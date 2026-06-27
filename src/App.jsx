@@ -10087,7 +10087,33 @@ function AppContent({ onLock }) {
 
   // ── TABS ───────────────────────────────────────────────────────────────────
   // ── BILLS PAGE ──────────────────────────────────────────────────────────────
+  // Biller type icon map
+  const BILLER_ICON = {
+    "Electricity": "⚡",
+    "Water": "💧",
+    "LPG Gas": "🛢️",
+    "Piped Gas": "🔥",
+    "Broadband": "📶",
+    "Mobile Postpaid": "📱",
+    "Mobile Prepaid": "📱",
+    "DTH": "📺",
+    "Fastag": "🚗",
+    "OTT / Streaming": "🎬",
+    "Insurance": "🛡️",
+    "Loan EMI": "🏦",
+    "Credit Card": "💳",
+    "Education Fees": "🎓",
+    "Municipal Tax": "🏛️",
+    "Society Maintenance": "🏢",
+    "Gym / Fitness": "🏋️",
+    "Club Membership": "👥",
+    "Other Subscription": "🔔",
+    "Other": "📄",
+  };
+  const getBillerIcon = type => BILLER_ICON[type] || "📄";
+
   const BillsPage = () => {
+    const [billsTab, setBillsTab] = useState("mybills");
     const [bFilter, setBFilter] = useState("unpaid");
     const [expandedBillId, setExpandedBillId] = useState(null);
     const getBillDate = bill => bill?.billDate || bill?.createdDate || bill?.dueDate || "";
@@ -10105,9 +10131,25 @@ function AppContent({ onLock }) {
         return dueA - dueB || billB - billA;
       });
     const totalUnpaid = bills.filter(b=>b.status==="unpaid").reduce((s,b)=>s+getNetBillAmount(b),0);
+    const ccBillsDue = accounts.filter(a=>a.type==="cc").map(a=>{
+      const summary = getCardSummary(a);
+      if(!summary?.currentDue||summary.currentDue<=0) return null;
+      return { _isCC:true,id:`cc_due_${a.id}`,name:`${a.name} CC Bill`,type:"Credit Card",amount:summary.currentDue,dueDate:a.dueDate||"",accId:a.id,status:"unpaid" };
+    }).filter(Boolean);
+    const allUnpaid = [...ccBillsDue,...bills.filter(b=>b.status==="unpaid")];
     return (
-      <div style={{ padding:"14px 16px 0" }}>
-        {/* Biller Accounts section */}
+      <div style={{ padding:"0 0 120px" }}>
+        {/* Tab bar */}
+        <div style={{ display:"flex",background:T.card,borderBottom:`1px solid ${T.border}`,position:"sticky",top:0,zIndex:10 }}>
+          {[["mybills","📋 My Bills"],["history","🕐 Bill History"]].map(([t,l])=>(
+            <button key={t} onClick={()=>setBillsTab(t)} style={{ flex:1,padding:"14px 8px",background:"none",border:"none",borderBottom:`2px solid ${billsTab===t?T.accent:"transparent"}`,cursor:"pointer",fontSize:13,fontWeight:800,color:billsTab===t?T.accent:T.sub,fontFamily:"Nunito,sans-serif",transition:"all 0.2s" }}>{l}</button>
+          ))}
+        </div>
+
+        {/* MY BILLS TAB - Biller Accounts */}
+        {billsTab==="mybills"&&(
+          <div style={{ padding:"14px 16px" }}>
+            {/* Biller Accounts section */}
         <div style={{ marginBottom:18 }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
             <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>Biller Accounts</div>
@@ -10142,8 +10184,13 @@ function AppContent({ onLock }) {
                       )}
                       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
                         <div style={{ flex:1,minWidth:0 }}>
-                          <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{ba.name}</div>
-                          <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{ba.type}{ba.provider?` · ${ba.provider}`:""}{ba.consumerNo?` · #${ba.consumerNo}`:""}</div>
+                          <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                            <span style={{ fontSize:22 }}>{getBillerIcon(ba.type)}</span>
+                            <div>
+                              <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{ba.name}</div>
+                              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{ba.type}{ba.provider?` · ${ba.provider}`:""}{ba.consumerNo?` · #${ba.consumerNo}`:""}</div>
+                            </div>
+                          </div>
                           <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6 }}>
                             <span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>{attrLabel}</span>
                             {lastBill&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>Last: {sym}{fmt(lastBill.amount)}</span>}
@@ -10162,11 +10209,13 @@ function AppContent({ onLock }) {
               </div>
           }
         </div>
+          </div>
+        )}
 
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
-          <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>📅 Bills</div>
-        </div>
-        {totalUnpaid>0&&<div style={{ ...card,background:`linear-gradient(135deg,${T.danger}10,${T.card})`,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+        {/* BILL HISTORY TAB */}
+        {billsTab==="history"&&(
+          <div style={{ padding:"14px 16px" }}>
+            {totalUnpaid>0&&<div style={{ ...card,background:`linear-gradient(135deg,${T.danger}10,${T.card})`,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
           <div>
             <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Total Unpaid</div>
             <div style={{ color:T.danger,fontSize:22,fontWeight:900,marginTop:4 }}>{sym}{fmt(totalUnpaid)}</div>
@@ -10333,6 +10382,8 @@ function AppContent({ onLock }) {
             </div>
           );
         })}
+          </div>
+        )}
       </div>
     );
   };
