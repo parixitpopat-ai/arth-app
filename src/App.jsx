@@ -6150,6 +6150,7 @@ function AppContent({ onLock }) {
     txns,
     investments,
     bills,
+    billerAccounts,
     liabilities,
     trackedAssets,
     loans,
@@ -6157,7 +6158,7 @@ function AppContent({ onLock }) {
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -6185,6 +6186,7 @@ function AppContent({ onLock }) {
     setTxns(normalizeTxns(snapshot.txns));
     setInvestments(Array.isArray(snapshot.investments) ? snapshot.investments : []);
     setBills(Array.isArray(snapshot.bills) ? snapshot.bills : []);
+    setBillerAccounts(Array.isArray(snapshot.billerAccounts) ? snapshot.billerAccounts : []);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
@@ -6456,7 +6458,7 @@ function AppContent({ onLock }) {
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (idx, dir) => {
     const arr = cardOrder.map(x=>x); // fully mutable copy
@@ -8243,7 +8245,12 @@ function AppContent({ onLock }) {
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
             <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{isEditing?"Edit Loan":"Add Loan"}</div>
-            <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+            <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+              {isEditing && item?.status==="active" && Number(item?.outstanding||0)>0 && (
+                <button onClick={()=>{ onClose(); setRepaymentLoan(item); }} style={{ background:T.success+"22",border:`1px solid ${T.success}44`,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:800,color:T.success,fontFamily:"Nunito,sans-serif" }}>{direction==="taken"?"Pay EMI / Repay":"Record Receipt"}</button>
+              )}
+              <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+            </div>
           </div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
             <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -8607,7 +8614,7 @@ function AppContent({ onLock }) {
         meta:`${getLoanStatusMeta(loan).label}${loan.dueDate?` · due ${loan.dueDate}`:""}${loan.hasInterest&&Number(loan.interestRate||0)>0?` · ${loan.interestRate}% p.a.`:" · no interest"}`,
         value:`${sym}${fmt(loan.outstanding||0)}`,
         color:T.accent,
-        onClick:()=>setEditingLoan(loan),
+        onClick:()=>setRepaymentLoan(loan),
       })),
       trackedAssets: trackedAssets.map(asset=>({
         id:asset.id,
