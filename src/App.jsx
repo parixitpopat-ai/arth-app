@@ -889,6 +889,8 @@ function AppContent({ onLock }) {
   const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
   const [showAddBillerAccount, setShowAddBillerAccount] = useState(false);
   const [editingBillerAccount, setEditingBillerAccount] = useState(null);
+  const [billSearch, setBillSearch] = useState("");
+  const [preselectedBillerType, setPreselectedBillerType] = useState("");
   const [liabilities, setLiabilities] = useState(()=>JSON.parse(localStorage.getItem("arth_liabilities")||"[]"));
   const [trackedAssets, setTrackedAssets] = useState(()=>JSON.parse(localStorage.getItem("arth_assets")||"[]"));
   const [vehicles, setVehicles] = useState(()=>JSON.parse(localStorage.getItem("arth_vehicles")||"[]"));
@@ -10111,6 +10113,7 @@ function AppContent({ onLock }) {
     "Credit Card": "💳",
     "Recurring Deposit": "📅",
     "NPS": "🏦",
+    "School Fees": "🏫",
     "Education Fees": "🎓",
     "Municipal Tax": "🏛️",
     "Municipal Services": "🏛️",
@@ -10163,69 +10166,94 @@ function AppContent({ onLock }) {
           ))}
         </div>
 
-        {/* MY BILLS TAB - Biller Accounts */}
+        {/* MY BILLS TAB - PhonePe style */}
         {billsTab==="mybills"&&(
-          <div style={{ padding:"14px 16px" }}>
-            {/* Biller Accounts section */}
-        <div style={{ marginBottom:18 }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-            <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>Biller Accounts</div>
-            <button onClick={()=>setShowAddBillerAccount(true)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}33`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add Account</button>
-          </div>
-          {billerAccounts.length===0
-            ? <div style={{ background:T.card,borderRadius:14,padding:"12px 14px",color:T.sub,fontSize:12 }}>No biller accounts yet. Add one to store consumer numbers once and reuse every cycle.</div>
-            : <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-                {billerAccounts.map(ba=>{
-                  const attrLabel = ba.attributeType==="house"?"House":ba.attributeType==="person"?(people.find(p=>String(p.id)===String(ba.attributedTo))?.name||"Person"):(groups.find(g=>String(g.id)===String(ba.attributedTo))?.name||"Group");
-                  const billsForAcc = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
-                  const lastBill = [...billsForAcc].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
-                  return (
-                    <div key={ba.id} style={{ background:T.card,borderRadius:14,padding:"12px 14px" }}>
-                      {billsForAcc.length>0&&(
-                        <div style={{ marginTop:8,display:"flex",flexDirection:"column",gap:4 }}>
-                          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:4 }}>BILL HISTORY</div>
-                          {[...billsForAcc].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0)).slice(0,3).map(bill=>(
-                            <div key={bill.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:10,padding:"6px 10px" }}>
-                              <div>
-                                <div style={{ color:T.text,fontSize:11,fontWeight:700 }}>{formatShortDate(bill.billDate)||bill.billDate}</div>
-                                <div style={{ color:T.sub,fontSize:10 }}>{bill.invoiceNo?`#${bill.invoiceNo}`:""}{bill.dueDate?` Due ${formatShortDate(bill.dueDate)}`:""}</div>
-                              </div>
-                              <div style={{ textAlign:"right" }}>
-                                <div style={{ color:bill.status==="paid"?T.success:T.danger,fontSize:12,fontWeight:800 }}>{sym}{fmt(bill.amount)}</div>
-                                <div style={{ color:bill.status==="paid"?T.success:T.warn,fontSize:10,fontWeight:700 }}>{bill.status==="paid"?"Paid":"Unpaid"}</div>
-                              </div>
-                            </div>
-                          ))}
-                          {billsForAcc.length>3&&<div style={{ color:T.sub,fontSize:10,textAlign:"center" }}>+{billsForAcc.length-3} more in Bills</div>}
-                        </div>
-                      )}
-                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
-                        <div style={{ flex:1,minWidth:0 }}>
-                          <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                            <span style={{ fontSize:22 }}>{getBillerIcon(ba.type)}</span>
-                            <div>
-                              <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{ba.name}</div>
-                              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{ba.type}{ba.provider?` · ${ba.provider}`:""}{ba.consumerNo?` · #${ba.consumerNo}`:""}</div>
-                            </div>
-                          </div>
-                          <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6 }}>
-                            <span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>{attrLabel}</span>
-                            {lastBill&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>Last: {sym}{fmt(lastBill.amount)}</span>}
-                            <span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>{billsForAcc.length} bill{billsForAcc.length===1?"":"s"}</span>
-                          </div>
-                        </div>
-                        <div style={{ display:"flex",gap:6 }}>
-                          <button onClick={()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:10,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Bill</button>
-                          <button onClick={()=>setEditingBillerAccount(ba)} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:10,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Edit</button>
-                          <button onClick={()=>{ if(window.confirm(`Delete ${ba.name}?`)) setBillerAccounts(prev=>prev.filter(x=>x.id!==ba.id)); }} style={{ background:"none",border:`1px solid ${T.danger}33`,borderRadius:10,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>Del</button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+          <div style={{ paddingBottom:20 }}>
+            {/* Search bar */}
+            <div style={{ padding:"12px 16px 8px" }}>
+              <div style={{ background:T.input,borderRadius:24,padding:"10px 16px",display:"flex",alignItems:"center",gap:8 }}>
+                <span style={{ fontSize:16 }}>🔍</span>
+                <input
+                  style={{ background:"none",border:"none",outline:"none",color:T.text,fontSize:13,fontFamily:"Nunito,sans-serif",flex:1 }}
+                  placeholder="Search billers, categories..."
+                  value={billSearch||""}
+                  onChange={e=>setBillSearch(e.target.value)}
+                />
               </div>
-          }
-        </div>
+            </div>
+
+            {/* Active biller accounts - compact horizontal scroll */}
+            {billerAccounts.length>0&&(
+              <div style={{ padding:"8px 16px" }}>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>MY ACCOUNTS</div>
+                <div style={{ display:"flex",gap:10,overflowX:"auto",paddingBottom:8 }}>
+                  {billerAccounts.filter(ba=>!billSearch||(ba.name+ba.type+ba.consumerNo).toLowerCase().includes(billSearch.toLowerCase())).map(ba=>{
+                    const billsForAcc = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
+                    const unpaidCount = billsForAcc.filter(b=>b.status==="unpaid").length;
+                    const lastBill = [...billsForAcc].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
+                    const isExpiringSoon = ba.membershipEndDate && (new Date(ba.membershipEndDate)-new Date())/(1000*60*60*24) <= 30;
+                    return (
+                      <div key={ba.id} onClick={()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); }} style={{ minWidth:120,background:T.card,borderRadius:16,padding:"12px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}`,position:"relative",flexShrink:0 }}>
+                        {unpaidCount>0&&<div style={{ position:"absolute",top:8,right:8,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>{unpaidCount}</div>}
+                        {isExpiringSoon&&<div style={{ position:"absolute",top:8,right:8,background:T.warn,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>!</div>}
+                        <div style={{ fontSize:28,marginBottom:6 }}>{getBillerIcon(ba.type)}</div>
+                        <div style={{ color:T.text,fontSize:11,fontWeight:800,lineHeight:1.2 }}>{ba.name}</div>
+                        <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>{lastBill?`${sym}${fmt(lastBill.amount)}`:"No bills"}</div>
+                      </div>
+                    );
+                  })}
+                  <div onClick={()=>setShowAddBillerAccount(true)} style={{ minWidth:80,background:"none",borderRadius:16,padding:"12px",cursor:"pointer",border:`2px dashed ${T.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+                    <div style={{ fontSize:24,color:T.sub }}>+</div>
+                    <div style={{ color:T.sub,fontSize:9,marginTop:4 }}>Add Account</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ALL SERVICES divider */}
+            <div style={{ display:"flex",alignItems:"center",gap:10,padding:"12px 16px 8px" }}>
+              <div style={{ flex:1,height:1,background:T.border }}/>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>ALL SERVICES</div>
+              <div style={{ flex:1,height:1,background:T.border }}/>
+            </div>
+
+            {/* Service categories grid */}
+            {[
+              { label:"Recharge", types:["Fastag","Mobile Postpaid","Mobile Prepaid","DTH","Broadband","Landline","Cable TV","Metro Recharge","NCMC Recharge","EV Recharge"] },
+              { label:"Utility Bills", types:["Electricity","LPG Gas","Piped Gas","Water"] },
+              { label:"Finances", types:["Loan EMI","Credit Card","Recurring Deposit","NPS","Insurance","Forex"] },
+              { label:"Education & Fitness", types:["School Fees","Education Fees","Gym / Fitness","Club Membership","Hospital"] },
+              { label:"Others", types:["Donation","Municipal Services","Municipal Tax","Society Maintenance","Rental","Prepaid Meter","eChallan","Fleet Card","B2B","Other Subscription","Other"] },
+            ].map(cat=>{
+              const filtered2 = billSearch ? cat.types.filter(t=>t.toLowerCase().includes(billSearch.toLowerCase())) : cat.types;
+              if(filtered2.length===0) return null;
+              return (
+                <div key={cat.label} style={{ padding:"8px 16px 4px" }}>
+                  <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:12 }}>{cat.label}</div>
+                  <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12 }}>
+                    {filtered2.map(type=>{
+                      const existingBA = billerAccounts.find(ba=>ba.type===type);
+                      const unpaid = existingBA ? bills.filter(b=>String(b.billerAccountId)===String(existingBA.id)&&b.status==="unpaid").length : 0;
+                      return (
+                        <div key={type} onClick={()=>{
+                          if(existingBA){
+                            setDefaultBillerAccountId(existingBA.id);
+                            setShowAddBill(true);
+                          } else {
+                            setShowAddBillerAccount(true);
+                            setPreselectedBillerType(type);
+                          }
+                        }} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:6,cursor:"pointer",position:"relative" }}>
+                          {unpaid>0&&<div style={{ position:"absolute",top:-4,right:4,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 5px",fontSize:8,fontWeight:800 }}>{unpaid}</div>}
+                          <div style={{ width:56,height:56,background:T.card,borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,border:`1px solid ${T.border}` }}>{getBillerIcon(type)}</div>
+                          <div style={{ color:T.sub,fontSize:9,fontWeight:600,textAlign:"center",lineHeight:1.2 }}>{type}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -10417,17 +10445,24 @@ function AppContent({ onLock }) {
   const BillerAccountModal = ({ existing, onClose }) => {
     const isEdit = !!existing;
     const [baName, setBaName] = useState(existing?.name||"");
-    const [baType, setBaType] = useState(existing?.type||"");
+    const [baType, setBaType] = useState(existing?.type||preselectedBillerType||"");
     const [baConsumerNo, setBaConsumerNo] = useState(existing?.consumerNo||"");
     const [baProvider, setBaProvider] = useState(existing?.provider||"");
     const [baAttributedTo, setBaAttributedTo] = useState(existing?.attributedTo||"");
     const [baAttributeType, setBaAttributeType] = useState(existing?.attributeType||"house");
     const [baNote, setBaNote] = useState(existing?.note||"");
-    const BILLER_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","Mobile Postpaid","Mobile Prepaid","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","OTT / Streaming","Insurance","Loan EMI","Credit Card","Recurring Deposit","NPS","Education Fees","Municipal Tax","Municipal Services","Society Maintenance","Gym / Fitness","Club Membership","Hospital","Rental","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Other Subscription","Other"];
+    const SUB_TYPES = ["Gym / Fitness","Club Membership","School Fees","Education Fees","OTT / Streaming","Other Subscription","Insurance","Society Maintenance","Hospital","Rental"];
+    const isSubType = SUB_TYPES.includes(baType);
+    const [baSubStart, setBaSubStart] = useState(existing?.subStart||"");
+    const [baSubEnd, setBaSubEnd] = useState(existing?.subEnd||"");
+    const [baAutoRenew, setBaAutoRenew] = useState(existing?.autoRenew||false);
+    const [baBillingCycle, setBaBillingCycle] = useState(existing?.billingCycle||"monthly");
+    const daysToExpiry = baSubEnd ? Math.round((new Date(baSubEnd)-new Date())/(1000*60*60*24)) : null;
+    const BILLER_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","Mobile Postpaid","Mobile Prepaid","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","OTT / Streaming","Insurance","Loan EMI","Credit Card","Recurring Deposit","NPS","School Fees","Education Fees","Municipal Tax","Municipal Services","Society Maintenance","Gym / Fitness","Club Membership","Hospital","Rental","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Other Subscription","Other"];
     const canSave = baName.trim() && baType;
     const handleSave = () => {
       if(!canSave) return;
-      const record = { id:existing?.id||genId(), name:baName.trim(), type:baType, consumerNo:baConsumerNo.trim(), provider:baProvider.trim(), attributedTo:baAttributedTo, attributeType:baAttributeType, note:baNote.trim(), createdAt:existing?.createdAt||Date.now() };
+      const record = { id:existing?.id||genId(), name:baName.trim(), type:baType, consumerNo:baConsumerNo.trim(), provider:baProvider.trim(), attributedTo:baAttributedTo, attributeType:baAttributeType, note:baNote.trim(), createdAt:existing?.createdAt||Date.now(), subStart:baSubStart||null, subEnd:baSubEnd||null, autoRenew:baAutoRenew, billingCycle:baBillingCycle||null };
       setBillerAccounts(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[...prev,record]);
       onClose();
     };
@@ -10483,6 +10518,36 @@ function AppContent({ onLock }) {
               <span style={lbl}>Note (optional)</span>
               <input style={inp} placeholder="Any notes about this biller" value={baNote} onChange={e=>setBaNote(e.target.value)}/>
             </div>
+            {/* Subscription fields */}
+            {isSubType&&(
+              <div style={{ background:T.input,borderRadius:12,padding:"12px" }}>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>SUBSCRIPTION / MEMBERSHIP</div>
+                <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                    <div><span style={lbl}>Start Date</span><input style={inp} type="date" value={baSubStart} onChange={e=>setBaSubStart(e.target.value)}/></div>
+                    <div><span style={lbl}>End / Renewal Date</span><input style={inp} type="date" value={baSubEnd} onChange={e=>setBaSubEnd(e.target.value)}/></div>
+                  </div>
+                  {daysToExpiry!==null&&(
+                    <div style={{ background:daysToExpiry<=7?T.danger+"16":daysToExpiry<=30?T.warn+"16":T.success+"16",border:`1px solid ${daysToExpiry<=7?T.danger:daysToExpiry<=30?T.warn:T.success}33`,borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}>
+                      <span style={{ color:T.sub,fontSize:11 }}>{daysToExpiry<0?"Expired":"Expires in"}</span>
+                      <span style={{ color:daysToExpiry<=7?T.danger:daysToExpiry<=30?T.warn:T.success,fontSize:12,fontWeight:800 }}>{daysToExpiry<0?`${Math.abs(daysToExpiry)} days ago`:`${daysToExpiry} days`}</span>
+                    </div>
+                  )}
+                  <div>
+                    <span style={lbl}>Billing Cycle</span>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                      {["monthly","quarterly","halfyearly","annual"].map(c=>(
+                        <button key={c} onClick={()=>setBaBillingCycle(c)} style={{ background:baBillingCycle===c?T.accent+"22":"none",border:`1px solid ${baBillingCycle===c?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:baBillingCycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+                    <span style={{ color:T.sub,fontSize:12 }}>Auto-renewal</span>
+                    <button onClick={()=>setBaAutoRenew(v=>!v)} style={{ background:baAutoRenew?T.success+"22":"none",border:`1px solid ${baAutoRenew?T.success:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:baAutoRenew?T.success:T.sub,fontFamily:"Nunito,sans-serif" }}>{baAutoRenew?"ON":"OFF"}</button>
+                  </div>
+                </div>
+              </div>
+            )}
             <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Biller Account"}</button>
           </div>
         </div>
@@ -10915,7 +10980,7 @@ function AppContent({ onLock }) {
           </div>
         )}
         {showAddBill&&<AddBillModal/>}
-        {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>setShowAddBillerAccount(false)}/>}
+        {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); }}/>}
         {editingBillerAccount&&<BillerAccountModal existing={editingBillerAccount} onClose={()=>setEditingBillerAccount(null)}/>}
         {editingBill&&<EditBillModal b={editingBill} onClose={()=>setEditingBill(null)}/>}
         {billMatchSuggestion&&(
