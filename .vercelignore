@@ -1,0 +1,11 @@
+node_modules
+release
+dist
+dist-ssr
+electron
+.vscode
+.vercel
+*.log
+src/App.preview.fixed.jsx
+src/App.preview.fixed2.jsx
+src/## GitHub Copilot Chat.md

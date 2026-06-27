@@ -1,0 +1,9479 @@
+
+
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
+import { getCurrentCloudUser, isCloudSyncConfigured, loadCloudSnapshot, saveCloudSnapshot, signInWithPassword, signOutCloud, signUpWithPassword, supabase } from "./cloudSync";
+// smsBridge — stub (native SMS not available in web PWA)
+const isNativeSmsAvailable = () => false;
+const readCopiedSms = async () => ({ text: "", error: "Not supported" });
+const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
+
+// ─── THEME ───────────────────────────────────────────────────────────────────
+const DARK  = { bg:"#08080f", card:"#0f0f1a", border:"#1a1a2e", text:"#e8e4dc", accent:"#f0a500", accentSoft:"rgba(240,165,0,0.1)", success:"#22c55e", danger:"#ef4444", input:"#0b0b18", nav:"#0a0a16", sub:"#5a5a7a", pill:"#14142a", sh:"rgba(0,0,0,0.6)", info:"#06b6d4", purple:"#8b5cf6", warn:"#f97316" };
+const LIGHT = { bg:"#f4f3ef", card:"#ffffff", border:"#e5e1d8", text:"#1a1a2e", accent:"#d4920a", accentSoft:"rgba(212,146,10,0.08)", success:"#16a34a", danger:"#dc2626", input:"#ede9e3", nav:"#ffffff", sub:"#7a7890", pill:"#eeecea", sh:"rgba(0,0,0,0.06)", info:"#0891b2", purple:"#7c3aed", warn:"#ea6c00" };
+
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const PALETTE = ["#f0a500","#22c55e","#3b82f6","#ef4444","#a855f7","#06b6d4","#f97316","#ec4899","#84cc16","#14b8a6","#8b5cf6","#f43f5e","#0ea5e9","#10b981","#f59e0b"];
+const CAT_ICONS = ["🍽️","🍕","🍔","🍜","🥗","🍣","☕","🍺","🛒","🥩","🚗","🏍️","✈️","🚕","⛽","🅿️","🛍️","👗","👟","💄","💍","🧴","⚡","💧","📶","🔌","💊","🏥","🩺","🧘","🏋️","🎬","🎵","🎮","🎨","📚","🏠","🔧","🪴","🛋️","👶","🧒","🎒","✏️","🧸","💰","💳","📈","🏦","🪙","👤","🐕","🐈","🌿","🌍","☀️","🎁","🎂","💼","🖥️","📱","🔭","🪒","💇","💆","💅","🧖","🏊","🚴","⛳","🎯","🎪","🏟️","🚑","🔑","🛁","🧺","🪑","🖼️","⛵","🌊","⛰️","🎓","📖","🏛️"];
+const INVEST_TYPES = [{ id:"mf", name:"Mutual Funds / SIP", icon:"📈", color:"#3b82f6" },{ id:"stocks", name:"Stocks", icon:"📊", color:"#22c55e" },{ id:"fd", name:"Fixed Deposit", icon:"🏦", color:"#f0a500" },{ id:"gold", name:"Gold", icon:"🥇", color:"#f59e0b" },{ id:"ppf", name:"PPF / NPS", icon:"🏛️", color:"#8b5cf6" },{ id:"crypto", name:"Crypto", icon:"₿", color:"#f97316" },{ id:"realestate", name:"Real Estate", icon:"🏘️", color:"#06b6d4" },{ id:"custom", name:"Custom", icon:"💼", color:"#ec4899" }];
+const ACC_TYPES = [{ id:"bank", label:"Bank Account", icon:"🏦" },{ id:"cc", label:"Credit Card", icon:"💳" },{ id:"debit", label:"Debit Card", icon:"🏧" },{ id:"upi", label:"UPI", icon:"📱" },{ id:"cash", label:"Cash", icon:"💵" }];
+const LIABILITY_TYPES = [{ id:"mortgage", name:"Mortgage / Home Loan", icon:"🏠", color:"#f97316" },{ id:"student", name:"Student Loan", icon:"🎓", color:"#8b5cf6" },{ id:"car", name:"Car Loan", icon:"🚗", color:"#3b82f6" },{ id:"tax", name:"Tax Liability", icon:"🏛️", color:"#ef4444" },{ id:"personal", name:"Personal Loan", icon:"🏦", color:"#ec4899" },{ id:"other", name:"Other Liability", icon:"📦", color:"#78716c" }];
+const ASSET_TYPES = [{ id:"realestate", name:"Real Estate", icon:"🏠", color:"#06b6d4" },{ id:"vehicle", name:"Vehicle", icon:"🚗", color:"#3b82f6" },{ id:"valuable", name:"Valuable", icon:"💎", color:"#a855f7" },{ id:"gold", name:"Gold / Jewelry", icon:"🥇", color:"#f59e0b" },{ id:"other", name:"Other Asset", icon:"📦", color:"#22c55e" }];
+const DEFAULT_INCOME_TYPES = ["salary","interest","freelance","rental","royalty","dividend","capital_gains"];
+const INVESTMENT_FREQUENCY_OPTIONS = [
+  { value:"daily", label:"Daily" },
+  { value:"weekly", label:"Weekly" },
+  { value:"monthly", label:"Monthly" },
+  { value:"quarterly", label:"Quarterly" },
+  { value:"halfyearly", label:"Half-yearly" },
+  { value:"yearly", label:"Yearly" },
+];
+
+const ME = { id:"__me__", name:"Me", emoji:"🧑", relation:"Self", color:"#f0a500", personType:"dependant", isMe:true };
+
+const DEFAULT_CATS = [
+  { id:"housing", name:"Housing", icon:"🏠", color:"#06b6d4", budget:15000, fixed:true, subs:[{id:"h1",name:"Rent / EMI"},{id:"h2",name:"Maintenance"},{id:"h3",name:"Repairs"},{id:"h4",name:"Furniture & Appliances"},{id:"h5",name:"Renovation / Interiors"},{id:"h6",name:"Property Tax"}] },
+  { id:"utilities", name:"Utilities", icon:"⚡", color:"#f59e0b", budget:5000, fixed:true, subs:[{id:"u1",name:"Electricity"},{id:"u2",name:"Water"},{id:"u3",name:"Gas"},{id:"u4",name:"Internet / WiFi"},{id:"u5",name:"Mobile Bills"},{id:"u6",name:"Software Subscriptions"},{id:"u7",name:"Cloud Storage"}] },
+  { id:"groceries", name:"Groceries", icon:"🛒", color:"#22c55e", budget:10000, fixed:true, subs:[{id:"g1",name:"Staples"},{id:"g2",name:"Vegetables"},{id:"g3",name:"Fruits"},{id:"g4",name:"Dairy"},{id:"g5",name:"Snacks & Packaged Food"}] },
+  { id:"food", name:"Food & Dining", icon:"🍽️", color:"#f97316", budget:8000, fixed:false, subs:[{id:"f1",name:"Swiggy / Zomato"},{id:"f2",name:"Restaurants"},{id:"f3",name:"Cafes"},{id:"f4",name:"Treating Others"}] },
+  { id:"transport", name:"Transport", icon:"🚗", color:"#3b82f6", budget:5000, fixed:false, subs:[{id:"t1",name:"Fuel"},{id:"t2",name:"Uber / Ola"},{id:"t3",name:"Public Transport"},{id:"t4",name:"EMI"},{id:"t5",name:"Insurance"},{id:"t6",name:"Servicing & Repairs"},{id:"t7",name:"Parking & Tolls"}] },
+  { id:"financial", name:"Financial", icon:"💳", color:"#8b5cf6", budget:30000, fixed:true, subs:[{id:"fi1",name:"SIP / Mutual Funds"},{id:"fi2",name:"Stocks"},{id:"fi3",name:"PPF / NPS"},{id:"fi4",name:"Term Insurance"},{id:"fi5",name:"Health Insurance"},{id:"fi6",name:"Credit Card Bills"},{id:"fi7",name:"Loan EMI"},{id:"fi8",name:"Bank Charges"}] },
+  { id:"health", name:"Health", icon:"💊", color:"#ec4899", budget:3000, fixed:true, subs:[{id:"he1",name:"Doctor Consultation"},{id:"he2",name:"Medicines"},{id:"he3",name:"Diagnostics / Tests"},{id:"he4",name:"Health Checkups"},{id:"he5",name:"Supplements"}] },
+  { id:"fitness", name:"Fitness", icon:"🏋️", color:"#14b8a6", budget:2000, fixed:false, subs:[{id:"fit1",name:"Gym"},{id:"fit2",name:"Sports"},{id:"fit3",name:"Yoga / Trainer"},{id:"fit4",name:"Fitness Apps"}] },
+  { id:"personaldev", name:"Personal Development", icon:"📚", color:"#0ea5e9", budget:2000, fixed:false, subs:[{id:"pd1",name:"Courses"},{id:"pd2",name:"Books"},{id:"pd3",name:"Workshops"},{id:"pd4",name:"Coaching / Mentorship"}] },
+  { id:"lifestyle", name:"Lifestyle", icon:"👗", color:"#a855f7", budget:5000, fixed:false, subs:[{id:"l1",name:"Clothes"},{id:"l2",name:"Shoes"},{id:"l3",name:"Grooming / Salon"},{id:"l4",name:"Skincare / Cosmetics"},{id:"l5",name:"Accessories / Gadgets"}] },
+  { id:"entertainment", name:"Entertainment", icon:"🎬", color:"#f43f5e", budget:2000, fixed:false, subs:[{id:"e1",name:"OTT Subscriptions"},{id:"e2",name:"Movies"},{id:"e3",name:"Events / Shows"}] },
+  { id:"travel", name:"Travel", icon:"✈️", color:"#06b6d4", budget:5000, fixed:false, subs:[{id:"tr1",name:"Flights"},{id:"tr2",name:"Trains / Buses"},{id:"tr3",name:"Hotels"},{id:"tr4",name:"Local Transport"},{id:"tr5",name:"Activities"},{id:"tr6",name:"Shopping"}] },
+  { id:"family", name:"Groups & Social", icon:"👥", color:"#f0a500", budget:5000, fixed:false, subs:[{id:"fa1",name:"Gifts"},{id:"fa2",name:"Family Support"},{id:"fa3",name:"Festivals"},{id:"fa4",name:"Weddings / Functions"}] },
+  { id:"donations", name:"Donations", icon:"🙏", color:"#84cc16", budget:1000, fixed:false, subs:[{id:"d1",name:"Charity"},{id:"d2",name:"Religious Contributions"}] },
+  { id:"professional", name:"Professional", icon:"💼", color:"#475569", budget:2000, fixed:false, subs:[{id:"pr1",name:"Work Travel"},{id:"pr2",name:"Networking"},{id:"pr3",name:"Tools / Software"},{id:"pr4",name:"Office Setup"}] },
+  { id:"taxes", name:"Taxes", icon:"🏛️", color:"#dc2626", budget:5000, fixed:true, subs:[{id:"tx1",name:"Income Tax"},{id:"tx2",name:"CA / Filing Fees"}] },
+  { id:"emergency", name:"Emergency", icon:"🚑", color:"#ef4444", budget:5000, fixed:true, subs:[{id:"em1",name:"Medical Emergency"},{id:"em2",name:"Urgent Repairs"},{id:"em3",name:"Contingency"}] },
+  { id:"misc", name:"Miscellaneous", icon:"📦", color:"#78716c", budget:2000, fixed:false, subs:[{id:"m1",name:"Cash Expenses"},{id:"m2",name:"Tips"},{id:"m3",name:"Unplanned Purchases"}] },
+];
+
+const DEFAULT_ACCOUNTS = [
+  { id:"bank1", type:"bank", name:"ICICI Savings", last4:"3310", color:"#22c55e", openingBalance:0 },
+  { id:"cc1", type:"cc", name:"HDFC Sapphire", last4:"4242", color:"#3b82f6", limit:300000, outstanding:0, statementDate:15, dueDate:5, billingCycle:"15th–14th", alertPct:30 },
+  { id:"upi1", type:"upi", name:"GPay", handle:"", color:"#a855f7" },
+  { id:"cash1", type:"cash", name:"Cash Wallet", color:"#f0a500", openingBalance:0 },
+];
+const DEFAULT_MEASURE_UNITS = ["kg","g","ltr","ml","nos","pkt","dozen","box"];
+
+// ─── UTILS ───────────────────────────────────────────────────────────────────
+const genId = () => Math.random().toString(36).slice(2,9);
+const todayStr = () => new Date().toISOString().split("T")[0];
+const sym = "₹";
+const fmt = n => { const num = Number(n||0); return num.toLocaleString("en-IN", { minimumFractionDigits: num % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 }); };
+const fmtK = n => { const num = Number(n||0); if(num >= 100000) return (num/100000).toFixed(1).replace(/\.0$/,"")+"L"; if(num >= 1000) return (num/1000).toFixed(1).replace(/\.0$/,"")+"K"; return fmt(num); };
+const parseMoney = v => {
+  const cleaned = String(v ?? "").replace(/[₹,\s]/g,"");
+  const num = parseFloat(cleaned);
+  return Number.isFinite(num) ? num : 0;
+};
+const cleanMoneyInput = v => {
+  const stripped = String(v ?? "").replace(/[₹,\s]/g, "");
+  const cleaned = stripped.replace(/[^\d.]/g, "");
+  const dotIndex = cleaned.indexOf(".");
+  if(dotIndex === -1) return cleaned;
+  const whole = cleaned.slice(0, dotIndex);
+  const decimal = cleaned.slice(dotIndex + 1).replace(/\./g, "");
+  return `${whole}.${decimal}`;
+};
+const extractTxnReference = txt => {
+  const s = String(txt ?? "");
+  const labeled = s.match(/(?:utr|rrn|ref(?:erence)?(?:\s*(?:no\.?|id|number))?|txn(?:\s*(?:id|no|ref))?|transaction\s*(?:id|no|ref)?|upi\s*(?:ref(?:erence)?)?(?:\s*(?:no\.?|id))?|imps\s*(?:ref(?:no\.?)?)?|neft\s*(?:ref)?)[\s:#\/-]*([A-Z0-9]{6,})/i);
+  if(labeled?.[1]) return labeled[1].trim();
+  return "";
+};
+const extractSmsBalance = txt => {
+  const m = String(txt ?? "").match(/(?:avail(?:able)?[\s\w]{0,10}(?:bal(?:ance)?|limit)|(?:a\/c\s+)?bal(?:ance)?(?:\s+(?:is|:|-))?|closing\s+bal|avl\.?\s+bal|a\/c\s+bal)[\s:]*(?:Rs\.?|INR|\u20b9)?\s*([\d,]+(?:\.\d{1,2})?)/i);
+  return m ? parseFloat(m[1].replace(/,/g,"")) : null;
+};
+const normalizeIncomeTypeValue = value => String(value ?? "")
+  .trim()
+  .toLowerCase()
+  .replace(/&/g," and ")
+  .replace(/[^\w\s-]/g,"")
+  .replace(/[\s-]+/g,"_")
+  .replace(/^_+|_+$/g,"");
+const normalizeMeasureUnitValue = value => String(value ?? "")
+  .trim()
+  .toLowerCase()
+  .replace(/\./g, "")
+  .replace(/\s+/g, "_");
+const formatMeasureUnitLabel = value => String(value || "")
+  .replace(/_/g, " ")
+  .replace(/\b\w/g, ch=>ch.toUpperCase());
+const normalizeMeasureUnits = stored => {
+  const fromStored = Array.isArray(stored) ? stored : [];
+  return Array.from(new Set([...DEFAULT_MEASURE_UNITS, ...fromStored]
+    .map(normalizeMeasureUnitValue)
+    .filter(Boolean)));
+};
+const normalizeItemCatalog = stored => {
+  const list = Array.isArray(stored) ? stored : [];
+  return list
+    .map(item=>({
+      id:item?.id || genId(),
+      name:String(item?.name || "").trim(),
+      unit:normalizeMeasureUnitValue(item?.unit || "nos") || "nos",
+      catId:item?.catId || "",
+      subId:item?.subId || "",
+    }))
+    .filter(item=>item.name);
+};
+const formatIncomeTypeLabel = value => {
+  const normalized = normalizeIncomeTypeValue(value) || String(value ?? "").trim();
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map(part=>part.charAt(0).toUpperCase()+part.slice(1))
+    .join(" ");
+};
+const normalizeIncomeTypes = stored => Array.from(new Set(
+  [...DEFAULT_INCOME_TYPES, ...(Array.isArray(stored) ? stored : [])]
+    .map(normalizeIncomeTypeValue)
+    .filter(Boolean)
+));
+const normalizeLiabilityTypes = stored => {
+  const extras = [];
+  const seenIds = new Set(LIABILITY_TYPES.map(item=>item.id));
+  const seenNames = new Set(LIABILITY_TYPES.map(item=>normalizeIncomeTypeValue(item.name)));
+  (Array.isArray(stored) ? stored : []).forEach((entry, index) => {
+    const rawName = typeof entry === "string" ? entry : entry?.name;
+    const name = String(rawName ?? "").trim();
+    const normalizedName = normalizeIncomeTypeValue(name);
+    if(!name || !normalizedName || seenNames.has(normalizedName)) return;
+    let id = normalizedName || `liability_${index+1}`;
+    while(seenIds.has(id)) id = `${normalizedName}_${index+1}`;
+    seenIds.add(id);
+    seenNames.add(normalizedName);
+    extras.push({
+      id,
+      name,
+      icon: typeof entry === "object" && entry?.icon ? entry.icon : "🧾",
+      color: typeof entry === "object" && entry?.color ? entry.color : "#ef4444",
+      custom:true,
+    });
+  });
+  return extras;
+};
+const defaultAccountTypeBucket = baseType => baseType==="cc" ? "liability" : "cash";
+const inferAccountBucket = (value, fallback = "cash") => {
+  const text = String(value ?? "").toLowerCase();
+  if(/ppf|nps|pf\b|provident|retirement|fd\b|fixed deposit|term deposit|demat|broker|investment|mutual fund|sip\b|stocks?|equity|gold|crypto|real estate|property/.test(text)) return "investment";
+  return fallback;
+};
+const accountBucketLabel = bucket => bucket==="investment" ? "Investment / Wealth" : bucket==="liability" ? "Liability" : "Cash / Spending";
+const normalizeAccountTypes = stored => {
+  const rawList = Array.isArray(stored) ? stored : [];
+  const overrides = new Map(
+    rawList
+      .filter(entry=>entry && typeof entry === "object" && entry.id)
+      .map(entry=>[String(entry.id), entry])
+  );
+  const defaults = ACC_TYPES.map(item=>{
+    const override = overrides.get(item.id);
+    return {
+      ...item,
+      label:override?.label || item.label,
+      icon:override?.icon || item.icon,
+      baseType:item.id,
+      bucket:override?.bucket || defaultAccountTypeBucket(item.id),
+      custom:false,
+    };
+  });
+  const seenIds = new Set(defaults.map(item=>item.id));
+  const extras = [];
+  rawList.forEach((entry, index) => {
+    if(!entry || typeof entry !== "object") return;
+    const label = String(entry.label ?? entry.name ?? "").trim();
+    if(!label) return;
+    const requestedId = String(entry.id ?? "").trim();
+    if(requestedId && seenIds.has(requestedId)) return;
+    const baseType = ACC_TYPES.some(item=>item.id===entry.baseType) ? entry.baseType : "bank";
+    let id = requestedId || normalizeIncomeTypeValue(label) || `account_type_${index+1}`;
+    while(seenIds.has(id)) id = `${normalizeIncomeTypeValue(label) || "account_type"}_${index+1}`;
+    seenIds.add(id);
+    const baseMeta = ACC_TYPES.find(item=>item.id===baseType) || ACC_TYPES[0];
+    extras.push({
+      id,
+      label,
+      icon:entry.icon || baseMeta.icon,
+      baseType,
+      bucket:entry.bucket || inferAccountBucket(label, defaultAccountTypeBucket(baseType)),
+      custom:true,
+    });
+  });
+  return [...defaults, ...extras];
+};
+const normalizeVendorText = value => String(value ?? "")
+  .toLowerCase()
+  .replace(/[^a-z0-9\s]/g, " ")
+  .replace(/\s+/g, " ")
+  .trim();
+const VENDOR_CATEGORY_RULES = [
+  { pattern: /swiggy|zomato|dominos|pizza|burger|starbucks|kfc|mcd|restaurant|cafe/, catId: "food", label: "food delivery / dining vendor" },
+  { pattern: /uber|ola|rapido|petrol|fuel|shell|hpcl|iocl|parking|toll/, catId: "transport", label: "transport vendor" },
+  { pattern: /amazon|flipkart|myntra|ajio|nykaa|meesho/, catId: "lifestyle", label: "shopping vendor" },
+  { pattern: /apollo|pharmacy|medplus|hospital|clinic|diagnostic/, catId: "health", label: "health vendor" },
+  { pattern: /airtel|jio|bsnl|wifi|broadband|electricity|water|gas/, catId: "utilities", label: "utility bill vendor" },
+  { pattern: /netflix|spotify|hotstar|prime video|bookmyshow/, catId: "entertainment", label: "entertainment vendor" },
+  { pattern: /blinkit|zepto|bigbasket|instamart|grofers/, catId: "groceries", label: "grocery vendor" },
+];
+const investmentFreqLabel = freq => {
+  if(freq==="daily") return "Daily";
+  if(freq==="weekly") return "Weekly";
+  if(freq==="monthly") return "Monthly";
+  if(freq==="halfyearly") return "Half-yearly";
+  if(freq==="quarterly") return "Quarterly";
+  if(freq==="yearly") return "Yearly";
+  if(freq==="one-time") return "One-time";
+  return "";
+};
+const getInvestmentBudgetMeta = type => {
+  if(type==="mf") return { catId:"financial", subId:"fi1" };
+  if(type==="stocks" || type==="crypto" || type==="gold") return { catId:"financial", subId:"fi2" };
+  if(type==="ppf" || type==="fd" || type==="realestate") return { catId:"financial", subId:"fi3" };
+  return { catId:"financial", subId:null };
+};
+const getInvestmentMetricConfig = type => {
+  if(type==="mf") return { show:true, label:"NAV", placeholder:"e.g. 23.45", hint:"Track the latest NAV per unit for this fund.", shortLabel:"NAV" };
+  if(type==="stocks") return { show:true, label:"Units", placeholder:"e.g. 10", hint:"Track how many shares or units were bought.", shortLabel:"Units" };
+  if(type==="gold") return { show:true, label:"Weight (grams)", placeholder:"e.g. 12.5", hint:"Track gold weight in grams.", shortLabel:"Gold" };
+  if(type==="crypto") return { show:true, label:"Units", placeholder:"e.g. 0.015", hint:"Track the number of coins or tokens.", shortLabel:"Units" };
+  if(type==="ppf") return { show:false, label:"", placeholder:"", hint:"PPF / NPS is tracked by contribution amount; no NAV is required. If you created a PPF account, record the money movement as a Transfer into that account.", shortLabel:"" };
+  if(type==="fd") return { show:false, label:"", placeholder:"", hint:"FD is tracked by deposit value; no NAV is required.", shortLabel:"" };
+  if(type==="realestate") return { show:false, label:"", placeholder:"", hint:"Real estate is tracked by current value; no NAV is required.", shortLabel:"" };
+  return { show:false, label:"", placeholder:"", hint:"This holding is tracked by amount or current value.", shortLabel:"" };
+};
+const formatInvestmentMetric = (type, rawValue) => {
+  const value = Number(rawValue || 0);
+  if(!value) return "";
+  if(type==="mf") return `NAV ${fmt(value)}`;
+  if(type==="gold") return `${fmt(value)} g`;
+  if(type==="stocks" || type==="crypto") return `${fmt(value)} units`;
+  const config = getInvestmentMetricConfig(type);
+  return config.show && config.shortLabel ? `${config.shortLabel} ${fmt(value)}` : "";
+};
+const getInvestmentGroupMeta = inv => {
+  const type = String(inv?.type || "custom");
+  const folioNo = String(inv?.folioNo || "").trim();
+  const name = String(inv?.name || "Investment").trim() || "Investment";
+  if(type === "mf" && folioNo) return { key:`${type}|folio|${folioNo.toLowerCase()}`, folioNo, primaryName:name };
+  const normalizedName = normalizeVendorText(name);
+  if(normalizedName) return { key:`${type}|name|${normalizedName}`, folioNo:"", primaryName:name };
+  return { key:`${type}|single|${String(inv?.linkedInvestmentId || inv?.id || name)}`, folioNo:"", primaryName:name };
+};
+const inferInvestmentTypeId = value => {
+  const text = normalizeVendorText(value);
+  if(!text) return "custom";
+  if(/mutual fund|sip\b|mf\b/.test(text)) return "mf";
+  if(/stocks?|share|equity|demat/.test(text)) return "stocks";
+  if(/ppf|nps|pf\b|provident|retirement/.test(text)) return "ppf";
+  if(/fd\b|fixed deposit|term deposit/.test(text)) return "fd";
+  if(/gold|sovereign/.test(text)) return "gold";
+  if(/crypto|bitcoin|btc|eth/.test(text)) return "crypto";
+  if(/real estate|property|house|flat|plot/.test(text)) return "realestate";
+  return "custom";
+};
+const getTxnCategoryIds = txn => {
+  if(txn?.type==="investment") return [];
+  if(Array.isArray(txn?.catIds) && txn.catIds.length) return txn.catIds.filter(Boolean);
+  if(txn?.catId) return [txn.catId];
+  return [];
+};
+const getTxnSubIds = txn => {
+  if(txn?.type==="investment") return [];
+  if(Array.isArray(txn?.subIds) && txn.subIds.length) return txn.subIds.filter(Boolean);
+  if(txn?.subId) return [txn.subId];
+  return [];
+};
+const daysInMonth = (monthKey) => {
+  if(monthKey){
+    const [y,m] = monthKey.split("-").map(Number);
+    if(!y||!m) return 31;
+    return new Date(y, m, 0).getDate();
+  }
+  const n = new Date();
+  return new Date(n.getFullYear(), n.getMonth()+1, 0).getDate();
+};
+const daysLeft = (monthKey) => {
+  const today = new Date();
+  const nowKey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
+  if(!monthKey || monthKey === nowKey){
+    return Math.max(0, daysInMonth(nowKey) - today.getDate());
+  }
+  if(monthKey < nowKey) return 0;
+  return daysInMonth(monthKey);
+};
+const getMonthBounds = (monthKey = todayStr().slice(0,7)) => {
+  const [year, month] = String(monthKey || todayStr().slice(0,7)).split("-").map(Number);
+  const safeYear = year || new Date().getFullYear();
+  const safeMonth = month || (new Date().getMonth() + 1);
+  const start = `${safeYear}-${String(safeMonth).padStart(2,"0")}-01`;
+  const end = `${safeYear}-${String(safeMonth).padStart(2,"0")}-${String(new Date(safeYear, safeMonth, 0).getDate()).padStart(2,"0")}`;
+  return { start, end };
+};
+const getPreviousMonthKey = (monthKey = todayStr().slice(0,7)) => {
+  const [year, month] = String(monthKey || todayStr().slice(0,7)).split("-").map(Number);
+  const ref = new Date((year || new Date().getFullYear()), (month || 1) - 2, 1);
+  return `${ref.getFullYear()}-${String(ref.getMonth()+1).padStart(2,"0")}`;
+};
+const MONTH_NAME_MAP = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, sept:9, oct:10, nov:11, dec:12 };
+const toFourDigitYear = year => {
+  const num = Number(year);
+  if(!Number.isFinite(num)) return null;
+  if(num >= 100) return num;
+  return num >= 70 ? 1900 + num : 2000 + num;
+};
+const buildIsoDate = (year, month, day) => {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if(!y || !m || !d || m < 1 || m > 12) return "";
+  const maxDay = new Date(y, m, 0).getDate();
+  if(d < 1 || d > maxDay) return "";
+  return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+};
+const normalizeToIsoDate = value => {
+  if(!value) return "";
+  if(value instanceof Date && !Number.isNaN(value.getTime())){
+    return buildIsoDate(value.getFullYear(), value.getMonth()+1, value.getDate());
+  }
+  const cleaned = String(value)
+    .trim()
+    .replace(/\b(\d{1,2})(st|nd|rd|th)\b/gi, "$1")
+    .replace(/,/g, " ")
+    .replace(/\s+/g, " ");
+  if(!cleaned) return "";
+
+  let match = cleaned.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if(match) return buildIsoDate(match[1], match[2], match[3]);
+
+  match = cleaned.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+  if(match){
+    const first = Number(match[1]);
+    const second = Number(match[2]);
+    const year = toFourDigitYear(match[3]);
+    if(!year) return "";
+    if(first > 12 && second <= 12) return buildIsoDate(year, second, first);
+    if(second > 12 && first <= 12) return buildIsoDate(year, first, second);
+    return buildIsoDate(year, second, first); // default DD/MM for ambiguous numeric dates
+  }
+
+  match = cleaned.match(/^([A-Za-z]+)\s+(\d{1,2})\s+(\d{2,4})$/);
+  if(match){
+    const month = MONTH_NAME_MAP[match[1].slice(0,4).toLowerCase()] || MONTH_NAME_MAP[match[1].slice(0,3).toLowerCase()];
+    const year = toFourDigitYear(match[3]);
+    return month && year ? buildIsoDate(year, month, match[2]) : "";
+  }
+
+  match = cleaned.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{2,4})$/);
+  if(match){
+    const month = MONTH_NAME_MAP[match[2].slice(0,4).toLowerCase()] || MONTH_NAME_MAP[match[2].slice(0,3).toLowerCase()];
+    const year = toFourDigitYear(match[3]);
+    return month && year ? buildIsoDate(year, month, match[1]) : "";
+  }
+
+  const fallback = new Date(cleaned);
+  if(!Number.isNaN(fallback.getTime())){
+    return buildIsoDate(fallback.getFullYear(), fallback.getMonth()+1, fallback.getDate());
+  }
+  return "";
+};
+const extractDateFromText = text => {
+  const patterns = [
+    /\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b/,
+    /\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/,
+    /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*,)?\s+\d{2,4}\b/i,
+    /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*(?:\s*,)?\s+\d{2,4}\b/i,
+  ];
+  for(const pattern of patterns){
+    const match = String(text || "").match(pattern);
+    const iso = normalizeToIsoDate(match?.[0] || "");
+    if(iso) return iso;
+  }
+  return "";
+};
+const toDateOnly = value => {
+  const iso = normalizeToIsoDate(value);
+  if(!iso) return null;
+  const [y,m,d] = iso.split("-").map(Number);
+  return new Date(y, m-1, d, 12, 0, 0, 0);
+};
+const formatShortDate = value => {
+  const d = toDateOnly(value);
+  if(!d) return "";
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = d.toLocaleString("en-IN", { month:"short" });
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+const getRecordedSortValue = item => {
+  if(!item) return 0;
+  const activityText = item.date || item.paidDate || item.createdDate || item.dueDate || "";
+  const activityTime = toDateOnly(activityText)?.getTime() || 0;
+  if(Number.isFinite(activityTime) && activityTime > 0) return activityTime;
+  const updatedAt = Number(item.updatedAt || 0);
+  if(Number.isFinite(updatedAt) && updatedAt > 0) return updatedAt;
+  const createdAt = Number(item.createdAt || 0);
+  if(Number.isFinite(createdAt) && createdAt > 0) return createdAt;
+  const numericId = Number(item.id || 0);
+  if(Number.isFinite(numericId) && numericId > 0) return numericId;
+  return 0;
+};
+const isDateInRange = (txnDate, startDate, endDate) => {
+  const txnTime = toDateOnly(txnDate)?.getTime();
+  if(!txnTime) return !startDate && !endDate;
+  const startTime = startDate ? toDateOnly(startDate)?.getTime() : null;
+  const endTime = endDate ? toDateOnly(endDate)?.getTime() : null;
+  if(startTime && txnTime < startTime) return false;
+  if(endTime && txnTime > endTime) return false;
+  return true;
+};
+const txnHasPerson = (txn, personId) => {
+  if(!txn || !personId || personId === "all") return true;
+  if(String(txn.forPerson||"")===String(personId)) return true;
+  if(String(txn.fromPersonId||"")===String(personId)) return true;
+  if(String(txn.toPersonId||"")===String(personId)) return true;
+  return Object.keys(txn.people||{}).some(pid=>String(pid)===String(personId));
+};
+const nearlyEqualMoney = (a,b) => Math.abs(Number(a||0) - Number(b||0)) < 0.01;
+const dateAtDay = (year, monthIndex, day) => {
+  const safeDay = Math.max(1, Number(day)||1);
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  return new Date(year, monthIndex, Math.min(safeDay, lastDay), 12, 0, 0, 0);
+};
+const getNextDueDate = (startDate, dueDay) => {
+  const base = toDateOnly(startDate) || new Date();
+  const safeDay = Math.max(1, Math.min(31, parseInt(dueDay || base.getDate(), 10) || base.getDate()));
+  let candidate = dateAtDay(base.getFullYear(), base.getMonth(), safeDay);
+  if(candidate < base) candidate = dateAtDay(base.getFullYear(), base.getMonth() + 1, safeDay);
+  return candidate.toISOString().split("T")[0];
+};
+const getCardCycleDates = (card, refDate = new Date()) => {
+  const statementDay = Math.max(1, Math.min(31, parseInt(card?.statementDate || 15, 10)));
+  const dueDay = Math.max(1, Math.min(31, parseInt(card?.dueDate || 5, 10)));
+  const ref = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate(), 12, 0, 0, 0);
+
+  let lastStatementDate = dateAtDay(ref.getFullYear(), ref.getMonth(), statementDay);
+  if(ref < lastStatementDate) lastStatementDate = dateAtDay(ref.getFullYear(), ref.getMonth() - 1, statementDay);
+
+  const prevStatementDate = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth() - 1, statementDay);
+  const nextStatementDate = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth() + 1, statementDay);
+
+  let dueOn = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth(), dueDay);
+  if(dueOn <= lastStatementDate) dueOn = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth() + 1, dueDay);
+
+  return { prevStatementDate, lastStatementDate, nextStatementDate, dueOn };
+};
+const accIcon = value => {
+  if(value && typeof value === "object" && value.typeIcon) return value.typeIcon;
+  const t = typeof value === "object" ? value?.type : value;
+  return t==="bank"?"🏦":t==="cc"?"💳":t==="debit"?"🏧":t==="upi"?"📱":"💵";
+};
+const accLabel = value => {
+  if(value && typeof value === "object" && value.typeLabel) return value.typeLabel;
+  const t = typeof value === "object" ? value?.type : value;
+  return t==="bank"?"Bank Account":t==="cc"?"Credit Card":t==="debit"?"Debit Card":t==="upi"?"UPI":"Cash";
+};
+const isInvestmentAccount = account => {
+  if(!account || account.type==="cc") return false;
+  if(account.typeBucket==="investment" || account.bucket==="investment" || account.accountTypeBucket==="investment") return true;
+  const fallback = defaultAccountTypeBucket(account.type || account.baseType || "bank");
+  return inferAccountBucket(`${account.typeLabel||account.label||""} ${account.name||""} ${account.accountTypeId||account.baseType||""}`, fallback) === "investment";
+};
+const txnColor = (txnOrType,T) => {
+  const type = typeof txnOrType === "string" ? txnOrType : txnOrType?.type;
+  const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
+  if(isRefund) return T.text;
+  if(type==="income") return T.success;
+  if(type==="expense") return T.danger;
+  if(type==="transfer" || type==="settlement_in" || type==="settlement_out") return T.info;
+  if(type==="cc_payment" || type==="cc_emi") return T.purple;
+  if(type==="investment") return T.info;
+  return T.sub;
+};
+const txnLabel = txnOrType => {
+  const type = typeof txnOrType === "string" ? txnOrType : txnOrType?.type;
+  const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
+  if(isRefund) return "Refund";
+  return type==="income"?"Income":type==="transfer"?"Transfer":type==="cc_payment"?"CC Payment":type==="cc_emi"?"CC EMI":type==="settlement_in"?"Settlement":type==="settlement_out"?"Settlement Out":type==="investment"?"Investment":"Expense";
+};
+const txnEmoji = txnOrType => {
+  const type = typeof txnOrType === "string" ? txnOrType : txnOrType?.type;
+  const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
+  if(isRefund) return "↩️";
+  return type==="income"?"💚":type==="transfer"?"🔄":type==="cc_payment"?"💳":type==="cc_emi"?"💳":type==="settlement_in"?"🔵":type==="settlement_out"?"📤":type==="investment"?"💹":"💸";
+};
+const getTxnDisplayTitle = txn => {
+  if(!txn) return "—";
+  const desc = String(txn.desc || "").trim();
+  const merchant = String(txn.merchant || "").trim();
+  const note = String(txn.note || "").trim();
+  if(txn.type === "cc_payment" || txn.type === "transfer") return desc || note || merchant || "—";
+  return desc || merchant || note || "—";
+};
+const extractSmsLast4s = txt => {
+  const text = String(txt||"");
+  const hits = [];
+  const patterns = [
+    /(?:a\/c|acct|account|card|ending(?:\s+with)?|xx|x{2,}|\*{2,}|last\s*4)[^\d]{0,12}(\d{4})/ig,
+    /(?:xx|x{2,}|\*{2,})\s*(\d{4})/ig,
+  ];
+  patterns.forEach(rx=>{
+    for(const match of text.matchAll(rx)){
+      if(match[1]) hits.push(match[1]);
+    }
+  });
+  return Array.from(new Set(hits));
+};
+const detectSmsDirection = txt => {
+  const text = String(txt||"").toLowerCase();
+  if(/\b(credited|received|deposited|refund(?:ed)?|reversal|cashback|salary)\b/.test(text)) return "credit";
+  if(/\b(debited|spent|paid|purchase|withdrawn|sent|dr)\b/.test(text)) return "debit";
+  return "";
+};
+const findSmsAccountMatches = (txt, accounts=[]) => {
+  const text = String(txt||"");
+  const lower = text.toLowerCase();
+  const last4s = extractSmsLast4s(text);
+  const upiHandles = Array.from(new Set([...text.matchAll(/\b[a-z0-9._-]{2,}@[a-z][a-z0-9.-]{1,}\b/ig)].map(m=>m[0].toLowerCase())));
+  return accounts
+    .map(account=>{
+      let score = 0;
+      const accLast4 = String(account?.last4||"").trim();
+      const accNameTokens = String(account?.name||"").toLowerCase().split(/\s+/).filter(token=>token.length>2);
+      if(accLast4 && last4s.includes(accLast4)) score += 10;
+      if(account?.handle){
+        const handle = String(account.handle).toLowerCase();
+        if(upiHandles.some(item=>item.includes(handle) || handle.includes(item))) score += 8;
+      }
+      if(accNameTokens.some(token=>lower.includes(token))) score += 2;
+      if(account?.type==="cc" && /\b(credit card|visa|mastercard|rupay|amex|card)\b/i.test(text)) score += 3;
+      if(account?.type==="debit" && /\b(debit card|atm card)\b/i.test(text)) score += 3;
+      if(account?.type==="upi" && /\b(upi|vpa)\b/i.test(text)) score += 3;
+      if(account?.type==="bank" && /\b(a\/c|account|acct|savings|current)\b/i.test(text)) score += 1;
+      return score>0 ? { account, score } : null;
+    })
+    .filter(Boolean)
+    .sort((a,b)=>b.score-a.score || String(a.account?.name||"").localeCompare(String(b.account?.name||"")));
+};
+const remainingShare = info => {
+  if(!info) return 0;
+  if(info.settled) return 0;
+  return Math.max(0, Number(info?.remainingAmt ?? info?.amount ?? 0));
+};
+const linkedSettlementKey = t => t?.type==="settlement_in" && t?.againstTxnId
+  ? [t.fromPersonId||"", t.againstTxnId||"", t.date||"", Number(t.amount||0), t.accId||""].join("|")
+  : null;
+const dedupeSettlementTxns = txns => {
+  const seenLinked = new Set();
+  const seenLegacy = new Set();
+  return txns.filter(t=>{
+    if(t.type!=="settlement_in") return true;
+    const linkedKey = linkedSettlementKey(t);
+    if(linkedKey){
+      if(seenLinked.has(linkedKey)) return false;
+      seenLinked.add(linkedKey);
+      return true;
+    }
+    const legacyKey = `${t.fromPersonId||""}_${t.date||""}_${Number(t.amount||0)}`;
+    if(seenLegacy.has(legacyKey)) return false;
+    seenLegacy.add(legacyKey);
+    return true;
+  });
+};
+const CLOUD_SCHEMA_VERSION = 1;
+const CAT_MAP = {"food":"food","grocery":"groceries","groceries":"groceries","transport":"transport","bills":"utilities","utilities":"utilities","health":"health","shopping":"lifestyle","household":"housing","selfcare":"lifestyle","baby":"family","entertainment":"entertainment","financial":"financial","fitness":"fitness","travel":"travel","misc":"misc","donations":"donations","professional":"professional","taxes":"taxes","emergency":"emergency","personaldev":"personaldev","family":"family","lifestyle":"lifestyle","housing":"housing"};
+const normalizeCats = stored => {
+  const list = Array.isArray(stored) ? stored : null;
+  const hasLatestDefaults = list?.some(c=>c.id==="housing"||c.id==="utilities"||c.id==="financial");
+  return hasLatestDefaults ? list : DEFAULT_CATS;
+};
+const normalizeAccounts = stored => (Array.isArray(stored) && stored.length ? stored : DEFAULT_ACCOUNTS).map(acc=>{
+  const baseType = ACC_TYPES.some(item=>item.id===acc?.type) ? acc.type : "bank";
+  const typeMeta = normalizeAccountTypes([]).find(item=>item.id===String(acc?.accountTypeId || baseType)) || ACC_TYPES.find(item=>item.id===baseType) || ACC_TYPES[0];
+  const typeLabel = acc?.typeLabel || typeMeta.label || accLabel(baseType);
+  const typeBucket = acc?.typeBucket || typeMeta.bucket || inferAccountBucket(`${typeLabel} ${acc?.name||""} ${acc?.accountTypeId || baseType}`, defaultAccountTypeBucket(baseType));
+  return {
+    ...acc,
+    type:baseType,
+    accountTypeId:acc?.accountTypeId || typeMeta.id || baseType,
+    typeLabel,
+    typeIcon:acc?.typeIcon || typeMeta.icon || accIcon(baseType),
+    typeBucket,
+    openingBalance:Number(acc?.openingBalance||0),
+    openingBalanceDate:acc?.openingBalanceDate||"",
+  };
+});
+const normalizePeople = stored => {
+  const list = Array.isArray(stored) ? stored : [];
+  return list.find(p=>p.id==="__me__") ? list : [ME, ...list];
+};
+const normalizeTxns = stored => {
+  const list = Array.isArray(stored) ? stored : [];
+  const normalizeTxnCatId = value => {
+    const raw = String(value ?? "").trim();
+    if(!raw) return "";
+    const cleaned = raw.replace(/!+$/g, "");
+    return CAT_MAP[cleaned.toLowerCase()] || CAT_MAP[cleaned] || cleaned;
+  };
+  return dedupeSettlementTxns(list.map(t=>{
+    const normalizedTxn = t.type==="settlement_in"
+      ? { ...t, isRefund: t.isRefund ?? !t.fromPersonId }
+      : t;
+    const hasSplitPeople = normalizedTxn.type==="expense" && Object.entries(normalizedTxn.people||{}).some(([pid,info])=>pid!=="__me__" && info?.mode==="owes" && Number(info?.amount||0)>0);
+    const trackingMode = normalizedTxn.type==="expense"
+      ? (normalizedTxn.trackingMode || (hasSplitPeople ? "split" : (normalizedTxn.forPerson || normalizedTxn.groupId ? "tag" : "none")))
+      : normalizedTxn.trackingMode;
+    const preparedTxn = normalizedTxn.type==="expense"
+      ? {
+          ...normalizedTxn,
+          trackingMode,
+          groupCollectiveAmount: trackingMode==="split" ? Number(normalizedTxn.groupCollectiveAmount||0) : 0,
+        }
+      : normalizedTxn;
+    const normalizedCatIds = (Array.isArray(preparedTxn.catIds) && preparedTxn.catIds.length
+      ? preparedTxn.catIds
+      : (preparedTxn.catId ? [preparedTxn.catId] : []))
+      .map(normalizeTxnCatId)
+      .filter(Boolean);
+    const normalizedCatId = normalizeTxnCatId(preparedTxn.catId || normalizedCatIds[0] || "") || null;
+    return {
+      ...preparedTxn,
+      catId: normalizedCatId,
+      catIds: normalizedCatIds.length ? normalizedCatIds : (normalizedCatId ? [normalizedCatId] : []),
+    };
+  }));
+};
+const normalizeLoans = stored => (Array.isArray(stored) ? stored : []).map(loan=>({
+  ...loan,
+  direction:loan?.direction==="taken"?"taken":"given",
+  principal:Number(loan?.principal ?? loan?.amount ?? 0),
+  outstanding:Number(loan?.outstanding ?? loan?.principal ?? loan?.amount ?? 0),
+  startDate:loan?.startDate || loan?.date || todayStr(),
+  dueDate:loan?.dueDate || "",
+  hasInterest:loan?.hasInterest ?? Number(loan?.interestRate||0)>0,
+  interestRate:Number(loan?.interestRate||0),
+  repayments:Array.isArray(loan?.repayments)?loan.repayments:[],
+  status:loan?.status || (Number(loan?.outstanding ?? loan?.principal ?? loan?.amount ?? 0)<=0 ? "closed" : "active"),
+}));
+const formatSyncTime = value => {
+  if(!value) return "Not yet synced";
+  const d = new Date(value);
+  if(Number.isNaN(d.getTime())) return "Not yet synced";
+  return d.toLocaleString("en-IN", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" });
+};
+
+// ─── SECURITY ────────────────────────────────────────────────────────────────
+async function hashPin(pin) {
+  const data = new TextEncoder().encode(pin + "|arth_v1");
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+// ─── PIN SCREEN ───────────────────────────────────────────────────────────────
+function PinScreen({ onUnlock, isSetup, onCancel }) {
+  const [pin, setPin] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [step, setStep] = useState("enter");
+  const [error, setError] = useState("");
+  const handleKey = k => {
+    setError("");
+    if(k==="del"){ step==="confirm"?setConfirm(p=>p.slice(0,-1)):setPin(p=>p.slice(0,-1)); return; }
+    if(isSetup){
+      if(step==="enter"){ const np=pin+k; setPin(np); if(np.length===4) setStep("confirm"); }
+      else { const nc=confirm+k; setConfirm(nc); if(nc.length===4){ if(nc===pin) onUnlock(pin); else { setError("PINs don't match. Try again."); setPin(""); setConfirm(""); setStep("enter"); } } }
+    } else { const np=pin+k; setPin(np); if(np.length===4){ onUnlock(np); setPin(""); } }
+  };
+  const cur = step==="confirm"?confirm:pin;
+  return (
+    <div style={{minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Nunito,sans-serif"}}>
+      <div style={{fontSize:52,marginBottom:12,color:"#f0a500",fontWeight:900,fontFamily:"Nunito,sans-serif"}}>₹</div>
+      <div style={{color:"#f0a500",fontSize:30,fontWeight:900,marginBottom:6}}>Arth</div>
+      <div style={{color:"#5a5a7a",fontSize:13,marginBottom:40,textAlign:"center"}}>{isSetup?step==="enter"?"Set your 4-digit PIN":"Confirm your PIN":"Enter your PIN"}</div>
+      <div style={{display:"flex",gap:18,marginBottom:14}}>
+        {[0,1,2,3].map(i=><div key={i} style={{width:18,height:18,borderRadius:"50%",background:cur.length>i?"#f0a500":"transparent",border:"2px solid",borderColor:cur.length>i?"#f0a500":"#2a2a3a",transition:"all 0.15s"}}/>)}
+      </div>
+      {error&&<div style={{color:"#ef4444",fontSize:12,marginBottom:14,textAlign:"center"}}>{error}</div>}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,width:252,marginTop:12}}>
+        {["1","2","3","4","5","6","7","8","9","","0","del"].map((k,i)=>k===""?<div key={i}/>:
+          <button key={i} onClick={()=>handleKey(k)} style={{background:"#0f0f1a",border:"1px solid #1a1a2e",borderRadius:14,padding:"19px 0",fontSize:k==="del"?18:24,fontWeight:700,color:k==="del"?"#5a5a7a":"#e8e4dc",cursor:"pointer",fontFamily:"Nunito,sans-serif"}}>{k==="del"?"⌫":k}</button>
+        )}
+      </div>
+      {onCancel&&<button onClick={onCancel} style={{marginTop:18,background:"none",border:"1px solid #2a2a3a",borderRadius:12,padding:"10px 22px",cursor:"pointer",fontSize:13,fontWeight:700,color:"#5a5a7a",fontFamily:"Nunito,sans-serif"}}>Cancel</button>}
+    </div>
+  );
+}
+
+// ─── ROOT ─────────────────────────────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state={hasError:false,error:""}; }
+  static getDerivedStateFromError(e){ return {hasError:true,error:String(e)}; }
+  componentDidCatch(e,info){ console.error("Arth error:",e,info); }
+  render(){
+    if(this.state.hasError) return (
+      <div style={{minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Nunito,sans-serif"}}>
+        <div style={{fontSize:48,marginBottom:16}}>⚠️</div>
+        <div style={{color:"#f0a500",fontSize:20,fontWeight:900,marginBottom:8}}>Something went wrong</div>
+        <div style={{color:"#5a5a7a",fontSize:12,marginBottom:24,textAlign:"center",maxWidth:300}}>{this.state.error}</div>
+        <button onClick={()=>this.setState({hasError:false,error:""})} style={{background:"#f0a500",color:"#000",border:"none",borderRadius:12,padding:"12px 24px",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"Nunito,sans-serif"}}>Try Again</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
+export default function Arth() {
+  const [appPin, setAppPin] = useState(()=>localStorage.getItem("arth_pin")||"");
+  const [unlocked, setUnlocked] = useState(false);
+  const idleTimer = useRef(null);
+  const lock = useCallback(()=>setUnlocked(false),[]);
+
+  // Auto-lock after 5 min idle
+  useEffect(()=>{
+    if(!unlocked) return;
+    const IDLE_MS = 180*1000;
+    const reset = ()=>{ clearTimeout(idleTimer.current); idleTimer.current = setTimeout(lock, IDLE_MS); };
+    const events = ["mousemove","keydown","touchstart","click","scroll"];
+    events.forEach(e=>window.addEventListener(e,reset,{passive:true}));
+    reset();
+    return ()=>{ events.forEach(e=>window.removeEventListener(e,reset)); clearTimeout(idleTimer.current); };
+  },[unlocked,lock]);
+
+  // Lock when tab goes to background
+  useEffect(()=>{
+    if(!unlocked) return;
+    const handle = ()=>{ if(document.visibilityState==="hidden") lock(); };
+    document.addEventListener("visibilitychange",handle);
+    return ()=>document.removeEventListener("visibilitychange",handle);
+  },[unlocked,lock]);
+
+  if(!appPin) return <PinScreen isSetup onUnlock={async pin=>{
+    const hash = await hashPin(pin);
+    localStorage.setItem("arth_pin",hash);
+    setAppPin(hash);
+    setUnlocked(true);
+  }}/>;
+
+  if(!unlocked) return <PinScreen isSetup={false} onUnlock={async pin=>{
+    // Migration: old plaintext PINs are 4 chars; hashes are 64 hex chars
+    if(appPin.length<=6){
+      if(String(pin)===String(appPin)){
+        const hash = await hashPin(pin);
+        localStorage.setItem("arth_pin",hash);
+        setAppPin(hash);
+        setUnlocked(true);
+      }
+    } else {
+      const hash = await hashPin(pin);
+      if(hash===appPin) setUnlocked(true);
+    }
+  }}/>;
+
+  return <ErrorBoundary><AppContent onLock={lock}/></ErrorBoundary>;
+}
+
+// ─── APP ──────────────────────────────────────────────────────────────────────
+function AppContent({ onLock }) {
+  const [dark, setDark] = useState(()=>JSON.parse(localStorage.getItem("arth_dark")??"true"));
+  const [autoDetectExpenseCategory, setAutoDetectExpenseCategory] = useState(()=>JSON.parse(localStorage.getItem("arth_auto_category")??"true"));
+  const [workTripMode, setWorkTripMode] = useState(()=>JSON.parse(localStorage.getItem("arth_work_trip")??"false"));
+  const T = dark?DARK:LIGHT;
+  useEffect(()=>localStorage.setItem("arth_dark",JSON.stringify(dark)),[dark]);
+  useEffect(()=>localStorage.setItem("arth_auto_category",JSON.stringify(autoDetectExpenseCategory)),[autoDetectExpenseCategory]);
+  useEffect(()=>localStorage.setItem("arth_work_trip",JSON.stringify(workTripMode)),[workTripMode]);
+
+  // ── STATE ──────────────────────────────────────────────────────────────────
+  const [tab, setTab] = useState("home");
+  const [viewMonth, setViewMonth] = useState(()=>{ const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`; });
+  const [cats, setCats] = useState(()=>normalizeCats(JSON.parse(localStorage.getItem("arth_cats")||"null")));
+  const [accountTypes, setAccountTypes] = useState(()=>normalizeAccountTypes(JSON.parse(localStorage.getItem("arth_account_types")||"null")));
+  const [incomeTypes, setIncomeTypes] = useState(()=>normalizeIncomeTypes(JSON.parse(localStorage.getItem("arth_income_types")||"null")));
+  const [customLiabilityTypes, setCustomLiabilityTypes] = useState(()=>normalizeLiabilityTypes(JSON.parse(localStorage.getItem("arth_liability_types")||"null")));
+  const [accounts, setAccounts] = useState(()=>normalizeAccounts(JSON.parse(localStorage.getItem("arth_accounts")||"null")));
+  const [balanceCheckpoints, setBalanceCheckpoints] = useState(()=>JSON.parse(localStorage.getItem("arth_checkpoints")||"{}"));
+  const [people, setPeople] = useState(()=>normalizePeople(JSON.parse(localStorage.getItem("arth_people")||"[]")));
+  const [groups, setGroups] = useState(()=>JSON.parse(localStorage.getItem("arth_groups")||"[]"));
+  const [measureUnits, setMeasureUnits] = useState(()=>normalizeMeasureUnits(JSON.parse(localStorage.getItem("arth_measure_units")||"null")));
+  const [itemCatalog, setItemCatalog] = useState(()=>normalizeItemCatalog(JSON.parse(localStorage.getItem("arth_item_catalog")||"[]")));
+  const [txns, setTxns] = useState(()=>normalizeTxns(JSON.parse(localStorage.getItem("arth_txns")||"[]")));
+  const [investments, setInvestments] = useState(()=>JSON.parse(localStorage.getItem("arth_investments")||"[]"));
+  const [bills, setBills] = useState(()=>JSON.parse(localStorage.getItem("arth_bills")||"[]"));
+  const [liabilities, setLiabilities] = useState(()=>JSON.parse(localStorage.getItem("arth_liabilities")||"[]"));
+  const [trackedAssets, setTrackedAssets] = useState(()=>JSON.parse(localStorage.getItem("arth_assets")||"[]"));
+  const [loans, setLoans] = useState(()=>normalizeLoans(JSON.parse(localStorage.getItem("arth_loans")||"[]")));
+  const [ccEmiPlans, setCcEmiPlans] = useState(()=>JSON.parse(localStorage.getItem("arth_cc_emi_plans")||"[]"));
+  const currentFYStartYear = new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1;
+  const [annualBudget, setAnnualBudget] = useState(()=>Number(localStorage.getItem("arth_annual_budget")||600000));
+  const [lastFYTarget, setLastFYTarget] = useState(()=>Number(localStorage.getItem("arth_last_fy_target")||0));
+  const [selectedBudgetFY, setSelectedBudgetFY] = useState(currentFYStartYear);
+  const [monthOverrides, setMonthOverrides] = useState(()=>JSON.parse(localStorage.getItem("arth_month_overrides")||"{}"));
+  const [monthBudget] = useState(()=>Number(localStorage.getItem("arth_budget")||50000));
+
+  useEffect(()=>localStorage.setItem("arth_cats",JSON.stringify(cats)),[cats]);
+  useEffect(()=>localStorage.setItem("arth_account_types",JSON.stringify(accountTypes)),[accountTypes]);
+  useEffect(()=>localStorage.setItem("arth_income_types",JSON.stringify(incomeTypes)),[incomeTypes]);
+  useEffect(()=>localStorage.setItem("arth_liability_types",JSON.stringify(customLiabilityTypes)),[customLiabilityTypes]);
+  useEffect(()=>localStorage.setItem("arth_accounts",JSON.stringify(accounts)),[accounts]);
+  useEffect(()=>localStorage.setItem("arth_checkpoints",JSON.stringify(balanceCheckpoints)),[balanceCheckpoints]);
+  useEffect(()=>localStorage.setItem("arth_people",JSON.stringify(people)),[people]);
+  useEffect(()=>localStorage.setItem("arth_groups",JSON.stringify(groups)),[groups]);
+  useEffect(()=>localStorage.setItem("arth_measure_units",JSON.stringify(measureUnits)),[measureUnits]);
+  useEffect(()=>localStorage.setItem("arth_item_catalog",JSON.stringify(itemCatalog)),[itemCatalog]);
+  useEffect(()=>localStorage.setItem("arth_txns",JSON.stringify(txns)),[txns]);
+  useEffect(()=>localStorage.setItem("arth_investments",JSON.stringify(investments)),[investments]);
+  useEffect(()=>localStorage.setItem("arth_budget",monthBudget),[monthBudget]);
+  useEffect(()=>localStorage.setItem("arth_bills",JSON.stringify(bills)),[bills]);
+  useEffect(()=>localStorage.setItem("arth_liabilities",JSON.stringify(liabilities)),[liabilities]);
+  useEffect(()=>localStorage.setItem("arth_assets",JSON.stringify(trackedAssets)),[trackedAssets]);
+  useEffect(()=>localStorage.setItem("arth_loans",JSON.stringify(loans)),[loans]);
+  useEffect(()=>localStorage.setItem("arth_cc_emi_plans",JSON.stringify(ccEmiPlans)),[ccEmiPlans]);
+  useEffect(()=>localStorage.setItem("arth_annual_budget",annualBudget),[annualBudget]);
+  useEffect(()=>localStorage.setItem("arth_last_fy_target",lastFYTarget),[lastFYTarget]);
+  useEffect(()=>localStorage.setItem("arth_month_overrides",JSON.stringify(monthOverrides)),[monthOverrides]);
+
+  // ── MODAL STATE ────────────────────────────────────────────────────────────
+  const [showAdd, setShowAdd] = useState(false);
+  const [defaultAddType, setDefaultAddType] = useState("expense");
+  const [addPrefill, setAddPrefill] = useState(null);
+  const [showInvestments, setShowInvestments] = useState(false);
+  const [showAddBill, setShowAddBill] = useState(false);
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [editingMonthBudget, setEditingMonthBudget] = useState(null); // month key
+  const [editingMonthVal, setEditingMonthVal] = useState("");
+  const [editingCheckpoint, setEditingCheckpoint] = useState(null); // account id
+  const [editingCheckpointVal, setEditingCheckpointVal] = useState("");
+  const [editingCheckpointDate, setEditingCheckpointDate] = useState(todayStr());
+  const [editingOpeningBalanceVal, setEditingOpeningBalanceVal] = useState("");
+  const [editingOpeningBalanceDate, setEditingOpeningBalanceDate] = useState(todayStr());
+  const [editingBill, setEditingBill] = useState(null);
+  const [editingPerson, setEditingPerson] = useState(null);
+  const [editingTxn, setEditingTxn] = useState(null);
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [showAddInvestment, setShowAddInvestment] = useState(false);
+  const [editingInvestment, setEditingInvestment] = useState(null);
+  const [showAddLiability, setShowAddLiability] = useState(false);
+  const [showAddAsset, setShowAddAsset] = useState(false);
+  const [showAddLoan, setShowAddLoan] = useState(false);
+  const [showAccDetail, setShowAccDetail] = useState(null);
+  const [showWealthBreakdown, setShowWealthBreakdown] = useState(null);
+  const [selectedInvestmentDetail, setSelectedInvestmentDetail] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsSection, setSettingsSection] = useState(null);
+  const [confirmDeleteCat, setConfirmDeleteCat] = useState(null);
+  const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(null);
+  const [confirmDeleteTxn, setConfirmDeleteTxn] = useState(null);
+  const [billMatchSuggestion, setBillMatchSuggestion] = useState(null);
+  const [refundMatchSuggestion, setRefundMatchSuggestion] = useState(null);
+  const [reimbursementMatchSuggestion, setReimbursementMatchSuggestion] = useState(null);
+  const [imageViewSrc, setImageViewSrc] = useState(null);
+  const [refundSourceTxn, setRefundSourceTxn] = useState(null);
+  const [budgetOverrideMonth, setBudgetOverrideMonth] = useState(null);
+  const [budgetOverrideVal, setBudgetOverrideVal] = useState("");
+  const [selectedPerson, setSelectedPerson] = useState(null);
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [settleTxn, setSettleTxn] = useState(null);
+  const [expandedTxn, setExpandedTxn] = useState(null);
+  const defaultTxnMonth = viewMonth || todayStr().slice(0,7);
+  const [fType, setFType] = useState("All");
+  const [txnDatePreset, setTxnDatePreset] = useState("current_month");
+  const [txnSort, setTxnSort] = useState("date_desc");
+  const [txnDateFrom, setTxnDateFrom] = useState(()=>getMonthBounds(defaultTxnMonth).start);
+  const [txnDateTo, setTxnDateTo] = useState(()=>getMonthBounds(defaultTxnMonth).end);
+  const [txnAmountFrom, setTxnAmountFrom] = useState("");
+  const [txnAmountTo, setTxnAmountTo] = useState("");
+  const [txnCategoryFilter, setTxnCategoryFilter] = useState("all");
+  const [txnPersonFilter, setTxnPersonFilter] = useState("all");
+  const [expenseSourceFilter, setExpenseSourceFilter] = useState("all");
+  const [expenseCardFilter, setExpenseCardFilter] = useState("all");
+  const [incomeTypeFilter, setIncomeTypeFilter] = useState("all");
+  const [incomeAccountFilter, setIncomeAccountFilter] = useState("all");
+  const [investmentTypeFilter, setInvestmentTypeFilter] = useState("all");
+  const [txnReimbursableOnly, setTxnReimbursableOnly] = useState(false);
+  const [selectedInvestmentTypeView, setSelectedInvestmentTypeView] = useState("all");
+  const [editingLiability, setEditingLiability] = useState(null);
+  const [editingAsset, setEditingAsset] = useState(null);
+  const [editingLoan, setEditingLoan] = useState(null);
+  const [repaymentLoan, setRepaymentLoan] = useState(null);
+  const [showReceivablesList, setShowReceivablesList] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState(null);
+  const [editingCategoryName, setEditingCategoryName] = useState("");
+
+  const openInvestmentComposer = () => {
+    setShowInvestments(false);
+    setShowAddInvestment(false);
+    setEditingInvestment(null);
+    setSelectedInvestmentTypeView("all");
+    setDefaultAddType("investment");
+    setShowAdd(true);
+  };
+  const applyTxnDatePreset = useCallback((preset, baseMonth = viewMonth || todayStr().slice(0,7)) => {
+    if(preset === "all"){
+      setTxnDatePreset("all");
+      setTxnDateFrom("");
+      setTxnDateTo("");
+      return;
+    }
+    if(preset === "last_month"){
+      const { start, end } = getMonthBounds(getPreviousMonthKey(baseMonth));
+      setTxnDatePreset("last_month");
+      setTxnDateFrom(start);
+      setTxnDateTo(end);
+      return;
+    }
+    if(preset === "custom"){
+      setTxnDatePreset("custom");
+      return;
+    }
+    const { start, end } = getMonthBounds(baseMonth);
+    setTxnDatePreset("current_month");
+    setTxnDateFrom(start);
+    setTxnDateTo(end);
+  }, [viewMonth]);
+  const openLoanDraft = useCallback((overrides = {}) => {
+    setEditingLoan({ _isDraft:true, direction:"given", startDate:todayStr(), ...overrides });
+    setShowAddLoan(true);
+  }, []);
+
+  useEffect(()=>{
+    if(txnDatePreset === "current_month"){
+      const { start, end } = getMonthBounds(viewMonth || todayStr().slice(0,7));
+      setTxnDateFrom(start);
+      setTxnDateTo(end);
+    } else if(txnDatePreset === "last_month"){
+      const { start, end } = getMonthBounds(getPreviousMonthKey(viewMonth || todayStr().slice(0,7)));
+      setTxnDateFrom(start);
+      setTxnDateTo(end);
+    }
+  }, [txnDatePreset, viewMonth]);
+
+  // ── LOOKUPS ────────────────────────────────────────────────────────────────
+  const getCat = useCallback(id=>{
+    if(!id) return {name:"?",color:"#888",icon:"❓",subs:[]};
+    const matched = cats.find(c=>c.id===id || c.id.toLowerCase()===String(id).toLowerCase());
+    return matched || {name:"?",color:"#888",icon:"❓",subs:[]};
+  },[cats]);
+  const getAcc = useCallback(id=>accounts.find(a=>a.id===id)||{name:"?",color:"#888",type:"cash"},[accounts]);
+  const getPerson = useCallback(id=>people.find(p=>p.id===id)||{name:"?",emoji:"👤",color:"#888",relation:"",personType:"contact"},[people]);
+  const getGroup = useCallback(id=>groups.find(g=>g.id===id)||null,[groups]);
+  const getRefundCandidates = useCallback((refundTxn, excludeRefundId = null)=>{
+    if(!refundTxn || refundTxn.type!=="settlement_in" || !refundTxn.isRefund) return [];
+    const refundAmt = Number(refundTxn.amount||0);
+    if(!refundAmt) return [];
+    const refundDate = toDateOnly(refundTxn.date) || new Date();
+    const refundText = `${refundTxn.desc||""} ${refundTxn.merchant||""}`.toLowerCase();
+    const linkedExpenseIds = new Set(
+      txns
+        .filter(t=>t.type==="settlement_in" && t.againstTxnId && String(t.id)!==String(excludeRefundId||refundTxn.id||""))
+        .map(t=>String(t.againstTxnId))
+    );
+
+    return txns
+      .filter(t=>t.type==="expense" && !linkedExpenseIds.has(String(t.id)) && nearlyEqualMoney(t.amount, refundAmt))
+      .filter(t=>{
+        const txnDate = toDateOnly(t.date);
+        return !txnDate || txnDate <= refundDate;
+      })
+      .map(t=>{
+        const txnText = `${t.desc||""} ${t.merchant||""}`.toLowerCase();
+        const merchantMatch = refundText && txnText && (
+          refundText.includes(txnText) ||
+          txnText.includes(refundText) ||
+          refundText.split(/\s+/).some(word=>word.length>3 && txnText.includes(word))
+        );
+        const txnDate = toDateOnly(t.date) || refundDate;
+        const dayGap = Math.abs(Math.round((refundDate - txnDate)/(1000*60*60*24)));
+        const score = (merchantMatch ? 12 : 0) + (t.accId && refundTxn.accId && t.accId===refundTxn.accId ? 5 : 0) + Math.max(0, 45 - Math.min(dayGap, 45));
+        return { ...t, _refundScore:score, _dayGap:dayGap, _merchantMatch:merchantMatch };
+      })
+      .sort((a,b)=>b._refundScore-a._refundScore || new Date(b.date||0)-new Date(a.date||0))
+      .slice(0,3);
+  },[txns]);
+
+  // ── CURRENT MONTH FILTER ───────────────────────────────────────────────────
+  const cm = viewMonth;
+  const thisMonthTxns = useMemo(()=>txns.filter(t=>t.date&&t.date.startsWith(cm)),[txns,cm]);
+  const expenses = useMemo(()=>thisMonthTxns.filter(t=>t.type==="expense"),[thisMonthTxns]);
+  const refundTotalsByExpense = useMemo(()=>txns.reduce((map,txn)=>{
+    if(txn.type!=="settlement_in" || !txn.againstTxnId) return map;
+    const key = String(txn.againstTxnId);
+    map[key] = (map[key]||0) + Number(txn.amount||0);
+    return map;
+  },{}),[txns]);
+  const getNetExpenseAmount = useCallback(expense=>Math.max(0, Number(expense?.amount||0) - Number(refundTotalsByExpense[String(expense?.id)]||0)),[refundTotalsByExpense]);
+  const getGroupCollectiveDue = useCallback(expense=>{
+    if(!expense?.groupId || expense?.type!=="expense") return 0;
+    const hasIndividualReceivable = Object.entries(expense?.people||{}).some(([pid,info])=>pid!=="__me__" && info?.mode==="owes" && Number(info?.amount||0)>0 && !info?.settled);
+    const trackingMode = expense?.trackingMode || (hasIndividualReceivable ? "split" : (expense?.forPerson || expense?.groupId ? "tag" : "none"));
+    if(trackingMode!=="split") return 0;
+    if(expense.groupCollectiveAmount !== undefined && expense.groupCollectiveAmount !== null){
+      return Math.max(0, Number(expense.groupCollectiveAmount||0));
+    }
+    return hasIndividualReceivable ? 0 : Math.max(0, Number(expense.amount||0));
+  },[]);
+  const getMyExpenseAmount = useCallback(expense=>{
+    const netAmount = getNetExpenseAmount(expense);
+    if(!(netAmount>0)) return 0;
+
+    const trackingMode = expense?.trackingMode
+      || (Object.keys(expense?.people||{}).some(pid=>pid!=="__me__") ? "split" : (expense?.forPerson || expense?.groupId ? "tag" : "none"));
+    const meId = people.find(person=>person.isMe)?.id;
+    let attributedAway = 0;
+
+    Object.entries(expense?.people||{}).forEach(([pid,info])=>{
+      if(pid==="__me__") return;
+      const mode = info?.mode;
+      const part = Number(info?.amount||0);
+      if(!(part>0)) return;
+      if(mode==="owes") attributedAway += part;
+    });
+
+    const groupAllocations = Array.isArray(expense?.groupAllocations) ? expense.groupAllocations : [];
+    groupAllocations.forEach(groupPart=>{
+      const mode = groupPart?.mode;
+      const part = Number(groupPart?.amount||0);
+      if(!(part>0)) return;
+      if(mode==="owes") attributedAway += part;
+    });
+
+    if((trackingMode==="split" || trackingMode==="allocate") && groupAllocations.length===0){
+      const collectivePart = Number(expense?.groupCollectiveAmount||0);
+      if(collectivePart>0) attributedAway += collectivePart;
+    }
+
+    return Math.max(0, netAmount - attributedAway);
+  },[getNetExpenseAmount]);
+
+  // ── COMPUTED ───────────────────────────────────────────────────────────────
+  const myActual = useMemo(()=>expenses.reduce((sum,expense)=>sum+getMyExpenseAmount(expense),0),[expenses,getMyExpenseAmount]);
+
+  const totalIncome = useMemo(()=>thisMonthTxns.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0),[thisMonthTxns]);
+  const monthlyInvestmentFlow = useMemo(()=>thisMonthTxns.reduce((sum,t)=>{
+    if(t.type==="investment") return sum + Number(t.amount||0);
+    if(t.type==="transfer" && t.toAccId && isInvestmentAccount(getAcc(t.toAccId))) return sum + Number(t.amount||0);
+    return sum;
+  },0),[thisMonthTxns,getAcc]);
+  const trackedInvestments = useMemo(()=>{
+    const txnsById = new Map(txns.map(t=>[String(t.id), t]));
+    const saved = (investments||[]).flatMap(inv=>{
+      const linkedTxn = inv.linkedTxnId ? txnsById.get(String(inv.linkedTxnId)) : null;
+      if(inv.linkedTxnId && (!linkedTxn || linkedTxn.type!=="investment")) return [];
+      return [{
+        ...inv,
+        linkedInvestmentId:inv.id,
+        linkedTxnId:linkedTxn?.id ?? inv.linkedTxnId ?? null,
+        type:linkedTxn?.investType || inv.type || "mf",
+        name:linkedTxn?.desc || linkedTxn?.merchant || inv.name || "Investment",
+        amount:Number(linkedTxn?.amount ?? inv.amount ?? 0),
+        currentValue:Number(linkedTxn?.amount ?? inv.currentValue ?? inv.amount ?? 0),
+        freq:linkedTxn?.investFreq || inv.freq || "",
+        folioNo:String(linkedTxn?.investFolio ?? inv.folioNo ?? inv.folio ?? "").trim(),
+        startDate:linkedTxn?.investStartDate || inv.startDate || linkedTxn?.date || todayStr(),
+        paymentAccId:linkedTxn?.accId || inv.paymentAccId || "",
+        lastNav:Number(linkedTxn?.investNav ?? inv.lastNav ?? 0),
+        lastNavDate:linkedTxn?.date || inv.lastNavDate || inv.startDate || todayStr(),
+      }];
+    });
+    const knownTxnIds = new Set(saved.map(inv=>String(inv.linkedTxnId)).filter(Boolean));
+
+    const derivedFromTxns = txns
+      .filter(t=>t.type==="investment" && !knownTxnIds.has(String(t.id)))
+      .map(t=>({
+        id:`txn_${t.id}`,
+        type:t.investType||"mf",
+        name:t.desc||t.merchant||"Investment",
+        amount:Number(t.amount||0),
+        currentValue:Number(t.amount||0),
+        freq:t.investFreq||"",
+        folioNo:String(t.investFolio||"").trim(),
+        startDate:t.investStartDate || t.date || todayStr(),
+        linkedTxnId:t.id,
+        linkedInvestmentId:t.linkedInvestmentId || null,
+        source:"transaction",
+        paymentAccId:t.accId || "",
+        lastNav:Number(t.investNav || 0),
+        lastNavDate:t.date || todayStr(),
+      }));
+
+    return [...saved, ...derivedFromTxns];
+  },[investments,txns]);
+  const investmentFolioGroups = useMemo(()=>{
+    const map = new Map();
+    trackedInvestments.forEach(inv=>{
+      const grouping = getInvestmentGroupMeta(inv);
+      const key = grouping.key;
+      if(!map.has(key)){
+        map.set(key, {
+          id:key,
+          type:inv.type,
+          folioNo:grouping.folioNo,
+          primaryName:grouping.primaryName,
+          latestNameDate:inv.lastNavDate || inv.startDate || "",
+          items:[],
+          total:0,
+        });
+      }
+      const group = map.get(key);
+      const latestNameDate = inv.lastNavDate || inv.startDate || "";
+      if((inv.name||"") && String(group.latestNameDate||"") <= String(latestNameDate||"")){
+        group.primaryName = inv.name || group.primaryName;
+        group.latestNameDate = latestNameDate;
+      }
+      group.items.push(inv);
+      group.total += Number(inv.currentValue ?? inv.amount ?? 0);
+    });
+    return Array.from(map.values()).sort((a,b)=>b.total-a.total);
+  },[trackedInvestments]);
+  const monthlyInvestmentCommitment = useMemo(()=>trackedInvestments.reduce((sum,inv)=>inv.freq==="monthly"?sum+Number(inv.amount||0):sum,0),[trackedInvestments]);
+
+  const getInvestmentTxn = useCallback(inv=>{
+    const linkedTxnId = inv?.linkedTxnId || (String(inv?.id||"").startsWith("txn_") ? String(inv.id).slice(4) : "");
+    return linkedTxnId ? txns.find(t=>String(t.id)===String(linkedTxnId)) || null : null;
+  },[txns]);
+  const investmentTemplateOptions = useMemo(()=>{
+    const templates = new Map();
+    trackedInvestments.forEach(inv=>{
+      const linkedTxn = getInvestmentTxn(inv);
+      const folioKey = String(inv.folioNo||"").trim().toLowerCase();
+      const nameKey = String(inv.name||"").trim().toLowerCase();
+      const primaryKey = folioKey || nameKey;
+      if(!primaryKey) return;
+      const key = `${inv.type||"mf"}|${primaryKey}`;
+      const lastUsed = linkedTxn?.date || inv.lastNavDate || inv.startDate || "";
+      const candidate = {
+        key,
+        type:inv.type || "mf",
+        name:inv.name || "Investment",
+        folioNo:String(inv.folioNo||"").trim(),
+        amount:Number(linkedTxn?.amount ?? inv.amount ?? 0),
+        freq:linkedTxn?.investFreq || inv.freq || "",
+        accId:linkedTxn?.accId || inv.paymentAccId || "",
+        nav:Number(linkedTxn?.investNav ?? inv.lastNav ?? 0),
+        startDate:inv.startDate || linkedTxn?.date || "",
+        lastUsed,
+        label:String(inv.folioNo||"").trim()
+          ? `Folio ${String(inv.folioNo).trim()} · ${inv.name || "Investment"}`
+          : (inv.name || "Investment"),
+      };
+      const existing = templates.get(key);
+      if(!existing || String(existing.lastUsed||"") < String(lastUsed||"")){
+        templates.set(key, candidate);
+      }
+    });
+    return Array.from(templates.values()).sort((a,b)=>String(b.lastUsed||"").localeCompare(String(a.lastUsed||"")));
+  },[trackedInvestments,getInvestmentTxn]);
+
+  const removeTxnAndLinkedInvestment = useCallback(txn=>{
+    if(!txn) return;
+    if(getAcc(txn.accId)?.type==="cc" && txn.type==="expense"){
+      setAccounts(prev=>prev.map(a=>a.id===txn.accId?{...a,outstanding:Math.max(0,(a.outstanding||0)-Number(txn.amount||0))}:a));
+    }
+    setTxns(prev=>prev.filter(x=>String(x.id)!==String(txn.id)));
+    if(txn.type==="investment"){
+      setInvestments(prev=>prev.filter(x=>String(x.id)!==String(txn.linkedInvestmentId||"") && String(x.linkedTxnId)!==String(txn.id)));
+    }
+  },[getAcc]);
+
+  const removeInvestmentEntry = useCallback(inv=>{
+    const linkedTxn = getInvestmentTxn(inv);
+    if(linkedTxn){
+      removeTxnAndLinkedInvestment(linkedTxn);
+    } else {
+      const targetId = inv?.linkedInvestmentId || inv?.id;
+      setInvestments(prev=>prev.filter(x=>String(x.id)!==String(targetId)));
+    }
+    setSelectedInvestmentDetail(prev=>{
+      if(!prev) return prev;
+      const nextItems = prev.items.filter(item=>String(item.id)!==String(inv?.id));
+      if(nextItems.length===0) return null;
+      return {
+        ...prev,
+        items:nextItems,
+        total:nextItems.reduce((sum,item)=>sum+Number(item.currentValue ?? item.amount ?? 0),0),
+      };
+    });
+  },[getInvestmentTxn,removeTxnAndLinkedInvestment]);
+
+  const openInvestmentEditor = useCallback(inv=>{
+    const linkedTxn = getInvestmentTxn(inv);
+    setSelectedInvestmentDetail(null);
+    if(linkedTxn){
+      setEditingTxn(linkedTxn);
+      return;
+    }
+    const targetId = inv?.linkedInvestmentId || inv?.id;
+    const sourceItem = investments.find(x=>String(x.id)===String(targetId)) || inv;
+    setEditingInvestment(sourceItem);
+    setShowAddInvestment(true);
+  },[getInvestmentTxn,investments]);
+
+  const openInvestmentQuickAdd = useCallback(inv=>{
+    const linkedTxn = getInvestmentTxn(inv);
+    const sourceItem = linkedTxn ? {
+      ...inv,
+      paymentAccId: linkedTxn.accId || inv?.paymentAccId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "",
+      startDate: inv?.startDate || linkedTxn?.date || todayStr(),
+      lastNavDate: todayStr(),
+    } : inv;
+    setSelectedInvestmentDetail(null);
+    setEditingInvestment({
+      _prefillOnly:true,
+      type:sourceItem?.type || "mf",
+      name:sourceItem?.name || "Investment",
+      folioNo:String(sourceItem?.folioNo || "").trim(),
+      amount:Number(sourceItem?.amount || 0),
+      freq:sourceItem?.freq || "",
+      paymentAccId:sourceItem?.paymentAccId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "",
+      lastNav:Number(sourceItem?.lastNav || linkedTxn?.investNav || 0),
+      startDate:sourceItem?.startDate || todayStr(),
+      lastNavDate:sourceItem?.lastNavDate || todayStr(),
+      reminder:null,
+    });
+    setShowAddInvestment(true);
+  },[accounts,getInvestmentTxn]);
+
+  const byCat = useMemo(()=>cats.map(c=>({
+    name:c.name,
+    value:expenses.filter(expense=>getTxnCategoryIds(expense).includes(c.id)).reduce((sum,expense)=>{
+      const txnCatIds = getTxnCategoryIds(expense);
+      const catCount = txnCatIds.length || 1;
+      return sum+(getMyExpenseAmount(expense)/catCount);
+    },0),
+    color:c.color,id:c.id,icon:c.icon,budget:c.budget
+  })).filter(c=>c.value>0),[expenses,cats,getMyExpenseAmount]);
+
+  const settlements = useMemo(()=>{
+    const receivables = {};
+    const payables = {};
+
+    txns.forEach(t=>{
+      if(t.type==="expense"&&t.people){
+        Object.entries(t.people).forEach(([pid,info])=>{
+          if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
+          receivables[pid] = (receivables[pid]||0) + remainingShare(info);
+        });
+      }
+
+      if(t.type==="settlement_in"&&t.fromPersonId&&Number(t.extraAmount||0)>0){
+        payables[t.fromPersonId] = (payables[t.fromPersonId]||0) + Number(t.extraAmount||0);
+      }
+
+      if(t.type==="settlement_out"&&t.toPersonId){
+        payables[t.toPersonId] = (payables[t.toPersonId]||0) + Number(t.amount||0);
+      }
+    });
+
+    bills.forEach(b=>{
+      if(!b.splitPeople) return;
+      Object.entries(b.splitPeople).forEach(([pid,info])=>{
+        if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
+        receivables[pid] = (receivables[pid]||0) + remainingShare(info);
+      });
+    });
+
+    const ids = new Set([...Object.keys(receivables), ...Object.keys(payables)]);
+    const map = {};
+    ids.forEach(pid=>{
+      map[pid] = {
+        owesMe: Number(receivables[pid]||0),
+        iOwe: Math.max(0, Number(payables[pid]||0)),
+      };
+    });
+
+    return map;
+  },[txns,bills]);
+
+  const personSpend = useMemo(()=>{
+    const map={};
+    thisMonthTxns.forEach(t=>{
+      if(t.type==="expense"&&t.forPerson){
+        if(!map[t.forPerson]) map[t.forPerson]=0;
+        map[t.forPerson]+=(t.tagPersonAmount||t.amount);
+      }
+      if(t.type==="expense"&&t.tagItems?.length){
+        t.tagItems.forEach(item=>{
+          if(item.targetType==="person"&&item.targetId){
+            if(!map[item.targetId]) map[item.targetId]=0;
+            map[item.targetId]+=item.amount;
+          }
+        });
+      }
+    });
+    return map;
+  },[thisMonthTxns]);
+
+  const directOwedToMe = useMemo(()=>Object.values(settlements).reduce((s,p)=>s+(p.owesMe||0),0),[settlements]);
+  const receivablePeopleList = useMemo(()=>Object.entries(settlements)
+    .filter(([,info])=>Number(info?.owesMe||0)>0)
+    .map(([pid,info])=>({
+      id:pid,
+      person:getPerson(pid),
+      amount:Number(info?.owesMe||0),
+    }))
+    .sort((a,b)=>b.amount-a.amount)
+  ,[settlements,getPerson]);
+  const monthlyReceivables = useMemo(()=>{
+    const map = {};
+
+    thisMonthTxns.forEach(t=>{
+      if(t.type!=="expense" || !t.people) return;
+      Object.entries(t.people).forEach(([pid,info])=>{
+        if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
+        map[pid] = (map[pid]||0) + remainingShare(info);
+      });
+    });
+
+    bills
+      .filter(b=>b.status==="unpaid" && b.splitPeople)
+      .filter(b=>(b.dueDate&&String(b.dueDate).startsWith(cm)) || (b.createdDate&&String(b.createdDate).startsWith(cm)))
+      .forEach(b=>{
+        Object.entries(b.splitPeople||{}).forEach(([pid,info])=>{
+          if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
+          map[pid] = (map[pid]||0) + remainingShare(info);
+        });
+      });
+
+    return map;
+  },[thisMonthTxns,bills,cm]);
+  const monthDirectOwedToMe = useMemo(()=>Object.values(monthlyReceivables).reduce((sum,amount)=>sum+Number(amount||0),0),[monthlyReceivables]);
+  const monthlyReceivablePeopleList = useMemo(()=>Object.entries(monthlyReceivables)
+    .filter(([,amount])=>Number(amount||0)>0)
+    .map(([pid,amount])=>({
+      id:pid,
+      person:getPerson(pid),
+      amount:Number(amount||0),
+    }))
+    .sort((a,b)=>b.amount-a.amount)
+  ,[monthlyReceivables,getPerson]);
+  const monthlyCollectiveGroupReceivable = useMemo(()=>{
+    const txnCollective = txns
+      .filter(t=>t.type==="expense" && t.date && String(t.date).startsWith(cm))
+      .reduce((sum,t)=>sum + getGroupCollectiveDue(t),0);
+    const billCollective = bills
+      .filter(b=>b.status==="unpaid")
+      .filter(b=>(b.dueDate&&String(b.dueDate).startsWith(cm)) || (b.createdDate&&String(b.createdDate).startsWith(cm)))
+      .reduce((sum,b)=>sum + Number(b.groupCollectiveAmount||0),0);
+    return txnCollective + billCollective;
+  },[txns,bills,cm,getGroupCollectiveDue]);
+  const monthTotalOwedToMe = useMemo(()=>monthDirectOwedToMe + monthlyCollectiveGroupReceivable,[monthDirectOwedToMe,monthlyCollectiveGroupReceivable]);
+  const collectiveGroupReceivable = useMemo(()=>{
+    const txnCollective = txns.reduce((sum,t)=>sum + getGroupCollectiveDue(t),0);
+    const billCollective = bills.filter(b=>b.status==="unpaid").reduce((sum,b)=>sum + Number(b.groupCollectiveAmount||0),0);
+    return txnCollective + billCollective;
+  },[txns,bills,getGroupCollectiveDue]);
+  const totalOwedToMe = useMemo(()=>directOwedToMe + collectiveGroupReceivable,[directOwedToMe,collectiveGroupReceivable]);
+  const remaining = monthBudget-myActual;
+  const safePerDay = monthBudget>0?Math.max(0,Math.round(remaining/Math.max(1,daysLeft()))):null;
+
+  const expenseBaseTxns = useMemo(()=>txns.filter(t=>t.type==="expense" && isDateInRange(t.date, txnDateFrom, txnDateTo)),[txns,txnDateFrom,txnDateTo]);
+  const incomeBaseTxns = useMemo(()=>txns.filter(t=>t.type==="income" && isDateInRange(t.date, txnDateFrom, txnDateTo)),[txns,txnDateFrom,txnDateTo]);
+  const investmentBaseTxns = useMemo(()=>txns.filter(t=>t.type==="investment" && isDateInRange(t.date, txnDateFrom, txnDateTo)),[txns,txnDateFrom,txnDateTo]);
+
+  const filteredTxns = useMemo(()=>[
+    ...txns
+  ].filter(t=>{
+    if(fType!=="All" && t.type!==fType) return false;
+    if(!isDateInRange(t.date, txnDateFrom, txnDateTo)) return false;
+
+    const txnAmount = Number(t.amount||0);
+    if(txnAmountFrom && txnAmount < parseMoney(txnAmountFrom)) return false;
+    if(txnAmountTo && txnAmount > parseMoney(txnAmountTo)) return false;
+
+    if(txnCategoryFilter!=="all"){
+      const txnCats = getTxnCategoryIds(t);
+      if(!txnCats.some(id=>String(id)===String(txnCategoryFilter))) return false;
+    }
+
+    if(txnPersonFilter!=="all" && !txnHasPerson(t, txnPersonFilter)) return false;
+
+    if(fType==="expense"){
+      const accType = accounts.find(a=>a.id===t.accId)?.type || "";
+      if(expenseSourceFilter!=="all" && accType!==expenseSourceFilter) return false;
+      if(expenseSourceFilter==="cc" && expenseCardFilter!=="all" && String(t.accId)!==String(expenseCardFilter)) return false;
+    }
+
+    if(fType==="income"){
+      if(incomeTypeFilter!=="all" && normalizeIncomeTypeValue(t.incomeType||"salary")!==String(incomeTypeFilter)) return false;
+      if(incomeAccountFilter!=="all" && String(t.accId||"")!==String(incomeAccountFilter)) return false;
+    }
+
+    if(fType==="investment" && investmentTypeFilter!=="all" && String(t.investType||"mf")!==String(investmentTypeFilter)) return false;
+
+    if(txnReimbursableOnly && !(t.reimbursable && !t.reimbursedByTxnId)) return false;
+
+    return true;
+  }).sort((a,b)=>{
+    const recordedA = getRecordedSortValue(a);
+    const recordedB = getRecordedSortValue(b);
+    const dateA = new Date(a.date||0).getTime();
+    const dateB = new Date(b.date||0).getTime();
+    const amountA = Number(a.amount||0);
+    const amountB = Number(b.amount||0);
+    const tieDesc = String(b.id||"").localeCompare(String(a.id||""), undefined, { numeric:true, sensitivity:"base" });
+    const tieAsc = String(a.id||"").localeCompare(String(b.id||""), undefined, { numeric:true, sensitivity:"base" });
+
+    if(txnSort==="date_desc"){
+      if(dateB !== dateA) return dateB - dateA;
+      if(recordedB !== recordedA) return recordedB - recordedA;
+      return tieDesc;
+    }
+    if(txnSort==="date_asc"){
+      if(dateA !== dateB) return dateA - dateB;
+      if(recordedA !== recordedB) return recordedA - recordedB;
+      return tieAsc;
+    }
+    if(txnSort==="amount_desc"){
+      if(amountB !== amountA) return amountB - amountA;
+      if(recordedB !== recordedA) return recordedB - recordedA;
+      return tieDesc;
+    }
+    if(txnSort==="amount_asc"){
+      if(amountA !== amountB) return amountA - amountB;
+      if(recordedB !== recordedA) return recordedB - recordedA;
+      return tieDesc;
+    }
+
+    if(recordedB !== recordedA) return recordedB - recordedA;
+    if(dateB !== dateA) return dateB - dateA;
+    return tieDesc;
+  }),[txns,fType,txnDateFrom,txnDateTo,txnAmountFrom,txnAmountTo,txnCategoryFilter,txnPersonFilter,accounts,expenseSourceFilter,expenseCardFilter,incomeTypeFilter,incomeAccountFilter,investmentTypeFilter,txnSort,txnReimbursableOnly]);
+
+  const accountBalance = useCallback((accId, endDate=null)=>{
+    const acc=accounts.find(a=>a.id===accId);
+    if(!acc||acc.type==="cc") return 0;
+    const openingDate = acc.openingBalanceDate || "";
+    const linkedDebitIds = acc.type==="bank"
+      ? accounts.filter(a=>(a.type==="debit" && a.linkedBank===accId) || (a.type==="upi" && a.linkedAccount===accId)).map(a=>a.id)
+      : [];
+    let bal=Number(acc.openingBalance||0);
+    txns.forEach(t=>{
+      if(!isDateInRange(t.date, openingDate, endDate)) return;
+      if(t.type==="income"&&t.accId===accId) bal+=Number(t.amount||0);
+      if(t.type==="settlement_in"&&t.accId===accId) bal+=Number(t.amount||0);
+      if(t.type==="expense"){
+        if(t.accId===accId || linkedDebitIds.includes(t.accId)) bal-=Number(t.amount||0);
+      }
+      if(t.type==="investment"){
+        if(t.accId===accId || linkedDebitIds.includes(t.accId)) bal-=Number(t.amount||0);
+      }
+      if(t.type==="transfer"){
+        if(t.fromAccId===accId || linkedDebitIds.includes(t.fromAccId)) bal-=Number(t.amount||0);
+        if(t.toAccId===accId || linkedDebitIds.includes(t.toAccId)) bal+=Number(t.amount||0);
+      }
+      if(t.type==="cc_payment" && (t.fromAccId===accId || linkedDebitIds.includes(t.fromAccId))) bal-=Number(t.amount||0);
+    });
+    return bal;
+  },[txns,accounts]);
+
+  const bankBalance = useCallback(accId=>{
+    const acc=accounts.find(a=>a.id===accId);
+    if(!acc||acc.type!=="bank") return 0;
+    return accountBalance(accId);
+  },[accounts,accountBalance]);
+  const accountReconciliationGap = useCallback(accId=>{
+    const checkpoint = balanceCheckpoints[accId];
+    if(!checkpoint?.date) return 0;
+    const expectedAtDate = accountBalance(accId, checkpoint.date);
+    return Number(checkpoint.amount||0) - Number(expectedAtDate||0);
+  },[balanceCheckpoints,accountBalance]);
+  const effectiveAccountBalance = useCallback(accId=>{
+    const acc = accounts.find(a=>a.id===accId);
+    if(!acc || acc.type==="cc") return 0;
+    const computed = accountBalance(accId);
+    return acc.type==="bank" ? computed + accountReconciliationGap(accId) : computed;
+  },[accounts,accountBalance,accountReconciliationGap]);
+
+  const investmentAccounts = useMemo(()=>accounts.filter(a=>isInvestmentAccount(a)),[accounts]);
+  const cashBankTotal = useMemo(()=>accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+effectiveAccountBalance(a.id),0),[accounts,effectiveAccountBalance]);
+  const cashWalletTotal = useMemo(()=>accounts.filter(a=>a.type==="cash" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+accountBalance(a.id),0),[accounts,accountBalance]);
+  const upiTotal = useMemo(()=>accounts.filter(a=>a.type==="upi" && !isInvestmentAccount(a) && !a.linkedAccount).reduce((sum,a)=>sum+accountBalance(a.id),0),[accounts,accountBalance]);
+  const liquidAssetsTotal = useMemo(()=>accounts.filter(a=>a.type!=="cc" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+(a.type==="bank" ? effectiveAccountBalance(a.id) : accountBalance(a.id)),0),[accounts,accountBalance,effectiveAccountBalance]);
+  const reconciliationGapTotal = useMemo(()=>accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+accountReconciliationGap(a.id),0),[accounts,accountReconciliationGap]);
+  const reconciledBankCount = useMemo(()=>accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a) && balanceCheckpoints[a.id]?.date).length,[accounts,balanceCheckpoints]);
+  const investmentAccountTotal = useMemo(()=>investmentAccounts.reduce((sum,a)=>sum+accountBalance(a.id),0),[investmentAccounts,accountBalance]);
+  const investmentDashboardGroups = useMemo(()=>{
+    const map = new Map();
+    trackedInvestments.forEach(inv=>{
+      const grouping = getInvestmentGroupMeta(inv);
+      const key = grouping.key;
+      const typeMeta = INVEST_TYPES.find(type=>type.id===inv.type);
+      if(!map.has(key)){
+        map.set(key, {
+          id:key,
+          type:inv.type || "custom",
+          folioNo:grouping.folioNo || "",
+          primaryName:grouping.primaryName || inv.name || "Investment",
+          firstStartDate:inv.startDate || inv.lastNavDate || "",
+          title:grouping.folioNo ? `Folio ${grouping.folioNo}` : grouping.primaryName,
+          trackedTotal:0,
+          accountTotal:0,
+          itemCount:0,
+          accountCount:0,
+          color:typeMeta?.color || T.info,
+          accounts:[],
+          items:[],
+        });
+      }
+      const group = map.get(key);
+      if(grouping.folioNo) group.folioNo = grouping.folioNo;
+      if(grouping.primaryName) group.primaryName = grouping.primaryName;
+      const itemStartDate = inv.startDate || inv.lastNavDate || "";
+      if(itemStartDate && (!group.firstStartDate || String(itemStartDate) < String(group.firstStartDate))) group.firstStartDate = itemStartDate;
+      group.title = grouping.folioNo ? `Folio ${grouping.folioNo}` : (grouping.primaryName || group.title);
+      group.trackedTotal += Number(inv.currentValue ?? inv.amount ?? 0);
+      group.itemCount += 1;
+      group.items.push(inv);
+    });
+    investmentAccounts.forEach(account=>{
+      const typeId = inferInvestmentTypeId(`${account.typeLabel||""} ${account.name||""}`);
+      const grouping = getInvestmentGroupMeta({ type:typeId, name:account.name || account.typeLabel || "Investment", id:account.id, linkedInvestmentId:account.id });
+      const key = grouping.key;
+      const typeMeta = INVEST_TYPES.find(type=>type.id===typeId);
+      if(!map.has(key)){
+        map.set(key, {
+          id:key,
+          type:typeId,
+          title:grouping.primaryName,
+          trackedTotal:0,
+          accountTotal:0,
+          itemCount:0,
+          accountCount:0,
+          color:account.color || typeMeta?.color || T.info,
+          accounts:[],
+        });
+      }
+      const group = map.get(key);
+      group.accountTotal += Number(accountBalance(account.id) || 0);
+      group.accountCount += 1;
+      group.accounts.push(account);
+      if(!group.title || group.title === "Investment") group.title = account.name || grouping.primaryName;
+      if(!group.color) group.color = account.color || typeMeta?.color || T.info;
+    });
+    return Array.from(map.values())
+      .map(group=>({
+        ...group,
+        total:group.trackedTotal>0 && group.accountTotal>0 ? Math.max(group.trackedTotal, group.accountTotal) : (group.trackedTotal + group.accountTotal),
+      }))
+      .filter(group=>group.total>0)
+      .sort((a,b)=>b.total-a.total);
+  },[trackedInvestments,investmentAccounts,accountBalance]);
+  const investmentAssetsTotal = useMemo(()=>investmentDashboardGroups.reduce((sum,group)=>sum+Number(group.total||0),0),[investmentDashboardGroups]);
+  const investmentTypeSummaries = useMemo(()=>INVEST_TYPES.map(type=>{
+    const groups = investmentDashboardGroups.filter(group=>group.type===type.id && Number(group.total||0)>0);
+    if(!groups.length) return null;
+    return {
+      ...type,
+      total:groups.reduce((sum,group)=>sum+Number(group.total||0),0),
+      groupCount:groups.length,
+    };
+  }).filter(Boolean),[investmentDashboardGroups]);
+  const trackedAssetsTotal = useMemo(()=>trackedAssets.reduce((sum,a)=>sum+Number(a.currentValue||0),0),[trackedAssets]);
+  const cardOutstanding = useCallback((cardId)=>{
+    const today = todayStr();
+    const isPosted = t=>!t.date || String(t.date) <= today;
+    const linkedUpiIds = accounts.filter(a=>a.type==="upi" && a.linkedAccount===cardId).map(a=>a.id);
+    const allIds = [cardId, ...linkedUpiIds];
+    const spent = txns.reduce((sum,t)=>isPosted(t) && (t.type==="expense" || t.type==="investment" || t.type==="cc_emi") && allIds.includes(t.accId) ? sum + Number(t.amount||0) : sum,0);
+    const paid = txns.reduce((sum,t)=>isPosted(t) && t.type==="cc_payment" && t.toAccId===cardId ? sum + Number(t.amount||0) : sum,0);
+    // settlement_in goes to bank/UPI — should never reduce CC outstanding
+    const refunds = 0;
+    return Math.max(0, spent - paid - refunds);
+  },[txns,accounts]);
+  const creditCardLiabilityTotal = useMemo(()=>accounts.reduce((sum,a)=>sum+(a.type==="cc"?cardOutstanding(a.id):0),0),[accounts,cardOutstanding]);
+  const otherLiabilityTotal = useMemo(()=>liabilities.reduce((sum,l)=>sum+Number(l.outstanding||0),0),[liabilities]);
+  const getCardSummary = useCallback((card)=>{
+    const { prevStatementDate, lastStatementDate, nextStatementDate, dueOn } = getCardCycleDates(card, new Date());
+    const totalOutstanding = cardOutstanding(card.id);
+    const linkedUpiIds = accounts.filter(a=>a.type==="upi" && a.linkedAccount===card.id).map(a=>a.id);
+    const allIds = [card.id, ...linkedUpiIds];
+    const today = new Date();
+    const todayMid = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12, 0, 0, 0);
+    const currentCycleSpend = Math.max(0, txns.reduce((sum,t)=>{
+      if((t.type!=="expense" && t.type!=="cc_emi" && t.type!=="settlement_in") || !allIds.includes(t.accId)) return sum;
+      const txnDate = toDateOnly(t.date);
+      if(!txnDate || !lastStatementDate || txnDate<=lastStatementDate || txnDate>todayMid) return sum;
+      return sum + (t.type==="settlement_in" ? -Number(t.amount||0) : Number(t.amount||0));
+    },0));
+    const currentDue = Math.max(0, totalOutstanding - currentCycleSpend);
+    const alertPct = Number(card.alertPct ?? 30);
+    const thresholdAmount = card.limit ? (Number(card.limit||0) * alertPct) / 100 : 0;
+    const isOverAlert = Boolean(card.limit) && alertPct>0 && currentCycleSpend >= thresholdAmount && currentCycleSpend > 0;
+    const daysToDue = Math.ceil((dueOn - todayMid) / (1000*60*60*24));
+    return { prevStatementDate, lastStatementDate, nextStatementDate, dueOn, totalOutstanding, currentCycleSpend, currentDue, alertPct, thresholdAmount, isOverAlert, daysToDue };
+  },[txns,accounts,cardOutstanding]);
+  const groupReceivableTotal = useCallback(groupId=>{
+    const txnOwed = txns.filter(t=>t.groupId===groupId&&t.type==="expense").reduce((sum,t)=>
+      sum + Object.entries(t.people||{}).reduce((inner,[pid,info])=>{
+        if(pid==="__me__" || info.mode!=="owes" || info.settled) return inner;
+        return inner + remainingShare(info);
+      },0) + getGroupCollectiveDue(t)
+    ,0);
+    const billOwed = bills.filter(b=>b.groupId===groupId&&b.status==="unpaid").reduce((sum,b)=>
+      sum + Object.entries(b.splitPeople||{}).reduce((inner,[pid,info])=>{
+        if(pid==="__me__" || info.mode!=="owes" || info.settled) return inner;
+        return inner + remainingShare(info);
+      },0) + Number(b.groupCollectiveAmount||0)
+    ,0);
+    // manualLimit is a soft spending cap but not owed amount.
+    return txnOwed + billOwed;
+  },[txns,bills,getGroupCollectiveDue]);
+
+  const getPersonReceivableItems = useCallback(personId=>{
+    if(!personId) return [];
+    const txnItems = txns
+      .filter(t=>t.type==="expense"&&t.people?.[personId]?.mode==="owes"&&!t.people?.[personId]?.settled&&remainingShare(t.people?.[personId])>0)
+      .map(t=>({
+        key:`txn:${t.id}`,
+        kind:"txn",
+        id:t.id,
+        date:t.date||"",
+        title:t.desc||t.merchant||"Expense",
+        subtitle:[formatShortDate(t.date)||t.date, t.groupId&&getGroup(t.groupId)?.name].filter(Boolean).join(" · "),
+        amount:remainingShare(t.people[personId]),
+        originalAmount:Number(t.people[personId]?.amount||0),
+      }));
+    const billItems = bills
+      .filter(b=>b.splitPeople?.[personId]?.mode==="owes"&&!b.splitPeople?.[personId]?.settled&&remainingShare(b.splitPeople?.[personId])>0)
+      .map(b=>({
+        key:`bill:${b.id}`,
+        kind:"bill",
+        id:b.id,
+        date:b.dueDate||b.billDate||b.createdDate||"",
+        title:b.name||b.merchant||"Bill",
+        subtitle:[formatShortDate(b.dueDate)||b.dueDate, b.groupId&&getGroup(b.groupId)?.name, "bill"].filter(Boolean).join(" · "),
+        amount:remainingShare(b.splitPeople[personId]),
+        originalAmount:Number(b.splitPeople[personId]?.amount||0),
+      }));
+    return [...txnItems,...billItems].sort((a,b)=>
+      (toDateOnly(a.date)?.getTime()||0) - (toDateOnly(b.date)?.getTime()||0) ||
+      String(a.title||"").localeCompare(String(b.title||""), "en", { sensitivity:"base" })
+    );
+  },[txns,bills,getGroup]);
+
+  const applyRepaymentAllocations = useCallback((personId, settlementLinks)=>{
+    const links = (settlementLinks||[])
+      .map(link=>({ ...link, amount:Math.max(0, Number(link.amount||0)) }))
+      .filter(link=>personId&&link.id&&link.amount>0);
+    if(!links.length) return;
+
+    setTxns(prev=>prev.map(txn=>{
+      if(txn.type!=="expense" || !txn.people?.[personId]) return txn;
+      const link = links.find(item=>item.kind==="txn"&&String(item.id)===String(txn.id));
+      if(!link) return txn;
+      const info = txn.people[personId];
+      const originalAmt = Number(info.amount||0);
+      const prevSettled = Number(info.settledAmt||0);
+      const nextSettled = Math.min(originalAmt, prevSettled + Number(link.amount||0));
+      const nextRemaining = Math.max(0, originalAmt-nextSettled);
+      return { ...txn, people:{ ...txn.people, [personId]:{ ...info, settled:nextRemaining<=0, settledAmt:nextSettled, remainingAmt:nextRemaining } } };
+    }));
+
+    setBills(prev=>prev.map(bill=>{
+      if(!bill.splitPeople?.[personId]) return bill;
+      const link = links.find(item=>item.kind==="bill"&&String(item.id)===String(bill.id));
+      if(!link) return bill;
+      const info = bill.splitPeople[personId];
+      const originalAmt = Number(info.amount||0);
+      const prevSettled = Number(info.settledAmt||0);
+      const nextSettled = Math.min(originalAmt, prevSettled + Number(link.amount||0));
+      const nextRemaining = Math.max(0, originalAmt-nextSettled);
+      return { ...bill, splitPeople:{ ...bill.splitPeople, [personId]:{ ...info, settled:nextRemaining<=0, settledAmt:nextSettled, remainingAmt:nextRemaining } } };
+    }));
+  },[]);
+
+  const _groupReceivableTotalAll = useMemo(()=>groups.reduce((sum,g)=>sum+groupReceivableTotal(g.id),0),[groups,groupReceivableTotal]);
+  const activeLoans = useMemo(()=>loans.filter(loan=>loan.status==="active" && Number(loan.outstanding||0)>0),[loans]);
+  const isCreditCardBackedLoan = useCallback(loan=>loan?.direction==="taken" && (loan?.sourceType==="cc" || loan?.ccLinked===true || (loan?.autoScheduled && loan?.scheduledInstallmentIds?.length>0)),[]);
+  const loanGivenTotal = useMemo(()=>activeLoans.filter(loan=>loan.direction!=="taken").reduce((sum,loan)=>sum+Number(loan.outstanding||0),0),[activeLoans]);
+  const loanTakenTotal = useMemo(()=>activeLoans.filter(loan=>loan.direction==="taken" && !isCreditCardBackedLoan(loan)).reduce((sum,loan)=>sum+Number(loan.outstanding||0),0),[activeLoans,isCreditCardBackedLoan]);
+  const upcomingEmiLoans = useMemo(()=>activeLoans.filter(loan=>loan.direction==="taken" && !isCreditCardBackedLoan(loan) && Number(loan.emiAmount||0)>0),[activeLoans,isCreditCardBackedLoan]);
+  const monthlyEmiCommitment = useMemo(()=>upcomingEmiLoans.reduce((sum,loan)=>sum+Number(loan.emiAmount||0),0),[upcomingEmiLoans]);
+  const totalAssetsValue = liquidAssetsTotal + investmentAssetsTotal + trackedAssetsTotal + totalOwedToMe + loanGivenTotal;
+  // CC-backed EMI loans are already reflected in creditCardLiabilityTotal (via cc_emi txns on the card).
+  // loanTakenTotal excludes CC-backed loans via isCreditCardBackedLoan to prevent double-counting.
+  const totalLiabilitiesValue = creditCardLiabilityTotal + otherLiabilityTotal + loanTakenTotal;
+  const netWorthValue = totalAssetsValue - totalLiabilitiesValue;
+
+  // ── STYLES ─────────────────────────────────────────────────────────────────
+  const card = { background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:16, marginBottom:12 };
+  const lbl = { color:T.sub, fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.2, display:"block", marginBottom:6 };
+  const inp = { background:T.input, border:`1px solid ${T.border}`, borderRadius:10, padding:"11px 14px", color:T.text, fontSize:16, width:"100%", outline:"none", fontFamily:"Nunito,sans-serif", boxSizing:"border-box" };
+  const inpSm = { background:T.input, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px 10px", color:T.text, fontSize:16, outline:"none", fontFamily:"Nunito,sans-serif" };
+  const btnP = { background:T.accent, color:"#000", border:"none", borderRadius:12, padding:13, cursor:"pointer", fontSize:14, fontWeight:800, width:"100%", fontFamily:"Nunito,sans-serif" };
+  const btnG = { background:"none", border:`1px solid ${T.border}`, color:T.sub, borderRadius:12, padding:13, cursor:"pointer", fontSize:14, fontWeight:700, fontFamily:"Nunito,sans-serif" };
+  const ttStyle = { background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px 12px", fontSize:12, color:T.text };
+  const lightSelect = { ...inp, background:"#fff", color:"#111" };
+
+  const Chip = ({ color, children, onClick, active }) => (
+    <button onClick={onClick} style={{ background:active?color+"22":"none", border:`1px solid ${active?color:T.border}`, borderRadius:20, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:700, color:active?color:T.sub, whiteSpace:"nowrap", fontFamily:"Nunito,sans-serif" }}>{children}</button>
+  );
+  const AccountChipGroup = ({ items, value, onChange }) => (
+    <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+      {items.map(account=>(
+        <button
+          key={account.id}
+          onClick={()=>onChange(account.id)}
+          style={{
+            background:value===account.id?account.color+"22":"none",
+            border:`1px solid ${value===account.id?account.color:T.border}`,
+            borderRadius:20,
+            padding:"5px 12px",
+            cursor:"pointer",
+            fontSize:11,
+            color:value===account.id?account.color:T.sub,
+            fontWeight:700,
+            fontFamily:"Nunito,sans-serif"
+          }}
+        >
+          {accIcon(account.type)} {account.name}
+        </button>
+      ))}
+    </div>
+  );
+  const IncomeTypeChips = ({ options, value, onChange }) => (
+    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
+      {options.map(type=>(
+        <button
+          key={type}
+          onClick={()=>onChange(type)}
+          style={{
+            background:value===type?T.accent+"22":"none",
+            border:`1px solid ${value===type?T.accent:T.border}`,
+            borderRadius:20,
+            padding:"5px 12px",
+            cursor:"pointer",
+            fontSize:11,
+            color:value===type?T.accent:T.sub,
+            fontWeight:700,
+            fontFamily:"Nunito,sans-serif"
+          }}
+        >
+          {formatIncomeTypeLabel(type)}
+        </button>
+      ))}
+    </div>
+  );
+  const InvestmentTypeChips = ({ value, onChange }) => (
+    <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
+      {INVEST_TYPES.map(it=><Chip key={it.id} color={it.color} active={value===it.id} onClick={()=>onChange(it.id)}>{it.icon} {it.name.split("/")[0]}</Chip>)}
+    </div>
+  );
+  const InvestmentFrequencySelect = ({ value, onChange, emptyLabel="One-time / not fixed", styleOverride }) => (
+    <select style={styleOverride || lightSelect} value={value} onChange={e=>onChange(e.target.value)}>
+      <option value="" style={{ background:"#fff",color:"#111" }}>{emptyLabel}</option>
+      {INVESTMENT_FREQUENCY_OPTIONS.map(option=>(
+        <option key={option.value} value={option.value} style={{ background:"#fff",color:"#111" }}>{option.label}</option>
+      ))}
+    </select>
+  );
+
+  // ── TXN ROW ────────────────────────────────────────────────────────────────
+  const TxnRow = ({ t, last, onEditTxn }) => {
+    const txnCatIds = getTxnCategoryIds(t).filter(cid=>getCat(cid));
+    const txnSubIds = getTxnSubIds(t).filter(sid=>cats.some(cat=>cat.subs?.some(sub=>sub.id===sid)));
+    const cat = txnCatIds[0] ? getCat(txnCatIds[0]) : null;
+    const txnTitle = getTxnDisplayTitle(t);
+    const invTypeMeta = t.type==="investment" ? INVEST_TYPES.find(i=>i.id===t.investType) : null;
+    const investmentMetricText = t.type==="investment" ? formatInvestmentMetric(t.investType||"mf", t.investNav) : "";
+    const acc = t.accId?getAcc(t.accId):t.fromAccId?getAcc(t.fromAccId):null;
+    const color = t.type==="investment" ? (invTypeMeta?.color||txnColor(t,T)) : txnColor(t,T);
+    const refundTone = t.type==="settlement_in" && t.isRefund ? txnColor(t,T) : T.info;
+    const isPlus = t.type==="income"||t.type==="settlement_in";
+    const isExpanded = expandedTxn===t.id;
+    const owedPeople = t.type==="expense"?Object.entries(t.people||{}).filter(([pid,info])=>info.mode==="owes"&&!info.settled&&pid!=="__me__"&&remainingShare(info)>0):[];
+    const groupCollectiveDue = t.type==="expense" ? getGroupCollectiveDue(t) : 0;
+    const totalOwed = owedPeople.reduce((s,[,info])=>s+remainingShare(info),0) + groupCollectiveDue;
+    const myShare = t.type==="expense"?Math.max(0, Number(t.amount||0)-Object.entries(t.people||{}).filter(([pid,info])=>info.mode==="owes"&&pid!=="__me__").reduce((s,[,info])=>s+Number(info.amount||0),0)-groupCollectiveDue):t.amount;
+    const allSettled = t.type==="expense"&&Object.keys(t.people||{}).filter(p=>p!=="__me__").length>0&&Object.entries(t.people||{}).filter(([p])=>p!=="__me__").every(([,i])=>i.settled||i.mode!=="owes");
+    const refundTarget = t.type==="settlement_in" && t.againstTxnId ? txns.find(x=>String(x.id)===String(t.againstTxnId)) : null;
+    const linkedRefunds = t.type==="expense" ? txns.filter(x=>x.type==="settlement_in" && x.againstTxnId && String(x.againstTxnId)===String(t.id) && (x.isRefund || !x.fromPersonId)) : [];
+    const refundedAmount = linkedRefunds.reduce((sum,row)=>sum+Number(row.amount||0),0);
+    const netAfterRefund = t.type==="expense" ? Math.max(0, Number(t.amount||0) - refundedAmount) : Number(t.amount||0);
+    const refundStatus = refundedAmount<=0 ? "" : refundedAmount >= Number(t.amount||0) - 0.01 ? "Refunded" : "Partially Refunded";
+    const dateLabel = formatShortDate(t.date) || "--";
+
+    const handleEditTxn = (txn, e) => {
+      e?.stopPropagation?.();
+      setExpandedTxn(null);
+      if(typeof onEditTxn === "function") onEditTxn(txn);
+      else setEditingTxn(txn);
+    };
+
+    const deleteTxn = e => {
+      e.stopPropagation();
+      setConfirmDeleteTxn(t);
+    };
+
+    const writeOff = e => {
+      e.stopPropagation();
+      setTxns(p=>p.map(x=>x.id===t.id?{...x,writtenOff:true,people:Object.fromEntries(Object.entries(x.people||{}).map(([pid,info])=>[pid,{...info,settled:true}]))}:x));
+      setExpandedTxn(null);
+    };
+
+    return (
+      <div style={{ borderBottom:!last?`1px solid ${T.border}`:"none" }}>
+        {/* COLLAPSED ROW */}
+        <div onClick={()=>setExpandedTxn(isExpanded?null:t.id)} style={{ display:"flex", alignItems:"center", gap:12, padding:"11px 0", cursor:"pointer" }}>
+          <div style={{ width:38,height:38,borderRadius:10,background:color+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0,position:"relative" }}>
+            {t.type==="expense" && cat ? cat.icon : t.type==="investment" && invTypeMeta ? invTypeMeta.icon : txnEmoji(t)}
+            {allSettled&&<div style={{position:"absolute",bottom:-3,right:-3,fontSize:9,background:T.card,borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✅</div>}
+          </div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ color:t.writtenOff?T.sub:T.text, fontSize:13, fontWeight:700, marginBottom:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textDecoration:t.writtenOff?"line-through":"none" }}>
+              {txnTitle}
+            </div>
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap", alignItems:"center", justifyContent:"flex-start" }}>
+              {t.type==="expense"&&(
+                <>
+                  {txnCatIds.map(cid=>{
+                    const c=getCat(cid);
+                    if(!c) return null;
+                    return <span key={cid} style={{ background:c.color+"20",color:c.color,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{c.name.split(" ")[0]}</span>;
+                  })}
+                </>
+              )}
+              {t.type==="investment"&&invTypeMeta&&<span style={{ background:invTypeMeta.color+"20",color:invTypeMeta.color,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{invTypeMeta.icon} {invTypeMeta.name.split("/")[0]}</span>}
+              {t.type==="investment"&&t.investFolio&&<span style={{ background:T.pill,color:T.sub,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>Folio {t.investFolio}</span>}
+              {investmentMetricText&&<span style={{ color:T.sub,fontSize:10 }}>{investmentMetricText}</span>}
+              {t.catAllocations&&Object.keys(t.catAllocations).length>0&&<span style={{ color:T.sub,fontSize:10 }}>{Object.entries(t.catAllocations).map(([cid,val])=>`${getCat(cid).name.split(" ")[0]} ${sym}${fmt(val)}`).join(" · ")}</span>}
+              {acc&&<span style={{ color:T.sub,fontSize:10 }}>{accIcon(acc.type)} {acc.name}</span>}
+              {t.transactionRef&&<span style={{ color:T.sub,fontSize:10 }}># {t.transactionRef}</span>}
+              {totalOwed>0&&!allSettled&&<span style={{ color:T.accent,fontSize:10,fontWeight:700 }}>↗ {sym}{fmt(totalOwed)}</span>}
+              {t.type==="settlement_in"&&t.isRefund&&<span style={{ background:refundTone+"18",color:refundTone,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>↩ Refund</span>}
+              {t.type==="expense"&&refundedAmount>0&&<span style={{ background:T.info+"20",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>↩ {refundStatus}</span>}
+              {t.type==="expense"&&t.reimbursable&&!t.reimbursedByTxnId&&<span style={{ background:"#f0a50018",color:"#f0a500",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimb.</span>}
+              {t.type==="expense"&&t.reimbursedByTxnId&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 ✓</span>}
+              {t.isAutoEmiInstallment&&<span style={{ background:T.warn+"18",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💳 EMI {t.emiInstallmentNum}/{t.emiTotalInstallments}</span>}
+              {t.type==="cc_emi"&&t.ccEmiPlanId&&<span style={{ background:T.purple+"18",color:T.purple,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💳 EMI {t.installmentNo}/{t.ccEmiTenure||"?"}</span>}
+              {t.imageBase64&&<span style={{ fontSize:10 }}>📷</span>}
+            </div>
+          </div>
+          <div style={{ textAlign:"right", flexShrink:0 }}>
+            <div style={{ color, fontSize:14, fontWeight:800, lineHeight:1.2 }}>{isPlus?"+":""}{sym}{fmt(t.amount)}</div>
+            {t.type==="expense"&&refundedAmount>0&&<div style={{ color:T.info,fontSize:10,marginTop:1,fontWeight:500 }}>net {sym}{fmt(netAfterRefund)}</div>}
+            {t.type==="expense"&&myShare>0&&myShare<t.amount&&<div style={{ color:T.sub,fontSize:10,marginTop:2,fontWeight:500 }}>mine {sym}{fmt(myShare)}</div>}
+            <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{dateLabel}</div>
+          </div>
+          <div style={{ color:T.sub,fontSize:11,flexShrink:0 }}>{isExpanded?"▲":"▼"}</div>
+        </div>
+
+        {/* EXPANDED DETAIL */}
+        {isExpanded&&(
+          <div style={{ background:T.input,borderRadius:12,padding:14,marginBottom:12 }}>
+            <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:10 }}>{txnTitle}</div>
+            <div style={{ display:"flex",gap:5,flexWrap:"wrap",marginBottom:10 }}>
+              <span style={{ background:color+"20",color,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{txnLabel(t)}</span>
+              {t.type==="investment"&&invTypeMeta&&<span style={{ background:invTypeMeta.color+"20",color:invTypeMeta.color,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{invTypeMeta.icon} {invTypeMeta.name.split("/")[0]}</span>}
+              {t.type==="investment"&&t.investFolio&&<span style={{ background:T.pill,color:T.sub,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>Folio {t.investFolio}</span>}
+              {investmentMetricText&&<span style={{ background:T.info+"18",color:T.info,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{investmentMetricText}</span>}
+              {cat&&t.type==="expense"&&<span style={{ background:cat.color+"20",color:cat.color,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{cat.icon} {cat.name}</span>}
+              {t.type==="expense"&&txnSubIds.map(sid=>{
+                const parentCat = cats.find(c=>c.subs?.some(s=>s.id===sid));
+                const sub = parentCat?.subs?.find(s=>s.id===sid);
+                if(!sub) return null;
+                return <span key={sid} style={{ background:(parentCat?.color||"#888")+"20",color:(parentCat?.color||"#888"),borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{sub.name}</span>;
+              })}
+              {t.merchant&&t.type!=="cc_payment"&&t.type!=="transfer"&&<span style={{ background:T.pill,color:T.sub,borderRadius:20,padding:"2px 9px",fontSize:10 }}>@ {t.merchant}</span>}
+              {acc&&<span style={{ background:acc.color+"20",color:acc.color,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{accIcon(acc.type)} {acc.name}</span>}
+              {t.groupId&&getGroup(t.groupId)&&<span style={{ background:T.pill,color:T.sub,borderRadius:20,padding:"2px 9px",fontSize:10 }}>👥 {getGroup(t.groupId).name}</span>}
+              {allSettled&&<span style={{ background:T.success+"20",color:T.success,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>✅ Settled</span>}
+              {t.type==="settlement_in"&&t.isRefund&&<span style={{ background:refundTone+"18",color:refundTone,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>↩ Refund</span>}
+              {t.type==="expense"&&refundedAmount>0&&<span style={{ background:T.info+"20",color:T.info,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>↩ {refundStatus}</span>}
+              {t.writtenOff&&<span style={{ background:T.sub+"20",color:T.sub,borderRadius:20,padding:"2px 9px",fontSize:10 }}>Written off</span>}
+              {t.smsRaw&&<span style={{ background:T.info+"20",color:T.info,borderRadius:20,padding:"2px 9px",fontSize:10 }}>📱 SMS</span>}
+              {t.transactionRef&&<span style={{ background:T.pill,color:T.text,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>🔖 {t.transactionRef}</span>}
+            {t.isBillPayment&&<span style={{ background:T.accent+"20",color:T.accent,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>🧾 Bill{t.billInvoiceNo?` #${t.billInvoiceNo}`:""}</span>}
+            </div>
+            {t.type==="expense"&&Object.keys(t.people||{}).filter(p=>p!=="__me__").length>0&&(
+              <div style={{ marginBottom:10 }}>
+                {Object.entries(t.people).filter(([p])=>p!=="__me__").map(([pid,info])=>{
+                  const p=getPerson(pid);
+                  return <div key={pid} style={{ fontSize:11,color:info.settled?T.sub:info.mode==="owes"?T.accent:T.sub,textDecoration:info.settled?"line-through":"none",marginBottom:2 }}>
+                    {p.emoji} {p.name}: {sym}{fmt(info.settled ? info.amount : remainingShare(info))} {info.mode==="owes"?info.settled?"✅ paid":"owes you":"on me"}
+                  </div>;
+                })}
+              </div>
+            )}
+            {t.forPerson&&<div style={{ fontSize:11,color:"#ec4899",marginBottom:8 }}>👤 for {getPerson(t.forPerson).name}{t.tagPersonAmount&&t.tagPersonAmount!==t.amount?` · ${sym}${fmt(t.tagPersonAmount)} personal`:""}{ t.tagGroupAmount&&t.groupId?` · ${sym}${fmt(t.tagGroupAmount)} → ${getGroup(t.groupId)?.name||"group"}`:""}</div>}
+            {t.tagItems?.length>0&&<div style={{ fontSize:11,marginBottom:8,display:"flex",flexWrap:"wrap",gap:4 }}>{t.tagItems.map(item=>{const isP=item.targetType==="person";const obj=isP?getPerson(item.targetId):getGroup(item.targetId);return <span key={item.id} style={{ background:T.pill,color:obj?.color||T.sub,borderRadius:20,padding:"2px 8px" }}>{isP?"👤":"👥"} {obj?.name||"?"} {sym}{fmt(item.amount)}</span>})}</div>}
+            {t.type==="expense"&&groupCollectiveDue>0&&<div style={{ fontSize:11,color:T.info,marginBottom:8,fontWeight:700 }}>👥 {getGroup(t.groupId)?.name||"Group"} collectively owes {sym}{fmt(groupCollectiveDue)}</div>}
+            {t.transactionRef&&<div style={{ fontSize:11,color:T.sub,marginBottom:8 }}>🔖 Transaction ID: {t.transactionRef}</div>}
+            {t.note&&<div style={{ fontSize:11,color:T.sub,marginBottom:8 }}>📝 {t.note}</div>}
+            {refundTarget&&<div style={{ fontSize:11,color:T.info,marginBottom:8,fontWeight:700 }}>↩ Linked expense: {refundTarget.desc||refundTarget.merchant||"Original spend"} · {formatShortDate(refundTarget.date)}</div>}
+            {t.type==="expense"&&linkedRefunds.length>0&&<>
+              <div style={{ fontSize:11,color:T.info,marginBottom:6,fontWeight:700 }}>↩ Linked refund{linkedRefunds.length>1?"s":""}: {linkedRefunds.map(row=>`${sym}${fmt(row.amount)} on ${formatShortDate(row.date)}`).join(" · ")}</div>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                {linkedRefunds.map(row=><button key={row.id} onClick={e=>handleEditTxn(row, e)} style={{ background:T.info+"14",border:`1px solid ${T.info}33`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.info,fontFamily:"Nunito,sans-serif" }}>↩ Open refund {sym}{fmt(row.amount)}</button>)}
+              </div>
+              <div style={{ fontSize:11,color:T.text,marginBottom:8,fontWeight:700 }}>Net after refund: {sym}{fmt(netAfterRefund)}</div>
+            </>}
+            {t.paidBillName&&<div style={{ fontSize:11,color:T.accent,marginBottom:8,fontWeight:700 }}>🧾 Pays: {t.paidBillName}{t.billInvoiceNo?` · #${t.billInvoiceNo}`:""}</div>}
+            {t.imageBase64&&<img src={t.imageBase64} alt="receipt" onClick={e=>{e.stopPropagation();setImageViewSrc(t.imageBase64);}} style={{ width:"100%",borderRadius:8,maxHeight:140,objectFit:"cover",marginBottom:10,cursor:"zoom-in" }} onError={e=>e.target.style.display="none"}/>}
+            {t.paymentImageBase64&&<img src={t.paymentImageBase64} alt="payment" onClick={e=>{e.stopPropagation();setImageViewSrc(t.paymentImageBase64);}} style={{ width:"100%",borderRadius:8,maxHeight:140,objectFit:"cover",marginBottom:10,cursor:"zoom-in" }} onError={e=>e.target.style.display="none"}/>}
+
+            {/* Settlement buttons */}
+            {owedPeople.length>0&&!t.writtenOff&&(
+              <div style={{ marginBottom:10 }}>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Pending: {sym}{fmt(totalOwed)}</div>
+                <button onClick={e=>{e.stopPropagation();setSettleTxn(t);setExpandedTxn(null);}} style={{ background:T.success+"20",border:`1px solid ${T.success}44`,borderRadius:10,padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif",width:"100%" }}>
+                  💰 Settle with {owedPeople.map(([pid])=>getPerson(pid).name).join(", ")}
+                </button>
+              </div>
+            )}
+            {owedPeople.length>0&&!t.writtenOff&&(
+              <div style={{ marginBottom:10 }}>
+                <div style={{ color:T.sub,fontSize:11,marginBottom:6 }}>Can't collect? Write it off.</div>
+                <button onClick={writeOff} style={{ background:"none",border:`1px solid ${T.sub}44`,borderRadius:20,padding:"5px 14px",cursor:"pointer",fontSize:11,color:T.sub,fontFamily:"Nunito,sans-serif" }}>✏️ Write off {sym}{fmt(totalOwed)}</button>
+              </div>
+            )}
+
+            <div style={{ display:"flex",gap:8,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
+              <button onClick={e=>handleEditTxn(t, e)} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"7px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+              <button onClick={deleteTxn} style={{ background:T.danger+"18",border:`1px solid ${T.danger}33`,borderRadius:8,padding:"7px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif",marginLeft:"auto" }}>🗑 Delete</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── UNIQUE VENDORS FOR AUTOCOMPLETE ────────────────────────────────────────
+  const uniqueVendors = useMemo(() => {
+    const vendors = new Set();
+    txns.forEach(t => {
+      if (t.merchant && t.merchant.trim()) {
+        vendors.add(t.merchant.trim());
+      }
+    });
+    return Array.from(vendors).sort();
+  }, [txns]);
+  const accountTypeOptions = useMemo(
+    () => normalizeAccountTypes(accountTypes),
+    [accountTypes]
+  );
+  const incomeTypeOptions = useMemo(
+    () => normalizeIncomeTypes([
+      ...incomeTypes,
+      ...txns.filter(t=>t.type==="income").map(t=>t.incomeType||"salary"),
+    ]),
+    [incomeTypes, txns]
+  );
+  const liabilityTypeOptions = useMemo(
+    () => [...LIABILITY_TYPES, ...customLiabilityTypes],
+    [customLiabilityTypes]
+  );
+
+  // ── ADD TRANSACTION MODAL (new flow) ───────────────────────────────────────
+  const AddModal = ({ defaultType="expense", prefillTxn=null, prefill=null, editTxn=null, onClose=null }) => {
+    const sourceTxn = editTxn || null;
+    const linkedInvestment = sourceTxn?.linkedInvestmentId
+      ? investments.find(inv=>String(inv.id)===String(sourceTxn.linkedInvestmentId) || String(inv.linkedTxnId||"")===String(sourceTxn.id||"")) || null
+      : null;
+    const isEditing = Boolean(sourceTxn);
+    const refundPrefill = !isEditing && prefillTxn?.type==="expense" ? prefillTxn : null;
+    const safePrefill = prefill || {};
+    const initialRefundAmount = refundPrefill ? String(getNetExpenseAmount(refundPrefill) || Number(refundPrefill.amount||0) || "") : "";
+    const initialTxnType = isEditing ? (sourceTxn.type || defaultType || "expense") : (refundPrefill ? "settlement_in" : (defaultType||"expense"));
+    const recentTxnSort = (a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a) || Number(b.updatedAt||0)-Number(a.updatedAt||0) || String(b.id||"").localeCompare(String(a.id||""), undefined, { numeric:true, sensitivity:"base" });
+    const recentSpendAccId = [...txns]
+      .filter(t=>(t.type==="expense" || t.type==="investment") && t.accId && accounts.some(a=>String(a.id)===String(t.accId)))
+      .sort(recentTxnSort)[0]?.accId || "";
+    const recentInflowAccId = [...txns]
+      .filter(t=>(t.type==="income" || t.type==="settlement_in") && t.accId && accounts.some(a=>String(a.id)===String(t.accId) && a.type!=="cc"))
+      .sort(recentTxnSort)[0]?.accId || "";
+    const recentFromAccId = [...txns]
+      .filter(t=>(t.type==="transfer" || t.type==="cc_payment") && t.fromAccId && accounts.some(a=>String(a.id)===String(t.fromAccId)))
+      .sort(recentTxnSort)[0]?.fromAccId || "";
+    const recentCardAccId = [...txns]
+      .filter(t=>t.type==="cc_payment" && t.toAccId && accounts.some(a=>String(a.id)===String(t.toAccId)))
+      .sort(recentTxnSort)[0]?.toAccId || "";
+    const firstBankOrSafeAccId = (accounts.find(a=>a.type==="bank") || accounts.find(a=>a.type==="upi") || accounts.find(a=>a.type==="cash") || accounts.find(a=>a.type==="cc") || accounts[0])?.id || "";
+    const defaultSpendAccId = recentSpendAccId || firstBankOrSafeAccId;
+    const defaultInflowAccId = recentInflowAccId || firstBankOrSafeAccId;
+    const defaultFromAccId = recentFromAccId || (accounts.find(a=>a.type==="bank") || accounts.find(a=>a.type==="cash") || accounts.find(a=>a.type==="upi") || accounts[0])?.id || "";
+    const defaultToCardId = recentCardAccId || accounts.find(a=>a.type==="cc")?.id || "";
+    const defaultAccId = (initialTxnType==="income" || initialTxnType==="settlement_in") ? defaultInflowAccId : defaultSpendAccId;
+    const initialCatIds = (isEditing
+      ? getTxnCategoryIds(sourceTxn)
+      : (Array.isArray(safePrefill.catIds) ? safePrefill.catIds.filter(Boolean) : (safePrefill.catId ? [safePrefill.catId] : [])))
+      .filter(cid=>cats.some(cat=>cat.id===cid));
+    const initialSubIds = (isEditing
+      ? getTxnSubIds(sourceTxn)
+      : (Array.isArray(safePrefill.subIds) ? safePrefill.subIds.filter(Boolean) : (safePrefill.subId ? [safePrefill.subId] : [])))
+      .filter(sid=>initialCatIds.some(cid=>getCat(cid)?.subs?.some(sub=>sub.id===sid)));
+    const initialTrackingMode = isEditing && sourceTxn?.type==="expense"
+      ? (sourceTxn.trackingMode || (Object.keys(sourceTxn.people||{}).some(pid=>pid!=="__me__") ? "split" : (sourceTxn.forPerson || sourceTxn.groupId ? "tag" : "none")))
+      : "unified";
+    const initialSplitPeople = isEditing && sourceTxn?.type==="expense"
+      ? Object.fromEntries(Object.entries(sourceTxn.people||{}).filter(([pid])=>pid!=="__me__").map(([pid])=>[pid, true]))
+      : {};
+    const initialSplitCustom = isEditing && sourceTxn?.type==="expense"
+      ? Object.fromEntries(Object.entries(sourceTxn.people||{}).filter(([pid])=>pid!=="__me__").map(([pid,info])=>[pid, String(info?.amount ?? "")]))
+      : {};
+    const initialCollectMap = isEditing && sourceTxn?.type==="expense"
+      ? Object.fromEntries(Object.entries(sourceTxn.people||{}).filter(([pid])=>pid!=="__me__").map(([pid,info])=>[pid, info?.mode !== "spent_on"]))
+      : {};
+    const initialSettlementKind = isEditing && sourceTxn?.type==="settlement_in"
+      ? ((sourceTxn.isRefund || !sourceTxn.fromPersonId) ? "refund" : "repayment")
+      : "refund";
+
+    const [txnType, setTxnType] = useState(initialTxnType);
+    const [incomeType, setIncomeType] = useState(sourceTxn?.incomeType || safePrefill.incomeType || "salary");
+    const incomeTypeChoices = normalizeIncomeTypes([...incomeTypeOptions, incomeType]);
+    const [who, setWho] = useState(
+      isEditing
+        ? (sourceTxn.type==="cc_payment"||sourceTxn.type==="transfer"
+            ? (sourceTxn.desc || sourceTxn.note || "")
+            : (sourceTxn.merchant || sourceTxn.desc || ""))
+        : (refundPrefill?.merchant || refundPrefill?.desc || safePrefill.who || "")
+    );
+    const [amount, setAmount] = useState(isEditing ? String(sourceTxn.amount ?? "") : (initialRefundAmount || String(safePrefill.amount || "")));
+    const [date, setDate] = useState(isEditing ? (sourceTxn.date || todayStr()) : (safePrefill.date || todayStr()));
+    const [catIds, setCatIds] = useState(initialCatIds);  // multiple categories
+    const [subIds, setSubIds] = useState(initialSubIds);  // multiple subcats
+    const [accId, setAccId] = useState(isEditing ? (sourceTxn.accId || sourceTxn.fromAccId || defaultAccId) : (refundPrefill?.accId || safePrefill.accId || defaultAccId));
+    const [fromAccId, setFromAccId] = useState(isEditing ? (sourceTxn.fromAccId || defaultFromAccId) : (safePrefill.fromAccId || defaultFromAccId));
+    const [toAccId, setToAccId] = useState(isEditing ? (sourceTxn.toAccId || defaultToCardId) : (safePrefill.toAccId || defaultToCardId));
+    const [note, setNote] = useState(isEditing ? (sourceTxn.note || "") : (refundPrefill ? `Refund for ${refundPrefill.desc||refundPrefill.merchant||"expense"}` : (safePrefill.note || "")));
+    const [imageBase64, setImageBase64] = useState(sourceTxn?.imageBase64 || null);
+    const [paymentImageBase64, setPaymentImageBase64] = useState(sourceTxn?.paymentImageBase64 || null);
+    const isNative = isNativeSmsAvailable();
+
+    const [smsRaw, setSmsRaw] = useState(sourceTxn?.smsRaw || "");
+    const [showSms, setShowSms] = useState(Boolean(sourceTxn?.smsRaw));
+    const [smsTxt, setSmsTxt] = useState(sourceTxn?.smsRaw || "");
+    const [smsParseMeta, setSmsParseMeta] = useState(null);
+    const [smsBusy, setSmsBusy] = useState(false);
+    const [smsImportStatus, setSmsImportStatus] = useState("");
+    const [splitMode, setSplitMode] = useState(initialTrackingMode); // none | split | tag | allocate | unified
+    const [showAdvancedTracking, setShowAdvancedTracking] = useState(isEditing && ["split","tag","allocate"].includes(initialTrackingMode));
+    const [splitGroup, setSplitGroup] = useState(isEditing && sourceTxn?.type==="expense" && initialTrackingMode==="split" ? (sourceTxn.groupId || "") : "");
+    const initialAllocRows = isEditing && sourceTxn?.type==="expense" && initialTrackingMode==="allocate"
+      ? (sourceTxn.allocations||[]).map(a=>({...a}))
+      : [];
+    const [allocRows, setAllocRows] = useState(initialAllocRows);
+    const [allocTargetPicker, setAllocTargetPicker] = useState(null);
+    const [tagMode, setTagMode] = useState(isEditing && sourceTxn?.type==="expense" ? (sourceTxn.tagItems?.length ? "itemize" : sourceTxn.forPerson && sourceTxn.groupId ? "both" : sourceTxn.forPerson ? "person" : "group") : "person"); // person | group | both | itemize
+    const [tagGroup, setTagGroup] = useState(isEditing && sourceTxn?.type==="expense" && initialTrackingMode==="tag" ? (sourceTxn.groupId || "") : "");
+    const [splitPeople, setSplitPeople] = useState(initialSplitPeople);
+    const [splitCalc, setSplitCalc] = useState(isEditing && sourceTxn?.type==="expense" && Object.keys(initialSplitCustom).length ? "amount" : "equally"); // equally | amount | percent | share
+    const [splitCustom, setSplitCustom] = useState(initialSplitCustom);
+    const [tagPerson, setTagPerson] = useState(isEditing ? ((sourceTxn.type==="settlement_in" ? sourceTxn.fromPersonId : sourceTxn.forPerson) || "") : "");
+    const [collectMap, setCollectMap] = useState(initialCollectMap);
+    const [includeMeInSplit, setIncludeMeInSplit] = useState(isEditing ? Boolean(sourceTxn?.people?.__me__) : true);
+    const [catAllocations, setCatAllocations] = useState(isEditing ? (sourceTxn?.catAllocations || {}) : {});
+    const [lastEditedCatId, setLastEditedCatId] = useState("");
+    const [investType, setInvestType] = useState(isEditing ? (sourceTxn.investType || linkedInvestment?.type || "mf") : "mf");
+    const [investFreq, setInvestFreq] = useState(isEditing ? (sourceTxn.investFreq || linkedInvestment?.freq || "") : "");
+    const [investFolio, setInvestFolio] = useState(isEditing ? (sourceTxn.investFolio || linkedInvestment?.folioNo || "") : "");
+    const [investNav, setInvestNav] = useState(isEditing ? String(sourceTxn.investNav ?? linkedInvestment?.lastNav ?? "") : "");
+    const [showFolioSuggestions, setShowFolioSuggestions] = useState(false);
+    const [expensePaymentMode, setExpensePaymentMode] = useState("full");
+    const [emiSourceType, setEmiSourceType] = useState("store");
+    const [emiTenureMonths, setEmiTenureMonths] = useState("");
+    const [emiAmount, setEmiAmount] = useState("");
+    const [showEmiDownPayment, setShowEmiDownPayment] = useState(false);
+    const [emiDownPayment, setEmiDownPayment] = useState("");
+    const [reimbursable, setReimbursable] = useState(isEditing ? Boolean(sourceTxn?.reimbursable) : workTripMode);
+    const [emiDueDay, setEmiDueDay] = useState("");
+    const [emiInterestRate, setEmiInterestRate] = useState("");
+    const [isBillPayment, setIsBillPayment] = useState(isEditing ? Boolean(sourceTxn?.isBillPayment) : false);
+    const [tagPersonAmount, setTagPersonAmount] = useState(isEditing && sourceTxn?.tagPersonAmount ? String(sourceTxn.tagPersonAmount) : "");
+    const [tagGroupAmount, setTagGroupAmount] = useState(isEditing && sourceTxn?.tagGroupAmount ? String(sourceTxn.tagGroupAmount) : "");
+    const [tagItems, setTagItems] = useState(isEditing && sourceTxn?.tagItems?.length ? sourceTxn.tagItems.map(item=>({...item,amount:String(item.amount)})) : [{id:genId(),targetType:"person",targetId:"",amount:""}]);
+    const [useItemizedLines, setUseItemizedLines] = useState(isEditing ? Boolean(sourceTxn?.lineItems?.length) : false);
+    const [lineItems, setLineItems] = useState(
+      isEditing && Array.isArray(sourceTxn?.lineItems) && sourceTxn.lineItems.length
+        ? sourceTxn.lineItems.map(item=>({
+            id:item.id||genId(),
+            label:item.label||"",
+            qty:String(item.qty ?? "1"),
+            unitPrice:String(item.unitPrice ?? ""),
+            catId:item.catId||"",
+            subId:item.subId||"",
+            splits:Array.isArray(item.splits)
+              ? item.splits.map(split=>({
+                  id:split.id||genId(),
+                  targetType:split.targetType||"person",
+                  targetId:split.targetId||"",
+                  qty:String(split.qty ?? ""),
+                }))
+              : [],
+          }))
+        : [{ id:genId(), label:"", qty:"1", unitPrice:"", catId:"", subId:"", splits:[] }]
+    );
+    const [billInvoiceNo, setBillInvoiceNo] = useState(isEditing ? (sourceTxn?.billInvoiceNo || "") : "");
+    const [settlementKind, setSettlementKind] = useState(initialSettlementKind);
+    const [transactionRef, setTransactionRef] = useState(isEditing ? (sourceTxn?.transactionRef || "") : "");
+    const [repaymentAllocations, setRepaymentAllocations] = useState(()=>Object.fromEntries((sourceTxn?.settlementLinks||[]).map(link=>[`${link.kind}:${link.id}`, String(link.amount||"")])));
+    const [repaymentTouched, setRepaymentTouched] = useState(isEditing&&Boolean(sourceTxn?.settlementLinks?.length));
+    // ── CC EMI state ──────────────────────────────────────────────────────────
+    const firstCcAccId = accounts.find(a=>a.type==="cc")?.id || "";
+    const [ccEmiCardId, setCcEmiCardId] = useState(isEditing && sourceTxn?.type==="cc_emi" ? (sourceTxn.accId||firstCcAccId) : firstCcAccId);
+    const [ccEmiPlanId, setCcEmiPlanId] = useState(isEditing && sourceTxn?.type==="cc_emi" ? (sourceTxn.ccEmiPlanId||"") : "");
+    const [ccEmiNewPlanMode, setCcEmiNewPlanMode] = useState(false);
+    const [ccEmiNewName, setCcEmiNewName] = useState("");
+    const [ccEmiNewTotal, setCcEmiNewTotal] = useState("");
+    const [ccEmiNewTenure, setCcEmiNewTenure] = useState("");
+    const [ccEmiNewMonthly, setCcEmiNewMonthly] = useState("");
+    const [ccEmiNewRate, setCcEmiNewRate] = useState("");
+    const activeCcEmiPlans = ccEmiPlans.filter(p=>p.cardId===ccEmiCardId && p.status!=="closed");
+    const selectedEmiPlan = ccEmiPlans.find(p=>p.id===ccEmiPlanId) || null;
+    const emiInstallmentNum = selectedEmiPlan ? txns.filter(t=>t.type==="cc_emi" && t.ccEmiPlanId===ccEmiPlanId).length + (isEditing ? 0 : 1) : 0;
+    const addTagItem = () => {
+      const remaining = Math.max(0, (parseFloat(amount)||0) - tagItemsTotal);
+      setTagItems(prev=>[...prev,{id:genId(),targetType:"person",targetId:"",amount:remaining>0?String(parseFloat(remaining.toFixed(2))):""}]);
+    };
+    const removeTagItem = id => setTagItems(prev=>prev.filter(item=>item.id!==id));
+    const updateTagItem = (id,field,value) => setTagItems(prev=>prev.map(item=>item.id===id?{...item,[field]:value}:item));
+    const tagItemsTotal = tagItems.reduce((s,item)=>s+(parseFloat(item.amount)||0),0);
+    const addLineItem = () => setLineItems(prev=>[...prev,{ id:genId(), label:"", qty:"1", unitPrice:"", catId:"", subId:"", splits:[] }]);
+    const removeLineItem = id => setLineItems(prev=>prev.length<=1 ? prev : prev.filter(item=>item.id!==id));
+    const updateLineItem = (id, field, value) => setLineItems(prev=>prev.map(item=>{
+      if(item.id!==id) return item;
+      if(field==="qty" || field==="unitPrice"){
+        if(value==="") return { ...item, [field]:"" };
+        const n = parseFloat(value);
+        return { ...item, [field]:String(Math.max(0, Number.isFinite(n)?n:0)) };
+      }
+      if(field==="catId") return { ...item, catId:value, subId:"" };
+      return { ...item, [field]:value };
+    }));
+    const addLineSplit = itemId => setLineItems(prev=>prev.map(item=>item.id===itemId
+      ? { ...item, splits:[...(item.splits||[]),{ id:genId(), targetType:"person", targetId:"", qty:"" }] }
+      : item
+    ));
+    const removeLineSplit = (itemId, splitId) => setLineItems(prev=>prev.map(item=>item.id===itemId
+      ? { ...item, splits:(item.splits||[]).filter(split=>split.id!==splitId) }
+      : item
+    ));
+    const updateLineSplit = (itemId, splitId, field, value) => setLineItems(prev=>prev.map(item=>{
+      if(item.id!==itemId) return item;
+      return {
+        ...item,
+        splits:(item.splits||[]).map(split=>{
+          if(split.id!==splitId) return split;
+          if(field==="qty"){
+            if(value==="") return { ...split, qty:"" };
+            const n = parseFloat(value);
+            return { ...split, qty:String(Math.max(0, Number.isFinite(n)?n:0)) };
+          }
+          if(field==="targetType") return { ...split, targetType:value, targetId:"" };
+          return { ...split, [field]:value };
+        })
+      };
+    }));
+    const lineItemAmount = item => (parseFloat(item.qty)||0) * (parseFloat(item.unitPrice)||0);
+    const lineItemsTotal = lineItems.reduce((sum,item)=>sum+lineItemAmount(item),0);
+    const lineSplitQtyTotal = item => (item.splits||[]).reduce((sum,split)=>sum+(parseFloat(split.qty)||0),0);
+
+    // ── auto-save draft ──
+    const DRAFT_KEY = "arth_txn_draft";
+    const [draftBanner, setDraftBanner] = useState(false);
+    const [draftData, setDraftData] = useState(null);
+    useEffect(()=>{
+      if(isEditing) return;
+      try{
+        const raw=localStorage.getItem(DRAFT_KEY);
+        if(!raw) return;
+        const d=JSON.parse(raw);
+        if(d?.who||d?.amount){ setDraftData(d); setDraftBanner(true); }
+      }catch{}
+    },[]);
+    const restoreDraft = () => {
+      if(!draftData) return;
+      try{
+        if(draftData.txnType) setTxnType(draftData.txnType);
+        if(draftData.who) setWho(draftData.who);
+        if(draftData.amount) setAmount(draftData.amount);
+        if(draftData.date) setDate(draftData.date);
+        if(draftData.note) setNote(draftData.note);
+        if(draftData.accId) setAccId(draftData.accId);
+        if(draftData.catIds) setCatIds(draftData.catIds);
+        if(draftData.subIds) setSubIds(draftData.subIds);
+        if(draftData.splitMode) setSplitMode(draftData.splitMode);
+        if(typeof draftData.useItemizedLines === "boolean") setUseItemizedLines(draftData.useItemizedLines);
+        if(draftData.lineItems?.length) setLineItems(draftData.lineItems);
+        if(draftData.tagMode) setTagMode(draftData.tagMode);
+        if(draftData.tagPerson) setTagPerson(draftData.tagPerson);
+        if(draftData.tagGroup) setTagGroup(draftData.tagGroup);
+        if(draftData.tagItems?.length) setTagItems(draftData.tagItems);
+        if(draftData.splitPeople?.length) setSplitPeople(draftData.splitPeople);
+        if(draftData.transactionRef) setTransactionRef(draftData.transactionRef);
+      }catch{}
+      setDraftBanner(false);
+    };
+    useEffect(()=>{
+      if(isEditing) return;
+      const t=setTimeout(()=>{
+        try{ localStorage.setItem(DRAFT_KEY,JSON.stringify({txnType,who,amount,date,note,accId,catIds,subIds,splitMode,useItemizedLines,lineItems,tagMode,tagPerson,tagGroup,tagItems,splitPeople,transactionRef})); }catch{}
+      },600);
+      return ()=>clearTimeout(t);
+    },[txnType,who,amount,date,note,accId,catIds,subIds,splitMode,useItemizedLines,lineItems,tagMode,tagPerson,tagGroup,tagItems,splitPeople,transactionRef,isEditing]);
+
+    const closeModal = () => {
+      setShowAdd(false);
+      setRefundSourceTxn(null);
+      setAddPrefill(null);
+      setEditingTxn(null);
+      onClose?.();
+    };
+
+    // Autocomplete state
+    const [showSuggestions, setShowSuggestions] = useState(false);
+    const [categoryTouched, setCategoryTouched] = useState(isEditing);
+    const [showQuickCategoryAdd, setShowQuickCategoryAdd] = useState(false);
+    const [quickCatName, setQuickCatName] = useState("");
+    const [quickSubName, setQuickSubName] = useState("");
+    const txnsSnapshot = txns;
+    const catsSnapshot = cats;
+    const autoDetectEnabled = autoDetectExpenseCategory;
+    const filteredSuggestions = useMemo(() => {
+      if (!who.trim() || txnType === "cc_payment" || txnType === "transfer") return [];
+      return uniqueVendors.filter(v => v.toLowerCase().includes(who.toLowerCase())).slice(0, 5);
+    }, [who, txnType]);
+    const vendorCategorySuggestion = useMemo(() => {
+      if(txnType !== "expense" || !autoDetectEnabled) return null;
+      const vendorText = normalizeVendorText(who);
+      if(!vendorText) return null;
+
+      const rankedMatches = new Map();
+      txnsSnapshot.forEach(txn => {
+        if(txn.type !== "expense" || !txn.catId) return;
+        const merchantText = normalizeVendorText(txn.merchant || txn.desc);
+        if(!merchantText) return;
+
+        let score = 0;
+        if(merchantText === vendorText) score = 10;
+        else if(merchantText.startsWith(vendorText) || vendorText.startsWith(merchantText)) score = 6;
+        else if(merchantText.includes(vendorText) || vendorText.includes(merchantText)) score = 3;
+        if(!score) return;
+
+        const key = `${txn.catId}__${txn.subId || ""}`;
+        const existing = rankedMatches.get(key) || {
+          catId: txn.catId,
+          subId: txn.subId || null,
+          score: 0,
+          hits: 0,
+          reason: "your previous expense history",
+        };
+        existing.score += score;
+        existing.hits += 1;
+        rankedMatches.set(key, existing);
+      });
+
+      const topMatch = [...rankedMatches.values()]
+        .filter(item=>catsSnapshot.some(cat=>cat.id===item.catId))
+        .sort((a,b)=>b.score-a.score || b.hits-a.hits)[0];
+      if(topMatch) return topMatch;
+
+      const keywordMatch = VENDOR_CATEGORY_RULES.find(rule=>rule.pattern.test(vendorText));
+      if(keywordMatch && catsSnapshot.some(cat=>cat.id===keywordMatch.catId)){
+        return {
+          catId: keywordMatch.catId,
+          subId: null,
+          score: 1,
+          hits: 1,
+          reason: keywordMatch.label,
+        };
+      }
+      return null;
+    }, [who, txnType, txnsSnapshot, catsSnapshot, autoDetectEnabled]);
+    const applySuggestedExpenseCategory = useCallback((suggestion, markTouched=false) => {
+      if(!suggestion || txnType !== "expense") return;
+      setCatIds([suggestion.catId]);
+      setSubIds(suggestion.subId ? [suggestion.subId] : []);
+      setCatAllocations({});
+      if(markTouched) setCategoryTouched(true);
+    }, [txnType]);
+    const addQuickCategory = useCallback(() => {
+      const nextName = String(quickCatName || "").trim();
+      if(!nextName) return;
+      const starterSub = String(quickSubName || "").trim();
+      const createdSubId = starterSub ? `sub_${genId()}` : null;
+      const nextCat = {
+        id:`cat_${genId()}`,
+        name:nextName,
+        icon:"🏷️",
+        color:PALETTE[catsSnapshot.length % PALETTE.length] || T.accent,
+        budget:0,
+        subs:createdSubId ? [{ id:createdSubId, name:starterSub }] : [],
+      };
+      setCats(prev=>[...prev, nextCat]);
+      setCategoryTouched(true);
+      setCatIds(prev=>prev.includes(nextCat.id) ? prev : [...prev, nextCat.id]);
+      if(createdSubId) setSubIds(prev=>prev.includes(createdSubId) ? prev : [...prev, createdSubId]);
+      setQuickCatName("");
+      setQuickSubName("");
+    }, [quickCatName, quickSubName, catsSnapshot.length]);
+    const addQuickSubcategory = useCallback(() => {
+      const nextName = String(quickSubName || "").trim();
+      const targetCatId = catIds[0] || "";
+      if(!nextName || !targetCatId) return;
+      const createdSubId = `sub_${genId()}`;
+      setCats(prev=>prev.map(cat=>cat.id!==targetCatId ? cat : {
+        ...cat,
+        subs:[...(cat.subs||[]), { id:createdSubId, name:nextName }],
+      }));
+      setCategoryTouched(true);
+      setSubIds(prev=>prev.includes(createdSubId) ? prev : [...prev, createdSubId]);
+      setQuickSubName("");
+    }, [quickSubName, catIds]);
+
+    useEffect(() => {
+      if(txnType !== "expense" || categoryTouched || !vendorCategorySuggestion) return;
+      const sameCat = catIds.length===1 && catIds[0]===vendorCategorySuggestion.catId;
+      const sameSub = (subIds[0]||null)===(vendorCategorySuggestion.subId||null);
+      if(!sameCat || !sameSub) applySuggestedExpenseCategory(vendorCategorySuggestion);
+    }, [vendorCategorySuggestion, txnType, categoryTouched, catIds, subIds, applySuggestedExpenseCategory]);
+
+    useEffect(()=>{
+      if(["split","tag","allocate"].includes(splitMode)) setShowAdvancedTracking(true);
+    },[splitMode]);
+
+    const validCatIds = catIds.filter(cid=>getCat(cid));
+    const validSubIds = subIds.filter(sid=>validCatIds.some(cid=>getCat(cid)?.subs?.some(sub=>sub.id===sid)));
+    const catId = validCatIds[0]||null;  // primary cat for backward compat
+    const nonCCAccs = accounts.filter(a=>a.type!=="cc");
+    const ccAccs = accounts.filter(a=>a.type==="cc");
+    const investmentMetricConfig = getInvestmentMetricConfig(investType);
+    const selectedPids = Object.entries(splitPeople).filter(([,v])=>v).map(([k])=>k).filter(p=>p!=="__me__");
+    const amt = parseFloat(amount)||0;
+    const repaymentCandidates = useMemo(()=>settlementKind==="repayment"&&tagPerson?getPersonReceivableItems(tagPerson):[],[settlementKind,tagPerson]);
+    const buildRepaymentAllocations = useCallback(total=>{
+      let left = Math.max(0, Number(total||0));
+      const next = {};
+      repaymentCandidates.forEach(item=>{
+        const applied = Math.min(left, Number(item.amount||0));
+        if(applied>0){ next[item.key] = String(Math.round(applied*100)/100); left -= applied; }
+      });
+      return next;
+    },[repaymentCandidates]);
+    const repaymentAllocTotal = useMemo(()=>repaymentCandidates.reduce((sum,item)=>sum+Math.min(Number(repaymentAllocations[item.key]||0), Number(item.amount||0)),0),[repaymentCandidates,repaymentAllocations]);
+    const repaymentExtra = Math.max(0, amt-repaymentAllocTotal);
+    const updateRepaymentAllocation = (key,value,max)=>{
+      setRepaymentTouched(true);
+      const safe = value==="" ? "" : String(Math.min(Math.max(0, parseFloat(value)||0), Number(max||0)));
+      setRepaymentAllocations(prev=>({...prev,[key]:safe}));
+    };
+    useEffect(()=>{
+      if(isEditing) return;
+      if(settlementKind!=="repayment"||!tagPerson){ setRepaymentAllocations({}); setRepaymentTouched(false); return; }
+      if(!repaymentTouched) setRepaymentAllocations(buildRepaymentAllocations(amt));
+    },[isEditing,settlementKind,tagPerson,amt,repaymentTouched,buildRepaymentAllocations]);
+    const splitEvenAmounts = useCallback((total,count)=>{
+      if(!(total>0) || !(count>0)) return Array.from({ length:Math.max(0,count) },()=>0);
+      const totalCents = Math.round(total*100);
+      const base = Math.floor(totalCents/count);
+      let remainder = totalCents - (base*count);
+      return Array.from({ length:count },()=>{
+        const next = base + (remainder>0 ? 1 : 0);
+        if(remainder>0) remainder -= 1;
+        return next/100;
+      });
+    },[]);
+    const buildEqualCategoryAllocations = useCallback((ids,total)=>{
+      if(!Array.isArray(ids) || ids.length<=1) return {};
+      const parts = splitEvenAmounts(Math.max(0,total||0), ids.length);
+      return Object.fromEntries(ids.map((id,idx)=>[id, String(parts[idx]||0)]));
+    },[splitEvenAmounts]);
+    const updateCategoryAllocation = useCallback((ids, changedId, rawValue, total, current)=>{
+      if(!Array.isArray(ids) || ids.length<=1) return current||{};
+      const totalAmt = Math.max(0, Number(total||0));
+      const next = { ...(current||{}) };
+      ids.forEach(id=>{ if(next[id]===undefined) next[id] = "0"; });
+      const othersTotal = ids.filter(id=>id!==changedId).reduce((sum,id)=>sum+(parseFloat(next[id])||0),0);
+      const maxForChanged = Math.max(0, totalAmt-othersTotal);
+      if(rawValue===""){
+        next[changedId] = "";
+        return next;
+      }
+      const parsed = parseFloat(rawValue);
+      const safe = Number.isFinite(parsed) ? Math.max(0, Math.min(maxForChanged, parsed)) : 0;
+      next[changedId] = String(Math.round(safe*100)/100);
+      return next;
+    },[]);
+    useEffect(()=>{
+      if(txnType!=="expense" || catIds.length<=1) return;
+      const hasAll = catIds.every(cid=>catAllocations[cid]!==undefined && catAllocations[cid]!=="");
+      if(hasAll) return;
+      setCatAllocations(buildEqualCategoryAllocations(catIds, amt));
+    },[txnType,catIds,amt,catAllocations,buildEqualCategoryAllocations]);
+    const emiDownPaymentValue = showEmiDownPayment ? Math.min(amt, Math.max(0, parseMoney(emiDownPayment)||0)) : 0;
+    const financedAmount = Math.max(0, amt - emiDownPaymentValue);
+    const investmentSuggestions = useMemo(()=>{
+      if(txnType!=="investment") return [];
+      const folioQuery = normalizeVendorText(investFolio);
+      const nameQuery = normalizeVendorText(who);
+      return investmentTemplateOptions
+        .filter(template=>{
+          if(!folioQuery && !nameQuery) return true;
+          const templateFolio = normalizeVendorText(template.folioNo);
+          const templateName = normalizeVendorText(template.name);
+          return (folioQuery && (templateFolio.includes(folioQuery) || folioQuery.includes(templateFolio))) || (nameQuery && templateName.includes(nameQuery));
+        })
+        .slice(0,5);
+    },[txnType,investFolio,who,investmentTemplateOptions]);
+    const applyInvestmentTemplate = useCallback(template=>{
+      if(!template) return;
+      setInvestType(template.type || "mf");
+      setInvestFolio(template.folioNo || "");
+      if(template.name) setWho(template.name);
+      if(Number(template.amount||0)>0) setAmount(String(template.amount));
+      setInvestFreq(template.freq || "");
+      if(template.accId) setAccId(template.accId);
+      if(Number(template.nav||0)>0) setInvestNav(String(template.nav));
+      if(template.startDate) setDate(template.startDate);
+      setShowFolioSuggestions(false);
+    },[]);
+
+    const lockedInvestFolioStartDate = useMemo(()=>{
+      if(txnType!=="investment" || investType!=="mf") return "";
+      const folioKey = normalizeVendorText(investFolio);
+      if(!folioKey) return "";
+      const matches = trackedInvestments
+        .filter(inv=>String(inv.type||"mf")==="mf" && normalizeVendorText(inv.folioNo)===folioKey)
+        .filter(inv=>!isEditing || String(inv.linkedTxnId||"")!==String(sourceTxn?.id||""))
+        .map(inv=>inv.startDate)
+        .filter(Boolean)
+        .sort();
+      return matches[0] || "";
+    },[txnType,investType,investFolio,trackedInvestments,isEditing,sourceTxn]);
+
+    useEffect(()=>{
+      if(txnType!=="investment" || investType!=="mf") return;
+      const folioQuery = normalizeVendorText(investFolio);
+      if(!folioQuery) return;
+      const exactMatch = investmentTemplateOptions.find(template=>template.folioNo && normalizeVendorText(template.folioNo)===folioQuery);
+      if(exactMatch) applyInvestmentTemplate(exactMatch);
+    },[txnType,investType,investFolio,investmentTemplateOptions,applyInvestmentTemplate]);
+
+    useEffect(()=>{
+      if(lockedInvestFolioStartDate && date !== lockedInvestFolioStartDate) setDate(lockedInvestFolioStartDate);
+    },[lockedInvestFolioStartDate,date]);
+
+    useEffect(()=>{
+      if(txnType!=="expense" || expensePaymentMode!=="emi") return;
+      if(!emiDueDay){
+        const defaultDay = toDateOnly(date)?.getDate() || new Date().getDate();
+        setEmiDueDay(String(defaultDay));
+      }
+      const tenureNum = Math.max(0, parseInt(emiTenureMonths||0,10) || 0);
+      if(tenureNum>0 && financedAmount>0){
+        const suggestedEmi = Math.round((financedAmount/tenureNum) * 100) / 100;
+        if(suggestedEmi>=0) setEmiAmount(String(suggestedEmi));
+      } else {
+        setEmiAmount("");
+      }
+    },[txnType,expensePaymentMode,emiTenureMonths,financedAmount,date,emiDueDay]);
+
+    // Auto-select group members when group selected
+    const handleGroupSelect = gid => {
+      setSplitGroup(gid);
+      setSplitMode("split");
+      if(!gid){
+        setSplitPeople({});
+        setIncludeMeInSplit(true);
+        return;
+      }
+      // Selecting a group should not assume everyone owes a share.
+      // Leave members unselected by default so the amount can be tracked
+      // as a collective house/group due unless the user picks individuals.
+      setSplitPeople({});
+      setIncludeMeInSplit(false);
+    };
+
+    const calcShares = () => {
+      if(!selectedPids.length) return {};
+      const shares = {};
+      if(splitCalc==="equally"){
+        const total = selectedPids.length+(includeMeInSplit?1:0);
+        const sh = total>0?Math.round(amt/total*100)/100:0;
+        selectedPids.forEach(pid=>shares[pid]=sh);
+      } else if(splitCalc==="amount"){
+        selectedPids.forEach(pid=>shares[pid]=parseFloat(splitCustom[pid])||0);
+      } else if(splitCalc==="percent"){
+        selectedPids.forEach(pid=>{ const pct=parseFloat(splitCustom[pid])||0; shares[pid]=Math.round(amt*pct/100*100)/100; });
+      } else if(splitCalc==="share"){
+        const totalShares=selectedPids.reduce((s,pid)=>s+(parseFloat(splitCustom[pid])||1),0)+1;
+        selectedPids.forEach(pid=>{ const sh=parseFloat(splitCustom[pid])||1; shares[pid]=Math.round(amt*sh/totalShares*100)/100; });
+      }
+      return shares;
+    };
+
+    const parseSms = (txt, options={}) => {
+      setSmsRaw(txt);
+      if(!txt.trim()){
+        setSmsParseMeta(null);
+        return;
+      }
+
+      // Strip warning / fraud footer text before parsing.
+      const safe = txt
+        .replace(/not you[?.]?.*/i,"")
+        .replace(/call.*\d{10}.*/i,"")
+        .replace(/helpline.*/i,"")
+        .replace(/block.*/i,"")
+        .replace(/to dispute.*/i,"")
+        .replace(/report.*/i,"")
+        .replace(/\b\d{10,}\b/g,"");
+
+      const amtM = safe.match(/(?:Rs\.?|INR|\u20b9)\s*([\d,]+(?:\.\d{1,2})?)/i);
+      if(amtM) setAmount(amtM[1].replace(/,/g,""));
+
+      const clean = safe;
+      const skip = ["a/c","ac","account","bank","clearing","neft","imps","upi","ref","txn","card"];
+
+      // 1. UPI VPA vendor extraction (most reliable): pick handle before @
+      const vpaMatch =
+        safe.match(/(?:VPA|UPI\s*(?:Id|ID|vpa)?)\s*[:=.]\s*([a-zA-Z][a-zA-Z0-9._-]{1,}?)@[a-zA-Z0-9.-]+/i) ||
+        safe.match(/UPI\/[A-Z0-9]+\/[0-9]+\/([a-zA-Z][a-zA-Z0-9._-]{1,}?)@[a-zA-Z0-9.-]+/i) ||
+        safe.match(/\bto\s+([a-zA-Z][a-zA-Z0-9._-]{2,}?)@[a-zA-Z]{3,}\b/i);
+      let merchant = "";
+      if(vpaMatch){
+        const handle = vpaMatch[1].replace(/\d+$/,"").replace(/[._-]/g," ").replace(/\s+/g," ").trim();
+        if(handle.length>=3 && !/^\d+$/.test(handle) && !skip.some(w=>handle.toLowerCase()===w))
+          merchant = handle.charAt(0).toUpperCase()+handle.slice(1).toLowerCase();
+      }
+      // 2. Fallback: keyword-based merchant name
+      if(!merchant){
+        const mercM = clean.match(/(?:at|to|for|towards)\s+([A-Za-z0-9][A-Za-z0-9 ]{2,25}?)(?:\s+on|\s+via|\s+ref|\.|,|$)/i);
+        const m = mercM?.[1]?.trim();
+        if(m && !skip.some(w=>m.toLowerCase().includes(w))) merchant = m;
+      }
+      if(merchant) setWho(merchant);
+
+      const parsedDate = extractDateFromText(safe);
+      if(parsedDate) setDate(parsedDate);
+
+      const lower = safe.toLowerCase();
+      const direction = detectSmsDirection(safe);
+      const isCcPayment = /(?:bill pay|billpay|credit card.*(?:bill|payment|pay)|payment towards(?: your)? credit card|cc.*payment)/i.test(lower);
+      const isTransfer = !isCcPayment && /(?:self\s+transfer|transfer(?:red)?\s+to\s+(?:your|own)|from\s+a\/c.*to\s+a\/c|to\s+own\s+a\/c)/i.test(lower);
+      const parsedType = isCcPayment ? "cc_payment" : isTransfer ? "transfer" : direction==="credit" ? "income" : direction==="debit" ? "expense" : txnType;
+
+      if(parsedType==="cc_payment"){
+        setTxnType("cc_payment");
+        setWho("");
+      } else if(parsedType==="transfer"){
+        setTxnType("transfer");
+      } else if(parsedType==="income"){
+        setTxnType("income");
+      } else if(parsedType==="expense"){
+        setTxnType("expense");
+      }
+
+      const accountMatches = findSmsAccountMatches(safe, accounts);
+      const last4s = extractSmsLast4s(safe);
+      const matchedCard = accountMatches.find(item=>item.account?.type==="cc")?.account || null;
+      const matchedNonCard = accountMatches.find(item=>item.account?.type!=="cc")?.account || null;
+      const exactLast4Account = last4s.length
+        ? accountMatches.find(item=>{
+            const accLast4 = String(item.account?.last4 || "").trim();
+            return accLast4 && last4s.includes(accLast4);
+          })?.account || null
+        : null;
+      const primaryAccount = exactLast4Account || accountMatches[0]?.account || null;
+
+      if(parsedType==="cc_payment"){
+        if(matchedNonCard) setFromAccId(matchedNonCard.id);
+        if(matchedCard) setToAccId(matchedCard.id);
+      } else if(parsedType==="transfer"){
+        if(accountMatches[0]?.account) setFromAccId(accountMatches[0].account.id);
+        if(accountMatches[1]?.account) setToAccId(accountMatches[1].account.id);
+        else if(primaryAccount) setAccId(primaryAccount.id);
+      } else if(parsedType==="income"){
+        if((matchedNonCard || primaryAccount)) setAccId((matchedNonCard || primaryAccount).id);
+      } else if(primaryAccount){
+        setAccId(primaryAccount.id);
+      }
+
+      const matchedLabel = parsedType==="cc_payment" && matchedNonCard && matchedCard
+        ? `${accIcon(matchedNonCard.type)} ${matchedNonCard.name}${matchedNonCard.last4?` ···${matchedNonCard.last4}`:""} → ${accIcon(matchedCard.type)} ${matchedCard.name}${matchedCard.last4?` ···${matchedCard.last4}`:""}`
+        : primaryAccount
+          ? `${accIcon(primaryAccount.type)} ${primaryAccount.name}${primaryAccount.last4?` ···${primaryAccount.last4}`:""}`
+          : "";
+      const parsedTxnRef = extractTxnReference(txt);
+      if(parsedTxnRef) setTransactionRef(parsedTxnRef);
+
+      let balanceAdjusted = false;
+      let smsBalance = null;
+      let balanceDiff = 0;
+      if(options.adjustBalance && primaryAccount && primaryAccount.type!=="cc"){
+        smsBalance = extractSmsBalance(txt);
+        if(smsBalance !== null){
+          const appBal = accountBalance(primaryAccount.id);
+          balanceDiff = smsBalance - appBal;
+          if(Math.abs(balanceDiff) > 0.01){
+            setAccounts(prev=>prev.map(a=>a.id===primaryAccount.id?{...a,openingBalance:Number(a.openingBalance||0)+balanceDiff}:a));
+            balanceAdjusted = true;
+          }
+        }
+      }
+
+      setSmsParseMeta({
+        direction,
+        parsedType,
+        matchedLabel,
+        last4: last4s[0] || "",
+        smsBalance,
+        balanceAdjusted,
+        balanceDiff,
+      });
+    };
+
+    const importSms = async mode => {
+      setSmsBusy(true);
+      setSmsImportStatus("");
+      try{
+        const result = mode === "phone" ? await readLatestPhoneSms() : await readCopiedSms();
+        const text = String(result?.text || "").trim();
+        if(!text) throw new Error("No SMS text found.");
+        setShowSms(true);
+        setSmsTxt(text);
+        parseSms(text, { adjustBalance: true });
+        setSmsImportStatus(result?.source === "phone" ? "Imported from phone SMS." : "Imported from copied SMS.");
+      }catch(err){
+        setSmsImportStatus(err?.message || "Unable to import SMS.");
+      }finally{
+        setSmsBusy(false);
+      }
+    };
+
+    const hasTxnSubject = Boolean(
+      who.trim() ||
+      note.trim() ||
+      (isEditing && (sourceTxn?.merchant || sourceTxn?.desc || sourceTxn?.note)) ||
+      txnType==="cc_payment" ||
+      txnType==="transfer" ||
+      txnType==="settlement_in" ||
+      txnType==="cc_emi"
+    );
+
+    const submit = () => {
+      if(!hasTxnSubject || !amt) return;
+      const resolvedTxnId = isEditing ? sourceTxn.id : Date.now();
+      const baseLabel = who.trim() || sourceTxn?.desc || sourceTxn?.merchant || note.trim() || "";
+      const base = {
+        ...(sourceTxn || {}),
+        id:resolvedTxnId,
+        createdAt:sourceTxn?.createdAt || (Number.isFinite(Number(resolvedTxnId)) ? Number(resolvedTxnId) : Date.now()),
+        updatedAt:Date.now(),
+        type:txnType,
+        desc:(txnType==="cc_payment"||txnType==="transfer") ? (baseLabel || txnLabel(txnType)) : baseLabel,
+        merchant:(txnType==="cc_payment"||txnType==="transfer") ? "" : (baseLabel || sourceTxn?.merchant || ""),
+        date,
+        note:note.trim(),
+        smsRaw,
+        imageBase64,
+        transactionRef:transactionRef.trim()||null,
+      };
+      const upsertTxn = nextTxn => {
+        setTxns(prev=>isEditing
+          ? prev.map(txn=>String(txn.id)===String(resolvedTxnId) ? nextTxn : txn)
+          : [nextTxn,...prev]
+        );
+      };
+
+      if(txnType==="expense"){
+        if(expensePaymentMode==="emi"){
+          const dueDayNum = Math.max(1, Math.min(31, parseInt(emiDueDay || (toDateOnly(date)?.getDate() || new Date().getDate()), 10) || new Date().getDate()));
+          const upfrontPaid = emiDownPaymentValue;
+          const remainingBalance = financedAmount;
+          if(upfrontPaid>0){
+            const downPaymentTxn = {
+              ...base,
+              id:resolvedTxnId,
+              amount:upfrontPaid,
+              catId,
+              catIds:catIds.length ? catIds : (catId ? [catId] : []),
+              subId:subIds[0]||null,
+              subIds,
+              accId,
+              note:[note.trim(), `Down payment for ${who.trim() || "item"}`].filter(Boolean).join(" · "),
+            };
+            setTxns(prev=>[downPaymentTxn,...(isEditing ? prev.filter(txn=>String(txn.id)!==String(resolvedTxnId)) : prev)]);
+            if(!isEditing && getAcc(accId).type==="cc") setAccounts(prev=>prev.map(a=>a.id===accId?{...a,outstanding:(a.outstanding||0)+upfrontPaid}:a));
+          } else if(isEditing){
+            setTxns(prev=>prev.filter(txn=>String(txn.id)!==String(resolvedTxnId)));
+          }
+          if(remainingBalance>0){
+            const tenureNum = Math.max(0, parseInt(emiTenureMonths||0,10) || 0);
+            const emiAmt = Math.max(0, parseMoney(emiAmount)||0);
+
+            // Auto-schedule installment transactions for CC EMI
+            const autoInstallments = [];
+            if(emiSourceType==="cc" && tenureNum>0 && emiAmt>0){
+              const ccAcc = getAcc(accId);
+              const stmtDay = Number(ccAcc?.statementDate || dueDayNum || 15);
+              const purchaseDate = new Date((date || todayStr()) + "T00:00:00");
+              let cursor = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth(), stmtDay);
+              if(cursor <= purchaseDate) cursor = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth()+1, stmtDay);
+              const instCatIds = catIds.length ? catIds : (catId ? [catId] : ["financial"]);
+              for(let i=0; i<tenureNum; i++){
+                autoInstallments.push({
+                  id:genId(),
+                  type:"expense",
+                  desc:`EMI ${i+1}/${tenureNum} – ${who.trim() || note.trim() || "EMI purchase"}`,
+                  merchant:who.trim() || "EMI purchase",
+                  date:cursor.toISOString().split("T")[0],
+                  note:`CC EMI installment ${i+1} of ${tenureNum}`,
+                  amount:emiAmt,
+                  accId,
+                  catId:instCatIds[0],
+                  catIds:instCatIds,
+                  subId:subIds[0]||null,
+                  subIds,
+                  isAutoEmiInstallment:true,
+                  emiInstallmentNum:i+1,
+                  emiTotalInstallments:tenureNum,
+                  trackingMode:"none",
+                  people:{},
+                });
+                cursor = new Date(cursor.getFullYear(), cursor.getMonth()+1, stmtDay);
+              }
+            }
+
+            const nextLoan = {
+              id:genId(),
+              direction:"taken",
+              name:who.trim() || note.trim() || "EMI purchase",
+              principal:remainingBalance,
+              outstanding:remainingBalance,
+              startDate:date || todayStr(),
+              dueDate:getNextDueDate(date || todayStr(), dueDayNum),
+              dueDay:dueDayNum,
+              tenureMonths:tenureNum,
+              hasInterest:Number(emiInterestRate||0)>0,
+              interestRate:Math.max(0, parseFloat(emiInterestRate)||0),
+              emiAmount:emiAmt,
+              paymentAccId:accId || nonCCAccs[0]?.id || "",
+              sourceType:emiSourceType,
+              paymentMode:"emi",
+              isEmiPlan:true,
+              autoScheduled:autoInstallments.length>0,
+              scheduledInstallmentIds:autoInstallments.map(t=>t.id),
+              expenseCatId:catId || "financial",
+              expenseCatIds:catIds.length ? catIds : (catId ? [catId] : ["financial"]),
+              expenseSubId:subIds[0]||null,
+              expenseSubIds:subIds,
+              note:[
+                note.trim(),
+                upfrontPaid>0 ? `Down payment ${sym}${fmt(upfrontPaid)} paid upfront.` : "",
+                `Balance ${sym}${fmt(remainingBalance)} moved to ${emiSourceType.replace(/_/g," ")} EMI.`
+              ].filter(Boolean).join(" · "),
+              repayments:[],
+              status:"active",
+            };
+            setLoans(prev=>[nextLoan,...prev]);
+            if(autoInstallments.length>0) setTxns(prev=>[...autoInstallments,...prev]);
+          }
+          try{ localStorage.removeItem(DRAFT_KEY); }catch{}
+          closeModal();
+          return;
+        }
+        const shares = splitMode==="split"?calcShares():{};
+        const psplit = {};
+        Object.entries(shares).forEach(([pid,sh])=>{
+          const collect = collectMap[pid]!==undefined ? collectMap[pid] : getPerson(pid).personType!=="dependant";
+          psplit[pid] = { amount:sh, mode:collect?"owes":"spent_on" };
+        });
+        const lineItemUnitPriceById = Object.fromEntries(
+          (lineItems||[]).map(item=>{
+            const qty = Math.max(0, parseFloat(item.qty)||0);
+            const unit = Math.max(0, parseFloat(item.unitPrice)||0);
+            const fallbackAmount = Math.max(0, parseFloat(item.amount)||0);
+            return [item.id, qty>0 ? unit : fallbackAmount];
+          })
+        );
+        const allocItemAmount = item=>{
+          if(item?.sourceItemId){
+            const unit = Number(lineItemUnitPriceById[item.sourceItemId]||0);
+            return Math.max(0, (parseFloat(item.qty)||0) * unit);
+          }
+          return Math.max(0, parseFloat(item?.amount)||0);
+        };
+        // Allocate mode: build psplit + groupAllocations from allocRows
+        const groupAllocationsVal = [];
+        if(splitMode==="allocate" || splitMode==="unified"){
+          allocRows.forEach(row=>{
+            if(!row.targetId) return;
+            const rowAmt = row.items?.length
+              ? row.items.reduce((s,i)=>s+allocItemAmount(i),0)
+              : parseFloat(row.amount)||0;
+            if(!(rowAmt>0)) return;
+            if(row.targetType==="person"){
+              psplit[row.targetId] = { amount:rowAmt, mode:row.mode==="i_owe"?"owes_by_me":row.mode };
+            } else {
+              groupAllocationsVal.push({ groupId:row.targetId, amount:rowAmt, mode:row.mode });
+            }
+          });
+        }
+        const splitTotal = Object.values(shares).reduce((sum,val)=>sum+Number(val||0),0);
+        if(splitMode==="split"){
+          const percentTotal = selectedPids.reduce((sum,pid)=>sum+(parseFloat(splitCustom[pid])||0),0);
+          if(splitCalc==="percent" && percentTotal > 100.01){
+            alert("Split percentages cannot exceed 100% of the bill.");
+            return;
+          }
+          if(splitTotal > amt+0.01){
+            alert("Split amount cannot exceed the total expense amount.");
+            return;
+          }
+        }
+        if(splitMode==="allocate" || splitMode==="unified"){
+          const qtyBySource = {};
+          allocRows.forEach(row=>{
+            (row.items||[]).forEach(item=>{
+              if(!item?.sourceItemId) return;
+              qtyBySource[item.sourceItemId] = (qtyBySource[item.sourceItemId]||0) + Math.max(0, parseFloat(item.qty)||0);
+            });
+          });
+          const qtyOver = Object.entries(qtyBySource).find(([sid,qty])=>qty > (Math.max(0, parseFloat((lineItems||[]).find(li=>li.id===sid)?.qty)||0) + 0.0001));
+          if(qtyOver){
+            const src = (lineItems||[]).find(li=>li.id===qtyOver[0]);
+            alert(`Allocated qty for item \"${src?.label||"Unnamed item"}\" exceeds bought qty.`);
+            return;
+          }
+          const allocTotal = allocRows.reduce((sum,row)=>{
+            if(!row.targetId) return sum;
+            const rowAmt = row.items?.length
+              ? row.items.reduce((s,i)=>s+allocItemAmount(i),0)
+              : parseFloat(row.amount)||0;
+            return sum + Math.max(0,rowAmt);
+          },0);
+          if(allocTotal > amt+0.01){
+            alert("Allocated total cannot exceed the total expense amount.");
+            return;
+          }
+        }
+        const tagAmt=(splitMode==="tag" && (tagMode==="person"||tagMode==="both") && tagPersonAmount && parseFloat(tagPersonAmount)>0) ? parseFloat(tagPersonAmount) : (splitMode==="tag" && (tagMode==="person"||tagMode==="both") ? amt : null);
+        const tagGrpAmt=(splitMode==="tag" && tagMode==="both" && tagGroupAmount && parseFloat(tagGroupAmount)>0) ? parseFloat(tagGroupAmount) : null;
+        const savedTagItems=splitMode==="tag" && tagMode==="itemize" ? tagItems.filter(item=>item.targetId&&parseFloat(item.amount)>0).map(item=>({id:item.id,targetType:item.targetType,targetId:item.targetId,amount:parseFloat(item.amount)})) : null;
+        if(splitMode==="tag"){
+          if(tagMode==="itemize"){
+            const itemizedTotal = (savedTagItems||[]).reduce((sum,item)=>sum+Number(item.amount||0),0);
+            if(itemizedTotal > amt+0.01){
+              alert("Itemized total cannot exceed the total expense amount.");
+              return;
+            }
+          } else {
+            const taggedTotal = Number(tagAmt||0) + Number(tagGrpAmt||0);
+            if(taggedTotal > amt+0.01){
+              alert("Tagged amount cannot exceed the total expense amount.");
+              return;
+            }
+          }
+        }
+        const forPersonVal = splitMode==="tag" && (tagMode==="person"||tagMode==="both") ? tagPerson : "";
+        const groupIdVal = splitMode==="split" ? (splitGroup||null)
+          : (splitMode==="allocate" || splitMode==="unified") ? (groupAllocationsVal[0]?.groupId||null)
+          : (splitMode==="tag" && (tagMode==="group"||tagMode==="both") ? (tagGroup||null) : null);
+        let catAllocNumeric = Object.fromEntries(Object.entries(catAllocations||{}).map(([cid,val])=>[cid,parseFloat(val)||0]));
+        if(catIds.length>1){
+          const baseMap = Object.fromEntries(catIds.map(cid=>[cid,Math.max(0,Number(catAllocNumeric[cid]||0))]));
+          const currentTotal = Object.values(baseMap).reduce((s,v)=>s+v,0);
+          const diff = Math.round((amt-currentTotal)*100)/100;
+          if(Math.abs(diff)>=0.01){
+            const targetId = (lastEditedCatId && catIds.includes(lastEditedCatId)) ? lastEditedCatId : catIds[catIds.length-1];
+            baseMap[targetId] = Math.max(0, Math.round((Number(baseMap[targetId]||0)+diff)*100)/100);
+          }
+          const adjustedTotal = Object.values(baseMap).reduce((s,v)=>s+v,0);
+          const finalDiff = Math.round((amt-adjustedTotal)*100)/100;
+          if(Math.abs(finalDiff)>=0.01){
+            const fallbackId = catIds[catIds.length-1];
+            baseMap[fallbackId] = Math.max(0, Math.round((Number(baseMap[fallbackId]||0)+finalDiff)*100)/100);
+          }
+          catAllocNumeric = baseMap;
+          setCatAllocations(prev=>{
+            const next = { ...prev };
+            catIds.forEach(cid=>{ next[cid] = String(catAllocNumeric[cid]||0); });
+            return next;
+          });
+        }
+        const categorySplitTotal = Object.values(catAllocNumeric).reduce((s,v)=>s+v,0);
+        const hasCategorySplit = catIds.length>1 && Math.abs(categorySplitTotal - amt) < 0.01;
+        const normalizedLineItems = useItemizedLines
+          ? lineItems
+              .map(item=>{
+                const qty = Math.max(0, parseFloat(item.qty)||0);
+                const unitPrice = Math.max(0, parseFloat(item.unitPrice)||0);
+                const amountVal = qty * unitPrice;
+                const normalizedSplits = (item.splits||[])
+                  .map(split=>({
+                    id:split.id||genId(),
+                    targetType:split.targetType||"person",
+                    targetId:split.targetId||null,
+                    qty:Math.max(0, parseFloat(split.qty)||0),
+                  }))
+                  .filter(split=>split.targetId && split.qty>0);
+                return {
+                  id:item.id||genId(),
+                  label:String(item.label||"").trim(),
+                  qty,
+                  unitPrice,
+                  amount:Math.round(amountVal*100)/100,
+                  catId:item.catId||null,
+                  subId:item.subId||null,
+                  splits:normalizedSplits.length ? normalizedSplits : null,
+                };
+              })
+              .filter(item=>item.label || item.amount>0 || item.catId)
+          : null;
+        if(useItemizedLines && normalizedLineItems?.length){
+          const itemsTotal = normalizedLineItems.reduce((sum,item)=>sum+Number(item.amount||0),0);
+          if(Math.abs(itemsTotal-amt)>0.01){
+            alert(`Items total must match amount (${sym}${fmt(amt)}). Current items total is ${sym}${fmt(itemsTotal)}.`);
+            return;
+          }
+          const qtyOverAllocated = normalizedLineItems.find(item=>{
+            const splitQty = (item.splits||[]).reduce((sum,split)=>sum+Number(split.qty||0),0);
+            return splitQty > Number(item.qty||0) + 0.0001;
+          });
+          if(qtyOverAllocated){
+            alert(`Item split qty cannot exceed item qty for "${qtyOverAllocated.label||"Unnamed item"}".`);
+            return;
+          }
+        }
+        const matchedBill = bills.find(b=>b.status==="unpaid"&&b.catId===catId&&b.amount>0&&b.amount===amt);
+        const owedByOthers = (splitMode==="allocate" || splitMode==="unified")
+          ? Object.values(psplit).reduce((s,info)=>s+(info.mode==="owes"?Number(info.amount||0):0),0)
+          : Object.entries(psplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
+        const myImplicitShare = splitMode==="split" && includeMeInSplit ? Math.max(0, amt-owedByOthers) : 0;
+        const groupCollectiveAmount = (splitMode==="allocate" || splitMode==="unified")
+          ? groupAllocationsVal.filter(g=>g.mode==="owes").reduce((s,g)=>s+g.amount,0)
+          : (groupIdVal && splitMode==="split" ? Math.max(0, amt-owedByOthers-myImplicitShare) : 0);
+        const normalizedTrackingMode = splitMode==="unified" ? "allocate" : splitMode;
+        const linkedBillId = isBillPayment ? ((isEditing && sourceTxn?.paidBillId) || matchedBill?.id || genId()) : null;
+        const linkedBillName = isBillPayment ? (matchedBill?.name || who.trim() || note.trim() || "Bill payment") : null;
+        const newTxn = {
+          ...base,
+          amount:amt,
+          catId,
+          catIds:validCatIds.length ? validCatIds : (catId ? [catId] : []),
+          subIds:validSubIds,
+          subId:validSubIds[0]||null,
+          accId,
+          isBillPayment,
+          billInvoiceNo:billInvoiceNo.trim()||null,
+          paidBillId:linkedBillId,
+          paidBillName:linkedBillName,
+          tagPersonAmount:tagAmt,
+          tagGroupAmount:tagGrpAmt,
+          tagItems:savedTagItems,
+          people:splitMode==="split"||splitMode==="allocate"||splitMode==="unified"?psplit:{},
+          forPerson:forPersonVal,
+          groupId:groupIdVal,
+          trackingMode:normalizedTrackingMode,
+          groupCollectiveAmount,
+          allocations:(splitMode==="allocate" || splitMode==="unified")?allocRows.filter(r=>r.targetId).map(r=>{
+            const normalizedItems = (r.items||[])
+              .map(i=>{
+                const amtVal = allocItemAmount(i);
+                const qtyVal = Math.max(0, parseFloat(i.qty)||0);
+                return {
+                  ...i,
+                  qty:qtyVal,
+                  amount:amtVal,
+                  label:i.label||null,
+                  sourceItemId:i.sourceItemId||null,
+                };
+              })
+              .filter(i=>(i.sourceItemId && i.qty>0) || i.amount>0 || i.label);
+            const effAmt = normalizedItems.length ? normalizedItems.reduce((s,i)=>s+Number(i.amount||0),0) : parseFloat(r.amount)||0;
+            return { id:r.id, targetType:r.targetType, targetId:r.targetId, amount:effAmt, mode:r.mode, items:normalizedItems };
+          }).filter(r=>r.amount>0):null,
+          groupAllocations:(splitMode==="allocate" || splitMode==="unified")&&groupAllocationsVal.length?groupAllocationsVal:null,
+          catAllocations:hasCategorySplit?catAllocNumeric:null,
+          lineItems:normalizedLineItems?.length ? normalizedLineItems : null,
+          reimbursable:reimbursable||false,
+          paymentImageBase64:paymentImageBase64||null
+        };
+        upsertTxn(newTxn);
+        if(!isEditing && getAcc(accId).type==="cc") setAccounts(prev=>prev.map(a=>a.id===accId?{...a,outstanding:(a.outstanding||0)+amt}:a));
+
+        if(isBillPayment){
+          const billRecord = {
+            id:linkedBillId,
+            name:linkedBillName,
+            merchant:who.trim()||"",
+            invoiceNo:billInvoiceNo.trim(),
+            amount:amt,
+            dueDate:date,
+            catId,
+            catIds:validCatIds.length ? validCatIds : (catId ? [catId] : []),
+            subId:validSubIds[0]||null,
+            recurring:matchedBill?.recurring||false,
+            frequency:matchedBill?.frequency||"monthly",
+            status:"paid",
+            paidDate:date,
+            createdDate:matchedBill?.createdDate||sourceTxn?.date||todayStr(),
+            splitPeople:splitMode==="split"?psplit:(matchedBill?.splitPeople||{}),
+            groupId:groupIdVal||matchedBill?.groupId||null,
+            groupCollectiveAmount:groupCollectiveAmount || Number(matchedBill?.groupCollectiveAmount||0),
+            myShare:myImplicitShare,
+            paidByTxnId:resolvedTxnId,
+            imageBase64:imageBase64 || matchedBill?.imageBase64 || null,
+            paymentImageBase64:paymentImageBase64 || matchedBill?.paymentImageBase64 || null,
+          };
+          setBills(prev=>prev.some(b=>b.id===linkedBillId)
+            ? prev.map(b=>b.id===linkedBillId?{...b,...billRecord}:b)
+            : [billRecord,...prev]
+          );
+        } else if(matchedBill && !isEditing){
+          setBillMatchSuggestion({bill:matchedBill,txn:newTxn});
+        }
+      } else if(txnType==="income"){
+        upsertTxn({ ...base, amount:amt, accId, catId:null, catIds:[], subId:null, subIds:[], incomeType:normalizeIncomeTypeValue(incomeType)||"salary" });
+        if(!isEditing){
+          const pending = txns.filter(t=>t.type==="expense" && t.reimbursable && !t.reimbursedByTxnId);
+          if(pending.length>0) setReimbursementMatchSuggestion({ incomeTxnId:resolvedTxnId, pending });
+        }
+      } else if(txnType==="transfer"){
+        upsertTxn({ ...base, amount:amt, fromAccId, toAccId, catId:null, catIds:[], subId:null, subIds:[] });
+      } else if(txnType==="cc_payment"){
+        upsertTxn({ ...base, amount:amt, fromAccId, toAccId, catId:null, catIds:[], subId:null, subIds:[] });
+        if(!isEditing){
+          setAccounts(prev=>prev.map(a=>a.id===toAccId?{...a,outstanding:Math.max(0,(a.outstanding||0)-amt)}:a));
+          // Auto-reduce outstanding on CC-backed EMI loans linked to this card.
+          // Each cc_emi installment posted to this card reduces that plan's loan outstanding.
+          // When CC bill is paid, the installments are cleared — so we reduce loan outstanding accordingly.
+          setLoans(prev=>prev.map(loan=>{
+            if(loan.direction!=="taken") return loan;
+            if(!(loan.sourceType==="cc" || loan.ccLinked===true)) return loan;
+            if(loan.linkedCardId!==toAccId) return loan;
+            if(loan.status==="closed") return loan;
+            // Find cc_emi txns for this loan's plan that are dated on or before today and not yet accounted
+            const planId = loan.ccEmiPlanId;
+            if(!planId) return loan;
+            const installmentsPosted = txns.filter(t=>
+              t.type==="cc_emi" &&
+              t.ccEmiPlanId===planId &&
+              t.accId===toAccId &&
+              (!t.paidInBill) // not yet cleared by a bill payment
+            );
+            const totalInstallmentAmt = installmentsPosted.reduce((s,t)=>s+Number(t.amount||0),0);
+            if(totalInstallmentAmt<=0) return loan;
+            const newOutstanding = Math.max(0, Number(loan.outstanding||0) - totalInstallmentAmt);
+            return {
+              ...loan,
+              outstanding: newOutstanding,
+              status: newOutstanding<=0 ? "closed" : "active",
+              repayments: [
+                ...(loan.repayments||[]),
+                { id:genId(), date:date||todayStr(), amount:totalInstallmentAmt, note:`CC bill payment — ${installmentsPosted.length} EMI installment(s)` }
+              ]
+            };
+          }));
+          // Mark those cc_emi txns as cleared by this bill payment
+          setTxns(prev=>prev.map(t=>{
+            if(t.type!=="cc_emi" || t.accId!==toAccId || t.paidInBill) return t;
+            return { ...t, paidInBill:true };
+          }));
+        }
+      } else if(txnType==="investment"){
+        const invId = (isEditing ? (sourceTxn?.linkedInvestmentId || linkedInvestment?.id) : null) || genId();
+        const folioNo = investType==="mf" ? investFolio.trim() : "";
+        const metricValue = investmentMetricConfig.show ? Math.max(0, parseMoney(investNav)||0) : 0;
+        const commonStartDate = lockedInvestFolioStartDate || date || todayStr();
+        const inv = { id:invId, type:investType, name:who.trim()||"Investment", amount:amt, currentValue:amt, freq:investFreq||"", folioNo, startDate:commonStartDate, linkedTxnId:resolvedTxnId, paymentAccId:accId, lastNav:metricValue, lastNavDate:date, transactionRef:transactionRef.trim()||null };
+        setInvestments(prev=>{
+          const exists = prev.some(item=>String(item.id)===String(invId) || String(item.linkedTxnId||"")===String(resolvedTxnId));
+          return exists
+            ? prev.map(item=>(String(item.id)===String(invId) || String(item.linkedTxnId||"")===String(resolvedTxnId)) ? { ...item, ...inv } : item)
+            : [inv,...prev];
+        });
+        upsertTxn({
+          ...base,
+          amount:amt,
+          date:date || commonStartDate,
+          accId,
+          investType,
+          investFreq:investFreq||"",
+          investFolio:folioNo,
+          investStartDate:commonStartDate,
+          investNav:metricValue,
+          catId:null,
+          catIds:[],
+          subId:null,
+          subIds:[],
+          linkedInvestmentId:invId,
+        });
+      } else if(txnType==="settlement_in"){
+        const isRepayment = settlementKind==="repayment" && Boolean(tagPerson||sourceTxn?.fromPersonId);
+        const repaymentPersonId = tagPerson||sourceTxn?.fromPersonId||null;
+        const settlementLinks = isRepayment
+          ? repaymentCandidates.map(item=>({
+              kind:item.kind,
+              id:item.id,
+              personId:repaymentPersonId,
+              amount:Math.min(Number(repaymentAllocations[item.key]||0), Number(item.amount||0)),
+              title:item.title,
+            })).filter(link=>link.amount>0)
+          : [];
+        const appliedAmount = settlementLinks.reduce((sum,link)=>sum+Number(link.amount||0),0);
+        const extraAmount = isRepayment ? Math.max(0, amt-appliedAmount) : 0;
+        const firstTxnLink = settlementLinks.find(link=>link.kind==="txn");
+        const linkedExpenseId = settlementKind==="refund" ? (sourceTxn?.againstTxnId || refundPrefill?.id || null) : (firstTxnLink?.id || null);
+        const linkedRefundNote = linkedExpenseId && settlementKind==="refund"
+          ? [note.trim(), `Linked refund for ${(refundPrefill?.desc||refundPrefill?.merchant||sourceTxn?.desc||sourceTxn?.merchant||"expense")}`].filter(Boolean).join(" · ")
+          : note.trim();
+        const newTxn = { ...base, amount:amt, appliedAmount, extraAmount, accId, fromPersonId:repaymentPersonId, catId:null, catIds:[], subId:null, subIds:[], note:linkedRefundNote, isRefund:settlementKind==="refund", againstTxnId:linkedExpenseId, settlementLinks };
+        upsertTxn(newTxn);
+        if(isRepayment && (!isEditing || !sourceTxn?.settlementLinks?.length)) applyRepaymentAllocations(repaymentPersonId, settlementLinks);
+        if(newTxn.isRefund && !newTxn.againstTxnId){
+          const matches = getRefundCandidates(newTxn, resolvedTxnId);
+          if(matches.length) setRefundMatchSuggestion({ refundTxn:newTxn, matches });
+        }
+      } else if(txnType==="cc_emi"){
+        if(!ccEmiCardId){ alert("Please select a credit card."); return; }
+        let planId = ccEmiPlanId;
+        if(ccEmiNewPlanMode){
+          const monthlyAmt = parseMoney(ccEmiNewMonthly)||0;
+          if(!ccEmiNewName.trim()){ alert("Enter a plan name."); return; }
+          if(!monthlyAmt){ alert("Enter the monthly EMI amount."); return; }
+          const newPlan = {
+            id:genId(),
+            name:ccEmiNewName.trim(),
+            cardId:ccEmiCardId,
+            totalAmount:parseMoney(ccEmiNewTotal)||0,
+            tenure:Math.max(1,parseInt(ccEmiNewTenure,10)||1),
+            monthlyAmount:monthlyAmt,
+            interestRate:parseFloat(ccEmiNewRate)||0,
+            startDate:date,
+            catId:catIds[0]||null,
+            catIds:catIds.length?catIds:[],
+            subId:subIds[0]||null,
+            subIds,
+            status:"active",
+            createdAt:Date.now(),
+          };
+          setCcEmiPlans(prev=>[newPlan,...prev]);
+          planId = newPlan.id;
+          // Auto-create a linked loan record for this CC EMI plan so outstanding is tracked
+          const emiLoanId = genId();
+          const totalEmiAmt = parseMoney(ccEmiNewTotal)||0;
+          if(totalEmiAmt>0){
+            setLoans(prev=>[{
+              id:emiLoanId,
+              direction:"taken",
+              name:ccEmiNewName.trim(),
+              sourceType:"cc",
+              ccLinked:true,
+              linkedCardId:ccEmiCardId,
+              ccEmiPlanId:planId,
+              principal:totalEmiAmt,
+              outstanding:totalEmiAmt,
+              emiAmount:monthlyAmt,
+              interestRate:parseFloat(ccEmiNewRate)||0,
+              tenureMonths:Math.max(1,parseInt(ccEmiNewTenure,10)||1),
+              startDate:date||todayStr(),
+              status:"active",
+              repayments:[],
+              note:`CC EMI on ${getAcc(ccEmiCardId)?.name||"card"}`,
+            },...prev]);
+          }
+        }
+        if(!planId){ alert("Please select or create an EMI plan."); return; }
+        const plan = ccEmiNewPlanMode
+          ? { id:planId, name:ccEmiNewName.trim(), tenure:Math.max(1,parseInt(ccEmiNewTenure,10)||1) }
+          : ccEmiPlans.find(p=>p.id===planId);
+        const installedSoFar = txns.filter(t=>t.type==="cc_emi" && t.ccEmiPlanId===planId).length;
+        const thisNum = isEditing ? (sourceTxn?.installmentNo||installedSoFar) : installedSoFar+1;
+        upsertTxn({
+          ...base,
+          amount:amt,
+          accId:ccEmiCardId,
+          merchant:plan?.name||"",
+          desc:`${plan?.name||"EMI"} · ${thisNum}/${plan?.tenure||"?"}`,
+          catId:catIds[0]||null,
+          catIds:catIds.length?catIds:[],
+          subId:subIds[0]||null,
+          subIds,
+          ccEmiPlanId:planId,
+          installmentNo:thisNum,
+          ccEmiTenure:plan?.tenure||null,
+          trackingMode:"none",
+          people:{},
+        });
+      }
+      if(isEditing && sourceTxn?.type==="investment" && txnType!=="investment"){
+        setInvestments(prev=>prev.filter(inv=>String(inv.id)!==String(sourceTxn.linkedInvestmentId||linkedInvestment?.id||"") && String(inv.linkedTxnId||"")!==String(sourceTxn.id)));
+      }
+      try{ localStorage.removeItem(DRAFT_KEY); }catch{}
+      closeModal();
+    };
+
+    const canSubmit = hasTxnSubject && amt>0;
+
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&closeModal()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"94vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{isEditing?"Edit Transaction":refundPrefill?"Add Refund":"Add Transaction"}</div>
+            <button onClick={closeModal} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          {draftBanner&&<div style={{ background:T.accent+"18",border:`1px solid ${T.accent}44`,borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8 }}>
+            <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>📝 You have an unsaved draft</span>
+            <div style={{ display:"flex",gap:6 }}>
+              <button onClick={restoreDraft} style={{ background:T.accent,border:"none",borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Restore</button>
+              <button onClick={()=>{ setDraftBanner(false); try{localStorage.removeItem(DRAFT_KEY);}catch{} }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Dismiss</button>
+            </div>
+          </div>}
+
+          {/* STEP 1 — TYPE */}
+          {txnType==="cc_emi"
+            ? <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:16,background:T.purple+"18",border:`1px solid ${T.purple}33`,borderRadius:12,padding:"10px 14px" }}>
+                <span style={{ fontSize:20 }}>💳</span>
+                <div style={{ flex:1 }}>
+                  <div style={{ color:T.purple,fontSize:13,fontWeight:800 }}>CC EMI Installment</div>
+                  <div style={{ color:T.sub,fontSize:10 }}>Recording an installment against an EMI plan on your credit card</div>
+                </div>
+                <button onClick={()=>setTxnType("expense")} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap" }}>← Change type</button>
+              </div>
+            : <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
+                {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["investment","💹","Invest",T.info],["transfer","🔄","Transfer",T.info],["cc_payment","💳","CC Pay",T.purple],["settlement_in","✅","Settlement",T.info]].map(([v,ic,lb,col])=>(
+                  <button key={v} onClick={()=>{ setTxnType(v); if(v==="cc_payment"||v==="transfer") setWho(""); }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
+                    <span style={{ fontSize:16 }}>{ic}</span>{lb}
+                  </button>
+                ))}
+              </div>
+          }
+
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            {/* STEP 2 — WHO + AMOUNT + DATE */}
+            {(txnType!=="cc_payment"&&txnType!=="transfer")&&(
+              <div style={{ position:"relative" }}>
+                <input 
+                  style={{ ...inp, fontSize:18, fontWeight:700, border:`1px solid ${!who.trim()&&txnType!=="transfer"&&txnType!=="settlement_in"?T.danger+"66":T.border}` }} 
+                  placeholder={txnType==="income"?"Source (e.g. Salary, Freelance)":txnType==="settlement_in"?"Refund / settlement note (store, app, person, etc.)":txnType==="investment"?"Investment name *":"Vendor / Person / Place *"} 
+                  value={who} 
+                  onChange={e=>{setWho(e.target.value); setShowSuggestions(true);}}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                />
+                {showSuggestions && filteredSuggestions.length > 0 && (
+                  <div style={{ position:"absolute", top:"100%", left:0, right:0, background:T.card, border:`1px solid ${T.border}`, borderRadius:8, zIndex:1000, maxHeight:200, overflowY:"auto", boxShadow:"0 4px 12px rgba(0,0,0,0.15)" }}>
+                    {filteredSuggestions.map((suggestion, index) => (
+                      <button 
+                        key={index} 
+                        onClick={() => { setWho(suggestion); setShowSuggestions(false); }}
+                        style={{ width:"100%", padding:"10px 14px", background:"none", border:"none", textAlign:"left", cursor:"pointer", fontSize:14, color:T.text, fontFamily:"Nunito,sans-serif", borderBottom:index < filteredSuggestions.length - 1 ? `1px solid ${T.border}` : "none" }}
+                        onMouseDown={(e) => e.preventDefault()} // Prevent blur on click
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {txnType==="expense" && vendorCategorySuggestion && (()=>{
+                  const suggestedCat = getCat(vendorCategorySuggestion.catId);
+                  if(!suggestedCat) return null;
+                  const suggestedSub = vendorCategorySuggestion.subId ? suggestedCat.subs?.find(sub=>sub.id===vendorCategorySuggestion.subId) : null;
+                  const isApplied = catIds.length===1 && catIds[0]===vendorCategorySuggestion.catId && (subIds[0]||null)===(vendorCategorySuggestion.subId||null);
+                  return (
+                    <div style={{ color:isApplied?T.success:T.info,fontSize:10,marginTop:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap" }}>
+                      <span>{isApplied?"✨ Auto-selected":"✨ Suggested"} {suggestedCat.icon} {suggestedCat.name}{suggestedSub?` → ${suggestedSub.name}`:""} based on {vendorCategorySuggestion.reason}.</span>
+                      {!isApplied && <button onClick={()=>applySuggestedExpenseCategory(vendorCategorySuggestion,true)} style={{ background:"none",border:`1px solid ${T.info}44`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,color:T.info,fontFamily:"Nunito,sans-serif" }}>Use</button>}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+            {(txnType==="cc_payment"||txnType==="transfer")&&<input style={inp} placeholder="Note (optional)" value={who} onChange={e=>setWho(e.target.value)}/>}
+
+            <div style={{ display:"grid",gridTemplateColumns:"1.2fr 1fr",gap:10 }}>
+              <div>
+                <span style={lbl}>Amount ({sym}) *</span>
+                <input style={{ ...inp,fontSize:22,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} onChange={e=>setAmount(cleanMoneyInput(e.target.value))}/>
+              </div>
+              <div>
+                <span style={lbl}>Date</span>
+                <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+              </div>
+            </div>
+
+            {(txnType!=="income")&&(
+              <div>
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4 }}>
+                  <span style={{ ...lbl,marginBottom:0 }}>Transaction ID / Ref (optional)</span>
+                  {txnType==="expense"&&<div style={{ display:"flex",gap:4 }}>
+                    <Chip color={T.success} active={expensePaymentMode==="full"} onClick={()=>setExpensePaymentMode("full")}>✅ Full</Chip>
+                    <Chip color={T.warn} active={expensePaymentMode==="emi"} onClick={()=>setExpensePaymentMode("emi")}>🧾 EMI</Chip>
+                  </div>}
+                </div>
+                <input style={inp} type="text" placeholder="e.g. UPI / bank reference" value={transactionRef} onChange={e=>setTransactionRef(e.target.value.toUpperCase())}/>
+              </div>
+            )}
+
+            {/* STEP 3 — PAYMENT METHOD */}
+            {txnType==="expense"&&(
+              <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                <div>
+                  <span style={lbl}>Paid via</span>
+                  <AccountChipGroup items={accounts} value={accId} onChange={setAccId} />
+                </div>
+                {expensePaymentMode==="emi"&&(
+                  <div style={{ background:T.input,border:`1px solid ${T.warn}33`,borderRadius:12,padding:"12px" }}>
+                    <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>EMI plan details</div>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
+                      {[ ["bank","🏦 Bank loan"],["cc","💳 Credit card EMI"],["store","🛒 Store EMI"],["person","👤 Borrowed from person"],["other","📦 Other"] ].map(([value,label])=>(
+                        <Chip key={value} color={value==="cc"?T.danger:T.warn} active={emiSourceType===value} onClick={()=>setEmiSourceType(value)}>{label}</Chip>
+                      ))}
+                    </div>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
+                      <Chip color={T.info} active={showEmiDownPayment} onClick={()=>setShowEmiDownPayment(v=>!v)}>💸 Down payment</Chip>
+                    </div>
+                    {showEmiDownPayment&&(
+                      <div style={{ marginBottom:10 }}>
+                        <span style={lbl}>Down payment ({sym})</span>
+                        <input style={inp} type="text" inputMode="decimal" placeholder={`e.g. ${sym}20,000`} value={emiDownPayment||""} onChange={e=>setEmiDownPayment(cleanMoneyInput(e.target.value))}/>
+                      </div>
+                    )}
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
+                      <div>
+                        <span style={lbl}>Tenure (months)</span>
+                        <input style={inp} type="number" min="1" placeholder="e.g. 12" value={emiTenureMonths} onChange={e=>setEmiTenureMonths(e.target.value)}/>
+                      </div>
+                      <div>
+                        <span style={lbl}>EMI amount ({sym})</span>
+                        <input style={inp} type="text" inputMode="decimal" placeholder={`e.g. ${sym}2,500`} value={emiAmount||""} onChange={e=>setEmiAmount(cleanMoneyInput(e.target.value))}/>
+                      </div>
+                    </div>
+                    <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 12px",marginBottom:10 }}>
+                      <div style={{ color:T.sub,fontSize:10 }}>Total item cost: {sym}{fmt(amt||0)}</div>
+                      <div style={{ color:T.sub,fontSize:10 }}>Down payment: {sym}{fmt(emiDownPaymentValue||0)}</div>
+                      <div style={{ color:T.text,fontSize:12,fontWeight:800,marginTop:4 }}>Balance for EMI: {sym}{fmt(financedAmount||0)}</div>
+                    </div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
+                      <div>
+                        <span style={lbl}>Due day</span>
+                        <input style={inp} type="number" min="1" max="31" placeholder="e.g. 5" value={emiDueDay} onChange={e=>setEmiDueDay(e.target.value)}/>
+                      </div>
+                      <div>
+                        <span style={lbl}>Interest % (optional)</span>
+                        <input style={inp} type="number" min="0" step="0.01" placeholder="e.g. 12" value={emiInterestRate} onChange={e=>setEmiInterestRate(e.target.value)}/>
+                      </div>
+                    </div>
+                    <div>
+                      <span style={lbl}>Repayment from</span>
+                      <AccountChipGroup items={accounts} value={accId} onChange={setAccId} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {txnType==="income"&&(
+              <div>
+                <span style={lbl}>Income type</span>
+                <IncomeTypeChips options={incomeTypeChoices} value={incomeType} onChange={setIncomeType} />
+                <span style={lbl}>Into account</span>
+                <AccountChipGroup items={nonCCAccs} value={accId} onChange={setAccId} />
+              </div>
+            )}
+            {(txnType==="transfer"||txnType==="cc_payment")&&(
+              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                  <div><span style={lbl}>From</span><select style={inp} value={fromAccId} onChange={e=>setFromAccId(e.target.value)}>{(txnType==="cc_payment"?nonCCAccs:accounts).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
+                  <div><span style={lbl}>To</span><select style={inp} value={toAccId} onChange={e=>setToAccId(e.target.value)}>{(txnType==="cc_payment"?ccAccs:accounts).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
+                </div>
+                {txnType==="transfer"&&<div style={{ color:T.sub,fontSize:10 }}>Use `Transfer` for moving money into PPF / FD / NPS accounts. It will not count as an expense, and investment-bucket accounts still show under `Wealth → Investments`.</div>}
+              </div>
+            )}
+            {txnType==="investment"&&(
+              <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                <div>
+                  <span style={lbl}>Type</span>
+                  <InvestmentTypeChips value={investType} onChange={setInvestType} />
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:investType==="mf"?"1fr 1fr":"1fr",gap:10 }}>
+                  {investType==="mf"&&<div style={{ position:"relative" }}>
+                    <span style={lbl}>Folio No.</span>
+                    <input style={inp} placeholder="Type folio to reuse defaults" value={investFolio} onChange={e=>{ setInvestFolio(e.target.value); setShowFolioSuggestions(true); }} onFocus={()=>setShowFolioSuggestions(true)} onBlur={()=>setTimeout(()=>setShowFolioSuggestions(false),150)}/>
+                    {showFolioSuggestions && investmentSuggestions.length>0 && (
+                      <div style={{ position:"absolute",top:"100%",left:0,right:0,background:T.card,border:`1px solid ${T.border}`,borderRadius:8,zIndex:1000,boxShadow:"0 6px 14px rgba(0,0,0,0.18)",maxHeight:180,overflowY:"auto" }}>
+                        {investmentSuggestions.map(template=>(
+                          <button key={template.key} onMouseDown={e=>e.preventDefault()} onClick={()=>applyInvestmentTemplate(template)} style={{ width:"100%",padding:"9px 10px",background:"none",border:"none",borderBottom:`1px solid ${T.border}`,textAlign:"left",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                            <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{template.label}</div>
+                            <div style={{ color:T.sub,fontSize:10 }}>{template.amount?`${sym}${fmt(template.amount)}`:""}{template.freq?` · ${investmentFreqLabel(template.freq)}`:""}{template.accId?` · ${getAcc(template.accId).name}`:""}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ color:lockedInvestFolioStartDate?T.info:T.sub,fontSize:10,marginTop:6 }}>
+                      {lockedInvestFolioStartDate
+                        ? `🔒 Start date locked to ${formatShortDate(lockedInvestFolioStartDate) || lockedInvestFolioStartDate} for this folio.`
+                        : "Existing folios auto-fill the fund name, amount, frequency, account, and common start date."}
+                    </div>
+                  </div>}
+                  <div>
+                    <span style={lbl}>Frequency</span>
+                    <InvestmentFrequencySelect value={investFreq} onChange={setInvestFreq} />
+                  </div>
+                </div>
+                <div>
+                  {investmentMetricConfig.show ? <>
+                    <span style={lbl}>{investmentMetricConfig.label} (optional)</span>
+                    <input style={inp} type="text" inputMode="decimal" placeholder={investmentMetricConfig.placeholder} value={investNav||""} onChange={e=>setInvestNav(cleanMoneyInput(e.target.value))}/>
+                  </> : null}
+                </div>
+                <div>
+                  <span style={lbl}>Paid from</span>
+                  <AccountChipGroup items={accounts} value={accId} onChange={setAccId} />
+                </div>
+              </div>
+            )}
+            {txnType==="settlement_in"&&(
+              <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                {refundPrefill&&(
+                  <div style={{ background:T.input,border:`1px solid ${T.info}33`,borderRadius:12,padding:"10px 12px" }}>
+                    <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:4 }}>↩ Refund linked to original expense</div>
+                    <div style={{ color:T.sub,fontSize:11 }}>{refundPrefill.desc||refundPrefill.merchant||"Expense"} · {sym}{fmt(refundPrefill.amount||0)}{refundPrefill.accId?` · ${getAcc(refundPrefill.accId).name}`:""}</div>
+                  </div>
+                )}
+                <div>
+                  <span style={lbl}>Tag this inflow as</span>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
+                    {[{id:"refund",label:"↩ Refund",color:T.text},{id:"repayment",label:"💰 Repayment",color:T.info}].map(opt=>(
+                      <button key={opt.id} onClick={()=>setSettlementKind(opt.id)} style={{ background:settlementKind===opt.id?opt.color+"22":"none",border:`1px solid ${settlementKind===opt.id?opt.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:settlementKind===opt.id?opt.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{opt.label}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <span style={lbl}>Link to contact (optional — only for people repayments)</span>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                    <button onClick={()=>{ setTagPerson(""); setSettlementKind("refund"); }} style={{ background:!tagPerson?"#88888822":"none",border:`1px solid ${!tagPerson?"#888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>No contact / merchant refund</button>
+                    {people.filter(p=>!p.isMe).map(p=><button key={p.id} onClick={()=>{ setTagPerson(p.id); setSettlementKind("repayment"); setRepaymentTouched(false); if(!who.trim()) setWho(p.name); }} style={{ background:tagPerson===p.id?p.color+"22":"none",border:`1px solid ${tagPerson===p.id?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagPerson===p.id?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+                  </div>
+                </div>
+                {settlementKind==="repayment"&&tagPerson&&(
+                  <div style={{ background:T.input,border:`1px solid ${T.info}33`,borderRadius:12,padding:"12px 14px" }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8 }}>
+                      <div>
+                        <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>Apply to original dues</div>
+                        <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Choose the dues this payment clears.</div>
+                      </div>
+                      <button onClick={()=>{ setRepaymentTouched(false); setRepaymentAllocations(buildRepaymentAllocations(amt)); }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap" }}>Auto</button>
+                    </div>
+                    {repaymentCandidates.length>0&&
+                      repaymentCandidates.map(item=>{
+                        const val = repaymentAllocations[item.key]||"";
+                        const applied = Math.min(Number(val||0), Number(item.amount||0));
+                        const status = applied<=0 ? "Not applied" : applied>=Number(item.amount||0)-0.01 ? "Will settle" : "Partly settle";
+                        return (
+                          <div key={item.key} style={{ display:"grid",gridTemplateColumns:"1fr 96px",gap:8,alignItems:"center",padding:"8px 0",borderTop:`1px solid ${T.border}` }}>
+                            <div style={{ minWidth:0 }}>
+                              <div style={{ color:T.text,fontSize:12,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{item.kind==="bill"?"🧾":"💸"} {item.title}</div>
+                              <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{item.subtitle||"pending"} · due {sym}{fmt(item.amount)} · {status}</div>
+                            </div>
+                            <input type="number" min="0" max={item.amount} value={val} onChange={e=>updateRepaymentAllocation(item.key,e.target.value,item.amount)} placeholder="0" style={{ ...inp,padding:"7px 8px",fontSize:13,textAlign:"right" }}/>
+                          </div>
+                        );
+                      })}
+                    <div style={{ color:repaymentExtra>0?T.warn:T.success,fontSize:11,fontWeight:700,marginTop:8 }}>Applied {sym}{fmt(repaymentAllocTotal)} of {sym}{fmt(amt)}{repaymentExtra>0?` · ${sym}${fmt(repaymentExtra)} extra kept as advance`:""}</div>
+                  </div>
+                )}
+                <div>
+                  <span style={lbl}>Received into</span>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                    {accounts.map(a=><button key={a.id} onClick={()=>setAccId(a.id)} style={{ background:accId===a.id?a.color+"22":"none",border:`1px solid ${accId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:accId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* CC EMI SECTION */}
+            {txnType==="cc_emi"&&(
+              <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+                {ccAccs.length===0&&(
+                  <div style={{ background:T.warn+"18",border:`1px solid ${T.warn}44`,borderRadius:10,padding:"10px 14px",color:T.text,fontSize:12 }}>⚠ No credit card accounts found. Add a CC account first.</div>
+                )}
+                {ccAccs.length>0&&(
+                  <>
+                    <div>
+                      <span style={lbl}>Credit card</span>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                        {ccAccs.map(a=>(
+                          <button key={a.id} onClick={()=>{ setCcEmiCardId(a.id); setCcEmiPlanId(""); setCcEmiNewPlanMode(false); }} style={{ background:ccEmiCardId===a.id?a.color+"22":"none",border:`1px solid ${ccEmiCardId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:ccEmiCardId===a.id?a.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{accIcon("cc")} {a.name}</button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {!ccEmiNewPlanMode&&(
+                      <div>
+                        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
+                          <span style={{ ...lbl,marginBottom:0 }}>EMI Plan</span>
+                          <button onClick={()=>{ setCcEmiNewPlanMode(true); setCcEmiPlanId(""); }} style={{ background:"none",border:`1px solid ${T.accent}`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ New Plan</button>
+                        </div>
+                        {activeCcEmiPlans.length===0&&(
+                          <div style={{ color:T.sub,fontSize:11,marginBottom:6 }}>No active plans for this card. Create a new plan to get started.</div>
+                        )}
+                        <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                          {activeCcEmiPlans.map(plan=>{
+                            const installedCount = txns.filter(t=>t.type==="cc_emi" && t.ccEmiPlanId===plan.id).length;
+                            const remaining = plan.tenure - installedCount;
+                            return (
+                              <button key={plan.id} onClick={()=>{ setCcEmiPlanId(plan.id); setAmount(String(plan.monthlyAmount||"")); }} style={{ background:ccEmiPlanId===plan.id?T.purple+"22":"none",border:`1px solid ${ccEmiPlanId===plan.id?T.purple:T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
+                                <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:2 }}>{plan.name}</div>
+                                <div style={{ color:T.sub,fontSize:10 }}>
+                                  {sym}{fmt(plan.monthlyAmount)}/mo · {plan.tenure} months · {installedCount}/{plan.tenure} recorded
+                                  {remaining>0?` · ${remaining} left`:" · ✅ complete"}
+                                  {plan.interestRate?` · ${plan.interestRate}% p.a.`:""}
+                                </div>
+                                {ccEmiPlanId===plan.id&&installedCount<plan.tenure&&(
+                                  <div style={{ marginTop:6,background:T.purple+"22",borderRadius:8,padding:"4px 8px",display:"inline-block",color:T.purple,fontSize:11,fontWeight:800 }}>
+                                    Recording installment {installedCount+1} of {plan.tenure}
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {ccEmiNewPlanMode&&(
+                      <div style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px" }}>
+                        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>New EMI Plan</div>
+                          <button onClick={()=>setCcEmiNewPlanMode(false)} style={{ background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:13,fontFamily:"Nunito,sans-serif" }}>✕ Cancel</button>
+                        </div>
+                        <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                          <div>
+                            <span style={lbl}>Item name (e.g. Samsung TV)</span>
+                            <input style={inp} placeholder="e.g. Samsung TV" value={ccEmiNewName} onChange={e=>setCcEmiNewName(e.target.value)}/>
+                          </div>
+                          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                            <div>
+                              <span style={lbl}>Total amount</span>
+                              <input style={inp} type="text" inputMode="decimal" placeholder="e.g. 60000" value={ccEmiNewTotal} onChange={e=>{ const v=cleanMoneyInput(e.target.value); setCcEmiNewTotal(v); if(ccEmiNewTenure){ const t=parseInt(ccEmiNewTenure,10); if(t>0) setCcEmiNewMonthly(String(Math.round((parseMoney(v)||0)/t))); } }}/>
+                            </div>
+                            <div>
+                              <span style={lbl}>Tenure (months)</span>
+                              <input style={inp} type="number" min="1" placeholder="e.g. 6" value={ccEmiNewTenure} onChange={e=>{ setCcEmiNewTenure(e.target.value); const t=parseInt(e.target.value,10); if(t>0&&ccEmiNewTotal) setCcEmiNewMonthly(String(Math.round((parseMoney(ccEmiNewTotal)||0)/t))); }}/>
+                            </div>
+                          </div>
+                          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                            <div>
+                              <span style={lbl}>Monthly EMI amount</span>
+                              <input style={inp} type="text" inputMode="decimal" placeholder="auto-calculated" value={ccEmiNewMonthly} onChange={e=>setCcEmiNewMonthly(cleanMoneyInput(e.target.value))}/>
+                            </div>
+                            <div>
+                              <span style={lbl}>Interest rate % (optional)</span>
+                              <input style={inp} type="number" min="0" step="0.01" placeholder="e.g. 14" value={ccEmiNewRate} onChange={e=>setCcEmiNewRate(e.target.value)}/>
+                            </div>
+                          </div>
+                          {ccEmiNewMonthly&&<div style={{ color:T.sub,fontSize:10 }}>First installment amount: {sym}{fmt(parseMoney(ccEmiNewMonthly)||0)}</div>}
+                        </div>
+                      </div>
+                    )}
+
+                    {(ccEmiPlanId||ccEmiNewPlanMode)&&(
+                      <div>
+                        <span style={lbl}>Category (optional)</span>
+                        <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                          <button onClick={()=>{ setCatIds([]); setSubIds([]); }} style={{ background:!catIds.length?"#88888822":"none",border:`1px solid ${!catIds.length?"#888":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>❓ None</button>
+                          {cats.map(c=>(
+                            <button key={c.id} onClick={()=>{ const newIds=catIds.includes(c.id)?catIds.filter(x=>x!==c.id):[c.id]; setCatIds(newIds); setSubIds([]); }} style={{ background:catIds.includes(c.id)?c.color+"22":"none",border:`1px solid ${catIds.includes(c.id)?c.color:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:catIds.includes(c.id)?c.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.icon} {c.name.split(" ")[0]}</button>
+                          ))}
+                        </div>
+                        {catIds.length>0&&cats.filter(c=>catIds.includes(c.id)&&c.subs?.length).map(c=>(
+                          <div key={c.id} style={{ marginTop:8 }}>
+                            <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
+                              {c.subs.map(s=><Chip key={s.id} color={c.color} active={subIds.includes(s.id)} onClick={()=>setSubIds(prev=>prev.includes(s.id)?prev.filter(x=>x!==s.id):[...prev,s.id])}>{s.name}</Chip>)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* STEP 4 — CATEGORY (expense only) */}
+            {txnType==="expense"&&(
+              <div>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:6 }}>
+                  <span style={{ ...lbl,marginBottom:0 }}>Categories (select one or more)</span>
+                  <button
+                    onClick={()=>setShowQuickCategoryAdd(v=>!v)}
+                    title="Add category or subcategory"
+                    style={{
+                      width:28,
+                      height:28,
+                      borderRadius:"50%",
+                      border:`1px solid ${T.accent}55`,
+                      background:showQuickCategoryAdd?T.accentSoft:"none",
+                      color:T.accent,
+                      cursor:"pointer",
+                      fontSize:18,
+                      fontWeight:800,
+                      lineHeight:1,
+                      fontFamily:"Nunito,sans-serif"
+                    }}
+                  >
+                    +
+                  </button>
+                </div>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                  <button onClick={()=>{ setCategoryTouched(true); setCatIds([]); setSubIds([]); setCatAllocations({}); }} style={{ background:!catId?"#88888822":"none",border:`1px solid ${!catId?"#888888":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:!catId?"#888888":T.sub,fontFamily:"Nunito,sans-serif" }}>❓ None</button>
+                  {cats.map(c=>(
+                    <button key={c.id} onClick={()=>{ setCategoryTouched(true); const existingValidIds=catIds.filter(id=>getCat(id)); const newIds=existingValidIds.includes(c.id)?existingValidIds.filter(x=>x!==c.id):[...existingValidIds,c.id]; setCatIds(newIds); setSubIds(prev=>prev.filter(sid=>newIds.some(cid=>getCat(cid)?.subs?.find(s=>s.id===sid)))); setCatAllocations(()=>buildEqualCategoryAllocations(newIds, amt)); }} style={{ background:catIds.includes(c.id)?c.color+"22":"none",border:`1px solid ${catIds.includes(c.id)?c.color:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:catIds.includes(c.id)?c.color:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>{c.icon} {c.name.split(" ")[0]}</button>
+                  ))}
+                </div>
+                {showQuickCategoryAdd && (
+                  <div style={{ marginTop:10,background:T.input,border:`1px dashed ${T.border}`,borderRadius:10,padding:10 }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8 }}>
+                      <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Quick add category / subcategory</div>
+                      <button onClick={()=>setShowQuickCategoryAdd(false)} style={{ background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:12,fontFamily:"Nunito,sans-serif" }}>✕</button>
+                    </div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr auto",gap:8 }}>
+                      <input
+                        style={{ ...inpSm,minWidth:0 }}
+                        placeholder="New category name"
+                        value={quickCatName}
+                        onChange={e=>setQuickCatName(e.target.value)}
+                        onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); addQuickCategory(); } }}
+                      />
+                      <button onClick={addQuickCategory} style={{ ...btnG,padding:"8px 10px",fontSize:11 }}>+ Category</button>
+                    </div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr auto",gap:8,marginTop:8 }}>
+                      <input
+                        style={{ ...inpSm,minWidth:0 }}
+                        placeholder={catIds.length>0 ? `Subcategory for ${getCat(catId || catIds[0])?.name || "selected category"}` : "Optional starter subcategory"}
+                        value={quickSubName}
+                        onChange={e=>setQuickSubName(e.target.value)}
+                        onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); catIds.length>0 ? addQuickSubcategory() : addQuickCategory(); } }}
+                      />
+                      <button onClick={catIds.length>0 ? addQuickSubcategory : addQuickCategory} style={{ ...btnG,padding:"8px 10px",fontSize:11 }}>
+                        {catIds.length>0 ? "+ Sub" : "+ Add"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {catIds.length>0&&(
+                  <div style={{ marginTop:8 }}>
+                    {catIds.map(cid=>{ const c=getCat(cid); if(!c.subs?.length) return null; return (
+                      <div key={cid} style={{ marginBottom:6 }}>
+                        <div style={{ color:c.color,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:4 }}>{c.icon} {c.name}</div>
+                        <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
+                          {c.subs.map(s=><Chip key={s.id} color={c.color} active={subIds.includes(s.id)} onClick={()=>{ setCategoryTouched(true); setSubIds(prev=>prev.includes(s.id)?prev.filter(x=>x!==s.id):[...prev,s.id]); }}>{s.name}</Chip>)}
+                        </div>
+                      </div>
+                    ); })}
+                  </div>
+                )}
+
+                {catIds.length>1 && (
+                  <div style={{ marginTop:10, background:T.input, borderRadius:10, padding:10 }}>
+                    <div style={{ color:T.sub, fontSize:10, fontWeight:700, letterSpacing:1, marginBottom:8 }}>Split amount across selected categories</div>
+                    {catIds.map(cid=>{
+                      const c=getCat(cid);
+                      return (
+                        <div key={cid} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:6 }}>
+                          <span style={{ flex:1, color:c.color, fontSize:12, fontWeight:700 }}>{c.icon} {c.name.split(" ")[0]}</span>
+                          <input style={{ ...inpSm, width:90, textAlign:"right" }} type="number" min="0" value={catAllocations[cid]||""} placeholder="0" onChange={e=>{ setLastEditedCatId(cid); setCatAllocations(prev=>updateCategoryAllocation(catIds,cid,e.target.value,amt,prev)); }}/>
+                        </div>
+                      );
+                    })}
+                    <div style={{ color:T.sub, fontSize:10 }}>Total must equal transaction amount to enforce exact split.</div>
+                  </div>
+                )}
+
+                <div style={{ marginTop:10, background:T.input, borderRadius:10, padding:10 }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                    <div style={{ color:T.sub, fontSize:10, fontWeight:700, letterSpacing:1 }}>Items (beta)</div>
+                    <button onClick={()=>setUseItemizedLines(v=>!v)} style={{ background:useItemizedLines?T.accent+"22":"none",border:`1px solid ${useItemizedLines?T.accent:T.border}`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:useItemizedLines?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{useItemizedLines?"ON":"OFF"}</button>
+                  </div>
+                  <div style={{ color:T.sub,fontSize:10,marginBottom:8 }}>Add item lines first, then optionally split units by person or group.</div>
+                  {useItemizedLines&&(
+                    <>
+                      {lineItems.map(item=>{
+                        const itemTotal = lineItemAmount(item);
+                        const itemCat = item.catId ? getCat(item.catId) : null;
+                        const itemSubs = itemCat?.subs || [];
+                        const splitQty = lineSplitQtyTotal(item);
+                        const itemQtyNum = Math.max(0, parseFloat(item.qty)||0);
+                        const qtyOver = splitQty > itemQtyNum + 0.0001;
+                        const remainingQty = Math.max(0, itemQtyNum - splitQty);
+                        return (
+                          <div key={item.id} style={{ border:`1px solid ${T.border}`,borderRadius:10,padding:10,marginBottom:10,background:T.card||T.input }}>
+                            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
+                              <span style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>Item details</span>
+                              <span style={{ display:"inline-flex",alignItems:"center",gap:6,padding:"3px 0" }}>
+                                <span style={{ color:T.sub,fontSize:9,fontWeight:600,letterSpacing:0.3 }}>Amount</span>
+                                <span style={{ color:T.accent,fontSize:14,fontWeight:500,lineHeight:1 }}>{sym}{fmt(itemTotal)}</span>
+                              </span>
+                            </div>
+                            <div style={{ display:"grid",gridTemplateColumns:"1.2fr 0.7fr 0.8fr auto",gap:7,marginBottom:4,color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.4 }}>
+                              <span>Name</span>
+                              <span style={{ textAlign:"right" }}>Qty</span>
+                              <span style={{ textAlign:"right" }}>Unit price</span>
+                              <span></span>
+                            </div>
+                            <div style={{ display:"grid",gridTemplateColumns:"1.2fr 0.7fr 0.8fr auto",gap:7,marginBottom:8 }}>
+                              <input style={{ ...inpSm,marginBottom:0 }} placeholder="item" value={item.label} onChange={e=>updateLineItem(item.id,"label",e.target.value)}/>
+                              <input style={{ ...inpSm,marginBottom:0,textAlign:"right" }} type="number" min="0" placeholder="qty" value={item.qty} onChange={e=>updateLineItem(item.id,"qty",e.target.value)}/>
+                              <input style={{ ...inpSm,marginBottom:0,textAlign:"right" }} type="number" min="0" placeholder="unit" value={item.unitPrice} onChange={e=>updateLineItem(item.id,"unitPrice",e.target.value)}/>
+                              <button onClick={()=>removeLineItem(item.id)} disabled={lineItems.length<=1} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"0 8px",cursor:lineItems.length<=1?"not-allowed":"pointer",fontSize:14,color:T.sub,fontFamily:"Nunito,sans-serif",opacity:lineItems.length<=1?0.5:1 }}>×</button>
+                            </div>
+                            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,alignItems:"center" }}>
+                              <select style={{ ...inpSm,marginBottom:0 }} value={item.catId} onChange={e=>updateLineItem(item.id,"catId",e.target.value)}>
+                                <option value="">category</option>
+                                {cats.map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+                              </select>
+                              <select style={{ ...inpSm,marginBottom:0 }} value={item.subId||""} onChange={e=>updateLineItem(item.id,"subId",e.target.value)}>
+                                <option value="">subcategory</option>
+                                {itemSubs.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                              </select>
+                            </div>
+                            <div style={{ marginTop:9, background:T.bg, border:`1px dashed ${qtyOver?T.danger:T.border}`, borderRadius:8, padding:8 }}>
+                              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
+                                <span style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>Unit split (optional)</span>
+                                <button onClick={()=>addLineSplit(item.id)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"2px 8px",cursor:"pointer",fontSize:10,color:T.sub,fontFamily:"Nunito,sans-serif",fontWeight:700 }}>+ split</button>
+                              </div>
+                              {(item.splits||[]).length>0 && (
+                                <div style={{ display:"grid",gridTemplateColumns:"auto 1fr 0.7fr auto",gap:7,alignItems:"center",marginBottom:5,color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.4 }}>
+                                  <span>Type</span>
+                                  <span>Target</span>
+                                  <span style={{ textAlign:"right" }}>Qty</span>
+                                  <span></span>
+                                </div>
+                              )}
+                              {(item.splits||[]).map(split=>{
+                                const targets = split.targetType==="group" ? groups : people.filter(p=>!p.isMe);
+                                return (
+                                  <div key={split.id} style={{ display:"grid",gridTemplateColumns:"auto 1fr 0.7fr auto",gap:7,alignItems:"center",marginBottom:6 }}>
+                                    <button onClick={()=>updateLineSplit(item.id,split.id,"targetType",split.targetType==="person"?"group":"person")} style={{ background:split.targetType==="person"?T.accent+"22":"none",border:`1px solid ${split.targetType==="person"?T.accent:T.border}`,borderRadius:8,padding:"5px 7px",cursor:"pointer",fontSize:10,fontWeight:700,color:split.targetType==="person"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{split.targetType==="person"?"Person":"Group"}</button>
+                                    <select style={{ ...inpSm,marginBottom:0 }} value={split.targetId||""} onChange={e=>updateLineSplit(item.id,split.id,"targetId",e.target.value)}>
+                                      <option value="">select {split.targetType}</option>
+                                      {targets.map(target=><option key={target.id} value={target.id}>{target.emoji||target.icon} {target.name}</option>)}
+                                    </select>
+                                    <input style={{ ...inpSm,marginBottom:0,textAlign:"right" }} type="number" min="0" placeholder="qty" value={split.qty} onChange={e=>updateLineSplit(item.id,split.id,"qty",e.target.value)}/>
+                                    <button onClick={()=>removeLineSplit(item.id,split.id)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"0 8px",cursor:"pointer",fontSize:13,color:T.sub,fontFamily:"Nunito,sans-serif" }}>×</button>
+                                  </div>
+                                );
+                              })}
+                              {(item.splits||[]).length===0 && (
+                                <div style={{ color:T.sub,fontSize:10 }}>No split rows yet. Use + split to allocate this item to people or groups.</div>
+                              )}
+                              <div style={{ color:qtyOver?T.danger:T.sub,fontSize:10,fontWeight:700 }}>
+                                Allocated qty: {fmt(splitQty)} / {fmt(itemQtyNum)} • Remaining: {fmt(remainingQty)}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
+                        <button onClick={addLineItem} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:8,padding:"4px 10px",cursor:"pointer",fontSize:11,color:T.accent,fontFamily:"Nunito,sans-serif",fontWeight:700 }}>+ item</button>
+                        <span style={{ color:Math.abs(lineItemsTotal-amt)<0.01?T.success:T.text,fontSize:13,fontWeight:800 }}>Items total: {sym}{fmt(lineItemsTotal)}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* STEP 5 — SPLIT / TAG / NONE */}
+            {txnType==="expense"&&(
+              <div>
+                <span style={lbl}>How to track this expense</span>
+                <div style={{ display:"flex",gap:8,marginBottom:8 }}>
+                  {[["unified","🧩","Txn break up"],["none","🚫","None"]].map(([v,ic,lb])=>(
+                    <button key={v} onClick={()=>setSplitMode(v)} style={{ flex:1,background:splitMode===v?T.accent+"22":"none",border:`1px solid ${splitMode===v?T.accent:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:10,fontWeight:700,color:splitMode===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:2 }}>
+                      <span style={{ fontSize:16 }}>{ic}</span>{lb}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+                  <div style={{ color:T.sub,fontSize:10 }}>{splitMode==="unified"?"Recommended: Txn break up handles split, tag and attribute in one table.":"No people/group tracking for this expense."}</div>
+                  <button onClick={()=>setShowAdvancedTracking(v=>!v)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>{showAdvancedTracking?"Hide advanced":"Advanced"}</button>
+                </div>
+                {showAdvancedTracking&&(
+                  <div style={{ display:"flex",gap:8,marginBottom:12 }}>
+                    {[["split","⚖️","Split"],["tag","👤","Tag"],["allocate","📋","Allocate"]].map(([v,ic,lb])=>(
+                      <button key={v} onClick={()=>setSplitMode(v)} style={{ flex:1,background:splitMode===v?T.accent+"22":"none",border:`1px solid ${splitMode===v?T.accent:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:10,fontWeight:700,color:splitMode===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:2 }}>
+                        <span style={{ fontSize:16 }}>{ic}</span>{lb}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* SPLIT UI */}
+                {splitMode==="split"&&(
+                  <div>
+                    {groups.length>0&&(
+                      <div style={{ marginBottom:10 }}>
+                        <span style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"block",marginBottom:6 }}>Select Group (leave people unselected for collective group due)</span>
+                        <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                          <Chip color={T.sub} active={!splitGroup} onClick={()=>{setSplitGroup("");setSplitPeople({});}}>None</Chip>
+                          {groups.map(g=><Chip key={g.id} color={g.color} active={splitGroup===g.id} onClick={()=>handleGroupSelect(g.id)}>{g.icon} {g.name}</Chip>)}
+                        </div>
+                      </div>
+                    )}
+                    <span style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"block",marginBottom:6 }}>People in split</span>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
+                      {people.filter(p=>!p.isMe).map(p=>(
+                        <button key={p.id} onClick={()=>setSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:splitPeople[p.id]?p.color+"22":"none",border:`1px solid ${splitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:splitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                      ))}
+                    </div>
+
+                    {selectedPids.length>0&&(
+                      <>
+                        <div style={{ display:"flex",gap:6,marginBottom:10 }}>
+                          {[["equally","= Equal"],["amount","₹ Amount"],["percent","% Percent"],["share","⚖️ Share"]].map(([v,lb])=>(
+                            <Chip key={v} color={T.accent} active={splitCalc===v} onClick={()=>setSplitCalc(v)}>{lb}</Chip>
+                          ))}
+                        </div>
+                        {(()=>{
+                          const shares=calcShares();
+                          const othersTotal=Object.values(shares).reduce((s,v)=>s+v,0);
+                          const splitOver = splitCalc==="amount" && othersTotal > amt+0.01;
+                          const splitPctOver = splitCalc==="percent" && selectedPids.reduce((s,pid)=>s+(parseFloat(splitCustom[pid])||0),0) > 100.01;
+                          return (splitOver||splitPctOver) ? <div style={{ color:T.danger,fontSize:11,fontWeight:700,marginBottom:6 }}>⚠ {splitCalc==="percent"?"Percentages exceed 100%":`Split total ${sym}${fmt(othersTotal)} exceeds bill ${sym}${fmt(amt)}`}</div> : null;
+                        })()}
+                        <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:10 }}>
+                          {/* Me toggle */}
+                          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}`,marginBottom:6 }}>
+                            <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                              <input type="checkbox" id="include_me" checked={includeMeInSplit} onChange={e=>setIncludeMeInSplit(e.target.checked)} style={{ width:16,height:16,accentColor:T.accent,cursor:"pointer" }}/>
+                              <label htmlFor="include_me" style={{ color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>🧑 Include me in split</label>
+                            </div>
+                            {includeMeInSplit&&(()=>{ const shares=calcShares(); const myS=amt-Object.values(shares).reduce((s,v)=>s+v,0); return <span style={{ color:myS<-0.01?T.danger:T.accent,fontSize:12,fontWeight:700 }}>{sym}{fmt(Math.max(0,myS))}</span>; })()}
+                          </div>
+                          {selectedPids.map(pid=>{
+                            const p=getPerson(pid);
+                            const shares=calcShares();
+                            const preview=shares[pid]||0;
+                            const isDependent=p.personType==="dependant";
+                            const willCollect=collectMap[pid]!==undefined?collectMap[pid]:!isDependent;
+                            const othersAmt=splitCalc==="amount"?selectedPids.filter(x=>x!==pid).reduce((s,x)=>s+(parseFloat(splitCustom[x])||0),0):0;
+                            const maxForPid=splitCalc==="amount"?Math.max(0,amt-othersAmt):undefined;
+                            const inputOver=splitCalc==="amount"&&(parseFloat(splitCustom[pid])||0)>amt+0.01;
+                            const pctOver=splitCalc==="percent"&&(parseFloat(splitCustom[pid])||0)>100.01;
+                            return (
+                              <div key={pid} style={{ marginBottom:8 }}>
+                                <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
+                                  <span style={{ color:T.text,fontSize:12,flex:1 }}>{p.emoji} {p.name}</span>
+                                  {splitCalc==="amount"&&<>
+                                    <input type="number" placeholder="0" value={splitCustom[pid]||""} onChange={e=>{
+                                      let v=e.target.value;
+                                      if(v!==""&&maxForPid!==undefined&&parseFloat(v)>maxForPid+0.01) v=String(Math.round(maxForPid*100)/100);
+                                      setSplitCustom(prev=>({...prev,[pid]:v}));
+                                    }} style={{ ...inpSm,width:60,textAlign:"right",borderColor:inputOver?T.danger:undefined }}/>
+                                    {maxForPid>0&&<button onClick={()=>setSplitCustom(prev=>({...prev,[pid]:String(Math.round(maxForPid*100)/100)}))} title="Fill remainder" style={{ background:T.accent+"22",border:`1px solid ${T.accent}`,borderRadius:10,padding:"2px 6px",cursor:"pointer",fontSize:10,color:T.accent,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap" }}>↩ {sym}{fmt(maxForPid)}</button>}
+                                  </>}
+                                  {splitCalc!=="equally"&&splitCalc!=="amount"&&<input type="number" placeholder={splitCalc==="percent"?"%":"shares"} max={splitCalc==="percent"?100:undefined} value={splitCustom[pid]||""} onChange={e=>setSplitCustom(prev=>({...prev,[pid]:e.target.value}))} style={{ ...inpSm,width:70,textAlign:"right",borderColor:pctOver?T.danger:undefined }}/>}
+                                  <span style={{ color:preview>amt+0.01?T.danger:T.accent,fontSize:12,fontWeight:700,minWidth:60,textAlign:"right" }}>{sym}{fmt(preview)}</span>
+                                </div>
+                                <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                                  <input type="checkbox" id={`collect_${pid}`} checked={willCollect} onChange={e=>setCollectMap(prev=>({...prev,[pid]:e.target.checked}))} style={{ width:16,height:16,accentColor:T.accent,cursor:"pointer" }}/>
+                                  <label htmlFor={`collect_${pid}`} style={{ color:T.sub,fontSize:11,cursor:"pointer" }}>Collect from {p.name}?</label>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* ALLOCATE UI */}
+                {(splitMode==="allocate" || splitMode==="unified")&&(()=>{
+                  const isUnified = splitMode==="unified";
+                  const lineMap = Object.fromEntries((lineItems||[]).map(item=>[item.id,item]));
+                  const lineUnit = item=>{
+                    const qty = Math.max(0, parseFloat(item?.qty)||0);
+                    const unit = Math.max(0, parseFloat(item?.unitPrice)||0);
+                    return qty>0 ? unit : 0;
+                  };
+                  const rowItemAmount = i=>{
+                    if(i?.sourceItemId){
+                      const src = lineMap[i.sourceItemId];
+                      return Math.max(0, parseFloat(i.qty)||0) * lineUnit(src);
+                    }
+                    return Math.max(0, parseFloat(i?.amount)||0);
+                  };
+                  const rowEffAmt = r => r.items?.length ? r.items.reduce((s,i)=>s+rowItemAmount(i),0) : parseFloat(r.amount)||0;
+                  const allocTotal = allocRows.reduce((s,r)=>s+rowEffAmt(r),0);
+                  const myRemainder = Math.max(0, amt - allocTotal);
+                  const addPersonRow = ()=>setAllocTargetPicker({ rowId:null, targetType:"person" });
+                  const addGroupRow = ()=>setAllocTargetPicker({ rowId:null, targetType:"group" });
+                  const updateRow = (id,field,val)=>setAllocRows(prev=>prev.map(r=>{
+                    if(r.id!==id) return r;
+                    if(field==="amount"){
+                      const n = parseFloat(val);
+                      return { ...r, amount:val===""?"":String(Math.max(0,Number.isFinite(n)?n:0)) };
+                    }
+                    return { ...r, [field]:val };
+                  }));
+                  const removeRow = id=>setAllocRows(prev=>prev.filter(r=>r.id!==id));
+                  const toggleItems = id=>setAllocRows(prev=>prev.map(r=>r.id===id?{...r,showItems:!r.showItems}:r));
+                  const remainingQtyFor = (rows,rowId,sourceItemId,currentItemId=null)=>{
+                    const bought = Math.max(0, parseFloat(lineMap[sourceItemId]?.qty)||0);
+                    const allocatedElse = rows.reduce((sum,row)=>sum + (row.items||[]).reduce((inner,item)=>{
+                      if(item?.sourceItemId!==sourceItemId) return inner;
+                      if(row.id===rowId && currentItemId && item.id===currentItemId) return inner;
+                      return inner + Math.max(0, parseFloat(item.qty)||0);
+                    },0),0);
+                    return Math.max(0, bought - allocatedElse);
+                  };
+                  const addItem = rowId=>setAllocRows(prev=>{
+                    const firstSource = (lineItems||[]).find(li=>Math.max(0,parseFloat(li.qty)||0)>0)?.id || "";
+                    return prev.map(r=>r.id===rowId?{...r,items:[...(r.items||[]),{id:genId(),sourceItemId:firstSource,qty:"",label:"",amount:""}],showItems:true}:r);
+                  });
+                  const removeItem = (rowId,iid)=>setAllocRows(prev=>prev.map(r=>r.id===rowId?{...r,items:(r.items||[]).filter(i=>i.id!==iid)}:r));
+                  const updateItem = (rowId,iid,field,val)=>setAllocRows(prev=>prev.map(r=>r.id===rowId?{...r,items:(r.items||[]).map(i=>{
+                    if(i.id!==iid) return i;
+                    if(field==="sourceItemId"){
+                      const nextId = val || "";
+                      const maxQty = nextId ? remainingQtyFor(prev,rowId,nextId,i.id) : 0;
+                      const currentQty = Math.max(0, parseFloat(i.qty)||0);
+                      return { ...i, sourceItemId:nextId, qty:String(Math.min(currentQty,maxQty)||"") };
+                    }
+                    if(field==="qty"){
+                      if(val==="") return { ...i, qty:"" };
+                      const n = Math.max(0, parseFloat(val)||0);
+                      const maxQty = i.sourceItemId ? remainingQtyFor(prev,rowId,i.sourceItemId,i.id) : 0;
+                      return { ...i, qty:String(Math.min(n,maxQty)) };
+                    }
+                    return { ...i, [field]:val };
+                  })}:r));
+                  const modeCycle = m=>m==="spent_on"?"owes":m==="owes"?"i_owe":"spent_on";
+                  const modeColor = m=>m==="spent_on"?T.sub:m==="owes"?T.success:T.danger;
+                  const modeShort = m=>m==="owes"?"C":m==="i_owe"?"O":"A";
+                  const rowModes = allocRows.filter(r=>r.targetId).map(r=>r.mode);
+                  const hasCollect = rowModes.includes("owes");
+                  const hasAttribute = rowModes.includes("spent_on");
+                  const hasIOwe = rowModes.includes("i_owe");
+                  return (
+                    <div>
+                      <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>{isUnified?"Txn break up: one table for split, tag and attribute. Choose target + amount + intent.":"Allocate portions of this bill to people or groups. Remainder stays with you."}</div>
+                      {isUnified&&(
+                        <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                          <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Derived:</span>
+                          {hasCollect&&<span style={{ background:T.success+"22",color:T.success,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700 }}>Split</span>}
+                          {hasAttribute&&<span style={{ background:T.info+"22",color:T.info,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700 }}>Tag/Attribute</span>}
+                          {hasIOwe&&<span style={{ background:T.danger+"22",color:T.danger,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700 }}>I Owe</span>}
+                          {!hasCollect&&!hasAttribute&&!hasIOwe&&<span style={{ color:T.sub,fontSize:10 }}>No allocations yet</span>}
+                        </div>
+                      )}
+                      {allocRows.map(row=>{
+                        const isP = row.targetType==="person";
+                        const target = isP ? getPerson(row.targetId) : groups.find(g=>g.id===row.targetId);
+                        const tColor = target?.color||T.sub;
+                        const hasItems = (row.items||[]).length > 0;
+                        const itemsTotal = (row.items||[]).reduce((s,i)=>s+rowItemAmount(i),0);
+                        return (
+                          <div key={row.id} style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:9 }}>
+                            <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                              <button onClick={()=>setAllocTargetPicker({ rowId:row.id, targetType:row.targetType })} style={{ flex:1,background:T.card,border:`1px solid ${tColor}55`,borderRadius:10,padding:"8px 10px",color:tColor,fontSize:12,fontWeight:800,fontFamily:"Nunito,sans-serif",minWidth:0,textAlign:"left",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer" }}>
+                                {target ? `${target.emoji||target.icon||""} ${target.name}` : (isP?"Person":"Group")}
+                              </button>
+                              {hasItems
+                                ? <span style={{ color:itemsTotal>0?T.accent:T.sub,fontSize:14,fontWeight:500,minWidth:92,textAlign:"right",padding:"6px 0",flexShrink:0 }}>{sym}{fmt(itemsTotal)}</span>
+                                : <input type="number" min="0" placeholder={sym} value={row.amount} onChange={e=>updateRow(row.id,"amount",e.target.value)} style={{ ...inp,width:102,marginBottom:0,flex:"none",textAlign:"right",padding:"9px 10px",fontSize:15,fontWeight:800 }}/>
+                              }
+                              <button onClick={()=>updateRow(row.id,"mode",modeCycle(row.mode))} title={row.mode==="owes"?"Collect":(row.mode==="i_owe"?"I Owe":"Attribute")} style={{ background:modeColor(row.mode)+"22",border:`1px solid ${modeColor(row.mode)}`,borderRadius:10,padding:"7px 10px",cursor:"pointer",fontSize:14,fontWeight:900,color:modeColor(row.mode),fontFamily:"Nunito,sans-serif",lineHeight:1,flexShrink:0,minWidth:40 }}>{modeShort(row.mode)}</button>
+                              <button onClick={()=>toggleItems(row.id)} title="Itemise for this target" style={{ background:hasItems?T.accent+"22":"none",border:`1px solid ${hasItems?T.accent:T.border}`,borderRadius:20,padding:"4px 7px",cursor:"pointer",fontSize:11,color:hasItems?T.accent:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>📋</button>
+                              <button onClick={()=>removeRow(row.id)} title="Remove this person or group from the breakup" style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Remove</button>
+                            </div>
+                            {row.showItems&&(
+                              <div style={{ marginTop:8,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
+                                {(row.items||[]).map(item=>{
+                                  const maxQty = item.sourceItemId ? remainingQtyFor(allocRows,row.id,item.sourceItemId,item.id) : 0;
+                                  const itemAmt = rowItemAmount(item);
+                                  return (
+                                  <div key={item.id}>
+                                    <div style={{ display:"grid",gridTemplateColumns:"1.1fr 0.45fr auto auto",gap:6,alignItems:"center",marginBottom:3 }}>
+                                      <select value={item.sourceItemId||""} onChange={e=>updateItem(row.id,item.id,"sourceItemId",e.target.value)} style={{ ...inp,marginBottom:0,fontSize:11,padding:"6px 8px" }}>
+                                        <option value="">select bought item</option>
+                                        {(lineItems||[]).filter(li=>Math.max(0,parseFloat(li.qty)||0)>0 && (li.label||"").trim()).map(li=>{
+                                          const boughtQty = Math.max(0,parseFloat(li.qty)||0);
+                                          const leftQty = remainingQtyFor(allocRows,row.id,li.id,item.id);
+                                          return <option key={li.id} value={li.id}>{li.label} (bought {fmt(boughtQty)} • left {fmt(leftQty)})</option>;
+                                        })}
+                                      </select>
+                                      <input type="number" min="0" max={maxQty} placeholder="qty" value={item.qty||""} onChange={e=>updateItem(row.id,item.id,"qty",e.target.value)} style={{ ...inp,width:"100%",marginBottom:0,textAlign:"right",fontSize:11,padding:"6px 8px",flex:"none" }}/>
+                                      <span style={{ color:itemAmt>0?T.accent:T.sub,fontSize:12,fontWeight:800,minWidth:70,textAlign:"right" }}>{sym}{fmt(itemAmt)}</span>
+                                      <button onClick={()=>removeItem(row.id,item.id)} style={{ background:"none",border:"none",cursor:"pointer",color:T.sub,fontSize:14,padding:"0 3px",lineHeight:1 }}>×</button>
+                                    </div>
+                                    <div style={{ color:T.sub,fontSize:10,marginBottom:6 }}>You can add up to {fmt(maxQty)} more qty for this selected item in this line.</div>
+                                  </div>
+                                );})}
+                                <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:2 }}>
+                                  <button onClick={()=>addItem(row.id)} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ item</button>
+                                  {hasItems&&itemsTotal>0&&<span style={{ color:T.sub,fontSize:11 }}>= {sym}{fmt(itemsTotal)}</span>}
+                                </div>
+                                {!(lineItems||[]).some(li=>Math.max(0,parseFloat(li.qty)||0)>0 && (li.label||"").trim())&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>Add bought items above first, then itemise here.</div>}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <div style={{ display:"flex",gap:8,marginBottom:10 }}>
+                        <button onClick={addPersonRow} style={{ flex:1,background:"none",border:`1px dashed #ec4899`,borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:12,color:"#ec4899",fontFamily:"Nunito,sans-serif",fontWeight:700 }}>+ Person</button>
+                        <button onClick={addGroupRow} style={{ flex:1,background:"none",border:`1px dashed #3b82f6`,borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:12,color:"#3b82f6",fontFamily:"Nunito,sans-serif",fontWeight:700 }}>+ Group</button>
+                      </div>
+                      {amt>0&&<div style={{ background:T.input,borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                        <span style={{ color:T.sub,fontSize:12 }}>🧑 Yours (remainder)</span>
+                        <span style={{ color:allocTotal>amt+0.01?T.danger:T.accent,fontSize:14,fontWeight:800 }}>{sym}{fmt(myRemainder)}{allocTotal>amt+0.01&&" ⚠"}</span>
+                      </div>}
+                      {allocTargetPicker&&(()=>{
+                        const pickerRow = allocRows.find(r=>r.id===allocTargetPicker.rowId);
+                        const pickerType = allocTargetPicker.targetType || pickerRow?.targetType || "person";
+                        const pickerTargets = pickerType==="person" ? people.filter(p=>!p.isMe) : groups;
+                        return (
+                          <div style={{ position:"fixed",inset:0,zIndex:1200,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",padding:14 }} onClick={()=>setAllocTargetPicker(null)}>
+                            <div style={{ width:"min(680px,96vw)",maxHeight:"86vh",overflow:"auto",background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:14 }} onClick={e=>e.stopPropagation()}>
+                              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+                                <div style={{ color:T.text,fontSize:16,fontWeight:800 }}>Select target</div>
+                                <button onClick={()=>setAllocTargetPicker(null)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:12,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
+                              </div>
+                              <div style={{ display:"flex",gap:8,marginBottom:12 }}>
+                                {[["person","👤 Person"],["group","👥 Group"]].map(([type,label])=>(
+                                  <button key={type} onClick={()=>setAllocTargetPicker(prev=>prev?{...prev,targetType:type}:prev)} style={{ flex:1,background:pickerType===type?T.accent+"22":"none",border:`1px solid ${pickerType===type?T.accent:T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:12,fontWeight:800,color:pickerType===type?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
+                                ))}
+                              </div>
+                              <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:8 }}>
+                                {pickerTargets.map(target=>{
+                                  const active = Boolean(pickerRow) && pickerRow.targetId===target.id && pickerRow.targetType===pickerType;
+                                  const c = target.color||T.accent;
+                                  return (
+                                    <button key={target.id} onClick={()=>{
+                                      if(pickerRow){
+                                        updateRow(pickerRow.id,"targetType",pickerType);
+                                        updateRow(pickerRow.id,"targetId",target.id);
+                                      } else {
+                                        setAllocRows(prev=>[...prev,{id:genId(),targetType:pickerType,targetId:target.id,amount:"",mode:pickerType==="group"?"owes":"spent_on",items:[],showItems:false}]);
+                                      }
+                                      setAllocTargetPicker(null);
+                                    }} style={{ background:active?c+"22":T.input,border:`1px solid ${active?c:T.border}`,borderRadius:10,padding:"12px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
+                                      <div style={{ color:active?c:T.text,fontSize:13,fontWeight:800 }}>{target.emoji||target.icon} {target.name}</div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                              {!pickerTargets.length&&<div style={{ color:T.sub,fontSize:12 }}>No {pickerType}s available yet.</div>}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })()}
+
+                {/* TAG UI */}
+                {splitMode==="tag"&&(
+                  <div>
+                    <span style={{ color:T.sub,fontSize:11,display:"block",marginBottom:8 }}>Tag this expense to</span>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
+                      {["person","group","both","itemize"].map(mode=>(
+                        <button key={mode} onClick={()=>setTagMode(mode)} style={{ background:tagMode===mode?T.accent+"22":"none",border:`1px solid ${tagMode===mode?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagMode===mode?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{mode==="itemize"?"📋 Itemize":mode[0].toUpperCase()+mode.slice(1)}</button>
+                      ))}
+                    </div>
+
+                    {(tagMode==="person"||tagMode==="both")&&tagMode!=="itemize"&&(
+                      <>
+                        <div style={{ color:T.sub,fontSize:11,display:"block",marginBottom:8 }}>Person</div>
+                        <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
+                          {people.map(p=>(
+                            <button key={p.id} onClick={()=>setTagPerson(p.id)} style={{ background:tagPerson===p.id?p.color+"22":"none",border:`1px solid ${tagPerson===p.id?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagPerson===p.id?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}{p.isMe?" (Me)":""}</button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    {(tagMode==="group"||tagMode==="both")&&tagMode!=="itemize"&&(
+                      <>
+                        <div style={{ color:T.sub,fontSize:11,display:"block",marginBottom:8 }}>Group</div>
+                        <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
+                          <button onClick={()=>setTagGroup("")} style={{ background:!tagGroup?"#88888822":"none",border:`1px solid ${!tagGroup?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>None</button>
+                          {groups.map(g=>(
+                            <button key={g.id} onClick={()=>setTagGroup(g.id)} style={{ background:tagGroup===g.id?g.color+"22":"none",border:`1px solid ${tagGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    {tagMode==="itemize"&&(
+                      <div style={{ background:T.input,borderRadius:12,padding:"12px 14px",marginBottom:10 }}>
+                        <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>📋 Itemized tagging</div>
+                        <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>
+                          Total bill: <b style={{ color:T.text }}>{sym}{fmt(amt)}</b>
+                          {tagItemsTotal>0&&<span style={{ color:Math.abs(tagItemsTotal-amt)<0.01?"#22c55e":"#ef4444",fontWeight:700 }}> · Allocated: {sym}{fmt(tagItemsTotal)}{Math.abs(tagItemsTotal-amt)>0.01?" ⚠ doesn't match total":""}</span>}
+                        </div>
+                        {tagItems.map((item)=>{
+                          const isP=item.targetType==="person";
+                          const targetObj=isP?people.find(p=>p.id===item.targetId):groups.find(g=>g.id===item.targetId);
+                          const itemColor=targetObj?.color||T.sub;
+                          return (
+                            <div key={item.id} style={{ display:"flex",gap:6,alignItems:"center",marginBottom:8 }}>
+                              <button onClick={()=>setTagItems(prev=>prev.map(it=>it.id===item.id?{...it,targetType:isP?"group":"person",targetId:""}:it))} style={{ background:isP?"#ec489922":"#3b82f622",border:`1px solid ${isP?"#ec4899":"#3b82f6"}`,borderRadius:20,padding:"4px 8px",cursor:"pointer",fontSize:13,color:isP?"#ec4899":"#3b82f6",fontFamily:"Nunito,sans-serif",minWidth:34,textAlign:"center" }}>{isP?"👤":"👥"}</button>
+                              <select value={item.targetId} onChange={e=>updateTagItem(item.id,"targetId",e.target.value)} style={{ flex:1,background:T.card,border:`1px solid ${item.targetId?itemColor:T.border}`,borderRadius:8,padding:"6px 8px",color:T.text,fontSize:12,fontFamily:"Nunito,sans-serif",outline:"none" }}>
+                                <option value="">— {isP?"person":"group"} —</option>
+                                {isP?people.map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}{p.isMe?" (Me)":""}</option>):groups.map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
+                              </select>
+                              <input type="number" placeholder="₹" value={item.amount} onChange={e=>updateTagItem(item.id,"amount",e.target.value)} style={{ ...inp,width:80,marginBottom:0,flex:"none" }}/>
+                              {tagItems.length>1&&<button onClick={()=>removeTagItem(item.id)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"3px 8px",cursor:"pointer",fontSize:16,color:T.sub,fontFamily:"Nunito,sans-serif",lineHeight:1 }}>×</button>}
+                            </div>
+                          );
+                        })}
+                        <button onClick={addTagItem} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,color:T.accent,fontFamily:"Nunito,sans-serif",fontWeight:700,width:"100%",marginTop:2 }}>+ Add item</button>
+                      </div>
+                    )}
+
+                    {tagPerson&&(()=>{
+                      const p=getPerson(tagPerson);
+                      const grp=tagMode==="both"&&tagGroup?groups.find(g=>g.id===tagGroup):null;
+                      const pAmt=parseFloat(tagPersonAmount)||0;
+                      const gAmt=parseFloat(tagGroupAmount)||0;
+                      const allocTotal=tagMode==="both"?(pAmt+gAmt):0;
+                      const allocMismatch=tagMode==="both"&&pAmt>0&&gAmt>0&&Math.abs(allocTotal-amt)>0.01;
+                      return (
+                        <div style={{ background:T.input,borderRadius:12,padding:"12px 14px",marginBottom:10 }}>
+                          <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>
+                            {tagMode==="both"?"Split between personal & group":""}
+                            {tagMode==="person"?`${p.emoji} ${p.name} — spend tracking`:""}
+                          </div>
+                          <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>
+                            Total bill: <b style={{ color:T.text }}>{sym}{fmt(amt)}</b>
+                            {tagMode==="both"&&pAmt>0&&gAmt>0&&<span style={{ color:allocMismatch?"#ef4444":"#22c55e",fontWeight:700 }}> · Allocated: {sym}{fmt(allocTotal)}{allocMismatch?" ⚠ doesn't match total":""}</span>}
+                            {tagMode==="person"&&pAmt>0&&<span style={{ color:p.color,fontWeight:700 }}> · Tagged: {sym}{fmt(pAmt)}</span>}
+                          </div>
+                          {tagMode==="both"?(
+                            <div style={{ display:"flex",gap:8 }}>
+                              <div style={{ flex:1 }}>
+                                <span style={{ ...lbl,color:p.color }}>{p.emoji} {p.name}{p.isMe?" (Me)":""}</span>
+                                <input style={{ ...inp,borderColor:pAmt>0?p.color:undefined }} type="number" placeholder={`Personal share`} value={tagPersonAmount} onChange={e=>setTagPersonAmount(e.target.value)}/>
+                              </div>
+                              <div style={{ flex:1 }}>
+                                <span style={{ ...lbl,color:grp?grp.color:T.sub }}>{grp?`${grp.icon} ${grp.name}`:"Group"}</span>
+                                <input style={{ ...inp,borderColor:gAmt>0?(grp?.color||T.accent):undefined }} type="number" placeholder={`Group share`} value={tagGroupAmount} onChange={e=>setTagGroupAmount(e.target.value)}/>
+                              </div>
+                            </div>
+                          ):(
+                            <div>
+                              <span style={lbl}>Amount spent on {p.name} (optional — defaults to full amount)</span>
+                              <input style={inp} type="number" placeholder={`e.g. ${fmt(amt)} (full) or part of it`} value={tagPersonAmount} onChange={e=>setTagPersonAmount(e.target.value)}/>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* NOTE */}
+            {txnType!=="cc_payment"&&txnType!=="transfer"&&<input style={inp} placeholder="Note (optional)" value={note} onChange={e=>setNote(e.target.value)}/>}
+
+            {/* QUICK FLAGS */}
+            {txnType==="expense"&&(
+              <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+                <div style={{ display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:isBillPayment?10:0 }}>
+                  <button onClick={()=>setReimbursable(r=>!r)} title={reimbursable?"Reimbursable — tap to remove":"Mark as reimbursable work expense"} style={{ background:reimbursable?"#f0a50018":"none",border:`1px solid ${reimbursable?"#f0a500":T.border}`,borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:reimbursable?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif",display:"inline-flex",alignItems:"center",gap:4 }}>
+                    <span>💼</span>
+                    {reimbursable&&<span style={{ fontSize:10 }}>✓</span>}
+                  </button>
+                  <button onClick={()=>setIsBillPayment(v=>!v)} style={{ background:isBillPayment?T.accent+"20":"none",border:`1px solid ${isBillPayment?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:isBillPayment?T.accent:T.sub,fontFamily:"Nunito,sans-serif",display:"inline-flex",alignItems:"center",gap:6 }}>
+                    <span>🧾</span>
+                    <span>Bill payment</span>
+                    {isBillPayment&&<span style={{ fontSize:10 }}>✓</span>}
+                  </button>
+                </div>
+                {isBillPayment&&<input style={{ ...inp,marginTop:4 }} placeholder="Invoice / Bill Number (optional) e.g. MSEB/2026/04/001" value={billInvoiceNo} onChange={e=>setBillInvoiceNo(e.target.value)}/>}
+              </div>
+            )}
+
+            {/* SMS PASTE */}
+            <div style={{ background:T.input,borderRadius:12,overflow:"hidden" }}>
+              <button onClick={()=>setShowSms(p=>!p)} style={{ width:"100%",background:"none",border:"none",padding:"11px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,fontFamily:"Nunito,sans-serif" }}>
+                <span>📱</span>
+                <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1,textAlign:"left" }}>Bank SMS import</span>
+                <span style={{ color:T.sub,fontSize:12 }}>{showSms?"▲":"▼"}</span>
+              </button>
+              {showSms&&<div style={{ padding:"0 14px 14px" }}>
+                {smsImportStatus&&/unable|empty|not available|error/i.test(smsImportStatus)&&<div style={{ color:T.warn,fontSize:11,fontWeight:700,marginBottom:6 }}>{smsImportStatus}</div>}
+                <textarea
+                  style={{ ...inp,height:80,resize:"none",marginBottom:6,cursor:smsBusy?"wait":"text" }}
+                  placeholder={smsBusy?"Fetching SMS…":`Tap to import SMS${isNative?"":" (copy SMS first)"} or paste here…`}
+                  value={smsTxt}
+                  onFocus={()=>{ if(!smsTxt && !smsBusy) importSms(isNative?"phone":"clipboard"); }}
+                  onChange={e=>{ setSmsTxt(e.target.value); parseSms(e.target.value); }}
+                />
+                {smsParseMeta?.balanceAdjusted&&<div style={{ color:T.success,fontSize:11,fontWeight:700 }}>✅ Balance synced ({smsParseMeta.balanceDiff>0?"+":""}{sym}{fmt(smsParseMeta.balanceDiff)})</div>}
+              </div>}
+            </div>
+
+            {/* ATTACHMENTS */}
+            <div style={{ background:T.input,borderRadius:12,padding:"11px 14px" }}>
+              <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap" }}>
+                <div style={{ display:"flex",alignItems:"center",gap:10,minWidth:0 }}>
+                  <span>📷</span>
+                  <span style={{ color:T.sub,fontSize:13,fontWeight:700 }}>Attachments</span>
+                </div>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end" }}>
+                  <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>
+                    {imageBase64 ? (isBillPayment ? "Change bill" : "Change receipt") : (isBillPayment ? "Add bill" : "Add receipt")}
+                    <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setImageBase64(ev.target.result); r.readAsDataURL(f); }}/>
+                  </label>
+                  {isBillPayment&&<label style={{ background:T.success+"18",border:`1px solid ${T.success}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif" }}>
+                    {paymentImageBase64?"Change proof":"Add proof"}
+                    <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setPaymentImageBase64(ev.target.result); r.readAsDataURL(f); }}/>
+                  </label>}
+                  {imageBase64&&<button onClick={()=>setImageBase64(null)} style={{ background:"none",border:`1px solid ${T.danger}33`,borderRadius:8,color:T.danger,cursor:"pointer",fontSize:11,fontWeight:700,padding:"5px 10px",fontFamily:"Nunito,sans-serif" }}>Clear bill</button>}
+                  {isBillPayment&&paymentImageBase64&&<button onClick={()=>setPaymentImageBase64(null)} style={{ background:"none",border:`1px solid ${T.danger}33`,borderRadius:8,color:T.danger,cursor:"pointer",fontSize:11,fontWeight:700,padding:"5px 10px",fontFamily:"Nunito,sans-serif" }}>Clear proof</button>}
+                </div>
+              </div>
+              {(imageBase64 || (isBillPayment && paymentImageBase64))&&(
+                <div style={{ display:"grid",gridTemplateColumns:imageBase64&&isBillPayment&&paymentImageBase64?"1fr 1fr":"1fr",gap:10,marginTop:10 }}>
+                  {imageBase64&&<div>
+                    <div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:6 }}>{isBillPayment?"🧾 Bill / receipt":"🧾 Receipt"} · tap to view</div>
+                    <img src={imageBase64} alt="receipt" onClick={()=>setImageViewSrc(imageBase64)} style={{ width:"100%",borderRadius:10,maxHeight:160,objectFit:"cover",cursor:"zoom-in" }} onError={e=>{ e.target.style.display="none"; setImageBase64(null); }}/>
+                  </div>}
+                  {isBillPayment&&paymentImageBase64&&<div>
+                    <div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:6 }}>💳 Payment proof · tap to view</div>
+                    <img src={paymentImageBase64} alt="payment proof" onClick={()=>setImageViewSrc(paymentImageBase64)} style={{ width:"100%",borderRadius:10,maxHeight:160,objectFit:"cover",cursor:"zoom-in" }} onError={e=>{ e.target.style.display="none"; setPaymentImageBase64(null); }}/>
+                  </div>}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+              <button onClick={closeModal} style={btnG}>Cancel</button>
+              <button onClick={submit} style={{ ...btnP,opacity:canSubmit?1:0.5 }}>{canSubmit?(isEditing?"Save Changes ✓":"Add ✓"):txnType==="investment"?"Fill name & amount":"Fill vendor & amount"}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── SETTLE MODAL ───────────────────────────────────────────────────────────
+  const SettleModal = () => {
+    const t = settleTxn;
+    const owedPeople = Object.entries(t?.people||{}).filter(([pid,info])=>info.mode==="owes"&&!info.settled&&pid!=="__me__"&&remainingShare(info)>0);
+    const [partials, setPartials] = useState(Object.fromEntries(owedPeople.map(([pid,info])=>[pid,String(remainingShare(info))])));
+    const [receiptImg, setReceiptImg] = useState(null);
+    const [accId, setAccId] = useState(accounts.find(a=>a.type!=="cc")?.id||"");
+    if(!t) return null;
+
+    const settle = pid => {
+      const dueAmt = t._isBillSettle
+        ? (t._billIds||[]).reduce((sum,billId)=>{
+            const bill = bills.find(b=>b.id===billId);
+            return sum + (bill?.splitPeople?.[pid] ? remainingShare(bill.splitPeople[pid]) : 0);
+          },0)
+        : remainingShare(t.people?.[pid]);
+      const requestedAmt = parseFloat(partials[pid])||0;
+      if(!requestedAmt) return;
+      const appliedAmt = Math.min(requestedAmt, dueAmt);
+      const extraAmt = Math.max(0, requestedAmt - dueAmt);
+      const p = getPerson(pid);
+      const settleId = Date.now()+Math.random();
+      const settleDesc = `${p.name} settled${t.desc?` against '${t.desc}'`:''}${extraAmt>0?` + ${sym}${fmt(extraAmt)} advance`:''}`;
+      const newSettleTxn = { id:settleId, type:"settlement_in", desc:settleDesc, merchant:"", date:todayStr(), note:`Against: ${t.desc||"unknown"} · Account: ${getAcc(accId)?.name||"unnamed"}${extraAmt>0?` · Extra ${sym}${fmt(extraAmt)} kept as advance`:""}`, amount:requestedAmt, appliedAmount:appliedAmt, extraAmount:extraAmt, accId, fromPersonId:pid, groupId:t.groupId||null, againstTxnId:t._isFallbackSettle?null:t.id, imageBase64:receiptImg };
+      const upsertSettlement = prev => {
+        const newKey = linkedSettlementKey(newSettleTxn);
+        if(newKey && prev.some(x=>linkedSettlementKey(x)===newKey)) return prev;
+        return [newSettleTxn,...prev];
+      };
+      if(t._isBillSettle){
+        // Settle against bills directly
+        setTxns(upsertSettlement);
+        if(t._billIds){
+          let remaining=appliedAmt;
+          setBills(prev=>prev.map(b=>{
+            if(!t._billIds.includes(b.id)||!b.splitPeople?.[pid]) return b;
+            const billAmt=remainingShare(b.splitPeople[pid]);
+            if(remaining<=0) return b;
+            const paidNow=Math.min(remaining,billAmt);
+            remaining-=paidNow;
+            const prevSettled = Number(b.splitPeople[pid].settledAmt||0);
+            const nextSettled = prevSettled + paidNow;
+            const originalAmt = Number(b.splitPeople[pid].amount||0);
+            const nextRemaining = Math.max(0, originalAmt-nextSettled);
+            return {...b,splitPeople:{...b.splitPeople,[pid]:{...b.splitPeople[pid],settled:nextRemaining<=0,settledAmt:nextSettled,remainingAmt:nextRemaining}}};
+          }));
+        }
+      } else {
+        setTxns(prev=>[
+          ...upsertSettlement([]),
+          ...prev.map(x=>{
+            if(x.id!==t.id) return x;
+            const originalAmt = Number(x.people[pid]?.amount||0);
+            const prevSettled = Number(x.people[pid]?.settledAmt||0);
+            const nextSettled = Math.min(originalAmt, prevSettled + appliedAmt);
+            const nextRemaining = Math.max(0, originalAmt-nextSettled);
+            return { ...x, people:{ ...x.people, [pid]:{ ...x.people[pid], settled:nextRemaining<=0, settledAmt:nextSettled, remainingAmt:nextRemaining } } };
+          })
+        ]);
+      }
+    };
+
+    const settleAll = () => {
+      owedPeople.forEach(([pid])=>settle(pid));
+      setSettleTxn(null);
+    };
+
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&setSettleTxn(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>💰 Settle Payment</div>
+            <button onClick={()=>setSettleTxn(null)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ color:T.sub,fontSize:12,marginBottom:16 }}>Against: {t.desc} · {sym}{fmt(t.amount)}</div>
+
+          {owedPeople.map(([pid,info])=>{
+            const p=getPerson(pid);
+            const dueAmt = t._isBillSettle
+              ? (t._billIds||[]).reduce((sum,billId)=>{
+                  const bill = bills.find(b=>b.id===billId);
+                  return sum + (bill?.splitPeople?.[pid] ? remainingShare(bill.splitPeople[pid]) : 0);
+                },0)
+              : remainingShare(info);
+            return (
+              <div key={pid} style={{ ...card,marginBottom:10 }}>
+                <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:12 }}>
+                  <div style={{ width:38,height:38,borderRadius:"50%",background:p.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20 }}>{p.emoji}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ color:T.text,fontSize:14,fontWeight:700 }}>{p.name}</div>
+                    <div style={{ color:T.sub,fontSize:11 }}>owes {sym}{fmt(dueAmt)}</div>
+                  </div>
+                </div>
+                <div style={{ marginBottom:10 }}>
+                  <span style={lbl}>Amount received ({sym})</span>
+                  <input style={inp} type="number" value={partials[pid]||""} onChange={e=>setPartials(prev=>({...prev,[pid]:e.target.value}))}/>
+                  <div style={{ display:"flex",gap:6,marginTop:6 }}>
+                    <button onClick={()=>setPartials(prev=>({...prev,[pid]:String(dueAmt)}))} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"4px 10px",cursor:"pointer",fontSize:11,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Full {sym}{fmt(dueAmt)}</button>
+                  </div>
+                </div>
+                <button onClick={()=>{ settle(pid); setTimeout(()=>setSettleTxn(null),50); }} style={{ ...btnP,background:T.success }}>✅ {p.name} paid {sym}{fmt(parseFloat(partials[pid])||0)}</button>
+              </div>
+            );
+          })}
+
+          <div style={{ marginBottom:12 }}>
+            <span style={lbl}>Payment mode / received into</span>
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+              {accounts.filter(a=>a.type!=="cc").map(a=><button key={a.id} onClick={()=>setAccId(a.id)} style={{ background:accId===a.id?a.color+"22":"none",border:`1px solid ${accId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:accId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
+            </div>
+          </div>
+
+          <div style={{ marginBottom:12 }}>
+            <span style={lbl}>Payment proof (optional)</span>
+            <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",display:"inline-block" }}>
+              📷 {receiptImg?"Change photo":"Attach screenshot"}
+              <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setReceiptImg(ev.target.result); r.readAsDataURL(f); }}/>
+            </label>
+            {receiptImg&&<img src={receiptImg} alt="proof" style={{ width:"100%",borderRadius:8,maxHeight:120,objectFit:"cover",marginTop:8 }} onError={e=>e.target.style.display="none"}/>}
+          </div>
+
+          {owedPeople.length>1&&<button onClick={settleAll} style={btnP}>✅ Settle All</button>}
+        </div>
+      </div>
+    );
+  };
+
+  // ── EDIT MODAL ─────────────────────────────────────────────────────────────
+  const EditModal = ({ t, onClose }) => {
+    if(!t) return null;
+    if(t.type==="investment"){
+      const linkedInvestment = investments.find(inv=>String(inv.id)===String(t.linkedInvestmentId||"") || String(inv.linkedTxnId||"")===String(t.id||"")) || {
+        id:t.linkedInvestmentId || `txn_${t.id}`,
+        type:t.investType || "mf",
+        name:t.desc || t.merchant || "Investment",
+        folioNo:String(t.investFolio||"").trim(),
+        amount:Number(t.amount||0),
+        currentValue:Number(t.amount||0),
+        freq:t.investFreq || "",
+        paymentAccId:t.accId || "",
+        lastNav:Number(t.investNav||0),
+        lastNavDate:t.date || todayStr(),
+        startDate:t.date || todayStr(),
+        linkedTxnId:t.id,
+        transactionRef:t.transactionRef || null,
+      };
+      return <AddInvestmentModal item={linkedInvestment} onClose={onClose} />;
+    }
+    return <AddModal defaultType={t.type||"expense"} editTxn={t} onClose={onClose} />;
+  };
+
+
+  // ── ADD ACCOUNT MODAL ──────────────────────────────────────────────────────
+  const AddAccountModal = () => {
+    const [aType,setAType]=useState(accountTypeOptions[0]?.id||"bank");
+    const [name,setName]=useState("");
+    const [last4,setLast4]=useState("");
+    const [color,setColor]=useState(PALETTE[2]);
+    const [limit,setLimit]=useState("");
+    const [statementDate,setStatementDate]=useState("15");
+    const [dueDate,setDueDate]=useState("5");
+    const [alertPct,setAlertPct]=useState("30");
+    const [billingCycle,setBillingCycle]=useState("");
+    const [handle,setHandle]=useState("");
+    const [linkedBank,setLinkedBank]=useState(accounts.find(a=>a.type==="bank")?.id||"");
+    const [linkedUpiAccount,setLinkedUpiAccount]=useState("");
+    const [openingBalance,setOpeningBalance]=useState("");
+    const [openingBalanceDate,setOpeningBalanceDate]=useState(todayStr());
+    const [error,setError]=useState("");
+    const selectedAccountType = accountTypeOptions.find(item=>item.id===aType) || ACC_TYPES.find(item=>item.id===aType) || ACC_TYPES[0];
+    const selectedAccountBaseType = selectedAccountType.baseType || selectedAccountType.id || "bank";
+    const selectedAccountBucket = selectedAccountType.bucket || defaultAccountTypeBucket(selectedAccountBaseType);
+    const banks=accounts.filter(a=>a.type==="bank");
+    const submit=()=>{
+      if(!name.trim()){setError("Name required");return;}
+      if(selectedAccountBaseType==="debit"&&!linkedBank){setError("Please link a bank account — required for debit cards");return;}
+      const base={
+        id:genId(),
+        type:selectedAccountBaseType,
+        accountTypeId:selectedAccountType.id,
+        typeLabel:selectedAccountType.label,
+        typeIcon:selectedAccountType.icon,
+        typeBucket:selectedAccountBucket,
+        name:name.trim(),
+        color,
+      };
+      if(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cash") setAccounts(p=>[...p,{...base,last4,openingBalance:parseMoney(openingBalance)||0,openingBalanceDate:openingBalanceDate||todayStr()}]);
+      else if(selectedAccountBaseType==="cc") setAccounts(p=>[...p,{...base,last4,limit:parseFloat(limit)||0,outstanding:0,statementDate:parseInt(statementDate)||15,dueDate:parseInt(dueDate)||5,alertPct:Math.max(0,parseFloat(alertPct)||0),billingCycle:billingCycle||`${statementDate}th`}]);
+      else if(selectedAccountBaseType==="debit") setAccounts(p=>[...p,{...base,last4,linkedBank}]);
+      else if(selectedAccountBaseType==="upi") setAccounts(p=>[...p,{...base,handle,linkedAccount:linkedUpiAccount||""}]);
+      else setAccounts(p=>[...p,base]);
+      setShowAddAccount(false);
+    };
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&setShowAddAccount(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>Add Account</div>
+            <button onClick={()=>setShowAddAccount(false)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+              {accountTypeOptions.map(at=><button key={at.id} onClick={()=>setAType(at.id)} style={{ background:aType===at.id?color+"22":"none",border:`1px solid ${aType===at.id?color:T.border}`,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:aType===at.id?color:T.sub,fontFamily:"Nunito,sans-serif" }}>{at.icon} {at.label}</button>)}
+            </div>
+            {selectedAccountBucket==="investment"&&<div style={{ color:T.sub,fontSize:10 }}>This account will show under Investments in Wealth. Fund it using `Transfer` from your bank, and record annual PF interest as `Income` into this same account.</div>}
+            <input style={inp} placeholder="Name" value={name} onChange={e=>setName(e.target.value)}/>
+            {(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cc"||selectedAccountBaseType==="debit")&&<input style={inp} placeholder="Last 4 digits" maxLength={4} value={last4} onChange={e=>setLast4(e.target.value)}/>}
+            {(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cash")&&<div style={{ display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:10 }}>
+              <input style={inp} type="text" inputMode="decimal" placeholder={selectedAccountBaseType==="cash"?`Cash in hand (${sym})`:`Opening balance (${sym})`} value={openingBalance||""} onChange={e=>setOpeningBalance(cleanMoneyInput(e.target.value))}/>
+              <div>
+                <span style={lbl}>As on date</span>
+                <input style={inp} type="date" value={openingBalanceDate} onChange={e=>setOpeningBalanceDate(e.target.value)}/>
+              </div>
+            </div>}
+            {selectedAccountBaseType==="cc"&&<>
+              <input style={inp} type="number" placeholder={`Credit limit (${sym})`} value={limit} onChange={e=>setLimit(e.target.value)}/>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <div><span style={lbl}>Statement Date</span><input style={inp} type="number" min="1" max="31" value={statementDate} onChange={e=>setStatementDate(e.target.value)}/></div>
+                <div><span style={lbl}>Due Date</span><input style={inp} type="number" min="1" max="31" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
+              </div>
+              <div><span style={lbl}>Spend alert (% of limit)</span><input style={inp} type="number" min="0" max="100" value={alertPct} onChange={e=>setAlertPct(e.target.value)}/></div>
+              <input style={inp} placeholder="Billing cycle e.g. 15th–14th" value={billingCycle} onChange={e=>setBillingCycle(e.target.value)}/>
+            </>}
+            {selectedAccountBaseType==="debit"&&<div>
+              <span style={lbl}>Linked Bank Account *</span>
+              {banks.length===0?<div style={{ color:T.danger,fontSize:12 }}>Add a bank account first</div>:
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {banks.map(b=><button key={b.id} onClick={()=>setLinkedBank(b.id)} style={{ background:linkedBank===b.id?b.color+"22":"none",border:`1px solid ${linkedBank===b.id?b.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkedBank===b.id?b.color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏦 {b.name}</button>)}
+              </div>}
+            </div>}
+            {selectedAccountBaseType==="upi"&&<>
+              <input style={inp} placeholder="UPI handle e.g. you@okicici" value={handle} onChange={e=>setHandle(e.target.value)}/>
+              <div>
+                <span style={lbl}>Linked Account <span style={{ color:T.sub,fontWeight:400 }}>(optional — bank or card this UPI draws from)</span></span>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:4 }}>
+                  <button onClick={()=>setLinkedUpiAccount("")} style={{ background:!linkedUpiAccount?T.pill:"none",border:`1px solid ${!linkedUpiAccount?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:!linkedUpiAccount?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>None</button>
+                  {[...accounts.filter(a=>a.type==="bank"), ...accounts.filter(a=>a.type==="cc")].map(a=>(
+                    <button key={a.id} onClick={()=>setLinkedUpiAccount(a.id)} style={{ background:linkedUpiAccount===a.id?a.color+"22":"none",border:`1px solid ${linkedUpiAccount===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkedUpiAccount===a.id?a.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{a.type==="bank"?"🏦":"💳"} {a.name}</button>
+                  ))}
+                </div>
+              </div>
+            </>}
+            <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+              {PALETTE.map(c=><div key={c} onClick={()=>setColor(c)} style={{ width:28,height:28,borderRadius:7,background:c,cursor:"pointer",border:color===c?"3px solid #fff":"3px solid transparent" }}/>)}
+            </div>
+            {error&&<div style={{ color:T.danger,fontSize:12,fontWeight:700 }}>⚠️ {error}</div>}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+              <button onClick={()=>setShowAddAccount(false)} style={btnG}>Cancel</button>
+              <button onClick={submit} style={btnP}>Save Account</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── ADD INVESTMENT MODAL ───────────────────────────────────────────────────
+  const AddInvestmentModal = ({ item, onClose = null }) => {
+    const isEditing = Boolean(item && !item?._prefillOnly);
+    const allowStartDateEdit = Boolean(item?._allowStartDateEdit);
+    const closeModal = () => {
+      setShowAddInvestment(false);
+      setEditingInvestment(null);
+      setEditingTxn(null);
+      onClose?.();
+    };
+    const [iType,setIType]=useState(item?.type||"mf");
+    const [name,setName]=useState(item?.name||"");
+    const [folioNo,setFolioNo]=useState(item?.folioNo||"");
+    const [amount,setAmount]=useState(String(item?.amount||""));
+    const [freq,setFreq]=useState(item?.freq||"");
+    const linkedTxn = item?.linkedTxnId
+      ? txns.find(txn=>String(txn.id)===String(item.linkedTxnId)) || txns.find(txn=>String(txn.linkedInvestmentId||"")===String(item.id||"")) || null
+      : txns.find(txn=>String(txn.linkedInvestmentId||"")===String(item?.id||"")) || null;
+    const [paymentAccId,setPaymentAccId]=useState(item?.paymentAccId || linkedTxn?.accId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "");
+    const [lastNav,setLastNav]=useState(String(item?.lastNav||linkedTxn?.investNav||""));
+    const [showFolioSuggestions,setShowFolioSuggestions]=useState(false);
+    const [startDate,setStartDate]=useState(item?.startDate||todayStr());
+    const [investmentDate,setInvestmentDate]=useState(item?.lastNavDate||item?.startDate||todayStr());
+    const [reminderEnabled,setReminderEnabled]=useState(Boolean(item?.reminder));
+    const [reminderDate,setReminderDate]=useState(item?.reminder||todayStr());
+    const [transactionRef,setTransactionRef]=useState(item?.transactionRef||linkedTxn?.transactionRef||"");
+    const metricConfig = getInvestmentMetricConfig(iType);
+    const budgetMeta = getInvestmentBudgetMeta(iType);
+    const folioStartLock = useMemo(()=>{
+      if(iType!=="mf") return "";
+      const folioKey = normalizeVendorText(folioNo);
+      if(!folioKey) return "";
+      const matchingDates = trackedInvestments
+        .filter(inv=>String(inv.type||"mf")==="mf" && normalizeVendorText(inv.folioNo)===folioKey)
+        .filter(inv=>!isEditing || String(inv.id)!==String(item?.id||""))
+        .map(inv=>inv.startDate)
+        .filter(Boolean)
+        .sort();
+      return matchingDates[0] || "";
+    },[iType,folioNo,trackedInvestments,isEditing,item]);
+    const investmentSuggestions = useMemo(()=>{
+      if(iType!=="mf") return [];
+      const query = normalizeVendorText(folioNo || name);
+      return investmentTemplateOptions
+        .filter(template=>template.type==="mf")
+        .filter(template=>{
+          if(!query) return true;
+          return normalizeVendorText(template.folioNo).includes(query) || normalizeVendorText(template.name).includes(query);
+        })
+        .slice(0,5);
+    },[iType,folioNo,name,investmentTemplateOptions]);
+    const applyInvestmentTemplate = useCallback(template=>{
+      if(!template) return;
+      setIType(template.type || "mf");
+      setName(template.name || "Investment");
+      setFolioNo(template.folioNo || "");
+      if(Number(template.amount||0)>0) setAmount(String(template.amount));
+      setFreq(template.freq || "");
+      if(template.accId) setPaymentAccId(template.accId);
+      if(Number(template.nav||0)>0) setLastNav(String(template.nav));
+      if(template.startDate) setStartDate(template.startDate);
+      setShowFolioSuggestions(false);
+    },[]);
+    useEffect(()=>{
+      if(allowStartDateEdit) return;
+      if(folioStartLock && startDate !== folioStartLock) setStartDate(folioStartLock);
+    },[folioStartLock,startDate,allowStartDateEdit]);
+
+    const submit=()=>{
+      const amt = parseMoney(amount);
+      if(!name.trim()||!amt) return;
+      const resolvedTxnId = item?.linkedTxnId || linkedTxn?.id || Date.now();
+      const metricValue = metricConfig.show ? Math.max(0, parseMoney(lastNav)||0) : 0;
+      const resolvedStartDate = allowStartDateEdit ? (startDate || folioStartLock || todayStr()) : (folioStartLock || startDate || todayStr());
+      const nextItem = {
+        ...(isEditing ? item : {}),
+        id:isEditing ? item?.id : genId(),
+        type:iType,
+        name:name.trim(),
+        folioNo:iType==="mf"?folioNo.trim():"",
+        amount:amt,
+        currentValue:amt,
+        freq:freq||"",
+        paymentAccId,
+        lastNav:metricValue,
+        lastNavDate:investmentDate,
+        startDate:resolvedStartDate,
+        reminder:reminderEnabled?reminderDate:null,
+        linkedTxnId:resolvedTxnId,
+        transactionRef:transactionRef.trim()||null,
+      };
+      const folioKey = normalizeVendorText(folioNo);
+      const shouldUpdateWholeFolio = allowStartDateEdit && iType==="mf" && folioKey;
+      setInvestments(p=>{
+        if(!isEditing) return [nextItem,...p];
+        return p.map(inv=>{
+          const sameItem = String(inv.id)===String(nextItem.id);
+          const sameFolio = shouldUpdateWholeFolio && String(inv.type||"mf")==="mf" && normalizeVendorText(inv.folioNo)===folioKey;
+          if(sameItem) return nextItem;
+          if(sameFolio) return { ...inv, startDate:resolvedStartDate };
+          return inv;
+        });
+      });
+      const nextTxn = {
+        ...(linkedTxn||{}),
+        id:resolvedTxnId,
+        type:"investment",
+        desc:name.trim(),
+        merchant:name.trim(),
+        amount:amt,
+        date:investmentDate || startDate || todayStr(),
+        accId:paymentAccId,
+        investType:iType,
+        investFreq:freq||"",
+        investFolio:iType==="mf"?folioNo.trim():"",
+        investStartDate:resolvedStartDate,
+        investNav:metricValue,
+        catId:null,
+        catIds:[],
+        subId:null,
+        subIds:[],
+        linkedInvestmentId:nextItem.id,
+        transactionRef:transactionRef.trim()||null,
+        note:linkedTxn?.note || item?.note || "",
+      };
+      setTxns(prev=>{
+        const exists = prev.some(txn=>String(txn.id)===String(resolvedTxnId));
+        return exists
+          ? prev.map(txn=>{
+              const sameTxn = String(txn.id)===String(resolvedTxnId);
+              const sameFolioTxn = shouldUpdateWholeFolio && String(txn.type)==="investment" && normalizeVendorText(txn.investFolio)===folioKey;
+              if(sameTxn) return { ...txn, ...nextTxn };
+              if(sameFolioTxn) return { ...txn, investStartDate:resolvedStartDate };
+              return txn;
+            })
+          : [nextTxn,...prev];
+      });
+      closeModal();
+    };
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&closeModal()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{isEditing?"Edit Investment":"Add Investment"}</div>
+            <button onClick={closeModal} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <InvestmentTypeChips value={iType} onChange={setIType} />
+            <input style={inp} placeholder="Name e.g. Axis Bluechip SIP" value={name} onChange={e=>setName(e.target.value)}/>
+            {iType==="mf"&&<>
+              <div style={{ position:"relative" }}>
+                <input style={inp} placeholder="Type folio to reuse fund defaults" value={folioNo} onChange={e=>{ setFolioNo(e.target.value); setShowFolioSuggestions(true); }} onFocus={()=>setShowFolioSuggestions(true)} onBlur={()=>setTimeout(()=>setShowFolioSuggestions(false),150)}/>
+                {showFolioSuggestions && investmentSuggestions.length>0 && (
+                  <div style={{ position:"absolute",top:"100%",left:0,right:0,background:T.card,border:`1px solid ${T.border}`,borderRadius:8,zIndex:1000,boxShadow:"0 6px 14px rgba(0,0,0,0.18)",maxHeight:180,overflowY:"auto" }}>
+                    {investmentSuggestions.map(template=>(
+                      <button key={template.key} onMouseDown={e=>e.preventDefault()} onClick={()=>applyInvestmentTemplate(template)} style={{ width:"100%",padding:"9px 10px",background:"none",border:"none",borderBottom:`1px solid ${T.border}`,textAlign:"left",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                        <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{template.label}</div>
+                        <div style={{ color:T.sub,fontSize:10 }}>{template.amount?`${sym}${fmt(template.amount)}`:""}{template.freq?` · ${investmentFreqLabel(template.freq)}`:""}{template.accId?` · ${getAcc(template.accId).name}`:""}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{ color:T.sub,fontSize:10 }}>If the same fund uses the same folio number, Arth can group those SIPs together and auto-fill its defaults.</div>
+            </>}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div>
+                <span style={lbl}>Amount ({sym})</span>
+                <input style={inp} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} onChange={e=>setAmount(cleanMoneyInput(e.target.value))}/>
+              </div>
+              <div>
+                <span style={lbl}>Frequency</span>
+                <InvestmentFrequencySelect value={freq} onChange={setFreq} emptyLabel="Select frequency (optional)" />
+              </div>
+            </div>
+            <div>
+              {metricConfig.show ? <>
+                <span style={lbl}>{metricConfig.label} (optional)</span>
+                <input style={inp} type="text" inputMode="decimal" placeholder={metricConfig.placeholder} value={lastNav||""} onChange={e=>setLastNav(cleanMoneyInput(e.target.value))}/>
+              </> : <div style={{ color:T.sub,fontSize:10,padding:"4px 0" }}>{metricConfig.hint}</div>}
+              {metricConfig.show && metricConfig.hint && <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>{metricConfig.hint}</div>}
+            </div>
+            <div>
+              <span style={lbl}>Payment account</span>
+              <AccountChipGroup items={accounts} value={paymentAccId} onChange={setPaymentAccId} />
+            </div>
+            <div>
+              <span style={lbl}>Transaction ID / Ref (optional)</span>
+              <input style={inp} type="text" placeholder="e.g. UPI / bank reference" value={transactionRef} onChange={e=>setTransactionRef(e.target.value.toUpperCase())}/>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div>
+                <span style={lbl}>Start Date</span>
+                <input style={inp} type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} disabled={!allowStartDateEdit && (isEditing || Boolean(folioStartLock))} />
+                <div style={{ color:(allowStartDateEdit || folioStartLock)?T.info:T.sub,fontSize:10,marginTop:6 }}>
+                  {allowStartDateEdit
+                    ? "🗓 Updating this will apply the common start date across the folio."
+                    : (isEditing
+                      ? "Read-only here — use the folio header to edit the common start date."
+                      : (folioStartLock
+                        ? `🔒 Common start date locked to ${formatShortDate(folioStartLock) || folioStartLock} for this folio.`
+                        : "This becomes the folio's common start date."))}
+                </div>
+              </div>
+              <div><span style={lbl}>Investment Date</span><input style={inp} type="date" value={investmentDate} onChange={e=>setInvestmentDate(e.target.value)}/></div>
+            </div>
+            <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+              <input id="reminder_enabled" type="checkbox" checked={reminderEnabled} onChange={e=>setReminderEnabled(e.target.checked)} style={{ width:16,height:16,accentColor:T.accent,cursor:"pointer" }}/>
+              <label htmlFor="reminder_enabled" style={{ color:T.text,fontSize:12,fontWeight:700,cursor:"pointer" }}>Set reminder for next instalment</label>
+            </div>
+            {reminderEnabled&&(
+              <div><span style={lbl}>Reminder Date</span><input style={inp} type="date" value={reminderDate} onChange={e=>setReminderDate(e.target.value)}/></div>
+            )}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+              <button onClick={closeModal} style={btnG}>Cancel</button>
+              <button onClick={submit} style={btnP}>{isEditing?"Save Changes":"Save Investment"}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── CONFIRM DELETE CAT / ACCOUNT ──────────────────────────────────────────
+  const ConfirmDelete = () => {
+    const category = cats.find(c=>c.id===confirmDeleteCat) || getCat(confirmDeleteCat);
+    const linkedExpenseCount = txns.filter(txn=>txn.type==="expense" && (
+      String(txn.catId||"")===String(confirmDeleteCat||"") ||
+      (Array.isArray(txn.catIds) && txn.catIds.some(id=>String(id)===String(confirmDeleteCat||"")))
+    )).length;
+    const linkedBillCount = bills.filter(bill=>
+      String(bill.catId||"")===String(confirmDeleteCat||"") ||
+      (Array.isArray(bill.catIds) && bill.catIds.some(id=>String(id)===String(confirmDeleteCat||"")))
+    ).length;
+    const isOnlyCategory = cats.length <= 1;
+    return (
+      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20 }}>
+        <div style={{ background:T.card,borderRadius:20,padding:24,width:"100%",maxWidth:360 }}>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900,marginBottom:10 }}>Delete {category?.name||"Category"}?</div>
+          <div style={{ color:T.sub,fontSize:13,marginBottom:12 }}>
+            {linkedExpenseCount || linkedBillCount
+              ? `Warning: this category is linked to ${linkedExpenseCount} expense${linkedExpenseCount===1?"":"s"}${linkedBillCount?` and ${linkedBillCount} bill${linkedBillCount===1?"":"s"}`:""}. Those records will lose the category label until you edit them.`
+              : "This will remove the category from your setup."}
+          </div>
+          {isOnlyCategory && <div style={{ color:T.warn,fontSize:11,marginBottom:14 }}>Keep at least one category in the app.</div>}
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+            <button onClick={()=>setConfirmDeleteCat(null)} style={btnG}>Cancel</button>
+            <button onClick={()=>{ if(!isOnlyCategory) setCats(p=>p.filter(c=>c.id!==confirmDeleteCat)); setConfirmDeleteCat(null); }} style={{ ...btnP,background:T.danger,opacity:isOnlyCategory?0.55:1,cursor:isOnlyCategory?"not-allowed":"pointer" }} disabled={isOnlyCategory}>Delete</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const ConfirmDeleteAccount = () => {
+    const account = accounts.find(a=>a.id===confirmDeleteAccount);
+    if(!account) return null;
+    const linkedTxnCount = txns.filter(txn=>[txn.accId, txn.fromAccId, txn.toAccId].some(id=>String(id||"")===String(account.id))).length;
+    const linkedDebitCount = accounts.filter(other=>other.id!==account.id && String(other.linkedBank||"")===String(account.id)).length;
+    const linkedUpiCount = accounts.filter(other=>other.id!==account.id && String(other.linkedAccount||"")===String(account.id)).length;
+    const hasCheckpoint = Boolean(balanceCheckpoints[account.id]);
+    const handleDelete = () => {
+      setAccounts(prev=>prev
+        .filter(item=>item.id!==account.id)
+        .map(item=>{
+          if(String(item.linkedBank||"")===String(account.id)) return { ...item, linkedBank:"" };
+          if(String(item.linkedAccount||"")===String(account.id)) return { ...item, linkedAccount:"" };
+          return item;
+        })
+      );
+      setBalanceCheckpoints(prev=>{
+        const next = { ...prev };
+        delete next[account.id];
+        return next;
+      });
+      setConfirmDeleteAccount(null);
+    };
+    return (
+      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20 }}>
+        <div style={{ background:T.card,borderRadius:20,padding:24,width:"100%",maxWidth:360 }}>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900,marginBottom:10 }}>Delete {account.name}?</div>
+          <div style={{ color:T.sub,fontSize:13,marginBottom:12 }}>
+            {linkedTxnCount || linkedDebitCount || linkedUpiCount || hasCheckpoint
+              ? `Warning: this account is linked to ${linkedTxnCount} transaction${linkedTxnCount===1?"":"s"}${linkedDebitCount?`, ${linkedDebitCount} debit card${linkedDebitCount===1?"":"s"}`:""}${linkedUpiCount?`, ${linkedUpiCount} UPI account${linkedUpiCount===1?"":"s"}`:""}${hasCheckpoint?", and saved balance checks":""}. Linked records will need reassignment later.`
+              : "This will remove the account from your setup."}
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+            <button onClick={()=>setConfirmDeleteAccount(null)} style={btnG}>Cancel</button>
+            <button onClick={handleDelete} style={{ ...btnP,background:T.danger }}>Delete</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── ACCOUNT DETAIL MODAL ───────────────────────────────────────────────────
+  const AccDetailModal = () => {
+    const a=showAccDetail;
+    if(!a) return null;
+
+    const linkedBankAcc = a.type==="debit" ? accounts.find(b=>b.id===a.linkedBank) : null;
+    const linkedUpiAcc = a.type==="upi" && a.linkedAccount ? accounts.find(b=>b.id===a.linkedAccount) : null;
+    const linkedDebitIds = a.type==="bank"
+      ? accounts.filter(x=>(x.type==="debit"&&x.linkedBank===a.id)||(x.type==="upi"&&x.linkedAccount===a.id)).map(x=>x.id)
+      : [];
+    const cardSummary = a.type==="cc" ? getCardSummary(a) : null;
+    const util = a.type==="cc" && a.limit ? Math.round((((cardSummary?.currentCycleSpend)||0)/a.limit)*100) : 0;
+    const utilLimit = cardSummary?.alertPct || 30;
+    const currentBalance = a.type==="cc"
+      ? Number(cardSummary?.totalOutstanding||0)
+      : a.type==="debit"
+        ? Number(linkedBankAcc ? effectiveAccountBalance(linkedBankAcc.id) : 0)
+        : a.type==="upi" && linkedUpiAcc && linkedUpiAcc.type==="bank"
+          ? Number(effectiveAccountBalance(linkedUpiAcc.id)||0)
+          : Number(a.type==="bank" ? effectiveAccountBalance(a.id) : accountBalance(a.id));
+    const checkpoint = balanceCheckpoints[a.id] || null;
+    const expectedAtCheckpoint = checkpoint?.date && a.type!=="cc"
+      ? Number(accountBalance(a.id, checkpoint.date)||0)
+      : null;
+    const discrepancy = checkpoint && expectedAtCheckpoint!==null
+      ? Number(checkpoint.amount||0) - Number(expectedAtCheckpoint||0)
+      : null;
+
+    const ledgerRows = [...txns].map(t=>{
+      let signed = 0;
+      let secondary = txnLabel(t.type);
+
+      const ccLinkedUpiIds = a.type==="cc" ? accounts.filter(x=>x.type==="upi"&&x.linkedAccount===a.id).map(x=>x.id) : [];
+      if(a.type==="cc"){
+        if(t.type==="expense" && t.accId===a.id){ signed -= Number(t.amount||0); secondary = t.note || "Card spend"; }
+        else if(t.type==="expense" && ccLinkedUpiIds.includes(t.accId)){ signed -= Number(t.amount||0); secondary = `Via ${getAcc(t.accId)?.name||"UPI"}`; }
+        else if(t.type==="cc_payment" && t.toAccId===a.id){ signed += Number(t.amount||0); secondary = `Payment from ${getAcc(t.fromAccId)?.name||"account"}`; }
+        else if(t.type==="settlement_in" && t.accId===a.id){ signed += Number(t.amount||0); secondary = t.fromPersonId ? `Settlement from ${getPerson(t.fromPersonId)?.name||"contact"}` : (t.isRefund ? "Merchant refund" : "Credit adjustment"); }
+        else if(t.type==="settlement_in" && ccLinkedUpiIds.includes(t.accId)){ signed += Number(t.amount||0); secondary = `Refund via ${getAcc(t.accId)?.name||"UPI"}`; }
+        else if(t.type==="cc_emi" && t.accId===a.id){ signed -= Number(t.amount||0); secondary = `EMI ${t.installmentNo||""}${t.ccEmiTenure?"/"+t.ccEmiTenure:""} · ${t.merchant||"CC EMI"}`; }
+        else return null;
+      } else {
+        if(t.type==="income" && t.accId===a.id){ signed += Number(t.amount||0); secondary = t.incomeType ? `Income · ${formatIncomeTypeLabel(t.incomeType)}` : "Income"; }
+        else if(t.type==="settlement_in" && t.accId===a.id){ signed += Number(t.amount||0); secondary = t.fromPersonId ? `Settlement from ${getPerson(t.fromPersonId)?.name||"contact"}` : (t.isRefund ? "Merchant refund" : "Refund / settlement"); }
+        else if(t.type==="transfer" && (t.fromAccId===a.id || (a.type==="bank" && linkedDebitIds.includes(t.fromAccId)))){ signed -= Number(t.amount||0); secondary = `Transfer to ${getAcc(t.toAccId)?.name||"account"}${a.type==="bank" && linkedDebitIds.includes(t.fromAccId)?` via ${getAcc(t.fromAccId)?.name||"debit"}`:""}`; }
+        else if(t.type==="transfer" && (t.toAccId===a.id || (a.type==="bank" && linkedDebitIds.includes(t.toAccId)))){ signed += Number(t.amount||0); secondary = `Transfer from ${getAcc(t.fromAccId)?.name||"account"}${a.type==="bank" && linkedDebitIds.includes(t.toAccId)?` via ${getAcc(t.toAccId)?.name||"debit"}`:""}`; }
+        else if(t.type==="cc_payment" && (t.fromAccId===a.id || (a.type==="bank" && linkedDebitIds.includes(t.fromAccId)))){ signed -= Number(t.amount||0); secondary = `CC payment to ${getAcc(t.toAccId)?.name||"card"}${a.type==="bank" && linkedDebitIds.includes(t.fromAccId)?` via ${getAcc(t.fromAccId)?.name||"debit"}`:""}`; }
+        else if((t.type==="expense"||t.type==="investment") && t.accId===a.id){ signed -= Number(t.amount||0); secondary = t.type==="investment" ? "Investment outflow" : (t.note || "Expense"); }
+        else if(a.type==="bank" && linkedDebitIds.includes(t.accId) && (t.type==="expense"||t.type==="investment")){
+          signed -= Number(t.amount||0);
+          const via = getAcc(t.accId); secondary = `Via ${via?.name||(via?.type==="upi"?"UPI":"debit card")}`;
+        } else {
+          return null;
+        }
+      }
+
+      return {
+        id:`${a.id}_${t.id}`,
+        t,
+        signed,
+        color:signed>=0?T.success:T.danger,
+        label:signed>=0?"Credit":"Debit",
+        secondary,
+      };
+    }).filter(Boolean).sort((x,y)=>{
+      const dx=new Date(x.t.date||0); const dy=new Date(y.t.date||0);
+      if(dy-dx!==0) return dy-dx;
+      return (y.t.id||0)-(x.t.id||0);
+    });
+
+    const totalCredits = ledgerRows.reduce((sum,row)=>sum+(row.signed>0?row.signed:0),0);
+    const totalDebits = ledgerRows.reduce((sum,row)=>sum+(row.signed<0?Math.abs(row.signed):0),0);
+    const accountTxns = ledgerRows.map(row=>row.t);
+    const summaryCards = a.type==="cc"
+      ? [
+          { l:"Limit", v:`${sym}${fmt(a.limit)}`, c:T.text },
+          { l:"Due Now", v:`${sym}${fmt(cardSummary?.currentDue||0)}`, c:(cardSummary?.currentDue||0)>0?T.danger:T.success },
+          { l:"Unbilled", v:`${sym}${fmt(cardSummary?.currentCycleSpend||0)}`, c:T.warn },
+          { l:"Outstanding", v:`${sym}${fmt(cardSummary?.totalOutstanding||0)}`, c:(cardSummary?.totalOutstanding||0)>0?T.danger:T.success },
+        ]
+      : [
+          { l:a.type==="debit"?"Linked Bank":a.type==="upi"&&linkedUpiAcc?"Linked Account":"Live Balance",
+            v:a.type==="debit"?(linkedBankAcc?.name||"Not linked"):a.type==="upi"&&linkedUpiAcc?(linkedUpiAcc.name||"Not linked"):`${sym}${fmt(currentBalance)}`,
+            c:a.type==="debit"||a.type==="upi"?T.text:currentBalance>=0?T.success:T.danger },
+          { l:"Credits", v:`${sym}${fmt(totalCredits)}`, c:T.success },
+          { l:"Debits", v:`${sym}${fmt(totalDebits)}`, c:T.danger },
+        ];
+
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&setShowAccDetail(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"stretch",justifyContent:"center",zIndex:220 }}>
+        <div style={{ background:T.card,borderRadius:0,padding:"22px 18px 40px",width:"100%",maxWidth:"100vw",height:"100vh",maxHeight:"100vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+            <div>
+              <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{accIcon(a.type)} {a.name}</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{accLabel(a.type)}{a.last4?` · ···${a.last4}`:""}</div>
+            </div>
+            <button onClick={()=>setShowAccDetail(null)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
+            {summaryCards.map(s=>(
+              <div key={s.l} style={{ background:T.input,borderRadius:10,padding:"10px 12px" }}>
+                <div style={{ color:s.c,fontSize:16,fontWeight:800 }}>{s.v}</div>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginTop:2 }}>{s.l}</div>
+              </div>
+            ))}
+          </div>
+
+
+          {a.type==="cc"&&<>
+            <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>
+              {(cardSummary?.totalOutstanding||0)===0 && (cardSummary?.currentCycleSpend||0)===0
+                ? `No billed or unbilled spend right now · Alert above ${utilLimit}% of limit`
+                : `Statement ${formatShortDate(cardSummary?.lastStatementDate)} · Due ${formatShortDate(cardSummary?.dueOn)} · Alert above ${utilLimit}% of limit`}
+            </div>
+            <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:10 }}>
+              <div style={{ height:"100%",width:`${Math.min(100,util)}%`,background:util>utilLimit?T.danger:T.success,borderRadius:3 }}/>
+            </div>
+            {util>utilLimit&&<div style={{ background:T.danger+"22",border:`1px solid ${T.danger}44`,borderRadius:10,padding:10,marginBottom:14 }}>⚠️ <span style={{ color:T.danger,fontSize:12,fontWeight:700 }}>Current-cycle spend is above your {utilLimit}% alert limit</span></div>}
+          </>}
+
+          {isInvestmentAccount(a) && a.type!=="cc" && (
+            <div style={{ background:T.info+"10",border:`1px solid ${T.info}22`,borderRadius:12,padding:"10px 12px",marginBottom:12 }}>
+              <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>PF / investment account flow</div>
+              <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Use `Transfer` for new contributions and `Income` for credited interest — similar to the smooth MF flow.</div>
+              <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginTop:8 }}>
+                <button onClick={()=>{
+                  const sourceAcc = accounts.find(x=>x.id!==a.id && x.type==="bank") || accounts.find(x=>x.id!==a.id && x.type!=="cc") || null;
+                  setShowAccDetail(null);
+                  setAddPrefill({
+                    fromAccId:sourceAcc?.id || "",
+                    toAccId:a.id,
+                    who:`${a.name} contribution`,
+                  });
+                  setDefaultAddType("transfer");
+                  setShowAdd(true);
+                }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>↔ Add contribution</button>
+                <button onClick={()=>{
+                  setShowAccDetail(null);
+                  setAddPrefill({
+                    accId:a.id,
+                    incomeType:"interest",
+                    who:`${a.name} interest`,
+                  });
+                  setDefaultAddType("income");
+                  setShowAdd(true);
+                }} style={{ background:T.success+"18",border:`1px solid ${T.success}33`,color:T.success,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>💚 Add interest</button>
+              </div>
+            </div>
+          )}
+
+          {a.type==="cc"&&(()=>{
+            const cardEmiPlans = ccEmiPlans.filter(p=>p.cardId===a.id);
+            if(!cardEmiPlans.length) return null;
+            return (
+              <div style={{ marginBottom:16 }}>
+                <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:8 }}>CC EMI Plans</div>
+                <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                  {cardEmiPlans.map(plan=>{
+                    const installed = txns.filter(t=>t.type==="cc_emi"&&t.ccEmiPlanId===plan.id).length;
+                    const pct = plan.tenure>0 ? Math.round((installed/plan.tenure)*100) : 0;
+                    const done = installed>=plan.tenure;
+                    return (
+                      <div key={plan.id} style={{ background:T.input,border:`1px solid ${done?T.success:T.purple}33`,borderRadius:12,padding:"10px 14px" }}>
+                        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8 }}>
+                          <div>
+                            <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{plan.name}</div>
+                            <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>
+                              {sym}{fmt(plan.monthlyAmount)}/mo · {installed}/{plan.tenure} paid
+                              {plan.interestRate?` · ${plan.interestRate}% p.a.`:""}
+                              {plan.totalAmount?` · Total: ${sym}${fmt(plan.totalAmount)}`:""}
+                            </div>
+                          </div>
+                          <div style={{ display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4 }}>
+                            {done
+                              ? <span style={{ background:T.success+"22",color:T.success,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700 }}>✅ Done</span>
+                              : <span style={{ background:T.purple+"22",color:T.purple,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700 }}>Active</span>
+                            }
+                            {!done&&<button onClick={()=>{
+                              setCcEmiPlans(prev=>prev.map(p=>p.id===plan.id?{...p,status:"closed"}:p));
+                            }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"3px 8px",cursor:"pointer",fontSize:10,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>}
+                          </div>
+                        </div>
+                        <div style={{ height:5,background:T.border,borderRadius:3,marginTop:8 }}>
+                          <div style={{ height:"100%",width:`${Math.min(100,pct)}%`,background:done?T.success:T.purple,borderRadius:3,transition:"width 0.3s" }}/>
+                        </div>
+                        {!done&&<div style={{ display:"flex",justifyContent:"flex-end",marginTop:6 }}>
+                          <button onClick={()=>{ setShowAccDetail(null); setDefaultAddType("cc_emi"); setShowAdd(true); }} style={{ background:T.purple+"22",border:`1px solid ${T.purple}33`,color:T.purple,borderRadius:10,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>+ Record EMI</button>
+                        </div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10 }}>
+            <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>Transactions</div>
+            <div style={{ display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end" }}>
+              <button onClick={()=>{ setShowAccDetail(null); setEditingAccount(a); }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>✏️ Edit account</button>
+              {!(isInvestmentAccount(a) && a.type!=="cc") && <button onClick={()=>{ setShowAccDetail(null); setAddPrefill(a.type==="cc" ? { toAccId:a.id } : { accId:a.id }); setDefaultAddType(a.type==="cc"?"cc_payment":"expense"); setShowAdd(true); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>+ Add</button>}
+            </div>
+          </div>
+
+          {accountTxns.length===0 ? (
+            <div style={{ ...card,textAlign:"center",padding:20,marginBottom:0 }}>
+              <div style={{ color:T.sub,fontSize:12 }}>No transactions yet for this account.</div>
+            </div>
+          ) : (
+            <div style={{ ...card,padding:"8px 12px",marginBottom:0 }}>
+              {accountTxns.map((txn,idx)=><TxnRow key={`${a.id}_${txn.id}`} t={txn} last={idx===accountTxns.length-1} onEditTxn={nextTxn=>{ setShowAccDetail(null); setEditingTxn(nextTxn); }}/>) }
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const InvestmentDetailModal = () => {
+    const group = selectedInvestmentDetail;
+    if(!group) return null;
+    const type = INVEST_TYPES.find(x=>x.id===group.type) || group.typeMeta || INVEST_TYPES[0];
+    const displayFolio = String(group.folioNo || group.items.find(item=>String(item?.folioNo || "").trim())?.folioNo || "").trim();
+    const displayTitle = displayFolio ? `Folio ${displayFolio}` : (group.primaryName || group.title || type.name);
+    const groupStartDate = group.firstStartDate || group.items
+      .map(item=>normalizeToIsoDate(item?.startDate) || item?.startDate || "")
+      .filter(Boolean)
+      .sort((a,b)=>String(a).localeCompare(String(b)))[0] || "";
+    const primaryGroupItem = group.items
+      .slice()
+      .sort((a,b)=>String(normalizeToIsoDate(a?.startDate) || a?.startDate || "").localeCompare(String(normalizeToIsoDate(b?.startDate) || b?.startDate || "")))[0] || group.items[0] || null;
+    const openFolioStartDateEditor = () => {
+      if(!primaryGroupItem) return;
+      setSelectedInvestmentDetail(null);
+      setEditingInvestment({ ...primaryGroupItem, _allowStartDateEdit:true });
+      setShowAddInvestment(true);
+    };
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&setSelectedInvestmentDetail(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.82)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:220 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"22px 18px 40px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto",textAlign:"left" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:16 }}>
+            <div style={{ flex:1,minWidth:0,textAlign:"left" }}>
+              <div style={{ color:T.text,fontSize:18,fontWeight:900,wordBreak:"break-word" }}>{type.icon} {displayTitle}</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{type.name} · {group.items.length} entr{group.items.length===1?"y":"ies"}</div>
+            </div>
+            <div style={{ display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",justifyContent:"flex-end" }}>
+              {type.id==="mf" && primaryGroupItem && <button onClick={()=>{ setSelectedInvestmentDetail(null); openInvestmentQuickAdd(primaryGroupItem); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>+ Add</button>}
+              {type.id==="mf" && primaryGroupItem && <button onClick={openFolioStartDateEditor} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>Start date</button>}
+              <button onClick={()=>setSelectedInvestmentDetail(null)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+            </div>
+          </div>
+
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
+            {[
+              { l:"Worth", v:`${sym}${fmt(group.total)}`, c:type.color },
+              { l:"Start date", v:groupStartDate ? (formatShortDate(groupStartDate) || groupStartDate) : "—", c:T.purple },
+              { l:type.id==="mf" ? "Folio" : "Section", v:type.id==="mf" ? (displayFolio || "—") : type.name, c:T.text },
+              { l:"Entries", v:String(group.items.length), c:T.success }
+            ].map(s=>(
+              <div key={s.l} style={{ background:T.input,borderRadius:10,padding:"10px 12px",textAlign:"left" }}>
+                <div style={{ color:s.c,fontSize:15,fontWeight:800,wordBreak:"break-word" }}>{s.v}</div>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginTop:2 }}>{s.l}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ ...card,marginBottom:0,textAlign:"left" }}>
+            <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:10 }}>{type.id==="mf"?"Entries in this folio":"Holdings in this section"}</div>
+            {group.items.map((inv,idx)=>{
+              const linkedTxn = getInvestmentTxn(inv);
+              const metricText = formatInvestmentMetric(inv.type, linkedTxn?.investNav ?? inv.lastNav);
+              return (
+                <div key={inv.id} style={{ display:"flex",justifyContent:"space-between",gap:10,padding:"10px 0",borderBottom:idx<group.items.length-1?`1px solid ${T.border}`:"none" }}>
+                  <div style={{ minWidth:0,flex:1,textAlign:"left" }}>
+                    <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{inv.name}</div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>
+                      {type.id==="stocks"
+                        ? `1 stock entry`
+                        : (investmentFreqLabel(inv.freq) || "One-time / no frequency")}
+                      {metricText?` · ${metricText}`:""}
+                      {inv.startDate?` · ${formatShortDate(inv.startDate) || inv.startDate}`:""}
+                      {inv.reminder?` · Reminder ${inv.reminder}`:""}
+                    </div>
+                    {(inv.transactionRef || linkedTxn?.transactionRef)&&<div style={{ color:T.sub,fontSize:10,marginTop:3 }}>Ref ID: {inv.transactionRef || linkedTxn?.transactionRef}</div>}
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ color:type.color,fontSize:12,fontWeight:800 }}>{sym}{fmt(inv.currentValue ?? inv.amount)}</div>
+                    <div style={{ display:"flex",gap:4,justifyContent:"flex-end",marginTop:2,flexWrap:"wrap" }}>
+                      <button onClick={()=>openInvestmentEditor(inv)} style={{ background:"none",border:"none",color:T.info,cursor:"pointer",fontSize:10,fontFamily:"Nunito,sans-serif" }}>Edit</button>
+                      <button onClick={()=>removeInvestmentEntry(inv)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:10,fontFamily:"Nunito,sans-serif" }}>Delete</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── HOME ───────────────────────────────────────────────────────────────────
+  const DEFAULT_CARD_ORDER = ["stats","budget","categories","cc","bills","recent"];
+  const [cardOrder, setCardOrder] = useState(()=>JSON.parse(localStorage.getItem("arth_card_order")||"null")||DEFAULT_CARD_ORDER);
+  const [editingCards, setEditingCards] = useState(false);
+  const [syncEmail, setSyncEmail] = useState("");
+  const [syncPassword, setSyncPassword] = useState("");
+  const [cloudUser, setCloudUser] = useState(null);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudHydrated, setCloudHydrated] = useState(!isCloudSyncConfigured);
+  const [lastSyncedAt, setLastSyncedAt] = useState("");
+  const [cloudStatus, setCloudStatus] = useState(
+    isCloudSyncConfigured
+      ? "Sign in with the same account on web and desktop to keep your data synced."
+      : "Cloud sync is off. Add your Supabase keys in `.env` to enable shared login and sync."
+  );
+  const [backupStatus, setBackupStatus] = useState("");
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(()=>JSON.parse(localStorage.getItem("arth_auto_backup_enabled") ?? "true"));
+  const [autoBackupFrequency, setAutoBackupFrequency] = useState(()=>localStorage.getItem("arth_auto_backup_frequency") || "daily");
+  const [autoBackups, setAutoBackups] = useState(()=>JSON.parse(localStorage.getItem("arth_auto_backups") || "[]"));
+  const backupFileInputRef = useRef(null);
+  const applyingCloudSnapshotRef = useRef(false);
+  const cloudSnapshotRef = useRef(null);
+
+  useEffect(() => {
+    localStorage.setItem("arth_card_order", JSON.stringify(cardOrder));
+  }, [cardOrder]);
+  useEffect(() => {
+    localStorage.setItem("arth_auto_backup_enabled", JSON.stringify(autoBackupEnabled));
+  }, [autoBackupEnabled]);
+  useEffect(() => {
+    localStorage.setItem("arth_auto_backup_frequency", autoBackupFrequency);
+  }, [autoBackupFrequency]);
+  useEffect(() => {
+    try{
+      localStorage.setItem("arth_auto_backups", JSON.stringify((Array.isArray(autoBackups) ? autoBackups : []).slice(0, 3)));
+    }catch(err){
+      console.warn("Unable to persist auto backups", err);
+      if(autoBackupEnabled) setBackupStatus("Auto backups are limited by device storage. Please download a manual backup too.");
+    }
+  }, [autoBackups, autoBackupEnabled]);
+
+  const cloudSnapshot = useMemo(() => ({
+    version: CLOUD_SCHEMA_VERSION,
+    savedAt: new Date().toISOString(),
+    dark,
+    autoDetectExpenseCategory,
+    workTripMode,
+    autoBackupEnabled,
+    autoBackupFrequency,
+    cats,
+    accountTypes,
+    incomeTypes,
+    liabilityTypes:customLiabilityTypes,
+    accounts,
+    balanceCheckpoints,
+    people,
+    groups,
+    measureUnits,
+    itemCatalog,
+    txns,
+    investments,
+    bills,
+    liabilities,
+    trackedAssets,
+    loans,
+    annualBudget,
+    lastFYTarget,
+    monthOverrides,
+    cardOrder,
+  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+
+  useEffect(() => {
+    cloudSnapshotRef.current = cloudSnapshot;
+  }, [cloudSnapshot]);
+
+  const applyCloudSnapshot = useCallback((snapshot) => {
+    if(!snapshot || typeof snapshot !== "object") return;
+    applyingCloudSnapshotRef.current = true;
+    setDark(Boolean(snapshot.dark ?? true));
+    setAutoDetectExpenseCategory(Boolean(snapshot.autoDetectExpenseCategory ?? true));
+    setWorkTripMode(Boolean(snapshot.workTripMode ?? false));
+    setAutoBackupEnabled(Boolean(snapshot.autoBackupEnabled ?? true));
+    setAutoBackupFrequency(String(snapshot.autoBackupFrequency || "daily"));
+    setCats(normalizeCats(snapshot.cats));
+    setAccountTypes(normalizeAccountTypes(snapshot.accountTypes));
+    setIncomeTypes(normalizeIncomeTypes(snapshot.incomeTypes));
+    setCustomLiabilityTypes(normalizeLiabilityTypes(snapshot.liabilityTypes));
+    setAccounts(normalizeAccounts(snapshot.accounts));
+    setBalanceCheckpoints(snapshot.balanceCheckpoints && typeof snapshot.balanceCheckpoints === "object" ? snapshot.balanceCheckpoints : {});
+    setPeople(normalizePeople(snapshot.people));
+    setGroups(Array.isArray(snapshot.groups) ? snapshot.groups : []);
+    setMeasureUnits(normalizeMeasureUnits(snapshot.measureUnits));
+    setItemCatalog(normalizeItemCatalog(snapshot.itemCatalog));
+    setTxns(normalizeTxns(snapshot.txns));
+    setInvestments(Array.isArray(snapshot.investments) ? snapshot.investments : []);
+    setBills(Array.isArray(snapshot.bills) ? snapshot.bills : []);
+    setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
+    setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
+    setLoans(normalizeLoans(snapshot.loans));
+    setAnnualBudget(Number(snapshot.annualBudget || 600000));
+    setLastFYTarget(Number(snapshot.lastFYTarget || 0));
+    setMonthOverrides(snapshot.monthOverrides && typeof snapshot.monthOverrides === "object" ? snapshot.monthOverrides : {});
+    if(Array.isArray(snapshot.cardOrder) && snapshot.cardOrder.length) setCardOrder(snapshot.cardOrder);
+    window.setTimeout(() => { applyingCloudSnapshotRef.current = false; }, 0);
+  }, [setCardOrder]);
+
+  const formatBackupStamp = useCallback((value) => {
+    if(!value) return "";
+    const parsed = new Date(value);
+    if(Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toLocaleString("en-IN", { dateStyle:"medium", timeStyle:"short" });
+  }, []);
+
+  const buildBackupPayload = useCallback((snapshot = cloudSnapshotRef.current || {}, backupType = "manual", exportedAt = new Date().toISOString()) => ({
+    app:"Arth",
+    backupType,
+    exportedAt,
+    snapshot:{ ...snapshot, savedAt:snapshot?.savedAt || exportedAt },
+  }), []);
+
+  const downloadBackupPayload = useCallback((payload, prefix = "arth-backup") => {
+    const exportedAt = payload?.exportedAt || payload?.snapshot?.savedAt || new Date().toISOString();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:"application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${prefix}-${String(exportedAt).replace(/[:.]/g, "-")}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, []);
+
+  const restoreBackupSnapshot = useCallback((snapshot, label = "selected backup") => {
+    const looksValid = snapshot && typeof snapshot === "object" && (
+      Array.isArray(snapshot.txns) ||
+      Array.isArray(snapshot.accounts) ||
+      Array.isArray(snapshot.cats) ||
+      Array.isArray(snapshot.people) ||
+      Array.isArray(snapshot.investments)
+    );
+    if(!looksValid) throw new Error("Please choose a valid Arth backup JSON file.");
+    const stamp = formatBackupStamp(snapshot?.savedAt || "");
+    const summary = `${Array.isArray(snapshot.txns) ? snapshot.txns.length : 0} txns · ${Array.isArray(snapshot.accounts) ? snapshot.accounts.length : 0} accounts`;
+    const proceed = window.confirm(`Restore ${label}${stamp ? ` (${stamp})` : ""}? This will replace current data on this device.\n\n${summary}`);
+    if(!proceed) return false;
+    applyCloudSnapshot(snapshot);
+    if(cloudUser?.id && isCloudSyncConfigured) setCloudStatus("Backup restored locally. Syncing your updated data...");
+    setBackupStatus(`Backup restored${stamp ? ` · ${stamp}` : ""}`);
+    return true;
+  }, [applyCloudSnapshot, cloudUser?.id, formatBackupStamp]);
+
+  const downloadBackupFile = useCallback(() => {
+    try{
+      const exportedAt = new Date().toISOString();
+      const payload = buildBackupPayload(cloudSnapshotRef.current || {}, "manual", exportedAt);
+      downloadBackupPayload(payload, "arth-backup");
+      setBackupStatus(`Backup downloaded · ${formatBackupStamp(exportedAt)}`);
+    }catch(err){
+      setBackupStatus(`Backup failed: ${err.message}`);
+    }
+  }, [buildBackupPayload, downloadBackupPayload, formatBackupStamp]);
+
+  const shareBackupToDrive = useCallback(async () => {
+    const exportedAt = new Date().toISOString();
+    const payload = buildBackupPayload(cloudSnapshotRef.current || {}, "drive-export", exportedAt);
+    const fileName = `arth-backup-${exportedAt.replace(/[:.]/g, "-")}.json`;
+    const file = new File([JSON.stringify(payload, null, 2)], fileName, { type:"application/json" });
+    try{
+      if(navigator.share && navigator.canShare?.({ files:[file] })) {
+        await navigator.share({
+          title:"Arth backup",
+          text:"Save this backup to Google Drive.",
+          files:[file],
+        });
+        setBackupStatus("Backup shared. Choose Google Drive in the share sheet to save it.");
+        return;
+      }
+      downloadBackupPayload(payload, "arth-drive-export");
+      window.open("https://drive.google.com/drive/my-drive", "_blank", "noopener,noreferrer");
+      setBackupStatus("Backup downloaded. Upload it to Google Drive in the tab that just opened.");
+    }catch(err){
+      if(err?.name === "AbortError"){
+        setBackupStatus("Drive export cancelled.");
+        return;
+      }
+      const permissionDenied = /permission denied|notallowed|permission/i.test(String(err?.message || "")) || err?.name === "NotAllowedError";
+      if(permissionDenied){
+        try{
+          downloadBackupPayload(payload, "arth-drive-export");
+          window.open("https://drive.google.com/drive/my-drive", "_blank", "noopener,noreferrer");
+          setBackupStatus("Direct Drive sharing was blocked on this phone, so the backup was downloaded instead. Upload that file to Google Drive.");
+          return;
+        }catch(fallbackErr){
+          setBackupStatus(`Drive export fallback failed: ${fallbackErr.message}`);
+          return;
+        }
+      }
+      setBackupStatus(`Drive export failed: ${err.message}`);
+    }
+  }, [buildBackupPayload, downloadBackupPayload]);
+
+  const restoreBackupFile = useCallback(async (file) => {
+    if(!file) return;
+    try{
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const snapshot = parsed?.snapshot && typeof parsed.snapshot === "object" ? parsed.snapshot : parsed;
+      const backupTime = parsed?.exportedAt || snapshot?.savedAt || (file.lastModified ? new Date(file.lastModified).toISOString() : "");
+      const stamp = formatBackupStamp(backupTime);
+      restoreBackupSnapshot(snapshot, stamp ? `backup from ${stamp}` : (file.name || "backup file"));
+    }catch(err){
+      setBackupStatus(`Restore failed: ${err.message}`);
+    }finally{
+      if(backupFileInputRef.current) backupFileInputRef.current.value = "";
+    }
+  }, [formatBackupStamp, restoreBackupSnapshot]);
+
+  useEffect(() => {
+    if(!autoBackupEnabled) return;
+    const snapshot = cloudSnapshotRef.current || cloudSnapshot;
+    const intervalMap = { hourly:60*60*1000, daily:24*60*60*1000, weekly:7*24*60*60*1000 };
+    const minGap = intervalMap[autoBackupFrequency] || intervalMap.daily;
+    const now = Date.now();
+    setAutoBackups(prev => {
+      const list = Array.isArray(prev) ? prev : [];
+      const latestTime = list[0]?.exportedAt ? new Date(list[0].exportedAt).getTime() : 0;
+      if(latestTime && (now - latestTime) < minGap) return list;
+      const exportedAt = new Date(now).toISOString();
+      const nextItem = {
+        id:`auto_${now}`,
+        backupType:"auto",
+        exportedAt,
+        snapshot:{ ...snapshot, savedAt:snapshot?.savedAt || exportedAt },
+      };
+      return [nextItem, ...list].slice(0, 3);
+    });
+  }, [cloudSnapshot, autoBackupEnabled, autoBackupFrequency]);
+
+  const pushCloudSnapshot = useCallback(async (statusText = "Cloud sync complete.", quiet = false) => {
+    if(!cloudUser?.id || !isCloudSyncConfigured) return;
+    if(!quiet) setCloudBusy(true);
+    try{
+      const nextSnapshot = cloudSnapshotRef.current || {};
+      const saved = await saveCloudSnapshot(cloudUser.id, nextSnapshot);
+      setLastSyncedAt(saved?.updated_at || nextSnapshot.savedAt || new Date().toISOString());
+      setCloudStatus(statusText);
+    }catch(err){
+      setCloudStatus(`Sync failed: ${err.message}`);
+    }finally{
+      if(!quiet) setCloudBusy(false);
+    }
+  }, [cloudUser]);
+
+  const pullCloudSnapshot = useCallback(async () => {
+    if(!cloudUser?.id || !isCloudSyncConfigured) return;
+    setCloudBusy(true);
+    try{
+      const record = await loadCloudSnapshot(cloudUser.id);
+      if(record?.snapshot){
+        applyCloudSnapshot(record.snapshot);
+        setLastSyncedAt(record.updated_at || record.snapshot?.savedAt || new Date().toISOString());
+        setCloudStatus("Cloud data loaded for this account.");
+      } else {
+        const nextSnapshot = cloudSnapshotRef.current || {};
+        const seeded = await saveCloudSnapshot(cloudUser.id, nextSnapshot);
+        setLastSyncedAt(seeded?.updated_at || nextSnapshot.savedAt || new Date().toISOString());
+        setCloudStatus("First sync complete. Current data is now shared across your web and desktop apps.");
+      }
+    }catch(err){
+      setCloudStatus(`Cloud load failed: ${err.message}`);
+    }finally{
+      setCloudBusy(false);
+      setCloudHydrated(true);
+    }
+  }, [cloudUser, applyCloudSnapshot]);
+
+  const handleCloudAuth = useCallback(async (mode = "signin") => {
+    if(!isCloudSyncConfigured) return;
+    if(!syncEmail.trim() || !syncPassword.trim()){
+      setCloudStatus("Enter your email and password first.");
+      return;
+    }
+    setCloudBusy(true);
+    try{
+      const data = mode==="signup"
+        ? await signUpWithPassword(syncEmail.trim(), syncPassword)
+        : await signInWithPassword(syncEmail.trim(), syncPassword);
+      const nextUser = data?.session?.user ?? null;
+      if(nextUser?.email) setSyncEmail(nextUser.email);
+      setCloudUser(nextUser);
+      setCloudHydrated(!nextUser);
+      setCloudStatus(
+        mode==="signup"
+          ? (nextUser ? "Account created and signed in. Loading your cloud data..." : "Account created. Check your email if confirmation is enabled, then sign in.")
+          : "Signed in. Loading your cloud data..."
+      );
+      setSyncPassword("");
+    }catch(err){
+      setCloudStatus(`${mode==="signup" ? "Sign-up" : "Sign-in"} failed: ${err.message}`);
+    }finally{
+      setCloudBusy(false);
+    }
+  }, [syncEmail, syncPassword]);
+
+  const handleCloudSignOut = useCallback(async () => {
+    setCloudBusy(true);
+    try{
+      await signOutCloud();
+      setCloudUser(null);
+      setCloudHydrated(true);
+      setLastSyncedAt("");
+      setSyncPassword("");
+      setCloudStatus("Signed out. Local data stays on this device until you sign back in.");
+    }catch(err){
+      setCloudStatus(`Sign-out failed: ${err.message}`);
+    }finally{
+      setCloudBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if(!isCloudSyncConfigured || !supabase) return;
+    let mounted = true;
+    getCurrentCloudUser()
+      .then(user => {
+        if(!mounted) return;
+        setCloudUser(user);
+        setCloudHydrated(!user);
+        if(user?.email) setSyncEmail(user.email);
+      })
+      .catch(err => {
+        if(!mounted) return;
+        setCloudStatus(`Cloud setup error: ${err.message}`);
+        setCloudHydrated(true);
+      });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if(!mounted) return;
+      const nextUser = session?.user ?? null;
+      setCloudUser(nextUser);
+      if(nextUser?.email) setSyncEmail(nextUser.email);
+      if(!nextUser){
+        setLastSyncedAt("");
+        setCloudHydrated(true);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      authListener?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if(!cloudUser?.id || !isCloudSyncConfigured) return;
+    setCloudHydrated(false);
+    setCloudStatus("Loading cloud data...");
+    pullCloudSnapshot();
+  }, [cloudUser?.id, pullCloudSnapshot]);
+
+  useEffect(() => {
+    if(!cloudUser?.id || !isCloudSyncConfigured || !cloudHydrated || applyingCloudSnapshotRef.current) return;
+    const timer = window.setTimeout(() => {
+      pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+
+  const moveCard = (idx, dir) => {
+    const arr = cardOrder.map(x=>x); // fully mutable copy
+    const swap = idx + dir;
+    if(swap < 0 || swap >= arr.length) return;
+    const tmp = arr[idx];
+    arr[idx] = arr[swap];
+    arr[swap] = tmp;
+    const newArr = arr.map(x=>x);
+    setCardOrder(newArr);
+    localStorage.setItem("arth_card_order", JSON.stringify(newArr));
+  };
+
+  const Home = () => {
+    const ccList = accounts.filter(a=>a.type==="cc");
+    const ccSummaries = ccList.map(card=>({ card, ...getCardSummary(card) }));
+    const totalDue = ccSummaries.reduce((s,item)=>s+item.currentDue,0);
+    const totalUnbilled = ccSummaries.reduce((s,item)=>s+item.currentCycleSpend,0);
+    const anyHighUtil = ccSummaries.some(item=>item.isOverAlert);
+    const nextDueCard = [...ccSummaries].filter(item=>item.currentDue>0).sort((a,b)=>a.dueOn-b.dueOn)[0] || null;
+    const monthly = monthOverrides[viewMonth] || Math.round(annualBudget/12);
+    const budgetPct = Math.min(100,Math.round(myActual/Math.max(1,monthly)*100));
+    const diff = monthly - myActual;
+    const isOver = diff < 0;
+
+    const groupSpent = byCat.find(c=>c.id==="family")?.value || 0;
+    const leftDays = daysLeft(viewMonth);
+    const CARDS = {
+      stats: (
+        <div key="stats" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+          {[
+            {label:"Income",value:`${sym}${fmt(totalIncome)}`,color:T.success,icon:"💚",action:()=>{ setTab("transactions"); setFType("income"); }},
+            {label:"Investments",value:`${sym}${fmt(monthlyInvestmentFlow)}`,color:T.info,icon:"💹",action:()=>{ setSelectedInvestmentTypeView("all"); setShowInvestments(true); }},
+            {label:"People & Groups",value:`${sym}${fmt(groupSpent)}`,color:T.info,icon:"👥",action:()=>setTab("people")},
+            {label:"Budget",value:`${sym}${fmt(monthly)}`,color:T.warn,icon:"🎯",action:()=>{ setShowSettings(true); setSettingsSection("budget"); }},
+            {label:"To Receive",value:`${sym}${fmt(monthTotalOwedToMe)}`,color:T.accent,icon:"🔄",action:()=>setShowReceivablesList(true)},
+            {label:"Net Savings",value:`${sym}${fmtK(Math.max(0,totalIncome-myActual-monthlyInvestmentFlow))}`,color:T.success,icon:"💰",action:()=>setTab("home")},
+          ].map(s=>(
+            <div key={s.label} onClick={s.action} style={{ ...card,marginBottom:0,padding:"12px",cursor:"pointer" }}>
+              <div style={{ fontSize:20,marginBottom:4 }}>{s.icon}</div>
+              <div style={{ color:s.color,fontSize:16,fontWeight:800 }}>{s.value}</div>
+              <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginTop:2 }}>{s.label}</div>
+              {s.sub&&<div style={{ color:T.sub,fontSize:9,marginTop:3,whiteSpace:"normal" }}>{s.sub}</div>}
+            </div>
+          ))}
+        </div>
+      ),
+
+
+      categories: byCat.length>0 ? (
+        <div key="categories" style={{ ...card,padding:"16px 14px" }}>
+          <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:14 }}>Spend by Category</div>
+          <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+            <ResponsiveContainer width={140} height={140}>
+              <PieChart>
+                <Pie data={byCat} cx="50%" cy="50%" innerRadius={38} outerRadius={68} dataKey="value" stroke="none">
+                  {byCat.map((c,i)=><Cell key={i} fill={c.color} opacity={0.9}/>)}
+                </Pie>
+                <Tooltip content={({active,payload})=>active&&payload?.length?<div style={ttStyle}><b style={{color:payload[0].payload.color}}>{payload[0].payload.icon} {payload[0].name}</b><br/>{sym}{fmt(payload[0].value)}</div>:null}/>
+              </PieChart>
+            </ResponsiveContainer>
+            <div style={{ flex:1 }}>
+              {[...byCat].sort((a,b)=>b.value-a.value).slice(0,6).map((c,i)=>{
+                return (
+                  <div key={i} style={{ marginBottom:7 }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2 }}>
+                      <span style={{ color:T.sub,fontSize:11 }}>{c.icon} {c.name.split(" ")[0]}</span>
+                      <span style={{ color:T.text,fontSize:11,fontWeight:800 }}>{sym}{fmtK(c.value)}</span>
+                    </div>
+                    {c.budget>0&&<div style={{ height:2,background:T.border,borderRadius:1 }}>
+                      <div style={{ height:"100%",width:`${Math.min(100,Math.round(c.value/c.budget*100))}%`,background:c.value>c.budget?T.danger:c.color,borderRadius:1 }}/>
+                    </div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null,
+
+      cc: ccList.length>0 ? (
+        <div key="cc" onClick={()=>{
+          if(ccList.length===1) setShowAccDetail(ccList[0]);
+          else { setShowSettings(true); setSettingsSection("accounts"); }
+        }} style={{ ...card,cursor:"pointer",display:"flex",alignItems:"center",gap:12 }}>
+          <div style={{ width:36,height:36,borderRadius:10,background:T.danger+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>💳</div>
+          <div style={{ flex:1 }}>
+            <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{ccList.length} Credit Card{ccList.length>1?"s":""}</div>
+            <div style={{ color:T.sub,fontSize:11,marginTop:1 }}>{ccList.map(a=>a.name).join(" · ")}</div>
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <div style={{ color:totalDue>0?T.danger:T.success,fontSize:14,fontWeight:800 }}>{sym}{fmt(totalDue)} due now</div>
+            <div style={{ color:anyHighUtil?T.danger:T.sub,fontSize:10 }}>
+              {totalUnbilled>0
+                ? `${sym}${fmt(totalUnbilled)} unbilled`
+                : nextDueCard
+                  ? `Due ${formatShortDate(nextDueCard.dueOn)}`
+                  : "No current due"}
+            </div>
+          </div>
+          <div style={{ color:T.sub,fontSize:16 }}>›</div>
+        </div>
+      ) : null,
+
+      bills: (()=>{
+        const today = new Date();
+        const upcoming = bills.filter(b=>b.status==="unpaid").sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).slice(0,4);
+        const overdue = upcoming.filter(b=>new Date(b.dueDate)<today);
+        if(!upcoming.length) return null;
+        return (
+          <div key="bills" style={card}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+              <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>📅 Bills Due</span>
+              {overdue.length>0&&<span style={{ background:T.danger+"22",color:T.danger,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700 }}>{overdue.length} overdue</span>}
+            </div>
+            {upcoming.map(b=>{
+              const daysUntil=Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
+              const isOverdue=daysUntil<0;
+              const cat=getCat(b.catId);
+              return (
+                <div key={b.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                  <div style={{ width:32,height:32,borderRadius:9,background:(isOverdue?T.danger:daysUntil<=3?T.warn:T.success)+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>{cat.icon}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{b.name}</div>
+                    <div style={{ color:isOverdue?T.danger:daysUntil<=3?T.warn:T.sub,fontSize:11 }}>{isOverdue?`${Math.abs(daysUntil)}d overdue`:daysUntil===0?"Due today":`Due in ${daysUntil}d`}</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    {b.amount>0&&<div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(b.amount)}</div>}
+                    <button onClick={e=>{ e.stopPropagation();
+                      const accId=b.accId||accounts.find(a=>a.type!=="cc")?.id||"";
+                      setTxns(p=>[{id:Date.now(),type:"expense",desc:b.name,merchant:b.merchant||"",date:todayStr(),note:"Bill payment",catId:b.catId,catIds:b.catIds||[b.catId],subId:b.subId||null,accId,people:b.splitPeople||{},forPerson:"",groupId:b.groupId||null,groupCollectiveAmount:Number(b.groupCollectiveAmount||0),amount:b.amount||0,isBillPayment:true,billInvoiceNo:b.invoiceNo||null,paidBillId:b.id,paidBillName:b.name,imageBase64:b.imageBase64||null,paymentImageBase64:b.paymentImageBase64||null},...p]);
+                      setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:todayStr()}:x));
+                      if(b.recurring){ const next=new Date(b.dueDate); if(b.frequency==="monthly") next.setMonth(next.getMonth()+1); else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3); else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6); else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
+                    }} style={{ background:T.success+"22",border:`1px solid ${T.success}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif" }}>Pay</button>
+                  </div>
+                </div>
+              );
+            })}
+            <button onClick={()=>setTab("bills")} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer",marginTop:8,width:"100%",textAlign:"right" }}>Manage bills →</button>
+          </div>
+        );
+      })(),
+
+      recent: txns.length>0 ? (
+        <div key="recent" style={card}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+            <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>Recent</span>
+            <button onClick={()=>{ setFType("All"); applyTxnDatePreset("current_month", viewMonth); setTxnAmountFrom(""); setTxnAmountTo(""); setTxnCategoryFilter("all"); setTxnPersonFilter("all"); setExpenseSourceFilter("all"); setExpenseCardFilter("all"); setIncomeTypeFilter("all"); setIncomeAccountFilter("all"); setInvestmentTypeFilter("all"); setTab("transactions"); }} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer" }}>See all →</button>
+          </div>
+          {[...txns]
+            .sort((a,b)=>{
+              const sortA = getRecordedSortValue(a);
+              const sortB = getRecordedSortValue(b);
+              if(sortB !== sortA) return sortB - sortA;
+              return String(b.id||"").localeCompare(String(a.id||""), undefined, { numeric:true, sensitivity:"base" });
+            })
+            .slice(0,5)
+            .map((t,i,arr)=><TxnRow key={t.id} t={t} last={i===arr.length-1}/>)}
+        </div>
+      ) : (
+        <div key="recent" style={{ ...card,textAlign:"center",padding:40 }}>
+          <div style={{ fontSize:48,marginBottom:12 }}>💸</div>
+          <div style={{ color:T.text,fontSize:16,fontWeight:800,marginBottom:8 }}>No transactions yet</div>
+          <div style={{ color:T.sub,fontSize:13,marginBottom:20 }}>Tap + Add to get started</div>
+          <button onClick={()=>setShowAdd(true)} style={btnP}>+ Add First Expense</button>
+        </div>
+      ),
+    };
+
+    return (
+      <div>
+        {/* Hero — sticky spend+budget+month nav */}
+        <div style={{ position:"sticky",top:56,zIndex:40,background:dark?"#0d0a05":"#fffbf0",borderBottom:`1px solid ${T.border}`,padding:"14px 18px 16px" }}>
+          {/* Month nav */}
+          <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:12 }}>
+            <button onClick={()=>setViewMonth(m=>{ const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })} style={{ background:"none",border:"none",color:T.accent,fontSize:22,cursor:"pointer",padding:0,lineHeight:1 }}>‹</button>
+            <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1.5,flex:1,textAlign:"center" }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
+            <button onClick={()=>setViewMonth(m=>{ const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })} style={{ background:"none",border:"none",color:T.accent,fontSize:22,cursor:"pointer",padding:0,lineHeight:1 }}>›</button>
+          </div>
+          {/* Spend + Budget side by side */}
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12 }}>
+            <div>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:3 }}>Spent</div>
+              <div style={{ color:T.danger,fontSize:28,fontWeight:900,lineHeight:1 }}>{sym}{fmt(myActual)}</div>
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:3 }}>Budget</div>
+              <div style={{ color:T.text,fontSize:28,fontWeight:900,lineHeight:1 }}>{sym}{fmt(monthly)}</div>
+            </div>
+          </div>
+          {/* Progress bar */}
+          <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:6 }}>
+            <div style={{ height:"100%",width:`${budgetPct}%`,background:budgetPct>90?T.danger:budgetPct>70?T.warn:T.success,borderRadius:3,transition:"width 0.3s" }}/>
+          </div>
+          {/* Bottom row */}
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <span style={{ color:isOver?T.danger:T.success,fontSize:12,fontWeight:800 }}>{isOver?"−":"+"}{sym}{fmt(Math.abs(diff))} {isOver?"over":"left"} · {leftDays}d</span>
+            {safePerDay!==null&&<span style={{ color:T.success,fontSize:12,fontWeight:800 }}>Safe/day: {sym}{fmt(safePerDay)}</span>}
+          </div>
+        </div>
+
+        <div style={{ padding:"14px 16px 0" }}>
+          {/* Edit cards toggle */}
+          <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:8 }}>
+            <button onClick={()=>setEditingCards(e=>!e)} style={{ background:editingCards?T.accent+"22":"none",border:`1px solid ${editingCards?T.accent:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:editingCards?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{editingCards?"✓ Done":"⠿ Arrange"}</button>
+          </div>
+
+          {/* Cards in user-defined order */}
+          {cardOrder.map((cardId, idx) => {
+            const cardEl = CARDS[cardId];
+            if(!cardEl) return null;
+            return (
+              <div key={cardId} style={{ position:"relative",marginBottom:12 }}>
+                {editingCards&&(
+                  <div style={{ position:"absolute",right:-8,top:"50%",transform:"translateY(-50%)",display:"flex",flexDirection:"column",gap:4,zIndex:10 }}>
+                    <button onClick={()=>moveCard(idx,-1)} disabled={idx===0} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===0?"not-allowed":"pointer",fontSize:14,color:idx===0?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↑</button>
+                    <button onClick={()=>moveCard(idx,1)} disabled={idx===cardOrder.length-1} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===cardOrder.length-1?"not-allowed":"pointer",fontSize:14,color:idx===cardOrder.length-1?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↓</button>
+                  </div>
+                )}
+                <div style={{ marginRight:editingCards?36:0, transition:"margin 0.2s" }}>
+                  {cardEl}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // ── TRANSACTIONS ───────────────────────────────────────────────────────────
+  const Transactions = () => {
+    const [showTxnFilters, setShowTxnFilters] = useState(false);
+    const [showTxnSort, setShowTxnSort] = useState(false);
+    const txnSortOptions = [
+      { id:"recorded_desc", label:"Latest", title:"Latest" },
+      { id:"date_desc", label:"By date ↓", title:"By date ↓" },
+      { id:"date_asc", label:"By date ↑", title:"By date ↑" },
+      { id:"amount_desc", label:"High ₹", title:"High ₹" },
+      { id:"amount_asc", label:"Low ₹", title:"Low ₹" },
+    ];
+    const txnSortMeta = txnSortOptions.find(opt=>opt.id===txnSort) || txnSortOptions[0];
+    const expenseAccountTypes = ACC_TYPES.filter(opt=>accounts.some(a=>a.type===opt.id));
+    const personFilterOptions = people.filter(p=>!p.isMe).filter(p=>txns.some(txn=>txnHasPerson(txn, p.id)));
+    const activeFilterCount = [
+      fType !== "All",
+      txnDateFrom || txnDateTo,
+      txnAmountFrom || txnAmountTo,
+      txnCategoryFilter !== "all",
+      txnPersonFilter !== "all",
+      expenseSourceFilter !== "all" || expenseCardFilter !== "all",
+      incomeTypeFilter !== "all" || incomeAccountFilter !== "all",
+      investmentTypeFilter !== "all",
+      txnReimbursableOnly
+    ].filter(Boolean).length;
+    const hasActiveFilters = activeFilterCount > 0;
+
+    const clearTxnFilters = () => {
+      setFType("All");
+      setTxnDatePreset("all");
+      setTxnDateFrom("");
+      setTxnDateTo("");
+      setTxnAmountFrom("");
+      setTxnAmountTo("");
+      setTxnCategoryFilter("all");
+      setTxnPersonFilter("all");
+      setExpenseSourceFilter("all");
+      setExpenseCardFilter("all");
+      setIncomeTypeFilter("all");
+      setIncomeAccountFilter("all");
+      setInvestmentTypeFilter("all");
+      setTxnReimbursableOnly(false);
+    };
+
+    return (
+      <div style={{ padding:"14px 16px 0" }}>
+        {txnReimbursableOnly&&(
+          <div style={{ background:"#f0a50012",border:"1px solid #f0a50044",borderRadius:10,padding:"8px 12px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <span style={{ color:"#f0a500",fontSize:12,fontWeight:700 }}>💼 Showing pending reimbursements only</span>
+            <button onClick={()=>setTxnReimbursableOnly(false)} style={{ background:"none",border:"none",color:"#f0a500",cursor:"pointer",fontSize:14,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+        )}
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+          <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>Transactions</div>
+          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+            <div style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{filteredTxns.length} shown</div>
+            <button
+              onClick={()=>setShowTxnSort(true)}
+              aria-label="Open transaction sort options"
+              title={`Sort transactions: ${txnSortMeta.title}`}
+              style={{
+                height:38,
+                borderRadius:12,
+                border:`1px solid ${T.border}`,
+                background:T.card,
+                color:T.text,
+                cursor:"pointer",
+                display:"flex",
+                alignItems:"center",
+                justifyContent:"center",
+                gap:6,
+                padding:"0 10px",
+                boxShadow:"none",
+                fontFamily:"Nunito,sans-serif"
+              }}
+            >
+              <span style={{ fontSize:14 }}>↕</span>
+              <span style={{ fontSize:11,fontWeight:800,whiteSpace:"nowrap" }}>{txnSortMeta.label}</span>
+            </button>
+            <button
+              onClick={()=>setShowTxnFilters(true)}
+              aria-label="Open transaction filters"
+              title="Filter transactions"
+              style={{
+                position:"relative",
+                width:38,
+                height:38,
+                borderRadius:12,
+                border:`1px solid ${hasActiveFilters?T.accent:T.border}`,
+                background:hasActiveFilters?T.accentSoft:T.card,
+                color:hasActiveFilters?T.accent:T.sub,
+                cursor:"pointer",
+                display:"flex",
+                alignItems:"center",
+                justifyContent:"center",
+                boxShadow:"none"
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M3 5H21L14 13V19L10 17V13L3 5Z" fill="currentColor" />
+              </svg>
+              {hasActiveFilters&&<span style={{ position:"absolute",top:-5,right:-5,minWidth:18,height:18,borderRadius:999,background:T.accent,color:"#000",fontSize:10,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px" }}>{activeFilterCount}</span>}
+            </button>
+          </div>
+        </div>
+
+        {showTxnSort&&(
+          <div onClick={e=>e.target===e.currentTarget&&setShowTxnSort(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:210 }}>
+            <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 28px",width:"100%",maxWidth:430 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+                <div>
+                  <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>Sort Transactions</div>
+                  <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>Current: {txnSortMeta.title}</div>
+                </div>
+                <button onClick={()=>setShowTxnSort(false)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+              </div>
+
+              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                {txnSortOptions.map(opt=>(
+                  <button
+                    key={opt.id}
+                    onClick={()=>{ setTxnSort(opt.id); setShowTxnSort(false); }}
+                    style={{
+                      textAlign:"left",
+                      borderRadius:12,
+                      padding:"11px 12px",
+                      border:`1px solid ${txnSort===opt.id?T.accent:T.border}`,
+                      background:txnSort===opt.id?T.accentSoft:T.input,
+                      color:T.text,
+                      cursor:"pointer",
+                      fontFamily:"Nunito,sans-serif"
+                    }}
+                  >
+                    <div style={{ fontSize:13,fontWeight:800,color:txnSort===opt.id?T.accent:T.text }}>{opt.title}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showTxnFilters&&(
+          <div onClick={e=>e.target===e.currentTarget&&setShowTxnFilters(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:210 }}>
+            <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 28px",width:"100%",maxWidth:430,maxHeight:"92vh",overflowY:"auto" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+                <div>
+                  <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>Filter Transactions</div>
+                  <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{filteredTxns.length} result{filteredTxns.length!==1?"s":""}</div>
+                </div>
+                <button onClick={()=>setShowTxnFilters(false)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+              </div>
+
+              <div style={{ display:"flex",flexWrap:"wrap",gap:6,overflowX:"auto",paddingBottom:10,marginBottom:10 }}>
+                {["All","expense","income","investment","transfer","cc_payment","settlement_in"].map(type=>(
+                  <Chip key={type} color={type==="All"?T.accent:txnColor(type,T)} active={fType===type} onClick={()=>setFType(type)}>
+                    {type==="All" ? "All" : txnLabel(type)}
+                  </Chip>
+                ))}
+              </div>
+
+              <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+                <div>
+                  <span style={lbl}>Quick date filters</span>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                    <Chip color={T.accent} active={txnDatePreset==="current_month"} onClick={()=>applyTxnDatePreset("current_month", viewMonth)}>This Month</Chip>
+                    <Chip color={T.info} active={txnDatePreset==="last_month"} onClick={()=>applyTxnDatePreset("last_month", viewMonth)}>Last Month</Chip>
+                    <Chip color={T.warn} active={txnDatePreset==="custom"} onClick={()=>applyTxnDatePreset("custom", viewMonth)}>Calendar</Chip>
+                    <Chip color={T.sub} active={txnDatePreset==="all" && !txnDateFrom && !txnDateTo} onClick={()=>applyTxnDatePreset("all", viewMonth)}>All Time</Chip>
+                  </div>
+                </div>
+
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                  <div>
+                    <span style={lbl}>TXN from</span>
+                    <input style={inp} type="date" value={txnDateFrom} onChange={e=>{ setTxnDatePreset("custom"); setTxnDateFrom(e.target.value); }}/>
+                  </div>
+                  <div>
+                    <span style={lbl}>TXN to</span>
+                    <input style={inp} type="date" value={txnDateTo} onChange={e=>{ setTxnDatePreset("custom"); setTxnDateTo(e.target.value); }}/>
+                  </div>
+                </div>
+
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                  <div>
+                    <span style={lbl}>Amount from</span>
+                    <input style={inp} type="text" inputMode="decimal" placeholder={`e.g. ${sym}500`} value={txnAmountFrom||""} onChange={e=>setTxnAmountFrom(cleanMoneyInput(e.target.value))}/>
+                  </div>
+                  <div>
+                    <span style={lbl}>Amount to</span>
+                    <input style={inp} type="text" inputMode="decimal" placeholder={`e.g. ${sym}10,000`} value={txnAmountTo||""} onChange={e=>setTxnAmountTo(cleanMoneyInput(e.target.value))}/>
+                  </div>
+                </div>
+
+                <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                  <div>
+                    <span style={lbl}>Category</span>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                      <Chip color={T.accent} active={txnCategoryFilter==="all"} onClick={()=>setTxnCategoryFilter("all")}>
+                        All Categories ({expenseBaseTxns.length})
+                      </Chip>
+                      {cats
+                        .filter(cat=>txnCategoryFilter===cat.id || expenseBaseTxns.some(txn=>{
+                          const ids = getTxnCategoryIds(txn);
+                          return ids.some(id=>String(id)===String(cat.id));
+                        }))
+                        .map(cat=>{
+                          const count = expenseBaseTxns.filter(txn=>{
+                            const ids = getTxnCategoryIds(txn);
+                            return ids.some(id=>String(id)===String(cat.id));
+                          }).length;
+                          return (
+                            <Chip key={cat.id} color={cat.color} active={txnCategoryFilter===cat.id} onClick={()=>setTxnCategoryFilter(cat.id)}>
+                              {cat.icon} {cat.name} ({count})
+                            </Chip>
+                          );
+                        })}
+                    </div>
+                  </div>
+                  <div>
+                    <span style={lbl}>Person / contact</span>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                      <Chip color={T.accent} active={txnPersonFilter==="all"} onClick={()=>setTxnPersonFilter("all")}>All People</Chip>
+                      {personFilterOptions.map(person=>{
+                        const count = txns.filter(txn=>isDateInRange(txn.date, txnDateFrom, txnDateTo) && txnHasPerson(txn, person.id)).length;
+                        return (
+                          <Chip key={person.id} color={person.color} active={txnPersonFilter===person.id} onClick={()=>setTxnPersonFilter(person.id)}>
+                            {person.emoji} {person.name} ({count})
+                          </Chip>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {fType==="expense"&&(
+                  <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                    <div>
+                      <span style={lbl}>Paid via</span>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                        <Chip color={T.accent} active={expenseSourceFilter==="all"} onClick={()=>{ setExpenseSourceFilter("all"); setExpenseCardFilter("all"); }}>
+                          All ({expenseBaseTxns.length})
+                        </Chip>
+                        {expenseAccountTypes.map(opt=>{
+                          const count = expenseBaseTxns.filter(txn=>getAcc(txn.accId)?.type===opt.id).length;
+                          return (
+                            <Chip key={opt.id} color={opt.id==="cc"?T.danger:T.info} active={expenseSourceFilter===opt.id} onClick={()=>{
+                              setExpenseSourceFilter(opt.id);
+                              if(opt.id !== "cc") setExpenseCardFilter("all");
+                            }}>
+                              {opt.icon} {opt.label.replace(" Account","").replace(" Card","")} ({count})
+                            </Chip>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {expenseSourceFilter==="cc"&&accounts.some(a=>a.type==="cc")&&(
+                      <div>
+                        <span style={lbl}>Card</span>
+                        <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                          <Chip color={T.accent} active={expenseCardFilter==="all"} onClick={()=>setExpenseCardFilter("all")}>
+                            All Cards ({expenseBaseTxns.filter(txn=>getAcc(txn.accId)?.type==="cc").length})
+                          </Chip>
+                          {accounts.filter(a=>a.type==="cc").map(cardAcc=>{
+                            const count = expenseBaseTxns.filter(txn=>String(txn.accId)===String(cardAcc.id)).length;
+                            return (
+                              <Chip key={cardAcc.id} color={cardAcc.color} active={expenseCardFilter===cardAcc.id} onClick={()=>setExpenseCardFilter(cardAcc.id)}>
+                                💳 {cardAcc.name} ({count})
+                              </Chip>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {fType==="income"&&(
+                  <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                    <div>
+                      <span style={lbl}>Income type</span>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                        <Chip color={T.accent} active={incomeTypeFilter==="all"} onClick={()=>setIncomeTypeFilter("all")}>
+                          All ({incomeBaseTxns.length})
+                        </Chip>
+                        {incomeTypeOptions.map(type=>{
+                          const count = incomeBaseTxns.filter(txn=>normalizeIncomeTypeValue(txn.incomeType||"salary")===type).length;
+                          return (
+                            <Chip key={type} color={T.success} active={incomeTypeFilter===type} onClick={()=>setIncomeTypeFilter(type)}>
+                              {formatIncomeTypeLabel(type)} ({count})
+                            </Chip>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={lbl}>Account</span>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                        <Chip color={T.accent} active={incomeAccountFilter==="all"} onClick={()=>setIncomeAccountFilter("all")}>
+                          All Accounts ({incomeBaseTxns.length})
+                        </Chip>
+                        {accounts.filter(a=>a.type!=="cc").map(acc=>{
+                          const count = incomeBaseTxns.filter(txn=>String(txn.accId)===String(acc.id)).length;
+                          return (
+                            <Chip key={acc.id} color={acc.color} active={incomeAccountFilter===acc.id} onClick={()=>setIncomeAccountFilter(acc.id)}>
+                              {accIcon(acc.type)} {acc.name} ({count})
+                            </Chip>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {fType==="investment"&&(
+                  <div>
+                    <span style={lbl}>Investment type</span>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                      <Chip color={T.accent} active={investmentTypeFilter==="all"} onClick={()=>setInvestmentTypeFilter("all")}>
+                        All ({investmentBaseTxns.length})
+                      </Chip>
+                      {INVEST_TYPES.map(type=>{
+                        const count = investmentBaseTxns.filter(txn=>String(txn.investType||"mf")===type.id).length;
+                        return (
+                          <Chip key={type.id} color={type.color} active={investmentTypeFilter===type.id} onClick={()=>setInvestmentTypeFilter(type.id)}>
+                            {type.icon} {type.name.split("/")[0]} ({count})
+                          </Chip>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1.4fr",gap:10,marginTop:16,paddingTop:12,borderTop:`1px solid ${T.border}` }}>
+                <button onClick={clearTxnFilters} style={{ ...btnG,opacity:hasActiveFilters?1:0.65 }}>
+                  Clear
+                </button>
+                <button onClick={()=>setShowTxnFilters(false)} style={btnP}>OK</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={card}>
+          {filteredTxns.length===0?<div style={{ textAlign:"center",padding:40,color:T.sub }}>No transactions match the selected filters</div>
+            :filteredTxns.map((t,i)=><TxnRow key={t.id} t={t} last={i===filteredTxns.length-1}/>)}
+        </div>
+      </div>
+    );
+  };
+
+  // ── PEOPLE ─────────────────────────────────────────────────────────────────
+  const People = () => {
+    const [newName,setNewName]=useState("");
+    const [newEmoji,setNewEmoji]=useState("👤");
+    const [newRelation,setNewRelation]=useState("");
+    const [editingGroupName,setEditingGroupName]=useState("");
+    const [editingGroupBudget,setEditingGroupBudget]=useState("");
+    const [editingGroupMembers,setEditingGroupMembers]=useState([]);
+    const [editingGroupIncludeMe,setEditingGroupIncludeMe]=useState(true);
+    const [isEditingGroup,setIsEditingGroup]=useState(false);
+    const [newColor,setNewColor]=useState(PALETTE[1]);
+    const [newPersonType,setNewPersonType]=useState("contact");
+    const [newCreditLimit,setNewCreditLimit]=useState("");
+    const [newSpendBudget,setNewSpendBudget]=useState("");
+    const [newGroupName,setNewGroupName]=useState("");
+    const [newGroupType,setNewGroupType]=useState("");
+    const [newGroupColor,setNewGroupColor]=useState(PALETTE[5]);
+    const [newGroupMembers,setNewGroupMembers]=useState([]);
+    const [newGroupIncludeMe,setNewGroupIncludeMe]=useState(true);
+    const [newGroupManualLimit,setNewGroupManualLimit]=useState("");
+    const [subView,setSubView]=useState("people");
+    const [shareMonth,setShareMonth]=useState(()=>{ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
+    const [showUpiPicker,setShowUpiPicker]=useState(false);
+    const [pendingShareBase,setPendingShareBase]=useState("");
+    const [showTxnUpiPicker,setShowTxnUpiPicker]=useState(false);
+    const [pendingTxnShare,setPendingTxnShare]=useState(null);
+    const mePerson = people.find(p=>p.isMe) || ME;
+    const sortedPeople = people
+      .filter(p=>!p.isMe)
+      .slice()
+      .sort((a,b)=>{
+        const favDiff = Number(Boolean(b.favorite)) - Number(Boolean(a.favorite));
+        if(favDiff) return favDiff;
+        return a.name.localeCompare(b.name, "en", { sensitivity:"base" });
+      });
+    const listedPeople = [mePerson, ...sortedPeople].filter(Boolean);
+
+    const doTxnShare = async (recipientName, amount, contextLabel, upiHandle) => {
+      const linkedLabel = upiHandle ? (() => {
+        const acc = accounts.find(a=>a.type==="upi"&&a.handle===upiHandle);
+        const linked = acc?.linkedAccount ? accounts.find(b=>b.id===acc.linkedAccount) : null;
+        return linked ? ` (${linked.name})` : "";
+      })() : "";
+      const lines = [
+        `Hey ${recipientName}, you owe ${sym}${fmt(amount)} for ${contextLabel}.`,
+        upiHandle ? `Please pay to ${upiHandle}${linkedLabel}.` : "",
+        "– sent via Arth",
+      ].filter(Boolean).join("\n");
+      try {
+        if(navigator.share){ await navigator.share({ text: lines }); }
+        else { await navigator.clipboard.writeText(lines); alert("Payment request copied to clipboard!"); }
+      } catch(e){
+        if(e?.name!=="AbortError") navigator.clipboard?.writeText(lines).catch(()=>{});
+      }
+    };
+    const sharePaymentRequest = (recipientName, amount, contextLabel) => {
+      const upiAccs = accounts.filter(a=>a.type==="upi"&&a.handle);
+      if(upiAccs.length<=1){ doTxnShare(recipientName, amount, contextLabel, upiAccs[0]?.handle||""); return; }
+      setPendingTxnShare({ recipientName, amount, contextLabel });
+      setShowTxnUpiPicker(true);
+    };
+
+    useEffect(()=>{
+      if(selectedGroup){
+        setEditingGroupName(selectedGroup.name||"");
+        setEditingGroupBudget(String(selectedGroup.manualLimit||""));
+        setEditingGroupMembers([...(selectedGroup.members||[])]);
+        setEditingGroupIncludeMe(selectedGroup.includeMe !== false);
+        setIsEditingGroup(false);
+      }
+    },[selectedGroup]);
+
+    const toggleFavorite = person => {
+      const nextFavorite = !person.favorite;
+      setPeople(prev=>prev.map(x=>x.id===person.id?{...x,favorite:nextFavorite}:x));
+      setSelectedPerson(prev=>prev?.id===person.id?{...prev,favorite:nextFavorite}:prev);
+    };
+
+    const addPerson=()=>{
+      if(!newName.trim()) return;
+      setPeople(p=>[...p,{ id:genId(), name:newName.trim(), emoji:newEmoji, relation:newRelation, color:newColor, personType:newPersonType, creditLimit:parseFloat(newCreditLimit)||0, spendBudget:parseFloat(newSpendBudget)||0, favorite:false }]);
+      setNewName(""); setNewRelation(""); setNewCreditLimit(""); setNewSpendBudget("");
+    };
+
+    const addGroup=()=>{
+      if(!newGroupName.trim()) return;
+      const gtlow=(newGroupType||"group").toLowerCase();
+      const gicon=gtlow.includes("house")||gtlow.includes("flat")||gtlow.includes("property")?"🏠":gtlow.includes("trip")||gtlow.includes("travel")?"✈️":gtlow.includes("office")||gtlow.includes("work")?"💼":gtlow.includes("family")?"👨‍👩‍👧":gtlow.includes("friend")?"👫":gtlow.includes("society")||gtlow.includes("building")?"🏢":"👥";
+      setGroups(p=>[...p,{ id:genId(), type:newGroupType||"Group", name:newGroupName.trim(), icon:gicon, color:newGroupColor, members:newGroupMembers, includeMe:newGroupIncludeMe, manualLimit:parseFloat(newGroupManualLimit)||0 }]);
+      setNewGroupName(""); setNewGroupMembers([]); setNewGroupManualLimit(""); setNewGroupIncludeMe(true);
+    };
+
+    if(selectedPerson){
+      const p=selectedPerson;
+      const s=settlements[p.id]||{owesMe:0,iOwe:0};
+      const selfTrackedSpend = Number(personSpend["__me__"]||0);
+      const overallSpentByMe = myActual;
+      const spent=p.isMe ? selfTrackedSpend : (personSpend[p.id]||0);
+      const creditLimit=p.creditLimit||0;
+      const creditPct=creditLimit>0?Math.min(100,Math.round(s.owesMe/creditLimit*100)):0;
+      const spendBudget=p.spendBudget||0;
+      const spentPct=spendBudget>0?Math.min(100,Math.round(spent/spendBudget*100)):0;
+      const relTxns=txns
+        .filter(t=>t.type==="expense"&&t.people&&t.people[p.id]&&!p.isMe)
+        .sort((a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a) || new Date(b.date||0)-new Date(a.date||0));
+      const taggedTxns=(p.isMe
+        ? txns.filter(t=>{
+            if(t.type!=="expense") return false;
+            return t.forPerson===p.id || Boolean(t.people?.__me__);
+          })
+        : txns.filter(t=>t.type==="expense"&&t.forPerson===p.id)
+      ).sort((a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a) || new Date(b.date||0)-new Date(a.date||0));
+      const settlementTxns=txns.filter(t=>t.type==="settlement_in"&&t.fromPersonId===p.id).sort((a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a) || new Date(b.date||0)-new Date(a.date||0));
+      return (
+        <div style={{ padding:"14px 16px 0" }}>
+          <button onClick={()=>setSelectedPerson(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:13,fontWeight:700,marginBottom:16,fontFamily:"Nunito,sans-serif" }}>← People</button>
+          <div style={{ ...card,background:`linear-gradient(135deg,${p.color}14,${T.card})` }}>
+            <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:16 }}>
+              <div style={{ width:52,height:52,borderRadius:"50%",background:p.color+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26 }}>{p.emoji}</div>
+              <div style={{ flex:1 }}>
+                <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>{p.name}{p.favorite?<span style={{ color:T.accent,fontSize:15,marginLeft:6 }}>★</span>:""}</div>
+                <div style={{ color:T.sub,fontSize:12,marginTop:1 }}>{p.relation} · <span style={{ color:p.personType==="dependant"?T.info:T.accent,fontWeight:700 }}>{p.personType==="dependant"?"Dependant":"Contact"}</span></div>
+              </div>
+              {!p.isMe&&<button onClick={e=>{ e.stopPropagation(); toggleFavorite(p); }} style={{ background:p.favorite?T.accentSoft:"none",border:`1px solid ${p.favorite?T.accent:T.border}`,borderRadius:10,padding:"7px 10px",cursor:"pointer",fontSize:13,fontWeight:800,color:p.favorite?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.favorite?"★ Fav":"☆ Fav"}</button>}
+            </div>
+
+            {!p.isMe&&(
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
+                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",textAlign:"center" }}>
+                  <div style={{ color:T.success,fontSize:18,fontWeight:800 }}>{sym}{fmt(s.owesMe)}</div>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Owes You</div>
+                  {creditLimit>0&&<><div style={{ height:3,background:T.border,borderRadius:2,marginTop:6,marginBottom:2 }}>
+                    <div style={{ height:"100%",width:`${creditPct}%`,background:creditPct>80?T.danger:T.success,borderRadius:2 }}/>
+                  </div><div style={{ color:T.sub,fontSize:9 }}>Credit limit: {sym}{fmt(creditLimit)}</div></>}
+                </div>
+                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",textAlign:"center" }}>
+                  <div style={{ color:T.danger,fontSize:18,fontWeight:800 }}>{sym}{fmt(s.iOwe)}</div>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>You Owe</div>
+                </div>
+              </div>
+            )}
+
+            {(spent>0 || spendBudget>0)&&(
+              <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:14, border:`1px solid ${spendBudget>0 && spent>spendBudget ? T.danger : T.border}` }}>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginBottom:4 }}>{p.isMe ? "Your personal budget spend this month" : `Spent on ${p.name} this month`}</div>
+                <div style={{ color:spent>spendBudget && spendBudget>0 ? T.danger : p.color,fontSize:20,fontWeight:900 }}>{sym}{fmt(spent)}</div>
+                {p.isMe && <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Overall spent this month: {sym}{fmt(overallSpentByMe)}</div>}
+                {spendBudget>0&&<><div style={{ height:3,background:T.border,borderRadius:2,marginTop:6,marginBottom:2 }}>
+                  <div style={{ height:"100%",width:`${spentPct}%`,background:spentPct>90?T.danger:p.color,borderRadius:2 }}/>
+                </div><div style={{ color:T.sub,fontSize:9 }}>{spendBudget>0?`Budget: ${sym}${fmt(spendBudget)} · ${sym}${fmt(Math.max(0,spendBudget-spent))} remaining`:""}</div>
+                {spent>spendBudget && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:4 }}>⚠️ Over budget by {sym}{fmt(spent-spendBudget)}</div>}</>}
+              </div>
+            )}
+
+            {!p.isMe&&s.owesMe>0&&<button onClick={()=>{
+              // Find first unsettled expense txn with this person
+              const t=txns.find(x=>x.type==="expense"&&x.people&&x.people[p.id]&&!x.people[p.id]?.settled&&remainingShare(x.people[p.id])>0);
+              if(t){ setSettleTxn(t); return; }
+              // If only bills pending — build a synthetic txn for the settle modal
+              const pendingBills=bills.filter(x=>x.status==="unpaid"&&x.splitPeople&&x.splitPeople[p.id]?.mode==="owes"&&remainingShare(x.splitPeople[p.id])>0);
+              if(pendingBills.length>0){
+                // Merge all pending bill amounts into one synthetic txn for the modal
+                const totalAmt=pendingBills.reduce((s,b)=>s+remainingShare(b.splitPeople[p.id]),0);
+                const syntheticTxn={
+                  id:"bill_settle_"+p.id,
+                  type:"expense",
+                  desc:pendingBills.length===1?pendingBills[0].name:`${pendingBills.length} pending bills`,
+                  amount:totalAmt,
+                  people:{ [p.id]:{ amount:totalAmt, mode:"owes", settled:false } },
+                  _billIds:pendingBills.map(b=>b.id),
+                  _isBillSettle:true,
+                };
+                setSettleTxn(syntheticTxn);
+                return;
+              }
+              setSettleTxn({
+                id:"person_settle_"+p.id,
+                type:"expense",
+                desc:`Settlement with ${p.name}`,
+                amount:s.owesMe,
+                people:{ [p.id]:{ amount:s.owesMe, mode:"owes", settled:false } },
+                _isFallbackSettle:true,
+              });
+            }} style={{ ...btnP,marginBottom:10 }}>💰 Settle with {p.name}</button>}
+            {!p.isMe&&s.owesMe>0&&<button onClick={()=>sharePaymentRequest(p.name,s.owesMe,"pending expenses")} style={{ ...btnP,marginBottom:10,background:T.accentSoft,border:`1px solid ${T.accent}55`,color:T.accent }}>📤 Request ₹{fmt(s.owesMe)} from {p.name}</button>}
+            <div style={{ display:"flex",gap:10 }}>
+              <button onClick={()=>setEditingPerson(p)} style={{ ...btnP,background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,flex:1 }}>{p.isMe?"🎯 Edit My Budget":"✏️ Edit Profile"}</button>
+              {!p.isMe&&<button onClick={()=>{ setPeople(prev=>prev.filter(x=>x.id!==p.id)); setSelectedPerson(null); }} style={{ ...btnP,background:"transparent",border:`1px solid ${T.danger}`,color:T.danger,flex:1 }}>🗑️ Remove</button>}
+            </div>
+            {p.isMe&&<div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"8px 0" }}>This is you — you can edit your monthly self budget here</div>}
+          </div>
+
+          {(()=>{
+            const personBills=[...bills]
+              .filter(b=>b.splitPeople&&b.splitPeople[p.id]&&b.splitPeople[p.id].mode==="owes")
+              .sort((a,b)=>(toDateOnly(a.dueDate)?.getTime()||0) - (toDateOnly(b.dueDate)?.getTime()||0) || (toDateOnly(b.billDate || b.createdDate)?.getTime()||0) - (toDateOnly(a.billDate || a.createdDate)?.getTime()||0));
+            if(!personBills.length) return null;
+            return (
+              <div style={{ ...card,border:`1px solid ${T.danger}44`,marginBottom:12 }}>
+                <div style={{ color:T.danger,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>Pending Bills</div>
+                {personBills.map((b,idx,arr)=>(
+                  <div key={b.id} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:idx<arr.length-1?`1px solid ${T.border}`:"none" }}>
+                    <div>
+                      <div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{b.name}</div>
+                      <div style={{ color:T.danger,fontSize:11 }}>Due {b.dueDate}</div>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      {(()=>{ const info=b.splitPeople[p.id]; const owed=Number(info.amount||0); const left=remainingShare(info); const paid=Number(info.settledAmt||0); const color=left<=0?T.success:paid>0?T.warn:T.accent; const label=info.mode!=="owes"?"on you":left<=0?"Settled":paid>0?`Partly settled ${sym}${fmt(paid)} · Bal. ${sym}${fmt(left)}`:"owes you"; return <><div style={{ color,fontSize:13,fontWeight:700 }}>{sym}{fmt(owed)}</div><div style={{ color,fontSize:10 }}>{label}</div></>; })()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+          {(relTxns.length>0||taggedTxns.length>0||settlementTxns.length>0)&&(
+            <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:10 }}>Transactions</div>
+          )}
+          {relTxns.length>0&&(
+            <div style={card}>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>Shared expenses</div>
+              {relTxns.map((t,idx,arr)=>{ const info=t.people[p.id]; return (
+                <div key={t.id} style={{ display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:idx<arr.length-1?`1px solid ${T.border}`:"none" }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{t.desc}</div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(t.date) || t.date}</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ color:info.mode==="owes"&&!info.settled?T.accent:T.sub,fontSize:13,fontWeight:700,textDecoration:info.settled?"line-through":"none" }}>{sym}{fmt(info.settled ? info.amount : remainingShare(info))}</div>
+                    <div style={{ color:T.sub,fontSize:10 }}>{info.settled?"paid":info.mode==="owes"?"owes you":"on you"}</div>
+                  </div>
+                </div>
+              );})}
+            </div>
+          )}
+          {taggedTxns.length>0&&(
+            <div style={card}>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>{p.isMe ? "Your expense entries" : `Spent on ${p.name}`}</div>
+              {taggedTxns.map((t,idx,arr)=>{
+                const explicitMeAmt = Number(t.people?.__me__?.amount || 0);
+                const displayAmt = p.isMe ? (t.forPerson===p.id ? Number(t.amount||0) : explicitMeAmt) : Number(t.amount||0);
+                return (
+                  <div key={t.id} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:idx<arr.length-1?`1px solid ${T.border}`:"none" }}>
+                    <div>
+                      <div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{t.desc}</div>
+                      <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(t.date) || t.date} · {getCat(t.catId)?.name}</div>
+                    </div>
+                    <div style={{ color:p.color,fontSize:13,fontWeight:700 }}>{sym}{fmt(displayAmt)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {settlementTxns.length>0&&(
+            <div style={card}>
+              <div style={{ color:T.success,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>Settlements received</div>
+              {settlementTxns.map((st,idx,arr)=>(
+                <div key={st.id} onClick={()=>setEditingTxn(st)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:idx<arr.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{st.desc||`Settlement from ${p.name}`}</div>
+                    <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(st.date) || st.date} · {getAcc(st.accId)?.name||"account"}</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ color:T.success,fontSize:13,fontWeight:700 }}>+{sym}{fmt(st.amount)}</div>
+                    <div style={{ color:T.info,fontSize:10 }}>tap to edit</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if(selectedGroup){
+      const g=selectedGroup;
+      const gTxns=txns.filter(t=>t.groupId===g.id);
+      const gBills=bills.filter(b=>b.groupId===g.id&&b.status==="unpaid");
+      const total=groupReceivableTotal(g.id);
+      const currentMembers=isEditingGroup ? editingGroupMembers : (g.members||[]);
+      const groupIncludeMe = isEditingGroup ? editingGroupIncludeMe : (g.includeMe !== false);
+      const displayedMemberCount = currentMembers.length + (groupIncludeMe ? 1 : 0);
+      const nonMembers=people.filter(p=>!p.isMe&&!currentMembers.includes(p.id));
+
+      // ── month navigation ──
+      const nowYM=`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+      const [smYr,smMo]=shareMonth.split("-").map(Number);
+      const smLabel=new Date(smYr,smMo-1,1).toLocaleString("en-IN",{month:"short",year:"numeric"});
+      const goPrev=()=>{ const d=new Date(smYr,smMo-2,1); setShareMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); };
+      const goNext=()=>{ if(shareMonth>=nowYM) return; const d=new Date(smYr,smMo,1); setShareMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); };
+      const mTxns=gTxns.filter(t=>(t.date||"").startsWith(shareMonth));
+
+      // month-filtered stats
+      const groupTotalSpend = mTxns.filter(t=>t.type==="expense").reduce((sum,t)=>sum+Number(t.amount||0),0) + gBills.reduce((sum,b)=>sum+Number(b.amount||0),0);
+      const groupBudget = Number(g.manualLimit||0);
+      const groupOver = groupBudget>0 && groupTotalSpend>groupBudget;
+
+      const groupPaidByMe = mTxns.filter(t=>t.type==="expense").reduce((sum,t)=>sum+Number(t.amount||0),0);
+      const groupMySpend = mTxns.reduce((sum,t)=>{
+        if(t.type!=="expense") return sum;
+        const otherOwed = Object.entries(t.people||{}).filter(([pid])=>pid!=="__me__").reduce((s,[,info])=>s+(Number(info.amount||0)),0);
+        return sum + Math.max(0, Number(t.amount||0) - otherOwed - getGroupCollectiveDue(t));
+      },0);
+      // owe/owes-me are all-time outstanding balances, not month-filtered
+      const groupIOwe = gTxns.reduce((sum,t)=>{
+        const me=t.people?.__me__;
+        if(!me||me.mode!=="owes"||me.settled) return sum;
+        return sum + remainingShare(me);
+      },0);
+      const groupOwesMe = total;
+
+      const getGroupMemberOwed = (groupId,pid)=>{
+        const txnOwed = txns.filter(t=>t.groupId===groupId&&t.type==="expense"&&t.people&&t.people[pid]&&t.people[pid].mode==="owes"&&!t.people[pid].settled).reduce((sum,t)=>sum + remainingShare(t.people[pid]),0);
+        const billOwed = bills.filter(b=>b.groupId===groupId&&b.status==="unpaid"&&b.splitPeople&&b.splitPeople[pid]&&b.splitPeople[pid].mode==="owes"&&!b.splitPeople[pid].settled).reduce((sum,b)=>sum + remainingShare(b.splitPeople[pid]),0);
+        return txnOwed + billOwed;
+      };
+
+      const toggleMember=(pid)=>{
+        const isMember=currentMembers.includes(pid);
+        if(isMember){
+          const owed=getGroupMemberOwed(g.id,pid);
+          if(owed>0){
+            const personName = getPerson(pid)?.name||pid;
+            const choice = window.prompt(`Member ${personName} has ${sym}${fmt(owed)} unsettled in group '${g.name}'.\nChoose: 1) Remove + write off, 2) Cancel, 3) Keep in group`, "1");
+            if(choice===null||choice.trim()==="2") return;
+            if(choice.trim()==="3") return;
+            if(choice.trim()==="1"){
+              setTxns(prev=>prev.map(t=>{
+                if(t.groupId!==g.id||t.type!=="expense"||!t.people||!t.people[pid]) return t;
+                const info = t.people[pid];
+                if(info.mode!=="owes"||info.settled) return t;
+                return { ...t, people:{ ...t.people, [pid]:{ ...info, settled:true } } };
+              }));
+              setBills(prev=>prev.map(b=>{
+                if(b.groupId!==g.id||b.status!=="unpaid"||!b.splitPeople||!b.splitPeople[pid]) return b;
+                const info = b.splitPeople[pid];
+                if(info.mode!=="owes"||info.settled) return b;
+                return { ...b, splitPeople:{ ...b.splitPeople, [pid]:{ ...info, settled:true } } };
+              }));
+            }
+          }
+          setEditingGroupMembers(prev=>prev.filter(x=>x!==pid));
+        } else {
+          setEditingGroupMembers(prev=>[...prev,pid]);
+        }
+      };
+
+      const startEditingGroup = () => {
+        setEditingGroupName(g.name||"");
+        setEditingGroupBudget(String(g.manualLimit||""));
+        setEditingGroupMembers([...(g.members||[])]);
+        setEditingGroupIncludeMe(g.includeMe !== false);
+        setIsEditingGroup(true);
+      };
+
+      const cancelEditingGroup = () => {
+        setEditingGroupName(g.name||"");
+        setEditingGroupBudget(String(g.manualLimit||""));
+        setEditingGroupMembers([...(g.members||[])]);
+        setEditingGroupIncludeMe(g.includeMe !== false);
+        setIsEditingGroup(false);
+      };
+
+      const saveGroupEdits = () => {
+        const name = editingGroupName.trim();
+        if(!name) return;
+        const updated = {
+          ...g,
+          name,
+          manualLimit:parseMoney(editingGroupBudget),
+          members:editingGroupMembers,
+          includeMe:editingGroupIncludeMe,
+        };
+        setGroups(prev=>prev.map(x=>x.id===g.id?updated:x));
+        setSelectedGroup(updated);
+        setIsEditingGroup(false);
+      };
+
+      return (
+        <div style={{ padding:"14px 16px 0" }}>
+          <button onClick={()=>setSelectedGroup(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:13,fontWeight:700,marginBottom:16,fontFamily:"Nunito,sans-serif" }}>← Groups</button>
+          <div style={card}>
+            <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:14 }}>
+              <div style={{ width:46,height:46,borderRadius:14,background:g.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24 }}>{g.icon}</div>
+              <div style={{ flex:1 }}>
+                {isEditingGroup ? (
+                  <div style={{ display:"flex",flexDirection:"column",gap:8,marginTop:2 }}>
+                    <input value={editingGroupName} onChange={e=>setEditingGroupName(e.target.value)} style={{ ...inp, padding:"8px 10px", fontSize:16, fontWeight:700, width:"100%" }} placeholder="Group name" />
+                    <input value={editingGroupBudget} onChange={e=>setEditingGroupBudget(e.target.value)} style={{ ...inp, padding:"8px 10px", fontSize:14, width:"100%" }} type="text" inputMode="decimal" placeholder="Group budget (0 = no budget)" />
+                    <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                      <button onClick={saveGroupEdits} style={{ background:T.accent,border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#000",fontFamily:"Nunito,sans-serif" }}>Save</button>
+                      <button onClick={cancelEditingGroup} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap" }}>
+                    <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{g.name}</div>
+                    <button onClick={startEditingGroup} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>✏️ Edit Group</button>
+                  </div>
+                )}
+                <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{g.type} · {sym}{fmt(total)} owes you · {displayedMemberCount} members{groupIncludeMe?" · you included":" · you not included"}</div>
+                {(groupBudget>0 || groupTotalSpend>0) && (
+                  <div style={{ marginTop:8, padding:10, borderRadius:10, background:groupOver?T.danger+"22":T.input, border:`1px solid ${groupOver?T.danger:T.border}` }}>
+                    <div style={{ fontSize:11, fontWeight:700, color:groupOver?T.danger:T.sub }}>Group budget{groupBudget>0?`: ${sym}${fmt(groupBudget)}`:" (not set)"}</div>
+                    <div style={{ fontSize:12, fontWeight:800, color:groupOver?T.danger:T.text, marginTop:3 }}>Spent: {sym}{fmt(groupTotalSpend)} {groupBudget>0 && `(remaining ${sym}${fmt(Math.max(0, groupBudget-groupTotalSpend))})`}</div>
+                    {groupOver && <div style={{ color:T.danger, fontSize:11, fontWeight:700, marginTop:4 }}>⚠️ Over budget by {sym}{fmt(groupTotalSpend-groupBudget)}</div>}
+                  </div>
+                )}
+                {/* month nav — always visible */}
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:10,background:T.input,borderRadius:10,padding:"6px 10px" }}>
+                  <button onClick={goPrev} style={{ background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:18,padding:"0 6px",fontFamily:"Nunito,sans-serif" }}>‹</button>
+                  <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{smLabel}</span>
+                  <button onClick={goNext} style={{ background:"none",border:"none",color:shareMonth>=nowYM?T.border:T.sub,cursor:shareMonth>=nowYM?"default":"pointer",fontSize:18,padding:"0 6px",fontFamily:"Nunito,sans-serif" }}>›</button>
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8 }}>
+                  <div style={{ background:T.input,borderRadius:10,padding:8,textAlign:"center" }}>
+                    <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>YOU PAID</div>
+                    <div style={{ color:T.info,fontSize:16,fontWeight:800 }}>{sym}{fmt(groupPaidByMe)}</div>
+                  </div>
+                  <div style={{ background:T.input,borderRadius:10,padding:8,textAlign:"center" }}>
+                    <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>YOUR SHARE</div>
+                    <div style={{ color:T.accent,fontSize:16,fontWeight:800 }}>{sym}{fmt(groupMySpend)}</div>
+                  </div>
+                  <div style={{ background:T.input,borderRadius:10,padding:8,textAlign:"center" }}>
+                    <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>YOU OWE</div>
+                    <div style={{ color:T.danger,fontSize:16,fontWeight:800 }}>{sym}{fmt(groupIOwe)}</div>
+                  </div>
+                  <div style={{ background:T.input,borderRadius:10,padding:8,textAlign:"center" }}>
+                    <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>GROUP OWES</div>
+                    <div style={{ color:T.success,fontSize:16,fontWeight:800 }}>{sym}{fmt(groupOwesMe)}</div>
+                  </div>
+                </div>
+                {(()=>{
+                  // Per-member individual balances
+                  const memberIds = g.members||[];
+                  if(!memberIds.length) return null;
+                  const memberBalances = memberIds.map(pid=>{
+                    const p = getPerson(pid);
+                    if(!p) return null;
+                    const owesMe = getGroupMemberOwed(g.id, pid);
+                    // spent_on (attributed, no collect) — all-time
+                    const spentOn = txns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.allocations?.some(a=>a.targetType==="person"&&a.targetId===pid&&a.mode==="spent_on"))&&t.people&&t.people[pid]&&t.people[pid].mode==="spent_on").reduce((s,t)=>s+Number(t.people[pid]?.amount||0),0);
+                    return { p, owesMe, spentOn };
+                  }).filter(Boolean);
+                  const anyBalance = memberBalances.some(m=>m.owesMe>0||m.spentOn>0);
+                  if(!anyBalance) return null;
+                  return (
+                    <div style={{ marginTop:10 }}>
+                      <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6 }}>Individual Balances</div>
+                      {memberBalances.map(({p,owesMe,spentOn})=>{
+                        if(!owesMe && !spentOn) return null;
+                        return (
+                          <div key={p.id} style={{ display:"flex",alignItems:"center",gap:10,background:T.input,borderRadius:10,padding:"8px 12px",marginBottom:6 }}>
+                            <div style={{ width:30,height:30,borderRadius:10,background:p.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0 }}>{p.emoji}</div>
+                            <div style={{ flex:1,minWidth:0 }}>
+                              <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{p.name}</div>
+                              {spentOn>0&&<div style={{ color:T.sub,fontSize:10 }}>👁 Spent on: {sym}{fmt(spentOn)}</div>}
+                            </div>
+                            {owesMe>0&&<div style={{ textAlign:"right",flexShrink:0 }}>
+                              <div style={{ color:T.success,fontSize:13,fontWeight:800 }}>{sym}{fmt(owesMe)}</div>
+                              <div style={{ color:T.sub,fontSize:10 }}>owes you</div>
+                            </div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+                {groupOwesMe>0&&(()=>{
+                  const buildMsg=(upiHandle)=>{
+                    const msgBills=bills.filter(b=>b.groupId===g.id&&b.status==="unpaid"&&((b.dueDate||b.billDate||"").startsWith(shareMonth)));
+                    const commonItems=[]; const personItems={};
+                    mTxns.forEach(t=>{
+                      const ca=Number(t.groupCollectiveAmount||0);
+                      const hasPS=Object.entries(t.people||{}).some(([pid,info])=>pid!=="__me__"&&info?.mode==="owes"&&Number(info?.amount||0)>0&&!info?.settled);
+                      if(ca>0) commonItems.push({desc:t.desc||t.merchant||"Expense",amount:ca});
+                      Object.entries(t.people||{}).forEach(([pid,info])=>{
+                        if(pid==="__me__"||info?.mode!=="owes"||info?.settled) return;
+                        const sh=remainingShare(info); if(!sh) return;
+                        if(!personItems[pid]) personItems[pid]=[];
+                        personItems[pid].push({desc:t.desc||t.merchant||"Expense",amount:sh});
+                      });
+                      if(!hasPS&&!ca) commonItems.push({desc:t.desc||t.merchant||"Expense",amount:Number(t.amount||0)});
+                    });
+                    msgBills.forEach(b=>{
+                      const ca=Number(b.groupCollectiveAmount||0);
+                      const hasPS=Object.entries(b.splitPeople||{}).some(([pid,info])=>pid!=="__me__"&&info?.mode==="owes"&&!info?.settled);
+                      if(ca>0) commonItems.push({desc:b.name||"Bill",amount:ca});
+                      Object.entries(b.splitPeople||{}).forEach(([pid,info])=>{
+                        if(pid==="__me__"||info?.mode!=="owes"||info?.settled) return;
+                        const sh=remainingShare(info); if(!sh) return;
+                        if(!personItems[pid]) personItems[pid]=[];
+                        personItems[pid].push({desc:b.name||"Bill",amount:sh});
+                      });
+                      if(!hasPS&&!ca) commonItems.push({desc:b.name||"Bill",amount:Number(b.amount||0)});
+                    });
+                    const cTotal=commonItems.reduce((s,i)=>s+i.amount,0);
+                    const pTotal=Object.values(personItems).flat().reduce((s,i)=>s+i.amount,0);
+                    const grand=cTotal+pTotal;
+                    if(!grand) return null;
+                    const ls=[`📋 ${smLabel} — ${g.name} | Total: ${sym}${fmt(grand)}`,""];
+                    if(commonItems.length){ ls.push(`Common: ${sym}${fmt(cTotal)}`); commonItems.forEach(i=>ls.push(`  · ${i.desc} ${sym}${fmt(i.amount)}`)); ls.push(""); }
+                    (g.members||[]).forEach(pid=>{ const items=personItems[pid]; if(!items?.length) return; const pm=getPerson(pid); const tot=items.reduce((s,i)=>s+i.amount,0); ls.push(`${pm.emoji} ${pm.name}: ${sym}${fmt(tot)}`); items.forEach(i=>ls.push(`  · ${i.desc} ${sym}${fmt(i.amount)}`)); ls.push(""); });
+                    if(upiHandle) ls.push(`Pay to: ${upiHandle}`);
+                    ls.push("– sent via Arth");
+                    return ls.join("\n").trim();
+                  };
+                  const doShare=async(upiHandle)=>{
+                    const text=buildMsg(upiHandle);
+                    if(!text){ alert("No expenses found for "+smLabel); return; }
+                    try{
+                      if(navigator.share){ await navigator.share({text}); }
+                      else{ await navigator.clipboard.writeText(text); alert("Payment request copied to clipboard!"); }
+                    }catch(e){ if(e?.name!=="AbortError") navigator.clipboard?.writeText(text||"").catch(()=>{}); }
+                  };
+                  const handleShareClick=()=>{
+                    const upiAccs=accounts.filter(a=>a.type==="upi"&&a.handle);
+                    if(upiAccs.length<=1){ doShare(upiAccs[0]?.handle||""); return; }
+                    setPendingShareBase(()=>doShare);
+                    setShowUpiPicker(true);
+                  };
+                  return (<>
+                    <button onClick={handleShareClick} style={{ ...btnP,marginTop:8,background:T.accentSoft,border:`1px solid ${T.accent}55`,color:T.accent,width:"100%" }}>📤 Request {sym}{fmt(groupOwesMe)} from group</button>
+                    {showUpiPicker&&<div style={{ position:"fixed",inset:0,background:"#0009",zIndex:900,display:"flex",alignItems:"flex-end",justifyContent:"center" }} onClick={()=>setShowUpiPicker(false)}>
+                      <div style={{ background:T.card,borderRadius:"18px 18px 0 0",padding:24,width:"100%",maxWidth:480 }} onClick={e=>e.stopPropagation()}>
+                        <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:12 }}>Pay via which UPI?</div>
+                        {accounts.filter(a=>a.type==="upi"&&a.handle).map(a=>{
+                          const linked=a.linkedAccount?accounts.find(b=>b.id===a.linkedAccount):null;
+                          return (
+                            <button key={a.id} onClick={()=>{ setShowUpiPicker(false); doShare(a.handle); }} style={{ display:"block",width:"100%",textAlign:"left",background:T.input,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 14px",marginBottom:8,color:T.text,fontFamily:"Nunito,sans-serif",fontSize:14,fontWeight:700,cursor:"pointer" }}>
+                              📱 {a.name} <span style={{ color:T.sub,fontWeight:400 }}>{a.handle}{linked?` · ${linked.name}`:""}</span>
+                            </button>
+                          );
+                        })}
+                        <button onClick={()=>{ setShowUpiPicker(false); doShare(""); }} style={{ display:"block",width:"100%",textAlign:"center",background:"none",border:"none",color:T.sub,fontFamily:"Nunito,sans-serif",fontSize:13,cursor:"pointer",marginTop:4 }}>Share without UPI</button>
+                      </div>
+                    </div>}
+                  </>);
+                })()}
+              </div>
+              <button onClick={()=>setGroups(prev=>prev.filter(x=>x.id!==g.id))&&setSelectedGroup(null)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:20 }}>🗑</button>
+            </div>
+
+            <div style={{ marginBottom:12 }}>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>{isEditingGroup ? "Add / Remove / Replace Members" : "Members"}</div>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                {isEditingGroup ? (
+                  <button onClick={()=>setEditingGroupIncludeMe(prev=>!prev)} style={{ background:editingGroupIncludeMe?T.accentSoft:"none",border:`1px solid ${editingGroupIncludeMe?T.accent:T.border}`,borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700,color:editingGroupIncludeMe?T.accent:T.sub,cursor:"pointer",fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>
+                    🧑 Me {editingGroupIncludeMe ? "✓" : "+"}
+                  </button>
+                ) : groupIncludeMe ? (
+                  <div style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>
+                    🧑 Me
+                  </div>
+                ) : null}
+                {currentMembers.map(pid=>{ const p=getPerson(pid); return isEditingGroup ? (
+                  <button key={pid} onClick={()=>toggleMember(pid)} style={{ background:p.color+"22",border:`1px solid ${p.color}66`,borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700,color:p.color,cursor:"pointer",fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>
+                    {p.emoji} {p.name} <span style={{ fontSize:10,opacity:0.7 }}>✕</span>
+                  </button>
+                ) : (
+                  <div key={pid} style={{ background:p.color+"18",border:`1px solid ${p.color}44`,borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700,color:p.color,fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>
+                    {p.emoji} {p.name}
+                  </div>
+                ); })}
+              </div>
+            </div>
+
+            {isEditingGroup && nonMembers.length>0&&<div style={{ marginBottom:14 }}>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Available people to add</div>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {nonMembers.map(p=>(
+                  <button key={p.id} onClick={()=>toggleMember(p.id)} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700,color:T.sub,cursor:"pointer",fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>
+                    {p.emoji} {p.name} <span style={{ fontSize:14,color:T.success }}>+</span>
+                  </button>
+                ))}
+              </div>
+            </div>}
+
+            <div style={{ borderTop:`1px solid ${T.border}`,paddingTop:12,marginTop:4 }}>
+              {(g.manualLimit||0)>0&&<div style={{ ...card,marginBottom:12,padding:"12px 14px",background:T.accentSoft,border:`1px solid ${T.accent}33` }}>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:4 }}>Manual group spend cap</div>
+                <div style={{ color:T.accent,fontSize:18,fontWeight:900 }}>{sym}{fmt(g.manualLimit)}</div>
+              </div>}
+              {gBills.length>0&&<>
+                <div style={{ color:T.danger,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Pending Bills</div>
+                {gBills.map(b=>(
+                  <div key={b.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                    <div>
+                      <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{b.name}</div>
+                      <div style={{ color:T.danger,fontSize:11 }}>Due {b.dueDate}</div>
+                    </div>
+                    <div style={{ color:T.danger,fontSize:13,fontWeight:700 }}>{sym}{fmt(b.amount)}</div>
+                  </div>
+                ))}
+                <div style={{ marginBottom:12 }}/>
+              </>}
+              <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>Expenses — {smLabel}</div>
+              {mTxns.length===0&&gBills.length===0
+                ?<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:20 }}>No expenses for {smLabel}</div>
+                :mTxns.map((t,idx,arr)=><TxnRow key={t.id} t={t} last={idx===arr.length-1}/>)}
+              {/* Settlements related to group members */}
+              {(()=>{
+                const memberIds=g.members||[];
+                const groupSettlements=txns.filter(t=>t.type==="settlement_in"&&memberIds.includes(t.fromPersonId)&&(t.date||"").startsWith(shareMonth));
+                if(!groupSettlements.length) return null;
+                return (<>
+                  <div style={{ color:T.success,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginTop:12,marginBottom:8 }}>Settlements Received</div>
+                  {groupSettlements.map(t=>{
+                    const p=getPerson(t.fromPersonId);
+                    return <div key={t.id} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                      <div><div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{p.emoji} {p.name} paid</div><div style={{ color:T.sub,fontSize:11 }}>{t.date}{t.note?` · ${t.note}`:""}</div></div>
+                      <div style={{ color:T.success,fontSize:13,fontWeight:700 }}>+{sym}{fmt(t.amount)}</div>
+                    </div>;
+                  })}
+                </>);
+              })()}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ padding:"14px 16px 0" }}>
+        <div style={{ display:"flex",gap:0,marginBottom:12,background:T.pill,borderRadius:12,padding:4 }}>
+          {[["people","👥 People"],["groups","🏘️ Groups"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setSubView(v)} style={{ flex:1,background:subView===v?T.card:"transparent",border:subView===v?`1px solid ${T.border}`:"none",borderRadius:9,padding:"8px 0",cursor:"pointer",fontSize:13,fontWeight:700,color:subView===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
+          ))}
+        </div>
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16 }}>
+          <button onClick={()=>setSubView("people")} style={{ background:subView==="people"?T.accentSoft:T.card,border:`1px solid ${subView==="people"?T.accent:T.border}`,borderRadius:10,padding:"9px 12px",cursor:"pointer",fontSize:12,fontWeight:800,color:subView==="people"?T.accent:T.text,fontFamily:"Nunito,sans-serif" }}>+ Add Person</button>
+          <button onClick={()=>setSubView("groups")} style={{ background:subView==="groups"?T.accentSoft:T.card,border:`1px solid ${subView==="groups"?T.accent:T.border}`,borderRadius:10,padding:"9px 12px",cursor:"pointer",fontSize:12,fontWeight:800,color:subView==="groups"?T.accent:T.text,fontFamily:"Nunito,sans-serif" }}>+ Add Group</button>
+        </div>
+
+        {subView==="people"&&<>
+          {totalOwedToMe>0&&<div style={{ ...card,background:`linear-gradient(135deg,${T.success}10,${T.card})`,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <div>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Total to Recover</div>
+              <div style={{ color:T.success,fontSize:22,fontWeight:900,marginTop:4 }}>{sym}{fmt(totalOwedToMe)}</div>
+            </div>
+            <div style={{ fontSize:32 }}>💰</div>
+          </div>}
+
+          <div style={{ ...card,border:`1px dashed ${T.border}` }}>
+            <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:12 }}>➕ Add Person</div>
+            <div style={{ display:"flex",gap:8,marginBottom:10 }}>
+              {[["contact","🤝 Contact","They may owe you"],["dependant","♥ Dependant","Family, you cover them"]].map(([v,l,sub])=>(
+                <button key={v} onClick={()=>setNewPersonType(v)} style={{ flex:1,background:newPersonType===v?T.accentSoft:"none",border:`1px solid ${newPersonType===v?T.accent:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                  <div style={{ fontSize:12,fontWeight:700,color:newPersonType===v?T.accent:T.text }}>{l}</div>
+                  <div style={{ fontSize:10,color:T.sub,marginTop:2 }}>{sub}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10 }}>
+              <input style={inp} placeholder="Name *" value={newName} onChange={e=>setNewName(e.target.value)}/>
+              <select style={inp} value={newRelation} onChange={e=>setNewRelation(e.target.value)}>
+                <option value="">Select Relation</option>
+                <option value="Spouse">Spouse</option>
+                <option value="Child">Child</option>
+                <option value="Parent">Parent</option>
+                <option value="Uncle">Uncle</option>
+                <option value="Aunt">Aunt</option>
+                <option value="Cousin">Cousin</option>
+                <option value="Friend">Friend</option>
+                <option value="Colleague">Colleague</option>
+                <option value="Sibling">Sibling</option>
+                <option value="Grandparent">Grandparent</option>
+                <option value="Grandchild">Grandchild</option>
+                <option value="In-law">In-law</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div style={{ display:"flex",gap:8,marginBottom:10 }}>
+              {["👤","👨","👩","👶","👴","👵","🐕"].map(em=><button key={em} onClick={()=>setNewEmoji(em)} style={{ background:newEmoji===em?T.accentSoft:"none",border:`1px solid ${newEmoji===em?T.accent:T.border}`,borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:18 }}>{em}</button>)}
+            </div>
+            {newPersonType==="contact"&&(
+              <div style={{ marginBottom:10 }}>
+                <span style={lbl}>Credit limit (how much they can owe you)</span>
+                <input style={inp} type="number" placeholder={`e.g. 5000 (0 = unlimited)`} value={newCreditLimit} onChange={e=>setNewCreditLimit(e.target.value)}/>
+              </div>
+            )}
+            {newPersonType==="dependant"&&(
+              <div style={{ marginBottom:10 }}>
+                <span style={lbl}>Monthly spend awareness budget</span>
+                <input style={inp} type="number" placeholder={`e.g. 3000 (0 = no limit)`} value={newSpendBudget} onChange={e=>setNewSpendBudget(e.target.value)}/>
+              </div>
+            )}
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
+              {PALETTE.map(c=><div key={c} onClick={()=>setNewColor(c)} style={{ width:24,height:24,borderRadius:6,background:c,cursor:"pointer",border:newColor===c?"3px solid #fff":"3px solid transparent" }}/>) }
+            </div>
+            <button onClick={addPerson} style={btnP}>Add Person</button>
+          </div>
+
+          {listedPeople.map(p=>{
+            const s=settlements[p.id];
+            const personalSpent = Number(personSpend["__me__"]||0);
+            const spent=p.isMe ? personalSpent : (personSpend[p.id]||0);
+            const net=(s?.owesMe||0)-(s?.iOwe||0);
+            const creditLimit=p.creditLimit||0;
+            const atLimit=!p.isMe&&creditLimit>0&&(s?.owesMe||0)>=creditLimit*0.9;
+            return (
+              <div key={p.id} onClick={()=>setSelectedPerson(p)} style={{ ...card,cursor:"pointer",display:"flex",alignItems:"center",gap:12 }}>
+                <div style={{ width:42,height:42,borderRadius:"50%",background:p.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0,position:"relative" }}>
+                  {p.emoji}
+                  {p.personType==="dependant"&&<div style={{ position:"absolute",bottom:-2,right:-2,fontSize:9,background:T.info,borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center" }}>♥</div>}
+                  {p.favorite&&<div style={{ position:"absolute",top:-2,right:-2,fontSize:9,background:T.accent,color:"#000",borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900 }}>★</div>}
+                </div>
+                <div style={{ flex:1 }}>
+                  <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{p.name}{p.isMe?<span style={{ color:T.accent,fontSize:10,marginLeft:6 }}>you</span>:""}</div>
+                  <div style={{ color:T.sub,fontSize:11,marginTop:1 }}>
+                    {p.relation||p.personType}
+                    {p.isMe
+                      ? (myActual>0 ? ` · ${sym}${fmtK(spent)} personal · ${sym}${fmtK(myActual)} total` : (spent>0 ? ` · ${sym}${fmtK(spent)} personal` : ""))
+                      : (spent>0 ? ` · ${sym}${fmtK(spent)} spent` : "")}
+                    {atLimit&&<span style={{ color:T.danger,fontSize:10,fontWeight:700,marginLeft:6 }}>⚠️ Credit limit</span>}
+                  </div>
+                </div>
+                {!p.isMe&&<button onClick={e=>{ e.stopPropagation(); toggleFavorite(p); }} style={{ background:p.favorite?T.accentSoft:"none",border:`1px solid ${p.favorite?T.accent:T.border}`,borderRadius:8,padding:"5px 8px",cursor:"pointer",fontSize:12,fontWeight:800,color:p.favorite?T.accent:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>{p.favorite?"★":"☆"}</button>}
+                {!p.isMe&&net!==0&&(
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ color:net>0?T.success:T.danger,fontSize:13,fontWeight:800 }}>{net>0?"+":""}{sym}{fmt(Math.abs(net))}</div>
+                    <div style={{ color:net>0?T.success:T.danger,fontSize:10 }}>{net>0?"owes you":"you owe"}</div>
+                  </div>
+                )}
+                <div style={{ color:T.sub,fontSize:12 }}>→</div>
+              </div>
+            );
+          })}
+
+        </>}
+
+        {subView==="groups"&&<>
+          <div style={{ ...card,border:`1px dashed ${T.border}` }}>
+            <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:12 }}>➕ New Group</div>
+            <input style={{ ...inp,marginBottom:10 }} placeholder="Group name *" value={newGroupName} onChange={e=>setNewGroupName(e.target.value)}/>
+            <div style={{ marginBottom:10 }}>
+              <span style={lbl}>Group type (e.g. Society, Trip, House)</span>
+              <input style={inp} placeholder="Optional" value={newGroupType} onChange={e=>setNewGroupType(e.target.value)}/>
+            </div>
+            <div style={{ marginBottom:10 }}>
+              <span style={lbl}>Members</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6 }}>
+                <button onClick={()=>setNewGroupIncludeMe(v=>!v)} style={{ background:newGroupIncludeMe?T.accentSoft:"none",border:`1px solid ${newGroupIncludeMe?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupIncludeMe?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🧑 Me {newGroupIncludeMe?"✓":"+"}</button>
+                {people.filter(p=>!p.isMe).map(p=><button key={p.id} onClick={()=>setNewGroupMembers(prev=>prev.includes(p.id)?prev.filter(x=>x!==p.id):[...prev,p.id])} style={{ background:newGroupMembers.includes(p.id)?p.color+"22":"none",border:`1px solid ${newGroupMembers.includes(p.id)?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupMembers.includes(p.id)?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+              </div>
+            </div>
+            <div style={{ marginBottom:10 }}>
+              <span style={lbl}>Optional group budget</span>
+              <input style={inp} type="number" placeholder={`e.g. 10000`} value={newGroupManualLimit} onChange={e=>setNewGroupManualLimit(e.target.value)}/>
+            </div>
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:2,marginBottom:12 }}>
+              {PALETTE.map(c=><div key={c} onClick={()=>setNewGroupColor(c)} style={{ width:24,height:24,borderRadius:6,background:c,cursor:"pointer",border:newGroupColor===c?"3px solid #fff":"3px solid transparent" }}/>) }
+            </div>
+            <button onClick={addGroup} style={btnP}>Create Group</button>
+          </div>
+
+          {[...new Set(groups.map(g=>g.type||"Group"))].map(gtype=>{
+            const grps=groups.filter(g=>(g.type||"Group")===gtype);
+            if(!grps.length) return null;
+            return (
+              <div key={gtype} style={{ marginBottom:16 }}>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,marginBottom:10 }}>{gtype}</div>
+                {grps.map(g=>{
+                  const gTotalSpend = txns.filter(t=>t.groupId===g.id&&t.type==="expense").reduce((sum,t)=>sum+Number(t.amount||0),0) + bills.filter(b=>b.groupId===g.id&&b.status==="unpaid").reduce((sum,b)=>sum+Number(b.amount||0),0);
+                  const gBudget = Number(g.manualLimit||0);
+                  const gOver = gBudget>0 && gTotalSpend>gBudget;
+                  return (
+                    <div key={g.id} onClick={()=>{ setSelectedGroup(g); setEditingGroupName(g.name||""); setEditingGroupBudget(String(g.manualLimit||"")); setEditingGroupMembers([...(g.members||[])]); setIsEditingGroup(false); }} style={{ ...card,cursor:"pointer",display:"flex",alignItems:"center",gap:12 }}>
+                      <div style={{ width:42,height:42,borderRadius:12,background:g.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20 }}>{g.icon}</div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{g.name}</div>
+                        <div style={{ color:T.sub,fontSize:11,marginTop:1 }}>{(g.members?.length||0) + (g.includeMe===false?0:1)} members{g.includeMe===false?" · you not included":" · you included"}</div>
+                        <div style={{ color:gOver?T.danger:T.sub,fontSize:10,marginTop:2 }}>{gBudget>0?`Budget ${sym}${fmt(gBudget)} · `:""}Spent {sym}{fmt(gTotalSpend)}{gOver?` · ⚠️ Over ${sym}${fmt(gTotalSpend-gBudget)}`:""}</div>
+                      </div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ color:g.color,fontSize:14,fontWeight:800 }}>{sym}{fmt(groupReceivableTotal(g.id))}</div>
+                        <div style={{ color:T.sub,fontSize:10 }}>→</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+
+
+
+
+
+        </>}
+
+      {showTxnUpiPicker&&pendingTxnShare&&<div style={{ position:"fixed",inset:0,background:"#0009",zIndex:900,display:"flex",alignItems:"flex-end",justifyContent:"center" }} onClick={()=>setShowTxnUpiPicker(false)}>
+        <div style={{ background:T.card,borderRadius:"18px 18px 0 0",padding:24,width:"100%",maxWidth:480 }} onClick={e=>e.stopPropagation()}>
+          <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:12 }}>Pay via which UPI?</div>
+          {accounts.filter(a=>a.type==="upi"&&a.handle).map(a=>{
+            const linked = a.linkedAccount ? accounts.find(b=>b.id===a.linkedAccount) : null;
+            return (
+              <button key={a.id} onClick={()=>{ setShowTxnUpiPicker(false); doTxnShare(pendingTxnShare.recipientName, pendingTxnShare.amount, pendingTxnShare.contextLabel, a.handle); setPendingTxnShare(null); }} style={{ display:"block",width:"100%",textAlign:"left",background:T.input,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 14px",marginBottom:8,color:T.text,fontFamily:"Nunito,sans-serif",fontSize:14,fontWeight:700,cursor:"pointer" }}>
+                📱 {a.name} <span style={{ color:T.sub,fontWeight:400 }}>{a.handle}{linked?` · ${linked.name}`:""}</span>
+              </button>
+            );
+          })}
+          <button onClick={()=>{ setShowTxnUpiPicker(false); doTxnShare(pendingTxnShare.recipientName, pendingTxnShare.amount, pendingTxnShare.contextLabel, ""); setPendingTxnShare(null); }} style={{ display:"block",width:"100%",textAlign:"center",background:"none",border:"none",color:T.sub,fontFamily:"Nunito,sans-serif",fontSize:13,cursor:"pointer",marginTop:4 }}>Share without UPI</button>
+        </div>
+      </div>}
+
+      </div>
+    );
+  };
+
+  // ── INVESTMENTS ────────────────────────────────────────────────────────────
+  const Investments = ({ onClose = null }) => {
+    const byType=investmentTypeSummaries.map(it=>({
+      ...it,
+      folios:investmentDashboardGroups.filter(group=>group.type===it.id).sort((a,b)=>b.total-a.total),
+    })).filter(it=>it.folios.length>0);
+    const activeType = selectedInvestmentTypeView==="all" ? null : (byType.find(it=>it.id===selectedInvestmentTypeView) || null);
+    const grandTotal=investmentAssetsTotal;
+    const pieData=byType.map(it=>({ name:it.name,value:it.total,color:it.color,icon:it.icon }));
+    const folioCount = investmentDashboardGroups.length;
+    return (
+      <div style={{ padding:"14px 16px 0" }}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+          <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>💹 Investments</div>
+          <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+            <button onClick={openInvestmentComposer} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>+ Add</button>
+            {onClose && <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>}
+          </div>
+        </div>
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
+          {[{label:"Total",value:`${sym}${fmt(grandTotal)}`,color:T.info,icon:"💹"},{label:"Monthly",value:`${sym}${fmt(monthlyInvestmentCommitment)}`,color:T.purple,icon:"🔁"},{label:"Holdings",value:folioCount,color:T.success,icon:"🗂️"},{label:"This Month",value:`${sym}${fmt(monthlyInvestmentFlow)}`,color:T.accent,icon:"📅"}].map(s=>(
+            <div key={s.label} style={{ ...card,marginBottom:0,padding:"12px" }}>
+              <div style={{ fontSize:20,marginBottom:4 }}>{s.icon}</div>
+              <div style={{ color:s.color,fontSize:16,fontWeight:800 }}>{s.value}</div>
+              <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginTop:2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+        {byType.length===0?(
+          <div style={{ ...card,textAlign:"center",padding:40 }}>
+            <div style={{ fontSize:48,marginBottom:12 }}>💹</div>
+            <div style={{ color:T.text,fontSize:16,fontWeight:800,marginBottom:8 }}>No investments yet</div>
+            <button onClick={openInvestmentComposer} style={btnP}>+ Add Investment</button>
+          </div>
+        ):<>
+          {pieData.length>0&&<div style={{ ...card,padding:"16px 14px" }}>
+            <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:12 }}>Portfolio</div>
+            <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+              <ResponsiveContainer width={140} height={140}>
+                <PieChart>
+                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={38} outerRadius={68} dataKey="value" stroke="none">
+                    {pieData.map((c,i)=><Cell key={i} fill={c.color} opacity={0.9}/>)}
+                  </Pie>
+                  <Tooltip content={({active,payload})=>active&&payload?.length?<div style={ttStyle}><b style={{color:payload[0].payload.color}}>{payload[0].payload.icon} {payload[0].name}</b><br/>{sym}{fmt(payload[0].value)}</div>:null}/>
+                </PieChart>
+              </ResponsiveContainer>
+              <div style={{ flex:1 }}>
+                {pieData.map((c,i)=>(
+                  <div key={i} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7 }}>
+                    <div style={{ display:"flex",alignItems:"center",gap:5 }}>
+                      <div style={{ width:8,height:8,borderRadius:"50%",background:c.color }}/>
+                      <span style={{ color:T.sub,fontSize:11 }}>{c.name.split("/")[0]}</span>
+                    </div>
+                    <span style={{ color:T.text,fontSize:11,fontWeight:800 }}>{grandTotal?Math.round(c.value/grandTotal*100):0}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>}
+          {!activeType ? byType.map(it=>(
+            <div key={it.id} onClick={()=>setSelectedInvestmentTypeView(it.id)} style={{ ...card,cursor:"pointer" }}>
+              <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                <div style={{ width:34,height:34,borderRadius:10,background:it.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{it.icon}</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{it.name}</div>
+                  <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{it.groupCount} {it.groupCount===1?"holding":"holdings"}</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ color:it.color,fontSize:14,fontWeight:800 }}>{sym}{fmt(it.total)}</div>
+                  <div style={{ color:T.sub,fontSize:10 }}>Open</div>
+                </div>
+              </div>
+            </div>
+          )) : (
+            <div style={card}>
+              <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:10 }}>
+                <button onClick={()=>setSelectedInvestmentTypeView("all")} style={{ background:T.pill,border:"none",color:T.accent,borderRadius:8,padding:"4px 10px",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>← Types</button>
+                <div style={{ width:34,height:34,borderRadius:10,background:(activeType.color||T.info)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{activeType.icon}</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{activeType.name}</div>
+                  <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{activeType.folios.length} {activeType.folios.length===1?"holding":"holdings"}</div>
+                </div>
+                <div style={{ color:activeType.color||T.info,fontSize:14,fontWeight:800 }}>{sym}{fmt(activeType.total)}</div>
+              </div>
+              {activeType.folios.map((folio,idx,arr)=>(
+                <div key={folio.id} onClick={()=>{
+                  if(!folio.itemCount && folio.accountCount===1 && folio.accounts?.[0]){
+                    setShowInvestments(false);
+                    setSelectedInvestmentTypeView("all");
+                    setShowAccDetail(folio.accounts[0]);
+                    return;
+                  }
+                  setSelectedInvestmentDetail({...folio,typeMeta:activeType});
+                }} style={{ padding:"8px 0",borderBottom:idx<arr.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}>
+                    <div style={{ minWidth:0,flex:1 }}>
+                      <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{folio.folioNo?`Folio ${folio.folioNo}`:(folio.title || folio.primaryName)}</div>
+                      <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>
+                        {folio.itemCount>0
+                          ? (activeType.id==="stocks"
+                            ? `${folio.itemCount} stock${folio.itemCount===1?"":"s"}`
+                            : (folio.folioNo
+                              ? `Folio ${folio.folioNo} · ${folio.itemCount} entr${folio.itemCount===1?"y":"ies"}`
+                              : (investmentFreqLabel(folio.items?.[0]?.freq) || `${folio.itemCount} holding${folio.itemCount===1?"":"s"}`)))
+                          : `${folio.accountCount} account${folio.accountCount===1?"":"s"} · tracked in Wealth`}
+                      </div>
+                      {(folio.items||[]).slice(0,2).map(item=>{
+                        const metricText = formatInvestmentMetric(item.type, item.lastNav);
+                        return <div key={item.id} style={{ color:T.sub,fontSize:10,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{item.name} · {sym}{fmt(item.amount)}{metricText?` · ${metricText}`:""}</div>;
+                      })}
+                      {!folio.itemCount && (folio.accounts||[]).slice(0,2).map(account=><div key={account.id} style={{ color:T.sub,fontSize:10,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{account.name} · balance {sym}{fmt(accountBalance(account.id))}</div>)}
+                      {folio.itemCount>2&&<div style={{ color:T.sub,fontSize:10,marginTop:3 }}>+{folio.itemCount-2} more</div>}
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ color:activeType.color||T.info,fontSize:12,fontWeight:800 }}>{sym}{fmt(folio.total)}</div>
+                      <div style={{ color:T.sub,fontSize:10 }}>Tap to view</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>}
+      </div>
+    );
+  };
+
+  // ── SETTINGS ───────────────────────────────────────────────────────────────
+  const LoanModal = ({ item, onClose }) => {
+    const isDraft = Boolean(item?._isDraft);
+    const isEditing = Boolean(item && !isDraft);
+    const [direction,setDirection]=useState(item?.direction||"given");
+    const [sourceType,setSourceType]=useState(item?.sourceType || (item?.direction==="taken" ? "bank" : "person"));
+    const [name,setName]=useState(item?.name||"");
+    const [principal,setPrincipal]=useState(String(item?.principal ?? item?.amount ?? ""));
+    const [outstanding,setOutstanding]=useState(String(item?.outstanding ?? item?.principal ?? item?.amount ?? ""));
+    const [tenureMonths,setTenureMonths]=useState(String(item?.tenureMonths||""));
+    const [emiAmount,setEmiAmount]=useState(String(item?.emiAmount||""));
+    const [startDate,setStartDate]=useState(item?.startDate||todayStr());
+    const [dueDate,setDueDate]=useState(item?.dueDate||"");
+    const [dueDay,setDueDay]=useState(String(item?.dueDay||""));
+    const [paymentAccId,setPaymentAccId]=useState(item?.paymentAccId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "");
+    const [hasInterest,setHasInterest]=useState(item?.hasInterest ?? (Number(item?.interestRate||0)>0));
+    const [interestRate,setInterestRate]=useState(String(item?.interestRate||""));
+    const [note,setNote]=useState(item?.note||"");
+
+    useEffect(()=>{
+      if(!dueDay && startDate){
+        const defaultDay = toDateOnly(startDate)?.getDate() || new Date().getDate();
+        setDueDay(String(defaultDay));
+      }
+    },[dueDay,startDate]);
+
+    useEffect(()=>{
+      const principalNum = parseMoney(principal);
+      const months = Math.max(0, parseInt(tenureMonths||0,10) || 0);
+      if(direction==="taken" && principalNum>0 && months>0 && !parseMoney(emiAmount)){
+        setEmiAmount(String(Math.round((principalNum / months) * 100) / 100));
+      }
+    },[direction,principal,tenureMonths,emiAmount]);
+
+    const save=()=>{
+      if(!name.trim()) return;
+      const principalNum = Math.max(0, parseMoney(principal));
+      const outstandingNum = Math.max(0, parseMoney(outstanding));
+      const nextStatus = item?.status==="written_off"
+        ? "written_off"
+        : item?.status==="converted_to_expense"
+          ? "converted_to_expense"
+          : outstandingNum<=0
+            ? "closed"
+            : "active";
+      const nextItem={
+        ...(item||{}),
+        id:isEditing ? item.id : (item?.id || genId()),
+        direction,
+        sourceType,
+        name:name.trim(),
+        principal:principalNum,
+        outstanding:outstandingNum,
+        startDate:startDate||todayStr(),
+        dueDate:dueDate || (dueDay ? getNextDueDate(startDate||todayStr(), dueDay) : ""),
+        dueDay:dueDay ? Math.max(1, Math.min(31, parseInt(dueDay,10)||1)) : "",
+        tenureMonths:Math.max(0, parseInt(tenureMonths||0,10) || 0),
+        emiAmount:Math.max(0, parseMoney(emiAmount)||0),
+        paymentAccId:paymentAccId || accounts[0]?.id || "",
+        hasInterest,
+        interestRate:hasInterest?Math.max(0,parseFloat(interestRate)||0):0,
+        note:note.trim(),
+        paymentMode:(Number(parseMoney(emiAmount)||0)>0 || Number(tenureMonths||0)>0) ? "emi" : (item?.paymentMode || "manual"),
+        isEmiPlan:Boolean(Number(parseMoney(emiAmount)||0)>0 || Number(tenureMonths||0)>0 || item?.isEmiPlan),
+        repayments:Array.isArray(item?.repayments)?item.repayments:[],
+        status:nextStatus,
+        closedDate:nextStatus==="closed"?(item?.closedDate||todayStr()):item?.closedDate||"",
+        writtenOffDate:item?.writtenOffDate||"",
+        convertedDate:item?.convertedDate||"",
+      };
+      setLoans(prev=>isEditing?prev.map(x=>x.id===item.id?{...x,...nextItem}:x):[nextItem,...prev]);
+      setEditingLoan(null);
+      setShowAddLoan(false);
+      onClose();
+    };
+
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{isEditing?"Edit Loan":"Add Loan"}</div>
+            <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+              <Chip color={T.accent} active={direction==="given"} onClick={()=>setDirection("given")}>🫴 Loan Given</Chip>
+              <Chip color={T.danger} active={direction==="taken"} onClick={()=>setDirection("taken")}>🤲 Loan Taken</Chip>
+            </div>
+            <input style={inp} placeholder={direction==="given"?"Who owes you this loan?":"Loan / lender name"} value={name} onChange={e=>setName(e.target.value)}/>
+            <div>
+              <span style={lbl}>Source type</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {[ ["person","👤 Person"],["bank","🏦 Bank"],["store","🛒 Store"],["cc","💳 Credit Card"],["other","📦 Other"] ].map(([value,label])=>(
+                  <Chip key={value} color={value==="cc"?T.danger:(direction==="taken"?T.warn:T.accent)} active={sourceType===value} onClick={()=>setSourceType(value)}>{label}</Chip>
+                ))}
+              </div>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div>
+                <span style={lbl}>Principal ({sym})</span>
+                <input style={inp} type="text" inputMode="decimal" value={principal||""} onChange={e=>setPrincipal(cleanMoneyInput(e.target.value))}/>
+              </div>
+              <div>
+                <span style={lbl}>Outstanding ({sym})</span>
+                <input style={inp} type="text" inputMode="decimal" value={outstanding||""} onChange={e=>setOutstanding(cleanMoneyInput(e.target.value))}/>
+              </div>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div>
+                <span style={lbl}>Start Date</span>
+                <input style={inp} type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}/>
+              </div>
+              <div>
+                <span style={lbl}>Due Date</span>
+                <input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/>
+              </div>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div>
+                <span style={lbl}>Tenure (months)</span>
+                <input style={inp} type="number" min="0" value={tenureMonths} onChange={e=>setTenureMonths(e.target.value)} placeholder="Optional"/>
+              </div>
+              <div>
+                <span style={lbl}>EMI ({sym})</span>
+                <input style={inp} type="text" inputMode="decimal" value={emiAmount||""} onChange={e=>setEmiAmount(cleanMoneyInput(e.target.value))} placeholder="Optional"/>
+              </div>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div>
+                <span style={lbl}>Due day</span>
+                <input style={inp} type="number" min="1" max="31" value={dueDay} onChange={e=>setDueDay(e.target.value)} placeholder="e.g. 5"/>
+              </div>
+              <div>
+                <span style={lbl}>{direction==="taken"?"Repayment from":"Receive into"}</span>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                  {accounts.map(a=><button key={a.id} onClick={()=>setPaymentAccId(a.id)} style={{ background:paymentAccId===a.id?a.color+"22":"none",border:`1px solid ${paymentAccId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:paymentAccId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
+                </div>
+              </div>
+            </div>
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:T.input,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 12px" }}>
+              <div>
+                <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>Interest</div>
+                <div style={{ color:T.sub,fontSize:10 }}>{hasInterest?"Track APR / rate":"No-interest loan"}</div>
+              </div>
+              <button onClick={()=>setHasInterest(v=>!v)} style={{ background:hasInterest?T.accent:T.pill,border:`1px solid ${hasInterest?T.accent:T.border}`,borderRadius:18,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:hasInterest?"#000":T.sub,fontFamily:"Nunito,sans-serif" }}>{hasInterest?"Interest ON":"No Interest"}</button>
+            </div>
+            {hasInterest&&<div>
+              <span style={lbl}>Interest Rate (% p.a.)</span>
+              <input style={inp} type="number" value={interestRate} onChange={e=>setInterestRate(e.target.value)} placeholder="e.g. 12"/>
+            </div>}
+            <input style={inp} placeholder="Note (optional)" value={note} onChange={e=>setNote(e.target.value)}/>
+            <div style={{ color:T.sub,fontSize:10 }}>If EMI is set, each repayment can automatically create the monthly cash-flow entry so the loan and spending stay in sync.</div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+              <button onClick={onClose} style={btnG}>Cancel</button>
+              <button onClick={save} style={btnP}>{isEditing?"Save Loan":"Save Loan"}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const LoanRepaymentModal = ({ item, onClose }) => {
+    const isEmiFlow = item?.direction==="taken" && (Number(item?.emiAmount||0)>0 || item?.paymentMode==="emi" || item?.isEmiPlan);
+    const [amount,setAmount]=useState(String(item?.direction==="taken" ? (item?.emiAmount || item?.outstanding || "") : (item?.outstanding || "")));
+    const [date,setDate]=useState(todayStr());
+    const [accId,setAccId]=useState(item?.paymentAccId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "");
+    const [note,setNote]=useState("");
+    const label = item?.direction==="given" ? "Record money received" : (isEmiFlow ? "Pay EMI" : "Record repayment made");
+
+    const save=()=>{
+      const outstandingNow = Number(item?.outstanding||0);
+      const repaymentAmount = Math.min(outstandingNow, Math.max(0, parseMoney(amount)||0));
+      if(!item || repaymentAmount<=0) return;
+      setLoans(prev=>prev.map(loan=>{
+        if(loan.id!==item.id) return loan;
+        const nextOutstanding = Math.max(0, Number(loan.outstanding||0) - repaymentAmount);
+        return {
+          ...loan,
+          paymentAccId:accId || loan.paymentAccId || accounts[0]?.id || "",
+          outstanding:nextOutstanding,
+          status:nextOutstanding<=0?"closed":"active",
+          closedDate:nextOutstanding<=0?(date||todayStr()):loan.closedDate||"",
+          repayments:[...(Array.isArray(loan.repayments)?loan.repayments:[]),{ id:genId(), date:date||todayStr(), amount:repaymentAmount, note:note.trim() }],
+        };
+      }));
+
+      if(item.direction==="taken"){
+        // CC EMI with autoScheduled: installment transactions already pre-created upfront — skip adding a new one
+        if(!item.autoScheduled){
+          const expenseCatIds = Array.isArray(item.expenseCatIds) && item.expenseCatIds.length ? item.expenseCatIds : (item.expenseCatId ? [item.expenseCatId] : ["financial"]);
+          const expenseSubId = item.expenseSubId || (expenseCatIds[0]==="financial" ? "fi7" : null);
+          setTxns(prev=>[{
+            id:Date.now(),
+            type:"expense",
+            desc:isEmiFlow ? `EMI - ${item.name || "Loan"}` : `Repayment - ${item.name || "Loan"}`,
+            merchant:item.name || (isEmiFlow ? "Loan EMI" : "Loan repayment"),
+            date:date||todayStr(),
+            note:[isEmiFlow?"EMI payment":"Loan repayment", note.trim()].filter(Boolean).join(" · "),
+            amount:repaymentAmount,
+            accId:accId || item.paymentAccId || accounts[0]?.id || "",
+            catId:expenseCatIds[0] || "financial",
+            catIds:expenseCatIds,
+            subId:expenseSubId || null,
+            subIds:Array.isArray(item.expenseSubIds) && item.expenseSubIds.length ? item.expenseSubIds : (expenseSubId ? [expenseSubId] : []),
+            linkedLoanId:item.id,
+            trackingMode:"none",
+            people:{},
+          },...prev]);
+        }
+      } else {
+        const matchedPerson = people.find(p=>!p.isMe && normalizeVendorText(p.name)===normalizeVendorText(item?.name||""));
+        setTxns(prev=>[{
+          id:Date.now(),
+          type:"settlement_in",
+          desc:`Loan receipt - ${item?.name || "Loan"}`,
+          merchant:item?.name || "Loan receipt",
+          date:date||todayStr(),
+          note:["Money received against loan", note.trim()].filter(Boolean).join(" · "),
+          amount:repaymentAmount,
+          accId:accId || accounts[0]?.id || "",
+          fromPersonId:matchedPerson?.id || null,
+          catId:null,
+          isRefund:false,
+          againstTxnId:null,
+          linkedLoanId:item?.id || null,
+        },...prev]);
+      }
+
+      setRepaymentLoan(null);
+      onClose();
+    };
+
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:210,padding:20 }}>
+        <div style={{ background:T.card,borderRadius:20,padding:22,width:"100%",maxWidth:360 }}>
+          <div style={{ color:T.text,fontSize:16,fontWeight:900,marginBottom:8 }}>{label}</div>
+          <div style={{ color:T.sub,fontSize:12,marginBottom:14 }}>{item?.name} · outstanding {sym}{fmt(item?.outstanding||0)}</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Amount ({sym})</span>
+              <input style={inp} type="text" inputMode="decimal" value={amount||""} onChange={e=>setAmount(cleanMoneyInput(e.target.value))} autoFocus/>
+            </div>
+            <div>
+              <span style={lbl}>Date</span>
+              <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>{item?.direction==="taken"?"Paid from":"Received into"}</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {accounts.map(a=><button key={a.id} onClick={()=>setAccId(a.id)} style={{ background:accId===a.id?a.color+"22":"none",border:`1px solid ${accId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:accId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
+              </div>
+            </div>
+            <input style={inp} placeholder="Note (optional)" value={note} onChange={e=>setNote(e.target.value)}/>
+            <div style={{ color:T.sub,fontSize:10 }}>{item?.direction==="taken" ? "This also adds the month’s actual cash outflow to Transactions." : "This also records the money received in Transactions."}</div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <button onClick={onClose} style={btnG}>Cancel</button>
+              <button onClick={save} style={btnP}>{isEmiFlow?"Pay EMI":"Save Entry"}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const LiabilityModal = ({ item, onClose }) => {
+    const [name,setName]=useState(item?.name||"");
+    const [type,setType]=useState(item?.type||liabilityTypeOptions[0]?.id||LIABILITY_TYPES[0].id);
+    const [principal,setPrincipal]=useState(String(item?.principal ?? item?.outstanding ?? ""));
+    const [outstanding,setOutstanding]=useState(String(item?.outstanding ?? item?.principal ?? ""));
+    const [tenureMonths,setTenureMonths]=useState(String(item?.tenureMonths||""));
+    const [emiAmount,setEmiAmount]=useState(String(item?.emiAmount||""));
+    const [interestRate,setInterestRate]=useState(String(item?.interestRate||""));
+    const [nextDue,setNextDue]=useState(item?.nextDue||todayStr());
+    const [paymentAccId,setPaymentAccId]=useState(item?.paymentAccId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "");
+    const [note,setNote]=useState(item?.note||"");
+    const save=()=>{
+      if(!name.trim()) return;
+      const nextItem={
+        ...(item||{}),
+        id:item?.id||genId(),
+        name:name.trim(),
+        type,
+        principal:Math.max(0, parseMoney(principal)||0),
+        outstanding:Math.max(0, parseMoney(outstanding)||0),
+        tenureMonths:Math.max(0, parseInt(tenureMonths||0,10) || 0),
+        emiAmount:Math.max(0, parseMoney(emiAmount)||0),
+        interestRate:Math.max(0, parseFloat(interestRate)||0),
+        nextDue,
+        paymentAccId,
+        note:note.trim(),
+      };
+      setLiabilities(prev=>item?prev.map(x=>x.id===item.id?nextItem:x):[nextItem,...prev]);
+      setEditingLiability(null);
+      setShowAddLiability(false);
+      onClose();
+    };
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{item?"Edit Liability":"Add Liability"}</div>
+            <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <input style={inp} placeholder="Liability name" value={name} onChange={e=>setName(e.target.value)}/>
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+              {liabilityTypeOptions.map(l=><Chip key={l.id} color={l.color} active={type===l.id} onClick={()=>setType(l.id)}>{l.icon} {l.name}</Chip>)}
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>Principal ({sym})</span><input style={inp} type="text" inputMode="decimal" value={principal||""} onChange={e=>setPrincipal(cleanMoneyInput(e.target.value))}/></div>
+              <div><span style={lbl}>Outstanding ({sym})</span><input style={inp} type="text" inputMode="decimal" value={outstanding||""} onChange={e=>setOutstanding(cleanMoneyInput(e.target.value))}/></div>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>Tenure (months)</span><input style={inp} type="number" min="0" value={tenureMonths} onChange={e=>setTenureMonths(e.target.value)} placeholder="Optional"/></div>
+              <div><span style={lbl}>EMI ({sym})</span><input style={inp} type="text" inputMode="decimal" value={emiAmount||""} onChange={e=>setEmiAmount(cleanMoneyInput(e.target.value))} placeholder="Optional"/></div>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>Interest %</span><input style={inp} type="number" min="0" step="0.01" value={interestRate} onChange={e=>setInterestRate(e.target.value)} placeholder="Optional"/></div>
+              <div><span style={lbl}>Next Due</span><input style={inp} type="date" value={nextDue} onChange={e=>setNextDue(e.target.value)}/></div>
+            </div>
+            <div>
+              <span style={lbl}>Repayment from</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {accounts.map(a=><button key={a.id} onClick={()=>setPaymentAccId(a.id)} style={{ background:paymentAccId===a.id?a.color+"22":"none",border:`1px solid ${paymentAccId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:paymentAccId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
+              </div>
+            </div>
+            <input style={inp} placeholder="Note (optional)" value={note} onChange={e=>setNote(e.target.value)}/>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+              <button onClick={onClose} style={btnG}>Cancel</button>
+              <button onClick={save} style={btnP}>Save Liability</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const AssetModal = ({ item, onClose }) => {
+    const [name,setName]=useState(item?.name||"");
+    const [type,setType]=useState(item?.type||ASSET_TYPES[0].id);
+    const [currentValue,setCurrentValue]=useState(String(item?.currentValue||""));
+    const [note,setNote]=useState(item?.note||"");
+    const save=()=>{
+      if(!name.trim()) return;
+      const nextItem={ id:item?.id||genId(), name:name.trim(), type, currentValue:parseMoney(currentValue)||0, note:note.trim() };
+      setTrackedAssets(prev=>item?prev.map(x=>x.id===item.id?nextItem:x):[nextItem,...prev]);
+      setEditingAsset(null);
+      setShowAddAsset(false);
+      onClose();
+    };
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{item?"Edit Asset":"Add Asset"}</div>
+            <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <input style={inp} placeholder="Asset name" value={name} onChange={e=>setName(e.target.value)}/>
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+              {ASSET_TYPES.map(a=><Chip key={a.id} color={a.color} active={type===a.id} onClick={()=>setType(a.id)}>{a.icon} {a.name}</Chip>)}
+            </div>
+            <div><span style={lbl}>Current Value ({sym})</span><input style={inp} type="text" inputMode="decimal" value={currentValue||""} onChange={e=>setCurrentValue(cleanMoneyInput(e.target.value))}/></div>
+            <input style={inp} placeholder="Note (optional)" value={note} onChange={e=>setNote(e.target.value)}/>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+              <button onClick={onClose} style={btnG}>Cancel</button>
+              <button onClick={save} style={btnP}>Save Asset</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const WealthPage = () => {
+    const getLoanStatusMeta = loan => {
+      if(loan.status==="written_off") return { label:"Written off", color:T.sub };
+      if(loan.status==="converted_to_expense") return { label:"Converted to expense", color:T.warn };
+      if(loan.status==="closed" || Number(loan.outstanding||0)<=0) return { label:"Closed", color:T.success };
+      return { label:loan.direction==="taken"?"To repay":"To receive", color:loan.direction==="taken"?T.danger:T.accent };
+    };
+
+    const visibleLoans = loans.filter(loan=>!isCreditCardBackedLoan(loan));
+    const activeGivenLoans = visibleLoans.filter(loan=>loan.direction!=="taken" && loan.status==="active" && Number(loan.outstanding||0)>0);
+    const activeTakenLoans = visibleLoans.filter(loan=>loan.direction==="taken" && loan.status==="active" && Number(loan.outstanding||0)>0);
+
+    const inlineSections = {
+      banks: accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a)).map(a=>({
+        id:a.id,
+        title:a.name,
+        meta:`Live ${sym}${fmt(effectiveAccountBalance(a.id))}${balanceCheckpoints[a.id]?.date?` · Gap ${accountReconciliationGap(a.id)>=0?"+":"−"}${sym}${fmt(Math.abs(accountReconciliationGap(a.id)))}`:""}`,
+        value:`${sym}${fmt(effectiveAccountBalance(a.id))}`,
+        color:effectiveAccountBalance(a.id)>=0?T.success:T.danger,
+        onClick:()=>setShowAccDetail(a),
+      })),
+      cash: accounts.filter(a=>a.type==="cash" && !isInvestmentAccount(a)).map(a=>({
+        id:a.id,
+        title:a.name,
+        meta:`Cash in hand ${sym}${fmt(accountBalance(a.id))}`,
+        value:`${sym}${fmt(accountBalance(a.id))}`,
+        color:accountBalance(a.id)>=0?T.success:T.danger,
+        onClick:()=>setShowAccDetail(a),
+      })),
+      upi: accounts.filter(a=>a.type==="upi" && !isInvestmentAccount(a)).map(a=>({
+        id:a.id,
+        title:a.name,
+        meta:`${a.handle||"UPI"} · ${sym}${fmt(accountBalance(a.id))}`,
+        value:`${sym}${fmt(accountBalance(a.id))}`,
+        color:accountBalance(a.id)>=0?T.success:T.danger,
+        onClick:()=>setShowAccDetail(a),
+      })),
+      investments: investmentTypeSummaries.map(type=>({
+        id:type.id,
+        title:type.name.split("/")[0].trim(),
+        meta:`${type.groupCount} ${type.groupCount===1?"holding":"holdings"}`,
+        value:`${sym}${fmt(type.total)}`,
+        color:type.color || T.info,
+        onClick:()=>{ setSelectedInvestmentTypeView(type.id); setShowInvestments(true); },
+      })),
+      owed: Object.entries(settlements).filter(([,val])=>Number(val?.owesMe||0)>0).map(([pid,val])=>({
+        id:`person_${pid}`,
+        title:getPerson(pid).name,
+        meta:"Amount to receive",
+        value:`${sym}${fmt(val.owesMe||0)}`,
+        color:T.accent,
+      })),
+      loanGiven: activeGivenLoans.map(loan=>({
+        id:loan.id,
+        title:loan.name,
+        meta:`${getLoanStatusMeta(loan).label}${loan.dueDate?` · due ${loan.dueDate}`:""}${loan.hasInterest&&Number(loan.interestRate||0)>0?` · ${loan.interestRate}% p.a.`:" · no interest"}`,
+        value:`${sym}${fmt(loan.outstanding||0)}`,
+        color:T.accent,
+        onClick:()=>setEditingLoan(loan),
+      })),
+      trackedAssets: trackedAssets.map(asset=>({
+        id:asset.id,
+        title:asset.name,
+        meta:(ASSET_TYPES.find(x=>x.id===asset.type)?.name)||"Asset",
+        value:`${sym}${fmt(asset.currentValue||0)}`,
+        color:T.purple,
+      })),
+      cc: accounts.filter(a=>a.type==="cc").map(a=>{
+        const summary = getCardSummary(a);
+        return {
+          id:a.id,
+          title:a.name,
+          meta:`Due now ${sym}${fmt(summary.currentDue)} · Unbilled ${sym}${fmt(summary.currentCycleSpend)} · Outstanding ${sym}${fmt(summary.totalOutstanding||0)}`,
+          value:`${sym}${fmt(summary.totalOutstanding||0)}`,
+          color:T.danger,
+          onClick:()=>setShowAccDetail(a),
+        };
+      }),
+      loanTaken: activeTakenLoans.map(loan=>({
+        id:loan.id,
+        title:loan.name,
+        meta:`${getLoanStatusMeta(loan).label}${loan.dueDate?` · due ${loan.dueDate}`:""}${loan.hasInterest&&Number(loan.interestRate||0)>0?` · ${loan.interestRate}% p.a.`:" · no interest"}`,
+        value:`${sym}${fmt(loan.outstanding||0)}`,
+        color:T.danger,
+        onClick:()=>setEditingLoan(loan),
+      }))
+    };
+
+    const renderInlineBreakdown = mode => {
+      const items = inlineSections[mode] || [];
+      return (
+        <div style={{ padding:"0 0 8px 10px" }}>
+          {items.length===0 ? (
+            <div style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 12px",color:T.sub,fontSize:11 }}>Nothing to show here yet.</div>
+          ) : items.map(item=>(
+            <div key={item.id} onClick={item.onClick} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:T.input,border:`1px solid ${T.border}`,borderRadius:10,padding:"9px 10px",marginBottom:6,cursor:item.onClick?"pointer":"default" }}>
+              <div style={{ minWidth:0,flex:1 }}>
+                <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.title}</div>
+                <div style={{ color:T.sub,fontSize:10,marginTop:2,whiteSpace:"normal" }}>{item.meta}</div>
+              </div>
+              <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                <div style={{ color:item.color,fontSize:12,fontWeight:800 }}>{item.value}</div>
+                {item.onClick&&<div style={{ color:T.sub,fontSize:12 }}>›</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    const assetBreakdownItems = [
+      { label:"Cash in bank", value:cashBankTotal, color:T.success, icon:"🏦", mode:"banks" },
+      { label:"Cash at hand", value:cashWalletTotal, color:T.success, icon:"🪙", mode:"cash" },
+      { label:"UPI balance", value:upiTotal, color:T.success, icon:"📱", mode:"upi" },
+      { label:"Investments", value:investmentAssetsTotal, color:T.info, icon:"📈", mode:"investments" },
+      { label:"People owe you (dues)", value:directOwedToMe, color:T.accent, icon:"🤝", mode:"owed" },
+      { label:"Loans given (tracked)", value:loanGivenTotal, color:T.accent, icon:"🫴", mode:"loanGiven" },
+      { label:"Tracked assets", value:trackedAssetsTotal, color:T.purple, icon:"🏠", mode:"trackedAssets" },
+    ];
+
+    return (
+      <div style={{ padding:"14px 16px 0" }}>
+        <div style={{ ...card,background:`linear-gradient(135deg,${T.success}10,${T.card})` }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6 }}>Net Worth</div>
+          <div style={{ color:netWorthValue>=0?T.success:T.danger,fontSize:30,fontWeight:900,marginBottom:14 }}>{sym}{fmt(netWorthValue)}</div>
+          {reconciledBankCount>0&&(
+            <div style={{ background:Math.abs(reconciliationGapTotal)<0.01?T.success+"14":T.warn+"14",border:`1px solid ${Math.abs(reconciliationGapTotal)<0.01?T.success:T.warn}33`,borderRadius:10,padding:"8px 10px",marginBottom:12 }}>
+              <div style={{ color:T.text,fontSize:11,fontWeight:800 }}>Bank reconciliation gap</div>
+              <div style={{ color:Math.abs(reconciliationGapTotal)<0.01?T.success:T.warn,fontSize:11,marginTop:2 }}>
+                {Math.abs(reconciliationGapTotal)<0.01
+                  ? `All ${reconciledBankCount} reconciled bank account${reconciledBankCount===1?"":"s"} are matched.`
+                  : `Live bank balances are ${reconciliationGapTotal>=0?"ahead of":"behind"} entered transactions by ${sym}${fmt(Math.abs(reconciliationGapTotal))}. Add missing txns to close this gap.`}
+              </div>
+            </div>
+          )}
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+            <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+              <div style={{ color:T.success,fontSize:18,fontWeight:800 }}>{sym}{fmt(totalAssetsValue)}</div>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Assets</div>
+            </div>
+            <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+              <div style={{ color:T.danger,fontSize:18,fontWeight:800 }}>{sym}{fmt(totalLiabilitiesValue)}</div>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Liabilities</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={card}>
+          <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:10 }}>Assets Breakdown</div>
+          {assetBreakdownItems.map((item,idx)=>{
+            const isOpen = showWealthBreakdown===item.mode;
+            return (
+              <div key={item.label} style={{ borderBottom:idx===assetBreakdownItems.length-1?"none":`1px solid ${T.border}` }}>
+                <div onClick={()=>setShowWealthBreakdown(isOpen?null:item.mode)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",cursor:"pointer" }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{item.icon} {item.label}</div>
+                  <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                    <div style={{ color:item.value>=0?item.color:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(item.value)}</div>
+                    <div style={{ color:T.sub,fontSize:12 }}>{isOpen?"▲":"▼"}</div>
+                  </div>
+                </div>
+                {isOpen && renderInlineBreakdown(item.mode)}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={card}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+            <div style={{ color:T.text,fontSize:15,fontWeight:800 }}>Tracked Assets</div>
+            <button onClick={()=>setShowAddAsset(true)} style={{ background:T.info+"22",border:`1px solid ${T.info}33`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.info,fontFamily:"Nunito,sans-serif" }}>+ Add</button>
+          </div>
+          {trackedAssets.length===0?<div style={{ color:T.sub,fontSize:12 }}>Add real estate, vehicles, gold, valuables, or other assets you want included in net worth.</div>
+            :trackedAssets.map((asset,idx)=>{
+              const type=ASSET_TYPES.find(x=>x.id===asset.type)||ASSET_TYPES[ASSET_TYPES.length-1];
+              return <div key={asset.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"9px 0",borderBottom:idx===trackedAssets.length-1?"none":`1px solid ${T.border}` }}>
+                <div style={{ width:36,height:36,borderRadius:10,background:type.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{type.icon}</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{asset.name}</div>
+                  <div style={{ color:T.sub,fontSize:10 }}>{type.name}{asset.note?` · ${asset.note}`:""}</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ color:type.color,fontSize:13,fontWeight:800 }}>{sym}{fmt(asset.currentValue)}</div>
+                  <div style={{ display:"flex",gap:4,justifyContent:"flex-end",marginTop:2 }}>
+                    <button onClick={()=>setEditingAsset(asset)} style={{ background:"none",border:"none",color:T.info,cursor:"pointer",fontSize:11,fontFamily:"Nunito,sans-serif" }}>Edit</button>
+                    <button onClick={()=>setTrackedAssets(prev=>prev.filter(x=>x.id!==asset.id))} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:11,fontFamily:"Nunito,sans-serif" }}>Delete</button>
+                  </div>
+                </div>
+              </div>;
+            })}
+        </div>
+
+        <div style={card}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+            <div style={{ color:T.text,fontSize:15,fontWeight:800 }}>Loans</div>
+            <button onClick={()=>setShowAddLoan(true)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}33`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add</button>
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12 }}>
+            <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+              <div style={{ color:T.accent,fontSize:16,fontWeight:800 }}>{sym}{fmt(loanGivenTotal)}</div>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Loans given</div>
+            </div>
+            <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+              <div style={{ color:T.danger,fontSize:16,fontWeight:800 }}>{sym}{fmt(loanTakenTotal)}</div>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Loans taken</div>
+            </div>
+          </div>
+          {monthlyEmiCommitment>0&&<div style={{ background:T.warn+"12",border:`1px solid ${T.warn}33`,borderRadius:12,padding:"10px 12px",marginBottom:12 }}>
+            <div style={{ color:T.warn,fontSize:12,fontWeight:800 }}>Upcoming EMI load: {sym}{fmt(monthlyEmiCommitment)} / month</div>
+            <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>{upcomingEmiLoans.length} active EMI plan{upcomingEmiLoans.length===1?"":"s"} tracked in your liabilities.</div>
+          </div>}
+          {visibleLoans.length===0 ? <div style={{ color:T.sub,fontSize:12 }}>No non-card loans added yet. Credit card EMIs are tracked inside the card account.</div>
+            : visibleLoans.map((loan,idx)=>{
+              const statusMeta = getLoanStatusMeta(loan);
+              const progressAmount = Math.max(
+                Number(loan.principal||0) - Number(loan.outstanding||0),
+                (Array.isArray(loan.repayments)?loan.repayments:[]).reduce((sum,row)=>sum+Number(row.amount||0),0)
+              );
+              const lastRepayment = Array.isArray(loan.repayments)&&loan.repayments.length ? loan.repayments[loan.repayments.length-1] : null;
+              const isActive = loan.status==="active" && Number(loan.outstanding||0)>0;
+              const isEmiLoan = loan.direction==="taken" && (Number(loan.emiAmount||0)>0 || loan.paymentMode==="emi" || loan.isEmiPlan);
+              const paymentAccount = loan.paymentAccId ? getAcc(loan.paymentAccId) : null;
+              return <div key={loan.id} style={{ display:"flex",alignItems:"flex-start",gap:12,padding:"10px 0",borderBottom:idx===visibleLoans.length-1?"none":`1px solid ${T.border}` }}>
+                <div style={{ width:36,height:36,borderRadius:10,background:(loan.direction==="taken"?T.danger:T.accent)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{loan.direction==="taken"?"🤲":"🫴"}</div>
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{loan.name}</div>
+                  <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>
+                    {loan.direction==="taken"?"You borrowed":"You lent"} {sym}{fmt(loan.principal||0)}
+                    {loan.startDate?` · ${formatShortDate(loan.startDate)||loan.startDate}`:""}
+                    {loan.dueDate?` · due ${formatShortDate(loan.dueDate)||loan.dueDate}`:""}
+                  </div>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6 }}>
+                    <span style={{ background:statusMeta.color+"22",border:`1px solid ${statusMeta.color}33`,borderRadius:999,padding:"2px 8px",fontSize:10,fontWeight:800,color:statusMeta.color }}>{statusMeta.label}</span>
+                    <span style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:999,padding:"2px 8px",fontSize:10,fontWeight:800,color:T.info }}>{loan.hasInterest&&Number(loan.interestRate||0)>0?`${fmt(loan.interestRate)}% interest`:"No interest"}</span>
+                    {isEmiLoan&&<span style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:999,padding:"2px 8px",fontSize:10,fontWeight:800,color:T.warn }}>EMI {sym}{fmt(loan.emiAmount||0)}{loan.dueDay?` · day ${loan.dueDay}`:""}</span>}
+                    {progressAmount>0&&<span style={{ background:T.success+"16",border:`1px solid ${T.success}33`,borderRadius:999,padding:"2px 8px",fontSize:10,fontWeight:800,color:T.success }}>Settled {sym}{fmt(progressAmount)}</span>}
+                  </div>
+                  {paymentAccount?.name&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>{loan.direction==="taken"?"Pay from":"Receive into"} {accIcon(paymentAccount.type)} {paymentAccount.name}</div>}
+                  {loan.note&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>{loan.note}</div>}
+                  {lastRepayment&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>Last entry {formatShortDate(lastRepayment.date)||lastRepayment.date} · {sym}{fmt(lastRepayment.amount)}</div>}
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:8 }}>
+                    {isActive&&<button onClick={()=>setRepaymentLoan(loan)} style={{ background:T.success+"18",border:`1px solid ${T.success}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.success,fontFamily:"Nunito,sans-serif" }}>{loan.direction==="taken"?(isEmiLoan?"Pay EMI":"Repay"):"Record receipt"}</button>}
+                    <button onClick={()=>setEditingLoan(loan)} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>Edit</button>
+                    {isActive&&loan.direction!=="taken"&&<button onClick={()=>{ if(window.confirm(`Convert ${loan.name} to expense?`)){ setLoans(prev=>prev.map(x=>x.id===loan.id?{ ...x, status:"converted_to_expense", outstanding:0, convertedDate:todayStr(), closedDate:todayStr() }:x)); } }} style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Convert</button>}
+                    {isActive&&<button onClick={()=>{ if(window.confirm(`Mark ${loan.name} as written off?`)){ setLoans(prev=>prev.map(x=>x.id===loan.id?{ ...x, status:"written_off", outstanding:0, writtenOffDate:todayStr(), closedDate:todayStr() }:x)); } }} style={{ background:T.danger+"16",border:`1px solid ${T.danger}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.danger,fontFamily:"Nunito,sans-serif" }}>Write off</button>}
+                    <button onClick={()=>{ setLoans(prev=>prev.filter(x=>x.id!==loan.id)); if(loan.autoScheduled && loan.scheduledInstallmentIds?.length) setTxns(prev=>prev.filter(t=>!loan.scheduledInstallmentIds.includes(t.id))); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Delete</button>
+                  </div>
+                </div>
+                <div style={{ textAlign:"right",minWidth:86 }}>
+                  <div style={{ color:statusMeta.color,fontSize:13,fontWeight:800 }}>{sym}{fmt(loan.outstanding||0)}</div>
+                  <div style={{ color:T.sub,fontSize:10 }}>Outstanding</div>
+                </div>
+              </div>;
+            })}
+        </div>
+
+        <div style={card}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+            <div style={{ color:T.text,fontSize:15,fontWeight:800 }}>Manage Liabilities</div>
+            <button onClick={()=>setShowAddLiability(true)} style={{ background:T.danger+"22",border:`1px solid ${T.danger}33`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>+ Add</button>
+          </div>
+          <div style={{ borderBottom:`1px solid ${T.border}` }}>
+            <div onClick={()=>setShowWealthBreakdown(showWealthBreakdown==="cc"?null:"cc")} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",cursor:"pointer" }}>
+              <div>
+                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>💳 Credit Card Debt</div>
+                <div style={{ color:T.sub,fontSize:10 }}>{accounts.filter(a=>a.type==="cc").length} card(s)</div>
+              </div>
+              <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                <div style={{ color:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(creditCardLiabilityTotal)}</div>
+                <div style={{ color:T.sub,fontSize:12 }}>{showWealthBreakdown==="cc"?"▲":"▼"}</div>
+              </div>
+            </div>
+            {showWealthBreakdown==="cc" && renderInlineBreakdown("cc")}
+          </div>
+          <div style={{ borderBottom:liabilities.length===0?"none":`1px solid ${T.border}` }}>
+            <div onClick={()=>setShowWealthBreakdown(showWealthBreakdown==="loanTaken"?null:"loanTaken")} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",cursor:"pointer" }}>
+              <div>
+                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>🤲 Loans Taken</div>
+                <div style={{ color:T.sub,fontSize:10 }}>{activeTakenLoans.length} active loan(s)</div>
+              </div>
+              <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                <div style={{ color:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(loanTakenTotal)}</div>
+                <div style={{ color:T.sub,fontSize:12 }}>{showWealthBreakdown==="loanTaken"?"▲":"▼"}</div>
+              </div>
+            </div>
+            {showWealthBreakdown==="loanTaken" && renderInlineBreakdown("loanTaken")}
+          </div>
+          {liabilities.length===0?<div style={{ color:T.sub,fontSize:12,paddingTop:10 }}>Add mortgages, student loans, car loans, tax dues, or any other debt here.</div>
+            :liabilities.map((liability,idx)=>{
+              const type=liabilityTypeOptions.find(x=>x.id===liability.type)||liabilityTypeOptions[liabilityTypeOptions.length-1]||LIABILITY_TYPES[LIABILITY_TYPES.length-1];
+              const paymentAccount = liability.paymentAccId ? getAcc(liability.paymentAccId) : null;
+              const liabilityMeta = [
+                type.name,
+                Number(liability.principal||0)>0 ? `principal ${sym}${fmt(liability.principal||0)}` : "",
+                Number(liability.emiAmount||0)>0 ? `EMI ${sym}${fmt(liability.emiAmount||0)}` : "",
+                Number(liability.interestRate||0)>0 ? `${fmt(liability.interestRate)}%` : "",
+                liability.tenureMonths ? `${liability.tenureMonths} mo` : "",
+                liability.nextDue ? `due ${liability.nextDue}` : "",
+                paymentAccount?.name ? `from ${paymentAccount.name}` : "",
+                liability.note || "",
+              ].filter(Boolean).join(" · ");
+              return <div key={liability.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"9px 0",borderBottom:idx===liabilities.length-1?"none":`1px solid ${T.border}` }}>
+                <div style={{ width:36,height:36,borderRadius:10,background:type.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{type.icon}</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{liability.name}</div>
+                  <div style={{ color:T.sub,fontSize:10 }}>{liabilityMeta}</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ color:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(liability.outstanding)}</div>
+                  <div style={{ display:"flex",gap:4,justifyContent:"flex-end",marginTop:2 }}>
+                    <button onClick={()=>setEditingLiability(liability)} style={{ background:"none",border:"none",color:T.info,cursor:"pointer",fontSize:11,fontFamily:"Nunito,sans-serif" }}>Edit</button>
+                    <button onClick={()=>setLiabilities(prev=>prev.filter(x=>x.id!==liability.id))} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:11,fontFamily:"Nunito,sans-serif" }}>Delete</button>
+                  </div>
+                </div>
+              </div>;
+            })}
+        </div>
+      </div>
+    );
+  };
+
+  const WealthBreakdownModal = () => {
+    if(!showWealthBreakdown) return null;
+
+    const close = () => setShowWealthBreakdown(null);
+    const openAccount = acc => {
+      close();
+      setShowAccDetail(acc);
+    };
+
+    const sections = {
+      banks: {
+        title:"🏦 Cash in bank",
+        subtitle:"Bank-wise breakup",
+        items: accounts.filter(a=>a.type==="bank").map(a=>({
+          id:a.id,
+          title:a.name,
+          meta:`Live ${sym}${fmt(effectiveAccountBalance(a.id))}${balanceCheckpoints[a.id]?.date?` · Gap ${accountReconciliationGap(a.id)>=0?"+":"−"}${sym}${fmt(Math.abs(accountReconciliationGap(a.id)))}`:""}`,
+          value:`${sym}${fmt(effectiveAccountBalance(a.id))}`,
+          color:effectiveAccountBalance(a.id)>=0?T.success:T.danger,
+          onClick:()=>openAccount(a),
+        }))
+      },
+      cash: {
+        title:"🪙 Cash at hand",
+        subtitle:"Cash wallet breakup",
+        items: accounts.filter(a=>a.type==="cash").map(a=>({
+          id:a.id,
+          title:a.name,
+          meta:`Cash in hand ${sym}${fmt(accountBalance(a.id))}`,
+          value:`${sym}${fmt(accountBalance(a.id))}`,
+          color:accountBalance(a.id)>=0?T.success:T.danger,
+          onClick:()=>openAccount(a),
+        }))
+      },
+      upi: {
+        title:"📱 UPI balance",
+        subtitle:"App-wise breakup",
+        items: accounts.filter(a=>a.type==="upi").map(a=>({
+          id:a.id,
+          title:a.name,
+          meta:`${a.handle||"UPI"} · ${sym}${fmt(accountBalance(a.id))}`,
+          value:`${sym}${fmt(accountBalance(a.id))}`,
+          color:accountBalance(a.id)>=0?T.success:T.danger,
+          onClick:()=>openAccount(a),
+        }))
+      },
+      investments: {
+        title:"📈 Investments",
+        subtitle:"Type-wise breakup",
+        items: investmentTypeSummaries.map(type=>({
+          id:type.id,
+          title:type.name.split("/")[0].trim(),
+          meta:`${type.groupCount} ${type.groupCount===1?"holding":"holdings"}`,
+          value:`${sym}${fmt(type.total)}`,
+          color:type.color || T.info,
+          onClick:()=>{ close(); setSelectedInvestmentTypeView(type.id); setShowInvestments(true); }
+        }))
+      },
+      owed: {
+        title:"🤝 People owe you (dues)",
+        subtitle:"Simple receivables by person",
+        items: Object.entries(settlements).filter(([,val])=>Number(val?.owesMe||0)>0).map(([pid,val])=>({
+          id:`person_${pid}`,
+          title:getPerson(pid).name,
+          meta:"Amount to receive",
+          value:`${sym}${fmt(val.owesMe||0)}`,
+          color:T.accent,
+        }))
+      },
+      trackedAssets: {
+        title:"🏠 Tracked assets",
+        subtitle:"Asset-wise breakup",
+        items: trackedAssets.map(asset=>({
+          id:asset.id,
+          title:asset.name,
+          meta:(ASSET_TYPES.find(x=>x.id===asset.type)?.name)||"Asset",
+          value:`${sym}${fmt(asset.currentValue||0)}`,
+          color:T.purple,
+        }))
+      },
+      cc: {
+        title:"💳 Credit card breakup",
+        subtitle:"Current due vs total outstanding",
+        items: accounts.filter(a=>a.type==="cc").map(a=>{
+          const summary = getCardSummary(a);
+          return {
+            id:a.id,
+            title:a.name,
+            meta:`Due now ${sym}${fmt(summary.currentDue)} · Unbilled ${sym}${fmt(summary.currentCycleSpend)} · Outstanding ${sym}${fmt(summary.totalOutstanding||0)}`,
+            value:`${sym}${fmt(summary.totalOutstanding||0)}`,
+            color:T.danger,
+            onClick:()=>openAccount(a),
+          };
+        })
+      }
+    };
+
+    const section = sections[showWealthBreakdown] || { title:"Breakdown", subtitle:"", items:[] };
+
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&close()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",display:"flex",alignItems:"stretch",justifyContent:"center",zIndex:230 }}>
+        <div style={{ background:T.card,borderRadius:0,padding:"22px 18px 40px",width:"100%",maxWidth:"100vw",height:"100vh",maxHeight:"100vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{section.title}</div>
+            <button onClick={close} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>{section.subtitle}{section.items.some(item=>item.onClick)?" · Tap a row to open details":""}</div>
+
+          {section.items.length===0 ? (
+            <div style={{ ...card,textAlign:"center",marginBottom:0 }}>
+              <div style={{ color:T.sub,fontSize:12 }}>Nothing to show here yet.</div>
+            </div>
+          ) : (
+            <div style={{ ...card,marginBottom:0 }}>
+              {section.items.map((item,idx)=>(
+                <div key={item.id} onClick={item.onClick} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"10px 0",borderBottom:idx<section.items.length-1?`1px solid ${T.border}`:"none",cursor:item.onClick?"pointer":"default" }}>
+                  <div style={{ minWidth:0,flex:1 }}>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{item.title}</div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:2,whiteSpace:"normal" }}>{item.meta}</div>
+                  </div>
+                  <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                    <div style={{ color:item.color,fontSize:12,fontWeight:800,textAlign:"right" }}>{item.value}</div>
+                    {item.onClick&&<div style={{ color:T.sub,fontSize:14 }}>›</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const Settings = () => {
+    const [addSubTo,setAddSubTo]=useState(null);
+    const [subInput,setSubInput]=useState("");
+    const [newCatName,setNewCatName]=useState("");
+    const [newCatIcon,setNewCatIcon]=useState("🍽️");
+    const [newCatColor,setNewCatColor]=useState(PALETTE[0]);
+    const [newCatBudget,setNewCatBudget]=useState("");
+    const [showIconPk,setShowIconPk]=useState(false);
+    const [iconSearch,setIconSearch]=useState("");
+    const [newIncomeTypeInput,setNewIncomeTypeInput]=useState("");
+    const [typeAddMode,setTypeAddMode]=useState("income");
+    const [newAccountBaseType,setNewAccountBaseType]=useState("bank");
+    const [newAccountBucket,setNewAccountBucket]=useState("cash");
+    const [openGuide,setOpenGuide]=useState(null);
+
+    const lockAppNow = () => {
+      setSettingsSection(null);
+      setShowSettings(false);
+      setShowWealthPin(false);
+      setWealthUnlocked(false);
+      setUnlocked(false);
+    };
+
+    const filteredIcons=iconSearch?CAT_ICONS.filter(ic=>ic.includes(iconSearch)):CAT_ICONS;
+    const parseAccountTypeNames = value => Array.from(new Set(
+      String(value ?? "")
+        .split(/[\n,]+/)
+        .map(item=>String(item || "").trim())
+        .filter(Boolean)
+    ));
+    const addAccountTypes = () => {
+      const names = parseAccountTypeNames(newIncomeTypeInput);
+      if(!names.length) return;
+      const baseMeta = ACC_TYPES.find(item=>item.id===newAccountBaseType) || ACC_TYPES[0];
+      const bucket = baseMeta.id==="cc" ? "liability" : newAccountBucket;
+      setAccountTypes(prev=>normalizeAccountTypes([
+        ...prev,
+        ...names.map(label=>({
+          id:normalizeIncomeTypeValue(label),
+          label,
+          icon:baseMeta.icon,
+          baseType:baseMeta.id,
+          bucket,
+          custom:true,
+        }))
+      ]));
+      setNewIncomeTypeInput("");
+    };
+    const parseIncomeTypeNames = value => Array.from(new Set(
+      String(value ?? "")
+        .split(/[\n,]+/)
+        .map(item=>normalizeIncomeTypeValue(item))
+        .filter(Boolean)
+    ));
+    const addIncomeTypes = () => {
+      const names = parseIncomeTypeNames(newIncomeTypeInput);
+      if(!names.length) return;
+      setIncomeTypes(prev=>normalizeIncomeTypes([...prev, ...names]));
+      setNewIncomeTypeInput("");
+    };
+    const parseLiabilityTypeNames = value => Array.from(new Set(
+      String(value ?? "")
+        .split(/[\n,]+/)
+        .map(item=>String(item || "").trim())
+        .filter(Boolean)
+    ));
+    const addLiabilityTypes = () => {
+      const names = parseLiabilityTypeNames(newIncomeTypeInput);
+      if(!names.length) return;
+      setCustomLiabilityTypes(prev=>normalizeLiabilityTypes([
+        ...prev,
+        ...names.map(name=>({ name, icon:"🧾", color:"#ef4444", custom:true }))
+      ]));
+      setNewIncomeTypeInput("");
+    };
+    const handleTypeAdd = () => {
+      if(typeAddMode === "account"){
+        addAccountTypes();
+        return;
+      }
+      if(typeAddMode === "liability"){
+        addLiabilityTypes();
+        return;
+      }
+      addIncomeTypes();
+    };
+    const parseSubcategoryNames = value => Array.from(new Set(
+      String(value ?? "")
+        .split(/[\n,]+/)
+        .map(item=>item.trim())
+        .filter(Boolean)
+    ));
+    const addSubcategories = categoryId => {
+      const names = parseSubcategoryNames(subInput);
+      if(!names.length) return;
+      setCats(prev=>prev.map(cat=>{
+        if(cat.id!==categoryId) return cat;
+        const existing = new Set((cat.subs||[]).map(item=>String(item.name||"").trim().toLowerCase()));
+        const additions = names
+          .filter(name=>!existing.has(name.toLowerCase()))
+          .map(name=>({ id:genId(), name }));
+        return additions.length ? { ...cat, subs:[...(cat.subs||[]), ...additions] } : cat;
+      }));
+      setSubInput("");
+      setAddSubTo(null);
+    };
+    const startCategoryRename = cat => {
+      setEditingCategoryId(cat.id);
+      setEditingCategoryName(cat.name||"");
+    };
+    const saveCategoryRename = categoryId => {
+      const nextName = String(editingCategoryName||"").trim();
+      if(!nextName) return;
+      setCats(prev=>prev.map(cat=>cat.id===categoryId ? { ...cat, name:nextName } : cat));
+      setEditingCategoryId(null);
+      setEditingCategoryName("");
+    };
+
+    const Row=({ icon,title,subtitle,onClick,right })=>(
+      <div onClick={onClick} style={{ display:"flex",alignItems:"center",gap:14,padding:"14px 16px",borderBottom:`1px solid ${T.border}`,cursor:onClick?"pointer":"default" }}>
+        <div style={{ width:36,height:36,borderRadius:10,background:T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0 }}>{icon}</div>
+        <div style={{ flex:1 }}>
+          <div style={{ color:T.text,fontSize:14,fontWeight:600 }}>{title}</div>
+          {subtitle&&<div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{subtitle}</div>}
+        </div>
+        {right||(onClick&&<div style={{ color:T.sub,fontSize:16 }}>›</div>)}
+      </div>
+    );
+
+    const Toggle=({ val,fn })=>(
+      <div onClick={fn} style={{ width:44,height:24,borderRadius:12,background:val?T.accent:T.border,position:"relative",cursor:"pointer",flexShrink:0,transition:"background 0.2s" }}>
+        <div style={{ position:"absolute",top:2,left:val?22:2,width:20,height:20,borderRadius:"50%",background:"#fff",transition:"left 0.2s" }}/>
+      </div>
+    );
+
+    if(["types","income_types","liabilities"].includes(settingsSection)) return (
+      <div style={{ padding:"14px 16px 0" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
+          <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900,flex:1 }}>Account, Income & Liability Types</div>
+          <button onClick={handleTypeAdd} style={{ ...btnP,width:"auto",padding:"8px 14px" }}>+ Add</button>
+        </div>
+        <div style={{ ...card,marginBottom:12 }}>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 160px",gap:8,marginBottom:12 }}>
+            <input
+              style={inp}
+              placeholder={typeAddMode==="account" ? "Name e.g. Salary Account, Wallet" : typeAddMode==="income" ? "Name e.g. Bonus, Freelance" : "Name e.g. Home Loan, Shop Credit"}
+              value={newIncomeTypeInput}
+              onChange={e=>setNewIncomeTypeInput(e.target.value)}
+              onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); handleTypeAdd(); } }}
+            />
+            <select style={lightSelect} value={typeAddMode} onChange={e=>setTypeAddMode(e.target.value)}>
+              <option value="account">Account type</option>
+              <option value="income">Income type</option>
+              <option value="liability">Liability type</option>
+            </select>
+          </div>
+          <div style={{ color:T.sub,fontSize:10,marginBottom:12 }}>
+            {typeAddMode==="account"
+              ? "Add an account type here, choose its base behavior and whether it should sit under cash or investments, then it will appear in Manage Accounts → Add Account."
+              : "Enter the name, choose whether it is an income type or liability type, then tap + Add."}
+          </div>
+          {typeAddMode==="account"&&<div style={{ marginBottom:14 }}>
+            <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>Base behavior</div>
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
+              {ACC_TYPES.map(type=><Chip key={type.id} color={T.info} active={newAccountBaseType===type.id} onClick={()=>setNewAccountBaseType(type.id)}>{type.icon} {type.label}</Chip>)}
+            </div>
+            {newAccountBaseType!=="cc"&&<>
+              <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>Show this under</div>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                <Chip color={T.success} active={newAccountBucket==="cash"} onClick={()=>setNewAccountBucket("cash")}>💵 Cash / Spending</Chip>
+                <Chip color={T.purple} active={newAccountBucket==="investment"} onClick={()=>setNewAccountBucket("investment")}>📈 Investment / Wealth</Chip>
+              </div>
+            </>}
+          </div>}
+
+          <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:10 }}>Account types</div>
+          <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:14 }}>
+            {accountTypeOptions.map(type=>{
+              const count = accounts.filter(account=>String(account.accountTypeId||account.type)===String(type.id)).length;
+              return (
+                <span key={type.id} style={{ background:T.info+"18",color:T.info,borderRadius:20,padding:"5px 10px",fontSize:11,fontWeight:700,display:"inline-flex",alignItems:"center",gap:6 }}>
+                  <span>{type.icon}</span>
+                  <span>{type.label}</span>
+                  <span style={{ color:T.sub,fontSize:10 }}>({count})</span>
+                  <span style={{ color:T.sub,fontSize:10 }}>{type.custom ? accLabel(type.baseType) : "default"}</span>
+                  <span style={{ color:T.sub,fontSize:10 }}>{accountBucketLabel(type.bucket)}</span>
+                  {type.custom&&<button onClick={()=>setAccountTypes(prev=>prev.filter(item=>item.id!==type.id))} style={{ background:"none",border:"none",cursor:"pointer",color:T.sub,fontSize:10,padding:0 }}>✕</button>}
+                </span>
+              );
+            })}
+          </div>
+
+          <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:10 }}>Income types</div>
+          <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:14 }}>
+            {incomeTypeOptions.map(type=>{
+              const count = txns.filter(txn=>txn.type==="income" && normalizeIncomeTypeValue(txn.incomeType||"salary")===type).length;
+              const isDefault = DEFAULT_INCOME_TYPES.includes(type);
+              return (
+                <span key={type} style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"5px 10px",fontSize:11,fontWeight:700,display:"inline-flex",alignItems:"center",gap:6 }}>
+                  {formatIncomeTypeLabel(type)}
+                  <span style={{ color:T.sub,fontSize:10 }}>({count})</span>
+                  {isDefault ? (
+                    <span style={{ color:T.sub,fontSize:10 }}>default</span>
+                  ) : (
+                    <button onClick={()=>setIncomeTypes(prev=>prev.filter(item=>item!==type))} style={{ background:"none",border:"none",cursor:"pointer",color:T.sub,fontSize:10,padding:0 }}>✕</button>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+
+          <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:10 }}>Liability types</div>
+          <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+            {liabilityTypeOptions.map(type=>(
+              <span key={type.id} style={{ background:type.color+"18",color:type.color,borderRadius:20,padding:"5px 10px",fontSize:11,fontWeight:700,display:"inline-flex",alignItems:"center",gap:6 }}>
+                <span>{type.icon}</span>
+                <span>{type.name}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+
+    if(settingsSection==="investments") return (
+      <div style={{ padding:"14px 0 0" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:12,padding:"0 16px 16px" }}>
+          <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>Investments</div>
+          <button onClick={openInvestmentComposer} style={{ background:T.accent,border:"none",color:"#000",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>+ Add</button>
+        </div>
+        <div style={{ padding:"0 16px" }}>
+          {trackedInvestments.length===0 ? <div style={{ color:T.sub,fontSize:12,paddingTop:10 }}>No investments yet.</div> : trackedInvestments.map((inv)=>{
+            const type=INVEST_TYPES.find(x=>x.id===inv.type)||INVEST_TYPES[0];
+            return <div key={inv.id} style={{ ...card,display:"flex",alignItems:"center",gap:12 }}>
+              <div style={{ width:36,height:36,borderRadius:10,background:type.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{type.icon}</div>
+              <div style={{ flex:1 }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{inv.name}</div>
+                <div style={{ color:T.sub,fontSize:10 }}>{type.name} · {investmentFreqLabel(inv.freq) || "No frequency set"}{inv.reminder?` · reminder: ${inv.reminder}`:""}</div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ color:T.info,fontSize:13,fontWeight:800 }}>{sym}{fmt(inv.amount)}</div>
+                <div style={{ display:"flex",gap:4,justifyContent:"flex-end",marginTop:2,flexWrap:"wrap" }}>
+                  <button onClick={()=>openInvestmentEditor(inv)} style={{ background:"none",border:"none",color:T.info,cursor:"pointer",fontSize:11,fontFamily:"Nunito,sans-serif" }}>Edit</button>
+                  <button onClick={()=>removeInvestmentEntry(inv)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:11,fontFamily:"Nunito,sans-serif" }}>{getInvestmentTxn(inv)?"Delete":"Remove"}</button>
+                </div>
+              </div>
+            </div>;
+          })}
+        </div>
+      </div>
+    );
+
+    if(settingsSection==="accounts") return (
+      <div style={{ padding:"14px 0 0" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:12,padding:"0 16px 16px" }}>
+          <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900,flex:1 }}>Accounts</div>
+          <button onClick={()=>setShowAddAccount(true)} style={{ background:T.accent,border:"none",color:"#000",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>+ Add</button>
+        </div>
+        <div style={{ padding:"0 16px" }}>
+          {["bank","cc","debit","upi","cash"].map(type=>{
+            const accs=accounts.filter(a=>a.type===type);
+            if(!accs.length) return null;
+            return (
+              <div key={type} style={{ marginBottom:16 }}>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,marginBottom:8 }}>{accLabel(type)}s</div>
+                {accs.map(a=>{
+                  const bal=a.type==="cc"?null:(a.type==="bank" ? effectiveAccountBalance(a.id) : accountBalance(a.id));
+                  const linkedB=a.type==="debit"?accounts.find(b=>b.id===a.linkedBank):null;
+                  const ccSummary = a.type==="cc" ? getCardSummary(a) : null;
+                  return (
+                    <div key={a.id} style={{ ...card,cursor:"pointer" }} onClick={()=>setShowAccDetail(a)}>
+                      <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+                        <div style={{ width:38,height:38,borderRadius:11,background:a.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{accIcon(a.type)}</div>
+                        <div style={{ flex:1 }}>
+                          <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{a.name}{a.last4?` ···${a.last4}`:""}</div>
+                          <div style={{ color:T.sub,fontSize:11,marginTop:1 }}>
+                            {a.type==="bank"&&<>
+                              <div>Balance: {sym}{fmt(bal)}</div>
+                              {balanceCheckpoints[a.id]?.date&&(()=>{
+                                const gap = accountReconciliationGap(a.id);
+                                return <div style={{ color:Math.abs(gap)<0.01?T.success:T.warn,fontSize:10,marginTop:2 }}>Actual {formatShortDate(balanceCheckpoints[a.id].date)} · {Math.abs(gap)<0.01?"Matched":`Gap ${gap>=0?"+":"−"}${sym}${fmt(Math.abs(gap))}`}</div>;
+                              })()}
+                            </>}
+                            {a.type==="cc"&&`${sym}${fmt(ccSummary?.currentDue||0)} due now · ${sym}${fmt(ccSummary?.totalOutstanding||0)} total`}
+                            {a.type==="debit"&&`Linked: ${linkedB?.name||"?"}`}
+                            {a.type==="upi"&&`${a.handle||"UPI"} · ${sym}${fmt(bal)}`}
+                            {a.type==="cash"&&`Cash in hand: ${sym}${fmt(bal)}`}
+                          </div>
+                        </div>
+                        <div style={{ display:"flex",gap:6,alignItems:"center" }}>
+                          {a.type==="bank"&&<button onClick={e=>{
+                            e.stopPropagation();
+                            const checkpoint = balanceCheckpoints[a.id];
+                            setEditingCheckpoint(a.id);
+                            setEditingOpeningBalanceVal(String(Number(a.openingBalance||0)));
+                            setEditingOpeningBalanceDate(a.openingBalanceDate || todayStr());
+                            setEditingCheckpointVal(checkpoint?.amount!=null ? String(checkpoint.amount) : String(Number(accountBalance(a.id)||0)));
+                            setEditingCheckpointDate(checkpoint?.date || todayStr());
+                          }} style={{ background:T.info+"22",border:`1px solid ${T.info}33`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.info,fontFamily:"Nunito,sans-serif" }}>📍 Balance</button>}
+                          <button onClick={e=>{e.stopPropagation();setEditingAccount(a);}} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+                          <button onClick={e=>{e.stopPropagation();setConfirmDeleteAccount(a.id);}} style={{ background:"none",border:"none",color:T.danger,fontSize:14,cursor:"pointer" }}>🗑</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+
+    if(settingsSection==="backup") return (
+      <div style={{ padding:"14px 16px 0" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
+          <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900,flex:1 }}>Backup & Restore</div>
+        </div>
+        <div style={{ ...card,marginBottom:12 }}>
+          <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:8 }}>Manual backup file</div>
+          <div style={{ color:T.sub,fontSize:11,marginBottom:12 }}>Download a JSON copy before major changes or when moving devices, then restore it anytime on web or desktop.</div>
+          <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+            <button onClick={downloadBackupFile} style={{ ...btnP,width:"auto",padding:"8px 14px" }}>⬇ Download backup</button>
+            <label style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:10,padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>
+              ⬆ Restore backup
+              <input ref={backupFileInputRef} type="file" accept=".json,application/json" style={{ display:"none" }} onChange={e=>restoreBackupFile(e.target.files?.[0] || null)}/>
+            </label>
+            <button onClick={shareBackupToDrive} style={{ background:T.success+"18",border:`1px solid ${T.success}33`,color:T.success,borderRadius:10,padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>☁ Google Drive export</button>
+          </div>
+          {backupStatus&&<div style={{ background:T.input,border:`1px solid ${backupStatus.toLowerCase().includes("failed") ? T.danger+"33" : T.border}`,borderRadius:10,padding:"10px 12px",marginTop:12,color:backupStatus.toLowerCase().includes("failed") ? T.danger : T.success,fontSize:11,fontWeight:700 }}>{backupStatus}</div>}
+        </div>
+        <div style={{ ...card,marginBottom:12 }}>
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:8 }}>
+            <div>
+              <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>Automatic scheduled backup</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:4 }}>Keep recent rolling backups on this device without exporting manually every time.</div>
+            </div>
+            <Toggle val={autoBackupEnabled} fn={()=>setAutoBackupEnabled(v=>!v)}/>
+          </div>
+          {autoBackupEnabled ? <>
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
+              {[ ["hourly","Hourly"], ["daily","Daily"], ["weekly","Weekly"] ].map(([value,label])=><Chip key={value} color={T.purple} active={autoBackupFrequency===value} onClick={()=>setAutoBackupFrequency(value)}>{label}</Chip>)}
+            </div>
+            <div style={{ color:T.sub,fontSize:10,marginBottom:10 }}>
+              Latest auto backup: {autoBackups[0]?.exportedAt ? formatBackupStamp(autoBackups[0].exportedAt) : "Will be created after your next change"}
+            </div>
+            {autoBackups.length===0 ? (
+              <div style={{ color:T.sub,fontSize:10 }}>No auto backups yet.</div>
+            ) : (
+              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                {autoBackups.slice(0,3).map(item=><div key={item.id} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:10,padding:"9px 10px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap" }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:11,fontWeight:800 }}>{formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "") || "Recent backup"}</div>
+                    <div style={{ color:T.sub,fontSize:10 }}>{Array.isArray(item.snapshot?.txns) ? item.snapshot.txns.length : 0} txns · {Array.isArray(item.snapshot?.accounts) ? item.snapshot.accounts.length : 0} accounts</div>
+                  </div>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                    <button onClick={()=>{ try{ restoreBackupSnapshot(item.snapshot, `auto backup from ${formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "") || "recent backup"}`); } catch(err){ setBackupStatus(`Restore failed: ${err.message}`); } }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Restore</button>
+                    <button onClick={()=>{ try{ downloadBackupPayload(buildBackupPayload(item.snapshot, "auto", item.exportedAt || item.snapshot?.savedAt || new Date().toISOString()), "arth-auto-backup"); setBackupStatus(`Backup downloaded · ${formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "")}`); } catch(err){ setBackupStatus(`Backup failed: ${err.message}`); } }} style={{ background:"none",border:`1px solid ${T.border}`,color:T.sub,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Download</button>
+                  </div>
+                </div>)}
+              </div>
+            )}
+          </> : <div style={{ color:T.sub,fontSize:10 }}>Turn this on to keep a rolling history of automatic backups on this device.</div>}
+        </div>
+        <div style={{ ...card,marginBottom:12 }}>
+          <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:8 }}>What gets included</div>
+          <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
+            {[
+              `${txns.length} txns`,
+              `${accounts.length} accounts`,
+              `${cats.length} categories`,
+              `${people.filter(p=>!p.isMe).length} people`,
+              `${bills.length} bills`,
+              `${investments.length} investments`
+            ].map(label=><span key={label} style={{ background:T.accentSoft,border:`1px solid ${T.accent}22`,borderRadius:999,padding:"4px 10px",fontSize:10,fontWeight:700,color:T.accent }}>{label}</span>)}
+          </div>
+          <div style={{ color:T.sub,fontSize:10 }}>Also includes liabilities, loans, wealth assets, budgets, layout preferences, and backup settings. Your PIN stays only on this device and is not included in the backup file.</div>
+        </div>
+      </div>
+    );
+
+    if(settingsSection==="security") return (
+      <div style={{ padding:"14px 16px 0" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
+          <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900,flex:1 }}>Security</div>
+        </div>
+        <div style={{ ...card,marginBottom:12 }}>
+          <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:8 }}>App PIN</div>
+          <div style={{ color:T.sub,fontSize:11,marginBottom:12 }}>Your app is protected by a 4-digit PIN. Change it here or lock Arth immediately.</div>
+          <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+            <button onClick={()=>setSettingsSection("security_pin_change")} style={{ ...btnP,width:"auto",padding:"8px 14px" }}>Change PIN</button>
+            <button onClick={lockAppNow} style={{ background:T.danger+"18",border:`1px solid ${T.danger}33`,color:T.danger,borderRadius:10,padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>Lock now</button>
+          </div>
+        </div>
+        <div style={{ ...card }}>
+          <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:6 }}>Auto-lock behavior</div>
+          <div style={{ color:T.sub,fontSize:11,lineHeight:1.6 }}>Arth locks when the app goes into the background and after a few minutes of inactivity.</div>
+        </div>
+      </div>
+    );
+
+    if(settingsSection==="security_pin_change") return (
+      <PinScreen
+        isSetup
+        onCancel={()=>setSettingsSection("security")}
+        onUnlock={async pin=>{
+          const hash = await hashPin(pin);
+          localStorage.setItem("arth_pin",hash);
+          setAppPin(hash);
+          setSettingsSection("security");
+        }}
+      />
+    );
+
+    if(settingsSection==="guides"){
+      const GUIDES = [
+        { section:"Adding Transactions", items:[
+          { title:"SMS Import", body:"Web: copy the bank SMS first, then tap the SMS box — it auto-reads from clipboard. Android app: just tap the box to pull the latest SMS directly. You can also paste manually. Tapping again when SMS is already filled lets you edit without overriding." },
+          { title:"Transaction Reference / UTR", body:"Arth auto-extracts UTR, RRN, Txn ID, UPI Ref, IMPS/NEFT reference numbers from an imported SMS and fills the Ref field automatically." },
+          { title:"EMI & Credit Card", body:"You can pick a credit card as the repayment account for an EMI. Arth shifts that payment into card outstanding and excludes it from double-counting when you later pay the card bill." },
+          { title:"Income Types", body:"To add a custom income type go to Settings → Account, Income & Liability Types. Categories and subcategories are managed separately under Manage Categories." },
+          { title:"SMS Balance Sync", body:"When you import an SMS that contains an available balance, Arth compares it to the computed account balance and auto-adjusts the opening balance so the two match." },
+        ]},
+        { section:"Tagging & Splitting", items:[
+          { title:"Tag → Person (Me)", body:"Choose 'Me' for personal spends like grooming or gym. Choose a group alone when the full amount is owed collectively by the group." },
+          { title:"Tag → Person — spend tracking", body:"Tagging to a person does NOT mean they owe you money. It only tracks what you spent on them. Use Split mode if you want to track a debt." },
+          { title:"Tag → Both (personal + group)", body:"Use Both when a single bill covers your personal share and a group's share. Enter each portion — the two should add up to the total." },
+          { title:"Tag → Itemize", body:"Use Itemize when one purchase has multiple destinations (e.g. an Amazon order with items for different people or groups). Tap 👤/👥 on each row to switch between person and group." },
+          { title:"Split — Amount mode", body:"In Amount mode each person's field has a cap equal to the bill minus what others have already been assigned. The split total and your implicit share both turn red if the entries exceed the bill." },
+        ]},
+        { section:"Settlements", items:[
+          { title:"Refund vs Repayment", body:"Refund: use when a merchant returns money against a previous expense — Arth will try to link it to the original transaction. Repayment: use when a person pays you back for money you lent or split." },
+          { title:"Overpayment / Advance", body:"If the amount received is more than what was due, the extra is moved to 'You Owe' as an advance that offsets the person's future dues." },
+          { title:"Refund back to card", body:"If a merchant refund came back to a credit card, select that same credit card as the destination so the card liability reduces correctly." },
+        ]},
+        { section:"Investments", items:[
+          { title:"Mutual Funds / SIP — NAV", body:"Record the latest NAV (Net Asset Value) per unit. Arth uses this to compute your current portfolio value alongside the number of units held." },
+          { title:"Stocks", body:"Track how many shares or units were purchased. Update the current price periodically to keep portfolio value accurate." },
+          { title:"PPF / NPS", body:"Tracked by contribution amount — no NAV required. Record contributions as a Transfer into your PPF/NPS account." },
+          { title:"Fixed Deposit", body:"Tracked by deposit value — no NAV required. Record the deposit as a Transfer into your FD account." },
+        ]},
+        { section:"Transactions List", items:[
+          { title:"Sort — Latest", body:"Orders by the time the transaction was recorded in Arth, newest first. Useful when you add past transactions and want the most recently added ones at the top." },
+          { title:"Sort — By date", body:"Orders strictly by the transaction date, ignoring when it was entered into Arth." },
+          { title:"Sort — High ₹ / Low ₹", body:"Orders by transaction amount. Useful for quickly spotting your biggest or smallest spends." },
+        ]},
+      ];
+      return (
+        <div style={{ padding:"14px 16px 40px" }}>
+          <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:20 }}>
+            <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>User Guides</div>
+          </div>
+          {GUIDES.map(group=>(
+            <div key={group.section} style={{ marginBottom:20 }}>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,marginBottom:8 }}>{group.section}</div>
+              <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,overflow:"hidden" }}>
+                {group.items.map((item,idx)=>{
+                  const key=group.section+item.title;
+                  const open=openGuide===key;
+                  return (
+                    <div key={item.title} style={{ borderTop:idx>0?`1px solid ${T.border}`:"none" }}>
+                      <button onClick={()=>setOpenGuide(open?null:key)} style={{ width:"100%",background:"none",border:"none",padding:"13px 16px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{item.title}</span>
+                        <span style={{ color:T.sub,fontSize:12,marginLeft:8,flexShrink:0 }}>{open?"▲":"▼"}</span>
+                      </button>
+                      {open&&<div style={{ color:T.sub,fontSize:12,lineHeight:1.6,padding:"0 16px 14px" }}>{item.body}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    if(settingsSection==="budget") return <BudgetPage embedded onBack={()=>setSettingsSection(null)} />;
+
+    if(settingsSection==="categories") return (
+      <div style={{ padding:"14px 16px 0" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
+          <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>Categories</div>
+        </div>
+        {cats.map(cat=>{
+          const spent=expenses.filter(e=>e.catId===cat.id).reduce((sum,expense)=>sum+getNetExpenseAmount(expense),0);
+          const pct=cat.budget?Math.min(100,Math.round(spent/cat.budget*100)):0;
+          return (
+            <div key={cat.id} style={card}>
+              <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:8 }}>
+                <div style={{ width:36,height:36,borderRadius:10,background:cat.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{cat.icon}</div>
+                <div style={{ flex:1 }}>
+                  {editingCategoryId===cat.id ? (
+                    <div style={{ display:"flex",gap:6,alignItems:"center",marginBottom:6 }}>
+                      <input
+                        style={{ ...inpSm,flex:1 }}
+                        value={editingCategoryName}
+                        onChange={e=>setEditingCategoryName(e.target.value)}
+                        onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); saveCategoryRename(cat.id); } }}
+                        autoFocus
+                      />
+                      <button onClick={()=>saveCategoryRename(cat.id)} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:6,padding:"5px 8px",cursor:"pointer",fontSize:10,color:T.accent,fontFamily:"Nunito,sans-serif",fontWeight:700 }}>Save</button>
+                    </div>
+                  ) : (
+                    <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{cat.name} {cat.fixed?"🔒":"🔓"}</div>
+                  )}
+                  <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
+                    <span style={{ color:T.sub,fontSize:11 }}>{cat.subs?.length||0} subs</span>
+                    <button onClick={()=>{ const el=document.getElementById("catbudget_"+cat.id); if(el) el.style.display=el.style.display==="none"?"flex":"none"; }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:10,color:T.accent,fontFamily:"Nunito,sans-serif" }}>₹ {cat.budget>0?fmt(cat.budget):"Set budget"}</button>
+                    <button onClick={()=>setCats(p=>p.map(c=>c.id===cat.id?{...c,fixed:!c.fixed}:c))} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:10,color:T.sub,fontFamily:"Nunito,sans-serif" }}>{cat.fixed?"Fixed":"Flexible"}</button>
+                    {editingCategoryId===cat.id ? (
+                      <button onClick={()=>{ setEditingCategoryId(null); setEditingCategoryName(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:10,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
+                    ) : (
+                      <button onClick={()=>startCategoryRename(cat)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:10,color:T.sub,fontFamily:"Nunito,sans-serif" }}>✏️ Name</button>
+                    )}
+                  </div>
+                  {cat.budget>0 && spent>cat.budget && <div style={{ color:T.danger,fontSize:11,fontWeight:700,marginTop:4 }}>⚠️ Over budget by {sym}{fmt(spent-cat.budget)}</div>}
+                  <div id={"catbudget_"+cat.id} style={{ display:"none",gap:6,marginTop:4,alignItems:"center" }}>
+                    <input type="number" defaultValue={cat.budget||0} onBlur={e=>setCats(p=>p.map(c=>c.id===cat.id?{...c,budget:parseFloat(e.target.value)||0}:c))} style={{ ...inpSm,width:110 }} placeholder="Monthly budget"/>
+                    <span style={{ color:T.sub,fontSize:11 }}>/ month</span>
+                  </div>
+                </div>
+                <div style={{ textAlign:"right",marginRight:8 }}>
+                  <div style={{ color:cat.color,fontSize:13,fontWeight:800 }}>{sym}{fmt(spent)}</div>
+                </div>
+                <button onClick={()=>setConfirmDeleteCat(cat.id)} style={{ background:"none",border:`1px solid ${T.border}`,color:T.danger,borderRadius:8,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Del</button>
+              </div>
+              {cat.budget>0&&<div style={{ height:3,background:T.border,borderRadius:2,marginBottom:8 }}>
+                <div style={{ height:"100%",width:`${pct}%`,background:pct>90?T.danger:cat.color,borderRadius:2 }}/>
+              </div>}
+              <div style={{ display:"flex",gap:5,flexWrap:"wrap",marginBottom:8 }}>
+                {cat.subs?.map(s=>(
+                  <span key={s.id} style={{ background:cat.color+"18",color:cat.color,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,display:"inline-flex",alignItems:"center",gap:4 }}>
+                    {s.name}
+                    <button onClick={()=>setCats(p=>p.map(c=>c.id===cat.id?{...c,subs:c.subs.filter(x=>x.id!==s.id)}:c))} style={{ background:"none",border:"none",cursor:"pointer",color:T.sub,fontSize:10,padding:0 }}>✕</button>
+                  </span>
+                ))}
+              </div>
+              {addSubTo===cat.id?(
+                <div>
+                  <div style={{ display:"flex",gap:6 }}>
+                    <input style={{ ...inpSm,flex:1 }} placeholder="Subcategory name(s) — e.g. Milk, Eggs, Bread" value={subInput} onChange={e=>setSubInput(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); addSubcategories(cat.id); } }} autoFocus/>
+                    <button onClick={()=>addSubcategories(cat.id)} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,borderRadius:8,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Add</button>
+                    <button onClick={()=>{setAddSubTo(null);setSubInput("");}} style={{ background:"none",border:`1px solid ${T.border}`,color:T.sub,borderRadius:8,padding:"7px 10px",cursor:"pointer",fontSize:12,fontFamily:"Nunito,sans-serif" }}>✕</button>
+                  </div>
+                  <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>Tip: separate multiple items with commas to add them all at once.</div>
+                </div>
+              ):(
+                <button onClick={()=>setAddSubTo(cat.id)} style={{ background:"none",border:`1px dashed ${T.border}`,color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>+ subcategory / items</button>
+              )}
+            </div>
+          );
+        })}
+        <div style={{ ...card,border:`1px dashed ${T.border}` }}>
+          <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:14 }}>➕ New Category</div>
+          <div style={{ display:"flex",gap:10,alignItems:"center",marginBottom:12 }}>
+            <div style={{ position:"relative" }}>
+              <button onClick={()=>setShowIconPk(p=>!p)} style={{ background:newCatColor+"22",border:`1px solid ${newCatColor}44`,borderRadius:10,padding:"10px 12px",cursor:"pointer",fontSize:22 }}>{newCatIcon}</button>
+              {showIconPk&&<div style={{ position:"absolute",top:"110%",left:0,background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:12,zIndex:30,width:240,boxShadow:`0 4px 20px ${T.sh}` }}>
+                <input style={{ ...inpSm,width:"100%",marginBottom:8 }} placeholder="Search icons..." value={iconSearch} onChange={e=>setIconSearch(e.target.value)}/>
+                <div style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,maxHeight:180,overflowY:"auto" }}>
+                  {filteredIcons.map(ic=><button key={ic} onClick={()=>{setNewCatIcon(ic);setShowIconPk(false);setIconSearch("");}} style={{ background:T.input,border:"none",borderRadius:8,padding:6,cursor:"pointer",fontSize:18 }}>{ic}</button>)}
+                </div>
+              </div>}
+            </div>
+            <input style={{ ...inp,flex:1 }} placeholder="Category name" value={newCatName} onChange={e=>setNewCatName(e.target.value)}/>
+          </div>
+          <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
+            {PALETTE.map(c=><div key={c} onClick={()=>setNewCatColor(c)} style={{ width:26,height:26,borderRadius:7,background:c,cursor:"pointer",border:newCatColor===c?"3px solid #fff":"3px solid transparent" }}/>)}
+          </div>
+          <input style={{ ...inp,marginBottom:12 }} type="number" placeholder={`Monthly budget (${sym}) — optional`} value={newCatBudget} onChange={e=>setNewCatBudget(e.target.value)}/>
+          <button onClick={()=>{ if(!newCatName.trim()) return; setCats(p=>[...p,{id:genId(),name:newCatName.trim(),icon:newCatIcon,color:newCatColor,budget:parseFloat(newCatBudget)||0,subs:[]}]); setNewCatName(""); setNewCatBudget(""); }} style={btnP}>Create Category</button>
+        </div>
+      </div>
+    );
+
+    return (
+      <div style={{ padding:"14px 0 0" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:12,padding:"0 16px 16px" }}>
+          <button onClick={()=>setShowSettings(false)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
+          <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>Settings</div>
+        </div>
+
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Appearance</div>
+        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
+          <Row icon="🌙" title="Dark Mode" subtitle={dark?"On — dark theme active":"Off — light theme active"} right={<Toggle val={dark} fn={()=>setDark(v=>!v)}/>}/>
+          <Row icon="🏷️" title="Auto-suggest Category" subtitle={autoDetectExpenseCategory?"On — category suggested from store name":"Off — manual category selection"} right={<Toggle val={autoDetectExpenseCategory} fn={()=>setAutoDetectExpenseCategory(v=>!v)}/>}/>
+        </div>
+
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Security</div>
+        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
+          <Row icon="🔐" title="PIN & Lock" subtitle="Change your app PIN or lock Arth now" onClick={()=>setSettingsSection("security")}/>
+        </div>
+
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Data</div>
+        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
+          <Row icon="🏦" title="Manage Accounts" subtitle={`${accounts.length} account${accounts.length===1?"":"s"}`} onClick={()=>setSettingsSection("accounts")}/>
+          <Row icon="🗂️" title="Manage Categories" subtitle={`${cats.length} categories`} onClick={()=>setSettingsSection("categories")}/>
+          <Row icon="🏷️" title="Account, Income & Liability Types" subtitle="Add custom types" onClick={()=>setSettingsSection("types")}/>
+        </div>
+
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Backup & Sync</div>
+        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
+          <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
+        </div>
+
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Help</div>
+        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 24px",overflow:"hidden" }}>
+          <Row icon="📖" title="User Guides" subtitle="How-to guides for features" onClick={()=>setSettingsSection("guides")}/>
+        </div>
+
+        <div style={{ color:T.sub,fontSize:10,textAlign:"center",padding:"0 16px 32px" }}>
+          {txns.length} txns · {accounts.length} accounts · {people.filter(p=>!p.isMe).length} people · {bills.length} bills
+        </div>
+      </div>
+    );
+  };
+
+  // ── EDIT ACCOUNT MODAL ───────────────────────────────────────────────────────
+  const EditAccountModal = ({ a, onClose }) => {
+    const [name, setName] = useState(a.name||"");
+    const [last4, setLast4] = useState(a.last4||"");
+    const [color, setColor] = useState(a.color||PALETTE[0]);
+    const [limit, setLimit] = useState(String(a.limit||""));
+    const [statementDate, setStatementDate] = useState(String(a.statementDate||"15"));
+    const [dueDate, setDueDate] = useState(String(a.dueDate||"5"));
+    const [alertPct, setAlertPct] = useState(String(a.alertPct ?? "30"));
+    const [billingCycle, setBillingCycle] = useState(a.billingCycle||"");
+    const [handle, setHandle] = useState(a.handle||"");
+    const [openingBalance, setOpeningBalance] = useState(String(a.openingBalance||"0"));
+    const [openingBalanceDate, setOpeningBalanceDate] = useState(a.openingBalanceDate||todayStr());
+    const [linkedBank, setLinkedBank] = useState(a.linkedBank||"");
+    const banks = accounts.filter(x=>x.type==="bank"&&x.id!==a.id);
+
+    const save = () => {
+      if(!name.trim()) return;
+      setAccounts(prev=>prev.map(x=>x.id===a.id?{
+        ...x, name:name.trim(), last4, color,
+        ...(a.type==="cc"&&{ limit:parseFloat(limit)||0, statementDate:parseInt(statementDate)||15, dueDate:parseInt(dueDate)||5, alertPct:Math.max(0,parseFloat(alertPct)||0), billingCycle:billingCycle||`${statementDate}th–${dueDate}th` }),
+        ...((a.type==="bank"||a.type==="cash")&&{ openingBalance:parseMoney(openingBalance)||0, openingBalanceDate:openingBalanceDate||todayStr() }),
+        ...(a.type==="upi"&&{ handle }),
+        ...(a.type==="debit"&&{ linkedBank }),
+      }:x));
+      onClose();
+    };
+
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>✏️ Edit {a.name}</div>
+            <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div style={{ background:T.input,borderRadius:10,padding:"8px 14px" }}>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Type: {a.typeLabel || accLabel(a)}</div>
+            </div>
+            <input style={inp} placeholder="Account name *" value={name} onChange={e=>setName(e.target.value)}/>
+            {(a.type==="bank"||a.type==="cc"||a.type==="debit")&&<input style={inp} placeholder="Last 4 digits" maxLength={4} value={last4} onChange={e=>setLast4(e.target.value)}/>}
+            {(a.type==="bank"||a.type==="cash")&&<div style={{ display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:10 }}>
+              <div>
+                <span style={lbl}>{a.type==="cash"?`Cash in hand (${sym})`:`Opening balance (${sym})`}</span>
+                <input style={inp} type="text" inputMode="decimal" value={openingBalance||""} onChange={e=>setOpeningBalance(cleanMoneyInput(e.target.value))}/>
+              </div>
+              <div>
+                <span style={lbl}>As on date</span>
+                <input style={inp} type="date" value={openingBalanceDate} onChange={e=>setOpeningBalanceDate(e.target.value)}/>
+              </div>
+            </div>}
+            {a.type==="cc"&&<>
+              <div><span style={lbl}>Credit limit ({sym})</span><input style={inp} type="number" value={limit} onChange={e=>setLimit(e.target.value)}/></div>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <div><span style={lbl}>Statement Date</span><input style={inp} type="number" min="1" max="31" value={statementDate} onChange={e=>setStatementDate(e.target.value)}/></div>
+                <div><span style={lbl}>Due Date</span><input style={inp} type="number" min="1" max="31" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
+              </div>
+              <div><span style={lbl}>Spend alert (% of limit)</span><input style={inp} type="number" min="0" max="100" value={alertPct} onChange={e=>setAlertPct(e.target.value)}/></div>
+              <div><span style={lbl}>Billing Cycle (e.g. 15th–14th)</span><input style={inp} placeholder="e.g. 15th–14th" value={billingCycle} onChange={e=>setBillingCycle(e.target.value)}/></div>
+            </>}
+            {a.type==="upi"&&<input style={inp} placeholder="UPI handle" value={handle} onChange={e=>setHandle(e.target.value)}/>}
+            {a.type==="debit"&&banks.length>0&&<div>
+              <span style={lbl}>Linked Bank Account</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {banks.map(b=><button key={b.id} onClick={()=>setLinkedBank(b.id)} style={{ background:linkedBank===b.id?b.color+"22":"none",border:`1px solid ${linkedBank===b.id?b.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkedBank===b.id?b.color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏦 {b.name}</button>)}
+              </div>
+            </div>}
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+              {PALETTE.map(c=><div key={c} onClick={()=>setColor(c)} style={{ width:28,height:28,borderRadius:7,background:c,cursor:"pointer",border:color===c?"3px solid #fff":"3px solid transparent" }}/>)}
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+              <button onClick={onClose} style={btnG}>Cancel</button>
+              <button onClick={save} style={btnP}>Save Changes ✓</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── BUDGET PAGE ──────────────────────────────────────────────────────────────
+  const BudgetPage = ({ embedded = false, onBack }) => {
+    const fy = selectedBudgetFY;
+    const fyLabel = `FY ${fy}–${fy+1}`;
+    const now = new Date();
+    const isPreviousFY = fy === currentFYStartYear - 1;
+    const isCurrentFY = fy === currentFYStartYear;
+    const activeAnnualBudget = isPreviousFY ? Number(lastFYTarget || 0) : Number(annualBudget || 0);
+    const setActiveAnnualBudget = value => {
+      if(isPreviousFY) setLastFYTarget(value);
+      else setAnnualBudget(value);
+    };
+    const [budgetDraft, setBudgetDraft] = useState(activeAnnualBudget ? fmt(activeAnnualBudget) : "");
+    useEffect(()=>{
+      setBudgetDraft(activeAnnualBudget ? fmt(activeAnnualBudget) : "");
+    },[activeAnnualBudget, fy]);
+    const commitBudgetDraft = () => {
+      setActiveAnnualBudget(parseMoney(budgetDraft));
+    };
+    const months = Array.from({length:12},(_,i)=>{ const d=new Date(fy,3+i,1); return { key:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`, label:d.toLocaleString("en-IN",{month:"short",year:"2-digit"}) }; });
+    const monthlySlice = Math.round(activeAnnualBudget/12);
+    const fySpend = months.reduce((s,m)=>s+txns.filter(t=>t.type==="expense"&&t.date?.startsWith(m.key)).reduce((a,t)=>a+getNetExpenseAmount(t),0),0);
+    const monthsElapsed = isCurrentFY ? Math.max(1, Math.min(12, ((now.getFullYear()-fy) * 12) + (now.getMonth()-3) + 1)) : 12;
+    const monthsRemaining = isCurrentFY ? Math.max(1, 12 - monthsElapsed) : 0;
+    const safeToSpend = activeAnnualBudget - fySpend;
+    const avgSpendPerMonth = monthsElapsed>0 ? fySpend / monthsElapsed : 0;
+    const safeMonthlyPace = isCurrentFY ? (monthsRemaining>0 ? safeToSpend / monthsRemaining : safeToSpend) : 0;
+    const fyPct = activeAnnualBudget>0 ? Math.min(100,Math.round(fySpend/Math.max(1,activeAnnualBudget)*100)) : (fySpend>0 ? 100 : 0);
+
+    return (
+      <div style={{ padding:"14px 16px 0" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:14 }}>
+          {embedded&&<button onClick={onBack} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>}
+          <div style={{ color:T.text,fontSize:20,fontWeight:900,flex:1 }}>💰 Budget</div>
+        </div>
+
+        <div style={{ ...card,padding:"10px 12px",marginBottom:12 }}>
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:8 }}>
+            <button onClick={()=>setSelectedBudgetFY(prev=>Math.max(currentFYStartYear-1, prev-1))} disabled={fy<=currentFYStartYear-1} style={{ background:T.pill,border:`1px solid ${T.border}`,color:fy<=currentFYStartYear-1?T.sub:T.text,borderRadius:8,padding:"6px 10px",cursor:fy<=currentFYStartYear-1?"not-allowed":"pointer",fontSize:11,fontWeight:800,fontFamily:"Nunito,sans-serif",opacity:fy<=currentFYStartYear-1?0.6:1 }}>← Last FY</button>
+            <div style={{ color:T.text,fontSize:13,fontWeight:900,textAlign:"center" }}>{fyLabel}</div>
+            <button onClick={()=>setSelectedBudgetFY(prev=>Math.min(currentFYStartYear, prev+1))} disabled={fy>=currentFYStartYear} style={{ background:T.pill,border:`1px solid ${T.border}`,color:fy>=currentFYStartYear?T.sub:T.text,borderRadius:8,padding:"6px 10px",cursor:fy>=currentFYStartYear?"not-allowed":"pointer",fontSize:11,fontWeight:800,fontFamily:"Nunito,sans-serif",opacity:fy>=currentFYStartYear?0.6:1 }}>Current FY →</button>
+          </div>
+        </div>
+
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12 }}>
+          <div style={{ ...card,marginBottom:0 }}>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Annual budget</div>
+            <input
+              style={{ ...inp,marginTop:8,fontSize:18,fontWeight:800,textAlign:"left" }}
+              type="text"
+              inputMode="decimal"
+              value={budgetDraft}
+              onChange={e=>setBudgetDraft(cleanMoneyInput(e.target.value))}
+              onBlur={commitBudgetDraft}
+              onKeyDown={e=>{
+                if(e.key==="Enter"){
+                  e.preventDefault();
+                  commitBudgetDraft();
+                  e.currentTarget.blur();
+                }
+              }}
+              placeholder={isPreviousFY?`Set ${fyLabel} budget`:`e.g. ${sym}6,00,000`}
+            />
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:8,flexWrap:"wrap" }}>
+              <span style={{ color:T.sub,fontSize:10 }}>{fyLabel}</span>
+              <span style={{ color:T.accent,fontSize:10,fontWeight:800 }}>{sym}{fmt(monthlySlice)}/month</span>
+            </div>
+          </div>
+          <div style={{ ...card,marginBottom:0 }}>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Spent so far</div>
+            <div style={{ color:T.danger,fontSize:22,fontWeight:900,marginTop:8 }}>{sym}{fmt(fySpend)}</div>
+            <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>{fyPct}% of annual budget used</div>
+          </div>
+          <div style={{ ...card,marginBottom:0 }}>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Remaining budget</div>
+            <div style={{ color:safeToSpend>=0?T.success:T.danger,fontSize:22,fontWeight:900,marginTop:8 }}>{safeToSpend>=0?"":"−"}{sym}{fmt(Math.abs(safeToSpend))}</div>
+            <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>{isCurrentFY ? (safeMonthlyPace>=0?`${sym}${fmt(safeMonthlyPace)}/month left`:`Over pace by ${sym}${fmt(Math.abs(safeMonthlyPace))}/month`) : (safeToSpend>=0?"Saved against budget":"Overspent in this FY")}</div>
+          </div>
+          <div style={{ ...card,marginBottom:0 }}>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Avg spend / month</div>
+            <div style={{ color:T.info,fontSize:22,fontWeight:900,marginTop:8 }}>{sym}{fmt(avgSpendPerMonth)}</div>
+            <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>{monthsElapsed} month{monthsElapsed===1?"":"s"} tracked</div>
+          </div>
+        </div>
+
+        <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:10 }}>Month by Month</div>
+        {months.map(m=>{
+          const mSpend = txns.filter(t=>t.type==="expense"&&t.date?.startsWith(m.key)).reduce((s,t)=>s+getNetExpenseAmount(t),0);
+          const mBudget = monthOverrides[m.key]||monthlySlice;
+          const diff = mBudget - mSpend;
+          const isOver = diff < 0;
+          const pct = mBudget>0 ? Math.min(100,Math.round(mSpend/mBudget*100)) : (mSpend>0 ? 100 : 0);
+          const isCurrent = m.key===viewMonth;
+          const isFuture = m.key > viewMonth;
+          return (
+            <div key={m.key} onClick={()=>{ setViewMonth(m.key); setTab("home"); setShowSettings(false); }} style={{ ...card,cursor:"pointer",border:`1px solid ${isCurrent?T.accent:T.border}`,background:isCurrent?T.accentSoft:T.card,opacity:isFuture?0.6:1,marginBottom:8 }}>
+              <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:6 }}>
+                <div style={{ color:isCurrent?T.accent:T.text,fontSize:13,fontWeight:isCurrent?800:600,minWidth:62 }}>{m.label}{isCurrent?<span style={{ color:T.accent,fontSize:9,marginLeft:4 }}>NOW</span>:""}</div>
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:10,color:T.sub,marginBottom:4,flexWrap:"wrap" }}>
+                    <span>Spent {sym}{fmtK(mSpend)}</span>
+                    <span>Budget {sym}{fmtK(mBudget)}</span>
+                  </div>
+                  <div style={{ height:5,background:T.border,borderRadius:3 }}>
+                    <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:pct>70?T.warn:T.success,borderRadius:3 }}/>
+                  </div>
+                </div>
+                <div style={{ fontSize:11,fontWeight:800,color:isOver?T.danger:T.success,minWidth:72,textAlign:"right" }}>
+                  {isOver?"Over":"Left"}
+                  <div>{sym}{fmtK(Math.abs(diff))}</div>
+                </div>
+              </div>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap" }}>
+                <span style={{ color:T.sub,fontSize:10 }}>{pct}% of monthly budget used</span>
+                <span style={{ color:T.sub,fontSize:10 }}>{isOver?"Over budget":"Within budget"}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ── EDIT BILL MODAL ──────────────────────────────────────────────────────────
+  const EditBillModal = ({ b, onClose }) => {
+    const [name,setName]=useState(b.name||"");
+    const [amount,setAmount]=useState(String(b.amount||""));
+    const [billDate,setBillDate]=useState(b.billDate||b.createdDate||todayStr());
+    const [dueDate,setDueDate]=useState(b.dueDate||"");
+    const [catId,setCatId]=useState(b.catId||cats[0]?.id||"");
+    const [subId,setSubId]=useState(b.subId||"");
+    const [recurring,setRecurring]=useState(b.recurring||false);
+    const [frequency,setFrequency]=useState(b.frequency||"monthly");
+    const [merchant,setMerchant]=useState(b.merchant||"");
+    const [invoiceNo,setInvoiceNo]=useState(b.invoiceNo||"");
+    const [editPhoto,setEditPhoto]=useState(b.imageBase64||null);
+    const [editSplitPeople,setEditSplitPeople]=useState(()=>{ const m={}; Object.entries(b.splitPeople||{}).forEach(([pid])=>m[pid]=true); return m; });
+    const [editSplitCalc,setEditSplitCalc]=useState("equally");
+    const [editSplitCustom,setEditSplitCustom]=useState({});
+    const [editGroup,setEditGroup]=useState(b.groupId||"");
+    const curCat=getCat(catId||"");
+    const billDateText = b.billDate || b.createdDate || b.dueDate || "";
+    const paymentDateText = txns.find(txn=>String(txn.id)===String(b.paidByTxnId || ""))?.date || b.paidDate || "";
+    const editSelectedPids=Object.entries(editSplitPeople).filter(([,v])=>v).map(([k])=>k);
+    const editAmt=parseFloat(amount)||0;
+    const normalizedInvoiceNo = String(invoiceNo||"").trim().toLowerCase();
+    const duplicateInvoiceBill = normalizedInvoiceNo
+      ? bills.find(row=>String(row.id)!==String(b.id) && String(row.invoiceNo||"").trim().toLowerCase()===normalizedInvoiceNo)
+      : null;
+
+    const editIncludeMe = editGroup ? (getGroup(editGroup)?.includeMe !== false) : true;
+    const calcEditShares=()=>{
+      if(!editSelectedPids.length) return {};
+      const shares={};
+      if(editSplitCalc==="equally"){ const total=editSelectedPids.length+(editIncludeMe?1:0); const sh=total>0?Math.round(editAmt/total*100)/100:0; editSelectedPids.forEach(pid=>shares[pid]=sh); }
+      else if(editSplitCalc==="amount"){ editSelectedPids.forEach(pid=>shares[pid]=parseFloat(editSplitCustom[pid])||0); }
+      else if(editSplitCalc==="percent"){ editSelectedPids.forEach(pid=>{ const pct=parseFloat(editSplitCustom[pid])||0; shares[pid]=Math.round(editAmt*pct/100*100)/100; }); }
+      else if(editSplitCalc==="share"){ const totalShares=editSelectedPids.reduce((s,pid)=>s+(parseFloat(editSplitCustom[pid])||1),0)+(editIncludeMe?1:0); editSelectedPids.forEach(pid=>{ const sh=parseFloat(editSplitCustom[pid])||1; shares[pid]=totalShares>0?Math.round(editAmt*sh/totalShares*100)/100:0; }); }
+      return shares;
+    };
+
+    const save=()=>{
+      if(duplicateInvoiceBill) return;
+      const shares=calcEditShares();
+      const peopleSplit={};
+      Object.entries(shares).forEach(([pid,sh])=>{ const p=getPerson(pid); peopleSplit[pid]={amount:sh,mode:p.personType!=="dependant"?"owes":"spent_on"}; });
+      const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
+      const myShare=editIncludeMe ? Math.max(0, editAmt-owedByOthers) : 0;
+      const groupCollectiveAmount = editGroup ? Math.max(0, editAmt-owedByOthers-myShare) : 0;
+      setBills(prev=>prev.map(x=>x.id===b.id?{...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare}:x));
+      onClose();
+    };
+
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>✏️ Edit Bill</div>
+            <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <input style={inp} placeholder="Bill name * e.g. Common Meter Electric" value={name} onChange={e=>setName(e.target.value)}/>
+            <input style={inp} placeholder="Biller / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
+            <input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>
+            {duplicateInvoiceBill && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:-4 }}>This invoice number already exists for {duplicateInvoiceBill.name}.</div>}
+            <div>
+              <span style={lbl}>Amount ({sym})</span>
+              <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center" }} type="number" value={amount} onChange={e=>setAmount(e.target.value)}/>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>Bill Date (generated on)</span><input style={inp} type="date" value={billDate} onChange={e=>setBillDate(e.target.value)}/></div>
+              <div><span style={lbl}>Due Date (pay by)</span><input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
+            </div>
+            <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
+              <div>
+                <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Bill date</div>
+                <div style={{ color:T.text,fontSize:11,fontWeight:700,marginTop:3 }}>{formatShortDate(billDateText) || billDateText || "—"}</div>
+              </div>
+              <div>
+                <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Due date</div>
+                <div style={{ color:T.text,fontSize:11,fontWeight:700,marginTop:3 }}>{formatShortDate(dueDate) || dueDate || "—"}</div>
+              </div>
+              <div>
+                <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Payment date</div>
+                <div style={{ color:T.text,fontSize:11,fontWeight:700,marginTop:3 }}>{paymentDateText ? (formatShortDate(paymentDateText) || paymentDateText) : "—"}</div>
+              </div>
+            </div>
+            <div>
+              <span style={lbl}>Category</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {cats.map(c=><button key={c.id} onClick={()=>{setCatId(c.id);setSubId("");}} style={{ background:catId===c.id?c.color+"22":"none",border:`1px solid ${catId===c.id?c.color:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:catId===c.id?c.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.icon} {c.name.split(" ")[0]}</button>)}
+              </div>
+              {curCat.subs?.length>0&&<div style={{ display:"flex",gap:5,flexWrap:"wrap",marginTop:8 }}>
+                <button onClick={()=>setSubId("")} style={{ background:!subId?T.pill:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,color:T.sub,fontFamily:"Nunito,sans-serif" }}>None</button>
+                {curCat.subs.map(s=><button key={s.id} onClick={()=>setSubId(s.id)} style={{ background:subId===s.id?curCat.color+"22":"none",border:`1px solid ${subId===s.id?curCat.color:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,color:subId===s.id?curCat.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{s.name}</button>)}
+              </div>}
+            </div>
+            {/* Split */}
+            <div>
+              <span style={lbl}>Split with (optional)</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                <button onClick={()=>{setEditSplitPeople({});setEditGroup("");}} style={{ background:editSelectedPids.length===0&&!editGroup?"#88888822":"none",border:`1px solid ${editSelectedPids.length===0&&!editGroup?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>None</button>
+                {groups.map(g=><button key={g.id} onClick={()=>{setEditGroup(editGroup===g.id?"":g.id); setEditSplitPeople({});}} style={{ background:editGroup===g.id?g.color+"22":"none",border:`1px solid ${editGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>)}
+              </div>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:editSelectedPids.length>0?10:0 }}>
+                {people.filter(p=>!p.isMe).map(p=><button key={p.id} onClick={()=>setEditSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:editSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${editSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+              </div>
+              {editSelectedPids.length>0&&<>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                  {[["equally","= Equal"],["amount","₹ Amount"],["percent","% Percent"],["share","⚖️ Share"]].map(([v,l])=>(
+                    <button key={v} onClick={()=>setEditSplitCalc(v)} style={{ background:editSplitCalc===v?T.accent+"22":"none",border:`1px solid ${editSplitCalc===v?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:editSplitCalc===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
+                  ))}
+                </div>
+                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px" }}>
+                  {(()=>{ const shares=calcEditShares(); const myS=editAmt-Object.values(shares).reduce((s,v)=>s+v,0); return <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}`,marginBottom:6 }}><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>🧑 My share</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{sym}{fmt(Math.max(0,myS))}</span></div>; })()}
+                  {editSelectedPids.map(pid=>{ const p=getPerson(pid); const shares=calcEditShares(); return (
+                    <div key={pid} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:6 }}>
+                      <span style={{ color:T.text,fontSize:12,flex:1 }}>{p.emoji} {p.name}</span>
+                      {editSplitCalc!=="equally"&&<input type="number" placeholder="0" value={editSplitCustom[pid]||""} onChange={e=>setEditSplitCustom(prev=>({...prev,[pid]:e.target.value}))} style={{ ...inp,width:70,padding:"6px 8px",textAlign:"right" }}/>}
+                      <span style={{ color:T.accent,fontSize:12,fontWeight:700,minWidth:60,textAlign:"right" }}>{sym}{fmt(shares[pid]||0)}</span>
+                    </div>
+                  ); })}
+                </div>
+              </>}
+            </div>
+
+            <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+              <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:recurring?12:0 }}>
+                <input type="checkbox" id="edit_recurring" checked={recurring} onChange={e=>setRecurring(e.target.checked)} style={{ width:18,height:18,accentColor:T.accent,cursor:"pointer" }}/>
+                <label htmlFor="edit_recurring" style={{ color:T.text,fontSize:14,fontWeight:700,cursor:"pointer" }}>🔁 Recurring bill</label>
+              </div>
+              {recurring&&<div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {[["monthly","Monthly"],["quarterly","Quarterly"],["halfyearly","Half-yearly"],["yearly","Yearly"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>setFrequency(v)} style={{ background:frequency===v?T.accent+"22":"none",border:`1px solid ${frequency===v?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:frequency===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
+                ))}
+              </div>}
+            </div>
+            {/* Bill photo */}
+            <div style={{ background:T.input,borderRadius:12,padding:"11px 14px",display:"flex",alignItems:"center",gap:10 }}>
+              <span>📷</span>
+              <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1 }}>Bill Photo (optional)</span>
+              <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>
+                {editPhoto?"Change":"Upload"}
+                <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setEditPhoto(ev.target.result); r.readAsDataURL(f); }}/>
+              </label>
+              {editPhoto&&<button onClick={()=>setEditPhoto(null)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:16 }}>✕</button>}
+            </div>
+            {editPhoto&&<img src={editPhoto} alt="bill" style={{ width:"100%",borderRadius:10,maxHeight:160,objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>}
+
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+              <button onClick={onClose} style={btnG}>Cancel</button>
+              <button onClick={save} style={btnP}>Save Changes ✓</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── TABS ───────────────────────────────────────────────────────────────────
+  // ── BILLS PAGE ──────────────────────────────────────────────────────────────
+  const BillsPage = () => {
+    const [bFilter, setBFilter] = useState("unpaid");
+    const [expandedBillId, setExpandedBillId] = useState(null);
+    const getBillDate = bill => bill?.billDate || bill?.createdDate || bill?.dueDate || "";
+    const getBillPaymentDate = bill => txns.find(txn=>String(txn.id)===String(bill?.paidByTxnId || ""))?.date || bill?.paidDate || "";
+    const filtered = [...bills]
+      .filter(b=>bFilter==="all"||b.status===bFilter)
+      .sort((a,b)=>{
+        const dueA = toDateOnly(a.dueDate)?.getTime() || 0;
+        const dueB = toDateOnly(b.dueDate)?.getTime() || 0;
+        const billA = toDateOnly(getBillDate(a))?.getTime() || 0;
+        const billB = toDateOnly(getBillDate(b))?.getTime() || 0;
+        const paidA = toDateOnly(getBillPaymentDate(a))?.getTime() || 0;
+        const paidB = toDateOnly(getBillPaymentDate(b))?.getTime() || 0;
+        if(bFilter==="paid") return paidB - paidA || dueA - dueB || billB - billA;
+        return dueA - dueB || billB - billA;
+      });
+    const totalUnpaid = bills.filter(b=>b.status==="unpaid").reduce((s,b)=>s+(b.amount||0),0);
+    return (
+      <div style={{ padding:"14px 16px 0" }}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+          <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>📅 Bills</div>
+        </div>
+        {totalUnpaid>0&&<div style={{ ...card,background:`linear-gradient(135deg,${T.danger}10,${T.card})`,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+          <div>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Total Unpaid</div>
+            <div style={{ color:T.danger,fontSize:22,fontWeight:900,marginTop:4 }}>{sym}{fmt(totalUnpaid)}</div>
+          </div>
+          <div style={{ fontSize:32 }}>📋</div>
+        </div>}
+        <div style={{ display:"flex",gap:6,marginBottom:14 }}>
+          {[["unpaid","🔴 Unpaid"],["paid","✅ Paid"],["all","All"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setBFilter(v)} style={{ background:bFilter===v?T.accent+"22":"none",border:`1px solid ${bFilter===v?T.accent:T.border}`,borderRadius:20,padding:"5px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:bFilter===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
+          ))}
+        </div>
+        {filtered.length===0?<div style={{ ...card,textAlign:"center",padding:40 }}>
+          <div style={{ fontSize:40,marginBottom:12 }}>📭</div>
+          <div style={{ color:T.sub,fontSize:13 }}>No bills here</div>
+        </div>:filtered.map(b=>{
+          const today=new Date();
+          const daysUntil=Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
+          const isOverdue=b.status==="unpaid"&&daysUntil<0;
+          const cat=getCat(b.catId||b.catIds?.[0]) || { icon:"📋", color:T.sub, name:"—" };
+          const group=getGroup(b.groupId||"");
+          const billDateText = getBillDate(b);
+          const paymentDateText = getBillPaymentDate(b);
+          const linkedPaymentTxn = txns.find(txn=>String(txn.id)===String(b.paidByTxnId || "")) || null;
+          const billImageSrc = b.imageBase64 || linkedPaymentTxn?.imageBase64 || null;
+          const paymentImageSrc = b.paymentImageBase64 || linkedPaymentTxn?.paymentImageBase64 || null;
+          const isExpanded = expandedBillId===b.id;
+          return (
+            <div key={b.id} style={{ ...card,border:`1px solid ${isOverdue?T.danger+"44":T.border}` }}>
+              <div onClick={()=>setExpandedBillId(prev=>prev===b.id?null:b.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,cursor:"pointer" }}>
+                <div style={{ flex:1,minWidth:0,textAlign:"justify" }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10 }}>
+                    <div style={{ color:T.text,fontSize:14,fontWeight:800,flex:1,wordBreak:"break-word" }}>{b.name}</div>
+                    <div style={{ color:T.text,fontSize:15,fontWeight:800,whiteSpace:"nowrap",textAlign:"right" }}>{sym}{fmt(b.amount||0)}</div>
+                  </div>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:5 }}>
+                    <span style={{ color:group?.color || T.sub,fontSize:10,fontWeight:700 }}>{group ? `${group.icon||"👥"} ${group.name}` : "Group: —"}</span>
+                    <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{isExpanded?"Tap to close":"Tap to expand"}</span>
+                  </div>
+                  <div style={{ display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8,marginTop:7 }}>
+                    <div style={{ textAlign:"left" }}>
+                      <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.7 }}>Bill</div>
+                      <div style={{ color:T.text,fontSize:10,fontWeight:700,marginTop:2 }}>{formatShortDate(billDateText) || billDateText || "—"}</div>
+                    </div>
+                    <div style={{ textAlign:"center" }}>
+                      <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.7 }}>Due</div>
+                      <div style={{ color:isOverdue?T.danger:T.text,fontSize:10,fontWeight:700,marginTop:2 }}>{formatShortDate(b.dueDate) || b.dueDate || "—"}</div>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.7 }}>Paid</div>
+                      <div style={{ color:b.status==="paid"?T.success:T.text,fontSize:10,fontWeight:700,marginTop:2 }}>{paymentDateText ? (formatShortDate(paymentDateText) || paymentDateText) : "—"}</div>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ color:T.sub,fontSize:14,paddingTop:2 }}>{isExpanded?"▴":"▾"}</div>
+              </div>
+
+              {isExpanded && (
+                <div style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:8 }}>
+                    <div style={{ color:T.sub,fontSize:11 }}>{cat.icon} {cat.name}{b.recurring?` · 🔁 ${b.frequency}`:""}{b.invoiceNo?` · #${b.invoiceNo}`:""}</div>
+                    <div style={{ color:isOverdue?T.danger:daysUntil<=3&&b.status==="unpaid"?T.warn:T.sub,fontSize:11 }}>
+                      {b.status==="paid"?`✅ Paid ${formatShortDate(paymentDateText) || paymentDateText || ""}`:isOverdue?`⚠️ ${Math.abs(daysUntil)}d overdue`:daysUntil===0?"Due today":`Due ${formatShortDate(b.dueDate) || b.dueDate}`}
+                    </div>
+                  </div>
+                  {b.splitPeople&&Object.keys(b.splitPeople).length>0&&(
+                    <div style={{ marginBottom:8 }}>
+                      {Object.entries(b.splitPeople).map(([pid,info])=>{ const p=getPerson(pid); return (
+                        <div key={pid} style={{ display:"flex",justifyContent:"space-between",gap:8,fontSize:11,color:info.mode==="owes"?(info.settled?T.success:Number(info.settledAmt||0)>0?T.warn:T.accent):T.sub,marginBottom:2 }}>
+                          <span>{p.emoji} {p.name}</span>
+                          {(()=>{ const owed=Number(info.amount||0); const left=remainingShare(info); const paid=Number(info.settledAmt||0); if(info.mode!=="owes") return <span>Owes {sym}{fmt(owed)} | on you</span>; if(left<=0) return <span>Settled {sym}{fmt(owed)}</span>; if(paid>0) return <span>Owes {sym}{fmt(owed)} | Partly settled {sym}{fmt(paid)} | Bal. {sym}{fmt(left)}</span>; return <span>Owes {sym}{fmt(owed)} | Bal. {sym}{fmt(left)}</span>; })()}
+                        </div>
+                      ); })}
+                      {(()=>{ const owedTotal=Object.values(b.splitPeople||{}).reduce((sum,info)=>sum+(info.mode==="owes"?Number(info.amount||0):0),0); const fallbackShare=Math.max(0,Number(b.amount||0)-owedTotal-Number(b.groupCollectiveAmount||0)); const storedShare=Number(b.myShare); const group=b.groupId?getGroup(b.groupId):null; const meExcluded=group?.includeMe===false; const myBillShare=Number.isFinite(storedShare)&&(storedShare>0||fallbackShare<=0||meExcluded)?storedShare:fallbackShare; return (
+                        <div style={{ display:"flex",justifyContent:"space-between",gap:8,fontSize:11,color:myBillShare>0?T.success:T.sub,fontWeight:700,marginTop:4 }}>
+                          <span>Your share{meExcluded?" (not included)":""}</span>
+                          <span>{sym}{fmt(myBillShare)}</span>
+                        </div>
+                      ); })()}
+                    </div>
+                  )}
+                  {(billImageSrc || paymentImageSrc)&&(
+                    <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:8 }}>
+                      {billImageSrc&&<button onClick={(e)=>{ e.stopPropagation(); setImageViewSrc(billImageSrc); }} style={{ background:T.info+"14",border:`1px solid ${T.info}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>🧾 View bill</button>}
+                      {paymentImageSrc&&<button onClick={(e)=>{ e.stopPropagation(); setImageViewSrc(paymentImageSrc); }} style={{ background:T.success+"14",border:`1px solid ${T.success}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.success,fontFamily:"Nunito,sans-serif" }}>💳 View payment</button>}
+                    </div>
+                  )}
+                  <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                    {b.status==="unpaid"&&<button onClick={(e)=>{
+                      e.stopPropagation();
+                      const payAccId=accounts.find(a=>a.type!=="cc")?.id||"";
+                      const paymentTxnId = Date.now();
+                      const paymentDate = todayStr();
+                      setTxns(p=>[{id:paymentTxnId,type:"expense",desc:b.name,merchant:b.merchant||"",date:paymentDate,note:"Bill payment",catId:b.catId,catIds:b.catIds||[b.catId],subId:b.subId||null,accId:payAccId,people:b.splitPeople||{},forPerson:"",groupId:b.groupId||null,groupCollectiveAmount:Number(b.groupCollectiveAmount||0),amount:b.amount||0,isBillPayment:true,billInvoiceNo:b.invoiceNo||null,paidBillId:b.id,paidBillName:b.name,imageBase64:b.imageBase64||null,paymentImageBase64:b.paymentImageBase64||null},...p]);
+                      setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:paymentDate,paidByTxnId:paymentTxnId}:x));
+                      if(b.recurring){
+                        const next=new Date(b.dueDate);
+                        if(b.frequency==="monthly") next.setMonth(next.getMonth()+1);
+                        else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3);
+                        else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6);
+                        else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1);
+                        setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],amount:b.amount,paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]);
+                      }
+                    }} style={{ ...btnP,flex:1,padding:"9px" }}>✅ Mark as Paid</button>}
+                    <button onClick={(e)=>{ e.stopPropagation(); setEditingBill(b); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+                    <button onClick={(e)=>{ e.stopPropagation(); setBills(p=>p.filter(x=>x.id!==b.id)); }} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ── ADD BILL MODAL ───────────────────────────────────────────────────────────
+  const AddBillModal = () => {
+    const [name,setName]=useState("");
+    const [amount,setAmount]=useState("");
+    const [billDate,setBillDate]=useState(todayStr());
+    const [dueDate,setDueDate]=useState("");
+    const [billCatIds,setBillCatIds]=useState([cats[0]?.id||""]);
+    const [subId,setSubId]=useState("");
+    const [recurring,setRecurring]=useState(false);
+    const [frequency,setFrequency]=useState("monthly");
+    const [merchant,setMerchant]=useState("");
+    const [billPhoto,setBillPhoto]=useState(null);
+    const [invoiceNo,setInvoiceNo]=useState("");
+    // Split state
+    const [billSplitPeople,setBillSplitPeople]=useState({});
+    const [billGroup,setBillGroup]=useState("");
+    const [splitCalc,setSplitCalc]=useState("equally");
+    const [splitCustom,setSplitCustom]=useState({});
+
+    const selectedPids=Object.entries(billSplitPeople).filter(([,v])=>v).map(([k])=>k);
+    const amt=parseFloat(amount)||0;
+    const normalizedInvoiceNo = String(invoiceNo||"").trim().toLowerCase();
+    const duplicateInvoiceBill = normalizedInvoiceNo
+      ? bills.find(row=>String(row.invoiceNo||"").trim().toLowerCase()===normalizedInvoiceNo)
+      : null;
+
+    const billIncludeMe = billGroup ? (getGroup(billGroup)?.includeMe !== false) : true;
+    const calcShares=()=>{
+      if(!selectedPids.length) return {};
+      const shares={};
+      if(splitCalc==="equally"){ const total=selectedPids.length+(billIncludeMe?1:0); const sh=total>0?Math.round(amt/total*100)/100:0; selectedPids.forEach(pid=>shares[pid]=sh); }
+      else if(splitCalc==="amount"){ selectedPids.forEach(pid=>shares[pid]=parseFloat(splitCustom[pid])||0); }
+      else if(splitCalc==="percent"){ selectedPids.forEach(pid=>{ const pct=parseFloat(splitCustom[pid])||0; shares[pid]=Math.round(amt*pct/100*100)/100; }); }
+      else if(splitCalc==="share"){ const totalShares=selectedPids.reduce((s,pid)=>s+(parseFloat(splitCustom[pid])||1),0)+(billIncludeMe?1:0); selectedPids.forEach(pid=>{ const sh=parseFloat(splitCustom[pid])||1; shares[pid]=totalShares>0?Math.round(amt*sh/totalShares*100)/100:0; }); }
+      return shares;
+    };
+
+    const handleGroupSelect=gid=>{
+      setBillGroup(gid);
+      setBillSplitPeople({});
+    };
+
+    const submit=()=>{
+      if(!name.trim()||!parseFloat(amount) || duplicateInvoiceBill) return;
+      const shares=calcShares();
+      const peopleSplit={};
+      Object.entries(shares).forEach(([pid,sh])=>{ const p=getPerson(pid); peopleSplit[pid]={amount:sh,mode:p.personType!=="dependant"?"owes":"spent_on"}; });
+      const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
+      const myShare = billIncludeMe ? Math.max(0, amt-owedByOthers) : 0;
+      const groupCollectiveAmount = billGroup ? Math.max(0, amt-owedByOthers-myShare) : 0;
+      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),amount:amt,dueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring,frequency,status:"unpaid",paidDate:null,billDate:billDate||todayStr(),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto};
+      setBills(p=>[newBill,...p]);
+
+      const matchingTxn = txns.find(t=>t.type==="expense" && !t.isBillPayment && !t.paidBillId && Number(t.amount)===amt && (billCatIds[0]? t.catId===billCatIds[0] : true));
+      if(matchingTxn){
+        setBillMatchSuggestion({bill:newBill,txn:matchingTxn});
+      }
+
+      setShowAddBill(false);
+    };
+
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&setShowAddBill(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"92vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>📅 Add Bill</div>
+            <button onClick={()=>setShowAddBill(false)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+
+            <input style={{ ...inp,fontSize:17,fontWeight:700,border:`1px solid ${!name.trim()?T.danger+"66":T.border}` }} placeholder="Bill name * e.g. Common Meter Electric" value={name} onChange={e=>setName(e.target.value)}/>
+            <input style={inp} placeholder="Biller / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
+            <input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>
+            {duplicateInvoiceBill && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:-4 }}>This invoice number already exists for {duplicateInvoiceBill.name}.</div>}
+
+            <div>
+              <span style={lbl}>Amount ({sym}) *</span>
+              <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center",border:`1px solid ${amount&&parseFloat(amount)>0?T.border:T.danger+"66"}` }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>Bill Date (generated on)</span><input style={inp} type="date" value={billDate} onChange={e=>setBillDate(e.target.value)}/></div>
+              <div><span style={lbl}>Due Date (pay by)</span><input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
+            </div>
+
+            <div>
+              <span style={lbl}>Categories (select one or more)</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {cats.map(c=><button key={c.id} onClick={()=>setBillCatIds(prev=>prev.includes(c.id)?prev.filter(x=>x!==c.id):[...prev,c.id])} style={{ background:billCatIds.includes(c.id)?c.color+"22":"none",border:`1px solid ${billCatIds.includes(c.id)?c.color:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:billCatIds.includes(c.id)?c.color:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>{c.icon} {c.name.split(" ")[0]}</button>)}
+              </div>
+              {billCatIds.length>0&&<div style={{ marginTop:8 }}>
+                {billCatIds.map(cid=>{ const c=getCat(cid); if(!c.subs?.length) return null; return (
+                  <div key={cid} style={{ marginBottom:6 }}>
+                    <div style={{ color:c.color,fontSize:10,fontWeight:700,marginBottom:4 }}>{c.icon} {c.name}</div>
+                    <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
+                      {c.subs.map(s=><button key={s.id} onClick={()=>setSubId(prev=>prev===s.id?"":s.id)} style={{ background:subId===s.id?c.color+"22":"none",border:`1px solid ${subId===s.id?c.color:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,color:subId===s.id?c.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{s.name}</button>)}
+                    </div>
+                  </div>
+                ); })}
+              </div>}
+            </div>
+
+            {/* Split section */}
+            <div>
+              <span style={lbl}>Split with (optional)</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                <button onClick={()=>{setBillSplitPeople({});setBillGroup("");}} style={{ background:selectedPids.length===0&&!billGroup?"#88888822":"none",border:`1px solid ${selectedPids.length===0&&!billGroup?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>None — just me</button>
+                {groups.map(g=><button key={g.id} onClick={()=>handleGroupSelect(billGroup===g.id?"":g.id)} style={{ background:billGroup===g.id?g.color+"22":"none",border:`1px solid ${billGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>)}
+              </div>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:selectedPids.length>0?10:0 }}>
+                {people.filter(p=>!p.isMe).map(p=><button key={p.id} onClick={()=>setBillSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:billSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${billSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+              </div>
+
+              {selectedPids.length>0&&<>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
+                  {[["equally","= Equal"],["amount","₹ Amount"],["percent","% Percent"],["share","⚖️ Share"]].map(([v,l])=>(
+                    <button key={v} onClick={()=>setSplitCalc(v)} style={{ background:splitCalc===v?T.accent+"22":"none",border:`1px solid ${splitCalc===v?T.accent:T.border}`,borderRadius:20,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:splitCalc===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
+                  ))}
+                </div>
+                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px" }}>
+                  {/* My share row */}
+                  {(()=>{ const shares=calcShares(); const myS=amt-Object.values(shares).reduce((s,v)=>s+v,0); return <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}`,marginBottom:6 }}><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>🧑 My share</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{sym}{fmt(Math.max(0,myS))}</span></div>; })()}
+                  {selectedPids.map(pid=>{
+                    const p=getPerson(pid);
+                    const shares=calcShares();
+                    return (
+                      <div key={pid} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:6 }}>
+                        <span style={{ color:T.text,fontSize:12,flex:1 }}>{p.emoji} {p.name}</span>
+                        {splitCalc!=="equally"&&<input type="number" placeholder={splitCalc==="percent"?"%":splitCalc==="share"?"shares":"0"} value={splitCustom[pid]||""} onChange={e=>setSplitCustom(prev=>({...prev,[pid]:e.target.value}))} style={{ ...inp,width:70,padding:"6px 8px",textAlign:"right" }}/>}
+                        <span style={{ color:T.accent,fontSize:12,fontWeight:700,minWidth:60,textAlign:"right" }}>{sym}{fmt(shares[pid]||0)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>}
+            </div>
+
+            {/* Recurring */}
+            <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+              <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:recurring?12:0 }}>
+                <input type="checkbox" id="recurring" checked={recurring} onChange={e=>setRecurring(e.target.checked)} style={{ width:18,height:18,accentColor:T.accent,cursor:"pointer" }}/>
+                <label htmlFor="recurring" style={{ color:T.text,fontSize:14,fontWeight:700,cursor:"pointer" }}>🔁 Recurring bill</label>
+              </div>
+              {recurring&&<div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {[["monthly","Monthly"],["quarterly","Quarterly"],["halfyearly","Half-yearly"],["yearly","Yearly"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>setFrequency(v)} style={{ background:frequency===v?T.accent+"22":"none",border:`1px solid ${frequency===v?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:frequency===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
+                ))}
+              </div>}
+            </div>
+
+            {/* Bill photo — optional */}
+            <div style={{ background:T.input,borderRadius:12,padding:"11px 14px",display:"flex",alignItems:"center",gap:10 }}>
+              <span>📷</span>
+              <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1 }}>Attach Bill Photo (optional)</span>
+              <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>
+                {billPhoto?"Change":"Upload"}
+                <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setBillPhoto(ev.target.result); r.readAsDataURL(f); }}/>
+              </label>
+              {billPhoto&&<button onClick={()=>setBillPhoto(null)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:16 }}>✕</button>}
+            </div>
+            {billPhoto&&<img src={billPhoto} alt="bill" style={{ width:"100%",borderRadius:10,maxHeight:160,objectFit:"cover" }} onError={e=>{ e.target.style.display="none"; setBillPhoto(null); }}/>}
+
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+              <button onClick={()=>setShowAddBill(false)} style={btnG}>Cancel</button>
+              <button onClick={submit} style={{ ...btnP,opacity:name.trim()?1:0.5 }}>Add Bill</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+    // ── EDIT PERSON MODAL ────────────────────────────────────────────────────────
+  const EditPersonModal = ({ p, onClose }) => {
+    const [name,setName]=useState(p.name||"");
+    const [emoji,setEmoji]=useState(p.emoji||"👤");
+    const [relation,setRelation]=useState(p.relation||"");
+    const [color,setColor]=useState(p.color||PALETTE[0]);
+    const [personType,setPersonType]=useState(p.personType||"contact");
+    const [creditLimit,setCreditLimit]=useState(String(p.creditLimit||""));
+    const [spendBudget,setSpendBudget]=useState(String(p.spendBudget||""));
+    const [favorite,setFavorite]=useState(Boolean(p.favorite));
+    const save=()=>{
+      setPeople(prev=>prev.map(x=>x.id===p.id?{...x,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite}:x));
+      setSelectedPerson(prev=>prev?{...prev,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite}:null);
+      onClose();
+    };
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>✏️ Edit {p.name}</div>
+            <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+              <input style={inp} placeholder="Name" value={name} onChange={e=>setName(e.target.value)}/>
+              <input style={inp} placeholder="Relation" value={relation} onChange={e=>setRelation(e.target.value)}/>
+            </div>
+            <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+              <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                <input type="checkbox" id="person_favorite" checked={favorite} onChange={e=>setFavorite(e.target.checked)} style={{ width:18,height:18,accentColor:T.accent,cursor:"pointer" }}/>
+                <label htmlFor="person_favorite" style={{ color:T.text,fontSize:13,fontWeight:700,cursor:"pointer" }}>Mark as favorite</label>
+              </div>
+            </div>
+            <div style={{ display:"flex",gap:8 }}>
+              {["👤","👨","👩","👶","👴","👵","🐕"].map(em=><button key={em} onClick={()=>setEmoji(em)} style={{ background:emoji===em?T.accentSoft:"none",border:`1px solid ${emoji===em?T.accent:T.border}`,borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:18 }}>{em}</button>)}
+            </div>
+            <div style={{ display:"flex",gap:8 }}>
+              {[["contact","🤝 Contact","They may owe you"],["dependant","♥ Dependant","Family, you cover them"]].map(([v,l,sub])=>(
+                <button key={v} onClick={()=>setPersonType(v)} style={{ flex:1,background:personType===v?T.accentSoft:"none",border:`1px solid ${personType===v?T.accent:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                  <div style={{ fontSize:12,fontWeight:700,color:personType===v?T.accent:T.text }}>{l}</div>
+                  <div style={{ fontSize:10,color:T.sub,marginTop:2 }}>{sub}</div>
+                </button>
+              ))}
+            </div>
+            {personType==="contact"&&<div>
+              <span style={lbl}>Credit limit (max they can owe you)</span>
+              <input style={inp} type="number" placeholder="0 = unlimited" value={creditLimit} onChange={e=>setCreditLimit(e.target.value)}/>
+            </div>}
+            {(personType==="dependant" || p.isMe)&&<div>
+              <span style={lbl}>{p.isMe ? "Monthly self budget" : "Monthly spend awareness budget"}</span>
+              <input style={inp} type="number" placeholder={p.isMe ? "e.g. 15000 for your own spends" : "0 = no limit"} value={spendBudget} onChange={e=>setSpendBudget(e.target.value)}/>
+            </div>}
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+              {PALETTE.map(c=><div key={c} onClick={()=>setColor(c)} style={{ width:26,height:26,borderRadius:7,background:c,cursor:"pointer",border:color===c?"3px solid #fff":"3px solid transparent" }}/>)}
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+              <button onClick={onClose} style={btnG}>Cancel</button>
+              <button onClick={save} style={btnP}>Save Changes ✓</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const TABS=[
+    {id:"home",icon:"🏠",label:"Home"},
+    {id:"transactions",icon:"📋",label:"Txns"},
+    {id:"bills",icon:"📅",label:"Bills"},
+    {id:"wealth",icon:"📈",label:"Wealth"},
+    {id:"settings_tab",icon:"⚙️",label:"Settings"}
+  ];
+
+  const [wealthUnlocked, setWealthUnlocked] = useState(false);
+  const [showWealthPin, setShowWealthPin] = useState(false);
+  const hasAppPin = Boolean(localStorage.getItem("arth_pin")||"");
+
+  const handleTab=t=>{
+    if(t==="settings_tab"){ setShowWealthPin(false); setShowSettings(true); setSettingsSection(null); return; }
+    if(t==="wealth"){
+      if(!hasAppPin){ setShowWealthPin(false); setShowSettings(true); setSettingsSection("security_pin_change"); return; }
+      if(wealthUnlocked){ setShowSettings(false); setTab("wealth"); setSelectedPerson(null); setSelectedGroup(null); }
+      else { setShowSettings(false); setShowWealthPin(true); }
+      return;
+    }
+    // Leave wealth, lock it again for next access
+    setShowWealthPin(false);
+    if(tab==="wealth") setWealthUnlocked(false);
+    setShowSettings(false);
+    setTab(t);
+    setSelectedPerson(null);
+    setSelectedGroup(null);
+  };
+
+  const isTabActive=t=>t==="settings_tab"?showSettings:(tab===t&&!showSettings);
+
+  return (
+    <div style={{ background:T.bg,minHeight:"100vh",transition:"background 0.3s" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0;}
+        ::-webkit-scrollbar{display:none;}
+        input,textarea,select{font-size:16px!important;-webkit-text-size-adjust:100%;}
+        input[type=date]::-webkit-calendar-picker-indicator{filter:${dark?"invert(1)":"none"};}
+        select option{background:#13131a;}
+        textarea{font-family:Nunito,sans-serif;}
+      `}</style>
+      <div style={{ maxWidth:430,margin:"0 auto",minHeight:"100vh",position:"relative",paddingBottom:80,fontFamily:"Nunito,sans-serif" }}>
+
+        {/* Top bar */}
+        {!showSettings&&<div style={{ background:T.nav,borderBottom:`1px solid ${T.border}`,padding:"12px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:50 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+            <div style={{ width:32,height:32,borderRadius:9,background:T.accentSoft,border:`1px solid ${T.accent}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:900,color:T.accent,fontFamily:"Nunito,sans-serif" }}>₹</div>
+            <div>
+              <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1 }}>Arth</div>
+              <div style={{ color:T.sub,fontSize:9,marginTop:1,textTransform:"uppercase",letterSpacing:1 }}>Personal Finance</div>
+            </div>
+          </div>
+          <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+            <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif" }}>💼{workTripMode?" ON":""}</button>
+            <button onClick={()=>{ if(tab==="bills") setShowAddBill(true); else { const typeMap={"expense":"expense","income":"income","transfer":"transfer","cc_payment":"cc_payment","investment":"investment","settlement_in":"settlement_in"}; setDefaultAddType(typeMap[fType]||"expense"); setShowAdd(true); } }} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Nunito,sans-serif" }}>{tab==="bills"?"+ Add Bill":"+ Add"}</button>
+          </div>
+        </div>}
+
+        {/* Pages */}
+        {!showSettings&&tab==="home"&&<Home/>}
+        {!showSettings&&tab==="transactions"&&<Transactions/>}
+        {!showSettings&&tab==="people"&&<People/>}
+        {!showSettings&&tab==="budget"&&<BudgetPage/>}
+        {!showSettings&&tab==="bills"&&<BillsPage/>}
+        {!showSettings&&tab==="wealth"&&wealthUnlocked&&<WealthPage/>}
+        {showSettings&&<Settings/>}
+
+      {showWealthPin&&hasAppPin&&(
+          <div style={{ position:"fixed",inset:0,zIndex:500,background:"rgba(0,0,0,0.92)" }}>
+            <PinScreen isSetup={false} onUnlock={async pin=>{ const stored=localStorage.getItem("arth_pin")||""; const match=stored.length<=6?String(pin)===stored:(await hashPin(pin))===stored; if(match){ if(stored.length<=6){ const h=await hashPin(pin); localStorage.setItem("arth_pin",h); } setWealthUnlocked(true); setShowWealthPin(false); setTab("wealth"); } }}/>
+          </div>
+        )}
+
+        {/* Bottom Nav */}
+        <div style={{ position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:T.nav,borderTop:`1px solid ${T.border}`,display:"flex",justifyContent:"space-around",padding:"10px 0 16px",zIndex:100 }}>
+          {TABS.map(t=>{
+            const active=isTabActive(t.id);
+            return (
+              <button key={t.id} onClick={()=>handleTab(t.id)} style={{ background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"2px 6px" }}>
+                <span style={{ fontSize:18,opacity:active?1:0.3,transition:"all 0.2s" }}>{t.icon}</span>
+                <span style={{ fontSize:8,fontWeight:800,color:active?T.accent:T.sub,textTransform:"uppercase",letterSpacing:0.8,fontFamily:"Nunito,sans-serif" }}>{t.label}</span>
+                {active&&<div style={{ width:14,height:3,borderRadius:2,background:T.accent }}/>}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Modals */}
+        {showAdd&&<AddModal defaultType={defaultAddType} prefillTxn={refundSourceTxn} prefill={addPrefill}/>}
+        {showInvestments&&(
+          <div onClick={e=>{ if(e.target===e.currentTarget){ setShowInvestments(false); setSelectedInvestmentTypeView("all"); } }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
+            <div style={{ background:T.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto",paddingBottom:40 }}>
+              <Investments onClose={()=>{ setShowInvestments(false); setSelectedInvestmentTypeView("all"); }} />
+            </div>
+          </div>
+        )}
+        {showAddBill&&<AddBillModal/>}
+        {editingBill&&<EditBillModal b={editingBill} onClose={()=>setEditingBill(null)}/>}
+        {billMatchSuggestion&&(
+          <div style={{ position:"fixed",bottom:90,left:"50%",transform:"translateX(-50%)",width:"calc(100% - 32px)",maxWidth:398,background:T.card,border:`1px solid ${T.success}66`,borderRadius:16,padding:"14px 16px",zIndex:300,boxShadow:`0 4px 24px ${T.sh}` }}>
+            <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:6 }}>🎯 Bill matched!</div>
+            <div style={{ color:T.sub,fontSize:12,marginBottom:12 }}>&#34;{billMatchSuggestion.bill.name}&#34; ({sym}{fmt(billMatchSuggestion.bill.amount)}) — mark as paid?</div>
+            <div style={{ display:"flex",gap:8 }}>
+              <button onClick={()=>setBillMatchSuggestion(null)} style={{ ...btnG,flex:1,padding:"8px" }}>Skip</button>
+              <button onClick={()=>{
+                const b=billMatchSuggestion.bill;
+                setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:billMatchSuggestion.txn.date || todayStr(),paidByTxnId:billMatchSuggestion.txn.id}:x));
+                setTxns(p=>p.map(x=>x.id===billMatchSuggestion.txn.id?{...x,isBillPayment:true,billInvoiceNo:b.invoiceNo||"",paidBillId:b.id,paidBillName:b.name}:x));
+                if(b.recurring){ const next=new Date(b.dueDate); if(b.frequency==="monthly") next.setMonth(next.getMonth()+1); else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3); else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6); else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
+                setBillMatchSuggestion(null);
+              }} style={{ ...btnP,flex:2,padding:"8px",background:T.success }}>✅ Yes, mark paid</button>
+            </div>
+          </div>
+        )}
+        {refundMatchSuggestion&&(
+          <div style={{ position:"fixed",bottom:90,left:"50%",transform:"translateX(-50%)",width:"calc(100% - 32px)",maxWidth:398,background:T.card,border:`1px solid ${T.info}66`,borderRadius:16,padding:"14px 16px",zIndex:300,boxShadow:`0 4px 24px ${T.sh}` }}>
+            <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:6 }}>↩ Refund match found</div>
+            <div style={{ color:T.sub,fontSize:12,marginBottom:12 }}>This refund of {sym}{fmt(refundMatchSuggestion.refundTxn.amount)} looks like an earlier spend. Is this the original transaction?</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:10 }}>
+              {refundMatchSuggestion.matches.map(candidate=>(
+                <button key={candidate.id} onClick={()=>{
+                  setTxns(prev=>prev.map(x=>String(x.id)===String(refundMatchSuggestion.refundTxn.id)
+                    ? { ...x, againstTxnId:candidate.id, note:[x.note, `Matched to ${candidate.desc||candidate.merchant||"original spend"} (${formatShortDate(candidate.date)})`].filter(Boolean).join(" · ") }
+                    : x
+                  ));
+                  setRefundMatchSuggestion(null);
+                }} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
+                  <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>{candidate.desc||candidate.merchant||"Expense"} · {sym}{fmt(candidate.amount)}</div>
+                  <div style={{ color:T.sub,fontSize:10,marginTop:3 }}>{formatShortDate(candidate.date)}{candidate.accId?` · ${getAcc(candidate.accId).name}`:""}</div>
+                </button>
+              ))}
+            </div>
+            <button onClick={()=>setRefundMatchSuggestion(null)} style={{ ...btnG,width:"100%",padding:"8px" }}>Skip for now</button>
+          </div>
+        )}
+        {reimbursementMatchSuggestion&&(
+          <div style={{ position:"fixed",bottom:90,left:"50%",transform:"translateX(-50%)",width:"calc(100% - 32px)",maxWidth:398,background:T.card,border:"1px solid #f0a50066",borderRadius:16,padding:"14px 16px",zIndex:300,boxShadow:`0 4px 24px ${T.sh}` }}>
+            <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:6 }}>💼 Work expenses pending reimbursement</div>
+            <div style={{ color:T.sub,fontSize:12,marginBottom:12 }}>
+              {reimbursementMatchSuggestion.pending.length} expense{reimbursementMatchSuggestion.pending.length>1?"s":""} totalling {sym}{fmt(reimbursementMatchSuggestion.pending.reduce((s,t)=>s+Number(t.amount||0),0))}. Mark all as reimbursed by this income?
+            </div>
+            <div style={{ display:"flex",gap:8 }}>
+              <button onClick={()=>setReimbursementMatchSuggestion(null)} style={{ ...btnG,flex:1,padding:"8px" }}>Skip</button>
+              <button onClick={()=>{
+                const id=reimbursementMatchSuggestion.incomeTxnId;
+                setTxns(p=>p.map(x=>reimbursementMatchSuggestion.pending.some(pt=>String(pt.id)===String(x.id))?{...x,reimbursedByTxnId:id}:x));
+                setReimbursementMatchSuggestion(null);
+              }} style={{ ...btnP,flex:2,padding:"8px",background:"#f0a500",color:"#000" }}>✓ Mark all reimbursed</button>
+            </div>
+          </div>
+        )}
+        {budgetOverrideMonth&&(
+          <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20 }}>
+            <div style={{ background:T.card,borderRadius:20,padding:24,width:"100%",maxWidth:360 }}>
+              <div style={{ color:T.text,fontSize:16,fontWeight:900,marginBottom:12 }}>Edit Budget — {budgetOverrideMonth.label}</div>
+              <input style={{ ...inp,marginBottom:16 }} type="text" inputMode="decimal" value={budgetOverrideVal} onChange={e=>setBudgetOverrideVal(cleanMoneyInput(e.target.value))} placeholder={`e.g. ${sym}65,000`} autoFocus/>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <button onClick={()=>setBudgetOverrideMonth(null)} style={btnG}>Cancel</button>
+                <button onClick={()=>{ const val=parseMoney(budgetOverrideVal); if(val>0) setMonthOverrides(p=>({...p,[budgetOverrideMonth.key]:val})); setBudgetOverrideMonth(null); }} style={btnP}>Save</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {editingMonthBudget&&(
+          <div onClick={()=>setEditingMonthBudget(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:24 }}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:20,padding:24,width:"100%",maxWidth:360 }}>
+              <div style={{ color:T.text,fontSize:16,fontWeight:900,marginBottom:16 }}>Edit Budget — {new Date(editingMonthBudget+"-01").toLocaleString("en-IN",{month:"long",year:"2-digit"})}</div>
+              <input style={{ ...inp,marginBottom:16 }} type="text" inputMode="decimal" placeholder={`Enter budget amount (${sym})`} value={editingMonthVal} onChange={e=>setEditingMonthVal(cleanMoneyInput(e.target.value))} autoFocus/>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <button onClick={()=>setEditingMonthBudget(null)} style={btnG}>Cancel</button>
+                <button onClick={()=>{ const val=parseMoney(editingMonthVal); if(val>0){ setMonthOverrides(p=>({...p,[editingMonthBudget]:val})); } setEditingMonthBudget(null); }} style={btnP}>Save</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {editingCheckpoint&&(
+          <div onClick={()=>setEditingCheckpoint(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:24 }}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:20,padding:24,width:"100%",maxWidth:380 }}>
+              <div style={{ color:T.text,fontSize:16,fontWeight:900,marginBottom:8 }}>Bank Reconciliation</div>
+              <div style={{ color:T.sub,fontSize:12,marginBottom:16 }}>{accounts.find(a=>a.id===editingCheckpoint)?.name}</div>
+              <div style={{ background:T.input,borderRadius:12,padding:12,marginBottom:12 }}>
+                <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:10 }}>Opening balance</div>
+                <div style={{ display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:10 }}>
+                  <div>
+                    <span style={lbl}>Opening ({sym})</span>
+                    <input style={inp} type="text" inputMode="decimal" placeholder="e.g. 5,600" value={editingOpeningBalanceVal||""} onChange={e=>setEditingOpeningBalanceVal(cleanMoneyInput(e.target.value))}/>
+                  </div>
+                  <div>
+                    <span style={lbl}>As on date</span>
+                    <input style={inp} type="date" value={editingOpeningBalanceDate} onChange={e=>setEditingOpeningBalanceDate(e.target.value)}/>
+                  </div>
+                </div>
+              </div>
+              <div style={{ background:T.input,borderRadius:12,padding:12,marginBottom:16 }}>
+                <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:10 }}>Actual balance check</div>
+                <div style={{ display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:10 }}>
+                  <div>
+                    <span style={lbl}>Actual balance ({sym})</span>
+                    <input style={inp} type="text" inputMode="decimal" placeholder="e.g. 2,300" value={editingCheckpointVal||""} onChange={e=>setEditingCheckpointVal(cleanMoneyInput(e.target.value))} autoFocus/>
+                  </div>
+                  <div>
+                    <span style={lbl}>As on date</span>
+                    <input style={inp} type="date" value={editingCheckpointDate} onChange={e=>setEditingCheckpointDate(e.target.value)}/>
+                  </div>
+                </div>
+              </div>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <button onClick={()=>setEditingCheckpoint(null)} style={btnG}>Cancel</button>
+                <button onClick={()=>{
+                  const openingVal = parseMoney(editingOpeningBalanceVal);
+                  const actualVal = parseMoney(editingCheckpointVal);
+                  setAccounts(prev=>prev.map(acc=>acc.id===editingCheckpoint ? { ...acc, openingBalance:openingVal, openingBalanceDate:editingOpeningBalanceDate||todayStr() } : acc));
+                  setBalanceCheckpoints(p=>({...p,[editingCheckpoint]:{amount:actualVal,date:editingCheckpointDate||todayStr()}}));
+                  setEditingCheckpoint(null);
+                }} style={btnP}>Save</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {editingPerson&&<EditPersonModal p={editingPerson} onClose={()=>setEditingPerson(null)}/>}
+        {editingTxn&&<EditModal t={editingTxn} onClose={()=>setEditingTxn(null)}/>}
+        {settleTxn&&<SettleModal/>}
+        {showAddAccount&&<AddAccountModal/>}
+        {editingAccount&&<EditAccountModal a={editingAccount} onClose={()=>setEditingAccount(null)}/>}
+        {showAddInvestment&&<AddInvestmentModal item={editingInvestment}/>}
+        {selectedInvestmentDetail&&<InvestmentDetailModal/>}
+        {showReceivablesList&&(
+          <div onClick={()=>setShowReceivablesList(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.82)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:280,padding:20 }}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:20,padding:22,width:"100%",maxWidth:380,maxHeight:"80vh",overflowY:"auto" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                <div style={{ color:T.text,fontSize:17,fontWeight:900 }}>Amounts to Receive</div>
+                <button onClick={()=>setShowReceivablesList(false)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+              </div>
+              <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})} receivables from people and groups</div>
+              {monthlyReceivablePeopleList.length===0 && monthlyCollectiveGroupReceivable<=0 ? (
+                <div style={{ color:T.sub,fontSize:12 }}>No pending amount to receive for this month.</div>
+              ) : (
+                <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                  {monthlyReceivablePeopleList.map(item=>(
+                    <div key={item.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:T.input,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 12px" }}>
+                      <div style={{ minWidth:0,flex:1 }}>
+                        <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>{item.person?.emoji||"👤"} {item.person?.name||"Person"}</div>
+                        <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{item.person?.relation||"Pending receivable"}</div>
+                      </div>
+                      <div style={{ color:T.accent,fontSize:13,fontWeight:900 }}>{sym}{fmt(item.amount)}</div>
+                    </div>
+                  ))}
+                  {monthlyCollectiveGroupReceivable>0 && (
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px 12px" }}>
+                      <div style={{ minWidth:0,flex:1 }}>
+                        <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>👥 Group balances</div>
+                        <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Collective amount due in this month</div>
+                      </div>
+                      <div style={{ color:T.accent,fontSize:13,fontWeight:900 }}>{sym}{fmt(monthlyCollectiveGroupReceivable)}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {(showAddLoan||editingLoan)&&<LoanModal item={editingLoan} onClose={()=>{ setShowAddLoan(false); setEditingLoan(null); }}/>}        
+        {repaymentLoan&&<LoanRepaymentModal item={repaymentLoan} onClose={()=>setRepaymentLoan(null)}/>}        
+        {(showAddLiability||editingLiability)&&<LiabilityModal item={editingLiability} onClose={()=>{ setShowAddLiability(false); setEditingLiability(null); }}/>}
+        {(showAddAsset||editingAsset)&&<AssetModal item={editingAsset} onClose={()=>{ setShowAddAsset(false); setEditingAsset(null); }}/>}
+        {showAccDetail&&<AccDetailModal/>}
+        {confirmDeleteCat&&<ConfirmDelete/>}
+        {confirmDeleteAccount&&<ConfirmDeleteAccount/>}
+        {confirmDeleteTxn&&(
+          <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20 }}>
+            <div style={{ background:T.card,borderRadius:20,padding:24,width:"100%",maxWidth:360 }}>
+              <div style={{ color:T.text,fontSize:17,fontWeight:900,marginBottom:8 }}>Delete transaction?</div>
+              <div style={{ color:T.sub,fontSize:13,marginBottom:20 }}>{confirmDeleteTxn.desc} · {sym}{fmt(confirmDeleteTxn.amount)}</div>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <button onClick={()=>setConfirmDeleteTxn(null)} style={btnG}>Cancel</button>
+                <button onClick={()=>{ removeTxnAndLinkedInvestment(confirmDeleteTxn); setExpandedTxn(null); setConfirmDeleteTxn(null); }} style={{ ...btnP,background:T.danger }}>Delete</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {imageViewSrc&&(
+          <div onClick={()=>setImageViewSrc(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400,padding:16 }}>
+            <img src={imageViewSrc} alt="full view" style={{ maxWidth:"100%",maxHeight:"90vh",borderRadius:12,objectFit:"contain" }} onError={()=>setImageViewSrc(null)}/>
+            <button onClick={()=>setImageViewSrc(null)} style={{ position:"absolute",top:20,right:20,background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",borderRadius:"50%",width:36,height:36,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(vercel --version)",
+      "Bash(npm run:*)",
+      "Bash(node deploy.mjs)",
+      "Bash(npx vercel *)"
+    ]
+  }
+}
