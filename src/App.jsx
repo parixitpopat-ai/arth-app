@@ -9346,6 +9346,43 @@ function AppContent({ onLock }) {
       </div>
     );
 
+    if(settingsSection==="cloudsync") return (
+      <div style={{ padding:"0 0 80px" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:18 }}>
+          <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:18,fontFamily:"Nunito,sans-serif" }}>←</button>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>Cloud Sync & Account</div>
+        </div>
+        {cloudUser ? (
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div style={{ background:T.success+"16",border:`1px solid ${T.success}33`,borderRadius:14,padding:"14px 16px" }}>
+              <div style={{ color:T.success,fontSize:13,fontWeight:800 }}>✅ Signed in</div>
+              <div style={{ color:T.sub,fontSize:12,marginTop:4 }}>{cloudUser.email}</div>
+              {lastSyncedAt&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Last synced: {formatBackupStamp(lastSyncedAt)}</div>}
+            </div>
+            <div style={{ background:T.card,borderRadius:14,padding:"14px 16px" }}>
+              <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>Auto-syncing across devices</div>
+              <div style={{ color:T.sub,fontSize:11 }}>Every change saves to cloud automatically. Sign in on any device to access your data.</div>
+            </div>
+            <button onClick={()=>pullCloudSnapshot()} disabled={cloudBusy} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{cloudBusy?"🔄 Syncing...":"🔄 Sync Now"}</button>
+            <button onClick={handleCloudSignOut} disabled={cloudBusy} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.danger,fontFamily:"Nunito,sans-serif" }}>Sign Out</button>
+            {cloudStatus&&<div style={{ color:T.sub,fontSize:11,textAlign:"center",marginTop:4 }}>{cloudStatus}</div>}
+          </div>
+        ) : (
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div style={{ background:T.card,borderRadius:14,padding:"14px 16px" }}>
+              <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>Sign in to sync across devices</div>
+              <div style={{ color:T.sub,fontSize:11 }}>Data stored safely in cloud. Sign in on any device to restore everything instantly.</div>
+            </div>
+            <input style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",color:T.text,fontSize:14,fontFamily:"Nunito,sans-serif",outline:"none" }} type="email" placeholder="Email address" value={syncEmail} onChange={e=>setSyncEmail(e.target.value)}/>
+            <input style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",color:T.text,fontSize:14,fontFamily:"Nunito,sans-serif",outline:"none" }} type="password" placeholder="Password" value={syncPassword} onChange={e=>setSyncPassword(e.target.value)}/>
+            <button onClick={()=>handleCloudAuth("signin")} disabled={cloudBusy||!syncEmail||!syncPassword} style={{ background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>{cloudBusy?"Please wait...":"Sign In"}</button>
+            <button onClick={()=>handleCloudAuth("signup")} disabled={cloudBusy||!syncEmail||!syncPassword} style={{ background:"none",border:`1px solid ${T.accent}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{cloudBusy?"Please wait...":"Create Account"}</button>
+            {cloudStatus&&<div style={{ color:cloudStatus.includes("failed")||cloudStatus.includes("error")?T.danger:T.sub,fontSize:11,textAlign:"center" }}>{cloudStatus}</div>}
+          </div>
+        )}
+      </div>
+    );
+
     if(settingsSection==="backup") return (
       <div style={{ padding:"14px 16px 0" }}>
         <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
@@ -9640,6 +9677,7 @@ function AppContent({ onLock }) {
 
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Backup & Sync</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
+          <Row icon="🔑" title="Cloud Sync & Account" subtitle={cloudUser?.email ? `Signed in as ${cloudUser.email}${lastSyncedAt ? " · synced" : ""}` : "Sign in to sync across devices"} onClick={()=>setSettingsSection("cloudsync")}/>
           <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
         </div>
 
