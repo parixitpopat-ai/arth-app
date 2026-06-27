@@ -719,9 +719,22 @@ function PinScreen({ onUnlock, isSetup, onCancel }) {
       else { const nc=confirm+k; setConfirm(nc); if(nc.length===4){ if(nc===pin) onUnlock(pin); else { setError("PINs don't match. Try again."); setPin(""); setConfirm(""); setStep("enter"); } } }
     } else { const np=pin+k; setPin(np); if(np.length===4){ onUnlock(np); setPin(""); } }
   };
+  // B16: Physical keyboard support
+  React.useEffect(() => {
+    const handler = e => {
+      if(e.key >= "0" && e.key <= "9") handleKey(e.key);
+      else if(e.key === "Backspace" || e.key === "Delete") handleKey("del");
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [pin, confirm, step]);
   const cur = step==="confirm"?confirm:pin;
+  const hiddenInputRef = React.useRef(null);
+  React.useEffect(() => { hiddenInputRef.current?.focus(); }, [cur.length]);
   return (
     <div style={{minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Nunito,sans-serif"}}>
+      {/* B15: Hidden input keeps mobile keyboard context */}
+      <input ref={hiddenInputRef} type="tel" inputMode="numeric" pattern="[0-9]*" style={{position:"absolute",opacity:0,width:1,height:1,pointerEvents:"none"}} onChange={e=>{ const v=e.target.value.replace(/\D/g,""); if(v) { handleKey(v[v.length-1]); e.target.value=""; } }} onKeyDown={e=>{ if(e.key==="Backspace") handleKey("del"); }}/>
       <div style={{fontSize:52,marginBottom:12,color:"#f0a500",fontWeight:900,fontFamily:"Nunito,sans-serif"}}>₹</div>
       <div style={{color:"#f0a500",fontSize:30,fontWeight:900,marginBottom:6}}>Arth</div>
       <div style={{color:"#5a5a7a",fontSize:13,marginBottom:40,textAlign:"center"}}>{isSetup?step==="enter"?"Set your 4-digit PIN":"Confirm your PIN":"Enter your PIN"}</div>
