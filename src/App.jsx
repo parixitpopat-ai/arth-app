@@ -2343,6 +2343,7 @@ function AppContent({ onLock }) {
               {t.type==="settlement_in"&&!t.isRefund&&t.settlementLinks?.length>0&&<span style={{ background:T.info+"18",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💰 Repayment</span>}
               {t.type==="expense"&&refundedAmount>0&&<span style={{ background:T.info+"20",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>↩ {refundStatus}</span>}
               {t.type==="expense"&&linkedRepayments.length>0&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💰 Repaid</span>}
+              {t.billerLinkId&&(()=>{ const ba=billerAccounts.find(b=>b.id===t.billerLinkId); if(!ba) return null; const mem=memberships.filter(m=>m.billerAccountId===ba.id&&m.txnId===t.id)[0]; return <span style={{ background:T.accent+"18",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{getBillerIcon(ba.type)} {ba.name}{mem?` · ${formatShortDate(mem.validFrom)||mem.validFrom}→${formatShortDate(mem.validUntil)||mem.validUntil}`:""}</span>; })()}
               {t.type==="expense"&&t.reimbursable&&!t.reimbursedByTxnId&&<span style={{ background:"#f0a50018",color:"#f0a500",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimb.{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
               {t.type==="expense"&&t.reimbursedByTxnId&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimbursed{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
               {t.isAutoEmiInstallment&&<span style={{ background:T.warn+"18",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💳 EMI {t.emiInstallmentNum}/{t.emiTotalInstallments}</span>}
@@ -2601,6 +2602,17 @@ function AppContent({ onLock }) {
     const [fromAccId, setFromAccId] = useState(isEditing ? (sourceTxn.fromAccId || defaultFromAccId) : (safePrefill.fromAccId || defaultFromAccId));
     const [toAccId, setToAccId] = useState(isEditing ? (sourceTxn.toAccId || defaultToCardId) : (safePrefill.toAccId || defaultToCardId));
     const [note, setNote] = useState(isEditing ? (sourceTxn.note || "") : (refundPrefill ? `Refund for ${refundPrefill.desc||refundPrefill.merchant||"expense"}` : (safePrefill.note || "")));
+    const [billerLinkId, setBillerLinkId] = useState(isEditing ? (sourceTxn.billerLinkId||"") : "");
+    const [showMembershipPanel, setShowMembershipPanel] = useState(false);
+    const [linkValidFrom, setLinkValidFrom] = useState(todayStr());
+    const [linkCycle, setLinkCycle] = useState("monthly");
+    const [linkBulkMonths, setLinkBulkMonths] = useState("1");
+    const [linkGraceDays, setLinkGraceDays] = useState("0");
+    const [linkMemberPersonId, setLinkMemberPersonId] = useState("self");
+    const linkedBA = billerLinkId ? billerAccounts.find(b=>b.id===billerLinkId) : null;
+    const linkedBAType = linkedBA ? getBillerActionType(linkedBA.type) : null;
+    const cycleMonthsMap = { monthly:1, quarterly:3, halfyearly:6, annual:12 };
+    const linkValidUntil = linkValidFrom && linkBulkMonths ? (()=>{ const d=new Date(linkValidFrom); d.setMonth(d.getMonth()+Number(linkBulkMonths)*(cycleMonthsMap[linkCycle]||1)); d.setDate(d.getDate()+Number(linkGraceDays||0)-1); return d.toISOString().split("T")[0]; })() : "";
     const [imageBase64, setImageBase64] = useState(sourceTxn?.imageBase64 || null);
     const [paymentImageBase64, setPaymentImageBase64] = useState(sourceTxn?.paymentImageBase64 || null);
     const isNative = isNativeSmsAvailable();
@@ -3287,6 +3299,7 @@ function AppContent({ onLock }) {
         smsRaw,
         imageBase64,
         transactionRef:transactionRef.trim()||null,
+        billerLinkId:billerLinkId||undefined,
       };
       const upsertTxn = nextTxn => {
         setTxns(prev=>isEditing
@@ -3295,6 +3308,25 @@ function AppContent({ onLock }) {
         );
       };
 
+      // Create membership record if linked biller is membership type
+      if(billerLinkId && showMembershipPanel && linkedBAType==="membership" && linkValidFrom && !isEditing){
+        const memRecord = {
+          id: genId(),
+          billerAccountId: billerLinkId,
+          personId: linkMemberPersonId,
+          amount: parseFloat(amount)||0,
+          cycle: linkCycle,
+          bulkMonths: Number(linkBulkMonths),
+          graceDays: Number(linkGraceDays||0),
+          validFrom: linkValidFrom,
+          validUntil: linkValidUntil,
+          txnId: resolvedTxnId,
+          paidDate: date,
+          createdAt: Date.now(),
+          status: "active",
+        };
+        setMemberships(prev=>[memRecord,...prev]);
+      }
       if(txnType==="expense"){
         if(expensePaymentMode==="emi"){
           const dueDayNum = Math.max(1, Math.min(31, parseInt(emiDueDay || (toDateOnly(date)?.getDate() || new Date().getDate()), 10) || new Date().getDate()));
@@ -4953,6 +4985,63 @@ function AppContent({ onLock }) {
             {/* NOTE */}
             {txnType!=="cc_payment"&&txnType!=="transfer"&&<input style={inp} placeholder="Note (optional)" value={note} onChange={e=>setNote(e.target.value)}/>}
 
+            {/* LINK TO BILL / SUBSCRIPTION */}
+            {txnType==="expense"&&(
+              <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:billerLinkId?10:0 }}>
+                  <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>📎 Link to Bill / Subscription (optional)</span>
+                  {billerLinkId&&<button onClick={()=>{ setBillerLinkId(""); setShowMembershipPanel(false); }} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Remove</button>}
+                </div>
+                {!billerLinkId&&(
+                  <select style={inp} value="" onChange={e=>{
+                    const id=e.target.value;
+                    if(!id) return;
+                    setBillerLinkId(id);
+                    const ba=billerAccounts.find(b=>b.id===id);
+                    if(ba && getBillerActionType(ba.type)==="membership") setShowMembershipPanel(true);
+                  }}>
+                    <option value="">Select biller account...</option>
+                    {billerAccounts.map(ba=>(<option key={ba.id} value={ba.id}>{getBillerIcon(ba.type)} {ba.name} — {ba.type}</option>))}
+                  </select>
+                )}
+                {linkedBA&&(
+                  <div>
+                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:showMembershipPanel?10:0 }}>
+                      <span style={{ fontSize:20 }}>{getBillerIcon(linkedBA.type)}</span>
+                      <div>
+                        <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>{linkedBA.name}</div>
+                        <div style={{ color:T.sub,fontSize:10 }}>{linkedBA.type}{linkedBA.consumerNo?` · #${linkedBA.consumerNo}`:""}</div>
+                      </div>
+                      {linkedBAType==="membership"&&(
+                        <button onClick={()=>setShowMembershipPanel(v=>!v)} style={{ marginLeft:"auto",background:showMembershipPanel?T.accent+"22":"none",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{showMembershipPanel?"Hide dates":"+ Add dates"}</button>
+                      )}
+                    </div>
+                    {/* Membership panel */}
+                    {showMembershipPanel&&linkedBAType==="membership"&&(
+                      <div style={{ display:"flex",flexDirection:"column",gap:10,background:T.card,borderRadius:10,padding:"10px",marginTop:8 }}>
+                        <div>
+                          <span style={lbl}>Member</span>
+                          <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                            <button onClick={()=>setLinkMemberPersonId("self")} style={{ background:linkMemberPersonId==="self"?T.accent+"22":"none",border:`1px solid ${linkMemberPersonId==="self"?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkMemberPersonId==="self"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>Me</button>
+                            {people.map(p=>(<button key={p.id} onClick={()=>setLinkMemberPersonId(String(p.id))} style={{ background:linkMemberPersonId===String(p.id)?T.accent+"22":"none",border:`1px solid ${linkMemberPersonId===String(p.id)?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkMemberPersonId===String(p.id)?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>))}
+                          </div>
+                        </div>
+                        <div style={{ display:"flex",gap:6 }}>
+                          {["monthly","quarterly","halfyearly","annual"].map(c=>(<button key={c} onClick={()=>setLinkCycle(c)} style={{ flex:1,background:linkCycle===c?T.accent+"22":"none",border:`1px solid ${linkCycle===c?T.accent:T.border}`,borderRadius:10,padding:"5px 2px",cursor:"pointer",fontSize:9,fontWeight:700,color:linkCycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>))}
+                        </div>
+                        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
+                          <div><span style={lbl}>Valid From</span><input style={inp} type="date" value={linkValidFrom} onChange={e=>setLinkValidFrom(e.target.value)}/></div>
+                          <div><span style={lbl}>No. of cycles</span><input style={inp} type="number" min="1" value={linkBulkMonths} onChange={e=>setLinkBulkMonths(e.target.value)}/></div>
+                          <div><span style={lbl}>Grace days</span><input style={inp} type="number" min="0" value={linkGraceDays} onChange={e=>setLinkGraceDays(e.target.value)}/></div>
+                        </div>
+                        {linkValidUntil&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(linkValidUntil)||linkValidUntil}</span></div>}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* QUICK FLAGS */}
             {txnType==="expense"&&(
               <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
@@ -6107,7 +6196,21 @@ function AppContent({ onLock }) {
 
   // ── HOME ───────────────────────────────────────────────────────────────────
   const [privacyMode, setPrivacyMode] = useState(()=>JSON.parse(localStorage.getItem("arth_privacy_mode")||"false"));
-  const maskVal = v => privacyMode ? "₹XXXXX" : v;
+  const [pinRevealActive, setPinRevealActive] = useState(false);
+  const [showPinReveal, setShowPinReveal] = useState(false);
+  const [pinRevealTimer, setPinRevealTimer] = useState(null);
+  const [pinRevealTarget, setPinRevealTarget] = useState(""); // "income" | "savings" | "incometab"
+  const maskVal = v => (privacyMode && !pinRevealActive) ? "₹XXXXX" : v;
+  const [pinRevealInput, setPinRevealInput] = useState("");
+  const [pinRevealError, setPinRevealError] = useState(false);
+  const requestPinReveal = (target) => { setPinRevealTarget(target); setShowPinReveal(true); setPinRevealInput(""); setPinRevealError(false); };
+  const onPinRevealSuccess = () => {
+    setShowPinReveal(false);
+    setPinRevealActive(true);
+    if(pinRevealTimer) clearTimeout(pinRevealTimer);
+    const t = setTimeout(()=>{ setPinRevealActive(false); }, 60000);
+    setPinRevealTimer(t);
+  };
   const DEFAULT_CARD_ORDER = ["stats","categories","cc","bills","recent"];
   const KNOWN_CARD_KEYS = new Set(["stats","budget","categories","cc","bills","recent"]);
   const [cardOrder, setCardOrder] = useState(()=>{
@@ -6519,12 +6622,12 @@ function AppContent({ onLock }) {
       stats: (
         <div key="stats" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
           {[
-            {label:"Income",value:maskVal(`${sym}${fmt(totalIncome)}`),color:T.success,icon:"💚",action:()=>{ setTab("transactions"); setFType("income"); }},
+            {label:"Income",value:maskVal(`${sym}${fmt(totalIncome)}`),color:T.success,icon:"💚",action:()=>{ if(privacyMode&&!pinRevealActive){ requestPinReveal("income"); } else { setTab("transactions"); setFType("income"); } }},
             {label:"Investments",value:`${sym}${fmt(monthlyInvestmentFlow)}`,color:T.info,icon:"💹",action:()=>{ setSelectedInvestmentTypeView("all"); setShowInvestments(true); }},
             {label:"People & Groups",value:"",color:T.info,icon:"👥",action:()=>setTab("people")},
             {label:"Budget",value:`${sym}${fmt(monthly)}`,color:T.warn,icon:"🎯",action:()=>{ setShowSettings(true); setSettingsSection("budget"); }},
             {label:"To Receive",value:`${sym}${fmt(monthTotalOwedToMe + loanGivenTotal)}`,color:T.accent,icon:"🔄",action:()=>setShowReceivablesList(true),sub:(loanGivenTotal>0&&monthTotalOwedToMe>0)?`incl. ${sym}${fmtK(loanGivenTotal)} loans`:loanGivenTotal>0?`${sym}${fmtK(loanGivenTotal)} loans outstanding`:undefined},
-            {label:"Net Savings",value:maskVal(`${sym}${fmtK(Math.max(0,totalIncome-myActual-monthlyInvestmentFlow))}`),color:T.success,icon:"💰",action:()=>setTab("home")},
+            {label:"Net Savings",value:maskVal(`${sym}${fmtK(Math.max(0,totalIncome-myActual-monthlyInvestmentFlow))}`),color:T.success,icon:"💰",action:()=>{ if(privacyMode&&!pinRevealActive){ requestPinReveal("savings"); } }},
           ].map(s=>(
             <div key={s.label} onClick={s.action} style={{ ...card,marginBottom:0,padding:"12px",cursor:"pointer" }}>
               <div style={{ fontSize:20,marginBottom:4 }}>{s.icon}</div>
@@ -10619,17 +10722,6 @@ function AppContent({ onLock }) {
         status: "active",
       };
       setMemberships(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[...prev,record]);
-      // Record as expense transaction
-      if(!isEdit){
-        const newTxn = {
-          id: genId(), type:"expense", amount:parseFloat(amount),
-          who: billerAccount.name, accId, date: todayStr(),
-          catIds:[cats.find(c=>c.name==="Fitness"||c.name==="Health")?.id||cats[0]?.id],
-          note:`${billerAccount.name} membership ${bulkMonths>1?bulkMonths+" months":""}`,
-          membershipId: record.id, createdAt: Date.now(),
-        };
-        setTxns(prev=>[newTxn,...prev]);
-      }
       onClose();
     };
 
@@ -10732,15 +10824,6 @@ function AppContent({ onLock }) {
         createdAt: Date.now(),
       };
       setFeePayments(prev=>[record,...prev]);
-      // Record as one transaction
-      const newTxn = {
-        id: genId(), type:"expense", amount:parseFloat(amount),
-        who: billerAccount.name, accId, date: payDate,
-        catIds:[cats.find(c=>c.name==="Education"||c.name==="Family")?.id||cats[0]?.id],
-        note: note||`${billerAccount.name} fees — ${monthCount} months (${monthsArr[0]} to ${monthsArr[monthsArr.length-1]})`,
-        feePaymentId: record.id, createdAt: Date.now(),
-      };
-      setTxns(prev=>[newTxn,...prev]);
       onClose();
     };
 
@@ -11249,16 +11332,38 @@ function AppContent({ onLock }) {
                   </div>
                   <button onClick={()=>setActiveBillerForAction(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
                 </div>
-                {/* Active membership status */}
-                {activeMembership&&(
-                  <div style={{ background:T.success+"16",border:`1px solid ${T.success}33`,borderRadius:12,padding:"10px 14px",marginBottom:14 }}>
-                    <div style={{ display:"flex",justifyContent:"space-between" }}>
-                      <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>✅ Active</span>
-                      <span style={{ color:T.sub,fontSize:11 }}>Until {formatShortDate(activeMembership.validUntil)||activeMembership.validUntil}</span>
-                    </div>
-                    {activeMembership.personId&&activeMembership.personId!=="self"&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>{people.find(p=>String(p.id)===String(activeMembership.personId))?.name||"Unknown"}</div>}
-                  </div>
-                )}
+                {/* Per-person membership status */}
+                {(()=>{
+                  const allPersonIds = ["self",...people.map(p=>String(p.id))];
+                  const personsWithMem = allPersonIds.filter(pid=>baMemberships.some(m=>String(m.personId)===pid));
+                  if(personsWithMem.length===0) return null;
+                  return (<div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
+                    {personsWithMem.map(pid=>{
+                      const personName = pid==="self"?"Me":(people.find(p=>String(p.id)===pid)?.name||"Unknown");
+                      const personMems = baMemberships.filter(m=>String(m.personId)===pid).sort((a,b2)=>b2.validUntil.localeCompare(a.validUntil));
+                      const latest = personMems[0];
+                      const isActive = latest && latest.validUntil >= todayStr();
+                      const daysLeft = latest ? Math.round((new Date(latest.validUntil)-new Date())/(1000*60*60*24)) : 0;
+                      return (
+                        <div key={pid} style={{ background:isActive?T.success+"16":T.danger+"16",border:`1px solid ${isActive?T.success:T.danger}33`,borderRadius:12,padding:"10px 14px" }}>
+                          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                            <span style={{ color:isActive?T.success:T.danger,fontSize:12,fontWeight:800 }}>{isActive?"✅":"⚠️"} {personName}</span>
+                            <span style={{ color:T.sub,fontSize:11 }}>{isActive?`Until ${formatShortDate(latest.validUntil)||latest.validUntil} (${daysLeft}d)`:"Lapsed"}</span>
+                          </div>
+                          {!isActive&&latest&&(
+                            <div style={{ marginTop:8 }}>
+                              <div style={{ color:T.sub,fontSize:10,marginBottom:6 }}>Last: {formatShortDate(latest.validUntil)||latest.validUntil}</div>
+                              <button onClick={()=>{ setActiveBillerForAction(null); setDefaultAddType("expense"); setShowAdd(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>🔄 Renew {personName}</button>
+                            </div>
+                          )}
+                          <div style={{ marginTop:4,display:"flex",flexWrap:"wrap",gap:4 }}>
+                            {personMems.slice(0,3).map(m=>(<span key={m.id} style={{ background:T.pill,borderRadius:20,padding:"1px 8px",fontSize:9,color:T.sub }}>{formatShortDate(m.validFrom)||m.validFrom} → {formatShortDate(m.validUntil)||m.validUntil}</span>))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>);
+                })()}
                 {/* Actions */}
                 <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
                   {(actionType==="membership"||actionType==="hybrid")&&(
@@ -11571,7 +11676,36 @@ function AppContent({ onLock }) {
           </div>
         )}
         {(showAddLoan||editingLoan)&&<LoanModal item={editingLoan} onClose={()=>{ setShowAddLoan(false); setEditingLoan(null); }}/>}        
-        {repaymentLoan&&<LoanRepaymentModal item={repaymentLoan} onClose={()=>setRepaymentLoan(null)}/>}        
+        {repaymentLoan&&<LoanRepaymentModal item={repaymentLoan} onClose={()=>setRepaymentLoan(null)}/>}
+        {/* PIN Reveal Overlay */}
+        {showPinReveal&&(
+          <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:500,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
+            <div style={{ color:"#fff",fontSize:14,fontWeight:700,marginBottom:8,opacity:0.7 }}>{pinRevealTarget==="income"?"Reveal Income":pinRevealTarget==="savings"?"Reveal Net Savings":"Reveal Amounts"}</div>
+            <div style={{ color:"#fff",fontSize:12,marginBottom:24,opacity:0.5 }}>Enter PIN to view for 60 seconds</div>
+            <div style={{ display:"flex",gap:12,marginBottom:24 }}>
+              {[0,1,2,3].map(i=>(
+                <div key={i} style={{ width:16,height:16,borderRadius:"50%",background:pinRevealInput.length>i?"#f0a500":"transparent",border:"2px solid #f0a500" }}/>
+              ))}
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"repeat(3,72px)",gap:12 }}>
+              {[1,2,3,4,5,6,7,8,9,"",0,"del"].map(k=>(
+                <button key={k} onClick={async ()=>{
+                  if(k==="") return;
+                  if(k==="del"){ setPinRevealInput(p=>p.slice(0,-1)); return; }
+                  const np = pinRevealInput+String(k);
+                  setPinRevealInput(np);
+                  if(np.length===4){
+                    const h = await hashPin(np);
+                    if(h===appPin){ onPinRevealSuccess(); if(pinRevealTarget==="income"){ setTab("transactions"); setFType("income"); } setPinRevealInput(""); }
+                    else { setPinRevealInput(""); setPinRevealError(true); setTimeout(()=>setPinRevealError(false),800); }
+                  }
+                }} style={{ width:72,height:72,borderRadius:36,background:k===""?"transparent":"rgba(255,255,255,0.1)",border:k===""?"none":"1px solid rgba(255,255,255,0.2)",color:"#fff",fontSize:k==="del"?16:22,fontWeight:700,cursor:k===""?"default":"pointer",fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",justifyContent:"center" }}>{k==="del"?"⌫":k}</button>
+              ))}
+            </div>
+            {pinRevealError&&<div style={{ color:"#ef4444",fontSize:12,marginTop:16,fontWeight:700 }}>Wrong PIN</div>}
+            <button onClick={()=>{ setShowPinReveal(false); setPinRevealInput(""); }} style={{ marginTop:24,background:"none",border:"1px solid rgba(255,255,255,0.3)",borderRadius:20,padding:"8px 24px",color:"rgba(255,255,255,0.7)",fontSize:12,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Cancel</button>
+          </div>
+        )}        
         {(showAddLiability||editingLiability)&&<LiabilityModal item={editingLiability} onClose={()=>{ setShowAddLiability(false); setEditingLiability(null); }}/>}
         {(showAddAsset||editingAsset)&&<AssetModal item={editingAsset} onClose={()=>{ setShowAddAsset(false); setEditingAsset(null); }}/>}
         {showAccDetail&&<AccDetailModal/>}
