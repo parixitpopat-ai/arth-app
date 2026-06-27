@@ -6096,6 +6096,8 @@ function AppContent({ onLock }) {
   };
 
   // ── HOME ───────────────────────────────────────────────────────────────────
+  const [privacyMode, setPrivacyMode] = useState(()=>JSON.parse(localStorage.getItem("arth_privacy_mode")||"false"));
+  const maskVal = v => privacyMode ? "₹XXXXX" : v;
   const DEFAULT_CARD_ORDER = ["stats","categories","cc","bills","recent"];
   const KNOWN_CARD_KEYS = new Set(["stats","budget","categories","cc","bills","recent"]);
   const [cardOrder, setCardOrder] = useState(()=>{
@@ -6503,12 +6505,12 @@ function AppContent({ onLock }) {
       stats: (
         <div key="stats" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
           {[
-            {label:"Income",value:`${sym}${fmt(totalIncome)}`,color:T.success,icon:"💚",action:()=>{ setTab("transactions"); setFType("income"); }},
+            {label:"Income",value:maskVal(`${sym}${fmt(totalIncome)}`),color:T.success,icon:"💚",action:()=>{ setTab("transactions"); setFType("income"); }},
             {label:"Investments",value:`${sym}${fmt(monthlyInvestmentFlow)}`,color:T.info,icon:"💹",action:()=>{ setSelectedInvestmentTypeView("all"); setShowInvestments(true); }},
             {label:"People & Groups",value:"",color:T.info,icon:"👥",action:()=>setTab("people")},
             {label:"Budget",value:`${sym}${fmt(monthly)}`,color:T.warn,icon:"🎯",action:()=>{ setShowSettings(true); setSettingsSection("budget"); }},
             {label:"To Receive",value:`${sym}${fmt(monthTotalOwedToMe + loanGivenTotal)}`,color:T.accent,icon:"🔄",action:()=>setShowReceivablesList(true),sub:(loanGivenTotal>0&&monthTotalOwedToMe>0)?`incl. ${sym}${fmtK(loanGivenTotal)} loans`:loanGivenTotal>0?`${sym}${fmtK(loanGivenTotal)} loans outstanding`:undefined},
-            {label:"Net Savings",value:`${sym}${fmtK(Math.max(0,totalIncome-myActual-monthlyInvestmentFlow))}`,color:T.success,icon:"💰",action:()=>setTab("home")},
+            {label:"Net Savings",value:maskVal(`${sym}${fmtK(Math.max(0,totalIncome-myActual-monthlyInvestmentFlow))}`),color:T.success,icon:"💰",action:()=>setTab("home")},
           ].map(s=>(
             <div key={s.label} onClick={s.action} style={{ ...card,marginBottom:0,padding:"12px",cursor:"pointer" }}>
               <div style={{ fontSize:20,marginBottom:4 }}>{s.icon}</div>
@@ -10094,19 +10096,34 @@ function AppContent({ onLock }) {
     "LPG Gas": "🛢️",
     "Piped Gas": "🔥",
     "Broadband": "📶",
+    "Landline": "📞",
+    "Cable TV": "📺",
     "Mobile Postpaid": "📱",
     "Mobile Prepaid": "📱",
-    "DTH": "📺",
+    "DTH": "📡",
     "Fastag": "🚗",
+    "Metro Recharge": "🚇",
+    "NCMC Recharge": "💳",
+    "EV Recharge": "⚡",
     "OTT / Streaming": "🎬",
     "Insurance": "🛡️",
     "Loan EMI": "🏦",
     "Credit Card": "💳",
+    "Recurring Deposit": "📅",
+    "NPS": "🏦",
     "Education Fees": "🎓",
     "Municipal Tax": "🏛️",
+    "Municipal Services": "🏛️",
     "Society Maintenance": "🏢",
     "Gym / Fitness": "🏋️",
     "Club Membership": "👥",
+    "Hospital": "🏥",
+    "Rental": "🏠",
+    "Prepaid Meter": "🔌",
+    "eChallan": "🚦",
+    "Fleet Card": "🚛",
+    "Donation": "❤️",
+    "B2B": "💼",
     "Other Subscription": "🔔",
     "Other": "📄",
   };
@@ -10306,7 +10323,14 @@ function AppContent({ onLock }) {
                       {paymentImageSrc&&<button onClick={(e)=>{ e.stopPropagation(); setImageViewSrc(paymentImageSrc); }} style={{ background:T.success+"14",border:`1px solid ${T.success}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.success,fontFamily:"Nunito,sans-serif" }}>💳 View payment</button>}
                     </div>
                   )}
-                  {/* Validity / period display */}
+                  {/* Plan / recharge details */}
+                  {(b.planType||b.planDesc)&&(
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:4 }}>
+                      {b.planType&&<span style={{ background:T.accent+"16",border:`1px solid ${T.accent}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.accent }}>{b.planType}</span>}
+                      {b.planDesc&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,color:T.sub }}>{b.planDesc}</span>}
+                    </div>
+                  )}
+              {/* Validity / period display */}
                   {(b.validFrom||b.validUntil||b.periodStart||b.periodEnd)&&(
                     <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:6 }}>
                       {(b.periodStart||b.validFrom)&&<span style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.info }}>From {formatShortDate(b.periodStart||b.validFrom)}</span>}
@@ -10399,7 +10423,7 @@ function AppContent({ onLock }) {
     const [baAttributedTo, setBaAttributedTo] = useState(existing?.attributedTo||"");
     const [baAttributeType, setBaAttributeType] = useState(existing?.attributeType||"house");
     const [baNote, setBaNote] = useState(existing?.note||"");
-    const BILLER_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Mobile Postpaid","Mobile Prepaid","DTH","Fastag","OTT / Streaming","Insurance","Loan EMI","Credit Card","Education Fees","Municipal Tax","Society Maintenance","Gym / Fitness","Club Membership","Other Subscription","Other"];
+    const BILLER_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","Mobile Postpaid","Mobile Prepaid","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","OTT / Streaming","Insurance","Loan EMI","Credit Card","Recurring Deposit","NPS","Education Fees","Municipal Tax","Municipal Services","Society Maintenance","Gym / Fitness","Club Membership","Hospital","Rental","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Other Subscription","Other"];
     const canSave = baName.trim() && baType;
     const handleSave = () => {
       if(!canSave) return;
@@ -10485,6 +10509,13 @@ function AppContent({ onLock }) {
     const [consumerNumber,setConsumerNumber]=useState(_preBA?.consumerNo||"");
     const [lastPaidAmount,setLastPaidAmount]=useState("");
     const [autoGenerate,setAutoGenerate]=useState(true);
+    // Prepaid recharge fields
+    const isRecharge = ["Mobile Prepaid","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","DTH"].includes(billerCategory);
+    const [validityDays,setValidityDays]=useState("");
+    const [planType,setPlanType]=useState("");
+    const [planDesc,setPlanDesc]=useState("");
+    const [validFrom2,setValidFrom2]=useState(todayStr());
+    const validUntilCalc = validityDays && validFrom2 ? (()=>{ const d=new Date(validFrom2); d.setDate(d.getDate()+Number(validityDays)); return d.toISOString().split("T")[0]; })() : "";
     // Split state
     const [billSplitPeople,setBillSplitPeople]=useState({});
     const [billGroup,setBillGroup]=useState("");
@@ -10522,7 +10553,7 @@ function AppContent({ onLock }) {
       const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
       const myShare = billIncludeMe ? Math.max(0, amt-owedByOthers) : 0;
       const groupCollectiveAmount = billGroup ? Math.max(0, amt-owedByOthers-myShare) : 0;
-      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),amount:amt,dueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring,frequency,status:"unpaid",paidDate:null,billDate:billDate||todayStr(),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto,billerAccountId:billerAccountId||null,billerCategory:billerCategory||null,consumerNumber:consumerNumber.trim()||null,lastPaidAmount:lastPaidAmount?parseFloat(lastPaidAmount):null,autoGenerate,isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0};
+      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),amount:amt,dueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring,frequency,status:"unpaid",paidDate:null,billDate:billDate||todayStr(),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto,billerAccountId:billerAccountId||null,billerCategory:billerCategory||null,consumerNumber:consumerNumber.trim()||null,lastPaidAmount:lastPaidAmount?parseFloat(lastPaidAmount):null,autoGenerate,isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0,validityDays:validityDays?Number(validityDays):null,planType:planType||null,planDesc:planDesc.trim()||null,validFrom:validFrom2||null,validUntil:validUntilCalc||null};
       setBills(p=>[newBill,...p]);
 
       const matchingTxn = txns.find(t=>t.type==="expense" && !t.isBillPayment && !t.paidBillId && Number(t.amount)===amt && (billCatIds[0]? t.catId===billCatIds[0] : true));
@@ -10555,6 +10586,19 @@ function AppContent({ onLock }) {
               <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center",border:`1px solid ${amount&&parseFloat(amount)>0?T.border:T.danger+"66"}` }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
             </div>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              {/* Prepaid recharge fields */}
+              {isRecharge&&(
+                <div style={{ gridColumn:"1/-1",background:T.input,borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:8 }}>
+                  <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>RECHARGE DETAILS</div>
+                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                    <div><span style={lbl}>Recharge Date</span><input style={inp} type="date" value={validFrom2} onChange={e=>setValidFrom2(e.target.value)}/></div>
+                    <div><span style={lbl}>Validity (days)</span><input style={inp} type="number" placeholder="28, 84, 365" value={validityDays} onChange={e=>setValidityDays(e.target.value)}/></div>
+                  </div>
+                  {validUntilCalc&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(validUntilCalc)||validUntilCalc}</span></div>}
+                  <div><span style={lbl}>Plan Type</span><div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>{["Voice+Data","Data Only","Unlimited Calls","SMS+Voice"].map(pt=>(<button key={pt} onClick={()=>setPlanType(p=>p===pt?"":pt)} style={{ background:planType===pt?T.accent+"22":"none",border:`1px solid ${planType===pt?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:planType===pt?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pt}</button>))}</div></div>
+                  <div><span style={lbl}>Plan Details</span><input style={inp} placeholder="e.g. 1.5GB/day + unlimited calls" value={planDesc} onChange={e=>setPlanDesc(e.target.value)}/></div>
+                </div>
+              )}
               <div><span style={lbl}>Bill Date (generated on)</span><input style={inp} type="date" value={billDate} onChange={e=>setBillDate(e.target.value)}/></div>
               <div><span style={lbl}>Due Date (pay by)</span><input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
             </div>
@@ -10767,6 +10811,7 @@ function AppContent({ onLock }) {
           <div style={{ display:"flex",gap:8,alignItems:"center" }}>
             <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif" }}>💼{workTripMode?" ON":""}</button>
             <button onClick={()=>{ setShowSearch(true); setSearchQuery(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Search">🔍</button>
+            <button onClick={()=>{ const nm=!privacyMode; setPrivacyMode(nm); localStorage.setItem("arth_privacy_mode",JSON.stringify(nm)); }} style={{ background:privacyMode?T.danger+"22":"none",border:`1px solid ${privacyMode?T.danger:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15 }}>{privacyMode?"🙈":"👁️"}</button>
             <button onClick={()=>{ if(tab==="bills") setShowAddBill(true); else { const typeMap={"expense":"expense","income":"income","transfer":"transfer","cc_payment":"cc_payment","investment":"investment","settlement_in":"settlement_in"}; setDefaultAddType(typeMap[fType]||"expense"); setShowAdd(true); } }} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Nunito,sans-serif" }}>{tab==="bills"?"+ Add Bill":"+ Add"}</button>
           </div>
         </div>}
