@@ -887,6 +887,12 @@ function AppContent({ onLock }) {
   const [investments, setInvestments] = useState(()=>JSON.parse(localStorage.getItem("arth_investments")||"[]"));
   const [bills, setBills] = useState(()=>JSON.parse(localStorage.getItem("arth_bills")||"[]"));
   const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
+  const [memberships, setMemberships] = useState(()=>JSON.parse(localStorage.getItem("arth_memberships")||"[]"));
+  const [feePayments, setFeePayments] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_payments")||"[]"));
+  const [showAddMembership, setShowAddMembership] = useState(false);
+  const [editingMembership, setEditingMembership] = useState(null);
+  const [showAddFeePayment, setShowAddFeePayment] = useState(false);
+  const [activeBillerForAction, setActiveBillerForAction] = useState(null);
   const [showAddBillerAccount, setShowAddBillerAccount] = useState(false);
   const [editingBillerAccount, setEditingBillerAccount] = useState(null);
   const [billSearch, setBillSearch] = useState("");
@@ -919,6 +925,8 @@ function AppContent({ onLock }) {
   useEffect(()=>localStorage.setItem("arth_budget",monthBudget),[monthBudget]);
   useEffect(()=>localStorage.setItem("arth_bills",JSON.stringify(bills)),[bills]);
   useEffect(()=>localStorage.setItem("arth_biller_accounts",JSON.stringify(billerAccounts)),[billerAccounts]);
+  useEffect(()=>localStorage.setItem("arth_memberships",JSON.stringify(memberships)),[memberships]);
+  useEffect(()=>localStorage.setItem("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
   useEffect(()=>localStorage.setItem("arth_liabilities",JSON.stringify(liabilities)),[liabilities]);
   useEffect(()=>localStorage.setItem("arth_assets",JSON.stringify(trackedAssets)),[trackedAssets]);
   useEffect(()=>localStorage.setItem("arth_vehicles",JSON.stringify(vehicles)),[vehicles]);
@@ -6168,6 +6176,8 @@ function AppContent({ onLock }) {
     investments,
     bills,
     billerAccounts,
+    memberships,
+    feePayments,
     liabilities,
     trackedAssets,
     loans,
@@ -6204,6 +6214,8 @@ function AppContent({ onLock }) {
     setInvestments(Array.isArray(snapshot.investments) ? snapshot.investments : []);
     setBills(Array.isArray(snapshot.bills) ? snapshot.bills : []);
     setBillerAccounts(Array.isArray(snapshot.billerAccounts) ? snapshot.billerAccounts : []);
+    setMemberships(Array.isArray(snapshot.memberships) ? snapshot.memberships : []);
+    setFeePayments(Array.isArray(snapshot.feePayments) ? snapshot.feePayments : []);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
@@ -10193,7 +10205,7 @@ function AppContent({ onLock }) {
                     const lastBill = [...billsForAcc].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
                     const isExpiringSoon = ba.membershipEndDate && (new Date(ba.membershipEndDate)-new Date())/(1000*60*60*24) <= 30;
                     return (
-                      <div key={ba.id} onClick={()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); }} style={{ minWidth:120,background:T.card,borderRadius:16,padding:"12px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}`,position:"relative",flexShrink:0 }}>
+                      <div key={ba.id} onClick={()=>setActiveBillerForAction(ba)} style={{ minWidth:120,background:T.card,borderRadius:16,padding:"12px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}`,position:"relative",flexShrink:0 }}>
                         {unpaidCount>0&&<div style={{ position:"absolute",top:8,right:8,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>{unpaidCount}</div>}
                         {isExpiringSoon&&<div style={{ position:"absolute",top:8,right:8,background:T.warn,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>!</div>}
                         <div style={{ fontSize:28,marginBottom:6 }}>{getBillerIcon(ba.type)}</div>
@@ -10234,11 +10246,11 @@ function AppContent({ onLock }) {
                     {filtered2.map(type=>{
                       const existingBA = billerAccounts.find(ba=>ba.type===type);
                       const unpaid = existingBA ? bills.filter(b=>String(b.billerAccountId)===String(existingBA.id)&&b.status==="unpaid").length : 0;
+                      const actionType = getBillerActionType(type);
                       return (
                         <div key={type} onClick={()=>{
                           if(existingBA){
-                            setDefaultBillerAccountId(existingBA.id);
-                            setShowAddBill(true);
+                            setActiveBillerForAction(existingBA);
                           } else {
                             setShowAddBillerAccount(true);
                             setPreselectedBillerType(type);
@@ -10549,6 +10561,238 @@ function AppContent({ onLock }) {
               </div>
             )}
             <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Biller Account"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+
+  // -- BILLING TYPE HELPERS --------------------------------------------------
+  const MEMBERSHIP_TYPES = ["Gym / Fitness","Club Membership","School Fees","Education Fees","Other Subscription","Insurance","Society Maintenance","Rental"];
+  const BILL_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Hospital","Other"];
+  const HYBRID_TYPES = ["Mobile Postpaid","Mobile Prepaid","OTT / Streaming","NPS","Recurring Deposit","Loan EMI","Credit Card","Municipal Tax","Municipal Services"];
+  const getBillerActionType = type => {
+    if(MEMBERSHIP_TYPES.includes(type)) return "membership";
+    if(BILL_TYPES.includes(type)) return "bill";
+    return "hybrid";
+  };
+
+  // -- ADD MEMBERSHIP MODAL --------------------------------------------------
+  const AddMembershipModal = ({ billerAccount, existing, onClose }) => {
+    const isEdit = !!existing;
+    const [memberPersonId, setMemberPersonId] = useState(existing?.personId||"self");
+    const [amount, setAmount] = useState(existing?.amount?String(existing.amount):"");
+    const [cycle, setCycle] = useState(existing?.cycle||"monthly");
+    const [validFrom, setValidFrom] = useState(existing?.validFrom||todayStr());
+    const [graceDays, setGraceDays] = useState(existing?.graceDays?String(existing.graceDays):"0");
+    const [bulkMonths, setBulkMonths] = useState("1");
+    const [accId, setAccId] = useState(existing?.accId||accounts.find(a=>a.type!=="cc")?.id||"");
+
+    const cycleMonths = { monthly:1, quarterly:3, halfyearly:6, annual:12 };
+    const totalMonths = Number(bulkMonths) * (cycleMonths[cycle]||1);
+    const validUntil = (() => {
+      if(!validFrom) return "";
+      const d = new Date(validFrom);
+      d.setMonth(d.getMonth() + totalMonths);
+      d.setDate(d.getDate() + Number(graceDays||0));
+      d.setDate(d.getDate()-1);
+      return d.toISOString().split("T")[0];
+    })();
+    const daysLeft = validUntil ? Math.round((new Date(validUntil)-new Date())/(1000*60*60*24)) : null;
+
+    const handleSave = () => {
+      if(!amount||!validFrom) return;
+      const record = {
+        id: existing?.id||genId(),
+        billerAccountId: billerAccount.id,
+        personId: memberPersonId,
+        amount: parseFloat(amount),
+        cycle,
+        bulkMonths: Number(bulkMonths),
+        graceDays: Number(graceDays||0),
+        validFrom,
+        validUntil,
+        accId,
+        paidDate: todayStr(),
+        createdAt: existing?.createdAt||Date.now(),
+        status: "active",
+      };
+      setMemberships(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[...prev,record]);
+      // Record as expense transaction
+      if(!isEdit){
+        const newTxn = {
+          id: genId(), type:"expense", amount:parseFloat(amount),
+          who: billerAccount.name, accId, date: todayStr(),
+          catIds:[cats.find(c=>c.name==="Fitness"||c.name==="Health")?.id||cats[0]?.id],
+          note:`${billerAccount.name} membership ${bulkMonths>1?bulkMonths+" months":""}`,
+          membershipId: record.id, createdAt: Date.now(),
+        };
+        setTxns(prev=>[newTxn,...prev]);
+      }
+      onClose();
+    };
+
+    const memberPerson = memberPersonId==="self" ? null : people.find(p=>String(p.id)===String(memberPersonId));
+    return (
+      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+            <div>
+              <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit Membership":"Add Membership"}</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{getBillerIcon(billerAccount.type)} {billerAccount.name}</div>
+            </div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Member</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                <button onClick={()=>setMemberPersonId("self")} style={{ background:memberPersonId==="self"?T.accent+"22":"none",border:`1px solid ${memberPersonId==="self"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:memberPersonId==="self"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>Me</button>
+                {people.map(p=>(
+                  <button key={p.id} onClick={()=>setMemberPersonId(String(p.id))} style={{ background:memberPersonId===String(p.id)?T.accent+"22":"none",border:`1px solid ${memberPersonId===String(p.id)?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:memberPersonId===String(p.id)?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <span style={lbl}>Billing Cycle</span>
+              <div style={{ display:"flex",gap:6 }}>
+                {["monthly","quarterly","halfyearly","annual"].map(c=>(
+                  <button key={c} onClick={()=>setCycle(c)} style={{ flex:1,background:cycle===c?T.accent+"22":"none",border:`1px solid ${cycle===c?T.accent:T.border}`,borderRadius:10,padding:"6px 4px",cursor:"pointer",fontSize:10,fontWeight:700,color:cycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>Amount (per cycle)</span><input style={inp} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/></div>
+              <div><span style={lbl}>No. of cycles paying</span><input style={inp} type="number" min="1" placeholder="1" value={bulkMonths} onChange={e=>setBulkMonths(e.target.value)}/></div>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>Valid From</span><input style={inp} type="date" value={validFrom} onChange={e=>setValidFrom(e.target.value)}/></div>
+              <div><span style={lbl}>Grace Days</span><input style={inp} type="number" min="0" placeholder="0" value={graceDays} onChange={e=>setGraceDays(e.target.value)}/></div>
+            </div>
+            {validUntil&&(
+              <div style={{ background:daysLeft>=0?T.success+"16":T.danger+"16",border:`1px solid ${daysLeft>=0?T.success:T.danger}33`,borderRadius:12,padding:"10px 14px" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <span style={{ color:T.sub,fontSize:11 }}>Valid Until</span>
+                  <span style={{ color:daysLeft>=0?T.success:T.danger,fontSize:13,fontWeight:800 }}>{formatShortDate(validUntil)||validUntil}</span>
+                </div>
+                <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>
+                  {Number(bulkMonths)>1?`${bulkMonths} cycles paid`:""}{Number(graceDays)>0?` + ${graceDays} grace days`:""}
+                  {daysLeft!==null&&` — ${daysLeft>=0?`${daysLeft} days remaining`:"Expired"}`}
+                </div>
+              </div>
+            )}
+            <div>
+              <span style={lbl}>Paid From Account</span>
+              <select style={inp} value={accId} onChange={e=>setAccId(e.target.value)}>
+                {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+            <button onClick={handleSave} disabled={!amount||!validFrom} style={{ background:amount&&validFrom?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:amount&&validFrom?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Membership"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // -- ADD FEE PAYMENT MODAL -------------------------------------------------
+  const AddFeePaymentModal = ({ billerAccount, onClose }) => {
+    const [amount, setAmount] = useState("");
+    const [payDate, setPayDate] = useState(todayStr());
+    const [monthsFrom, setMonthsFrom] = useState(todayStr().slice(0,7));
+    const [monthCount, setMonthCount] = useState("1");
+    const [accId, setAccId] = useState(accounts.find(a=>a.type!=="cc")?.id||"");
+    const [note, setNote] = useState("");
+
+    const monthsArr = (() => {
+      const arr = [];
+      const start = new Date(monthsFrom+"-01");
+      for(let i=0;i<Number(monthCount);i++){
+        const d = new Date(start);
+        d.setMonth(d.getMonth()+i);
+        arr.push(d.toISOString().slice(0,7));
+      }
+      return arr;
+    })();
+    const perMonth = amount && monthCount ? Math.round(parseFloat(amount)/Number(monthCount)) : 0;
+
+    const handleSave = () => {
+      if(!amount||!payDate) return;
+      const record = {
+        id: genId(),
+        billerAccountId: billerAccount.id,
+        amount: parseFloat(amount),
+        payDate,
+        monthsFrom,
+        monthCount: Number(monthCount),
+        monthsArr,
+        perMonth,
+        accId,
+        note: note.trim(),
+        createdAt: Date.now(),
+      };
+      setFeePayments(prev=>[record,...prev]);
+      // Record as one transaction
+      const newTxn = {
+        id: genId(), type:"expense", amount:parseFloat(amount),
+        who: billerAccount.name, accId, date: payDate,
+        catIds:[cats.find(c=>c.name==="Education"||c.name==="Family")?.id||cats[0]?.id],
+        note: note||`${billerAccount.name} fees — ${monthCount} months (${monthsArr[0]} to ${monthsArr[monthsArr.length-1]})`,
+        feePaymentId: record.id, createdAt: Date.now(),
+      };
+      setTxns(prev=>[newTxn,...prev]);
+      onClose();
+    };
+
+    return (
+      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+            <div>
+              <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Add Fee Payment</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{getBillerIcon(billerAccount.type)} {billerAccount.name}</div>
+            </div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Total Amount Paid</span>
+              <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center" }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>Payment Date</span><input style={inp} type="date" value={payDate} onChange={e=>setPayDate(e.target.value)}/></div>
+              <div><span style={lbl}>No. of Months</span><input style={inp} type="number" min="1" max="12" placeholder="1" value={monthCount} onChange={e=>setMonthCount(e.target.value)}/></div>
+            </div>
+            <div>
+              <span style={lbl}>Covers From (Month)</span>
+              <input style={inp} type="month" value={monthsFrom} onChange={e=>setMonthsFrom(e.target.value)}/>
+            </div>
+            {monthsArr.length>0&&(
+              <div style={{ background:T.input,borderRadius:12,padding:"10px 14px" }}>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:8 }}>MONTHLY DISTRIBUTION</div>
+                {monthsArr.map(m=>(
+                  <div key={m} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}` }}>
+                    <span style={{ color:T.sub,fontSize:12 }}>{m}</span>
+                    <span style={{ color:T.accent,fontSize:12,fontWeight:800 }}>{sym}{fmt(perMonth)}</span>
+                  </div>
+                ))}
+                <div style={{ display:"flex",justifyContent:"space-between",marginTop:6 }}>
+                  <span style={{ color:T.sub,fontSize:11 }}>Total</span>
+                  <span style={{ color:T.text,fontSize:13,fontWeight:900 }}>{sym}{fmt(parseFloat(amount)||0)}</span>
+                </div>
+              </div>
+            )}
+            <div>
+              <span style={lbl}>Paid From</span>
+              <select style={inp} value={accId} onChange={e=>setAccId(e.target.value)}>
+                {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <span style={lbl}>Note (optional)</span>
+              <input style={inp} placeholder="e.g. Term 2 fees" value={note} onChange={e=>setNote(e.target.value)}/>
+            </div>
+            <button onClick={handleSave} disabled={!amount||!payDate} style={{ background:amount&&payDate?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:amount&&payDate?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>Add Fee Payment</button>
           </div>
         </div>
       </div>
@@ -10982,6 +11226,102 @@ function AppContent({ onLock }) {
         {showAddBill&&<AddBillModal/>}
         {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); }}/>}
         {editingBillerAccount&&<BillerAccountModal existing={editingBillerAccount} onClose={()=>setEditingBillerAccount(null)}/>}
+        {showAddMembership&&activeBillerForAction&&<AddMembershipModal billerAccount={activeBillerForAction} existing={editingMembership} onClose={()=>{ setShowAddMembership(false); setEditingMembership(null); }}/>}
+        {showAddFeePayment&&activeBillerForAction&&<AddFeePaymentModal billerAccount={activeBillerForAction} onClose={()=>{ setShowAddFeePayment(false); setActiveBillerForAction(null); }}/>}
+        {/* Biller Action Sheet */}
+        {activeBillerForAction&&!showAddMembership&&!showAddFeePayment&&!showAddBill&&(()=>{
+          const ba = activeBillerForAction;
+          const actionType = getBillerActionType(ba.type);
+          const baMemberships = memberships.filter(m=>m.billerAccountId===ba.id);
+          const baFees = feePayments.filter(f=>f.billerAccountId===ba.id);
+          const baBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
+          const activeMembership = baMemberships.filter(m=>m.validUntil>=todayStr()).sort((a,b2)=>b2.validUntil.localeCompare(a.validUntil))[0];
+          return (
+            <div onClick={e=>{ if(e.target===e.currentTarget) setActiveBillerForAction(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+              <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                    <span style={{ fontSize:28 }}>{getBillerIcon(ba.type)}</span>
+                    <div>
+                      <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{ba.name}</div>
+                      <div style={{ color:T.sub,fontSize:11 }}>{ba.type}{ba.consumerNo?` · #${ba.consumerNo}`:""}</div>
+                    </div>
+                  </div>
+                  <button onClick={()=>setActiveBillerForAction(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+                </div>
+                {/* Active membership status */}
+                {activeMembership&&(
+                  <div style={{ background:T.success+"16",border:`1px solid ${T.success}33`,borderRadius:12,padding:"10px 14px",marginBottom:14 }}>
+                    <div style={{ display:"flex",justifyContent:"space-between" }}>
+                      <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>✅ Active</span>
+                      <span style={{ color:T.sub,fontSize:11 }}>Until {formatShortDate(activeMembership.validUntil)||activeMembership.validUntil}</span>
+                    </div>
+                    {activeMembership.personId&&activeMembership.personId!=="self"&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>{people.find(p=>String(p.id)===String(activeMembership.personId))?.name||"Unknown"}</div>}
+                  </div>
+                )}
+                {/* Actions */}
+                <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
+                  {(actionType==="membership"||actionType==="hybrid")&&(
+                    <button onClick={()=>setShowAddMembership(true)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>💪 Add Membership / Renew</button>
+                  )}
+                  {(actionType==="bill"||actionType==="hybrid")&&(
+                    <button onClick={()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); setActiveBillerForAction(null); }} style={{ background:T.info+"22",border:`1px solid ${T.info}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>📄 Add Bill</button>
+                  )}
+                  {actionType==="membership"&&(
+                    <button onClick={()=>setShowAddFeePayment(true)} style={{ background:T.warn+"22",border:`1px solid ${T.warn}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.warn,fontFamily:"Nunito,sans-serif" }}>🏫 Add Fee Payment (multi-month)</button>
+                  )}
+                </div>
+                {/* History */}
+                {baMemberships.length>0&&(
+                  <div style={{ marginBottom:12 }}>
+                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>MEMBERSHIP HISTORY</div>
+                    {baMemberships.sort((a,b2)=>b2.createdAt-a.createdAt).slice(0,5).map(m=>(
+                      <div key={m.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                        <div>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{people.find(p=>String(p.id)===String(m.personId))?.name||"Me"} · {m.cycle}</div>
+                          <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(m.validFrom)||m.validFrom} to {formatShortDate(m.validUntil)||m.validUntil}{m.graceDays>0?` (+${m.graceDays}d grace)`:""}</div>
+                        </div>
+                        <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(m.amount)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {baFees.length>0&&(
+                  <div style={{ marginBottom:12 }}>
+                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>FEE PAYMENTS</div>
+                    {baFees.sort((a,b2)=>b2.createdAt-a.createdAt).slice(0,5).map(f=>(
+                      <div key={f.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                        <div>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{f.monthCount} months · {sym}{fmt(f.perMonth)}/mo</div>
+                          <div style={{ color:T.sub,fontSize:10 }}>{f.monthsArr?.[0]} to {f.monthsArr?.[f.monthsArr.length-1]}</div>
+                        </div>
+                        <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(f.amount)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Edit / Delete biller account */}
+                <div style={{ display:"flex",gap:8,marginTop:8 }}>
+                  <button onClick={()=>{ setEditingBillerAccount(ba); setActiveBillerForAction(null); }} style={{ flex:1,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit Account</button>
+                  <button onClick={()=>{
+                    const linkedBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
+                    const linkedMem = memberships.filter(m=>m.billerAccountId===ba.id);
+                    const linkedFee = feePayments.filter(f=>f.billerAccountId===ba.id);
+                    const total = linkedBills.length+linkedMem.length+linkedFee.length;
+                    if(total>0){
+                      alert(`Cannot delete: ${ba.name} has ${total} linked record${total>1?"s":""}. Delete the bills, memberships and fee payments first.`);
+                      return;
+                    }
+                    if(window.confirm(`Delete ${ba.name}?`)){
+                      setBillerAccounts(prev=>prev.filter(x=>x.id!==ba.id));
+                      setActiveBillerForAction(null);
+                    }
+                  }} style={{ flex:1,background:"none",border:`1px solid ${T.danger}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete Account</button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         {editingBill&&<EditBillModal b={editingBill} onClose={()=>setEditingBill(null)}/>}
         {billMatchSuggestion&&(
           <div style={{ position:"fixed",bottom:90,left:"50%",transform:"translateX(-50%)",width:"calc(100% - 32px)",maxWidth:398,background:T.card,border:`1px solid ${T.success}66`,borderRadius:16,padding:"14px 16px",zIndex:300,boxShadow:`0 4px 24px ${T.sh}` }}>
