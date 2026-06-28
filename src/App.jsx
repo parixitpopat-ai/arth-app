@@ -1967,8 +1967,24 @@ function AppContent({ onLock }) {
         return inner + remainingShare(info);
       },0) + Number(b.groupCollectiveAmount||0)
     ,0);
-    return txnOwed + billOwed;
-  },[txns,bills,getGroupCollectiveDue]);
+    // Add individual member outstanding (expenses tagged to group members individually)
+    const group = groups.find(g=>g.id===groupId);
+    const memberIndividualOwed = (group?.members||[]).reduce((sum,memberId)=>{
+      const memberTxnOwed = txns.filter(t=>
+        t.type==="expense" &&
+        t.people?.[memberId]?.mode==="owes" &&
+        !t.people?.[memberId]?.settled &&
+        !t.groupId // not a group expense - avoid double counting
+      ).reduce((s,t)=>s+remainingShare(t.people[memberId]),0);
+      const memberLoanOwed = loans.filter(l=>
+        l.direction!=="taken" &&
+        l.status==="active" &&
+        String(l.personId||l.linkedPersonId||"")===String(memberId)
+      ).reduce((s,l)=>s+Number(l.outstanding||0),0);
+      return sum + memberTxnOwed + memberLoanOwed;
+    },0);
+    return txnOwed + billOwed + memberIndividualOwed;
+  },[txns,bills,loans,groups,getGroupCollectiveDue]);
 
   const getPersonReceivableItems = useCallback(personId=>{
     if(!personId) return [];
@@ -2603,6 +2619,11 @@ function AppContent({ onLock }) {
     const [toAccId, setToAccId] = useState(isEditing ? (sourceTxn.toAccId || defaultToCardId) : (safePrefill.toAccId || defaultToCardId));
     const [note, setNote] = useState(isEditing ? (sourceTxn.note || "") : (refundPrefill ? `Refund for ${refundPrefill.desc||refundPrefill.merchant||"expense"}` : (safePrefill.note || "")));
     const [billerLinkId, setBillerLinkId] = useState(isEditing ? (sourceTxn.billerLinkId||"") : "");
+    const [settleSelectedIds, setSettleSelectedIds] = useState({});
+    const [guestPersonName, setGuestPersonName] = useState("");
+    const [discount, setDiscount] = useState("");
+    const [guestPersonAmount, setGuestPersonAmount] = useState("");
+    const [showGuestPerson, setShowGuestPerson] = useState(false);
     const [showMembershipPanel, setShowMembershipPanel] = useState(false);
     const [linkValidFrom, setLinkValidFrom] = useState(todayStr());
     const [linkCycle, setLinkCycle] = useState("monthly");
@@ -2662,6 +2683,8 @@ function AppContent({ onLock }) {
     const [reimbursableAmount, setReimbursableAmount] = useState(isEditing && sourceTxn?.reimbursableAmount ? String(sourceTxn.reimbursableAmount) : "");
     const [emiDueDay, setEmiDueDay] = useState("");
     const [emiInterestRate, setEmiInterestRate] = useState("");
+    const [emiInterestWaiver, setEmiInterestWaiver] = useState("");
+    const [emiGstOnInterest, setEmiGstOnInterest] = useState("");
     const [isBillPayment, setIsBillPayment] = useState(isEditing ? Boolean(sourceTxn?.isBillPayment) : false);
     const [vehicleId, setVehicleId] = useState(isEditing ? (sourceTxn?.vehicleId||"") : "");
     const [tagPersonAmount, setTagPersonAmount] = useState(isEditing && sourceTxn?.tagPersonAmount ? String(sourceTxn.tagPersonAmount) : "");
@@ -3122,6 +3145,19 @@ function AppContent({ onLock }) {
       return shares;
     };
 
+    // EMI SMS auto-link helper
+    const tryAutoLinkEmi = (parsedAmt, parsedMerchant) => {
+      if(!parsedAmt) return;
+      const emiLoans = loans.filter(l=>l.status==="active"&&l.sourceType&&l.emiAmount>0);
+      const match = emiLoans.find(l=>{
+        const amtMatch = Math.abs(Number(l.emiAmount||0)-parsedAmt)<2;
+        const nameMatch = parsedMerchant ? (l.name||"").toLowerCase().includes(parsedMerchant.toLowerCase().slice(0,4)) : false;
+        return amtMatch || nameMatch;
+      });
+      if(match && !billerLinkId){
+        setSmsParseMeta(prev=>prev?{...prev,emiLoanId:match.id,emiLoanName:match.name}:prev);
+      }
+    };
     const parseSms = (txt, options={}) => {
       setSmsRaw(txt);
       if(!txt.trim()){
@@ -3245,6 +3281,8 @@ function AppContent({ onLock }) {
         balanceAdjusted,
         balanceDiff,
       });
+      // Try auto-link EMI loan
+      if(parsedAmt && parsedType==="expense") tryAutoLinkEmi(parsedAmt, merchant);
     };
 
     const importSms = async mode => {
@@ -3300,6 +3338,7 @@ function AppContent({ onLock }) {
         imageBase64,
         transactionRef:transactionRef.trim()||null,
         billerLinkId:billerLinkId||undefined,
+        discount:discount?parseFloat(discount):undefined,
       };
       const upsertTxn = nextTxn => {
         setTxns(prev=>isEditing
@@ -3398,6 +3437,8 @@ function AppContent({ onLock }) {
               tenureMonths:tenureNum,
               hasInterest:Number(emiInterestRate||0)>0,
               interestRate:Math.max(0, parseFloat(emiInterestRate)||0),
+              emiInterestWaiver:emiInterestWaiver?parseFloat(emiInterestWaiver):undefined,
+              emiGstOnInterest:emiGstOnInterest?parseFloat(emiGstOnInterest):undefined,
               emiAmount:emiAmt,
               paymentAccId:accId || nonCCAccs[0]?.id || "",
               sourceType:emiSourceType,
@@ -3686,6 +3727,47 @@ function AppContent({ onLock }) {
         if(!isEditing){
           const pending = txns.filter(t=>t.type==="expense" && t.reimbursable && !t.reimbursedByTxnId);
           if(pending.length>0) setReimbursementMatchSuggestion({ incomeTxnId:resolvedTxnId, pending });
+          // Process settlements if any selected
+          const selectedIds = Object.keys(settleSelectedIds).filter(k=>settleSelectedIds[k]);
+          if(selectedIds.length>0){
+            // Settle person outstanding
+            selectedIds.forEach(id=>{
+              const person = people.find(p=>String(p.id)===id);
+              const group = groups.find(g=>g.id===id);
+              if(person){
+                // Settle all expense splits for this person
+                setTxns(prev=>prev.map(t=>{
+                  if(!t.splitPeople?.[id]) return t;
+                  const info=t.splitPeople[id];
+                  if(info.settled) return t;
+                  return {...t, splitPeople:{...t.splitPeople,[id]:{...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0}}};
+                }));
+                // Settle active loans for this person
+                setLoans(prev=>prev.map(l=>{
+                  if(l.direction==="taken") return l;
+                  if(String(l.personId||l.linkedPersonId||"")!==String(id)) return l;
+                  if(l.status!=="active") return l;
+                  return {...l, status:"closed", outstanding:0};
+                }));
+              }
+              if(group){
+                // Settle group-level expenses
+                setTxns(prev=>prev.map(t=>{
+                  if(t.type!=="expense"||t.groupId!==id) return t;
+                  return {...t, groupCollectiveSettledAmt:Number(t.groupCollectiveAmount||0)};
+                }));
+                // Settle individual members
+                (group.members||[]).forEach(pid=>{
+                  setTxns(prev=>prev.map(t=>{
+                    if(!t.splitPeople?.[pid]) return t;
+                    const info=t.splitPeople[pid];
+                    if(info.settled) return t;
+                    return {...t, splitPeople:{...t.splitPeople,[pid]:{...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0}}};
+                  }));
+                });
+              }
+            });
+          }
         }
       } else if(txnType==="transfer"){
         upsertTxn({ ...base, amount:amt, fromAccId, toAccId, catId:null, catIds:[], subId:null, subIds:[] });
@@ -3978,6 +4060,15 @@ function AppContent({ onLock }) {
               </div>
             )}
             {(txnType==="cc_payment"||txnType==="transfer")&&<input style={inp} placeholder="Note (optional)" value={who} onChange={e=>setWho(e.target.value)}/>}
+            {txnType==="expense"&&(
+              <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                <div style={{ flex:1 }}><span style={lbl}>Discount ({sym}) (optional)</span><input style={inp} type="text" inputMode="decimal" placeholder="0" value={discount||""} onChange={e=>setDiscount(cleanMoneyInput(e.target.value))}/></div>
+                {discount&&parseFloat(discount)>0&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",flexShrink:0 }}>
+                  <div style={{ color:T.sub,fontSize:9 }}>You paid</div>
+                  <div style={{ color:T.success,fontSize:13,fontWeight:800 }}>{sym}{fmt(Math.max(0,(parseFloat(amount)||0)-(parseFloat(discount)||0)))}</div>
+                </div>}
+              </div>
+            )}
 
             <div style={{ display:"grid",gridTemplateColumns:"1.2fr 1fr",gap:10 }}>
               <div>
@@ -4073,6 +4164,30 @@ function AppContent({ onLock }) {
                         <input style={inp} type="text" inputMode="decimal" placeholder={`e.g. ${sym}2,500`} value={emiAmount||""} onChange={e=>setEmiAmount(cleanMoneyInput(e.target.value))}/>
                       </div>
                     </div>
+                    {/* No Cost EMI fields */}
+                    <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:10 }}>
+                      <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>NO COST EMI / INTEREST (optional)</div>
+                      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                        <div>
+                          <span style={lbl}>Interest waiver discount ({sym})</span>
+                          <input style={inp} type="text" inputMode="decimal" placeholder="e.g. 3,600" value={emiInterestWaiver||""} onChange={e=>setEmiInterestWaiver(cleanMoneyInput(e.target.value))}/>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>Shown on e-comm as discount — true interest cost</div>
+                        </div>
+                        <div>
+                          <span style={lbl}>GST on interest ({sym})</span>
+                          <input style={inp} type="text" inputMode="decimal" placeholder="e.g. 648" value={emiGstOnInterest||""} onChange={e=>setEmiGstOnInterest(cleanMoneyInput(e.target.value))}/>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>18% of interest waiver — your actual financing cost</div>
+                        </div>
+                      </div>
+                      {(emiInterestWaiver||emiGstOnInterest)&&(
+                        <div style={{ background:T.card,borderRadius:10,padding:"8px 10px",marginTop:8 }}>
+                          <div style={{ color:T.sub,fontSize:10 }}>Item cost: {sym}{fmt(amt||0)}</div>
+                          <div style={{ color:T.sub,fontSize:10 }}>Interest waiver: {sym}{fmt(parseFloat(emiInterestWaiver)||0)}</div>
+                          <div style={{ color:T.danger,fontSize:10 }}>GST on interest: {sym}{fmt(parseFloat(emiGstOnInterest)||0)}</div>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:800,marginTop:4 }}>True cost of financing: {sym}{fmt(parseFloat(emiGstOnInterest)||0)}</div>
+                        </div>
+                      )}
+                    </div>
                     <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 12px",marginBottom:10 }}>
                       <div style={{ color:T.sub,fontSize:10 }}>Total item cost: {sym}{fmt(amt||0)}</div>
                       <div style={{ color:T.sub,fontSize:10 }}>Down payment: {sym}{fmt(emiDownPaymentValue||0)}</div>
@@ -4102,6 +4217,58 @@ function AppContent({ onLock }) {
                 <IncomeTypeChips options={incomeTypeChoices} value={incomeType} onChange={setIncomeType} />
                 <span style={lbl}>Into account</span>
                 <AccountChipGroup items={nonCCAccs} value={accId} onChange={setAccId} />
+                {/* Settlement multi-select */}
+                {(()=>{
+                  const allOutstanding = [
+                    ...people.filter(p=>!p.isMe).map(p=>{
+                      const s=settlements[p.id]||{owesMe:0};
+                      const loanOwed=activeLoans.filter(l=>l.direction!=="taken"&&l.status==="active"&&String(l.personId||l.linkedPersonId||"")===String(p.id)).reduce((sum,l)=>sum+Number(l.outstanding||0),0);
+                      const total=(s.owesMe||0)+loanOwed;
+                      if(total<=0) return null;
+                      return { type:"person", id:p.id, label:`${p.emoji} ${p.name}`, amount:total, color:p.color };
+                    }).filter(Boolean),
+                    ...groups.map(g=>{
+                      const groupTxns = txns.filter(t=>t.type==="expense"&&t.groupId===g.id&&t.trackingMode!=="none");
+                      const groupOwed = groupTxns.reduce((s,t)=>s+(getGroupCollectiveDue(t)||0),0);
+                      const memberOwed = (g.members||[]).reduce((s,pid)=>{
+                        const ps=settlements[pid]||{owesMe:0};
+                        return s+(ps.owesMe||0);
+                      },0);
+                      const total=groupOwed+memberOwed;
+                      if(total<=0) return null;
+                      return { type:"group", id:g.id, label:`${g.icon||"\xf0\x9f\x91\xa5"} ${g.name}`, amount:total, color:g.color };
+                    }).filter(Boolean),
+                  ];
+                  if(allOutstanding.length===0) return null;
+                  return (
+                    <div style={{ marginTop:12 }}>
+                      <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>SETTLE OUTSTANDING (optional)</div>
+                      <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                        {allOutstanding.map(item=>{
+                          const isSelected=!!settleSelectedIds[item.id];
+                          return (
+                            <div key={item.id} onClick={()=>setSettleSelectedIds(prev=>({...prev,[item.id]:!prev[item.id]}))} style={{ display:"flex",alignItems:"center",gap:10,background:isSelected?item.color+"16":T.input,border:`1px solid ${isSelected?item.color:T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer" }}>
+                              <div style={{ width:20,height:20,borderRadius:5,background:isSelected?item.color:"none",border:`2px solid ${isSelected?item.color:T.border}`,display:"flex",alignItems:"center",justifyContent:"center" }}>
+                                {isSelected&&<span style={{ color:"#fff",fontSize:12,fontWeight:900 }}>\xe2\x9c\x93</span>}
+                              </div>
+                              <div style={{ flex:1 }}>
+                                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{item.label}</div>
+                                <div style={{ color:T.sub,fontSize:10 }}>{item.type==="group"?"Group + members total":"Outstanding"}</div>
+                              </div>
+                              <div style={{ color:item.color,fontSize:13,fontWeight:800 }}>{sym}{fmt(item.amount)}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {Object.keys(settleSelectedIds).filter(k=>settleSelectedIds[k]).length>0&&(
+                        <div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",marginTop:8,display:"flex",justifyContent:"space-between" }}>
+                          <span style={{ color:T.sub,fontSize:11 }}>Settling</span>
+                          <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{Object.keys(settleSelectedIds).filter(k=>settleSelectedIds[k]).length} items selected</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
             {(txnType==="transfer"||txnType==="cc_payment")&&(
@@ -4575,412 +4742,94 @@ function AppContent({ onLock }) {
               </div>
             )}
 
-            {/* STEP 5 — SPLIT / TAG / NONE */}
+            {/* STEP 5 - WHO IS THIS FOR? */}
             {txnType==="expense"&&(
               <div>
-                <span style={lbl}>How to track this expense</span>
-                <div style={{ display:"flex",gap:8,marginBottom:8 }}>
-                  {[["unified","🧩","Txn break up"],["none","🚫","None"]].map(([v,ic,lb])=>(
-                    <button key={v} onClick={()=>setSplitMode(v)} style={{ flex:1,background:splitMode===v?T.accent+"22":"none",border:`1px solid ${splitMode===v?T.accent:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:10,fontWeight:700,color:splitMode===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:2 }}>
-                      <span style={{ fontSize:16 }}>{ic}</span>{lb}
-                    </button>
-                  ))}
+                <span style={lbl}>Who is this for? (optional)</span>
+                <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:10 }}>
+                  <button onClick={()=>{ setSplitMode("none"); setTagPerson(""); setTagGroup(""); setSplitPeople({}); setSplitGroup(""); }} style={{ background:splitMode==="none"?T.accent+"22":"none",border:`1px solid ${splitMode==="none"?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:splitMode==="none"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>😎 Me only</button>
+                  {people.filter(p=>!p.isMe).map(p=>{ const isSelected=tagPerson===String(p.id); return (
+                    <button key={p.id} onClick={()=>{ if(tagPerson===String(p.id)){ setTagPerson(""); setSplitMode("none"); } else { setTagPerson(String(p.id)); setSplitMode("tag"); setTagGroup(""); setSplitGroup(""); } }} style={{ background:isSelected?p.color+"22":"none",border:`1px solid ${isSelected?p.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                  ); })}
+                  {groups.map(g=>{ const isSelected=tagGroup===g.id||splitGroup===g.id; return (
+                    <button key={g.id} onClick={()=>{
+                      if(isSelected){ setTagGroup(""); setSplitGroup(""); setSplitMode("none"); }
+                      else {
+                        const di=g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
+                        if(di==="attributed"){ setTagGroup(g.id); setSplitMode("tag"); setTagPerson(""); setSplitGroup(""); }
+                        else { setSplitGroup(g.id); setSplitMode("split"); setTagGroup(""); setTagPerson(""); }
+                      }
+                    }} style={{ background:isSelected?g.color+"22":"none",border:`1px solid ${isSelected?g.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon||"👥"} {g.name}</button>
+                  ); })}
+                  <button onClick={()=>setShowGuestPerson(v=>!v)} style={{ background:showGuestPerson?T.warn+"22":"none",border:`1px solid ${showGuestPerson?T.warn:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showGuestPerson?T.warn:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 One-time</button>
                 </div>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-                  <div style={{ color:T.sub,fontSize:10 }}>{splitMode==="unified"?"Recommended: Txn break up handles split, tag and attribute in one table.":"No people/group tracking for this expense."}</div>
-                  <button onClick={()=>setShowAdvancedTracking(v=>!v)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>{showAdvancedTracking?"Hide advanced":"Advanced"}</button>
-                </div>
-                {showAdvancedTracking&&(
-                  <div style={{ display:"flex",gap:8,marginBottom:12 }}>
-                    {[["split","⚖️","Split"],["tag","👤","Tag"],["allocate","📋","Allocate"]].map(([v,ic,lb])=>(
-                      <button key={v} onClick={()=>setSplitMode(v)} style={{ flex:1,background:splitMode===v?T.accent+"22":"none",border:`1px solid ${splitMode===v?T.accent:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:10,fontWeight:700,color:splitMode===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:2 }}>
-                        <span style={{ fontSize:16 }}>{ic}</span>{lb}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* SPLIT UI */}
-                {splitMode==="split"&&(
-                  <div>
-                    {groups.length>0&&(
-                      <div style={{ marginBottom:10 }}>
-                        <span style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"block",marginBottom:6 }}>Select Group (leave people unselected for collective group due)</span>
-                        <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                          <Chip color={T.sub} active={!splitGroup} onClick={()=>{setSplitGroup("");setSplitPeople({});}}>None</Chip>
-                          {groups.map(g=><Chip key={g.id} color={g.color} active={splitGroup===g.id} onClick={()=>handleGroupSelect(g.id)}>{g.icon} {g.name}</Chip>)}
-                        </div>
-                      </div>
-                    )}
-                    <span style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"block",marginBottom:6 }}>People in split</span>
-                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
-                      {people.filter(p=>!p.isMe).map(p=>(
-                        <button key={p.id} onClick={()=>setSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:splitPeople[p.id]?p.color+"22":"none",border:`1px solid ${splitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:splitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
-                      ))}
+                {/* Guest person - one time, not saved */}
+                {showGuestPerson&&(
+                  <div style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
+                    <div style={{ color:T.warn,fontSize:11,fontWeight:700,marginBottom:8 }}>👤 One-time person — not saved to your contacts</div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                      <div><span style={lbl}>Name</span><input style={inp} placeholder="e.g. Office colleague" value={guestPersonName} onChange={e=>setGuestPersonName(e.target.value)}/></div>
+                      <div><span style={lbl}>They owe ({sym})</span><input style={inp} type="text" inputMode="decimal" placeholder="0" value={guestPersonAmount} onChange={e=>setGuestPersonAmount(cleanMoneyInput(e.target.value))}/></div>
                     </div>
-
-                    {selectedPids.length>0&&(
-                      <>
-                        <div style={{ display:"flex",gap:6,marginBottom:10 }}>
-                          {[["equally","= Equal"],["amount","₹ Amount"],["percent","% Percent"],["share","⚖️ Share"]].map(([v,lb])=>(
-                            <Chip key={v} color={T.accent} active={splitCalc===v} onClick={()=>setSplitCalc(v)}>{lb}</Chip>
-                          ))}
-                        </div>
-                        {(()=>{
-                          const shares=calcShares();
-                          const othersTotal=Object.values(shares).reduce((s,v)=>s+v,0);
-                          const splitOver = splitCalc==="amount" && othersTotal > amt+0.01;
-                          const splitPctOver = splitCalc==="percent" && selectedPids.reduce((s,pid)=>s+(parseFloat(splitCustom[pid])||0),0) > 100.01;
-                          return (splitOver||splitPctOver) ? <div style={{ color:T.danger,fontSize:11,fontWeight:700,marginBottom:6 }}>⚠ {splitCalc==="percent"?"Percentages exceed 100%":`Split total ${sym}${fmt(othersTotal)} exceeds bill ${sym}${fmt(amt)}`}</div> : null;
-                        })()}
-                        <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:10 }}>
-                          {/* Me toggle */}
-                          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}`,marginBottom:6 }}>
-                            <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                              <input type="checkbox" id="include_me" checked={includeMeInSplit} onChange={e=>setIncludeMeInSplit(e.target.checked)} style={{ width:16,height:16,accentColor:T.accent,cursor:"pointer" }}/>
-                              <label htmlFor="include_me" style={{ color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>🧑 Include me in split</label>
-                            </div>
-                            {includeMeInSplit&&(()=>{ const shares=calcShares(); const myS=amt-Object.values(shares).reduce((s,v)=>s+v,0); return <span style={{ color:myS<-0.01?T.danger:T.accent,fontSize:12,fontWeight:700 }}>{sym}{fmt(Math.max(0,myS))}</span>; })()}
-                          </div>
-                          {selectedPids.map(pid=>{
-                            const p=getPerson(pid);
-                            const shares=calcShares();
-                            const preview=shares[pid]||0;
-                            const isDependent=p.personType==="dependant";
-                            const willCollect=collectMap[pid]!==undefined?collectMap[pid]:!isDependent;
-                            const othersAmt=splitCalc==="amount"?selectedPids.filter(x=>x!==pid).reduce((s,x)=>s+(parseFloat(splitCustom[x])||0),0):0;
-                            const othersAllFilled = splitCalc==="amount" && selectedPids.filter(x=>x!==pid).every(x=>splitCustom[x]!==""&&splitCustom[x]!==undefined);
-                            const maxForPid = splitCalc==="amount"&&othersAllFilled ? Math.max(0,amt-othersAmt) : undefined;
-                            const inputOver=splitCalc==="amount"&&(parseFloat(splitCustom[pid])||0)>amt+0.01;
-                            const pctOver=splitCalc==="percent"&&(parseFloat(splitCustom[pid])||0)>100.01;
-                            return (
-                              <div key={pid} style={{ marginBottom:8 }}>
-                                <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-                                  <span style={{ color:T.text,fontSize:12,flex:1 }}>{p.emoji} {p.name}</span>
-                                  {splitCalc==="amount"&&<>
-                                    <input type="text" inputMode="decimal" placeholder="0" value={splitCustom[pid]??""} onChange={e=>{ const v=cleanMoneyInput(e.target.value); setSplitCustom(prev=>({...prev,[pid]:v})); }} style={{ ...inpSm,width:70,textAlign:"right",borderColor:inputOver?T.danger:undefined }}/>
-                                    {maxForPid>0&&<button onClick={()=>setSplitCustom(prev=>({...prev,[pid]:String(Math.round(maxForPid*100)/100)}))} title="Fill remainder" style={{ background:T.accent+"22",border:`1px solid ${T.accent}`,borderRadius:10,padding:"2px 6px",cursor:"pointer",fontSize:10,color:T.accent,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap" }}>↩ {sym}{fmt(maxForPid)}</button>}
-                                  </>}
-                                  {splitCalc!=="equally"&&splitCalc!=="amount"&&<input type="number" placeholder={splitCalc==="percent"?"%":"shares"} max={splitCalc==="percent"?100:undefined} value={splitCustom[pid]||""} onChange={e=>setSplitCustom(prev=>({...prev,[pid]:e.target.value}))} style={{ ...inpSm,width:70,textAlign:"right",borderColor:pctOver?T.danger:undefined }}/>}
-                                  <span style={{ color:preview>amt+0.01?T.danger:T.accent,fontSize:12,fontWeight:700,minWidth:60,textAlign:"right" }}>{sym}{fmt(preview)}</span>
-                                </div>
-                                <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                                  <input type="checkbox" id={`collect_${pid}`} checked={willCollect} onChange={e=>setCollectMap(prev=>({...prev,[pid]:e.target.checked}))} style={{ width:16,height:16,accentColor:T.accent,cursor:"pointer" }}/>
-                                  <label htmlFor={`collect_${pid}`} style={{ color:T.sub,fontSize:11,cursor:"pointer" }}>Collect from {p.name}?</label>
-                                </div>
-                              </div>
-                            );
-                          })}
-                          {splitGroup&&selectedPids.length>0&&(()=>{
-                            const shares=calcShares();
-                            const othersTotal=Object.values(shares).reduce((s,v)=>s+v,0);
-                            const myS=includeMeInSplit?Math.max(0,amt-othersTotal):0;
-                            const groupCollective=Math.max(0,amt-othersTotal-myS);
-                            if(groupCollective<=0.01) return null;
-                            const grpObj=groups.find(g=>g.id===splitGroup);
-                            return (
-                              <div style={{ display:"flex",alignItems:"center",gap:8,paddingTop:6,borderTop:`1px solid ${T.border}`,marginTop:4 }}>
-                                <span style={{ color:grpObj?.color||T.accent,fontSize:12,flex:1 }}>{grpObj?.icon||"🏠"} {grpObj?.name||"Group"} (collective)</span>
-                                <span style={{ color:grpObj?.color||T.accent,fontSize:12,fontWeight:700,minWidth:60,textAlign:"right" }}>{sym}{fmt(groupCollective)}</span>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      </>
-                    )}
+                    <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>When they pay back → go to TXNS → find this expense → mark their share settled</div>
                   </div>
                 )}
-
-                {/* ALLOCATE UI */}
-                {(splitMode==="allocate" || splitMode==="unified")&&(()=>{
-                  const isUnified = splitMode==="unified";
-                  const lineMap = Object.fromEntries((lineItems||[]).map(item=>[item.id,item]));
-                  const lineUnit = item=>{
-                    const qty = Math.max(0, parseFloat(item?.qty)||0);
-                    const unit = Math.max(0, parseFloat(item?.unitPrice)||0);
-                    return qty>0 ? unit : 0;
-                  };
-                  const rowItemAmount = i=>{
-                    if(i?.sourceItemId){
-                      const src = lineMap[i.sourceItemId];
-                      return Math.max(0, parseFloat(i.qty)||0) * lineUnit(src);
-                    }
-                    return Math.max(0, parseFloat(i?.amount)||0);
-                  };
-                  const rowEffAmt = r => r.items?.length ? r.items.reduce((s,i)=>s+rowItemAmount(i),0) : parseFloat(r.amount)||0;
-                  const allocTotal = allocRows.reduce((s,r)=>s+rowEffAmt(r),0);
-                  const myRemainder = Math.max(0, amt - allocTotal);
-                  const addPersonRow = ()=>setAllocTargetPicker({ rowId:null, targetType:"person" });
-                  const addGroupRow = ()=>setAllocTargetPicker({ rowId:null, targetType:"group" });
-                  const updateRow = (id,field,val)=>setAllocRows(prev=>prev.map(r=>{
-                    if(r.id!==id) return r;
-                    if(field==="amount"){
-                      const n = parseFloat(val);
-                      return { ...r, amount:val===""?"":String(Math.max(0,Number.isFinite(n)?n:0)) };
-                    }
-                    return { ...r, [field]:val };
-                  }));
-                  const removeRow = id=>setAllocRows(prev=>prev.filter(r=>r.id!==id));
-                  const toggleItems = id=>setAllocRows(prev=>prev.map(r=>r.id===id?{...r,showItems:!r.showItems}:r));
-                  const remainingQtyFor = (rows,rowId,sourceItemId,currentItemId=null)=>{
-                    const bought = Math.max(0, parseFloat(lineMap[sourceItemId]?.qty)||0);
-                    const allocatedElse = rows.reduce((sum,row)=>sum + (row.items||[]).reduce((inner,item)=>{
-                      if(item?.sourceItemId!==sourceItemId) return inner;
-                      if(row.id===rowId && currentItemId && item.id===currentItemId) return inner;
-                      return inner + Math.max(0, parseFloat(item.qty)||0);
-                    },0),0);
-                    return Math.max(0, bought - allocatedElse);
-                  };
-                  const addItem = rowId=>setAllocRows(prev=>{
-                    const firstSource = (lineItems||[]).find(li=>Math.max(0,parseFloat(li.qty)||0)>0)?.id || "";
-                    return prev.map(r=>r.id===rowId?{...r,items:[...(r.items||[]),{id:genId(),sourceItemId:firstSource,qty:"",label:"",amount:""}],showItems:true}:r);
-                  });
-                  const removeItem = (rowId,iid)=>setAllocRows(prev=>prev.map(r=>r.id===rowId?{...r,items:(r.items||[]).filter(i=>i.id!==iid)}:r));
-                  const updateItem = (rowId,iid,field,val)=>setAllocRows(prev=>prev.map(r=>r.id===rowId?{...r,items:(r.items||[]).map(i=>{
-                    if(i.id!==iid) return i;
-                    if(field==="sourceItemId"){
-                      const nextId = val || "";
-                      const maxQty = nextId ? remainingQtyFor(prev,rowId,nextId,i.id) : 0;
-                      const currentQty = Math.max(0, parseFloat(i.qty)||0);
-                      return { ...i, sourceItemId:nextId, qty:String(Math.min(currentQty,maxQty)||"") };
-                    }
-                    if(field==="qty"){
-                      if(val==="") return { ...i, qty:"" };
-                      const n = Math.max(0, parseFloat(val)||0);
-                      const maxQty = i.sourceItemId ? remainingQtyFor(prev,rowId,i.sourceItemId,i.id) : 0;
-                      return { ...i, qty:String(Math.min(n,maxQty)) };
-                    }
-                    return { ...i, [field]:val };
-                  })}:r));
-                  const modeCycle = m=>m==="spent_on"?"owes":m==="owes"?"i_owe":"spent_on";
-                  const modeColor = m=>m==="spent_on"?T.sub:m==="owes"?T.success:T.danger;
-                  const modeShort = m=>m==="owes"?"C":m==="i_owe"?"O":"A";
-                  const rowModes = allocRows.filter(r=>r.targetId).map(r=>r.mode);
-                  const hasCollect = rowModes.includes("owes");
-                  const hasAttribute = rowModes.includes("spent_on");
-                  const hasIOwe = rowModes.includes("i_owe");
-                  return (
-                    <div>
-                      <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>{isUnified?"Txn break up: one table for split, tag and attribute. Choose target + amount + intent.":"Allocate portions of this bill to people or groups. Remainder stays with you."}</div>
-                      {isUnified&&(
-                        <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
-                          <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Derived:</span>
-                          {hasCollect&&<span style={{ background:T.success+"22",color:T.success,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700 }}>Split</span>}
-                          {hasAttribute&&<span style={{ background:T.info+"22",color:T.info,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700 }}>Tag/Attribute</span>}
-                          {hasIOwe&&<span style={{ background:T.danger+"22",color:T.danger,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700 }}>I Owe</span>}
-                          {!hasCollect&&!hasAttribute&&!hasIOwe&&<span style={{ color:T.sub,fontSize:10 }}>No allocations yet</span>}
+                {splitMode==="tag"&&tagPerson&&(()=>{
+                  const p=people.find(x=>String(x.id)===tagPerson); if(!p) return null;
+                  return (<div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
+                    <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>This expense on {p.name} —</div>
+                    <div style={{ display:"flex",gap:8 }}>
+                      <button onClick={()=>setTagMode("person")} style={{ flex:1,background:tagMode==="person"?T.success+"22":"none",border:`1px solid ${tagMode==="person"?T.success:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                        <div style={{ fontSize:11,fontWeight:700,color:tagMode==="person"?T.success:T.text }}>💸 They owe me back</div>
+                        <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Tracked in receivables</div>
+                      </button>
+                      <button onClick={()=>setTagMode("itemize")} style={{ flex:1,background:tagMode==="itemize"?T.info+"22":"none",border:`1px solid ${tagMode==="itemize"?T.info:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                        <div style={{ fontSize:11,fontWeight:700,color:tagMode==="itemize"?T.info:T.text }}>❤️ For them (no collection)</div>
+                        <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Budget attributed</div>
+                      </button>
+                    </div>
+                  </div>);
+                })()}
+                {/* Group intent */}
+                {(tagGroup||splitGroup)&&(()=>{
+                  const g=groups.find(x=>x.id===(tagGroup||splitGroup)); if(!g) return null;
+                  const currentIntent=tagGroup?"attributed":"split";
+                  return (<div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
+                    <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>{g.icon} {g.name}</div>
+                    <div style={{ display:"flex",gap:8,marginBottom:10 }}>
+                      <button onClick={()=>{ setSplitGroup(g.id); setTagGroup(""); setSplitMode("split"); }} style={{ flex:1,background:currentIntent==="split"?T.accent+"22":"none",border:`1px solid ${currentIntent==="split"?T.accent:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                        <div style={{ fontSize:11,fontWeight:700,color:currentIntent==="split"?T.accent:T.text }}>⚖️ Split (collect)</div>
+                        <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Group owes their share</div>
+                      </button>
+                      <button onClick={()=>{ setTagGroup(g.id); setSplitGroup(""); setSplitMode("tag"); }} style={{ flex:1,background:currentIntent==="attributed"?T.info+"22":"none",border:`1px solid ${currentIntent==="attributed"?T.info:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                        <div style={{ fontSize:11,fontWeight:700,color:currentIntent==="attributed"?T.info:T.text }}>🏠 Attributed</div>
+                        <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>No collection</div>
+                      </button>
+                    </div>
+                    {currentIntent==="split"&&(<>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                        {(g.members||[]).map(pid=>{ const p=people.find(x=>String(x.id)===String(pid)); if(!p) return null; return (
+                          <button key={pid} onClick={()=>setSplitPeople(prev=>({...prev,[pid]:!prev[pid]}))} style={{ background:splitPeople[pid]?p.color+"22":"none",border:`1px solid ${splitPeople[pid]?p.color:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:splitPeople[pid]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                        ); })}
+                      </div>
+                      {Object.keys(splitPeople).filter(k=>splitPeople[k]).length>0&&(
+                        <div style={{ display:"flex",gap:6,marginBottom:8 }}>
+                          {[["equally","= Equal"],["amount","₹ Amount"],["percent","% Pct"]].map(([v,lb])=>(
+                            <button key={v} onClick={()=>setSplitCalc(v)} style={{ flex:1,background:splitCalc===v?T.accent+"22":"none",border:`1px solid ${splitCalc===v?T.accent:T.border}`,borderRadius:20,padding:"4px",cursor:"pointer",fontSize:10,fontWeight:700,color:splitCalc===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{lb}</button>
+                          ))}
                         </div>
                       )}
-                      {allocRows.map(row=>{
-                        const isP = row.targetType==="person";
-                        const target = isP ? getPerson(row.targetId) : groups.find(g=>g.id===row.targetId);
-                        const tColor = target?.color||T.sub;
-                        const hasItems = (row.items||[]).length > 0;
-                        const itemsTotal = (row.items||[]).reduce((s,i)=>s+rowItemAmount(i),0);
-                        return (
-                          <div key={row.id} style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:9 }}>
-                            <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-                              <button onClick={()=>setAllocTargetPicker({ rowId:row.id, targetType:row.targetType })} style={{ flex:1,background:T.card,border:`1px solid ${tColor}55`,borderRadius:10,padding:"8px 10px",color:tColor,fontSize:12,fontWeight:800,fontFamily:"Nunito,sans-serif",minWidth:0,textAlign:"left",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer" }}>
-                                {target ? `${target.emoji||target.icon||""} ${target.name}` : (isP?"Person":"Group")}
-                              </button>
-                              {hasItems
-                                ? <span style={{ color:itemsTotal>0?T.accent:T.sub,fontSize:14,fontWeight:500,minWidth:92,textAlign:"right",padding:"6px 0",flexShrink:0 }}>{sym}{fmt(itemsTotal)}</span>
-                                : <input type="text" inputMode="decimal" placeholder={sym} value={row.amount} onChange={e=>updateRow(row.id,"amount",cleanMoneyInput(e.target.value))} style={{ ...inp,width:102,marginBottom:0,flex:"none",textAlign:"right",padding:"9px 10px",fontSize:15,fontWeight:800 }}/>
-                              }
-                              <button onClick={()=>updateRow(row.id,"mode",modeCycle(row.mode))} title={row.mode==="owes"?"Collect":(row.mode==="i_owe"?"I Owe":"Attribute")} style={{ background:modeColor(row.mode)+"22",border:`1px solid ${modeColor(row.mode)}`,borderRadius:10,padding:"7px 10px",cursor:"pointer",fontSize:14,fontWeight:900,color:modeColor(row.mode),fontFamily:"Nunito,sans-serif",lineHeight:1,flexShrink:0,minWidth:40 }}>{modeShort(row.mode)}</button>
-                              <button onClick={()=>toggleItems(row.id)} title="Itemise for this target" style={{ background:hasItems?T.accent+"22":"none",border:`1px solid ${hasItems?T.accent:T.border}`,borderRadius:20,padding:"4px 7px",cursor:"pointer",fontSize:11,color:hasItems?T.accent:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>📋</button>
-                              <button onClick={()=>removeRow(row.id)} title="Remove this person or group from the breakup" style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Remove</button>
-                            </div>
-                            {row.showItems&&(
-                              <div style={{ marginTop:8,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
-                                {(row.items||[]).map(item=>{
-                                  const maxQty = item.sourceItemId ? remainingQtyFor(allocRows,row.id,item.sourceItemId,item.id) : 0;
-                                  const itemAmt = rowItemAmount(item);
-                                  return (
-                                  <div key={item.id}>
-                                    <div style={{ display:"grid",gridTemplateColumns:"1.1fr 0.45fr auto auto",gap:6,alignItems:"center",marginBottom:3 }}>
-                                      <select value={item.sourceItemId||""} onChange={e=>updateItem(row.id,item.id,"sourceItemId",e.target.value)} style={{ ...inp,marginBottom:0,fontSize:11,padding:"6px 8px" }}>
-                                        <option value="">select bought item</option>
-                                        {(lineItems||[]).filter(li=>Math.max(0,parseFloat(li.qty)||0)>0 && (li.label||"").trim()).map(li=>{
-                                          const boughtQty = Math.max(0,parseFloat(li.qty)||0);
-                                          const leftQty = remainingQtyFor(allocRows,row.id,li.id,item.id);
-                                          return <option key={li.id} value={li.id}>{li.label} (bought {fmt(boughtQty)} • left {fmt(leftQty)})</option>;
-                                        })}
-                                      </select>
-                                      <input type="number" min="0" max={maxQty} placeholder="qty" value={item.qty||""} onChange={e=>updateItem(row.id,item.id,"qty",e.target.value)} style={{ ...inp,width:"100%",marginBottom:0,textAlign:"right",fontSize:11,padding:"6px 8px",flex:"none" }}/>
-                                      <span style={{ color:itemAmt>0?T.accent:T.sub,fontSize:12,fontWeight:800,minWidth:70,textAlign:"right" }}>{sym}{fmt(itemAmt)}</span>
-                                      <button onClick={()=>removeItem(row.id,item.id)} style={{ background:"none",border:"none",cursor:"pointer",color:T.sub,fontSize:14,padding:"0 3px",lineHeight:1 }}>×</button>
-                                    </div>
-                                    <div style={{ color:T.sub,fontSize:10,marginBottom:6 }}>You can add up to {fmt(maxQty)} more qty for this selected item in this line.</div>
-                                  </div>
-                                );})}
-                                <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:2 }}>
-                                  <button onClick={()=>addItem(row.id)} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ item</button>
-                                  {hasItems&&itemsTotal>0&&<span style={{ color:T.sub,fontSize:11 }}>= {sym}{fmt(itemsTotal)}</span>}
-                                </div>
-                                {!(lineItems||[]).some(li=>Math.max(0,parseFloat(li.qty)||0)>0 && (li.label||"").trim())&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>Add bought items above first, then itemise here.</div>}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                      <div style={{ display:"flex",gap:8,marginBottom:10 }}>
-                        <button onClick={addPersonRow} style={{ flex:1,background:"none",border:`1px dashed #ec4899`,borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:12,color:"#ec4899",fontFamily:"Nunito,sans-serif",fontWeight:700 }}>+ Person</button>
-                        <button onClick={addGroupRow} style={{ flex:1,background:"none",border:`1px dashed #3b82f6`,borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:12,color:"#3b82f6",fontFamily:"Nunito,sans-serif",fontWeight:700 }}>+ Group</button>
-                      </div>
-                      {amt>0&&<div style={{ background:T.input,borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                        <span style={{ color:T.sub,fontSize:12 }}>🧑 Yours (remainder)</span>
-                        <span style={{ color:allocTotal>amt+0.01?T.danger:T.accent,fontSize:14,fontWeight:800 }}>{sym}{fmt(myRemainder)}{allocTotal>amt+0.01&&" ⚠"}</span>
-                      </div>}
-                      {allocTargetPicker&&(()=>{
-                        const pickerRow = allocRows.find(r=>r.id===allocTargetPicker.rowId);
-                        const pickerType = allocTargetPicker.targetType || pickerRow?.targetType || "person";
-                        const pickerTargets = pickerType==="person" ? people.filter(p=>!p.isMe) : groups;
-                        return (
-                          <div style={{ position:"fixed",inset:0,zIndex:1200,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",padding:14 }} onClick={()=>setAllocTargetPicker(null)}>
-                            <div style={{ width:"min(680px,96vw)",maxHeight:"86vh",overflow:"auto",background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:14 }} onClick={e=>e.stopPropagation()}>
-                              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-                                <div style={{ color:T.text,fontSize:16,fontWeight:800 }}>Select target</div>
-                                <button onClick={()=>setAllocTargetPicker(null)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:12,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
-                              </div>
-                              <div style={{ display:"flex",gap:8,marginBottom:12 }}>
-                                {[["person","👤 Person"],["group","👥 Group"]].map(([type,label])=>(
-                                  <button key={type} onClick={()=>setAllocTargetPicker(prev=>prev?{...prev,targetType:type}:prev)} style={{ flex:1,background:pickerType===type?T.accent+"22":"none",border:`1px solid ${pickerType===type?T.accent:T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:12,fontWeight:800,color:pickerType===type?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
-                                ))}
-                              </div>
-                              <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:8 }}>
-                                {pickerTargets.map(target=>{
-                                  const active = Boolean(pickerRow) && pickerRow.targetId===target.id && pickerRow.targetType===pickerType;
-                                  const c = target.color||T.accent;
-                                  return (
-                                    <button key={target.id} onClick={()=>{
-                                      if(pickerRow){
-                                        updateRow(pickerRow.id,"targetType",pickerType);
-                                        updateRow(pickerRow.id,"targetId",target.id);
-                                      } else {
-                                        setAllocRows(prev=>[...prev,{id:genId(),targetType:pickerType,targetId:target.id,amount:"",mode:pickerType==="group"?"owes":"spent_on",items:[],showItems:false}]);
-                                      }
-                                      setAllocTargetPicker(null);
-                                    }} style={{ background:active?c+"22":T.input,border:`1px solid ${active?c:T.border}`,borderRadius:10,padding:"12px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
-                                      <div style={{ color:active?c:T.text,fontSize:13,fontWeight:800 }}>{target.emoji||target.icon} {target.name}</div>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                              {!pickerTargets.length&&<div style={{ color:T.sub,fontSize:12 }}>No {pickerType}s available yet.</div>}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  );
+                      {splitCalc==="amount"&&Object.keys(splitPeople).filter(k=>splitPeople[k]).map(pid=>{ const p=people.find(x=>String(x.id)===String(pid)); if(!p) return null; return (
+                        <div key={pid} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:6 }}>
+                          <span style={{ color:T.text,fontSize:12,flex:1 }}>{p.emoji} {p.name}</span>
+                          <input type="text" inputMode="decimal" placeholder="0" value={splitCustom[pid]||""} onChange={e=>setSplitCustom(prev=>({...prev,[pid]:cleanMoneyInput(e.target.value)}))} style={{ ...inpSm,width:80,textAlign:"right" }}/>
+                        </div>
+                      ); })}
+                    </>)}
+                  </div>);
                 })()}
-
-                {/* TAG UI */}
-                {splitMode==="tag"&&(
-                  <div>
-                    <span style={{ color:T.sub,fontSize:11,display:"block",marginBottom:8 }}>Tag this expense to</span>
-                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
-                      {["person","group","both","itemize"].map(mode=>(
-                        <button key={mode} onClick={()=>setTagMode(mode)} style={{ background:tagMode===mode?T.accent+"22":"none",border:`1px solid ${tagMode===mode?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagMode===mode?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{mode==="itemize"?"📋 Itemize":mode[0].toUpperCase()+mode.slice(1)}</button>
-                      ))}
-                    </div>
-
-                    {(tagMode==="person"||tagMode==="both")&&tagMode!=="itemize"&&(
-                      <>
-                        <div style={{ color:T.sub,fontSize:11,display:"block",marginBottom:8 }}>Person</div>
-                        <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
-                          {people.map(p=>(
-                            <button key={p.id} onClick={()=>setTagPerson(p.id)} style={{ background:tagPerson===p.id?p.color+"22":"none",border:`1px solid ${tagPerson===p.id?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagPerson===p.id?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}{p.isMe?" (Me)":""}</button>
-                          ))}
-                        </div>
-                      </>
-                    )}
-
-                    {(tagMode==="group"||tagMode==="both")&&tagMode!=="itemize"&&(
-                      <>
-                        <div style={{ color:T.sub,fontSize:11,display:"block",marginBottom:8 }}>Group</div>
-                        <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
-                          <button onClick={()=>setTagGroup("")} style={{ background:!tagGroup?"#88888822":"none",border:`1px solid ${!tagGroup?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>None</button>
-                          {groups.map(g=>(
-                            <button key={g.id} onClick={()=>setTagGroup(g.id)} style={{ background:tagGroup===g.id?g.color+"22":"none",border:`1px solid ${tagGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>
-                          ))}
-                        </div>
-                      </>
-                    )}
-
-                    {tagMode==="itemize"&&(
-                      <div style={{ background:T.input,borderRadius:12,padding:"12px 14px",marginBottom:10 }}>
-                        <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>📋 Itemized tagging</div>
-                        <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>
-                          Total bill: <b style={{ color:T.text }}>{sym}{fmt(amt)}</b>
-                          {tagItemsTotal>0&&<span style={{ color:Math.abs(tagItemsTotal-amt)<0.01?"#22c55e":"#ef4444",fontWeight:700 }}> · Allocated: {sym}{fmt(tagItemsTotal)}{Math.abs(tagItemsTotal-amt)>0.01?" ⚠ doesn't match total":""}</span>}
-                        </div>
-                        {tagItems.map((item)=>{
-                          const isP=item.targetType==="person";
-                          const targetObj=isP?people.find(p=>p.id===item.targetId):groups.find(g=>g.id===item.targetId);
-                          const itemColor=targetObj?.color||T.sub;
-                          return (
-                            <div key={item.id} style={{ display:"flex",gap:6,alignItems:"center",marginBottom:8 }}>
-                              <button onClick={()=>setTagItems(prev=>prev.map(it=>it.id===item.id?{...it,targetType:isP?"group":"person",targetId:""}:it))} style={{ background:isP?"#ec489922":"#3b82f622",border:`1px solid ${isP?"#ec4899":"#3b82f6"}`,borderRadius:20,padding:"4px 8px",cursor:"pointer",fontSize:13,color:isP?"#ec4899":"#3b82f6",fontFamily:"Nunito,sans-serif",minWidth:34,textAlign:"center" }}>{isP?"👤":"👥"}</button>
-                              <select value={item.targetId} onChange={e=>updateTagItem(item.id,"targetId",e.target.value)} style={{ flex:1,background:T.card,border:`1px solid ${item.targetId?itemColor:T.border}`,borderRadius:8,padding:"6px 8px",color:T.text,fontSize:12,fontFamily:"Nunito,sans-serif",outline:"none" }}>
-                                <option value="">— {isP?"person":"group"} —</option>
-                                {isP?people.map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}{p.isMe?" (Me)":""}</option>):groups.map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
-                              </select>
-                              <input type="number" placeholder="₹" value={item.amount} onChange={e=>updateTagItem(item.id,"amount",e.target.value)} style={{ ...inp,width:80,marginBottom:0,flex:"none" }}/>
-                              {tagItems.length>1&&<button onClick={()=>removeTagItem(item.id)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"3px 8px",cursor:"pointer",fontSize:16,color:T.sub,fontFamily:"Nunito,sans-serif",lineHeight:1 }}>×</button>}
-                            </div>
-                          );
-                        })}
-                        <button onClick={addTagItem} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,color:T.accent,fontFamily:"Nunito,sans-serif",fontWeight:700,width:"100%",marginTop:2 }}>+ Add item</button>
-                      </div>
-                    )}
-
-                    {tagPerson&&(()=>{
-                      const p=getPerson(tagPerson);
-                      const grp=tagMode==="both"&&tagGroup?groups.find(g=>g.id===tagGroup):null;
-                      const pAmt=parseFloat(tagPersonAmount)||0;
-                      const gAmt=parseFloat(tagGroupAmount)||0;
-                      const allocTotal=tagMode==="both"?(pAmt+gAmt):0;
-                      const allocMismatch=tagMode==="both"&&pAmt>0&&gAmt>0&&Math.abs(allocTotal-amt)>0.01;
-                      return (
-                        <div style={{ background:T.input,borderRadius:12,padding:"12px 14px",marginBottom:10 }}>
-                          <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>
-                            {tagMode==="both"?"Split between personal & group":""}
-                            {tagMode==="person"?`${p.emoji} ${p.name} — spend tracking`:""}
-                          </div>
-                          <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>
-                            Total bill: <b style={{ color:T.text }}>{sym}{fmt(amt)}</b>
-                            {tagMode==="both"&&pAmt>0&&gAmt>0&&<span style={{ color:allocMismatch?"#ef4444":"#22c55e",fontWeight:700 }}> · Allocated: {sym}{fmt(allocTotal)}{allocMismatch?" ⚠ doesn't match total":""}</span>}
-                            {tagMode==="person"&&pAmt>0&&<span style={{ color:p.color,fontWeight:700 }}> · Tagged: {sym}{fmt(pAmt)}</span>}
-                          </div>
-                          {tagMode==="both"?(
-                            <div style={{ display:"flex",gap:8 }}>
-                              <div style={{ flex:1 }}>
-                                <span style={{ ...lbl,color:p.color }}>{p.emoji} {p.name}{p.isMe?" (Me)":""}</span>
-                                <input style={{ ...inp,borderColor:pAmt>0?p.color:undefined }} type="number" placeholder={`Personal share`} value={tagPersonAmount} onChange={e=>setTagPersonAmount(e.target.value)}/>
-                              </div>
-                              <div style={{ flex:1 }}>
-                                <span style={{ ...lbl,color:grp?grp.color:T.sub }}>{grp?`${grp.icon} ${grp.name}`:"Group"}</span>
-                                <input style={{ ...inp,borderColor:gAmt>0?(grp?.color||T.accent):undefined }} type="number" placeholder={`Group share`} value={tagGroupAmount} onChange={e=>setTagGroupAmount(e.target.value)}/>
-                              </div>
-                            </div>
-                          ):(
-                            <div>
-                              <span style={lbl}>Amount spent on {p.name} (optional — defaults to full amount)</span>
-                              <input style={inp} type="number" placeholder={`e.g. ${fmt(amt)} (full) or part of it`} value={tagPersonAmount} onChange={e=>setTagPersonAmount(e.target.value)}/>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
               </div>
             )}
-
-            {/* NOTE */}
-            {txnType!=="cc_payment"&&txnType!=="transfer"&&<input style={inp} placeholder="Note (optional)" value={note} onChange={e=>setNote(e.target.value)}/>}
 
             {/* LINK TO BILL / SUBSCRIPTION */}
             {txnType==="expense"&&(
@@ -5080,6 +4929,7 @@ function AppContent({ onLock }) {
                   onChange={e=>{ setSmsTxt(e.target.value); parseSms(e.target.value, { adjustBalance: true }); }}
                 />
                 {smsParseMeta?.balanceAdjusted&&<div style={{ color:T.success,fontSize:11,fontWeight:700 }}>✅ Balance synced ({smsParseMeta.balanceDiff>0?"+":""}{sym}{fmt(smsParseMeta.balanceDiff)})</div>}
+                {smsParseMeta?.emiLoanId&&<div style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:10,padding:"6px 10px",display:"flex",justifyContent:"space-between",alignItems:"center" }}><span style={{ color:T.warn,fontSize:11,fontWeight:700 }}>🔗 EMI match: {smsParseMeta.emiLoanName}</span><button onClick={()=>{ setExpensePaymentMode("emi"); }} style={{ background:T.warn+"22",border:`1px solid ${T.warn}`,borderRadius:20,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Link</button></div>}
               </div>}
             </div>
 
@@ -5484,6 +5334,8 @@ function AppContent({ onLock }) {
     const [openingBalance,setOpeningBalance]=useState("");
     const [openingBalanceDate,setOpeningBalanceDate]=useState(todayStr());
     const [error,setError]=useState("");
+    const [accAttributedTo,setAccAttributedTo]=useState("");
+    const [accAttributeType,setAccAttributeType]=useState("person");
     const selectedAccountType = accountTypeOptions.find(item=>item.id===aType) || ACC_TYPES.find(item=>item.id===aType) || ACC_TYPES[0];
     const selectedAccountBaseType = selectedAccountType.baseType || selectedAccountType.id || "bank";
     const selectedAccountBucket = selectedAccountType.bucket || defaultAccountTypeBucket(selectedAccountBaseType);
@@ -5500,6 +5352,8 @@ function AppContent({ onLock }) {
         typeBucket:selectedAccountBucket,
         name:name.trim(),
         color,
+        attributedTo:accAttributedTo||null,
+        attributeType:accAttributedTo?accAttributeType:null,
       };
       if(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cash") setAccounts(p=>[...p,{...base,last4,openingBalance:parseMoney(openingBalance)||0,openingBalanceDate:openingBalanceDate||todayStr()}]);
       else if(selectedAccountBaseType==="cc") setAccounts(p=>[...p,{...base,last4,limit:parseFloat(limit)||0,outstanding:0,statementDate:parseInt(statementDate)||15,dueDate:parseInt(dueDate)||5,alertPct:Math.max(0,parseFloat(alertPct)||0),billingCycle:billingCycle||`${statementDate}th`}]);
@@ -5563,6 +5417,20 @@ function AppContent({ onLock }) {
             {error&&<div style={{ color:T.danger,fontSize:12,fontWeight:700 }}>⚠️ {error}</div>}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={()=>setShowAddAccount(false)} style={btnG}>Cancel</button>
+              {/* Account attribution */}
+              <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+                <div style={{ color:T.text,fontSize:12,fontWeight:700,marginBottom:8 }}>Tag to Person or Group (optional)</div>
+                <div style={{ color:T.sub,fontSize:10,marginBottom:10 }}>For wealth view — shows this account balance in their profile</div>
+                <div style={{ display:"flex",gap:6,marginBottom:8 }}>
+                  <button onClick={()=>setAccAttributeType("person")} style={{ flex:1,background:accAttributeType==="person"?T.accent+"22":"none",border:`1px solid ${accAttributeType==="person"?T.accent:T.border}`,borderRadius:10,padding:"6px",cursor:"pointer",fontSize:11,fontWeight:700,color:accAttributeType==="person"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 Person</button>
+                  <button onClick={()=>setAccAttributeType("group")} style={{ flex:1,background:accAttributeType==="group"?T.accent+"22":"none",border:`1px solid ${accAttributeType==="group"?T.accent:T.border}`,borderRadius:10,padding:"6px",cursor:"pointer",fontSize:11,fontWeight:700,color:accAttributeType==="group"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👥 Group</button>
+                </div>
+                <select style={inp} value={accAttributedTo} onChange={e=>setAccAttributedTo(e.target.value)}>
+                  <option value="">None (personal account)</option>
+                  {accAttributeType==="person" && people.filter(p=>!p.isMe).map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
+                  {accAttributeType==="group" && groups.map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
+                </select>
+              </div>
               <button onClick={submit} style={btnP}>Save Account</button>
             </div>
           </div>
@@ -7204,6 +7072,7 @@ function AppContent({ onLock }) {
     const [newSpendBudget,setNewSpendBudget]=useState("");
     const [newGroupName,setNewGroupName]=useState("");
     const [newGroupType,setNewGroupType]=useState("");
+    const [newGroupTypeId,setNewGroupTypeId]=useState("");
     const [newGroupColor,setNewGroupColor]=useState(PALETTE[5]);
     const [newGroupMembers,setNewGroupMembers]=useState([]);
     const [newGroupIncludeMe,setNewGroupIncludeMe]=useState(true);
@@ -7275,7 +7144,9 @@ function AppContent({ onLock }) {
       if(!newGroupName.trim()) return;
       const gtlow=(newGroupType||"group").toLowerCase();
       const gicon=gtlow.includes("house")||gtlow.includes("flat")||gtlow.includes("property")?"🏠":gtlow.includes("trip")||gtlow.includes("travel")?"✈️":gtlow.includes("office")||gtlow.includes("work")?"💼":gtlow.includes("family")?"👨‍👩‍👧":gtlow.includes("friend")?"👫":gtlow.includes("society")||gtlow.includes("building")?"🏢":"👥";
-      setGroups(p=>[...p,{ id:genId(), type:newGroupType||"Group", name:newGroupName.trim(), icon:gicon, color:newGroupColor, members:newGroupMembers, includeMe:newGroupIncludeMe, manualLimit:parseFloat(newGroupManualLimit)||0 }]);
+      const gtMeta = GROUP_TYPES.find(t=>t.id===newGroupTypeId);
+      setGroups(p=>[...p,{ id:genId(), type:gtMeta?.label||newGroupType||"Group", typeId:newGroupTypeId||"other", name:newGroupName.trim(), icon:gtMeta?.icon||gicon, color:newGroupColor, members:newGroupMembers, includeMe:newGroupIncludeMe, manualLimit:parseFloat(newGroupManualLimit)||0, defaultIntent:gtMeta?.default||"split" }]);
+      setNewGroupName(""); setNewGroupMembers([]); setNewGroupManualLimit(""); setNewGroupIncludeMe(true); setNewGroupTypeId("");
       setNewGroupName(""); setNewGroupMembers([]); setNewGroupManualLimit(""); setNewGroupIncludeMe(true);
     };
 
@@ -7313,6 +7184,24 @@ function AppContent({ onLock }) {
       return (
         <div style={{ padding:"14px 16px 0" }}>
           <button onClick={()=>setSelectedPerson(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:13,fontWeight:700,marginBottom:16,fontFamily:"Nunito,sans-serif" }}>← People</button>
+          {/* Tagged accounts */}
+          {(()=>{ const tagged=accounts.filter(a=>String(a.attributedTo)===String(p.id)); if(!tagged.length) return null; return (
+            <div style={{ ...card,marginBottom:12 }}>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>TAGGED ACCOUNTS</div>
+              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                {tagged.map(a=>{ const bal=accountBalance(a.id); return (
+                  <div key={a.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{a.name}</div>
+                    <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(bal)}</div>
+                  </div>
+                ); })}
+                <div style={{ borderTop:`1px solid ${T.border}`,paddingTop:6,display:"flex",justifyContent:"space-between" }}>
+                  <div style={{ color:T.sub,fontSize:11 }}>Total tagged wealth</div>
+                  <div style={{ color:T.success,fontSize:13,fontWeight:900 }}>{sym}{fmt(tagged.reduce((s,a)=>s+accountBalance(a.id),0))}</div>
+                </div>
+              </div>
+            </div>
+          ); })()}
           <div style={{ ...card,background:`linear-gradient(135deg,${p.color}14,${T.card})` }}>
             <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:16 }}>
               <div style={{ width:52,height:52,borderRadius:"50%",background:p.color+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26 }}>{p.emoji}</div>
@@ -7654,6 +7543,24 @@ function AppContent({ onLock }) {
       return (
         <div style={{ padding:"14px 16px 0" }}>
           <button onClick={()=>setSelectedGroup(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:13,fontWeight:700,marginBottom:16,fontFamily:"Nunito,sans-serif" }}>← Groups</button>
+          {/* Group tagged accounts */}
+          {(()=>{ const tagged=accounts.filter(a=>String(a.attributedTo)===String(g.id)); if(!tagged.length) return null; return (
+            <div style={{ ...card,marginBottom:12 }}>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>TAGGED ACCOUNTS</div>
+              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                {tagged.map(a=>{ const bal=accountBalance(a.id); return (
+                  <div key={a.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{a.name}</div>
+                    <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(bal)}</div>
+                  </div>
+                ); })}
+                <div style={{ borderTop:`1px solid ${T.border}`,paddingTop:6,display:"flex",justifyContent:"space-between" }}>
+                  <div style={{ color:T.sub,fontSize:11 }}>Total group wealth</div>
+                  <div style={{ color:T.success,fontSize:13,fontWeight:900 }}>{sym}{fmt(tagged.reduce((s,a)=>s+accountBalance(a.id),0))}</div>
+                </div>
+              </div>
+            </div>
+          ); })()}
           <div style={card}>
             <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:14 }}>
               <div style={{ width:46,height:46,borderRadius:14,background:g.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24 }}>{g.icon}</div>
@@ -7967,9 +7874,18 @@ function AppContent({ onLock }) {
             <button key={v} onClick={()=>setSubView(v)} style={{ flex:1,background:subView===v?T.card:"transparent",border:subView===v?`1px solid ${T.border}`:"none",borderRadius:9,padding:"8px 0",cursor:"pointer",fontSize:13,fontWeight:700,color:subView===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
           ))}
         </div>
-        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16 }}>
-          <button onClick={()=>setSubView("people")} style={{ background:subView==="people"?T.accentSoft:T.card,border:`1px solid ${subView==="people"?T.accent:T.border}`,borderRadius:10,padding:"9px 12px",cursor:"pointer",fontSize:12,fontWeight:800,color:subView==="people"?T.accent:T.text,fontFamily:"Nunito,sans-serif" }}>+ Add Person</button>
-          <button onClick={()=>setSubView("groups")} style={{ background:subView==="groups"?T.accentSoft:T.card,border:`1px solid ${subView==="groups"?T.accent:T.border}`,borderRadius:10,padding:"9px 12px",cursor:"pointer",fontSize:12,fontWeight:800,color:subView==="groups"?T.accent:T.text,fontFamily:"Nunito,sans-serif" }}>+ Add Group</button>
+        <div style={{ display:"flex",gap:8,marginBottom:16,alignItems:"center" }}>
+          <button onClick={()=>setSubView(subView==="people"?"list":"people")} style={{ background:T.accent,border:"none",borderRadius:10,padding:"9px 18px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>+ Add</button>
+          <div style={{ display:"flex",gap:6,flex:1 }}>
+            {subView==="people"&&<div style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Adding Person</div>}
+            {subView==="groups"&&<div style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Adding Group</div>}
+          </div>
+          {(subView==="people"||subView==="groups")&&(
+            <div style={{ display:"flex",gap:6 }}>
+              <button onClick={()=>setSubView("people")} style={{ background:subView==="people"?T.accentSoft:"none",border:`1px solid ${subView==="people"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:subView==="people"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 Person</button>
+              <button onClick={()=>setSubView("groups")} style={{ background:subView==="groups"?T.accentSoft:"none",border:`1px solid ${subView==="groups"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:subView==="groups"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👥 Group</button>
+            </div>
+          )}
         </div>
 
         {subView==="people"&&<>
@@ -8087,8 +8003,15 @@ function AppContent({ onLock }) {
             <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:12 }}>➕ New Group</div>
             <input style={{ ...inp,marginBottom:10 }} placeholder="Group name *" value={newGroupName} onChange={e=>setNewGroupName(e.target.value)}/>
             <div style={{ marginBottom:10 }}>
-              <span style={lbl}>Group type (e.g. Society, Trip, House)</span>
-              <input style={inp} placeholder="Optional" value={newGroupType} onChange={e=>setNewGroupType(e.target.value)}/>
+              <span style={lbl}>Group type</span>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:6 }}>
+                {GROUP_TYPES.map(gt=>(
+                  <button key={gt.id} onClick={()=>setNewGroupTypeId(newGroupTypeId===gt.id?"":gt.id)} style={{ background:newGroupTypeId===gt.id?T.accent+"22":"none",border:`1px solid ${newGroupTypeId===gt.id?T.accent:T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
+                    <div style={{ fontSize:12,fontWeight:700,color:newGroupTypeId===gt.id?T.accent:T.text }}>{gt.icon} {gt.label}</div>
+                    <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>{gt.desc}</div>
+                  </button>
+                ))}
+              </div>
             </div>
             <div style={{ marginBottom:10 }}>
               <span style={lbl}>Members</span>
@@ -9890,12 +9813,14 @@ function AppContent({ onLock }) {
     const [openingBalanceDate, setOpeningBalanceDate] = useState(a.openingBalanceDate||todayStr());
     const [linkedBank, setLinkedBank] = useState(a.linkedBank||"");
     const [excludeFromWealth, setExcludeFromWealth] = useState(a.excludeFromWealth||false);
+    const [accAttributedTo, setAccAttributedTo] = useState(a.attributedTo||"");
+    const [accAttributeType, setAccAttributeType] = useState(a.attributeType||"person");
     const banks = accounts.filter(x=>x.type==="bank"&&x.id!==a.id);
 
     const save = () => {
       if(!name.trim()) return;
       setAccounts(prev=>prev.map(x=>x.id===a.id?{
-        ...x, name:name.trim(), last4, color, excludeFromWealth,
+        ...x, name:name.trim(), last4, color, excludeFromWealth, attributedTo:accAttributedTo||null, attributeType:accAttributedTo?accAttributeType:null,
         ...(a.type==="cc"&&{ limit:parseFloat(limit)||0, statementDate:parseInt(statementDate)||15, dueDate:parseInt(dueDate)||5, alertPct:Math.max(0,parseFloat(alertPct)||0), billingCycle:billingCycle||`${statementDate}th–${dueDate}th` }),
         ...((a.type==="bank"||a.type==="cash")&&{ openingBalance:parseMoney(openingBalance)||0, openingBalanceDate:openingBalanceDate||todayStr() }),
         ...(a.type==="upi"&&{ handle }),
@@ -10305,6 +10230,18 @@ function AppContent({ onLock }) {
     "Other": "📄",
   };
   const getBillerIcon = type => BILLER_ICON[type] || "📄";
+  const GROUP_TYPES = [
+    { id:"family",     label:"Family / Dependants", icon:"🏠", default:"attributed", desc:"Expenses attributed, no collection" },
+    { id:"friends",    label:"Friends / Social",    icon:"👥", default:"split",      desc:"Split and collect" },
+    { id:"relatives",  label:"Relatives",           icon:"👨‍👩‍👧", default:"split", desc:"Split, can override per expense" },
+    { id:"trip",       label:"Trip / Event",        icon:"✈️", default:"split",  desc:"Split and collect" },
+    { id:"office",     label:"Office / Work",       icon:"💼", default:"split",      desc:"Split and collect" },
+    { id:"building",   label:"Office Building",     icon:"🏢", default:"split",      desc:"Split and collect" },
+    { id:"society",    label:"Society",             icon:"🏛️", default:"split", desc:"Split and collect" },
+    { id:"business",   label:"Business",            icon:"🍳", default:"attributed", desc:"Tagged expenses, no collection" },
+    { id:"other",      label:"Other",               icon:"📄", default:"manual",     desc:"Choose per expense" },
+  ];
+  const getGroupTypeMeta = id => GROUP_TYPES.find(t=>t.id===id) || GROUP_TYPES[GROUP_TYPES.length-1];
 
   const BillsPage = () => {
     const [billsTab, setBillsTab] = useState("mybills");
@@ -11060,6 +10997,8 @@ function AppContent({ onLock }) {
               )}
               <div><span style={lbl}>Bill Date (generated on)</span><input style={inp} type="date" value={billDate} onChange={e=>setBillDate(e.target.value)}/></div>
               <div><span style={lbl}>Due Date (pay by)</span><input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
+              <div><span style={lbl}>Period From (optional)</span><input style={inp} type="date" value={billPeriodFrom} onChange={e=>setBillPeriodFrom(e.target.value)}/></div>
+              <div><span style={lbl}>Period To (optional)</span><input style={inp} type="date" value={billPeriodTo} onChange={e=>setBillPeriodTo(e.target.value)}/></div>
             </div>
 
             <div>
