@@ -1774,7 +1774,7 @@ function AppContent({ onLock }) {
   const cashBankTotal = useMemo(()=>accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+effectiveAccountBalance(a.id),0),[accounts,effectiveAccountBalance]);
   const cashWalletTotal = useMemo(()=>accounts.filter(a=>a.type==="cash" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+accountBalance(a.id),0),[accounts,accountBalance]);
   const upiTotal = useMemo(()=>accounts.filter(a=>a.type==="upi" && !isInvestmentAccount(a) && !a.linkedAccount).reduce((sum,a)=>sum+accountBalance(a.id),0),[accounts,accountBalance]);
-  const liquidAssetsTotal = useMemo(()=>accounts.filter(a=>a.type!=="cc" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+(a.type==="bank" ? effectiveAccountBalance(a.id) : accountBalance(a.id)),0),[accounts,accountBalance,effectiveAccountBalance]);
+  const liquidAssetsTotal = useMemo(()=>accounts.filter(a=>a.type!=="cc" && !isInvestmentAccount(a) && !a.excludeFromWealth).reduce((sum,a)=>sum+(a.type==="bank" ? effectiveAccountBalance(a.id) : accountBalance(a.id)),0),[accounts,accountBalance,effectiveAccountBalance]);
   const reconciliationGapTotal = useMemo(()=>accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+accountReconciliationGap(a.id),0),[accounts,accountReconciliationGap]);
   const reconciledBankCount = useMemo(()=>accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a) && balanceCheckpoints[a.id]?.date).length,[accounts,balanceCheckpoints]);
   const investmentAccountTotal = useMemo(()=>investmentAccounts.reduce((sum,a)=>sum+accountBalance(a.id),0),[investmentAccounts,accountBalance]);
@@ -4649,7 +4649,8 @@ function AppContent({ onLock }) {
                             const isDependent=p.personType==="dependant";
                             const willCollect=collectMap[pid]!==undefined?collectMap[pid]:!isDependent;
                             const othersAmt=splitCalc==="amount"?selectedPids.filter(x=>x!==pid).reduce((s,x)=>s+(parseFloat(splitCustom[x])||0),0):0;
-                            const maxForPid=splitCalc==="amount"?Math.max(0,amt-othersAmt):undefined;
+                            const othersAllFilled = splitCalc==="amount" && selectedPids.filter(x=>x!==pid).every(x=>splitCustom[x]!==""&&splitCustom[x]!==undefined);
+                            const maxForPid = splitCalc==="amount"&&othersAllFilled ? Math.max(0,amt-othersAmt) : undefined;
                             const inputOver=splitCalc==="amount"&&(parseFloat(splitCustom[pid])||0)>amt+0.01;
                             const pctOver=splitCalc==="percent"&&(parseFloat(splitCustom[pid])||0)>100.01;
                             return (
@@ -4657,11 +4658,7 @@ function AppContent({ onLock }) {
                                 <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
                                   <span style={{ color:T.text,fontSize:12,flex:1 }}>{p.emoji} {p.name}</span>
                                   {splitCalc==="amount"&&<>
-                                    <input type="number" placeholder="0" value={splitCustom[pid]||""} onChange={e=>{
-                                      let v=e.target.value;
-                                      if(v!==""&&maxForPid!==undefined&&parseFloat(v)>maxForPid+0.01) v=String(Math.round(maxForPid*100)/100);
-                                      setSplitCustom(prev=>({...prev,[pid]:v}));
-                                    }} style={{ ...inpSm,width:60,textAlign:"right",borderColor:inputOver?T.danger:undefined }}/>
+                                    <input type="text" inputMode="decimal" placeholder="0" value={splitCustom[pid]??""} onChange={e=>{ const v=cleanMoneyInput(e.target.value); setSplitCustom(prev=>({...prev,[pid]:v})); }} style={{ ...inpSm,width:70,textAlign:"right",borderColor:inputOver?T.danger:undefined }}/>
                                     {maxForPid>0&&<button onClick={()=>setSplitCustom(prev=>({...prev,[pid]:String(Math.round(maxForPid*100)/100)}))} title="Fill remainder" style={{ background:T.accent+"22",border:`1px solid ${T.accent}`,borderRadius:10,padding:"2px 6px",cursor:"pointer",fontSize:10,color:T.accent,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap" }}>↩ {sym}{fmt(maxForPid)}</button>}
                                   </>}
                                   {splitCalc!=="equally"&&splitCalc!=="amount"&&<input type="number" placeholder={splitCalc==="percent"?"%":"shares"} max={splitCalc==="percent"?100:undefined} value={splitCustom[pid]||""} onChange={e=>setSplitCustom(prev=>({...prev,[pid]:e.target.value}))} style={{ ...inpSm,width:70,textAlign:"right",borderColor:pctOver?T.danger:undefined }}/>}
@@ -4788,7 +4785,7 @@ function AppContent({ onLock }) {
                               </button>
                               {hasItems
                                 ? <span style={{ color:itemsTotal>0?T.accent:T.sub,fontSize:14,fontWeight:500,minWidth:92,textAlign:"right",padding:"6px 0",flexShrink:0 }}>{sym}{fmt(itemsTotal)}</span>
-                                : <input type="number" min="0" placeholder={sym} value={row.amount} onChange={e=>updateRow(row.id,"amount",e.target.value)} style={{ ...inp,width:102,marginBottom:0,flex:"none",textAlign:"right",padding:"9px 10px",fontSize:15,fontWeight:800 }}/>
+                                : <input type="text" inputMode="decimal" placeholder={sym} value={row.amount} onChange={e=>updateRow(row.id,"amount",cleanMoneyInput(e.target.value))} style={{ ...inp,width:102,marginBottom:0,flex:"none",textAlign:"right",padding:"9px 10px",fontSize:15,fontWeight:800 }}/>
                               }
                               <button onClick={()=>updateRow(row.id,"mode",modeCycle(row.mode))} title={row.mode==="owes"?"Collect":(row.mode==="i_owe"?"I Owe":"Attribute")} style={{ background:modeColor(row.mode)+"22",border:`1px solid ${modeColor(row.mode)}`,borderRadius:10,padding:"7px 10px",cursor:"pointer",fontSize:14,fontWeight:900,color:modeColor(row.mode),fontFamily:"Nunito,sans-serif",lineHeight:1,flexShrink:0,minWidth:40 }}>{modeShort(row.mode)}</button>
                               <button onClick={()=>toggleItems(row.id)} title="Itemise for this target" style={{ background:hasItems?T.accent+"22":"none",border:`1px solid ${hasItems?T.accent:T.border}`,borderRadius:20,padding:"4px 7px",cursor:"pointer",fontSize:11,color:hasItems?T.accent:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>📋</button>
@@ -9842,12 +9839,13 @@ function AppContent({ onLock }) {
     const [openingBalance, setOpeningBalance] = useState(String(a.openingBalance||"0"));
     const [openingBalanceDate, setOpeningBalanceDate] = useState(a.openingBalanceDate||todayStr());
     const [linkedBank, setLinkedBank] = useState(a.linkedBank||"");
+    const [excludeFromWealth, setExcludeFromWealth] = useState(a.excludeFromWealth||false);
     const banks = accounts.filter(x=>x.type==="bank"&&x.id!==a.id);
 
     const save = () => {
       if(!name.trim()) return;
       setAccounts(prev=>prev.map(x=>x.id===a.id?{
-        ...x, name:name.trim(), last4, color,
+        ...x, name:name.trim(), last4, color, excludeFromWealth,
         ...(a.type==="cc"&&{ limit:parseFloat(limit)||0, statementDate:parseInt(statementDate)||15, dueDate:parseInt(dueDate)||5, alertPct:Math.max(0,parseFloat(alertPct)||0), billingCycle:billingCycle||`${statementDate}th–${dueDate}th` }),
         ...((a.type==="bank"||a.type==="cash")&&{ openingBalance:parseMoney(openingBalance)||0, openingBalanceDate:openingBalanceDate||todayStr() }),
         ...(a.type==="upi"&&{ handle }),
@@ -10194,6 +10192,13 @@ function AppContent({ onLock }) {
             </div>
             {editPhoto&&<img src={editPhoto} alt="bill" style={{ width:"100%",borderRadius:10,maxHeight:160,objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>}
 
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.input,borderRadius:12,padding:"12px 14px" }}>
+              <div>
+                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>Exclude from Net Worth</div>
+                <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>e.g. Vyom Wallet, kids accounts</div>
+              </div>
+              <button onClick={()=>setExcludeFromWealth(v=>!v)} style={{ background:excludeFromWealth?T.danger+"22":"none",border:`1px solid ${excludeFromWealth?T.danger:T.border}`,borderRadius:20,padding:"5px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:excludeFromWealth?T.danger:T.sub,fontFamily:"Nunito,sans-serif" }}>{excludeFromWealth?"Excluded":"Include"}</button>
+            </div>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={onClose} style={btnG}>Cancel</button>
               <button onClick={save} style={btnP}>Save Changes ✓</button>
