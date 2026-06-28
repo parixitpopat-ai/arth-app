@@ -6721,7 +6721,7 @@ function AppContent({ onLock }) {
                       setTxns(p=>[{id:Date.now(),type:"expense",desc:b.name,merchant:b.merchant||"",date:todayStr(),note:"Bill payment",catId:b.catId,catIds:b.catIds||[b.catId],subId:b.subId||null,accId,people:b.splitPeople||{},forPerson:"",groupId:b.groupId||null,groupCollectiveAmount:Number(b.groupCollectiveAmount||0),amount:b.amount||0,isBillPayment:true,billInvoiceNo:b.invoiceNo||null,paidBillId:b.id,paidBillName:b.name,imageBase64:b.imageBase64||null,paymentImageBase64:b.paymentImageBase64||null},...p]);
                       const _pd=todayStr();
                       setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:_pd,lastPaidAmount:b.amount,lastPaidDate:_pd}:x));
-                      if(b.recurring && b.autoGenerate!==false){ const _nd=computeNextDueDate(b,_pd); const _np=computeNextPeriod(b,_pd); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:_nd,billDate:_pd,paidDate:null,paidByTxnId:null,lastPaidAmount:b.amount,lastPaidDate:_pd,isPaused:false,pausedDate:null,resumeDate:null,pausedDays:0,createdDate:todayStr(),createdAt:Date.now(),...(_np||{})},...p]); }
+                      if(b.recurring && b.autoGenerate!==false){ const _nd=computeNextDueDate(b,_pd); const _np=computeNextPeriod(b,_pd); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:_nd,billDate:null,billPeriodFrom:null,billPeriodTo:null,paidDate:null,paidByTxnId:null,lastPaidAmount:b.amount,lastPaidDate:_pd,isPaused:false,pausedDate:null,resumeDate:null,pausedDays:0,createdDate:todayStr(),createdAt:Date.now(),...(_np||{})},...p]); }
                     }} style={{ background:T.success+"22",border:`1px solid ${T.success}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif" }}>Pay</button>
                   </div>
                 </div>
@@ -9475,6 +9475,55 @@ function AppContent({ onLock }) {
       </div>
     );
 
+    if(settingsSection==="releasenotes") return (
+      <div style={{ padding:"0 0 80px" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:18 }}>
+          <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:18,fontFamily:"Nunito,sans-serif" }}>←</button>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>🚀 Release Notes</div>
+        </div>
+        <div style={{ background:T.accent+"16",border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px 14px",marginBottom:16 }}>
+          <div style={{ color:T.accent,fontSize:12,fontWeight:800 }}>Current: {APP_VERSION}</div>
+          <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Auto-deployed from GitHub → Vercel</div>
+        </div>
+        {[
+          { month:"June 2026", items:[
+            "Bills tab redesigned with PhonePe-style grid and 35 biller types with icons",
+            "Membership system: recharge model per person, grace days, active/lapsed status",
+            "Fee payments: multi-month school/education fee distribution",
+            "Transaction link to biller: optional, non-intrusive",
+            "Privacy mode: income/savings hidden with PIN to reveal for 60 seconds",
+            "Exclude from Net Worth: per account toggle (e.g. Vyom Wallet)",
+            "Bill period dates: From/To for utility bills",
+            "Split fixes: 0 and decimal now work, clearing first amount no longer resets others",
+            "Auto-generate next bill no longer resets bill date to payment date",
+            "Cloud sync: GitHub + Vercel auto-deploy, Supabase auth working",
+            "Bugs fixed: B6 B8 B9 B11 B12 B13 B14 B15 B16",
+          ]},
+          { month:"April/May 2026", items:[
+            "Cloud sync infrastructure: Supabase auto-sync on every change",
+            "Biller Accounts: consumer number, type, attribution",
+            "Bills tab: My Bills + Bill History tabs",
+            "Auto-generate next bill on payment with pause/resume",
+            "Items UI: bottom-sheet redesign",
+            "CC refund reduces outstanding (B1 B1a B1b)",
+            "To Receive merged per person: splits + loans",
+          ]},
+        ].map(section=>(
+          <div key={section.month} style={{ marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:8 }}>{section.month}</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+              {section.items.map((item,i)=>(
+                <div key={i} style={{ display:"flex",gap:8,alignItems:"flex-start" }}>
+                  <span style={{ color:T.success,fontSize:12 }}>✅</span>
+                  <span style={{ color:T.sub,fontSize:12,lineHeight:1.4 }}>{item}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+
     if(settingsSection==="cloudsync") return (
       <div style={{ padding:"0 0 80px" }}>
         <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:18 }}>
@@ -9813,6 +9862,7 @@ function AppContent({ onLock }) {
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Help</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 24px",overflow:"hidden" }}>
           <Row icon="📖" title="User Guides" subtitle="How-to guides for features" onClick={()=>setSettingsSection("guides")}/>
+          <Row icon="🚀" title="Release Notes" subtitle={`v${APP_VERSION} · What's new`} onClick={()=>setSettingsSection("releasenotes")}/>
         </div>
 
         <div style={{ color:T.sub,fontSize:10,textAlign:"center",padding:"0 16px 8px" }}>
@@ -10044,6 +10094,8 @@ function AppContent({ onLock }) {
     const [billerAccountId,setBillerAccountId]=useState(b.billerAccountId||"");
     const selectedBA = billerAccountId ? billerAccounts.find(x=>x.id===billerAccountId) : null;
     const [autoGenerate,setAutoGenerate]=useState(b.autoGenerate!==false);
+    const [billPeriodFrom,setBillPeriodFrom]=useState(b.billPeriodFrom||"");
+    const [billPeriodTo,setBillPeriodTo]=useState(b.billPeriodTo||"");
     const [editPhoto,setEditPhoto]=useState(b.imageBase64||null);
     const [editSplitPeople,setEditSplitPeople]=useState(()=>{ const m={}; Object.entries(b.splitPeople||{}).forEach(([pid])=>m[pid]=true); return m; });
     const [editSplitCalc,setEditSplitCalc]=useState("equally");
@@ -10078,7 +10130,7 @@ function AppContent({ onLock }) {
       const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
       const myShare=editIncludeMe ? Math.max(0, editAmt-owedByOthers) : 0;
       const groupCollectiveAmount = editGroup ? Math.max(0, editAmt-owedByOthers-myShare) : 0;
-      setBills(prev=>prev.map(x=>x.id===b.id?{...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate}:x));
+      setBills(prev=>prev.map(x=>x.id===b.id?{...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null}:x));
       onClose();
     };
 
@@ -10115,6 +10167,8 @@ function AppContent({ onLock }) {
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
               <div><span style={lbl}>Bill Date (generated on)</span><input style={inp} type="date" value={billDate} onChange={e=>setBillDate(e.target.value)}/></div>
               <div><span style={lbl}>Due Date (pay by)</span><input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
+              <div><span style={lbl}>Period From (optional)</span><input style={inp} type="date" value={billPeriodFrom} onChange={e=>setBillPeriodFrom(e.target.value)}/></div>
+              <div><span style={lbl}>Period To (optional)</span><input style={inp} type="date" value={billPeriodTo} onChange={e=>setBillPeriodTo(e.target.value)}/></div>
             </div>
             <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
               <div>
@@ -10469,6 +10523,12 @@ function AppContent({ onLock }) {
                     <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:8 }}>
                       {billImageSrc&&<button onClick={(e)=>{ e.stopPropagation(); setImageViewSrc(billImageSrc); }} style={{ background:T.info+"14",border:`1px solid ${T.info}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>🧾 View bill</button>}
                       {paymentImageSrc&&<button onClick={(e)=>{ e.stopPropagation(); setImageViewSrc(paymentImageSrc); }} style={{ background:T.success+"14",border:`1px solid ${T.success}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.success,fontFamily:"Nunito,sans-serif" }}>💳 View payment</button>}
+                    </div>
+                  )}
+                  {/* Bill period */}
+                  {(b.billPeriodFrom||b.billPeriodTo)&&(
+                    <div style={{ display:"flex",gap:6,marginBottom:4 }}>
+                      <span style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.info }}>📅 {formatShortDate(b.billPeriodFrom)||b.billPeriodFrom||"?"} → {formatShortDate(b.billPeriodTo)||b.billPeriodTo||"?"}</span>
                     </div>
                   )}
                   {/* Plan / recharge details */}
@@ -10906,6 +10966,8 @@ function AppContent({ onLock }) {
     const [consumerNumber,setConsumerNumber]=useState(_preBA?.consumerNo||"");
     const [lastPaidAmount,setLastPaidAmount]=useState("");
     const [autoGenerate,setAutoGenerate]=useState(true);
+    const [billPeriodFrom,setBillPeriodFrom]=useState("");
+    const [billPeriodTo,setBillPeriodTo]=useState("");
     // Prepaid recharge fields
     const isRecharge = ["Mobile Prepaid","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","DTH"].includes(billerCategory);
     const [validityDays,setValidityDays]=useState("");
@@ -10950,7 +11012,7 @@ function AppContent({ onLock }) {
       const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
       const myShare = billIncludeMe ? Math.max(0, amt-owedByOthers) : 0;
       const groupCollectiveAmount = billGroup ? Math.max(0, amt-owedByOthers-myShare) : 0;
-      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),amount:amt,dueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring,frequency,status:"unpaid",paidDate:null,billDate:billDate||todayStr(),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto,billerAccountId:billerAccountId||null,billerCategory:billerCategory||null,consumerNumber:consumerNumber.trim()||null,lastPaidAmount:lastPaidAmount?parseFloat(lastPaidAmount):null,autoGenerate,isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0,validityDays:validityDays?Number(validityDays):null,planType:planType||null,planDesc:planDesc.trim()||null,validFrom:validFrom2||null,validUntil:validUntilCalc||null};
+      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),amount:amt,dueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring,frequency,status:"unpaid",paidDate:null,billDate:billDate||todayStr(),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto,billerAccountId:billerAccountId||null,billerCategory:billerCategory||null,consumerNumber:consumerNumber.trim()||null,lastPaidAmount:lastPaidAmount?parseFloat(lastPaidAmount):null,autoGenerate,isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0,validityDays:validityDays?Number(validityDays):null,planType:planType||null,planDesc:planDesc.trim()||null,validFrom:validFrom2||null,validUntil:validUntilCalc||null,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null};
       setBills(p=>[newBill,...p]);
 
       const matchingTxn = txns.find(t=>t.type==="expense" && !t.isBillPayment && !t.paidBillId && Number(t.amount)===amt && (billCatIds[0]? t.catId===billCatIds[0] : true));
