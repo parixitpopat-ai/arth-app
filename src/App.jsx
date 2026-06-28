@@ -2353,7 +2353,7 @@ function AppContent({ onLock }) {
             </div>
           </div>
           <div style={{ textAlign:"right", flexShrink:0 }}>
-            <div style={{ color, fontSize:14, fontWeight:800, lineHeight:1.2 }}>{isPlus?"+":""}{sym}{fmt(t.amount)}</div>
+            <div style={{ color, fontSize:14, fontWeight:800, lineHeight:1.2 }}>{isPlus?"+":""}{privacyMode&&!pinRevealActive&&t.type==="income"?"₹XXXXX":`${sym}${fmt(t.amount)}`}</div>
             {t.type==="expense"&&refundedAmount>0&&<div style={{ color:T.info,fontSize:10,marginTop:1,fontWeight:500 }}>net {sym}{fmt(netAfterRefund)}</div>}
             {t.type==="expense"&&myShare>0&&myShare<t.amount&&<div style={{ color:T.sub,fontSize:10,marginTop:2,fontWeight:500 }}>mine {sym}{fmt(myShare)}</div>}
             <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{dateLabel}</div>
@@ -6974,7 +6974,7 @@ function AppContent({ onLock }) {
 
               <div style={{ display:"flex",flexWrap:"wrap",gap:6,overflowX:"auto",paddingBottom:10,marginBottom:10 }}>
                 {["All","expense","income","investment","transfer","cc_payment","settlement_in"].map(type=>(
-                  <Chip key={type} color={type==="All"?T.accent:txnColor(type,T)} active={fType===type} onClick={()=>setFType(type)}>
+                  <Chip key={type} color={type==="All"?T.accent:txnColor(type,T)} active={fType===type} onClick={()=>{ if(type==="income"&&privacyMode&&!pinRevealActive){ requestPinReveal("income"); return; } setFType(type); }}>
                     {type==="All" ? "All" : txnLabel(type)}
                   </Chip>
                 ))}
@@ -11270,7 +11270,7 @@ function AppContent({ onLock }) {
           <div style={{ display:"flex",gap:8,alignItems:"center" }}>
             <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif" }}>💼{workTripMode?" ON":""}</button>
             <button onClick={()=>{ setShowSearch(true); setSearchQuery(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Search">🔍</button>
-            <button onClick={()=>{ const nm=!privacyMode; setPrivacyMode(nm); localStorage.setItem("arth_privacy_mode",JSON.stringify(nm)); }} style={{ background:privacyMode?T.danger+"22":"none",border:`1px solid ${privacyMode?T.danger:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15 }}>{privacyMode?"🙈":"👁️"}</button>
+            <button onClick={()=>{ if(privacyMode){ if(pinRevealActive){ setPinRevealActive(false); if(pinRevealTimer) clearTimeout(pinRevealTimer); } else { requestPinReveal("toggle"); } } else { setPrivacyMode(true); localStorage.setItem("arth_privacy_mode","true"); } }} style={{ background:privacyMode?T.danger+"22":"none",border:`1px solid ${privacyMode?T.danger:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15 }} title={privacyMode?pinRevealActive?"Tap to hide again":"Tap to reveal (PIN required)":"Tap to hide income & savings"}>{privacyMode?pinRevealActive?"👁️":"🙈":"👁️"}</button>
             <button onClick={()=>{ if(tab==="bills") setShowAddBill(true); else { const typeMap={"expense":"expense","income":"income","transfer":"transfer","cc_payment":"cc_payment","investment":"investment","settlement_in":"settlement_in"}; setDefaultAddType(typeMap[fType]||"expense"); setShowAdd(true); } }} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Nunito,sans-serif" }}>{tab==="bills"?"+ Add Bill":"+ Add"}</button>
           </div>
         </div>}
