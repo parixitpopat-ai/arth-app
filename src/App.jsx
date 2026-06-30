@@ -772,10 +772,6 @@ class ErrorBoundary extends React.Component {
 
 export default function Arth() {
   const [appPin, setAppPin] = useState(()=>localStorage.getItem("arth_pin")||"");
-  const [isLocked, setIsLocked] = useState(false);
-  const [lockPinAttempts, setLockPinAttempts] = useState(0);
-  const [lockoutUntil, setLockoutUntil] = useState(0);
-  const lockApp = () => setIsLocked(true);
   const [unlocked, setUnlocked] = useState(false);
   const idleTimer = useRef(null);
   const idleWarnTimer = useRef(null);
@@ -834,40 +830,6 @@ export default function Arth() {
     setAppPin(hash);
     setUnlocked(true);
   }}/>;
-
-  // Lock mode screen
-  if(isLocked) return (
-    <div style={{ minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Nunito,sans-serif" }}>
-      <div style={{ fontSize:52,marginBottom:8 }}>🔒</div>
-      <div style={{ color:"#f0a500",fontSize:22,fontWeight:900,marginBottom:4 }}>Arth is Locked</div>
-      <div style={{ color:"rgba(255,255,255,0.4)",fontSize:12,marginBottom:32 }}>Enter PIN to unlock</div>
-      {lockoutUntil>Date.now()&&(
-        <div style={{ background:"#ef444420",border:"1px solid #ef444444",borderRadius:12,padding:"10px 20px",marginBottom:20,color:"#ef4444",fontSize:12,fontWeight:700 }}>Too many attempts. Try again in {Math.ceil((lockoutUntil-Date.now())/60000)} minutes</div>
-      )}
-      <PinScreen isSetup={false} onUnlock={async pin=>{
-        let matched = false;
-        if(appPin.length<=6){
-          if(String(pin)===String(appPin)){
-            const hash = await hashPin(pin);
-            localStorage.setItem("arth_pin",hash);
-            setAppPin(hash);
-            matched = true;
-          }
-        } else {
-          const h = await hashPin(pin);
-          if(h===appPin) matched = true;
-        }
-        if(matched){
-          setIsLocked(false);
-          setLockPinAttempts(0);
-        } else {
-          const newAttempts = lockPinAttempts+1;
-          setLockPinAttempts(newAttempts);
-          if(newAttempts>=5){ setLockoutUntil(Date.now()+30*60*1000); setLockPinAttempts(0); }
-        }
-      }}/>
-    </div>
-  );
 
   if(!unlocked) return <PinScreen isSetup={false} onUnlock={async pin=>{
     // Migration: old plaintext PINs are 4 chars; hashes are 64 hex chars
@@ -11264,7 +11226,7 @@ function AppContent({ onLock }) {
           <div style={{ display:"flex",gap:8,alignItems:"center" }}>
             <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif" }}>💼{workTripMode?" ON":""}</button>
             <button onClick={()=>{ setShowSearch(true); setSearchQuery(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Search">🔍</button>
-            <button onClick={lockApp} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Lock app">🔒</button>
+            <button onClick={onLock} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Lock app">🔒</button>
 
             <button onClick={()=>{ if(tab==="bills") setShowAddBill(true); else { const typeMap={"expense":"expense","income":"income","transfer":"transfer","cc_payment":"cc_payment","investment":"investment","settlement_in":"settlement_in"}; setDefaultAddType(typeMap[fType]||"expense"); setShowAdd(true); } }} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Nunito,sans-serif" }}>{tab==="bills"?"+ Add Bill":"+ Add"}</button>
           </div>
