@@ -1017,6 +1017,7 @@ function AppContent({ onLock }) {
   const [expandedTxn, setExpandedTxn] = useState(null);
   const defaultTxnMonth = viewMonth || todayStr().slice(0,7);
   const [fType, setFType] = useState("All");
+  const [txnSearch, setTxnSearch] = useState("");
   const [txnDatePreset, setTxnDatePreset] = useState("current_month");
   const [txnSort, setTxnSort] = useState("date_desc");
   const [txnDateFrom, setTxnDateFrom] = useState(()=>getMonthBounds(defaultTxnMonth).start);
@@ -6704,7 +6705,6 @@ function AppContent({ onLock }) {
   // ── TRANSACTIONS ───────────────────────────────────────────────────────────
   const Transactions = () => {
     const [showTxnFilters, setShowTxnFilters] = useState(false);
-    const [txnSearch, setTxnSearch] = useState("");
     const [showTxnSort, setShowTxnSort] = useState(false);
     const txnSortOptions = [
       { id:"recorded_desc", label:"Latest", title:"Latest" },
