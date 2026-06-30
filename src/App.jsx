@@ -772,6 +772,10 @@ class ErrorBoundary extends React.Component {
 
 export default function Arth() {
   const [appPin, setAppPin] = useState(()=>localStorage.getItem("arth_pin")||"");
+  const [isLocked, setIsLocked] = useState(false);
+  const [lockPinAttempts, setLockPinAttempts] = useState(0);
+  const [lockoutUntil, setLockoutUntil] = useState(0);
+  const lockApp = () => setIsLocked(true);
   const [unlocked, setUnlocked] = useState(false);
   const idleTimer = useRef(null);
   const idleWarnTimer = useRef(null);
@@ -830,6 +834,29 @@ export default function Arth() {
     setAppPin(hash);
     setUnlocked(true);
   }}/>;
+
+  // Lock mode screen
+  if(isLocked) return (
+    <div style={{ minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Nunito,sans-serif" }}>
+      <div style={{ fontSize:52,marginBottom:8 }}>🔒</div>
+      <div style={{ color:"#f0a500",fontSize:22,fontWeight:900,marginBottom:4 }}>Arth is Locked</div>
+      <div style={{ color:"rgba(255,255,255,0.4)",fontSize:12,marginBottom:32 }}>Enter PIN to unlock</div>
+      {lockoutUntil>Date.now()&&(
+        <div style={{ background:"#ef444420",border:"1px solid #ef444444",borderRadius:12,padding:"10px 20px",marginBottom:20,color:"#ef4444",fontSize:12,fontWeight:700 }}>Too many attempts. Try again in {Math.ceil((lockoutUntil-Date.now())/60000)} minutes</div>
+      )}
+      <PinScreen isSetup={false} onUnlock={async pin=>{
+        const h = await hashPin(pin);
+        if(h===appPin){
+          setIsLocked(false);
+          setLockPinAttempts(0);
+        } else {
+          const newAttempts = lockPinAttempts+1;
+          setLockPinAttempts(newAttempts);
+          if(newAttempts>=5){ setLockoutUntil(Date.now()+30*60*1000); setLockPinAttempts(0); }
+        }
+      }}/>
+    </div>
+  );
 
   if(!unlocked) return <PinScreen isSetup={false} onUnlock={async pin=>{
     // Migration: old plaintext PINs are 4 chars; hashes are 64 hex chars
@@ -1688,6 +1715,17 @@ function AppContent({ onLock }) {
 
     if(txnReimbursableOnly && !(t.reimbursable && !t.reimbursedByTxnId)) return false;
 
+    // Text search
+    if(txnSearch&&txnSearch.trim()){
+      const q = txnSearch.trim().toLowerCase();
+      const merchant = (t.merchant||t.who||t.desc||"").toLowerCase();
+      const note = (t.note||"").toLowerCase();
+      const amount = String(t.amount||"");
+      const acc = accounts.find(a=>a.id===t.accId);
+      const accName = (acc?.name||"").toLowerCase();
+      if(!merchant.includes(q)&&!note.includes(q)&&!amount.includes(q)&&!accName.includes(q)) return false;
+    }
+
     return true;
   }).sort((a,b)=>{
     const recordedA = getRecordedSortValue(a);
@@ -1723,7 +1761,7 @@ function AppContent({ onLock }) {
     if(recordedB !== recordedA) return recordedB - recordedA;
     if(dateB !== dateA) return dateB - dateA;
     return tieDesc;
-  }),[txns,fType,txnDateFrom,txnDateTo,txnAmountFrom,txnAmountTo,txnCategoryFilter,txnPersonFilter,txnGroupFilter,accounts,expenseSourceFilter,expenseCardFilter,incomeTypeFilter,incomeAccountFilter,investmentTypeFilter,txnSort,txnReimbursableOnly]);
+  }),[txns,fType,txnDateFrom,txnDateTo,txnAmountFrom,txnAmountTo,txnCategoryFilter,txnPersonFilter,txnGroupFilter,accounts,expenseSourceFilter,expenseCardFilter,incomeTypeFilter,incomeAccountFilter,investmentTypeFilter,txnSort,txnReimbursableOnly,txnSearch]);
 
   const accountBalance = useCallback((accId, endDate=null)=>{
     const acc=accounts.find(a=>a.id===accId);
@@ -2369,7 +2407,7 @@ function AppContent({ onLock }) {
             </div>
           </div>
           <div style={{ textAlign:"right", flexShrink:0 }}>
-            <div style={{ color, fontSize:14, fontWeight:800, lineHeight:1.2 }}>{isPlus?"+":""}{privacyMode&&!pinRevealActive&&t.type==="income"?"₹XXXXX":`${sym}${fmt(t.amount)}`}</div>
+            <div style={{ color, fontSize:14, fontWeight:800, lineHeight:1.2 }}>{isPlus?"+":" "}{sym}{fmt(t.amount)}</div>
             {t.type==="expense"&&refundedAmount>0&&<div style={{ color:T.info,fontSize:10,marginTop:1,fontWeight:500 }}>net {sym}{fmt(netAfterRefund)}</div>}
             {t.type==="expense"&&myShare>0&&myShare<t.amount&&<div style={{ color:T.sub,fontSize:10,marginTop:2,fontWeight:500 }}>mine {sym}{fmt(myShare)}</div>}
             <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{dateLabel}</div>
@@ -4060,15 +4098,7 @@ function AppContent({ onLock }) {
               </div>
             )}
             {(txnType==="cc_payment"||txnType==="transfer")&&<input style={inp} placeholder="Note (optional)" value={who} onChange={e=>setWho(e.target.value)}/>}
-            {txnType==="expense"&&(
-              <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-                <div style={{ flex:1 }}><span style={lbl}>Discount ({sym}) (optional)</span><input style={inp} type="text" inputMode="decimal" placeholder="0" value={discount||""} onChange={e=>setDiscount(cleanMoneyInput(e.target.value))}/></div>
-                {discount&&parseFloat(discount)>0&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",flexShrink:0 }}>
-                  <div style={{ color:T.sub,fontSize:9 }}>You paid</div>
-                  <div style={{ color:T.success,fontSize:13,fontWeight:800 }}>{sym}{fmt(Math.max(0,(parseFloat(amount)||0)-(parseFloat(discount)||0)))}</div>
-                </div>}
-              </div>
-            )}
+
 
             <div style={{ display:"grid",gridTemplateColumns:"1.2fr 1fr",gap:10 }}>
               <div>
@@ -4923,10 +4953,10 @@ function AppContent({ onLock }) {
                 {smsImportStatus&&/unable|empty|not available|error/i.test(smsImportStatus)&&<div style={{ color:T.warn,fontSize:11,fontWeight:700,marginBottom:6 }}>{smsImportStatus}</div>}
                 <textarea
                   style={{ ...inp,height:80,resize:"none",marginBottom:6,cursor:smsBusy?"wait":"text" }}
-                  placeholder={smsBusy?"Fetching SMS…":`Tap to import SMS${isNative?"":" (copy SMS first)"} or paste here…`}
+                  placeholder="Paste bank SMS here..."
                   value={smsTxt}
-                  onFocus={()=>{ if(!smsTxt && !smsBusy) importSms(isNative?"phone":"clipboard"); }}
                   onChange={e=>{ setSmsTxt(e.target.value); parseSms(e.target.value, { adjustBalance: true }); }}
+                  onPaste={e=>{ const txt=e.clipboardData?.getData("text")||""; if(txt){ e.preventDefault(); setSmsTxt(txt); parseSms(txt, { adjustBalance:true }); } }}
                 />
                 {smsParseMeta?.balanceAdjusted&&<div style={{ color:T.success,fontSize:11,fontWeight:700 }}>✅ Balance synced ({smsParseMeta.balanceDiff>0?"+":""}{sym}{fmt(smsParseMeta.balanceDiff)})</div>}
                 {smsParseMeta?.emiLoanId&&<div style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:10,padding:"6px 10px",display:"flex",justifyContent:"space-between",alignItems:"center" }}><span style={{ color:T.warn,fontSize:11,fontWeight:700 }}>🔗 EMI match: {smsParseMeta.emiLoanName}</span><button onClick={()=>{ setExpensePaymentMode("emi"); }} style={{ background:T.warn+"22",border:`1px solid ${T.warn}`,borderRadius:20,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Link</button></div>}
@@ -6060,22 +6090,7 @@ function AppContent({ onLock }) {
   };
 
   // ── HOME ───────────────────────────────────────────────────────────────────
-  const [privacyMode, setPrivacyMode] = useState(()=>JSON.parse(localStorage.getItem("arth_privacy_mode")||"false"));
-  const [pinRevealActive, setPinRevealActive] = useState(false);
-  const [showPinReveal, setShowPinReveal] = useState(false);
-  const [pinRevealTimer, setPinRevealTimer] = useState(null);
-  const [pinRevealTarget, setPinRevealTarget] = useState(""); // "income" | "savings" | "incometab"
-  const maskVal = v => (privacyMode && !pinRevealActive) ? "₹XXXXX" : v;
-  const [pinRevealInput, setPinRevealInput] = useState("");
-  const [pinRevealError, setPinRevealError] = useState(false);
-  const requestPinReveal = (target) => { setPinRevealTarget(target); setShowPinReveal(true); setPinRevealInput(""); setPinRevealError(false); };
-  const onPinRevealSuccess = () => {
-    setShowPinReveal(false);
-    setPinRevealActive(true);
-    if(pinRevealTimer) clearTimeout(pinRevealTimer);
-    const t = setTimeout(()=>{ setPinRevealActive(false); }, 60000);
-    setPinRevealTimer(t);
-  };
+
   const DEFAULT_CARD_ORDER = ["stats","categories","cc","bills","recent"];
   const KNOWN_CARD_KEYS = new Set(["stats","budget","categories","cc","bills","recent"]);
   const [cardOrder, setCardOrder] = useState(()=>{
@@ -6487,12 +6502,12 @@ function AppContent({ onLock }) {
       stats: (
         <div key="stats" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
           {[
-            {label:"Income",value:maskVal(`${sym}${fmt(totalIncome)}`),color:T.success,icon:"💚",action:()=>{ if(privacyMode&&!pinRevealActive){ requestPinReveal("income"); } else { setTab("transactions"); setFType("income"); } }},
+            {label:"Income",value:`${sym}${fmt(totalIncome)}`,color:T.success,icon:"💚",action:()=>{ setTab("transactions"); setFType("income"); }},
             {label:"Investments",value:`${sym}${fmt(monthlyInvestmentFlow)}`,color:T.info,icon:"💹",action:()=>{ setSelectedInvestmentTypeView("all"); setShowInvestments(true); }},
             {label:"People & Groups",value:"",color:T.info,icon:"👥",action:()=>setTab("people")},
             {label:"Budget",value:`${sym}${fmt(monthly)}`,color:T.warn,icon:"🎯",action:()=>{ setShowSettings(true); setSettingsSection("budget"); }},
             {label:"To Receive",value:`${sym}${fmt(monthTotalOwedToMe + loanGivenTotal)}`,color:T.accent,icon:"🔄",action:()=>setShowReceivablesList(true),sub:(loanGivenTotal>0&&monthTotalOwedToMe>0)?`incl. ${sym}${fmtK(loanGivenTotal)} loans`:loanGivenTotal>0?`${sym}${fmtK(loanGivenTotal)} loans outstanding`:undefined},
-            {label:"Net Savings",value:maskVal(`${sym}${fmtK(Math.max(0,totalIncome-myActual-monthlyInvestmentFlow))}`),color:T.success,icon:"💰",action:()=>{ if(privacyMode&&!pinRevealActive){ requestPinReveal("savings"); } }},
+            {label:"Net Savings",value:`${sym}${fmtK(Math.max(0,totalIncome-myActual-monthlyInvestmentFlow))}`,color:T.success,icon:"💰",action:()=>setTab("home")},
           ].map(s=>(
             <div key={s.label} onClick={s.action} style={{ ...card,marginBottom:0,padding:"12px",cursor:"pointer" }}>
               <div style={{ fontSize:20,marginBottom:4 }}>{s.icon}</div>
@@ -6689,6 +6704,7 @@ function AppContent({ onLock }) {
   // ── TRANSACTIONS ───────────────────────────────────────────────────────────
   const Transactions = () => {
     const [showTxnFilters, setShowTxnFilters] = useState(false);
+    const [txnSearch, setTxnSearch] = useState("");
     const [showTxnSort, setShowTxnSort] = useState(false);
     const txnSortOptions = [
       { id:"recorded_desc", label:"Latest", title:"Latest" },
@@ -6734,6 +6750,17 @@ function AppContent({ onLock }) {
 
     return (
       <div style={{ padding:"14px 16px 0" }}>
+        {/* Search bar */}
+        <div style={{ background:T.input,borderRadius:24,padding:"10px 16px",display:"flex",alignItems:"center",gap:8,marginBottom:12 }}>
+          <span style={{ fontSize:15,color:T.sub }}>🔍</span>
+          <input
+            style={{ background:"none",border:"none",outline:"none",color:T.text,fontSize:13,fontFamily:"Nunito,sans-serif",flex:1 }}
+            placeholder="Search vendor, amount, account..."
+            value={txnSearch}
+            onChange={e=>setTxnSearch(e.target.value)}
+          />
+          {txnSearch&&<button onClick={()=>setTxnSearch("")} style={{ background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:14,fontFamily:"Nunito,sans-serif" }}>✕</button>}
+        </div>
         {txnReimbursableOnly&&(
           <div style={{ background:"#f0a50012",border:"1px solid #f0a50044",borderRadius:10,padding:"8px 12px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
             <span style={{ color:"#f0a500",fontSize:12,fontWeight:700 }}>💼 Showing pending reimbursements only</span>
@@ -6842,7 +6869,7 @@ function AppContent({ onLock }) {
 
               <div style={{ display:"flex",flexWrap:"wrap",gap:6,overflowX:"auto",paddingBottom:10,marginBottom:10 }}>
                 {["All","expense","income","investment","transfer","cc_payment","settlement_in"].map(type=>(
-                  <Chip key={type} color={type==="All"?T.accent:txnColor(type,T)} active={fType===type} onClick={()=>{ if(type==="income"&&privacyMode&&!pinRevealActive){ requestPinReveal("income"); return; } setFType(type); }}>
+                  <Chip key={type} color={type==="All"?T.accent:txnColor(type,T)} active={fType===type} onClick={()=>setFType(type)}>
                     {type==="All" ? "All" : txnLabel(type)}
                   </Chip>
                 ))}
@@ -7066,6 +7093,7 @@ function AppContent({ onLock }) {
     const [editingGroupMembers,setEditingGroupMembers]=useState([]);
     const [editingGroupIncludeMe,setEditingGroupIncludeMe]=useState(true);
     const [isEditingGroup,setIsEditingGroup]=useState(false);
+  const [editingGroupTypeId,setEditingGroupTypeId]=useState("");
     const [newColor,setNewColor]=useState(PALETTE[1]);
     const [newPersonType,setNewPersonType]=useState("contact");
     const [newCreditLimit,setNewCreditLimit]=useState("");
@@ -7514,6 +7542,7 @@ function AppContent({ onLock }) {
         setEditingGroupBudget(String(g.manualLimit||""));
         setEditingGroupMembers([...(g.members||[])]);
         setEditingGroupIncludeMe(g.includeMe !== false);
+        setEditingGroupTypeId(g.typeId||"other");
         setIsEditingGroup(true);
       };
 
@@ -7522,18 +7551,24 @@ function AppContent({ onLock }) {
         setEditingGroupBudget(String(g.manualLimit||""));
         setEditingGroupMembers([...(g.members||[])]);
         setEditingGroupIncludeMe(g.includeMe !== false);
+        setEditingGroupTypeId(g.typeId||"other");
         setIsEditingGroup(false);
       };
 
       const saveGroupEdits = () => {
         const name = editingGroupName.trim();
         if(!name) return;
+        const gtMeta = GROUP_TYPES.find(t=>t.id===editingGroupTypeId);
         const updated = {
           ...g,
           name,
           manualLimit:parseMoney(editingGroupBudget),
           members:editingGroupMembers,
           includeMe:editingGroupIncludeMe,
+          typeId:editingGroupTypeId||g.typeId||"other",
+          type:gtMeta?.label||g.type,
+          icon:gtMeta?.icon||g.icon,
+          defaultIntent:gtMeta?.default||g.defaultIntent||"split",
         };
         setGroups(prev=>prev.map(x=>x.id===g.id?updated:x));
         setSelectedGroup(updated);
@@ -7569,6 +7604,15 @@ function AppContent({ onLock }) {
                   <div style={{ display:"flex",flexDirection:"column",gap:8,marginTop:2 }}>
                     <input value={editingGroupName} onChange={e=>setEditingGroupName(e.target.value)} style={{ ...inp, padding:"8px 10px", fontSize:16, fontWeight:700, width:"100%" }} placeholder="Group name" />
                     <input value={editingGroupBudget} onChange={e=>setEditingGroupBudget(e.target.value)} style={{ ...inp, padding:"8px 10px", fontSize:14, width:"100%" }} type="text" inputMode="decimal" placeholder="Group budget (0 = no budget)" />
+                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:4 }}>Group Type</div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6 }}>
+                      {GROUP_TYPES.map(gt=>(
+                        <button key={gt.id} onClick={()=>setEditingGroupTypeId(gt.id)} style={{ background:editingGroupTypeId===gt.id?T.accent+"22":"none",border:`1px solid ${editingGroupTypeId===gt.id?T.accent:T.border}`,borderRadius:10,padding:"6px 8px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
+                          <div style={{ fontSize:11,fontWeight:700,color:editingGroupTypeId===gt.id?T.accent:T.text }}>{gt.icon} {gt.label}</div>
+                          <div style={{ fontSize:9,color:T.sub }}>{gt.desc}</div>
+                        </button>
+                      ))}
+                    </div>
                     <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
                       <button onClick={saveGroupEdits} style={{ background:T.accent,border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#000",fontFamily:"Nunito,sans-serif" }}>Save</button>
                       <button onClick={cancelEditingGroup} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
@@ -11209,7 +11253,8 @@ function AppContent({ onLock }) {
           <div style={{ display:"flex",gap:8,alignItems:"center" }}>
             <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif" }}>💼{workTripMode?" ON":""}</button>
             <button onClick={()=>{ setShowSearch(true); setSearchQuery(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Search">🔍</button>
-            <button onClick={()=>{ if(privacyMode){ if(pinRevealActive){ setPinRevealActive(false); if(pinRevealTimer) clearTimeout(pinRevealTimer); } else { requestPinReveal("toggle"); } } else { setPrivacyMode(true); localStorage.setItem("arth_privacy_mode","true"); } }} style={{ background:privacyMode?T.danger+"22":"none",border:`1px solid ${privacyMode?T.danger:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15 }} title={privacyMode?pinRevealActive?"Tap to hide again":"Tap to reveal (PIN required)":"Tap to hide income & savings"}>{privacyMode?pinRevealActive?"👁️":"🙈":"👁️"}</button>
+            <button onClick={lockApp} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Lock app">🔒</button>
+
             <button onClick={()=>{ if(tab==="bills") setShowAddBill(true); else { const typeMap={"expense":"expense","income":"income","transfer":"transfer","cc_payment":"cc_payment","investment":"investment","settlement_in":"settlement_in"}; setDefaultAddType(typeMap[fType]||"expense"); setShowAdd(true); } }} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Nunito,sans-serif" }}>{tab==="bills"?"+ Add Bill":"+ Add"}</button>
           </div>
         </div>}
@@ -11683,35 +11728,7 @@ function AppContent({ onLock }) {
         )}
         {(showAddLoan||editingLoan)&&<LoanModal item={editingLoan} onClose={()=>{ setShowAddLoan(false); setEditingLoan(null); }}/>}        
         {repaymentLoan&&<LoanRepaymentModal item={repaymentLoan} onClose={()=>setRepaymentLoan(null)}/>}
-        {/* PIN Reveal Overlay */}
-        {showPinReveal&&(
-          <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:500,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
-            <div style={{ color:"#fff",fontSize:14,fontWeight:700,marginBottom:8,opacity:0.7 }}>{pinRevealTarget==="income"?"Reveal Income":pinRevealTarget==="savings"?"Reveal Net Savings":"Reveal Amounts"}</div>
-            <div style={{ color:"#fff",fontSize:12,marginBottom:24,opacity:0.5 }}>Enter PIN to view for 60 seconds</div>
-            <div style={{ display:"flex",gap:12,marginBottom:24 }}>
-              {[0,1,2,3].map(i=>(
-                <div key={i} style={{ width:16,height:16,borderRadius:"50%",background:pinRevealInput.length>i?"#f0a500":"transparent",border:"2px solid #f0a500" }}/>
-              ))}
-            </div>
-            <div style={{ display:"grid",gridTemplateColumns:"repeat(3,72px)",gap:12 }}>
-              {[1,2,3,4,5,6,7,8,9,"",0,"del"].map(k=>(
-                <button key={k} onClick={async ()=>{
-                  if(k==="") return;
-                  if(k==="del"){ setPinRevealInput(p=>p.slice(0,-1)); return; }
-                  const np = pinRevealInput+String(k);
-                  setPinRevealInput(np);
-                  if(np.length===4){
-                    const h = await hashPin(np);
-                    if(h===appPin){ onPinRevealSuccess(); if(pinRevealTarget==="income"){ setTab("transactions"); setFType("income"); } setPinRevealInput(""); }
-                    else { setPinRevealInput(""); setPinRevealError(true); setTimeout(()=>setPinRevealError(false),800); }
-                  }
-                }} style={{ width:72,height:72,borderRadius:36,background:k===""?"transparent":"rgba(255,255,255,0.1)",border:k===""?"none":"1px solid rgba(255,255,255,0.2)",color:"#fff",fontSize:k==="del"?16:22,fontWeight:700,cursor:k===""?"default":"pointer",fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",justifyContent:"center" }}>{k==="del"?"⌫":k}</button>
-              ))}
-            </div>
-            {pinRevealError&&<div style={{ color:"#ef4444",fontSize:12,marginTop:16,fontWeight:700 }}>Wrong PIN</div>}
-            <button onClick={()=>{ setShowPinReveal(false); setPinRevealInput(""); }} style={{ marginTop:24,background:"none",border:"1px solid rgba(255,255,255,0.3)",borderRadius:20,padding:"8px 24px",color:"rgba(255,255,255,0.7)",fontSize:12,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Cancel</button>
-          </div>
-        )}        
+        
         {(showAddLiability||editingLiability)&&<LiabilityModal item={editingLiability} onClose={()=>{ setShowAddLiability(false); setEditingLiability(null); }}/>}
         {(showAddAsset||editingAsset)&&<AssetModal item={editingAsset} onClose={()=>{ setShowAddAsset(false); setEditingAsset(null); }}/>}
         {showAccDetail&&<AccDetailModal/>}
