@@ -845,8 +845,19 @@ export default function Arth() {
         <div style={{ background:"#ef444420",border:"1px solid #ef444444",borderRadius:12,padding:"10px 20px",marginBottom:20,color:"#ef4444",fontSize:12,fontWeight:700 }}>Too many attempts. Try again in {Math.ceil((lockoutUntil-Date.now())/60000)} minutes</div>
       )}
       <PinScreen isSetup={false} onUnlock={async pin=>{
-        const h = await hashPin(pin);
-        if(h===appPin){
+        let matched = false;
+        if(appPin.length<=6){
+          if(String(pin)===String(appPin)){
+            const hash = await hashPin(pin);
+            localStorage.setItem("arth_pin",hash);
+            setAppPin(hash);
+            matched = true;
+          }
+        } else {
+          const h = await hashPin(pin);
+          if(h===appPin) matched = true;
+        }
+        if(matched){
           setIsLocked(false);
           setLockPinAttempts(0);
         } else {
