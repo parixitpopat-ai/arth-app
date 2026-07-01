@@ -904,6 +904,7 @@ function AppContent({ onLock }) {
   const [ccEmiPlans, setCcEmiPlans] = useState(()=>JSON.parse(localStorage.getItem("arth_cc_emi_plans")||"[]"));
   const currentFYStartYear = new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1;
   const [annualBudget, setAnnualBudget] = useState(()=>Number(localStorage.getItem("arth_annual_budget")||600000));
+  const [perPersonBudgets, setPerPersonBudgets] = useState(()=>JSON.parse(localStorage.getItem("arth_person_budgets")||"{}"));
   const [lastFYTarget, setLastFYTarget] = useState(()=>Number(localStorage.getItem("arth_last_fy_target")||0));
   const [selectedBudgetFY, setSelectedBudgetFY] = useState(currentFYStartYear);
   const [monthOverrides, setMonthOverrides] = useState(()=>JSON.parse(localStorage.getItem("arth_month_overrides")||"{}"));
@@ -933,6 +934,7 @@ function AppContent({ onLock }) {
   useEffect(()=>localStorage.setItem("arth_loans",JSON.stringify(loans)),[loans]);
   useEffect(()=>localStorage.setItem("arth_cc_emi_plans",JSON.stringify(ccEmiPlans)),[ccEmiPlans]);
   useEffect(()=>localStorage.setItem("arth_annual_budget",annualBudget),[annualBudget]);
+  useEffect(()=>localStorage.setItem("arth_person_budgets",JSON.stringify(perPersonBudgets)),[perPersonBudgets]);
   useEffect(()=>localStorage.setItem("arth_last_fy_target",lastFYTarget),[lastFYTarget]);
   useEffect(()=>localStorage.setItem("arth_month_overrides",JSON.stringify(monthOverrides)),[monthOverrides]);
 
@@ -3231,7 +3233,7 @@ function AppContent({ onLock }) {
         setTxnType("transfer");
       } else if(parsedType==="income" && formIsBlank && txnType==="expense"){
         setTxnType("income");
-      } else if(parsedType==="expense" && formIsBlank){
+      } else if(parsedType==="expense" && formIsBlank && txnType!=="income"){
         setTxnType("expense");
       }
       // Never switch away from a type the user has explicitly chosen
@@ -3570,10 +3572,10 @@ function AppContent({ onLock }) {
             }
           }
         }
-        const forPersonVal = splitMode==="tag" && (tagMode==="person"||tagMode==="both") ? tagPerson : "";
+        const forPersonVal = splitMode==="tag" && (tagMode==="person"||tagMode==="both"||tagMode==="attribute") ? tagPerson : "";
         const groupIdVal = splitMode==="split" ? (splitGroup||null)
           : (splitMode==="allocate" || splitMode==="unified") ? (groupAllocationsVal[0]?.groupId||null)
-          : (splitMode==="tag" && (tagMode==="group"||tagMode==="both") ? (tagGroup||null) : null);
+          : (splitMode==="tag" && (tagMode==="group"||tagMode==="both"||tagMode==="attribute") ? (tagGroup||null) : null);
         let catAllocNumeric = Object.fromEntries(Object.entries(catAllocations||{}).map(([cid,val])=>[cid,parseFloat(val)||0]));
         if(catIds.length>1){
           const baseMap = Object.fromEntries(catIds.map(cid=>[cid,Math.max(0,Number(catAllocNumeric[cid]||0))]));
@@ -4244,6 +4246,10 @@ function AppContent({ onLock }) {
                     }).filter(Boolean),
                   ];
                   if(allOutstanding.length===0) return null;
+                  // Only show settlement for receivable-type income, not salary/interest/passive
+                  const NON_SETTLEMENT_TYPES = ["salary","interest","dividend","capital_gains","royalty"];
+                  const currentIncomeType = normalizeIncomeTypeValue(incomeType||"salary")||"salary";
+                  if(NON_SETTLEMENT_TYPES.includes(currentIncomeType)) return null;
                   return (
                     <div style={{ marginTop:12 }}>
                       <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>SETTLE OUTSTANDING (optional)</div>
@@ -4787,8 +4793,8 @@ function AppContent({ onLock }) {
                         <div style={{ fontSize:11,fontWeight:700,color:tagMode==="person"?T.success:T.text }}>💸 They owe me back</div>
                         <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Tracked in receivables</div>
                       </button>
-                      <button onClick={()=>setTagMode("itemize")} style={{ flex:1,background:tagMode==="itemize"?T.info+"22":"none",border:`1px solid ${tagMode==="itemize"?T.info:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
-                        <div style={{ fontSize:11,fontWeight:700,color:tagMode==="itemize"?T.info:T.text }}>❤️ For them (no collection)</div>
+                      <button onClick={()=>setTagMode("attribute")} style={{ flex:1,background:tagMode==="attribute"?T.info+"22":"none",border:`1px solid ${tagMode==="attribute"?T.info:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                        <div style={{ fontSize:11,fontWeight:700,color:tagMode==="attribute"?T.info:T.text }}>❤️ For them (no collection)</div>
                         <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Budget attributed</div>
                       </button>
                     </div>
@@ -4826,7 +4832,7 @@ function AppContent({ onLock }) {
                       {splitCalc==="amount"&&Object.keys(splitPeople).filter(k=>splitPeople[k]).map(pid=>{ const p=people.find(x=>String(x.id)===String(pid)); if(!p) return null; return (
                         <div key={pid} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:6 }}>
                           <span style={{ color:T.text,fontSize:12,flex:1 }}>{p.emoji} {p.name}</span>
-                          <input type="text" inputMode="decimal" placeholder="0" value={splitCustom[pid]||""} onChange={e=>setSplitCustom(prev=>({...prev,[pid]:cleanMoneyInput(e.target.value)}))} style={{ ...inpSm,width:80,textAlign:"right" }}/>
+                          <input type="text" inputMode="decimal" placeholder="0" value={splitCustom[pid]||""} onChange={e=>{ try{ setSplitCustom(prev=>({...prev,[pid]:cleanMoneyInput(e.target.value)})); }catch(err){} }} style={{ ...inpSm,width:80,textAlign:"right" }}/>
                         </div>
                       ); })}
                     </>)}
@@ -6065,7 +6071,7 @@ function AppContent({ onLock }) {
 
   // ── HOME ───────────────────────────────────────────────────────────────────
 
-  const DEFAULT_CARD_ORDER = ["stats","categories","cc","bills","recent"];
+  const DEFAULT_CARD_ORDER = ["health","stats","categories","cc","bills","recent"];
   const KNOWN_CARD_KEYS = new Set(["stats","budget","categories","cc","bills","recent"]);
   const [cardOrder, setCardOrder] = useState(()=>{
     const saved = JSON.parse(localStorage.getItem("arth_card_order")||"null");
@@ -6135,6 +6141,7 @@ function AppContent({ onLock }) {
     billerAccounts,
     memberships,
     feePayments,
+    perPersonBudgets,
     liabilities,
     trackedAssets,
     loans,
@@ -6173,6 +6180,7 @@ function AppContent({ onLock }) {
     setBillerAccounts(Array.isArray(snapshot.billerAccounts) ? snapshot.billerAccounts : []);
     setMemberships(Array.isArray(snapshot.memberships) ? snapshot.memberships : []);
     setFeePayments(Array.isArray(snapshot.feePayments) ? snapshot.feePayments : []);
+    if(snapshot.perPersonBudgets) setPerPersonBudgets(snapshot.perPersonBudgets);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
@@ -6470,9 +6478,54 @@ function AppContent({ onLock }) {
     const diff = monthly - myActual;
     const isOver = diff < 0;
 
+    // Financial Health calculations
+    const essentialCatIds = cats.filter(c=>c.fixed===true).map(c=>c.id);
+    const essentialSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>{
+      const tCats = (t.catIds||[t.catId]).filter(Boolean);
+      return tCats.some(cid=>essentialCatIds.includes(String(cid))) ? s+t.amount : s;
+    },0);
+    const discretionarySpend = myActual - essentialSpend;
+    const liquidSavings = liquidAssetsTotal;
+    const runwayMonths = essentialSpend > 0 ? Math.floor(liquidSavings / essentialSpend) : 0;
+    const runwayColor = runwayMonths >= 6 ? T.success : runwayMonths >= 3 ? T.warn : T.danger;
+
     const groupSpent = byCat.find(c=>c.id==="family")?.value || 0;
     const leftDays = daysLeft(viewMonth);
     const CARDS = {
+      health: (
+        <div key="health" style={{ ...card,padding:"16px 14px",background:`linear-gradient(135deg,${runwayColor}10,${T.card})`,border:`1px solid ${runwayColor}33` }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+            <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>💊 Financial Health</div>
+            <div style={{ background:runwayColor+"22",border:`1px solid ${runwayColor}44`,borderRadius:20,padding:"3px 10px" }}>
+              <span style={{ color:runwayColor,fontSize:11,fontWeight:800 }}>{runwayMonths >= 6 ? "Healthy" : runwayMonths >= 3 ? "Caution" : "At Risk"}</span>
+            </div>
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12 }}>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ color:runwayColor,fontSize:22,fontWeight:900 }}>{runwayMonths}</div>
+              <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>MONTHS RUNWAY</div>
+            </div>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ color:T.danger,fontSize:16,fontWeight:800 }}>{sym}{fmtK(essentialSpend)}</div>
+              <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>ESSENTIAL</div>
+            </div>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ color:T.warn,fontSize:16,fontWeight:800 }}>{sym}{fmtK(discretionarySpend)}</div>
+              <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>DISCRETIONARY</div>
+            </div>
+          </div>
+          <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:6 }}>
+            <div style={{ height:"100%",width:`${Math.min(100,Math.round(essentialSpend/Math.max(1,myActual)*100))}%`,background:T.danger,borderRadius:3 }}/>
+          </div>
+          <div style={{ display:"flex",justifyContent:"space-between" }}>
+            <span style={{ color:T.sub,fontSize:9 }}>Essential {Math.round(essentialSpend/Math.max(1,myActual)*100)}%</span>
+            <span style={{ color:T.sub,fontSize:9 }}>Discretionary {Math.round(discretionarySpend/Math.max(1,myActual)*100)}%</span>
+          </div>
+          <div style={{ marginTop:10,background:T.input,borderRadius:10,padding:"8px 12px" }}>
+            <div style={{ color:T.sub,fontSize:10 }}>Liquid savings: <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmtK(liquidSavings)}</span> ÷ monthly essential <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmtK(essentialSpend)}</span> = <span style={{ color:runwayColor,fontWeight:900 }}>{runwayMonths} months runway</span></div>
+          </div>
+        </div>
+      ),
       stats: (
         <div key="stats" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
           {[
@@ -10017,6 +10070,51 @@ function AppContent({ onLock }) {
             </div>
           );
         })}
+
+        {/* Per-person budgets */}
+        <div style={{ marginTop:20,paddingBottom:80 }}>
+          <div style={{ color:T.text,fontSize:15,fontWeight:900,marginBottom:12 }}>👤 Per-Person Budgets</div>
+          {people.filter(p=>!p.isMe).map(p=>{
+            const monthBudget = perPersonBudgets[p.id] || 0;
+            const monthSpend = thisMonthTxns.filter(t=>{
+              if(t.type!=="expense") return false;
+              return String(t.taggedPersonId||t.forPersonId||"")===String(p.id) || t.people?.[p.id];
+            }).reduce((s,t)=>s+t.amount,0);
+            const pct = monthBudget>0 ? Math.min(100,Math.round(monthSpend/monthBudget*100)) : 0;
+            const isOver = monthSpend > monthBudget && monthBudget > 0;
+            return (
+              <div key={p.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,marginBottom:10,padding:"12px 14px" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                    <span style={{ fontSize:18 }}>{p.emoji}</span>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{p.name}</div>
+                  </div>
+                  <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                    <span style={{ color:T.sub,fontSize:11 }}>₹</span>
+                    <input
+                      style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
+                      type="text" inputMode="decimal" placeholder="Budget"
+                      value={perPersonBudgets[p.id]?String(perPersonBudgets[p.id]):""}
+                      onChange={e=>setPerPersonBudgets(prev=>({...prev,[p.id]:parseMoney(e.target.value)||0}))}
+                    />
+                    <span style={{ color:T.sub,fontSize:10 }}>/mo</span>
+                  </div>
+                </div>
+                {monthBudget>0&&(
+                  <>
+                    <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
+                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:pct>80?T.warn:p.color||T.success,borderRadius:3 }}/>
+                    </div>
+                    <div style={{ display:"flex",justifyContent:"space-between" }}>
+                      <span style={{ color:T.sub,fontSize:10 }}>Spent: {sym}{fmtK(monthSpend)}</span>
+                      <span style={{ color:isOver?T.danger:T.success,fontSize:10,fontWeight:700 }}>{isOver?`Over ${sym}${fmtK(monthSpend-monthBudget)}`:`Left ${sym}${fmtK(monthBudget-monthSpend)}`}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   };
