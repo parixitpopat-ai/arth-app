@@ -885,6 +885,7 @@ function AppContent({ onLock }) {
   const [itemCatalog, setItemCatalog] = useState(()=>normalizeItemCatalog(JSON.parse(localStorage.getItem("arth_item_catalog")||"[]")));
   const [txns, setTxns] = useState(()=>normalizeTxns(JSON.parse(localStorage.getItem("arth_txns")||"[]")));
   const [investments, setInvestments] = useState(()=>JSON.parse(localStorage.getItem("arth_investments")||"[]"));
+  const [recurringSchedules, setRecurringSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_recurring")||"[]"));
   const [bills, setBills] = useState(()=>JSON.parse(localStorage.getItem("arth_bills")||"[]"));
   const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
   const [memberships, setMemberships] = useState(()=>JSON.parse(localStorage.getItem("arth_memberships")||"[]"));
@@ -923,6 +924,7 @@ function AppContent({ onLock }) {
   useEffect(()=>localStorage.setItem("arth_item_catalog",JSON.stringify(itemCatalog)),[itemCatalog]);
   useEffect(()=>localStorage.setItem("arth_txns",JSON.stringify(txns)),[txns]);
   useEffect(()=>localStorage.setItem("arth_investments",JSON.stringify(investments)),[investments]);
+  useEffect(()=>localStorage.setItem("arth_recurring",JSON.stringify(recurringSchedules)),[recurringSchedules]);
   useEffect(()=>localStorage.setItem("arth_budget",monthBudget),[monthBudget]);
   useEffect(()=>localStorage.setItem("arth_bills",JSON.stringify(bills)),[bills]);
   useEffect(()=>localStorage.setItem("arth_biller_accounts",JSON.stringify(billerAccounts)),[billerAccounts]);
@@ -993,6 +995,24 @@ function AppContent({ onLock }) {
   const defaultTxnMonth = viewMonth || todayStr().slice(0,7);
   const [fType, setFType] = useState("All");
   const [txnSearch, setTxnSearch] = useState("");
+  const [maskMode, setMaskMode] = useState(false);
+  const [maskRevealActive, setMaskRevealActive] = useState(false);
+  const [maskRevealTimer, setMaskRevealTimer] = useState(null);
+  const [showMaskPin, setShowMaskPin] = useState(false);
+  const [maskPinInput, setMaskPinInput] = useState("");
+  const [maskPinError, setMaskPinError] = useState(false);
+  const M = v => (maskMode && !maskRevealActive) ? "₹•••••" : v;
+  const toggleMask = () => {
+    if(!maskMode){ setMaskMode(true); setMaskRevealActive(false); }
+    else if(maskRevealActive){ setMaskRevealActive(false); if(maskRevealTimer) clearTimeout(maskRevealTimer); }
+    else { setShowMaskPin(true); setMaskPinInput(""); setMaskPinError(false); }
+  };
+  const onMaskReveal = () => {
+    setShowMaskPin(false); setMaskRevealActive(true);
+    if(maskRevealTimer) clearTimeout(maskRevealTimer);
+    const t = setTimeout(()=>setMaskRevealActive(false), 60000);
+    setMaskRevealTimer(t);
+  };
   const [txnDatePreset, setTxnDatePreset] = useState("current_month");
   const [txnSort, setTxnSort] = useState("date_desc");
   const [txnDateFrom, setTxnDateFrom] = useState(()=>getMonthBounds(defaultTxnMonth).start);
@@ -2383,7 +2403,7 @@ function AppContent({ onLock }) {
             </div>
           </div>
           <div style={{ textAlign:"right", flexShrink:0 }}>
-            <div style={{ color, fontSize:14, fontWeight:800, lineHeight:1.2 }}>{isPlus?"+":" "}{sym}{fmt(t.amount)}</div>
+            <div style={{ color, fontSize:14, fontWeight:800, lineHeight:1.2 }}>{isPlus?"+":" "}{M(`${sym}${fmt(t.amount)}`)}</div>
             {t.type==="expense"&&refundedAmount>0&&<div style={{ color:T.info,fontSize:10,marginTop:1,fontWeight:500 }}>net {sym}{fmt(netAfterRefund)}</div>}
             {t.type==="expense"&&myShare>0&&myShare<t.amount&&<div style={{ color:T.sub,fontSize:10,marginTop:2,fontWeight:500 }}>mine {sym}{fmt(myShare)}</div>}
             <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{dateLabel}</div>
@@ -3830,7 +3850,9 @@ function AppContent({ onLock }) {
         const folioNo = investType==="mf" ? investFolio.trim() : "";
         const metricValue = investmentMetricConfig.show ? Math.max(0, parseMoney(investNav)||0) : 0;
         const commonStartDate = lockedInvestFolioStartDate || date || todayStr();
-        const inv = { id:invId, type:investType, name:who.trim()||"Investment", amount:amt, currentValue:amt, freq:investFreq||"", folioNo, startDate:commonStartDate, linkedTxnId:resolvedTxnId, paymentAccId:accId, lastNav:metricValue, lastNavDate:date, transactionRef:transactionRef.trim()||null };
+        // Find matching recurring schedule for auto-link
+        const matchingSchedule = recurringSchedules.find(r=>r.active!==false && (r.name===who.trim() || (folioNo && r.groupKey && r.groupKey.includes(folioNo))));
+        const inv = { id:invId, type:investType, name:who.trim()||"Investment", amount:amt, currentValue:amt, freq:investFreq||"", folioNo, startDate:commonStartDate, linkedTxnId:resolvedTxnId, paymentAccId:accId, lastNav:metricValue, lastNavDate:date, transactionRef:transactionRef.trim()||null, recurringScheduleId:matchingSchedule?.id||null };
         setInvestments(prev=>{
           const exists = prev.some(item=>String(item.id)===String(invId) || String(item.linkedTxnId||"")===String(resolvedTxnId));
           return exists
@@ -3852,6 +3874,7 @@ function AppContent({ onLock }) {
           subId:null,
           subIds:[],
           linkedInvestmentId:invId,
+          recurringScheduleId:matchingSchedule?.id||null,
         });
       } else if(txnType==="settlement_in"){
         const isRepayment = settlementKind==="repayment" && Boolean(tagPerson||settlementTagGroup||sourceTxn?.fromPersonId||sourceTxn?.fromGroupId);
@@ -4789,11 +4812,11 @@ function AppContent({ onLock }) {
                   return (<div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
                     <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>This expense on {p.name} —</div>
                     <div style={{ display:"flex",gap:8 }}>
-                      <button onClick={()=>setTagMode("person")} style={{ flex:1,background:tagMode==="person"?T.success+"22":"none",border:`1px solid ${tagMode==="person"?T.success:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                      <button onClick={()=>{ setTagMode("person"); setSplitMode("split"); setSplitGroup(""); setSplitPeople({[tagPerson]:true}); setSplitCalc("equally"); }} style={{ flex:1,background:tagMode==="person"?T.success+"22":"none",border:`1px solid ${tagMode==="person"?T.success:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                         <div style={{ fontSize:11,fontWeight:700,color:tagMode==="person"?T.success:T.text }}>💸 They owe me back</div>
                         <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Tracked in receivables</div>
                       </button>
-                      <button onClick={()=>setTagMode("attribute")} style={{ flex:1,background:tagMode==="attribute"?T.info+"22":"none",border:`1px solid ${tagMode==="attribute"?T.info:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                      <button onClick={()=>{ setTagMode("attribute"); setSplitMode("tag"); setSplitPeople({}); }} style={{ flex:1,background:tagMode==="attribute"?T.info+"22":"none",border:`1px solid ${tagMode==="attribute"?T.info:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                         <div style={{ fontSize:11,fontWeight:700,color:tagMode==="attribute"?T.info:T.text }}>❤️ For them (no collection)</div>
                         <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Budget attributed</div>
                       </button>
@@ -6034,6 +6057,44 @@ function AppContent({ onLock }) {
             ))}
           </div>
 
+          {/* Recurring schedule */}
+          {(()=>{
+            const groupKey = group.key || displayTitle;
+            const existing = recurringSchedules.find(r=>r.groupKey===groupKey);
+            const [showRecurring, setShowRecurring] = React.useState(false);
+            const [recDay, setRecDay] = React.useState(existing?.day||"");
+            const [recAmount, setRecAmount] = React.useState(existing?.amount?String(existing.amount):"");
+            const [recAccId, setRecAccId] = React.useState(existing?.accId||(accounts.find(a=>a.type==="bank")?.id||""));
+            return (
+              <div style={{ background:T.input,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>🔄 Recurring Schedule</div>
+                    {existing?<div style={{ color:T.success,fontSize:11,marginTop:2 }}>Active · {existing.day}th every month · {sym}{fmt(existing.amount)}</div>:<div style={{ color:T.sub,fontSize:11,marginTop:2 }}>Not set</div>}
+                  </div>
+                  <button onClick={()=>setShowRecurring(v=>!v)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{showRecurring?"Cancel":existing?"Edit":"Set up"}</button>
+                </div>
+                {showRecurring&&(
+                  <div style={{ marginTop:10,display:"flex",flexDirection:"column",gap:8 }}>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                      <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>DAY OF MONTH</div><input style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:14,fontWeight:800,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} type="number" min="1" max="31" placeholder="e.g. 3" value={recDay} onChange={e=>setRecDay(e.target.value)}/></div>
+                      <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>AMOUNT ({sym})</div><input style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:14,fontWeight:800,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} type="text" inputMode="decimal" placeholder="0" value={recAmount} onChange={e=>setRecAmount(cleanMoneyInput(e.target.value))}/></div>
+                    </div>
+                    <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>DEBIT ACCOUNT</div><select style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:13,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} value={recAccId} onChange={e=>setRecAccId(e.target.value)}>{accounts.filter(a=>a.type!=="cc").map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+                    <div style={{ display:"flex",gap:8 }}>
+                      <button onClick={()=>{
+                        if(!recDay||!recAmount) return;
+                        const record = { id:existing?.id||genId(), groupKey, investType:group.type, name:displayTitle, day:Number(recDay), amount:parseFloat(recAmount), accId:recAccId, active:true, createdAt:existing?.createdAt||Date.now() };
+                        setRecurringSchedules(prev=>existing?prev.map(r=>r.groupKey===groupKey?record:r):[...prev,record]);
+                        setShowRecurring(false);
+                      }} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Save Schedule</button>
+                      {existing&&<button onClick={()=>{ setRecurringSchedules(prev=>prev.filter(r=>r.groupKey!==groupKey)); setShowRecurring(false); }} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>Remove</button>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <div style={{ ...card,marginBottom:0,textAlign:"left" }}>
             <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:10 }}>{type.id==="mf"?"Entries in this folio":"Holdings in this section"}</div>
             {group.items.map((inv,idx)=>{
@@ -6064,6 +6125,35 @@ function AppContent({ onLock }) {
               );
             })}
           </div>
+          {/* Transaction instalment history */}
+          {(()=>{
+            const groupKey = group.key || displayTitle;
+            const linkedTxns = txns.filter(t=>
+              t.type==="investment" &&
+              (t.linkedInvestmentId && group.items.some(inv=>String(inv.id)===String(t.linkedInvestmentId)) ||
+               t.recurringScheduleId && recurringSchedules.some(r=>r.groupKey===groupKey&&r.id===t.recurringScheduleId))
+            ).sort((a,b)=>b.date?.localeCompare(a.date||"")||0);
+            if(!linkedTxns.length) return null;
+            const totalInvested = linkedTxns.reduce((s,t)=>s+Number(t.amount||0),0);
+            return (
+              <div style={{ background:T.input,borderRadius:14,padding:"12px 14px",marginTop:12 }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:8 }}>📋 Payment History ({linkedTxns.length} instalments)</div>
+                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:10,padding:"6px 0",borderBottom:`1px solid ${T.border}` }}>
+                  <span style={{ color:T.sub,fontSize:11 }}>Total invested</span>
+                  <span style={{ color:T.success,fontSize:13,fontWeight:900 }}>{sym}{fmt(totalInvested)}</span>
+                </div>
+                {linkedTxns.slice(0,12).map(t=>(
+                  <div key={t.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${T.border}` }}>
+                    <div>
+                      <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{formatShortDate(t.date)||t.date}</div>
+                      <div style={{ color:T.sub,fontSize:10 }}>{accounts.find(a=>a.id===t.accId)?.name||"Account"}{t.investNav?` · NAV ₹${t.investNav}`:""}</div>
+                    </div>
+                    <div style={{ color:type.color,fontSize:12,fontWeight:800 }}>{sym}{fmt(t.amount)}</div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       </div>
     );
@@ -6491,6 +6581,10 @@ function AppContent({ onLock }) {
 
     const groupSpent = byCat.find(c=>c.id==="family")?.value || 0;
     const leftDays = daysLeft(viewMonth);
+    // Recurring investment reminders
+    const todayDate = new Date();
+    const todayDay = todayDate.getDate();
+    const dueRecurring = recurringSchedules.filter(r=>r.active!==false && r.day===todayDay);
     const CARDS = {
       health: (
         <div key="health" style={{ ...card,padding:"16px 14px",background:`linear-gradient(135deg,${runwayColor}10,${T.card})`,border:`1px solid ${runwayColor}33` }}>
@@ -6529,12 +6623,12 @@ function AppContent({ onLock }) {
       stats: (
         <div key="stats" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
           {[
-            {label:"Income",value:`${sym}${fmt(totalIncome)}`,color:T.success,icon:"💚",action:()=>{ setTab("transactions"); setFType("income"); }},
+            {label:"Income",value:M(`${sym}${fmt(totalIncome)}`),color:T.success,icon:"💚",action:()=>{ setTab("transactions"); setFType("income"); }},
             {label:"Investments",value:`${sym}${fmt(monthlyInvestmentFlow)}`,color:T.info,icon:"💹",action:()=>{ setSelectedInvestmentTypeView("all"); setShowInvestments(true); }},
             {label:"People & Groups",value:"",color:T.info,icon:"👥",action:()=>setTab("people")},
             {label:"Budget",value:`${sym}${fmt(monthly)}`,color:T.warn,icon:"🎯",action:()=>{ setShowSettings(true); setSettingsSection("budget"); }},
             {label:"To Receive",value:`${sym}${fmt(monthTotalOwedToMe + loanGivenTotal)}`,color:T.accent,icon:"🔄",action:()=>setShowReceivablesList(true),sub:(loanGivenTotal>0&&monthTotalOwedToMe>0)?`incl. ${sym}${fmtK(loanGivenTotal)} loans`:loanGivenTotal>0?`${sym}${fmtK(loanGivenTotal)} loans outstanding`:undefined},
-            {label:"Net Savings",value:`${sym}${fmtK(Math.max(0,totalIncome-myActual-monthlyInvestmentFlow))}`,color:T.success,icon:"💰",action:()=>setTab("home")},
+            {label:"Net Savings",value:M(`${sym}${fmtK(Math.max(0,totalIncome-myActual-monthlyInvestmentFlow))}`),color:T.success,icon:"💰",action:()=>setTab("home")},
           ].map(s=>(
             <div key={s.label} onClick={s.action} style={{ ...card,marginBottom:0,padding:"12px",cursor:"pointer" }}>
               <div style={{ fontSize:20,marginBottom:4 }}>{s.icon}</div>
@@ -6701,6 +6795,21 @@ function AppContent({ onLock }) {
         </div>
 
         <div style={{ padding:"14px 16px 0" }}>
+          {/* Recurring investment reminders */}
+          {dueRecurring.length>0&&(
+            <div style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
+              <div style={{ color:T.info,fontSize:13,fontWeight:800,marginBottom:8 }}>💹 {dueRecurring.length} Investment{dueRecurring.length>1?"s":"" } due today</div>
+              {dueRecurring.map(r=>(
+                <div key={r.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{r.name}</div>
+                    <div style={{ color:T.sub,fontSize:10 }}>{sym}{fmt(r.amount)} · {accounts.find(a=>a.id===r.accId)?.name||"Account"}</div>
+                  </div>
+                  <button onClick={()=>{ setDefaultAddType("investment"); setShowAdd(true); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Record</button>
+                </div>
+              ))}
+            </div>
+          )}
           {/* Edit cards toggle */}
           <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:8 }}>
             <button onClick={()=>setEditingCards(e=>!e)} style={{ background:editingCards?T.accent+"22":"none",border:`1px solid ${editingCards?T.accent:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:editingCards?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{editingCards?"✓ Done":"⠿ Arrange"}</button>
@@ -11324,6 +11433,7 @@ function AppContent({ onLock }) {
           <div style={{ display:"flex",gap:8,alignItems:"center" }}>
             <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif" }}>💼{workTripMode?" ON":""}</button>
             <button onClick={()=>{ setShowSearch(true); setSearchQuery(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Search">🔍</button>
+            <button onClick={toggleMask} style={{ background:maskMode?T.warn+"22":"none",border:`1px solid ${maskMode?T.warn:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:maskMode?T.warn:T.sub }} title={maskMode?"Tap to reveal (PIN) or disable":"Tap to hide amounts"}>{maskMode?"🙈":"👁️"}</button>
             <button onClick={onLock} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Lock app">🔒</button>
 
             <button onClick={()=>{ if(tab==="bills") setShowAddBill(true); else { const typeMap={"expense":"expense","income":"income","transfer":"transfer","cc_payment":"cc_payment","investment":"investment","settlement_in":"settlement_in"}; setDefaultAddType(typeMap[fType]||"expense"); setShowAdd(true); } }} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Nunito,sans-serif" }}>{tab==="bills"?"+ Add Bill":"+ Add"}</button>
@@ -11799,6 +11909,32 @@ function AppContent({ onLock }) {
         )}
         {(showAddLoan||editingLoan)&&<LoanModal item={editingLoan} onClose={()=>{ setShowAddLoan(false); setEditingLoan(null); }}/>}        
         {repaymentLoan&&<LoanRepaymentModal item={repaymentLoan} onClose={()=>setRepaymentLoan(null)}/>}
+        {/* Mask PIN reveal overlay */}
+        {showMaskPin&&(
+          <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:500,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
+            <div style={{ color:"#f0a500",fontSize:20,fontWeight:900,marginBottom:6 }}>👁️ Reveal Amounts</div>
+            <div style={{ color:"rgba(255,255,255,0.5)",fontSize:12,marginBottom:28 }}>Enter PIN to view for 60 seconds</div>
+            <div style={{ display:"flex",gap:12,marginBottom:24 }}>
+              {[0,1,2,3].map(i=>(<div key={i} style={{ width:14,height:14,borderRadius:"50%",background:maskPinInput.length>i?"#f0a500":"transparent",border:"2px solid #f0a500" }}/>))}
+            </div>
+            {maskPinError&&<div style={{ color:"#ef4444",fontSize:12,marginBottom:12,fontWeight:700 }}>Wrong PIN</div>}
+            <div style={{ display:"grid",gridTemplateColumns:"repeat(3,68px)",gap:10,marginBottom:20 }}>
+              {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map(k=>(
+                <button key={k} onClick={async()=>{
+                  if(k==="") return;
+                  if(k==="⌫"){ setMaskPinInput(p=>p.slice(0,-1)); return; }
+                  const np=maskPinInput+String(k); setMaskPinInput(np);
+                  if(np.length===4){
+                    const h=await hashPin(np);
+                    if(h===appPin||np===appPin){ onMaskReveal(); setMaskPinInput(""); }
+                    else { setMaskPinInput(""); setMaskPinError(true); setTimeout(()=>setMaskPinError(false),800); }
+                  }
+                }} style={{ width:68,height:68,borderRadius:34,background:k===""?"transparent":"rgba(255,255,255,0.1)",border:k===""?"none":"1px solid rgba(255,255,255,0.2)",color:"#fff",fontSize:k==="⌫"?16:20,fontWeight:700,cursor:k===""?"default":"pointer",fontFamily:"Nunito,sans-serif" }}>{k}</button>
+              ))}
+            </div>
+            <button onClick={()=>{ setShowMaskPin(false); setMaskMode(false); setMaskPinInput(""); }} style={{ background:"none",border:"1px solid rgba(255,255,255,0.3)",borderRadius:20,padding:"8px 20px",color:"rgba(255,255,255,0.6)",fontSize:12,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Cancel &amp; Disable Masking</button>
+          </div>
+        )}
         
         {(showAddLiability||editingLiability)&&<LiabilityModal item={editingLiability} onClose={()=>{ setShowAddLiability(false); setEditingLiability(null); }}/>}
         {(showAddAsset||editingAsset)&&<AssetModal item={editingAsset} onClose={()=>{ setShowAddAsset(false); setEditingAsset(null); }}/>}
