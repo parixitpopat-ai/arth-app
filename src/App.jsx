@@ -779,6 +779,11 @@ export default function Arth() {
   const resetIdleRef = useRef(null);
   const [showIdleWarning, setShowIdleWarning] = useState(false);
   const [idleCountdown, setIdleCountdown] = useState(120);
+  // PIN lockout state — must be declared before any early returns (Rules of Hooks)
+  const [pinAttempts, setPinAttempts] = useState(0);
+  const [pinLockedUntil, setPinLockedUntil] = useState(()=>Number(sessionStorage.getItem("arth_pin_locked_until")||0));
+  const pinIsLocked = pinLockedUntil > Date.now();
+  const pinLockMinsLeft = pinIsLocked ? Math.ceil((pinLockedUntil-Date.now())/60000) : 0;
   const lock = useCallback(()=>{ setUnlocked(false); setShowIdleWarning(false); setIdleCountdown(120); },[]);
 
   // Two-phase idle timer: warn at 5 minutes, lock 2 minutes later (7 min total)
@@ -830,12 +835,6 @@ export default function Arth() {
     setAppPin(hash);
     setUnlocked(true);
   }}/>;
-
-  // PIN lockout state (persisted in sessionStorage to survive page refresh)
-  const [pinAttempts, setPinAttempts] = React.useState(0);
-  const [pinLockedUntil, setPinLockedUntil] = React.useState(()=>Number(sessionStorage.getItem("arth_pin_locked_until")||0));
-  const pinIsLocked = pinLockedUntil > Date.now();
-  const pinLockMinsLeft = pinIsLocked ? Math.ceil((pinLockedUntil-Date.now())/60000) : 0;
 
   if(!unlocked) return (
     <div style={{ minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
@@ -10266,7 +10265,6 @@ function AppContent({ onLock }) {
             <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Carry Forward</div>
             <div style={{ color:T.sub,fontSize:10,marginTop:6,lineHeight:1.4 }}>Surplus/deficit from last month adjusts this month's budget</div>
             <button onClick={()=>setBudgetCarryForward(v=>!v)} style={{ marginTop:10,background:budgetCarryForward?T.success+"22":"none",border:`1px solid ${budgetCarryForward?T.success:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:budgetCarryForward?T.success:T.sub,fontFamily:"Nunito,sans-serif" }}>{budgetCarryForward?"ON ✅":"OFF"}</button>
-          </div>
           </div>
           <div style={{ ...card,marginBottom:0 }}>
             <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Spent so far</div>
