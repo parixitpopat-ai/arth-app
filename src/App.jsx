@@ -778,29 +778,29 @@ export default function Arth() {
   const countdownInterval = useRef(null);
   const resetIdleRef = useRef(null);
   const [showIdleWarning, setShowIdleWarning] = useState(false);
-  const [idleCountdown, setIdleCountdown] = useState(90);
-  const lock = useCallback(()=>{ setUnlocked(false); setShowIdleWarning(false); setIdleCountdown(90); },[]);
+  const [idleCountdown, setIdleCountdown] = useState(120);
+  const lock = useCallback(()=>{ setUnlocked(false); setShowIdleWarning(false); setIdleCountdown(120); },[]);
 
-  // Two-phase idle timer: warn at 60s, lock 90s later (150s total)
+  // Two-phase idle timer: warn at 5 minutes, lock 2 minutes later (7 min total)
   useEffect(()=>{
     if(!unlocked) return;
-    const WARN_MS = 60_000;
-    const LOCK_MS = 90_000;
+    const WARN_MS = 5 * 60_000;   // 5 minutes before warning
+    const LOCK_MS = 2 * 60_000;   // 2 more minutes to respond
     const clearAll = ()=>{ clearTimeout(idleTimer.current); clearTimeout(idleWarnTimer.current); clearInterval(countdownInterval.current); };
     const reset = ()=>{
       clearAll();
       setShowIdleWarning(false);
-      setIdleCountdown(90);
+      setIdleCountdown(120);
       idleWarnTimer.current = setTimeout(()=>{
         setShowIdleWarning(true);
-        let cd = 90;
+        let cd = 120;
         setIdleCountdown(cd);
         countdownInterval.current = setInterval(()=>{ cd--; setIdleCountdown(cd); if(cd<=0) clearInterval(countdownInterval.current); }, 1000);
         idleTimer.current = setTimeout(lock, LOCK_MS);
       }, WARN_MS);
     };
     resetIdleRef.current = reset;
-    const events = ["mousemove","keydown","touchstart","click","scroll"];
+    const events = ["mousemove","keydown","touchstart","touchend","click","scroll","pointerdown"];
     events.forEach(e=>window.addEventListener(e,reset,{passive:true}));
     reset();
     return ()=>{ events.forEach(e=>window.removeEventListener(e,reset)); clearAll(); resetIdleRef.current=null; };
@@ -831,20 +831,47 @@ export default function Arth() {
     setUnlocked(true);
   }}/>;
 
-  if(!unlocked) return <PinScreen isSetup={false} onUnlock={async pin=>{
-    // Migration: old plaintext PINs are 4 chars; hashes are 64 hex chars
-    if(appPin.length<=6){
-      if(String(pin)===String(appPin)){
-        const hash = await hashPin(pin);
-        localStorage.setItem("arth_pin",hash);
-        setAppPin(hash);
-        setUnlocked(true);
-      }
-    } else {
-      const hash = await hashPin(pin);
-      if(hash===appPin) setUnlocked(true);
-    }
-  }}/>;
+  // PIN lockout state (persisted in sessionStorage to survive page refresh)
+  const [pinAttempts, setPinAttempts] = React.useState(0);
+  const [pinLockedUntil, setPinLockedUntil] = React.useState(()=>Number(sessionStorage.getItem("arth_pin_locked_until")||0));
+  const pinIsLocked = pinLockedUntil > Date.now();
+  const pinLockMinsLeft = pinIsLocked ? Math.ceil((pinLockedUntil-Date.now())/60000) : 0;
+
+  if(!unlocked) return (
+    <div style={{ minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
+      {pinIsLocked ? (
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:48,marginBottom:12 }}>🔒</div>
+          <div style={{ color:"#f0a500",fontSize:18,fontWeight:900,marginBottom:8 }}>Too many attempts</div>
+          <div style={{ color:"rgba(255,255,255,0.5)",fontSize:13 }}>Try again in {pinLockMinsLeft} minute{pinLockMinsLeft!==1?"s":""}</div>
+        </div>
+      ) : (
+        <PinScreen isSetup={false} onUnlock={async pin=>{
+          if(appPin.length<=6){
+            if(String(pin)===String(appPin)){
+              const hash = await hashPin(pin);
+              localStorage.setItem("arth_pin",hash);
+              setAppPin(hash);
+              setUnlocked(true);
+              setPinAttempts(0);
+            } else {
+              const na = pinAttempts+1;
+              setPinAttempts(na);
+              if(na>=5){ const lu=Date.now()+30*60*1000; setPinLockedUntil(lu); sessionStorage.setItem("arth_pin_locked_until",String(lu)); setPinAttempts(0); }
+            }
+          } else {
+            const hash = await hashPin(pin);
+            if(hash===appPin){ setUnlocked(true); setPinAttempts(0); }
+            else {
+              const na = pinAttempts+1;
+              setPinAttempts(na);
+              if(na>=5){ const lu=Date.now()+30*60*1000; setPinLockedUntil(lu); sessionStorage.setItem("arth_pin_locked_until",String(lu)); setPinAttempts(0); }
+            }
+          }
+        }}/>
+      )}
+    </div>
+  );
 
   return <>
     <ErrorBoundary><AppContent onLock={lock}/></ErrorBoundary>
@@ -906,6 +933,7 @@ function AppContent({ onLock }) {
   const currentFYStartYear = new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1;
   const [annualBudget, setAnnualBudget] = useState(()=>Number(localStorage.getItem("arth_annual_budget")||600000));
   const [perPersonBudgets, setPerPersonBudgets] = useState(()=>JSON.parse(localStorage.getItem("arth_person_budgets")||"{}"));
+  const [budgetCarryForward, setBudgetCarryForward] = useState(()=>JSON.parse(localStorage.getItem("arth_budget_carry")||"false"));
   const [lastFYTarget, setLastFYTarget] = useState(()=>Number(localStorage.getItem("arth_last_fy_target")||0));
   const [selectedBudgetFY, setSelectedBudgetFY] = useState(currentFYStartYear);
   const [monthOverrides, setMonthOverrides] = useState(()=>JSON.parse(localStorage.getItem("arth_month_overrides")||"{}"));
@@ -937,6 +965,7 @@ function AppContent({ onLock }) {
   useEffect(()=>localStorage.setItem("arth_cc_emi_plans",JSON.stringify(ccEmiPlans)),[ccEmiPlans]);
   useEffect(()=>localStorage.setItem("arth_annual_budget",annualBudget),[annualBudget]);
   useEffect(()=>localStorage.setItem("arth_person_budgets",JSON.stringify(perPersonBudgets)),[perPersonBudgets]);
+  useEffect(()=>localStorage.setItem("arth_budget_carry",JSON.stringify(budgetCarryForward)),[budgetCarryForward]);
   useEffect(()=>localStorage.setItem("arth_last_fy_target",lastFYTarget),[lastFYTarget]);
   useEffect(()=>localStorage.setItem("arth_month_overrides",JSON.stringify(monthOverrides)),[monthOverrides]);
 
@@ -995,6 +1024,7 @@ function AppContent({ onLock }) {
   const defaultTxnMonth = viewMonth || todayStr().slice(0,7);
   const [fType, setFType] = useState("All");
   const [txnSearch, setTxnSearch] = useState("");
+  const [txnDetailId, setTxnDetailId] = useState(null);
   const [maskMode, setMaskMode] = useState(false);
   const [maskRevealActive, setMaskRevealActive] = useState(false);
   const [maskRevealTimer, setMaskRevealTimer] = useState(null);
@@ -1501,8 +1531,10 @@ function AppContent({ onLock }) {
     const meId = people.find(p=>p.isMe)?.id;
 
     txns.forEach(t=>{
-      if(t.type==="expense"&&t.people){
-        Object.entries(t.people).forEach(([pid,info])=>{
+      if(t.type==="expense"){
+        // Check F8 style (t.people) and legacy (t.splitPeople)
+        const peopleMap = {...(t.splitPeople||{}), ...(t.people||{})};
+        Object.entries(peopleMap).forEach(([pid,info])=>{
           if(pid==="__me__" || pid===meId || info.mode!=="owes" || info.settled) return;
           receivables[pid] = (receivables[pid]||0) + remainingShare(info);
         });
@@ -2023,17 +2055,25 @@ function AppContent({ onLock }) {
   const getPersonReceivableItems = useCallback(personId=>{
     if(!personId) return [];
     const txnItems = txns
-      .filter(t=>t.type==="expense"&&t.people?.[personId]?.mode==="owes"&&!t.people?.[personId]?.settled&&remainingShare(t.people?.[personId])>0)
-      .map(t=>({
-        key:`txn:${t.id}`,
-        kind:"txn",
-        id:t.id,
-        date:t.date||"",
-        title:t.desc||t.merchant||"Expense",
-        subtitle:[formatShortDate(t.date)||t.date, t.groupId&&getGroup(t.groupId)?.name].filter(Boolean).join(" · "),
-        amount:remainingShare(t.people[personId]),
-        originalAmount:Number(t.people[personId]?.amount||0),
-      }));
+      .filter(t=>{
+        if(t.type!=="expense") return false;
+        // Check both F8 (t.people) and legacy (t.splitPeople)
+        const info = t.people?.[personId] || t.splitPeople?.[personId];
+        return info?.mode==="owes" && !info?.settled && remainingShare(info)>0;
+      })
+      .map(t=>{
+        const info = t.people?.[personId] || t.splitPeople?.[personId];
+        return ({
+          key:`txn:${t.id}`,
+          kind:"txn",
+          id:t.id,
+          date:t.date||"",
+          title:t.desc||t.merchant||"Expense",
+          subtitle:[formatShortDate(t.date)||t.date, t.groupId&&getGroup(t.groupId)?.name].filter(Boolean).join(" · "),
+          amount:remainingShare(info),
+          originalAmount:Number(info?.amount||0),
+        });
+      });
     const txnItemIdSet = new Set(txnItems.map(i=>i.id));
     // Also collect bill IDs that are explicitly claimed by a txn in txnItems (via paidBillId)
     const txnClaimedBillIds = new Set(
@@ -2363,7 +2403,7 @@ function AppContent({ onLock }) {
     return (
       <div style={{ borderBottom:!last?`1px solid ${T.border}`:"none" }}>
         {/* COLLAPSED ROW */}
-        <div onClick={()=>setExpandedTxn(isExpanded?null:t.id)} style={{ display:"flex", alignItems:"center", gap:12, padding:"11px 0", cursor:"pointer" }}>
+        <div onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex", alignItems:"center", gap:12, padding:"11px 0", cursor:"pointer" }}>
           <div style={{ width:38,height:38,borderRadius:10,background:color+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0,position:"relative" }}>
             {t.type==="expense" && cat ? cat.icon : t.type==="investment" && invTypeMeta ? invTypeMeta.icon : txnEmoji(t)}
             {allSettled&&<div style={{position:"absolute",bottom:-3,right:-3,fontSize:9,background:T.card,borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✅</div>}
@@ -2394,6 +2434,7 @@ function AppContent({ onLock }) {
               {t.type==="expense"&&refundedAmount>0&&<span style={{ background:T.info+"20",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>↩ {refundStatus}</span>}
               {t.type==="expense"&&linkedRepayments.length>0&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💰 Repaid</span>}
               {t.billerLinkId&&(()=>{ const ba=billerAccounts.find(b=>b.id===t.billerLinkId); if(!ba) return null; const mem=memberships.filter(m=>m.billerAccountId===ba.id&&m.txnId===t.id)[0]; return <span style={{ background:T.accent+"18",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{getBillerIcon(ba.type)} {ba.name}{mem?` · ${formatShortDate(mem.validFrom)||mem.validFrom}→${formatShortDate(mem.validUntil)||mem.validUntil}`:""}</span>; })()}
+              {t.guestPerson&&<span style={{ background:T.warn+"18",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>👤 {t.guestPerson} owes {sym}{fmt(t.guestPersonAmount||0)}</span>}
               {t.type==="expense"&&t.reimbursable&&!t.reimbursedByTxnId&&<span style={{ background:"#f0a50018",color:"#f0a500",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimb.{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
               {t.type==="expense"&&t.reimbursedByTxnId&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimbursed{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
               {t.isAutoEmiInstallment&&<span style={{ background:T.warn+"18",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💳 EMI {t.emiInstallmentNum}/{t.emiTotalInstallments}</span>}
@@ -2675,6 +2716,7 @@ function AppContent({ onLock }) {
     const [smsRaw, setSmsRaw] = useState(sourceTxn?.smsRaw || "");
     const [showSms, setShowSms] = useState(Boolean(sourceTxn?.smsRaw));
     const [smsTxt, setSmsTxt] = useState(sourceTxn?.smsRaw || "");
+    const [userSetTxnType, setUserSetTxnType] = useState(isEditing);
     const [smsParseMeta, setSmsParseMeta] = useState(null);
     const [smsBusy, setSmsBusy] = useState(false);
     const [smsImportStatus, setSmsImportStatus] = useState("");
@@ -3251,10 +3293,12 @@ function AppContent({ onLock }) {
         setWho("");
       } else if(parsedType==="transfer"){
         setTxnType("transfer");
-      } else if(parsedType==="income" && formIsBlank && txnType==="expense"){
-        setTxnType("income");
-      } else if(parsedType==="expense" && formIsBlank && txnType!=="income"){
-        setTxnType("expense");
+      } else if(!userSetTxnType){
+        if(parsedType==="income" && formIsBlank && txnType==="expense"){
+          setTxnType("income");
+        } else if(parsedType==="expense" && formIsBlank && txnType!=="income"){
+          setTxnType("expense");
+        }
       }
       // Never switch away from a type the user has explicitly chosen
 
@@ -3373,6 +3417,8 @@ function AppContent({ onLock }) {
         transactionRef:transactionRef.trim()||null,
         billerLinkId:billerLinkId||undefined,
         discount:discount?parseFloat(discount):undefined,
+        guestPerson:guestPersonName.trim()||undefined,
+        guestPersonAmount:guestPersonAmount?parseFloat(guestPersonAmount):undefined,
       };
       const upsertTxn = nextTxn => {
         setTxns(prev=>isEditing
@@ -3381,6 +3427,12 @@ function AppContent({ onLock }) {
         );
       };
 
+      // Duplicate transaction warning
+      if(!isEditing && txnType==="expense" && amt>0){
+        const dupWindow = 5*60*1000; // 5 minutes
+        const dup = txns.find(t=>t.type==="expense" && Math.abs(t.amount-amt)<0.01 && String(t.accId)===String(accId) && Math.abs(Date.now()-(t.createdAt||0))<dupWindow);
+        if(dup && !window.confirm(`Possible duplicate: ${sym}${fmt(amt)} from the same account was recorded ${Math.round((Date.now()-(dup.createdAt||0))/60000)} minute(s) ago. Add anyway?`)) return;
+      }
       // Create membership record if linked biller is membership type
       if(billerLinkId && showMembershipPanel && linkedBAType==="membership" && linkValidFrom && !isEditing){
         const memRecord = {
@@ -3764,17 +3816,20 @@ function AppContent({ onLock }) {
           // Process settlements if any selected
           const selectedIds = Object.keys(settleSelectedIds).filter(k=>settleSelectedIds[k]);
           if(selectedIds.length>0){
-            // Settle person outstanding
             selectedIds.forEach(id=>{
               const person = people.find(p=>String(p.id)===id);
               const group = groups.find(g=>g.id===id);
               if(person){
-                // Settle all expense splits for this person
+                // Settle all expense splits for this person (t.people is F8, t.splitPeople is legacy)
                 setTxns(prev=>prev.map(t=>{
-                  if(!t.splitPeople?.[id]) return t;
-                  const info=t.splitPeople[id];
-                  if(info.settled) return t;
-                  return {...t, splitPeople:{...t.splitPeople,[id]:{...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0}}};
+                  if(t.type!=="expense") return t;
+                  // F8 style — t.people[id]
+                  const info = t.people?.[id] || t.splitPeople?.[id];
+                  if(!info || info.settled || info.mode!=="owes") return t;
+                  const updated = {...info, settled:true, settledAmt:Number(info.amount||0), remainingAmt:0};
+                  if(t.people?.[id]) return {...t, people:{...t.people,[id]:updated}};
+                  if(t.splitPeople?.[id]) return {...t, splitPeople:{...t.splitPeople,[id]:updated}};
+                  return t;
                 }));
                 // Settle active loans for this person
                 setLoans(prev=>prev.map(l=>{
@@ -3785,18 +3840,19 @@ function AppContent({ onLock }) {
                 }));
               }
               if(group){
-                // Settle group-level expenses
                 setTxns(prev=>prev.map(t=>{
                   if(t.type!=="expense"||t.groupId!==id) return t;
                   return {...t, groupCollectiveSettledAmt:Number(t.groupCollectiveAmount||0)};
                 }));
-                // Settle individual members
                 (group.members||[]).forEach(pid=>{
                   setTxns(prev=>prev.map(t=>{
-                    if(!t.splitPeople?.[pid]) return t;
-                    const info=t.splitPeople[pid];
-                    if(info.settled) return t;
-                    return {...t, splitPeople:{...t.splitPeople,[pid]:{...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0}}};
+                    if(t.type!=="expense") return t;
+                    const info = t.people?.[pid] || t.splitPeople?.[pid];
+                    if(!info || info.settled || info.mode!=="owes") return t;
+                    const updated = {...info, settled:true, settledAmt:Number(info.amount||0), remainingAmt:0};
+                    if(t.people?.[pid]) return {...t, people:{...t.people,[pid]:updated}};
+                    if(t.splitPeople?.[pid]) return {...t, splitPeople:{...t.splitPeople,[pid]:updated}};
+                    return t;
                   }));
                 });
               }
@@ -4049,7 +4105,7 @@ function AppContent({ onLock }) {
               </div>
             : <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
                 {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["investment","💹","Invest",T.info],["transfer","🔄","Transfer",T.info],["cc_payment","💳","CC Pay",T.purple],["settlement_in","💼","Settlement",T.info]].map(([v,ic,lb,col])=>(
-                  <button key={v} onClick={()=>{ setTxnType(v); if(v==="cc_payment"||v==="transfer") setWho(""); }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
+                  <button key={v} onClick={()=>{ setTxnType(v); setUserSetTxnType(true); if(v==="cc_payment"||v==="transfer") setWho(""); }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
                     <span style={{ fontSize:16 }}>{ic}</span>{lb}
                   </button>
                 ))}
@@ -4954,13 +5010,21 @@ function AppContent({ onLock }) {
               </button>
               {showSms&&<div style={{ padding:"0 14px 14px" }}>
                 {smsImportStatus&&/unable|empty|not available|error/i.test(smsImportStatus)&&<div style={{ color:T.warn,fontSize:11,fontWeight:700,marginBottom:6 }}>{smsImportStatus}</div>}
-                <textarea
-                  style={{ ...inp,height:80,resize:"none",marginBottom:6,cursor:smsBusy?"wait":"text" }}
-                  placeholder="Paste bank SMS here..."
-                  value={smsTxt}
-                  onChange={e=>{ setSmsTxt(e.target.value); parseSms(e.target.value, { adjustBalance: true }); }}
-                  onPaste={e=>{ const txt=e.clipboardData?.getData("text")||""; if(txt){ e.preventDefault(); setSmsTxt(txt); parseSms(txt, { adjustBalance:true }); } }}
-                />
+                <div style={{ display:"flex",gap:6,marginBottom:6 }}>
+                  <textarea
+                    style={{ ...inp,height:80,resize:"none",flex:1,marginBottom:0,cursor:smsBusy?"wait":"text" }}
+                    placeholder="Paste bank SMS here..."
+                    value={smsTxt}
+                    onChange={e=>{ setSmsTxt(e.target.value); parseSms(e.target.value, { adjustBalance: true }); }}
+                    onPaste={e=>{ const txt=e.clipboardData?.getData("text")||""; if(txt){ e.preventDefault(); setSmsTxt(txt); parseSms(txt, { adjustBalance:true }); } }}
+                  />
+                  <button onClick={async()=>{
+                    try{
+                      const txt = await navigator.clipboard.readText();
+                      if(txt){ setSmsTxt(txt); parseSms(txt,{ adjustBalance:true }); }
+                    }catch(e){ /* permission denied, user must paste manually */ }
+                  }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0,alignSelf:"stretch" }}>📋<br/>Paste</button>
+                </div>
                 {smsParseMeta?.balanceAdjusted&&<div style={{ color:T.success,fontSize:11,fontWeight:700 }}>✅ Balance synced ({smsParseMeta.balanceDiff>0?"+":""}{sym}{fmt(smsParseMeta.balanceDiff)})</div>}
                 {smsParseMeta?.emiLoanId&&<div style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:10,padding:"6px 10px",display:"flex",justifyContent:"space-between",alignItems:"center" }}><span style={{ color:T.warn,fontSize:11,fontWeight:700 }}>🔗 EMI match: {smsParseMeta.emiLoanName}</span><button onClick={()=>{ setExpensePaymentMode("emi"); }} style={{ background:T.warn+"22",border:`1px solid ${T.warn}`,borderRadius:20,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Link</button></div>}
               </div>}
@@ -6563,7 +6627,16 @@ function AppContent({ onLock }) {
     const totalUnbilled = ccSummaries.reduce((s,item)=>s+item.currentCycleSpend,0);
     const anyHighUtil = ccSummaries.some(item=>item.isOverAlert);
     const nextDueCard = [...ccSummaries].filter(item=>item.currentDue>0).sort((a,b)=>a.dueOn-b.dueOn)[0] || null;
-    const monthly = monthOverrides[viewMonth] || Math.round(annualBudget/12);
+    const baseMonthly = monthOverrides[viewMonth] || Math.round(annualBudget/12);
+    const monthly = (() => {
+      if(!budgetCarryForward) return baseMonthly;
+      const [y,m] = viewMonth.split("-").map(Number);
+      const prevMonth = m===1 ? `${y-1}-12` : `${y}-${String(m-1).padStart(2,"0")}`;
+      const prevBudget = monthOverrides[prevMonth] || Math.round(annualBudget/12);
+      const prevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(prevMonth)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
+      const carry = prevBudget - prevSpend;
+      return Math.max(0, baseMonthly + carry);
+    })();
     const budgetPct = Math.min(100,Math.round(myActual/Math.max(1,monthly)*100));
     const diff = monthly - myActual;
     const isOver = diff < 0;
@@ -6584,7 +6657,8 @@ function AppContent({ onLock }) {
     // Recurring investment reminders
     const todayDate = new Date();
     const todayDay = todayDate.getDate();
-    const dueRecurring = recurringSchedules.filter(r=>r.active!==false && r.day===todayDay);
+    const todayStr2 = new Date().toISOString().split("T")[0];
+    const dueRecurring = recurringSchedules.filter(r=>r.active!==false && r.day===todayDay && (!r.snoozedUntil || r.snoozedUntil < todayStr2));
     const CARDS = {
       health: (
         <div key="health" style={{ ...card,padding:"16px 14px",background:`linear-gradient(135deg,${runwayColor}10,${T.card})`,border:`1px solid ${runwayColor}33` }}>
@@ -6805,11 +6879,36 @@ function AppContent({ onLock }) {
                     <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{r.name}</div>
                     <div style={{ color:T.sub,fontSize:10 }}>{sym}{fmt(r.amount)} · {accounts.find(a=>a.id===r.accId)?.name||"Account"}</div>
                   </div>
-                  <button onClick={()=>{ setDefaultAddType("investment"); setShowAdd(true); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Record</button>
+                  <div style={{ display:"flex",gap:6 }}>
+                    <button onClick={()=>{ setDefaultAddType("investment"); setShowAdd(true); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Record</button>
+                    <button onClick={()=>setRecurringSchedules(prev=>prev.map(x=>x.id===r.id?{...x,snoozedUntil:new Date(Date.now()+24*60*60*1000).toISOString().split("T")[0]}:x))} style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Snooze 1d</button>
+                  </div>
                 </div>
               ))}
             </div>
           )}
+          {/* Membership expiry alerts */}
+          {(()=>{
+            const today = new Date().toISOString().split("T")[0];
+            const in7 = new Date(Date.now()+7*24*60*60*1000).toISOString().split("T")[0];
+            const expiring = memberships.filter(m=>m.validUntil && m.validUntil >= today && m.validUntil <= in7);
+            const lapsed = memberships.filter(m=>m.validUntil && m.validUntil < today && (() => { const diffDays = Math.round((new Date()-new Date(m.validUntil))/(1000*60*60*24)); return diffDays <= 3; })());
+            if(!expiring.length && !lapsed.length) return null;
+            return (<div style={{ marginBottom:12 }}>
+              {expiring.map(m=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
+                <div key={m.id} style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:14,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <div><div style={{ color:T.warn,fontSize:12,fontWeight:800 }}>⚠️ {ba?.name||"Membership"} expiring</div><div style={{ color:T.sub,fontSize:10 }}>Until {formatShortDate(m.validUntil)||m.validUntil}</div></div>
+                  <button onClick={()=>{ setActiveBillerForAction(ba); }} style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Renew</button>
+                </div>
+              ); })}
+              {lapsed.map(m=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
+                <div key={m.id} style={{ background:T.danger+"16",border:`1px solid ${T.danger}33`,borderRadius:14,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <div><div style={{ color:T.danger,fontSize:12,fontWeight:800 }}>🔴 {ba?.name||"Membership"} lapsed</div><div style={{ color:T.sub,fontSize:10 }}>Expired {formatShortDate(m.validUntil)||m.validUntil}</div></div>
+                  <button onClick={()=>{ setActiveBillerForAction(ba); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Renew</button>
+                </div>
+              ); })}
+            </div>);
+          })()}
           {/* Edit cards toggle */}
           <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:8 }}>
             <button onClick={()=>setEditingCards(e=>!e)} style={{ background:editingCards?T.accent+"22":"none",border:`1px solid ${editingCards?T.accent:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:editingCards?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{editingCards?"✓ Done":"⠿ Arrange"}</button>
@@ -7347,6 +7446,39 @@ function AppContent({ onLock }) {
       return (
         <div style={{ padding:"14px 16px 0" }}>
           <button onClick={()=>setSelectedPerson(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:13,fontWeight:700,marginBottom:16,fontFamily:"Nunito,sans-serif" }}>← People</button>
+          {/* Debt Transfer */}
+          {totalOwesMe>0&&(
+            <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:12 }}>
+              <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>🔀 Transfer debt to someone else</div>
+              <div style={{ color:T.sub,fontSize:10,marginBottom:8 }}>If {p.name} says another person will pay on their behalf</div>
+              <select style={{ ...inp,marginBottom:8 }} onChange={e=>{
+                const targetId = e.target.value;
+                if(!targetId) return;
+                const isGroup = targetId.startsWith("g_");
+                const realId = isGroup ? targetId.slice(2) : targetId;
+                if(!window.confirm(`Transfer ${p.name}'s debt of ${sym}${fmt(totalOwesMe)} to ${isGroup ? groups.find(g=>g.id===realId)?.name : people.find(x=>String(x.id)===realId)?.name}?`)) return;
+                // Mark all of person's splits as settled
+                setTxns(prev=>prev.map(t=>{
+                  if(t.type!=="expense") return t;
+                  const info = t.people?.[p.id] || t.splitPeople?.[p.id];
+                  if(!info||info.settled||info.mode!=="owes") return t;
+                  const updated = {...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0,transferredTo:realId};
+                  if(t.people?.[p.id]) return {...t,people:{...t.people,[p.id]:updated}};
+                  return {...t,splitPeople:{...t.splitPeople,[p.id]:updated}};
+                }));
+                // Add debt to target person
+                if(!isGroup){
+                  const newTxn = { id:genId(), type:"expense", amount:totalOwesMe, who:`Transferred from ${p.name}`, date:todayStr(), catIds:[], subIds:[], people:{[realId]:{amount:totalOwesMe,mode:"owes",settled:false,remainingAmt:totalOwesMe}}, createdAt:Date.now(), note:`Debt transferred from ${p.name}` };
+                  setTxns(prev=>[newTxn,...prev]);
+                }
+                e.target.value="";
+              }}>
+                <option value="">Select who will pay instead...</option>
+                {people.filter(x=>!x.isMe&&String(x.id)!==String(p.id)).map(x=>(<option key={x.id} value={x.id}>{x.emoji} {x.name}</option>))}
+                {groups.map(g=>(<option key={g.id} value={`g_${g.id}`}>{g.icon||"👥"} {g.name} (group)</option>))}
+              </select>
+            </div>
+          )}
           {/* Tagged accounts */}
           {(()=>{ const tagged=accounts.filter(a=>String(a.attributedTo)===String(p.id)); if(!tagged.length) return null; return (
             <div style={{ ...card,marginBottom:12 }}>
@@ -10128,6 +10260,12 @@ function AppContent({ onLock }) {
               <span style={{ color:T.accent,fontSize:10,fontWeight:800 }}>{sym}{fmt(monthlySlice)}/month</span>
             </div>
           </div>
+          <div style={{ ...card,marginBottom:0,display:"flex",flexDirection:"column",justifyContent:"space-between" }}>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Carry Forward</div>
+            <div style={{ color:T.sub,fontSize:10,marginTop:6,lineHeight:1.4 }}>Surplus/deficit from last month adjusts this month's budget</div>
+            <button onClick={()=>setBudgetCarryForward(v=>!v)} style={{ marginTop:10,background:budgetCarryForward?T.success+"22":"none",border:`1px solid ${budgetCarryForward?T.success:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:budgetCarryForward?T.success:T.sub,fontFamily:"Nunito,sans-serif" }}>{budgetCarryForward?"ON ✅":"OFF"}</button>
+          </div>
+          </div>
           <div style={{ ...card,marginBottom:0 }}>
             <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Spent so far</div>
             <div style={{ color:T.danger,fontSize:22,fontWeight:900,marginTop:8 }}>{sym}{fmt(fySpend)}</div>
@@ -11909,6 +12047,50 @@ function AppContent({ onLock }) {
         )}
         {(showAddLoan||editingLoan)&&<LoanModal item={editingLoan} onClose={()=>{ setShowAddLoan(false); setEditingLoan(null); }}/>}        
         {repaymentLoan&&<LoanRepaymentModal item={repaymentLoan} onClose={()=>setRepaymentLoan(null)}/>}
+        {/* Transaction Detail */}
+        {txnDetailId&&(()=>{
+          const t = txns.find(x=>x.id===txnDetailId);
+          if(!t) return null;
+          const acc = accounts.find(a=>a.id===t.accId);
+          const tCats = (t.catIds||[t.catId]).filter(Boolean).map(cid=>cats.find(c=>String(c.id)===String(cid))?.name).filter(Boolean);
+          const billerBA = t.billerLinkId ? billerAccounts.find(b=>b.id===t.billerLinkId) : null;
+          const color = txnColor(t.type,T);
+          return (
+            <div onClick={()=>setTxnDetailId(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+              <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16 }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{t.merchant||t.who||t.desc||"Transaction"}</div>
+                    <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>{formatShortDate(t.date)||t.date} · {acc?.name||"Account"}</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ color,fontSize:22,fontWeight:900 }}>{t.type==="income"?"+":t.type==="expense"?"-":""}{sym}{fmt(t.amount)}</div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{t.type?.toUpperCase()}</div>
+                  </div>
+                </div>
+                <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                  {tCats.length>0&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Category</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{tCats.join(", ")}</span></div>}
+                  {t.note&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Note</span><span style={{ color:T.text,fontSize:12 }}>{t.note}</span></div>}
+                  {t.transactionRef&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Ref</span><span style={{ color:T.text,fontSize:12 }}>{t.transactionRef}</span></div>}
+                  {t.priceMrp&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>MRP</span><span style={{ color:T.text,fontSize:12 }}>{sym}{fmt(t.priceMrp)}</span></div>}
+                  {t.priceDiscount&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Discount</span><span style={{ color:T.success,fontSize:12,fontWeight:700 }}>-{sym}{fmt(t.priceDiscount)}</span></div>}
+                  {t.emiInterestWaiver&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Interest waiver</span><span style={{ color:T.success,fontSize:12,fontWeight:700 }}>{sym}{fmt(t.emiInterestWaiver)}</span></div>}
+                  {t.emiGstOnInterest&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>GST on interest</span><span style={{ color:T.danger,fontSize:12,fontWeight:700 }}>{sym}{fmt(t.emiGstOnInterest)}</span></div>}
+                  {billerBA&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Linked biller</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{getBillerIcon(billerBA.type)} {billerBA.name}</span></div>}
+                  {t.guestPerson&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Guest person owes</span><span style={{ color:T.warn,fontSize:12,fontWeight:700 }}>{t.guestPerson} · {sym}{fmt(t.guestPersonAmount||0)}</span></div>}
+                  {t.reimbursable&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Reimbursable</span><span style={{ color:T.warn,fontSize:12,fontWeight:700 }}>{sym}{fmt(t.reimbursableAmount||t.amount)}</span></div>}
+                  {t.discount&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Discount applied</span><span style={{ color:T.success,fontSize:12,fontWeight:700 }}>-{sym}{fmt(t.discount)}</span></div>}
+                  {t.investFolio&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Folio</span><span style={{ color:T.text,fontSize:12 }}>{t.investFolio}</span></div>}
+                  {t.investNav&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>NAV</span><span style={{ color:T.text,fontSize:12 }}>{sym}{fmt(t.investNav)}</span></div>}
+                </div>
+                <div style={{ display:"flex",gap:8,marginTop:16 }}>
+                  <button onClick={()=>{ setTxnDetailId(null); setEditTxn(t); setShowAdd(true); }} style={{ flex:1,background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+                  <button onClick={()=>setTxnDetailId(null)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         {/* Mask PIN reveal overlay */}
         {showMaskPin&&(
           <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:500,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
