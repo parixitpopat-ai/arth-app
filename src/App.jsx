@@ -1652,9 +1652,12 @@ function AppContent({ onLock }) {
   const monthlyReceivables = useMemo(()=>{
     const map = {};
 
-    thisMonthTxns.forEach(t=>{
-      if(t.type!=="expense" || !t.people) return;
-      Object.entries(t.people).forEach(([pid,info])=>{
+    // B10 fix: use ALL txns not just thisMonthTxns — unpaid debts carry forward
+    txns.forEach(t=>{
+      if(t.type!=="expense") return;
+      // Check both F8 (t.people) and legacy (t.splitPeople)
+      const peopleMap = {...(t.splitPeople||{}), ...(t.people||{})};
+      Object.entries(peopleMap).forEach(([pid,info])=>{
         if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
         map[pid] = (map[pid]||0) + remainingShare(info);
       });
@@ -1662,7 +1665,6 @@ function AppContent({ onLock }) {
 
     bills
       .filter(b=>b.status==="unpaid" && b.splitPeople)
-      .filter(b=>(b.dueDate&&String(b.dueDate).startsWith(cm)) || (b.createdDate&&String(b.createdDate).startsWith(cm)))
       .forEach(b=>{
         Object.entries(b.splitPeople||{}).forEach(([pid,info])=>{
           if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
@@ -1671,7 +1673,7 @@ function AppContent({ onLock }) {
       });
 
     return map;
-  },[thisMonthTxns,bills,cm]);
+  },[txns,bills,cm]);
   const monthDirectOwedToMe = useMemo(()=>Object.values(monthlyReceivables).reduce((sum,amount)=>sum+Number(amount||0),0),[monthlyReceivables]);
   const monthlyReceivablePeopleList = useMemo(()=>Object.entries(monthlyReceivables)
     .filter(([,amount])=>Number(amount||0)>0)
