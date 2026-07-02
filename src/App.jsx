@@ -913,6 +913,12 @@ function AppContent({ onLock }) {
   const [txns, setTxns] = useState(()=>normalizeTxns(JSON.parse(localStorage.getItem("arth_txns")||"[]")));
   const [investments, setInvestments] = useState(()=>JSON.parse(localStorage.getItem("arth_investments")||"[]"));
   const [recurringSchedules, setRecurringSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_recurring")||"[]"));
+  const [editingRecurring, setEditingRecurring] = useState(null);
+  const [editingVehicle, setEditingVehicle] = useState(null);
+  const [vType, setVType] = useState("car");
+  const [vNumber, setVNumber] = useState("");
+  const [vName, setVName] = useState("");
+  const [vColor, setVColor] = useState(PALETTE[2]);
   const [bills, setBills] = useState(()=>JSON.parse(localStorage.getItem("arth_bills")||"[]"));
   const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
   const [memberships, setMemberships] = useState(()=>JSON.parse(localStorage.getItem("arth_memberships")||"[]"));
@@ -6127,10 +6133,6 @@ function AppContent({ onLock }) {
           {(()=>{
             const groupKey = group.key || displayTitle;
             const existing = recurringSchedules.find(r=>r.groupKey===groupKey);
-            const [showRecurring, setShowRecurring] = React.useState(false);
-            const [recDay, setRecDay] = React.useState(existing?.day||"");
-            const [recAmount, setRecAmount] = React.useState(existing?.amount?String(existing.amount):"");
-            const [recAccId, setRecAccId] = React.useState(existing?.accId||(accounts.find(a=>a.type==="bank")?.id||""));
             return (
               <div style={{ background:T.input,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
@@ -6138,23 +6140,26 @@ function AppContent({ onLock }) {
                     <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>🔄 Recurring Schedule</div>
                     {existing?<div style={{ color:T.success,fontSize:11,marginTop:2 }}>Active · {existing.day}th every month · {sym}{fmt(existing.amount)}</div>:<div style={{ color:T.sub,fontSize:11,marginTop:2 }}>Not set</div>}
                   </div>
-                  <button onClick={()=>setShowRecurring(v=>!v)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{showRecurring?"Cancel":existing?"Edit":"Set up"}</button>
+                  <button onClick={()=>setEditingRecurring(editingRecurring===groupKey?null:groupKey)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{editingRecurring===groupKey?"Cancel":existing?"Edit":"Set up"}</button>
                 </div>
-                {showRecurring&&(
+                {editingRecurring===groupKey&&(
                   <div style={{ marginTop:10,display:"flex",flexDirection:"column",gap:8 }}>
                     <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-                      <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>DAY OF MONTH</div><input style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:14,fontWeight:800,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} type="number" min="1" max="31" placeholder="e.g. 3" value={recDay} onChange={e=>setRecDay(e.target.value)}/></div>
-                      <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>AMOUNT ({sym})</div><input style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:14,fontWeight:800,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} type="text" inputMode="decimal" placeholder="0" value={recAmount} onChange={e=>setRecAmount(cleanMoneyInput(e.target.value))}/></div>
+                      <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>DAY OF MONTH</div><input style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:14,fontWeight:800,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} type="number" min="1" max="31" placeholder="e.g. 3" defaultValue={existing?.day||""} id={`rec-day-${groupKey}`}/></div>
+                      <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>AMOUNT ({sym})</div><input style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:14,fontWeight:800,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} type="text" inputMode="decimal" placeholder="0" defaultValue={existing?.amount||""} id={`rec-amt-${groupKey}`}/></div>
                     </div>
-                    <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>DEBIT ACCOUNT</div><select style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:13,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} value={recAccId} onChange={e=>setRecAccId(e.target.value)}>{accounts.filter(a=>a.type!=="cc").map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+                    <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>DEBIT ACCOUNT</div><select style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:13,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} defaultValue={existing?.accId||(accounts.find(a=>a.type!=="cc")?.id||"")} id={`rec-acc-${groupKey}`}>{accounts.filter(a=>a.type!=="cc").map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
                     <div style={{ display:"flex",gap:8 }}>
                       <button onClick={()=>{
-                        if(!recDay||!recAmount) return;
-                        const record = { id:existing?.id||genId(), groupKey, investType:group.type, name:displayTitle, day:Number(recDay), amount:parseFloat(recAmount), accId:recAccId, active:true, createdAt:existing?.createdAt||Date.now() };
+                        const day = Number(document.getElementById(`rec-day-${groupKey}`)?.value||0);
+                        const amount = parseFloat(cleanMoneyInput(document.getElementById(`rec-amt-${groupKey}`)?.value||"0"))||0;
+                        const accId = document.getElementById(`rec-acc-${groupKey}`)?.value||"";
+                        if(!day||!amount) return;
+                        const record = { id:existing?.id||genId(), groupKey, investType:group.type, name:displayTitle, day, amount, accId, active:true, createdAt:existing?.createdAt||Date.now() };
                         setRecurringSchedules(prev=>existing?prev.map(r=>r.groupKey===groupKey?record:r):[...prev,record]);
-                        setShowRecurring(false);
+                        setEditingRecurring(null);
                       }} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Save Schedule</button>
-                      {existing&&<button onClick={()=>{ setRecurringSchedules(prev=>prev.filter(r=>r.groupKey!==groupKey)); setShowRecurring(false); }} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>Remove</button>}
+                      {existing&&<button onClick={()=>{ setRecurringSchedules(prev=>prev.filter(r=>r.groupKey!==groupKey)); setEditingRecurring(null); }} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>Remove</button>}
                     </div>
                   </div>
                 )}
@@ -9579,11 +9584,6 @@ function AppContent({ onLock }) {
 
     if(settingsSection==="vehicles") return (()=>{
       const VEHICLE_TYPES=[{id:"car",label:"Car",icon:"🚗"},{id:"bike",label:"Bike",icon:"🏍️"},{id:"truck",label:"Truck",icon:"🚛"},{id:"auto",label:"Auto",icon:"🛺"},{id:"other",label:"Other",icon:"🚘"}];
-      const [editingVehicle,setEditingVehicle]=React.useState(null);
-      const [vType,setVType]=React.useState("car");
-      const [vNumber,setVNumber]=React.useState("");
-      const [vName,setVName]=React.useState("");
-      const [vColor,setVColor]=React.useState(PALETTE[2]);
       const openNew=()=>{ setEditingVehicle("new"); setVType("car"); setVNumber(""); setVName(""); setVColor(PALETTE[2]); };
       const openEdit=v=>{ setEditingVehicle(v.id); setVType(v.type||"car"); setVNumber(v.number||""); setVName(v.name||""); setVColor(v.color||PALETTE[2]); };
       const saveVehicle=()=>{
