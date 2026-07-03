@@ -91,6 +91,32 @@ const extractSmsBalance = txt => {
   const m = String(txt ?? "").match(/(?:avail(?:able)?[\s\w]{0,10}(?:bal(?:ance)?|limit)|(?:a\/c\s+)?bal(?:ance)?(?:\s+(?:is|:|-))?|closing\s+bal|avl\.?\s+bal|a\/c\s+bal)[\s:]*(?:Rs\.?|INR|\u20b9)?\s*([\d,]+(?:\.\d{1,2})?)/i);
   return m ? parseFloat(m[1].replace(/,/g,"")) : null;
 };
+// F12: Compute next due date based on billing model
+const computeNextDueDate = (bill, paidDate) => {
+  const base = bill.billingModel === "prorata"
+    ? new Date(paidDate || bill.dueDate || bill.activationDate || new Date())
+    : new Date(bill.periodEnd || bill.dueDate || new Date());
+  const next = new Date(base);
+  const freq = bill.frequency || "monthly";
+  if(freq === "monthly") next.setMonth(next.getMonth() + 1);
+  else if(freq === "quarterly") next.setMonth(next.getMonth() + 3);
+  else if(freq === "halfyearly") next.setMonth(next.getMonth() + 6);
+  else if(freq === "annual" || freq === "yearly") next.setFullYear(next.getFullYear() + 1);
+  else if(freq === "custom" && bill.validityDays) next.setDate(next.getDate() + Number(bill.validityDays));
+  return next.toISOString().split("T")[0];
+};
+const computeNextPeriod = (bill, paidDate) => {
+  if(bill.billingModel !== "calendar" || !bill.periodStart || !bill.periodEnd) return null;
+  const start = new Date(bill.periodEnd); start.setDate(start.getDate() + 1);
+  const end = new Date(start);
+  const freq = bill.frequency || "monthly";
+  if(freq === "monthly") end.setMonth(end.getMonth() + 1);
+  else if(freq === "quarterly") end.setMonth(end.getMonth() + 3);
+  else if(freq === "halfyearly") end.setMonth(end.getMonth() + 6);
+  else if(freq === "annual" || freq === "yearly") end.setFullYear(end.getFullYear() + 1);
+  end.setDate(end.getDate() - 1);
+  return { periodStart: start.toISOString().split("T")[0], periodEnd: end.toISOString().split("T")[0] };
+};
 const normalizeIncomeTypeValue = value => String(value ?? "")
   .trim()
   .toLowerCase()
@@ -693,9 +719,22 @@ function PinScreen({ onUnlock, isSetup, onCancel }) {
       else { const nc=confirm+k; setConfirm(nc); if(nc.length===4){ if(nc===pin) onUnlock(pin); else { setError("PINs don't match. Try again."); setPin(""); setConfirm(""); setStep("enter"); } } }
     } else { const np=pin+k; setPin(np); if(np.length===4){ onUnlock(np); setPin(""); } }
   };
+  // B16: Physical keyboard support
+  React.useEffect(() => {
+    const handler = e => {
+      if(e.key >= "0" && e.key <= "9") handleKey(e.key);
+      else if(e.key === "Backspace" || e.key === "Delete") handleKey("del");
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [pin, confirm, step]);
   const cur = step==="confirm"?confirm:pin;
+  const hiddenInputRef = React.useRef(null);
+  React.useEffect(() => { hiddenInputRef.current?.focus(); }, [cur.length]);
   return (
     <div style={{minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Nunito,sans-serif"}}>
+      {/* B15: Hidden input keeps mobile keyboard context */}
+      <input ref={hiddenInputRef} type="tel" inputMode="numeric" pattern="[0-9]*" style={{position:"absolute",opacity:0,width:1,height:1,pointerEvents:"none"}} onChange={e=>{ const v=e.target.value.replace(/\D/g,""); if(v) { handleKey(v[v.length-1]); e.target.value=""; } }} onKeyDown={e=>{ if(e.key==="Backspace") handleKey("del"); }}/>
       <div style={{fontSize:52,marginBottom:12,color:"#f0a500",fontWeight:900,fontFamily:"Nunito,sans-serif"}}>₹</div>
       <div style={{color:"#f0a500",fontSize:30,fontWeight:900,marginBottom:6}}>Arth</div>
       <div style={{color:"#5a5a7a",fontSize:13,marginBottom:40,textAlign:"center"}}>{isSetup?step==="enter"?"Set your 4-digit PIN":"Confirm your PIN":"Enter your PIN"}</div>
@@ -739,29 +778,34 @@ export default function Arth() {
   const countdownInterval = useRef(null);
   const resetIdleRef = useRef(null);
   const [showIdleWarning, setShowIdleWarning] = useState(false);
-  const [idleCountdown, setIdleCountdown] = useState(90);
-  const lock = useCallback(()=>{ setUnlocked(false); setShowIdleWarning(false); setIdleCountdown(90); },[]);
+  const [idleCountdown, setIdleCountdown] = useState(120);
+  // PIN lockout state — must be declared before any early returns (Rules of Hooks)
+  const [pinAttempts, setPinAttempts] = useState(0);
+  const [pinLockedUntil, setPinLockedUntil] = useState(()=>Number(sessionStorage.getItem("arth_pin_locked_until")||0));
+  const pinIsLocked = pinLockedUntil > Date.now();
+  const pinLockMinsLeft = pinIsLocked ? Math.ceil((pinLockedUntil-Date.now())/60000) : 0;
+  const lock = useCallback(()=>{ setUnlocked(false); setShowIdleWarning(false); setIdleCountdown(120); },[]);
 
-  // Two-phase idle timer: warn at 60s, lock 90s later (150s total)
+  // Two-phase idle timer: warn at 5 minutes, lock 2 minutes later (7 min total)
   useEffect(()=>{
     if(!unlocked) return;
-    const WARN_MS = 60_000;
-    const LOCK_MS = 90_000;
+    const WARN_MS = 5 * 60_000;   // 5 minutes before warning
+    const LOCK_MS = 2 * 60_000;   // 2 more minutes to respond
     const clearAll = ()=>{ clearTimeout(idleTimer.current); clearTimeout(idleWarnTimer.current); clearInterval(countdownInterval.current); };
     const reset = ()=>{
       clearAll();
       setShowIdleWarning(false);
-      setIdleCountdown(90);
+      setIdleCountdown(120);
       idleWarnTimer.current = setTimeout(()=>{
         setShowIdleWarning(true);
-        let cd = 90;
+        let cd = 120;
         setIdleCountdown(cd);
         countdownInterval.current = setInterval(()=>{ cd--; setIdleCountdown(cd); if(cd<=0) clearInterval(countdownInterval.current); }, 1000);
         idleTimer.current = setTimeout(lock, LOCK_MS);
       }, WARN_MS);
     };
     resetIdleRef.current = reset;
-    const events = ["mousemove","keydown","touchstart","click","scroll"];
+    const events = ["mousemove","keydown","touchstart","touchend","click","scroll","pointerdown"];
     events.forEach(e=>window.addEventListener(e,reset,{passive:true}));
     reset();
     return ()=>{ events.forEach(e=>window.removeEventListener(e,reset)); clearAll(); resetIdleRef.current=null; };
@@ -792,20 +836,41 @@ export default function Arth() {
     setUnlocked(true);
   }}/>;
 
-  if(!unlocked) return <PinScreen isSetup={false} onUnlock={async pin=>{
-    // Migration: old plaintext PINs are 4 chars; hashes are 64 hex chars
-    if(appPin.length<=6){
-      if(String(pin)===String(appPin)){
-        const hash = await hashPin(pin);
-        localStorage.setItem("arth_pin",hash);
-        setAppPin(hash);
-        setUnlocked(true);
-      }
-    } else {
-      const hash = await hashPin(pin);
-      if(hash===appPin) setUnlocked(true);
-    }
-  }}/>;
+  if(!unlocked) return (
+    <div style={{ minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
+      {pinIsLocked ? (
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:48,marginBottom:12 }}>🔒</div>
+          <div style={{ color:"#f0a500",fontSize:18,fontWeight:900,marginBottom:8 }}>Too many attempts</div>
+          <div style={{ color:"rgba(255,255,255,0.5)",fontSize:13 }}>Try again in {pinLockMinsLeft} minute{pinLockMinsLeft!==1?"s":""}</div>
+        </div>
+      ) : (
+        <PinScreen isSetup={false} onUnlock={async pin=>{
+          if(appPin.length<=6){
+            if(String(pin)===String(appPin)){
+              const hash = await hashPin(pin);
+              localStorage.setItem("arth_pin",hash);
+              setAppPin(hash);
+              setUnlocked(true);
+              setPinAttempts(0);
+            } else {
+              const na = pinAttempts+1;
+              setPinAttempts(na);
+              if(na>=5){ const lu=Date.now()+30*60*1000; setPinLockedUntil(lu); sessionStorage.setItem("arth_pin_locked_until",String(lu)); setPinAttempts(0); }
+            }
+          } else {
+            const hash = await hashPin(pin);
+            if(hash===appPin){ setUnlocked(true); setPinAttempts(0); }
+            else {
+              const na = pinAttempts+1;
+              setPinAttempts(na);
+              if(na>=5){ const lu=Date.now()+30*60*1000; setPinLockedUntil(lu); sessionStorage.setItem("arth_pin_locked_until",String(lu)); setPinAttempts(0); }
+            }
+          }
+        }}/>
+      )}
+    </div>
+  );
 
   return <>
     <ErrorBoundary><AppContent onLock={lock}/></ErrorBoundary>
@@ -846,7 +911,25 @@ function AppContent({ onLock }) {
   const [itemCatalog, setItemCatalog] = useState(()=>normalizeItemCatalog(JSON.parse(localStorage.getItem("arth_item_catalog")||"[]")));
   const [txns, setTxns] = useState(()=>normalizeTxns(JSON.parse(localStorage.getItem("arth_txns")||"[]")));
   const [investments, setInvestments] = useState(()=>JSON.parse(localStorage.getItem("arth_investments")||"[]"));
+  const [recurringSchedules, setRecurringSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_recurring")||"[]"));
+  const [editingRecurring, setEditingRecurring] = useState(null);
+  const [editingVehicle, setEditingVehicle] = useState(null);
+  const [vType, setVType] = useState("car");
+  const [vNumber, setVNumber] = useState("");
+  const [vName, setVName] = useState("");
+  const [vColor, setVColor] = useState(PALETTE[2]);
   const [bills, setBills] = useState(()=>JSON.parse(localStorage.getItem("arth_bills")||"[]"));
+  const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
+  const [memberships, setMemberships] = useState(()=>JSON.parse(localStorage.getItem("arth_memberships")||"[]"));
+  const [feePayments, setFeePayments] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_payments")||"[]"));
+  const [showAddMembership, setShowAddMembership] = useState(false);
+  const [editingMembership, setEditingMembership] = useState(null);
+  const [showAddFeePayment, setShowAddFeePayment] = useState(false);
+  const [activeBillerForAction, setActiveBillerForAction] = useState(null);
+  const [showAddBillerAccount, setShowAddBillerAccount] = useState(false);
+  const [editingBillerAccount, setEditingBillerAccount] = useState(null);
+  const [billSearch, setBillSearch] = useState("");
+  const [preselectedBillerType, setPreselectedBillerType] = useState("");
   const [liabilities, setLiabilities] = useState(()=>JSON.parse(localStorage.getItem("arth_liabilities")||"[]"));
   const [trackedAssets, setTrackedAssets] = useState(()=>JSON.parse(localStorage.getItem("arth_assets")||"[]"));
   const [vehicles, setVehicles] = useState(()=>JSON.parse(localStorage.getItem("arth_vehicles")||"[]"));
@@ -854,6 +937,8 @@ function AppContent({ onLock }) {
   const [ccEmiPlans, setCcEmiPlans] = useState(()=>JSON.parse(localStorage.getItem("arth_cc_emi_plans")||"[]"));
   const currentFYStartYear = new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1;
   const [annualBudget, setAnnualBudget] = useState(()=>Number(localStorage.getItem("arth_annual_budget")||600000));
+  const [perPersonBudgets, setPerPersonBudgets] = useState(()=>JSON.parse(localStorage.getItem("arth_person_budgets")||"{}"));
+  const [budgetCarryForward, setBudgetCarryForward] = useState(()=>JSON.parse(localStorage.getItem("arth_budget_carry")||"false"));
   const [lastFYTarget, setLastFYTarget] = useState(()=>Number(localStorage.getItem("arth_last_fy_target")||0));
   const [selectedBudgetFY, setSelectedBudgetFY] = useState(currentFYStartYear);
   const [monthOverrides, setMonthOverrides] = useState(()=>JSON.parse(localStorage.getItem("arth_month_overrides")||"{}"));
@@ -872,14 +957,20 @@ function AppContent({ onLock }) {
   useEffect(()=>localStorage.setItem("arth_item_catalog",JSON.stringify(itemCatalog)),[itemCatalog]);
   useEffect(()=>localStorage.setItem("arth_txns",JSON.stringify(txns)),[txns]);
   useEffect(()=>localStorage.setItem("arth_investments",JSON.stringify(investments)),[investments]);
+  useEffect(()=>localStorage.setItem("arth_recurring",JSON.stringify(recurringSchedules)),[recurringSchedules]);
   useEffect(()=>localStorage.setItem("arth_budget",monthBudget),[monthBudget]);
   useEffect(()=>localStorage.setItem("arth_bills",JSON.stringify(bills)),[bills]);
+  useEffect(()=>localStorage.setItem("arth_biller_accounts",JSON.stringify(billerAccounts)),[billerAccounts]);
+  useEffect(()=>localStorage.setItem("arth_memberships",JSON.stringify(memberships)),[memberships]);
+  useEffect(()=>localStorage.setItem("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
   useEffect(()=>localStorage.setItem("arth_liabilities",JSON.stringify(liabilities)),[liabilities]);
   useEffect(()=>localStorage.setItem("arth_assets",JSON.stringify(trackedAssets)),[trackedAssets]);
   useEffect(()=>localStorage.setItem("arth_vehicles",JSON.stringify(vehicles)),[vehicles]);
   useEffect(()=>localStorage.setItem("arth_loans",JSON.stringify(loans)),[loans]);
   useEffect(()=>localStorage.setItem("arth_cc_emi_plans",JSON.stringify(ccEmiPlans)),[ccEmiPlans]);
   useEffect(()=>localStorage.setItem("arth_annual_budget",annualBudget),[annualBudget]);
+  useEffect(()=>localStorage.setItem("arth_person_budgets",JSON.stringify(perPersonBudgets)),[perPersonBudgets]);
+  useEffect(()=>localStorage.setItem("arth_budget_carry",JSON.stringify(budgetCarryForward)),[budgetCarryForward]);
   useEffect(()=>localStorage.setItem("arth_last_fy_target",lastFYTarget),[lastFYTarget]);
   useEffect(()=>localStorage.setItem("arth_month_overrides",JSON.stringify(monthOverrides)),[monthOverrides]);
 
@@ -889,6 +980,7 @@ function AppContent({ onLock }) {
   const [addPrefill, setAddPrefill] = useState(null);
   const [showInvestments, setShowInvestments] = useState(false);
   const [showAddBill, setShowAddBill] = useState(false);
+  const [defaultBillerAccountId, setDefaultBillerAccountId] = useState("");
   const [editingAccount, setEditingAccount] = useState(null);
   const [editingMonthBudget, setEditingMonthBudget] = useState(null); // month key
   const [editingMonthVal, setEditingMonthVal] = useState("");
@@ -936,6 +1028,26 @@ function AppContent({ onLock }) {
   const [expandedTxn, setExpandedTxn] = useState(null);
   const defaultTxnMonth = viewMonth || todayStr().slice(0,7);
   const [fType, setFType] = useState("All");
+  const [txnSearch, setTxnSearch] = useState("");
+  const [txnDetailId, setTxnDetailId] = useState(null);
+  const [maskMode, setMaskMode] = useState(false);
+  const [maskRevealActive, setMaskRevealActive] = useState(false);
+  const [maskRevealTimer, setMaskRevealTimer] = useState(null);
+  const [showMaskPin, setShowMaskPin] = useState(false);
+  const [maskPinInput, setMaskPinInput] = useState("");
+  const [maskPinError, setMaskPinError] = useState(false);
+  const M = v => (maskMode && !maskRevealActive) ? "₹•••••" : v;
+  const toggleMask = () => {
+    if(!maskMode){ setMaskMode(true); setMaskRevealActive(false); }
+    else if(maskRevealActive){ setMaskRevealActive(false); if(maskRevealTimer) clearTimeout(maskRevealTimer); }
+    else { setShowMaskPin(true); setMaskPinInput(""); setMaskPinError(false); }
+  };
+  const onMaskReveal = () => {
+    setShowMaskPin(false); setMaskRevealActive(true);
+    if(maskRevealTimer) clearTimeout(maskRevealTimer);
+    const t = setTimeout(()=>setMaskRevealActive(false), 60000);
+    setMaskRevealTimer(t);
+  };
   const [txnDatePreset, setTxnDatePreset] = useState("current_month");
   const [txnSort, setTxnSort] = useState("date_desc");
   const [txnDateFrom, setTxnDateFrom] = useState(()=>getMonthBounds(defaultTxnMonth).start);
@@ -1107,6 +1219,13 @@ function AppContent({ onLock }) {
   const cm = viewMonth;
   const thisMonthTxns = useMemo(()=>txns.filter(t=>t.date&&t.date.startsWith(cm)),[txns,cm]);
   const expenses = useMemo(()=>thisMonthTxns.filter(t=>t.type==="expense"),[thisMonthTxns]);
+  const refundTotalsByBill = useMemo(()=>txns.reduce((map,txn)=>{
+    if(txn.type!=="settlement_in" || !txn.isRefund || !txn.againstBillId) return map;
+    const key = String(txn.againstBillId);
+    map[key] = (map[key]||0) + Number(txn.amount||0);
+    return map;
+  },{}), [txns]);
+  const getNetBillAmount = useCallback(bill=>Math.max(0, Number(bill?.amount||0) - Number(refundTotalsByBill[String(bill?.id)]||0)),[refundTotalsByBill]);
   const refundTotalsByExpense = useMemo(()=>txns.reduce((map,txn)=>{
     if(txn.type!=="settlement_in" || !txn.againstTxnId) return map;
     const key = String(txn.againstTxnId);
@@ -1282,6 +1401,10 @@ function AppContent({ onLock }) {
     if(getAcc(txn.accId)?.type==="cc" && txn.type==="expense"){
       setAccounts(prev=>prev.map(a=>a.id===txn.accId?{...a,outstanding:Math.max(0,(a.outstanding||0)-Number(txn.amount||0))}:a));
     }
+    // B1b: Delete refund on CC -> add amount back to outstanding
+    if(txn.type==="settlement_in" && txn.isRefund && getAcc(txn.accId)?.type==="cc"){
+      setAccounts(prev=>prev.map(a=>a.id===txn.accId?{...a,outstanding:(a.outstanding||0)+Number(txn.amount||0)}:a));
+    }
     // If deleting a repayment/settlement, reverse the settled amounts on original txns + bills
     if(txn.type==="settlement_in" && !txn.isRefund && txn.settlementLinks?.length){
       const links = txn.settlementLinks;
@@ -1413,8 +1536,10 @@ function AppContent({ onLock }) {
     const meId = people.find(p=>p.isMe)?.id;
 
     txns.forEach(t=>{
-      if(t.type==="expense"&&t.people){
-        Object.entries(t.people).forEach(([pid,info])=>{
+      if(t.type==="expense"){
+        // Check F8 style (t.people) and legacy (t.splitPeople)
+        const peopleMap = {...(t.splitPeople||{}), ...(t.people||{})};
+        Object.entries(peopleMap).forEach(([pid,info])=>{
           if(pid==="__me__" || pid===meId || info.mode!=="owes" || info.settled) return;
           receivables[pid] = (receivables[pid]||0) + remainingShare(info);
         });
@@ -1532,9 +1657,12 @@ function AppContent({ onLock }) {
   const monthlyReceivables = useMemo(()=>{
     const map = {};
 
-    thisMonthTxns.forEach(t=>{
-      if(t.type!=="expense" || !t.people) return;
-      Object.entries(t.people).forEach(([pid,info])=>{
+    // B10 fix: use ALL txns not just thisMonthTxns — unpaid debts carry forward
+    txns.forEach(t=>{
+      if(t.type!=="expense") return;
+      // Check both F8 (t.people) and legacy (t.splitPeople)
+      const peopleMap = {...(t.splitPeople||{}), ...(t.people||{})};
+      Object.entries(peopleMap).forEach(([pid,info])=>{
         if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
         map[pid] = (map[pid]||0) + remainingShare(info);
       });
@@ -1542,7 +1670,6 @@ function AppContent({ onLock }) {
 
     bills
       .filter(b=>b.status==="unpaid" && b.splitPeople)
-      .filter(b=>(b.dueDate&&String(b.dueDate).startsWith(cm)) || (b.createdDate&&String(b.createdDate).startsWith(cm)))
       .forEach(b=>{
         Object.entries(b.splitPeople||{}).forEach(([pid,info])=>{
           if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
@@ -1551,7 +1678,7 @@ function AppContent({ onLock }) {
       });
 
     return map;
-  },[thisMonthTxns,bills,cm]);
+  },[txns,bills,cm]);
   const monthDirectOwedToMe = useMemo(()=>Object.values(monthlyReceivables).reduce((sum,amount)=>sum+Number(amount||0),0),[monthlyReceivables]);
   const monthlyReceivablePeopleList = useMemo(()=>Object.entries(monthlyReceivables)
     .filter(([,amount])=>Number(amount||0)>0)
@@ -1623,6 +1750,17 @@ function AppContent({ onLock }) {
 
     if(txnReimbursableOnly && !(t.reimbursable && !t.reimbursedByTxnId)) return false;
 
+    // Text search
+    if(txnSearch&&txnSearch.trim()){
+      const q = txnSearch.trim().toLowerCase();
+      const merchant = (t.merchant||t.who||t.desc||"").toLowerCase();
+      const note = (t.note||"").toLowerCase();
+      const amount = String(t.amount||"");
+      const acc = accounts.find(a=>a.id===t.accId);
+      const accName = (acc?.name||"").toLowerCase();
+      if(!merchant.includes(q)&&!note.includes(q)&&!amount.includes(q)&&!accName.includes(q)) return false;
+    }
+
     return true;
   }).sort((a,b)=>{
     const recordedA = getRecordedSortValue(a);
@@ -1658,7 +1796,7 @@ function AppContent({ onLock }) {
     if(recordedB !== recordedA) return recordedB - recordedA;
     if(dateB !== dateA) return dateB - dateA;
     return tieDesc;
-  }),[txns,fType,txnDateFrom,txnDateTo,txnAmountFrom,txnAmountTo,txnCategoryFilter,txnPersonFilter,txnGroupFilter,accounts,expenseSourceFilter,expenseCardFilter,incomeTypeFilter,incomeAccountFilter,investmentTypeFilter,txnSort,txnReimbursableOnly]);
+  }),[txns,fType,txnDateFrom,txnDateTo,txnAmountFrom,txnAmountTo,txnCategoryFilter,txnPersonFilter,txnGroupFilter,accounts,expenseSourceFilter,expenseCardFilter,incomeTypeFilter,incomeAccountFilter,investmentTypeFilter,txnSort,txnReimbursableOnly,txnSearch]);
 
   const accountBalance = useCallback((accId, endDate=null)=>{
     const acc=accounts.find(a=>a.id===accId);
@@ -1709,7 +1847,7 @@ function AppContent({ onLock }) {
   const cashBankTotal = useMemo(()=>accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+effectiveAccountBalance(a.id),0),[accounts,effectiveAccountBalance]);
   const cashWalletTotal = useMemo(()=>accounts.filter(a=>a.type==="cash" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+accountBalance(a.id),0),[accounts,accountBalance]);
   const upiTotal = useMemo(()=>accounts.filter(a=>a.type==="upi" && !isInvestmentAccount(a) && !a.linkedAccount).reduce((sum,a)=>sum+accountBalance(a.id),0),[accounts,accountBalance]);
-  const liquidAssetsTotal = useMemo(()=>accounts.filter(a=>a.type!=="cc" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+(a.type==="bank" ? effectiveAccountBalance(a.id) : accountBalance(a.id)),0),[accounts,accountBalance,effectiveAccountBalance]);
+  const liquidAssetsTotal = useMemo(()=>accounts.filter(a=>a.type!=="cc" && !isInvestmentAccount(a) && !a.excludeFromWealth).reduce((sum,a)=>sum+(a.type==="bank" ? effectiveAccountBalance(a.id) : accountBalance(a.id)),0),[accounts,accountBalance,effectiveAccountBalance]);
   const reconciliationGapTotal = useMemo(()=>accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+accountReconciliationGap(a.id),0),[accounts,accountReconciliationGap]);
   const reconciledBankCount = useMemo(()=>accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a) && balanceCheckpoints[a.id]?.date).length,[accounts,balanceCheckpoints]);
   const investmentAccountTotal = useMemo(()=>investmentAccounts.reduce((sum,a)=>sum+accountBalance(a.id),0),[investmentAccounts,accountBalance]);
@@ -1806,14 +1944,23 @@ function AppContent({ onLock }) {
       if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
       return sum+Number(t.amount||0);
     },0);
-    // Payments made AFTER the statement date reduce what's due on this statement
+    // Refunds within cycle reduce charges
+    const inCycleRefunds = txns.reduce((sum,t)=>{
+      if(t.type!=="settlement_in"||!t.isRefund||!allIds.includes(t.accId)) return sum;
+      const d=toDateOnly(t.date);
+      if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
+      return sum+Number(t.amount||0);
+    },0);
+    // Payments AFTER statement date reduce outstanding
     const paymentsSinceStatement = txns.reduce((sum,t)=>{
-      if(t.type!=="cc_payment"||t.toAccId!==cardId) return sum;
+      const isCcPayment = t.type==="cc_payment" && t.toAccId===cardId;
+      const isCcRefund = t.type==="settlement_in" && t.isRefund && allIds.includes(t.accId);
+      if(!isCcPayment && !isCcRefund) return sum;
       const d=toDateOnly(t.date);
       if(!d||!lastStatementDate||d<=lastStatementDate) return sum;
       return sum+Number(t.amount||0);
     },0);
-    return Math.max(0, lastCycleCharges - paymentsSinceStatement);
+    return Math.max(0, lastCycleCharges - inCycleRefunds - paymentsSinceStatement);
   },[txns,accounts]);
   const creditCardLiabilityTotal = useMemo(()=>accounts.reduce((sum,a)=>sum+(a.type==="cc"?cardOutstanding(a):0),0),[accounts,cardOutstanding]);
   const otherLiabilityTotal = useMemo(()=>liabilities.reduce((sum,l)=>sum+Number(l.outstanding||0),0),[liabilities]);
@@ -1832,14 +1979,23 @@ function AppContent({ onLock }) {
       if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
       return sum+Number(t.amount||0);
     },0);
-    // Payments made after statement date reduce the outstanding
+    // Refunds WITHIN the billing cycle reduce charges directly
+    const inCycleRefunds = txns.reduce((sum,t)=>{
+      if(t.type!=="settlement_in"||!t.isRefund||!allIds.includes(t.accId)) return sum;
+      const d=toDateOnly(t.date);
+      if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
+      return sum+Number(t.amount||0);
+    },0);
+    // Payments AND refunds AFTER statement date reduce outstanding
     const paymentsSinceStatement = txns.reduce((sum,t)=>{
-      if(t.type!=="cc_payment"||t.toAccId!==card.id) return sum;
+      const isCcPayment = t.type==="cc_payment" && t.toAccId===card.id;
+      const isCcRefund = t.type==="settlement_in" && t.isRefund && allIds.includes(t.accId);
+      if(!isCcPayment && !isCcRefund) return sum;
       const d=toDateOnly(t.date);
       if(!d||!lastStatementDate||d<=lastStatementDate) return sum;
       return sum+Number(t.amount||0);
     },0);
-    const totalOutstanding = Math.max(0, lastCycleCharges - paymentsSinceStatement);
+    const totalOutstanding = Math.max(0, lastCycleCharges - inCycleRefunds - paymentsSinceStatement);
     // Unbilled = current open cycle charges (after lastStatementDate, up to today)
     const currentCycleSpend = Math.max(0, txns.reduce((sum,t)=>{
       if((t.type!=="expense"&&t.type!=="cc_emi")||!allIds.includes(t.accId)) return sum;
@@ -1884,23 +2040,47 @@ function AppContent({ onLock }) {
         return inner + remainingShare(info);
       },0) + Number(b.groupCollectiveAmount||0)
     ,0);
-    return txnOwed + billOwed;
-  },[txns,bills,getGroupCollectiveDue]);
+    // Add individual member outstanding (expenses tagged to group members individually)
+    const group = groups.find(g=>g.id===groupId);
+    const memberIndividualOwed = (group?.members||[]).reduce((sum,memberId)=>{
+      const memberTxnOwed = txns.filter(t=>
+        t.type==="expense" &&
+        t.people?.[memberId]?.mode==="owes" &&
+        !t.people?.[memberId]?.settled &&
+        !t.groupId // not a group expense - avoid double counting
+      ).reduce((s,t)=>s+remainingShare(t.people[memberId]),0);
+      const memberLoanOwed = loans.filter(l=>
+        l.direction!=="taken" &&
+        l.status==="active" &&
+        String(l.personId||l.linkedPersonId||"")===String(memberId)
+      ).reduce((s,l)=>s+Number(l.outstanding||0),0);
+      return sum + memberTxnOwed + memberLoanOwed;
+    },0);
+    return txnOwed + billOwed + memberIndividualOwed;
+  },[txns,bills,loans,groups,getGroupCollectiveDue]);
 
   const getPersonReceivableItems = useCallback(personId=>{
     if(!personId) return [];
     const txnItems = txns
-      .filter(t=>t.type==="expense"&&t.people?.[personId]?.mode==="owes"&&!t.people?.[personId]?.settled&&remainingShare(t.people?.[personId])>0)
-      .map(t=>({
-        key:`txn:${t.id}`,
-        kind:"txn",
-        id:t.id,
-        date:t.date||"",
-        title:t.desc||t.merchant||"Expense",
-        subtitle:[formatShortDate(t.date)||t.date, t.groupId&&getGroup(t.groupId)?.name].filter(Boolean).join(" · "),
-        amount:remainingShare(t.people[personId]),
-        originalAmount:Number(t.people[personId]?.amount||0),
-      }));
+      .filter(t=>{
+        if(t.type!=="expense") return false;
+        // Check both F8 (t.people) and legacy (t.splitPeople)
+        const info = t.people?.[personId] || t.splitPeople?.[personId];
+        return info?.mode==="owes" && !info?.settled && remainingShare(info)>0;
+      })
+      .map(t=>{
+        const info = t.people?.[personId] || t.splitPeople?.[personId];
+        return ({
+          key:`txn:${t.id}`,
+          kind:"txn",
+          id:t.id,
+          date:t.date||"",
+          title:t.desc||t.merchant||"Expense",
+          subtitle:[formatShortDate(t.date)||t.date, t.groupId&&getGroup(t.groupId)?.name].filter(Boolean).join(" · "),
+          amount:remainingShare(info),
+          originalAmount:Number(info?.amount||0),
+        });
+      });
     const txnItemIdSet = new Set(txnItems.map(i=>i.id));
     // Also collect bill IDs that are explicitly claimed by a txn in txnItems (via paidBillId)
     const txnClaimedBillIds = new Set(
@@ -2092,6 +2272,7 @@ function AppContent({ onLock }) {
   const activeLoans = useMemo(()=>loans.filter(loan=>loan.status==="active" && Number(loan.outstanding||0)>0),[loans]);
   const isCreditCardBackedLoan = useCallback(loan=>loan?.direction==="taken" && (loan?.sourceType==="cc" || loan?.ccLinked===true || (loan?.autoScheduled && loan?.scheduledInstallmentIds?.length>0)),[]);
   const loanGivenTotal = useMemo(()=>activeLoans.filter(loan=>loan.direction!=="taken").reduce((sum,loan)=>sum+Number(loan.outstanding||0),0),[activeLoans]);
+  const activeGivenLoans = useMemo(()=>activeLoans.filter(loan=>loan.direction!=="taken" && !isCreditCardBackedLoan(loan)),[activeLoans,isCreditCardBackedLoan]);
   const loanTakenTotal = useMemo(()=>activeLoans.filter(loan=>loan.direction==="taken" && !isCreditCardBackedLoan(loan)).reduce((sum,loan)=>sum+Number(loan.outstanding||0),0),[activeLoans,isCreditCardBackedLoan]);
   const upcomingEmiLoans = useMemo(()=>activeLoans.filter(loan=>loan.direction==="taken" && !isCreditCardBackedLoan(loan) && Number(loan.emiAmount||0)>0),[activeLoans,isCreditCardBackedLoan]);
   const monthlyEmiCommitment = useMemo(()=>upcomingEmiLoans.reduce((sum,loan)=>sum+Number(loan.emiAmount||0),0),[upcomingEmiLoans]);
@@ -2210,15 +2391,9 @@ function AppContent({ onLock }) {
 
     const handleEditTxn = (txn, e) => {
       e?.stopPropagation?.();
-      // Batch both state updates together to prevent re-render between them
-      // which caused the edit modal to not open reliably
-      if(typeof onEditTxn === "function"){
-        setExpandedTxn(null);
-        onEditTxn(txn);
-      } else {
-        setExpandedTxn(null);
-        setTimeout(()=>setEditingTxn(txn), 0);
-      }
+      setExpandedTxn(null);
+      if(typeof onEditTxn === "function") onEditTxn(txn);
+      else setEditingTxn(txn);
     };
 
     const deleteTxn = e => {
@@ -2235,7 +2410,7 @@ function AppContent({ onLock }) {
     return (
       <div style={{ borderBottom:!last?`1px solid ${T.border}`:"none" }}>
         {/* COLLAPSED ROW */}
-        <div onClick={()=>setExpandedTxn(isExpanded?null:t.id)} style={{ display:"flex", alignItems:"center", gap:12, padding:"11px 0", cursor:"pointer" }}>
+        <div onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex", alignItems:"center", gap:12, padding:"11px 0", cursor:"pointer" }}>
           <div style={{ width:38,height:38,borderRadius:10,background:color+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0,position:"relative" }}>
             {t.type==="expense" && cat ? cat.icon : t.type==="investment" && invTypeMeta ? invTypeMeta.icon : txnEmoji(t)}
             {allSettled&&<div style={{position:"absolute",bottom:-3,right:-3,fontSize:9,background:T.card,borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✅</div>}
@@ -2265,6 +2440,8 @@ function AppContent({ onLock }) {
               {t.type==="settlement_in"&&!t.isRefund&&t.settlementLinks?.length>0&&<span style={{ background:T.info+"18",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💰 Repayment</span>}
               {t.type==="expense"&&refundedAmount>0&&<span style={{ background:T.info+"20",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>↩ {refundStatus}</span>}
               {t.type==="expense"&&linkedRepayments.length>0&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💰 Repaid</span>}
+              {t.billerLinkId&&(()=>{ const ba=billerAccounts.find(b=>b.id===t.billerLinkId); if(!ba) return null; const mem=memberships.filter(m=>m.billerAccountId===ba.id&&m.txnId===t.id)[0]; return <span style={{ background:T.accent+"18",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{getBillerIcon(ba.type)} {ba.name}{mem?` · ${formatShortDate(mem.validFrom)||mem.validFrom}→${formatShortDate(mem.validUntil)||mem.validUntil}`:""}</span>; })()}
+              {t.guestPerson&&<span style={{ background:T.warn+"18",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>👤 {t.guestPerson} owes {sym}{fmt(t.guestPersonAmount||0)}</span>}
               {t.type==="expense"&&t.reimbursable&&!t.reimbursedByTxnId&&<span style={{ background:"#f0a50018",color:"#f0a500",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimb.{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
               {t.type==="expense"&&t.reimbursedByTxnId&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimbursed{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
               {t.isAutoEmiInstallment&&<span style={{ background:T.warn+"18",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💳 EMI {t.emiInstallmentNum}/{t.emiTotalInstallments}</span>}
@@ -2274,7 +2451,7 @@ function AppContent({ onLock }) {
             </div>
           </div>
           <div style={{ textAlign:"right", flexShrink:0 }}>
-            <div style={{ color, fontSize:14, fontWeight:800, lineHeight:1.2 }}>{isPlus?"+":""}{sym}{fmt(t.amount)}</div>
+            <div style={{ color, fontSize:14, fontWeight:800, lineHeight:1.2 }}>{isPlus?"+":" "}{M(`${sym}${fmt(t.amount)}`)}</div>
             {t.type==="expense"&&refundedAmount>0&&<div style={{ color:T.info,fontSize:10,marginTop:1,fontWeight:500 }}>net {sym}{fmt(netAfterRefund)}</div>}
             {t.type==="expense"&&myShare>0&&myShare<t.amount&&<div style={{ color:T.sub,fontSize:10,marginTop:2,fontWeight:500 }}>mine {sym}{fmt(myShare)}</div>}
             <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{dateLabel}</div>
@@ -2523,6 +2700,22 @@ function AppContent({ onLock }) {
     const [fromAccId, setFromAccId] = useState(isEditing ? (sourceTxn.fromAccId || defaultFromAccId) : (safePrefill.fromAccId || defaultFromAccId));
     const [toAccId, setToAccId] = useState(isEditing ? (sourceTxn.toAccId || defaultToCardId) : (safePrefill.toAccId || defaultToCardId));
     const [note, setNote] = useState(isEditing ? (sourceTxn.note || "") : (refundPrefill ? `Refund for ${refundPrefill.desc||refundPrefill.merchant||"expense"}` : (safePrefill.note || "")));
+    const [billerLinkId, setBillerLinkId] = useState(isEditing ? (sourceTxn.billerLinkId||"") : "");
+    const [settleSelectedIds, setSettleSelectedIds] = useState({});
+    const [guestPersonName, setGuestPersonName] = useState("");
+    const [discount, setDiscount] = useState("");
+    const [guestPersonAmount, setGuestPersonAmount] = useState("");
+    const [showGuestPerson, setShowGuestPerson] = useState(false);
+    const [showMembershipPanel, setShowMembershipPanel] = useState(false);
+    const [linkValidFrom, setLinkValidFrom] = useState(todayStr());
+    const [linkCycle, setLinkCycle] = useState("monthly");
+    const [linkBulkMonths, setLinkBulkMonths] = useState("1");
+    const [linkGraceDays, setLinkGraceDays] = useState("0");
+    const [linkMemberPersonId, setLinkMemberPersonId] = useState("self");
+    const linkedBA = billerLinkId ? billerAccounts.find(b=>b.id===billerLinkId) : null;
+    const linkedBAType = linkedBA ? getBillerActionType(linkedBA.type) : null;
+    const cycleMonthsMap = { monthly:1, quarterly:3, halfyearly:6, annual:12 };
+    const linkValidUntil = linkValidFrom && linkBulkMonths ? (()=>{ const d=new Date(linkValidFrom); d.setMonth(d.getMonth()+Number(linkBulkMonths)*(cycleMonthsMap[linkCycle]||1)); d.setDate(d.getDate()+Number(linkGraceDays||0)-1); return d.toISOString().split("T")[0]; })() : "";
     const [imageBase64, setImageBase64] = useState(sourceTxn?.imageBase64 || null);
     const [paymentImageBase64, setPaymentImageBase64] = useState(sourceTxn?.paymentImageBase64 || null);
     const isNative = isNativeSmsAvailable();
@@ -2530,6 +2723,7 @@ function AppContent({ onLock }) {
     const [smsRaw, setSmsRaw] = useState(sourceTxn?.smsRaw || "");
     const [showSms, setShowSms] = useState(Boolean(sourceTxn?.smsRaw));
     const [smsTxt, setSmsTxt] = useState(sourceTxn?.smsRaw || "");
+    const [userSetTxnType, setUserSetTxnType] = useState(isEditing);
     const [smsParseMeta, setSmsParseMeta] = useState(null);
     const [smsBusy, setSmsBusy] = useState(false);
     const [smsImportStatus, setSmsImportStatus] = useState("");
@@ -2572,12 +2766,16 @@ function AppContent({ onLock }) {
     const [reimbursableAmount, setReimbursableAmount] = useState(isEditing && sourceTxn?.reimbursableAmount ? String(sourceTxn.reimbursableAmount) : "");
     const [emiDueDay, setEmiDueDay] = useState("");
     const [emiInterestRate, setEmiInterestRate] = useState("");
+    const [emiInterestWaiver, setEmiInterestWaiver] = useState("");
+    const [emiGstOnInterest, setEmiGstOnInterest] = useState("");
     const [isBillPayment, setIsBillPayment] = useState(isEditing ? Boolean(sourceTxn?.isBillPayment) : false);
     const [vehicleId, setVehicleId] = useState(isEditing ? (sourceTxn?.vehicleId||"") : "");
     const [tagPersonAmount, setTagPersonAmount] = useState(isEditing && sourceTxn?.tagPersonAmount ? String(sourceTxn.tagPersonAmount) : "");
     const [tagGroupAmount, setTagGroupAmount] = useState(isEditing && sourceTxn?.tagGroupAmount ? String(sourceTxn.tagGroupAmount) : "");
     const [tagItems, setTagItems] = useState(isEditing && sourceTxn?.tagItems?.length ? sourceTxn.tagItems.map(item=>({...item,amount:String(item.amount)})) : [{id:genId(),targetType:"person",targetId:"",amount:""}]);
     const [useItemizedLines, setUseItemizedLines] = useState(isEditing ? Boolean(sourceTxn?.lineItems?.length) : false);
+    const [showItemSheet, setShowItemSheet] = useState(false);
+    const [editingItemId, setEditingItemId] = useState(null);
     const [lineItems, setLineItems] = useState(
       isEditing && Array.isArray(sourceTxn?.lineItems) && sourceTxn.lineItems.length
         ? sourceTxn.lineItems.map(item=>({
@@ -2601,6 +2799,7 @@ function AppContent({ onLock }) {
     );
     const [billInvoiceNo, setBillInvoiceNo] = useState(isEditing ? (sourceTxn?.billInvoiceNo || "") : "");
     const [settlementKind, setSettlementKind] = useState(initialSettlementKind);
+    const [refundPersonId, setRefundPersonId] = useState(null);
     const [refundLinkedExpenseId, setRefundLinkedExpenseId] = useState(
       isEditing && sourceTxn?.isRefund ? (sourceTxn.againstTxnId||null) : (refundPrefill?.id||null)
     );
@@ -2950,7 +3149,8 @@ function AppContent({ onLock }) {
       setInvestFreq(template.freq || "");
       if(template.accId) setAccId(template.accId);
       if(Number(template.nav||0)>0) setInvestNav(String(template.nav));
-      if(template.startDate) setDate(template.startDate);
+      // B12 FIX: Do not lock date to folio start date - user sets their own date
+      // if(template.startDate) setDate(template.startDate);
       setShowFolioSuggestions(false);
     },[]);
 
@@ -3028,6 +3228,19 @@ function AppContent({ onLock }) {
       return shares;
     };
 
+    // EMI SMS auto-link helper
+    const tryAutoLinkEmi = (parsedAmt, parsedMerchant) => {
+      if(!parsedAmt) return;
+      const emiLoans = loans.filter(l=>l.status==="active"&&l.sourceType&&l.emiAmount>0);
+      const match = emiLoans.find(l=>{
+        const amtMatch = Math.abs(Number(l.emiAmount||0)-parsedAmt)<2;
+        const nameMatch = parsedMerchant ? (l.name||"").toLowerCase().includes(parsedMerchant.toLowerCase().slice(0,4)) : false;
+        return amtMatch || nameMatch;
+      });
+      if(match && !billerLinkId){
+        setSmsParseMeta(prev=>prev?{...prev,emiLoanId:match.id,emiLoanName:match.name}:prev);
+      }
+    };
     const parseSms = (txt, options={}) => {
       setSmsRaw(txt);
       if(!txt.trim()){
@@ -3079,16 +3292,22 @@ function AppContent({ onLock }) {
       const isTransfer = !isCcPayment && /(?:self\s+transfer|transfer(?:red)?\s+to\s+(?:your|own)|from\s+a\/c.*to\s+a\/c|to\s+own\s+a\/c)/i.test(lower);
       const parsedType = isCcPayment ? "cc_payment" : isTransfer ? "transfer" : direction==="credit" ? "income" : direction==="debit" ? "expense" : txnType;
 
+      // Only auto-switch type for cc_payment and transfer (unambiguous)
+      // For income/expense: only switch if form is still on default expense with no data entered
+      const formIsBlank = !amount || parseFloat(amount)===0;
       if(parsedType==="cc_payment"){
         setTxnType("cc_payment");
         setWho("");
       } else if(parsedType==="transfer"){
         setTxnType("transfer");
-      } else if(parsedType==="income"){
-        setTxnType("income");
-      } else if(parsedType==="expense"){
-        setTxnType("expense");
+      } else if(!userSetTxnType){
+        if(parsedType==="income" && formIsBlank && txnType==="expense"){
+          setTxnType("income");
+        } else if(parsedType==="expense" && formIsBlank && txnType!=="income"){
+          setTxnType("expense");
+        }
       }
+      // Never switch away from a type the user has explicitly chosen
 
       const accountMatches = findSmsAccountMatches(safe, accounts);
       const last4s = extractSmsLast4s(safe);
@@ -3147,6 +3366,8 @@ function AppContent({ onLock }) {
         balanceAdjusted,
         balanceDiff,
       });
+      // Try auto-link EMI loan
+      if(parsedAmt && parsedType==="expense") tryAutoLinkEmi(parsedAmt, merchant);
     };
 
     const importSms = async mode => {
@@ -3201,6 +3422,10 @@ function AppContent({ onLock }) {
         smsRaw,
         imageBase64,
         transactionRef:transactionRef.trim()||null,
+        billerLinkId:billerLinkId||undefined,
+        discount:discount?parseFloat(discount):undefined,
+        guestPerson:guestPersonName.trim()||undefined,
+        guestPersonAmount:guestPersonAmount?parseFloat(guestPersonAmount):undefined,
       };
       const upsertTxn = nextTxn => {
         setTxns(prev=>isEditing
@@ -3209,6 +3434,31 @@ function AppContent({ onLock }) {
         );
       };
 
+      // Duplicate transaction warning
+      if(!isEditing && txnType==="expense" && amt>0){
+        const dupWindow = 5*60*1000; // 5 minutes
+        const dup = txns.find(t=>t.type==="expense" && Math.abs(t.amount-amt)<0.01 && String(t.accId)===String(accId) && Math.abs(Date.now()-(t.createdAt||0))<dupWindow);
+        if(dup && !window.confirm(`Possible duplicate: ${sym}${fmt(amt)} from the same account was recorded ${Math.round((Date.now()-(dup.createdAt||0))/60000)} minute(s) ago. Add anyway?`)) return;
+      }
+      // Create membership record if linked biller is membership type
+      if(billerLinkId && showMembershipPanel && linkedBAType==="membership" && linkValidFrom && !isEditing){
+        const memRecord = {
+          id: genId(),
+          billerAccountId: billerLinkId,
+          personId: linkMemberPersonId,
+          amount: parseFloat(amount)||0,
+          cycle: linkCycle,
+          bulkMonths: Number(linkBulkMonths),
+          graceDays: Number(linkGraceDays||0),
+          validFrom: linkValidFrom,
+          validUntil: linkValidUntil,
+          txnId: resolvedTxnId,
+          paidDate: date,
+          createdAt: Date.now(),
+          status: "active",
+        };
+        setMemberships(prev=>[memRecord,...prev]);
+      }
       if(txnType==="expense"){
         if(expensePaymentMode==="emi"){
           const dueDayNum = Math.max(1, Math.min(31, parseInt(emiDueDay || (toDateOnly(date)?.getDate() || new Date().getDate()), 10) || new Date().getDate()));
@@ -3280,6 +3530,8 @@ function AppContent({ onLock }) {
               tenureMonths:tenureNum,
               hasInterest:Number(emiInterestRate||0)>0,
               interestRate:Math.max(0, parseFloat(emiInterestRate)||0),
+              emiInterestWaiver:emiInterestWaiver?parseFloat(emiInterestWaiver):undefined,
+              emiGstOnInterest:emiGstOnInterest?parseFloat(emiGstOnInterest):undefined,
               emiAmount:emiAmt,
               paymentAccId:accId || nonCCAccs[0]?.id || "",
               sourceType:emiSourceType,
@@ -3399,10 +3651,10 @@ function AppContent({ onLock }) {
             }
           }
         }
-        const forPersonVal = splitMode==="tag" && (tagMode==="person"||tagMode==="both") ? tagPerson : "";
+        const forPersonVal = splitMode==="tag" && (tagMode==="person"||tagMode==="both"||tagMode==="attribute") ? tagPerson : "";
         const groupIdVal = splitMode==="split" ? (splitGroup||null)
           : (splitMode==="allocate" || splitMode==="unified") ? (groupAllocationsVal[0]?.groupId||null)
-          : (splitMode==="tag" && (tagMode==="group"||tagMode==="both") ? (tagGroup||null) : null);
+          : (splitMode==="tag" && (tagMode==="group"||tagMode==="both"||tagMode==="attribute") ? (tagGroup||null) : null);
         let catAllocNumeric = Object.fromEntries(Object.entries(catAllocations||{}).map(([cid,val])=>[cid,parseFloat(val)||0]));
         if(catIds.length>1){
           const baseMap = Object.fromEntries(catIds.map(cid=>[cid,Math.max(0,Number(catAllocNumeric[cid]||0))]));
@@ -3456,10 +3708,8 @@ function AppContent({ onLock }) {
           : null;
         if(useItemizedLines && normalizedLineItems?.length){
           const itemsTotal = normalizedLineItems.reduce((sum,item)=>sum+Number(item.amount||0),0);
-          if(Math.abs(itemsTotal-amt)>0.01){
-            alert(`Items total must match amount (${sym}${fmt(amt)}). Current items total is ${sym}${fmt(itemsTotal)}.`);
-            return;
-          }
+          // Mismatch is allowed - could be delivery/processing fees not in items
+          // Just warn, never block
           const qtyOverAllocated = normalizedLineItems.find(item=>{
             const splitQty = (item.splits||[]).reduce((sum,split)=>sum+Number(split.qty||0),0);
             return splitQty > Number(item.qty||0) + 0.0001;
@@ -3570,6 +3820,51 @@ function AppContent({ onLock }) {
         if(!isEditing){
           const pending = txns.filter(t=>t.type==="expense" && t.reimbursable && !t.reimbursedByTxnId);
           if(pending.length>0) setReimbursementMatchSuggestion({ incomeTxnId:resolvedTxnId, pending });
+          // Process settlements if any selected
+          const selectedIds = Object.keys(settleSelectedIds).filter(k=>settleSelectedIds[k]);
+          if(selectedIds.length>0){
+            selectedIds.forEach(id=>{
+              const person = people.find(p=>String(p.id)===id);
+              const group = groups.find(g=>g.id===id);
+              if(person){
+                // Settle all expense splits for this person (t.people is F8, t.splitPeople is legacy)
+                setTxns(prev=>prev.map(t=>{
+                  if(t.type!=="expense") return t;
+                  // F8 style — t.people[id]
+                  const info = t.people?.[id] || t.splitPeople?.[id];
+                  if(!info || info.settled || info.mode!=="owes") return t;
+                  const updated = {...info, settled:true, settledAmt:Number(info.amount||0), remainingAmt:0};
+                  if(t.people?.[id]) return {...t, people:{...t.people,[id]:updated}};
+                  if(t.splitPeople?.[id]) return {...t, splitPeople:{...t.splitPeople,[id]:updated}};
+                  return t;
+                }));
+                // Settle active loans for this person
+                setLoans(prev=>prev.map(l=>{
+                  if(l.direction==="taken") return l;
+                  if(String(l.personId||l.linkedPersonId||"")!==String(id)) return l;
+                  if(l.status!=="active") return l;
+                  return {...l, status:"closed", outstanding:0};
+                }));
+              }
+              if(group){
+                setTxns(prev=>prev.map(t=>{
+                  if(t.type!=="expense"||t.groupId!==id) return t;
+                  return {...t, groupCollectiveSettledAmt:Number(t.groupCollectiveAmount||0)};
+                }));
+                (group.members||[]).forEach(pid=>{
+                  setTxns(prev=>prev.map(t=>{
+                    if(t.type!=="expense") return t;
+                    const info = t.people?.[pid] || t.splitPeople?.[pid];
+                    if(!info || info.settled || info.mode!=="owes") return t;
+                    const updated = {...info, settled:true, settledAmt:Number(info.amount||0), remainingAmt:0};
+                    if(t.people?.[pid]) return {...t, people:{...t.people,[pid]:updated}};
+                    if(t.splitPeople?.[pid]) return {...t, splitPeople:{...t.splitPeople,[pid]:updated}};
+                    return t;
+                  }));
+                });
+              }
+            });
+          }
         }
       } else if(txnType==="transfer"){
         upsertTxn({ ...base, amount:amt, fromAccId, toAccId, catId:null, catIds:[], subId:null, subIds:[] });
@@ -3618,7 +3913,9 @@ function AppContent({ onLock }) {
         const folioNo = investType==="mf" ? investFolio.trim() : "";
         const metricValue = investmentMetricConfig.show ? Math.max(0, parseMoney(investNav)||0) : 0;
         const commonStartDate = lockedInvestFolioStartDate || date || todayStr();
-        const inv = { id:invId, type:investType, name:who.trim()||"Investment", amount:amt, currentValue:amt, freq:investFreq||"", folioNo, startDate:commonStartDate, linkedTxnId:resolvedTxnId, paymentAccId:accId, lastNav:metricValue, lastNavDate:date, transactionRef:transactionRef.trim()||null };
+        // Find matching recurring schedule for auto-link
+        const matchingSchedule = recurringSchedules.find(r=>r.active!==false && (r.name===who.trim() || (folioNo && r.groupKey && r.groupKey.includes(folioNo))));
+        const inv = { id:invId, type:investType, name:who.trim()||"Investment", amount:amt, currentValue:amt, freq:investFreq||"", folioNo, startDate:commonStartDate, linkedTxnId:resolvedTxnId, paymentAccId:accId, lastNav:metricValue, lastNavDate:date, transactionRef:transactionRef.trim()||null, recurringScheduleId:matchingSchedule?.id||null };
         setInvestments(prev=>{
           const exists = prev.some(item=>String(item.id)===String(invId) || String(item.linkedTxnId||"")===String(resolvedTxnId));
           return exists
@@ -3640,6 +3937,7 @@ function AppContent({ onLock }) {
           subId:null,
           subIds:[],
           linkedInvestmentId:invId,
+          recurringScheduleId:matchingSchedule?.id||null,
         });
       } else if(txnType==="settlement_in"){
         const isRepayment = settlementKind==="repayment" && Boolean(tagPerson||settlementTagGroup||sourceTxn?.fromPersonId||sourceTxn?.fromGroupId);
@@ -3675,8 +3973,27 @@ function AppContent({ onLock }) {
         const linkedRefundNote = linkedExpenseId && settlementKind==="refund"
           ? [note.trim(), `Linked refund for ${(refundPrefill?.desc||refundPrefill?.merchant||sourceTxn?.desc||sourceTxn?.merchant||"expense")}`].filter(Boolean).join(" · ")
           : note.trim();
-        const newTxn = { ...base, amount:amt, appliedAmount, extraAmount, accId, fromPersonId:repaymentPersonId, fromGroupId:repaymentGroupId, catId:null, catIds:[], subId:null, subIds:[], note:linkedRefundNote, isRefund:settlementKind==="refund", againstTxnId:linkedExpenseId, settlementLinks };
+        const linkedExpenseTxn = linkedExpenseId ? txns.find(t=>String(t.id)===String(linkedExpenseId)) : null;
+        const linkedBillId = settlementKind==="refund" ? (linkedExpenseTxn?.paidBillId || null) : null;
+        const newTxn = { ...base, amount:amt, appliedAmount, extraAmount, accId, fromPersonId:repaymentPersonId, fromGroupId:repaymentGroupId, catId:null, catIds:[], subId:null, subIds:[], note:linkedRefundNote, isRefund:settlementKind==="refund", againstTxnId:linkedExpenseId, againstBillId:linkedBillId, refundPersonId:settlementKind==="refund"?refundPersonId:null, settlementLinks };
         upsertTxn(newTxn);
+        if(newTxn.isRefund && !isEditing){
+          const refundAcc = getAcc(accId);
+          if(refundAcc?.type==="cc"){
+            setAccounts(prev=>prev.map(a=>a.id===accId?{...a,outstanding:Math.max(0,(a.outstanding||0)-amt)}:a));
+          }
+          // B1a: Reduce the refunded person share on original txn
+          if(refundPersonId && linkedExpenseId){
+            setTxns(prev=>prev.map(t=>{
+              if(String(t.id)!==String(linkedExpenseId)) return t;
+              const info = t.people?.[refundPersonId];
+              if(!info) return t;
+              const origAmt = Number(info.amount||0);
+              const newAmt = Math.max(0, origAmt - amt);
+              return { ...t, people:{ ...t.people, [refundPersonId]:{ ...info, amount:newAmt, remainingAmt:Math.max(0,(info.remainingAmt||origAmt)-amt), settled:newAmt<=0 } } };
+            }));
+          }
+        }
         if(isRepayment && (!isEditing || !sourceTxn?.settlementLinks?.length)) applyRepaymentAllocations(repaymentPersonId, settlementLinks);
         if(newTxn.isRefund && !newTxn.againstTxnId){
           const matches = getRefundCandidates(newTxn, resolvedTxnId);
@@ -3768,6 +4085,7 @@ function AppContent({ onLock }) {
     const canSubmit = hasTxnSubject && amt>0;
 
     return (
+      <>
       <div onClick={e=>e.target===e.currentTarget&&closeModal()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"94vh",overflowY:"auto" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
@@ -3794,7 +4112,7 @@ function AppContent({ onLock }) {
               </div>
             : <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
                 {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["investment","💹","Invest",T.info],["transfer","🔄","Transfer",T.info],["cc_payment","💳","CC Pay",T.purple],["settlement_in","💼","Settlement",T.info]].map(([v,ic,lb,col])=>(
-                  <button key={v} onClick={()=>{ setTxnType(v); if(v==="cc_payment"||v==="transfer") setWho(""); }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
+                  <button key={v} onClick={()=>{ setTxnType(v); setUserSetTxnType(true); if(v==="cc_payment"||v==="transfer") setWho(""); }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
                     <span style={{ fontSize:16 }}>{ic}</span>{lb}
                   </button>
                 ))}
@@ -3842,6 +4160,7 @@ function AppContent({ onLock }) {
               </div>
             )}
             {(txnType==="cc_payment"||txnType==="transfer")&&<input style={inp} placeholder="Note (optional)" value={who} onChange={e=>setWho(e.target.value)}/>}
+
 
             <div style={{ display:"grid",gridTemplateColumns:"1.2fr 1fr",gap:10 }}>
               <div>
@@ -3937,6 +4256,30 @@ function AppContent({ onLock }) {
                         <input style={inp} type="text" inputMode="decimal" placeholder={`e.g. ${sym}2,500`} value={emiAmount||""} onChange={e=>setEmiAmount(cleanMoneyInput(e.target.value))}/>
                       </div>
                     </div>
+                    {/* No Cost EMI fields */}
+                    <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:10 }}>
+                      <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>NO COST EMI / INTEREST (optional)</div>
+                      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                        <div>
+                          <span style={lbl}>Interest waiver discount ({sym})</span>
+                          <input style={inp} type="text" inputMode="decimal" placeholder="e.g. 3,600" value={emiInterestWaiver||""} onChange={e=>setEmiInterestWaiver(cleanMoneyInput(e.target.value))}/>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>Shown on e-comm as discount — true interest cost</div>
+                        </div>
+                        <div>
+                          <span style={lbl}>GST on interest ({sym})</span>
+                          <input style={inp} type="text" inputMode="decimal" placeholder="e.g. 648" value={emiGstOnInterest||""} onChange={e=>setEmiGstOnInterest(cleanMoneyInput(e.target.value))}/>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>18% of interest waiver — your actual financing cost</div>
+                        </div>
+                      </div>
+                      {(emiInterestWaiver||emiGstOnInterest)&&(
+                        <div style={{ background:T.card,borderRadius:10,padding:"8px 10px",marginTop:8 }}>
+                          <div style={{ color:T.sub,fontSize:10 }}>Item cost: {sym}{fmt(amt||0)}</div>
+                          <div style={{ color:T.sub,fontSize:10 }}>Interest waiver: {sym}{fmt(parseFloat(emiInterestWaiver)||0)}</div>
+                          <div style={{ color:T.danger,fontSize:10 }}>GST on interest: {sym}{fmt(parseFloat(emiGstOnInterest)||0)}</div>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:800,marginTop:4 }}>True cost of financing: {sym}{fmt(parseFloat(emiGstOnInterest)||0)}</div>
+                        </div>
+                      )}
+                    </div>
                     <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 12px",marginBottom:10 }}>
                       <div style={{ color:T.sub,fontSize:10 }}>Total item cost: {sym}{fmt(amt||0)}</div>
                       <div style={{ color:T.sub,fontSize:10 }}>Down payment: {sym}{fmt(emiDownPaymentValue||0)}</div>
@@ -3966,6 +4309,62 @@ function AppContent({ onLock }) {
                 <IncomeTypeChips options={incomeTypeChoices} value={incomeType} onChange={setIncomeType} />
                 <span style={lbl}>Into account</span>
                 <AccountChipGroup items={nonCCAccs} value={accId} onChange={setAccId} />
+                {/* Settlement multi-select */}
+                {(()=>{
+                  const allOutstanding = [
+                    ...people.filter(p=>!p.isMe).map(p=>{
+                      const s=settlements[p.id]||{owesMe:0};
+                      const loanOwed=activeLoans.filter(l=>l.direction!=="taken"&&l.status==="active"&&String(l.personId||l.linkedPersonId||"")===String(p.id)).reduce((sum,l)=>sum+Number(l.outstanding||0),0);
+                      const total=(s.owesMe||0)+loanOwed;
+                      if(total<=0) return null;
+                      return { type:"person", id:p.id, label:`${p.emoji} ${p.name}`, amount:total, color:p.color };
+                    }).filter(Boolean),
+                    ...groups.map(g=>{
+                      const groupTxns = txns.filter(t=>t.type==="expense"&&t.groupId===g.id&&t.trackingMode!=="none");
+                      const groupOwed = groupTxns.reduce((s,t)=>s+(getGroupCollectiveDue(t)||0),0);
+                      const memberOwed = (g.members||[]).reduce((s,pid)=>{
+                        const ps=settlements[pid]||{owesMe:0};
+                        return s+(ps.owesMe||0);
+                      },0);
+                      const total=groupOwed+memberOwed;
+                      if(total<=0) return null;
+                      return { type:"group", id:g.id, label:`${g.icon||"\xf0\x9f\x91\xa5"} ${g.name}`, amount:total, color:g.color };
+                    }).filter(Boolean),
+                  ];
+                  if(allOutstanding.length===0) return null;
+                  // Only show settlement for receivable-type income, not salary/interest/passive
+                  const NON_SETTLEMENT_TYPES = ["salary","interest","dividend","capital_gains","royalty"];
+                  const currentIncomeType = normalizeIncomeTypeValue(incomeType||"salary")||"salary";
+                  if(NON_SETTLEMENT_TYPES.includes(currentIncomeType)) return null;
+                  return (
+                    <div style={{ marginTop:12 }}>
+                      <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>SETTLE OUTSTANDING (optional)</div>
+                      <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                        {allOutstanding.map(item=>{
+                          const isSelected=!!settleSelectedIds[item.id];
+                          return (
+                            <div key={item.id} onClick={()=>setSettleSelectedIds(prev=>({...prev,[item.id]:!prev[item.id]}))} style={{ display:"flex",alignItems:"center",gap:10,background:isSelected?item.color+"16":T.input,border:`1px solid ${isSelected?item.color:T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer" }}>
+                              <div style={{ width:20,height:20,borderRadius:5,background:isSelected?item.color:"none",border:`2px solid ${isSelected?item.color:T.border}`,display:"flex",alignItems:"center",justifyContent:"center" }}>
+                                {isSelected&&<span style={{ color:"#fff",fontSize:12,fontWeight:900 }}>\xe2\x9c\x93</span>}
+                              </div>
+                              <div style={{ flex:1 }}>
+                                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{item.label}</div>
+                                <div style={{ color:T.sub,fontSize:10 }}>{item.type==="group"?"Group + members total":"Outstanding"}</div>
+                              </div>
+                              <div style={{ color:item.color,fontSize:13,fontWeight:800 }}>{sym}{fmt(item.amount)}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {Object.keys(settleSelectedIds).filter(k=>settleSelectedIds[k]).length>0&&(
+                        <div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",marginTop:8,display:"flex",justifyContent:"space-between" }}>
+                          <span style={{ color:T.sub,fontSize:11 }}>Settling</span>
+                          <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{Object.keys(settleSelectedIds).filter(k=>settleSelectedIds[k]).length} items selected</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
             {(txnType==="transfer"||txnType==="cc_payment")&&(
@@ -4010,7 +4409,7 @@ function AppContent({ onLock }) {
                 </div>
                 <div>
                   {investmentMetricConfig.show ? <>
-                    <span style={lbl}>{investmentMetricConfig.label} (optional)</span>
+                    <span style={lbl}>{investmentMetricConfig.label} {investType==="mf"?"(NAV per unit)":investType==="stocks"?"(units held)":investType==="gold"?"(grams)":"(optional)"}</span>
                     <input style={inp} type="text" inputMode="decimal" placeholder={investmentMetricConfig.placeholder} value={investNav||""} onChange={e=>setInvestNav(cleanMoneyInput(e.target.value))}/>
                   </> : null}
                 </div>
@@ -4077,6 +4476,24 @@ function AppContent({ onLock }) {
                           <div style={{ color:T.sub,fontSize:11 }}>{refundPrefill.desc||refundPrefill.merchant||"Expense"} · {sym}{fmt(refundPrefill.amount||0)}{refundPrefill.accId?` · ${getAcc(refundPrefill.accId).name}`:""}</div>
                         </div>
                       )}
+                    {/* B1a: Whose refund selector - shown when linked expense has split people */}
+                    {linkedExp && Object.keys(linkedExp.people||{}).length>0 && (() => {
+                      const splitPids = Object.entries(linkedExp.people||{}).filter(([,info])=>info.mode==="owes"||info.mode==="split");
+                      if(!splitPids.length) return null;
+                      return (
+                        <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+                          <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:8 }}>WHOSE PORTION IS REFUNDED?</div>
+                          <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                            <button onClick={()=>setRefundPersonId(null)} style={{ background:!refundPersonId?T.accent+"22":"none",border:`1px solid ${!refundPersonId?T.accent:T.border}`,borderRadius:20,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:!refundPersonId?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>My portion</button>
+                            {splitPids.map(([pid,info])=>{
+                              const per = getPerson(pid);
+                              return <button key={pid} onClick={()=>setRefundPersonId(pid)} style={{ background:refundPersonId===pid?T.info+"22":"none",border:`1px solid ${refundPersonId===pid?T.info:T.border}`,borderRadius:20,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:refundPersonId===pid?T.info:T.sub,fontFamily:"Nunito,sans-serif" }}>{per?.name||"Person"} ({sym}{fmt(info.amount||0)})</button>;
+                            })}
+                          </div>
+                          {refundPersonId&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>Their owed amount will reduce by the refund value</div>}
+                        </div>
+                      );
+                    })()}
                     </div>
                   );
                 })()}
@@ -4383,511 +4800,189 @@ function AppContent({ onLock }) {
                 )}
 
                 <div style={{ marginTop:10, background:T.input, borderRadius:10, padding:10 }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
-                    <div style={{ color:T.sub, fontSize:10, fontWeight:700, letterSpacing:1 }}>Items (beta)</div>
-                    <button onClick={()=>setUseItemizedLines(v=>!v)} style={{ background:useItemizedLines?T.accent+"22":"none",border:`1px solid ${useItemizedLines?T.accent:T.border}`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:useItemizedLines?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{useItemizedLines?"ON":"OFF"}</button>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                      <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>Items (beta)</div>
+                      {useItemizedLines&&lineItems.length>0&&<span style={{ background:T.accent+"22",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>{lineItems.length} item{lineItems.length>1?"s":""}</span>}
+                    </div>
+                    <div style={{ display:"flex",gap:6 }}>
+                      {useItemizedLines&&<button onClick={()=>{setEditingItemId(null);setShowItemSheet(true);}} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add item</button>}
+                      <button onClick={()=>{setUseItemizedLines(v=>!v);setShowItemSheet(false);}} style={{ background:useItemizedLines?T.accent+"22":"none",border:`1px solid ${useItemizedLines?T.accent:T.border}`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:useItemizedLines?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{useItemizedLines?"ON":"OFF"}</button>
+                    </div>
                   </div>
-                  <div style={{ color:T.sub,fontSize:10,marginBottom:8 }}>Add item lines first, then optionally split units by person or group.</div>
-                  {useItemizedLines&&(
-                    <>
+                  {!useItemizedLines&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>Turn on to itemise this purchase by name, qty, unit and price.</div>}
+                  {useItemizedLines&&lineItems.length===0&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>No items yet. Tap + Add item to start.</div>}
+                  {useItemizedLines&&lineItems.length>0&&(
+                    <div style={{ marginTop:8,display:"flex",flexDirection:"column",gap:6 }}>
                       {lineItems.map(item=>{
                         const itemTotal = lineItemAmount(item);
-                        const itemCat = item.catId ? getCat(item.catId) : null;
-                        const itemSubs = itemCat?.subs || [];
-                        const splitQty = lineSplitQtyTotal(item);
-                        const itemQtyNum = Math.max(0, parseFloat(item.qty)||0);
-                        const qtyOver = splitQty > itemQtyNum + 0.0001;
-                        const remainingQty = Math.max(0, itemQtyNum - splitQty);
                         return (
-                          <div key={item.id} style={{ border:`1px solid ${T.border}`,borderRadius:10,padding:10,marginBottom:10,background:T.card||T.input }}>
-                            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
-                              <span style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>Item details</span>
-                              <span style={{ display:"inline-flex",alignItems:"center",gap:6,padding:"3px 0" }}>
-                                <span style={{ color:T.sub,fontSize:9,fontWeight:600,letterSpacing:0.3 }}>Amount</span>
-                                <span style={{ color:T.accent,fontSize:14,fontWeight:500,lineHeight:1 }}>{sym}{fmt(itemTotal)}</span>
-                              </span>
+                          <div key={item.id} style={{ display:"flex",alignItems:"center",gap:8,background:T.card||T.bg,borderRadius:10,padding:"8px 10px",border:`1px solid ${T.border}` }}>
+                            <div style={{ flex:1,minWidth:0 }}>
+                              <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.label||"Unnamed item"}</div>
+                              <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{item.qty||1} {item.unit||"nos"} @ {sym}{fmt(item.unitPrice||0)} each</div>
                             </div>
-                            <div style={{ display:"grid",gridTemplateColumns:"1.2fr 0.5fr 0.55fr 0.8fr auto",gap:7,marginBottom:4,color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.4 }}>
-                              <span>Name</span>
-                              <span style={{ textAlign:"right" }}>Qty</span>
-                              <span style={{ textAlign:"center" }}>Unit</span>
-                              <span style={{ textAlign:"right" }}>Price/unit</span>
-                              <span></span>
-                            </div>
-                            <div style={{ display:"grid",gridTemplateColumns:"1.2fr 0.5fr 0.55fr 0.8fr auto",gap:7,marginBottom:8 }}>
-                              <input style={{ ...inpSm,marginBottom:0 }} placeholder="item" value={item.label} onChange={e=>updateLineItem(item.id,"label",e.target.value)}/>
-                              <input style={{ ...inpSm,marginBottom:0,textAlign:"right" }} type="number" min="0" placeholder="qty" value={item.qty} onChange={e=>updateLineItem(item.id,"qty",e.target.value)}/>
-                              <select style={{ ...inpSm,marginBottom:0,textAlign:"center",padding:"5px 2px" }} value={item.unit||"nos"} onChange={e=>updateLineItem(item.id,"unit",e.target.value)}>
-                                {measureUnits.map(u=><option key={u} value={u}>{formatMeasureUnitLabel(u)}</option>)}
-                              </select>
-                              <input style={{ ...inpSm,marginBottom:0,textAlign:"right" }} type="number" min="0" placeholder="price" value={item.unitPrice} onChange={e=>updateLineItem(item.id,"unitPrice",e.target.value)}/>
-                              <button onClick={()=>removeLineItem(item.id)} disabled={lineItems.length<=1} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"0 8px",cursor:lineItems.length<=1?"not-allowed":"pointer",fontSize:14,color:T.sub,fontFamily:"Nunito,sans-serif",opacity:lineItems.length<=1?0.5:1 }}>×</button>
-                            </div>
-                            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,alignItems:"center" }}>
-                              <select style={{ ...inpSm,marginBottom:0 }} value={item.catId} onChange={e=>updateLineItem(item.id,"catId",e.target.value)}>
-                                <option value="">category</option>
-                                {cats.map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
-                              </select>
-                              <select style={{ ...inpSm,marginBottom:0 }} value={item.subId||""} onChange={e=>updateLineItem(item.id,"subId",e.target.value)}>
-                                <option value="">subcategory</option>
-                                {itemSubs.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
-                              </select>
-                            </div>
-                            <div style={{ marginTop:9, background:T.bg, border:`1px dashed ${qtyOver?T.danger:T.border}`, borderRadius:8, padding:8 }}>
-                              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
-                                <span style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>Unit split (optional)</span>
-                                <button onClick={()=>addLineSplit(item.id)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"2px 8px",cursor:"pointer",fontSize:10,color:T.sub,fontFamily:"Nunito,sans-serif",fontWeight:700 }}>+ split</button>
-                              </div>
-                              {(item.splits||[]).length>0 && (
-                                <div style={{ display:"grid",gridTemplateColumns:"auto 1fr 0.7fr auto",gap:7,alignItems:"center",marginBottom:5,color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.4 }}>
-                                  <span>Type</span>
-                                  <span>Target</span>
-                                  <span style={{ textAlign:"right" }}>Qty</span>
-                                  <span></span>
-                                </div>
-                              )}
-                              {(item.splits||[]).map(split=>{
-                                const targets = split.targetType==="group" ? groups : people.filter(p=>!p.isMe);
-                                return (
-                                  <div key={split.id} style={{ display:"grid",gridTemplateColumns:"auto 1fr 0.7fr auto",gap:7,alignItems:"center",marginBottom:6 }}>
-                                    <button onClick={()=>updateLineSplit(item.id,split.id,"targetType",split.targetType==="person"?"group":"person")} style={{ background:split.targetType==="person"?T.accent+"22":"none",border:`1px solid ${split.targetType==="person"?T.accent:T.border}`,borderRadius:8,padding:"5px 7px",cursor:"pointer",fontSize:10,fontWeight:700,color:split.targetType==="person"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{split.targetType==="person"?"Person":"Group"}</button>
-                                    <select style={{ ...inpSm,marginBottom:0 }} value={split.targetId||""} onChange={e=>updateLineSplit(item.id,split.id,"targetId",e.target.value)}>
-                                      <option value="">select {split.targetType}</option>
-                                      {targets.map(target=><option key={target.id} value={target.id}>{target.emoji||target.icon} {target.name}</option>)}
-                                    </select>
-                                    <input style={{ ...inpSm,marginBottom:0,textAlign:"right" }} type="number" min="0" placeholder="qty" value={split.qty} onChange={e=>updateLineSplit(item.id,split.id,"qty",e.target.value)}/>
-                                    <button onClick={()=>removeLineSplit(item.id,split.id)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"0 8px",cursor:"pointer",fontSize:13,color:T.sub,fontFamily:"Nunito,sans-serif" }}>×</button>
-                                  </div>
-                                );
-                              })}
-                              {(item.splits||[]).length===0 && (
-                                <div style={{ color:T.sub,fontSize:10 }}>No split rows yet. Use + split to allocate this item to people or groups.</div>
-                              )}
-                              <div style={{ color:qtyOver?T.danger:T.sub,fontSize:10,fontWeight:700 }}>
-                                Allocated qty: {fmt(splitQty)} / {fmt(itemQtyNum)} {item.unit&&item.unit!=="nos"?item.unit:""} • Remaining: {fmt(remainingQty)}{Number(item.unitPrice)>0&&remainingQty>0?` (≈${sym}${fmt(remainingQty*Number(item.unitPrice))})`:""}</div>
-                            </div>
+                            <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(itemTotal)}</div>
+                            <button onClick={()=>{setEditingItemId(item.id);setShowItemSheet(true);}} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:11,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Edit</button>
+                            <button onClick={()=>removeLineItem(item.id)} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:11,color:T.danger,fontFamily:"Nunito,sans-serif" }}>x</button>
                           </div>
                         );
                       })}
-                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
-                        <button onClick={addLineItem} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:8,padding:"4px 10px",cursor:"pointer",fontSize:11,color:T.accent,fontFamily:"Nunito,sans-serif",fontWeight:700 }}>+ item</button>
-                        <span style={{ color:Math.abs(lineItemsTotal-amt)<0.01?T.success:T.text,fontSize:13,fontWeight:800 }}>Items total: {sym}{fmt(lineItemsTotal)}</span>
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4 }}>
+                        <span style={{ color:T.sub,fontSize:10 }}>Items total</span>
+                        <span style={{ color:Math.abs(lineItemsTotal-amt)<0.01?T.success:T.warn,fontSize:13,fontWeight:800 }}>{sym}{fmt(lineItemsTotal)}{Math.abs(lineItemsTotal-amt)>=0.01?` (\u2260 ${sym}${fmt(amt)} txn total)`:""}</span>
                       </div>
-                    </>
+                    </div>
                   )}
                 </div>
               </div>
             )}
 
-            {/* STEP 5 — SPLIT / TAG / NONE */}
+            {/* STEP 5 - WHO IS THIS FOR? */}
             {txnType==="expense"&&(
               <div>
-                <span style={lbl}>How to track this expense</span>
-                <div style={{ display:"flex",gap:8,marginBottom:8 }}>
-                  {[["unified","🧩","Txn break up"],["none","🚫","None"]].map(([v,ic,lb])=>(
-                    <button key={v} onClick={()=>setSplitMode(v)} style={{ flex:1,background:splitMode===v?T.accent+"22":"none",border:`1px solid ${splitMode===v?T.accent:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:10,fontWeight:700,color:splitMode===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:2 }}>
-                      <span style={{ fontSize:16 }}>{ic}</span>{lb}
-                    </button>
-                  ))}
+                <span style={lbl}>Who is this for? (optional)</span>
+                <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:10 }}>
+                  <button onClick={()=>{ setSplitMode("none"); setTagPerson(""); setTagGroup(""); setSplitPeople({}); setSplitGroup(""); }} style={{ background:splitMode==="none"?T.accent+"22":"none",border:`1px solid ${splitMode==="none"?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:splitMode==="none"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>😎 Me only</button>
+                  {people.filter(p=>!p.isMe).map(p=>{ const isSelected=tagPerson===String(p.id); return (
+                    <button key={p.id} onClick={()=>{ if(tagPerson===String(p.id)){ setTagPerson(""); setSplitMode("none"); } else { setTagPerson(String(p.id)); setSplitMode("tag"); setTagGroup(""); setSplitGroup(""); } }} style={{ background:isSelected?p.color+"22":"none",border:`1px solid ${isSelected?p.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                  ); })}
+                  {groups.map(g=>{ const isSelected=tagGroup===g.id||splitGroup===g.id; return (
+                    <button key={g.id} onClick={()=>{
+                      if(isSelected){ setTagGroup(""); setSplitGroup(""); setSplitMode("none"); }
+                      else {
+                        const di=g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
+                        if(di==="attributed"){ setTagGroup(g.id); setSplitMode("tag"); setTagPerson(""); setSplitGroup(""); }
+                        else { setSplitGroup(g.id); setSplitMode("split"); setTagGroup(""); setTagPerson(""); }
+                      }
+                    }} style={{ background:isSelected?g.color+"22":"none",border:`1px solid ${isSelected?g.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon||"👥"} {g.name}</button>
+                  ); })}
+                  <button onClick={()=>setShowGuestPerson(v=>!v)} style={{ background:showGuestPerson?T.warn+"22":"none",border:`1px solid ${showGuestPerson?T.warn:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showGuestPerson?T.warn:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 One-time</button>
                 </div>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-                  <div style={{ color:T.sub,fontSize:10 }}>{splitMode==="unified"?"Recommended: Txn break up handles split, tag and attribute in one table.":"No people/group tracking for this expense."}</div>
-                  <button onClick={()=>setShowAdvancedTracking(v=>!v)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>{showAdvancedTracking?"Hide advanced":"Advanced"}</button>
-                </div>
-                {showAdvancedTracking&&(
-                  <div style={{ display:"flex",gap:8,marginBottom:12 }}>
-                    {[["split","⚖️","Split"],["tag","👤","Tag"],["allocate","📋","Allocate"]].map(([v,ic,lb])=>(
-                      <button key={v} onClick={()=>setSplitMode(v)} style={{ flex:1,background:splitMode===v?T.accent+"22":"none",border:`1px solid ${splitMode===v?T.accent:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:10,fontWeight:700,color:splitMode===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:2 }}>
-                        <span style={{ fontSize:16 }}>{ic}</span>{lb}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* SPLIT UI */}
-                {splitMode==="split"&&(
-                  <div>
-                    {groups.length>0&&(
-                      <div style={{ marginBottom:10 }}>
-                        <span style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"block",marginBottom:6 }}>Select Group (leave people unselected for collective group due)</span>
-                        <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                          <Chip color={T.sub} active={!splitGroup} onClick={()=>{setSplitGroup("");setSplitPeople({});}}>None</Chip>
-                          {groups.map(g=><Chip key={g.id} color={g.color} active={splitGroup===g.id} onClick={()=>handleGroupSelect(g.id)}>{g.icon} {g.name}</Chip>)}
-                        </div>
-                      </div>
-                    )}
-                    <span style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,display:"block",marginBottom:6 }}>People in split</span>
-                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
-                      {people.filter(p=>!p.isMe).map(p=>(
-                        <button key={p.id} onClick={()=>setSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:splitPeople[p.id]?p.color+"22":"none",border:`1px solid ${splitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:splitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
-                      ))}
+                {/* Guest person - one time, not saved */}
+                {showGuestPerson&&(
+                  <div style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
+                    <div style={{ color:T.warn,fontSize:11,fontWeight:700,marginBottom:8 }}>👤 One-time person — not saved to your contacts</div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                      <div><span style={lbl}>Name</span><input style={inp} placeholder="e.g. Office colleague" value={guestPersonName} onChange={e=>setGuestPersonName(e.target.value)}/></div>
+                      <div><span style={lbl}>They owe ({sym})</span><input style={inp} type="text" inputMode="decimal" placeholder="0" value={guestPersonAmount} onChange={e=>setGuestPersonAmount(cleanMoneyInput(e.target.value))}/></div>
                     </div>
-
-                    {selectedPids.length>0&&(
-                      <>
-                        <div style={{ display:"flex",gap:6,marginBottom:10 }}>
-                          {[["equally","= Equal"],["amount","₹ Amount"],["percent","% Percent"],["share","⚖️ Share"]].map(([v,lb])=>(
-                            <Chip key={v} color={T.accent} active={splitCalc===v} onClick={()=>setSplitCalc(v)}>{lb}</Chip>
-                          ))}
-                        </div>
-                        {(()=>{
-                          const shares=calcShares();
-                          const othersTotal=Object.values(shares).reduce((s,v)=>s+v,0);
-                          const splitOver = splitCalc==="amount" && othersTotal > amt+0.01;
-                          const splitPctOver = splitCalc==="percent" && selectedPids.reduce((s,pid)=>s+(parseFloat(splitCustom[pid])||0),0) > 100.01;
-                          return (splitOver||splitPctOver) ? <div style={{ color:T.danger,fontSize:11,fontWeight:700,marginBottom:6 }}>⚠ {splitCalc==="percent"?"Percentages exceed 100%":`Split total ${sym}${fmt(othersTotal)} exceeds bill ${sym}${fmt(amt)}`}</div> : null;
-                        })()}
-                        <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:10 }}>
-                          {/* Me toggle */}
-                          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}`,marginBottom:6 }}>
-                            <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                              <input type="checkbox" id="include_me" checked={includeMeInSplit} onChange={e=>setIncludeMeInSplit(e.target.checked)} style={{ width:16,height:16,accentColor:T.accent,cursor:"pointer" }}/>
-                              <label htmlFor="include_me" style={{ color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>🧑 Include me in split</label>
-                            </div>
-                            {includeMeInSplit&&(()=>{ const shares=calcShares(); const myS=amt-Object.values(shares).reduce((s,v)=>s+v,0); return <span style={{ color:myS<-0.01?T.danger:T.accent,fontSize:12,fontWeight:700 }}>{sym}{fmt(Math.max(0,myS))}</span>; })()}
-                          </div>
-                          {selectedPids.map(pid=>{
-                            const p=getPerson(pid);
-                            const shares=calcShares();
-                            const preview=shares[pid]||0;
-                            const isDependent=p.personType==="dependant";
-                            const willCollect=collectMap[pid]!==undefined?collectMap[pid]:!isDependent;
-                            const othersAmt=splitCalc==="amount"?selectedPids.filter(x=>x!==pid).reduce((s,x)=>s+(parseFloat(splitCustom[x])||0),0):0;
-                            const maxForPid=splitCalc==="amount"?Math.max(0,amt-othersAmt):undefined;
-                            const inputOver=splitCalc==="amount"&&(parseFloat(splitCustom[pid])||0)>amt+0.01;
-                            const pctOver=splitCalc==="percent"&&(parseFloat(splitCustom[pid])||0)>100.01;
-                            return (
-                              <div key={pid} style={{ marginBottom:8 }}>
-                                <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-                                  <span style={{ color:T.text,fontSize:12,flex:1 }}>{p.emoji} {p.name}</span>
-                                  {splitCalc==="amount"&&<>
-                                    <input type="number" placeholder="0" value={splitCustom[pid]||""} onChange={e=>{
-                                      let v=e.target.value;
-                                      if(v!==""&&maxForPid!==undefined&&parseFloat(v)>maxForPid+0.01) v=String(Math.round(maxForPid*100)/100);
-                                      setSplitCustom(prev=>({...prev,[pid]:v}));
-                                    }} style={{ ...inpSm,width:60,textAlign:"right",borderColor:inputOver?T.danger:undefined }}/>
-                                    {maxForPid>0&&<button onClick={()=>setSplitCustom(prev=>({...prev,[pid]:String(Math.round(maxForPid*100)/100)}))} title="Fill remainder" style={{ background:T.accent+"22",border:`1px solid ${T.accent}`,borderRadius:10,padding:"2px 6px",cursor:"pointer",fontSize:10,color:T.accent,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap" }}>↩ {sym}{fmt(maxForPid)}</button>}
-                                  </>}
-                                  {splitCalc!=="equally"&&splitCalc!=="amount"&&<input type="number" placeholder={splitCalc==="percent"?"%":"shares"} max={splitCalc==="percent"?100:undefined} value={splitCustom[pid]||""} onChange={e=>setSplitCustom(prev=>({...prev,[pid]:e.target.value}))} style={{ ...inpSm,width:70,textAlign:"right",borderColor:pctOver?T.danger:undefined }}/>}
-                                  <span style={{ color:preview>amt+0.01?T.danger:T.accent,fontSize:12,fontWeight:700,minWidth:60,textAlign:"right" }}>{sym}{fmt(preview)}</span>
-                                </div>
-                                <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                                  <input type="checkbox" id={`collect_${pid}`} checked={willCollect} onChange={e=>setCollectMap(prev=>({...prev,[pid]:e.target.checked}))} style={{ width:16,height:16,accentColor:T.accent,cursor:"pointer" }}/>
-                                  <label htmlFor={`collect_${pid}`} style={{ color:T.sub,fontSize:11,cursor:"pointer" }}>Collect from {p.name}?</label>
-                                </div>
-                              </div>
-                            );
-                          })}
-                          {splitGroup&&selectedPids.length>0&&(()=>{
-                            const shares=calcShares();
-                            const othersTotal=Object.values(shares).reduce((s,v)=>s+v,0);
-                            const myS=includeMeInSplit?Math.max(0,amt-othersTotal):0;
-                            const groupCollective=Math.max(0,amt-othersTotal-myS);
-                            if(groupCollective<=0.01) return null;
-                            const grpObj=groups.find(g=>g.id===splitGroup);
-                            return (
-                              <div style={{ display:"flex",alignItems:"center",gap:8,paddingTop:6,borderTop:`1px solid ${T.border}`,marginTop:4 }}>
-                                <span style={{ color:grpObj?.color||T.accent,fontSize:12,flex:1 }}>{grpObj?.icon||"🏠"} {grpObj?.name||"Group"} (collective)</span>
-                                <span style={{ color:grpObj?.color||T.accent,fontSize:12,fontWeight:700,minWidth:60,textAlign:"right" }}>{sym}{fmt(groupCollective)}</span>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      </>
-                    )}
+                    <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>When they pay back → go to TXNS → find this expense → mark their share settled</div>
                   </div>
                 )}
-
-                {/* ALLOCATE UI */}
-                {(splitMode==="allocate" || splitMode==="unified")&&(()=>{
-                  const isUnified = splitMode==="unified";
-                  const lineMap = Object.fromEntries((lineItems||[]).map(item=>[item.id,item]));
-                  const lineUnit = item=>{
-                    const qty = Math.max(0, parseFloat(item?.qty)||0);
-                    const unit = Math.max(0, parseFloat(item?.unitPrice)||0);
-                    return qty>0 ? unit : 0;
-                  };
-                  const rowItemAmount = i=>{
-                    if(i?.sourceItemId){
-                      const src = lineMap[i.sourceItemId];
-                      return Math.max(0, parseFloat(i.qty)||0) * lineUnit(src);
-                    }
-                    return Math.max(0, parseFloat(i?.amount)||0);
-                  };
-                  const rowEffAmt = r => r.items?.length ? r.items.reduce((s,i)=>s+rowItemAmount(i),0) : parseFloat(r.amount)||0;
-                  const allocTotal = allocRows.reduce((s,r)=>s+rowEffAmt(r),0);
-                  const myRemainder = Math.max(0, amt - allocTotal);
-                  const addPersonRow = ()=>setAllocTargetPicker({ rowId:null, targetType:"person" });
-                  const addGroupRow = ()=>setAllocTargetPicker({ rowId:null, targetType:"group" });
-                  const updateRow = (id,field,val)=>setAllocRows(prev=>prev.map(r=>{
-                    if(r.id!==id) return r;
-                    if(field==="amount"){
-                      const n = parseFloat(val);
-                      return { ...r, amount:val===""?"":String(Math.max(0,Number.isFinite(n)?n:0)) };
-                    }
-                    return { ...r, [field]:val };
-                  }));
-                  const removeRow = id=>setAllocRows(prev=>prev.filter(r=>r.id!==id));
-                  const toggleItems = id=>setAllocRows(prev=>prev.map(r=>r.id===id?{...r,showItems:!r.showItems}:r));
-                  const remainingQtyFor = (rows,rowId,sourceItemId,currentItemId=null)=>{
-                    const bought = Math.max(0, parseFloat(lineMap[sourceItemId]?.qty)||0);
-                    const allocatedElse = rows.reduce((sum,row)=>sum + (row.items||[]).reduce((inner,item)=>{
-                      if(item?.sourceItemId!==sourceItemId) return inner;
-                      if(row.id===rowId && currentItemId && item.id===currentItemId) return inner;
-                      return inner + Math.max(0, parseFloat(item.qty)||0);
-                    },0),0);
-                    return Math.max(0, bought - allocatedElse);
-                  };
-                  const addItem = rowId=>setAllocRows(prev=>{
-                    const firstSource = (lineItems||[]).find(li=>Math.max(0,parseFloat(li.qty)||0)>0)?.id || "";
-                    return prev.map(r=>r.id===rowId?{...r,items:[...(r.items||[]),{id:genId(),sourceItemId:firstSource,qty:"",label:"",amount:""}],showItems:true}:r);
-                  });
-                  const removeItem = (rowId,iid)=>setAllocRows(prev=>prev.map(r=>r.id===rowId?{...r,items:(r.items||[]).filter(i=>i.id!==iid)}:r));
-                  const updateItem = (rowId,iid,field,val)=>setAllocRows(prev=>prev.map(r=>r.id===rowId?{...r,items:(r.items||[]).map(i=>{
-                    if(i.id!==iid) return i;
-                    if(field==="sourceItemId"){
-                      const nextId = val || "";
-                      const maxQty = nextId ? remainingQtyFor(prev,rowId,nextId,i.id) : 0;
-                      const currentQty = Math.max(0, parseFloat(i.qty)||0);
-                      return { ...i, sourceItemId:nextId, qty:String(Math.min(currentQty,maxQty)||"") };
-                    }
-                    if(field==="qty"){
-                      if(val==="") return { ...i, qty:"" };
-                      const n = Math.max(0, parseFloat(val)||0);
-                      const maxQty = i.sourceItemId ? remainingQtyFor(prev,rowId,i.sourceItemId,i.id) : 0;
-                      return { ...i, qty:String(Math.min(n,maxQty)) };
-                    }
-                    return { ...i, [field]:val };
-                  })}:r));
-                  const modeCycle = m=>m==="spent_on"?"owes":m==="owes"?"i_owe":"spent_on";
-                  const modeColor = m=>m==="spent_on"?T.sub:m==="owes"?T.success:T.danger;
-                  const modeShort = m=>m==="owes"?"C":m==="i_owe"?"O":"A";
-                  const rowModes = allocRows.filter(r=>r.targetId).map(r=>r.mode);
-                  const hasCollect = rowModes.includes("owes");
-                  const hasAttribute = rowModes.includes("spent_on");
-                  const hasIOwe = rowModes.includes("i_owe");
-                  return (
-                    <div>
-                      <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>{isUnified?"Txn break up: one table for split, tag and attribute. Choose target + amount + intent.":"Allocate portions of this bill to people or groups. Remainder stays with you."}</div>
-                      {isUnified&&(
-                        <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
-                          <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Derived:</span>
-                          {hasCollect&&<span style={{ background:T.success+"22",color:T.success,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700 }}>Split</span>}
-                          {hasAttribute&&<span style={{ background:T.info+"22",color:T.info,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700 }}>Tag/Attribute</span>}
-                          {hasIOwe&&<span style={{ background:T.danger+"22",color:T.danger,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700 }}>I Owe</span>}
-                          {!hasCollect&&!hasAttribute&&!hasIOwe&&<span style={{ color:T.sub,fontSize:10 }}>No allocations yet</span>}
+                {splitMode==="tag"&&tagPerson&&(()=>{
+                  const p=people.find(x=>String(x.id)===tagPerson); if(!p) return null;
+                  return (<div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
+                    <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>This expense on {p.name} —</div>
+                    <div style={{ display:"flex",gap:8 }}>
+                      <button onClick={()=>{ setTagMode("person"); setSplitMode("split"); setSplitGroup(""); setSplitPeople({[tagPerson]:true}); setSplitCalc("equally"); }} style={{ flex:1,background:tagMode==="person"?T.success+"22":"none",border:`1px solid ${tagMode==="person"?T.success:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                        <div style={{ fontSize:11,fontWeight:700,color:tagMode==="person"?T.success:T.text }}>💸 They owe me back</div>
+                        <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Tracked in receivables</div>
+                      </button>
+                      <button onClick={()=>{ setTagMode("attribute"); setSplitMode("tag"); setSplitPeople({}); }} style={{ flex:1,background:tagMode==="attribute"?T.info+"22":"none",border:`1px solid ${tagMode==="attribute"?T.info:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                        <div style={{ fontSize:11,fontWeight:700,color:tagMode==="attribute"?T.info:T.text }}>❤️ For them (no collection)</div>
+                        <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Budget attributed</div>
+                      </button>
+                    </div>
+                  </div>);
+                })()}
+                {/* Group intent */}
+                {(tagGroup||splitGroup)&&(()=>{
+                  const g=groups.find(x=>x.id===(tagGroup||splitGroup)); if(!g) return null;
+                  const currentIntent=tagGroup?"attributed":"split";
+                  return (<div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
+                    <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>{g.icon} {g.name}</div>
+                    <div style={{ display:"flex",gap:8,marginBottom:10 }}>
+                      <button onClick={()=>{ setSplitGroup(g.id); setTagGroup(""); setSplitMode("split"); }} style={{ flex:1,background:currentIntent==="split"?T.accent+"22":"none",border:`1px solid ${currentIntent==="split"?T.accent:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                        <div style={{ fontSize:11,fontWeight:700,color:currentIntent==="split"?T.accent:T.text }}>⚖️ Split (collect)</div>
+                        <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Group owes their share</div>
+                      </button>
+                      <button onClick={()=>{ setTagGroup(g.id); setSplitGroup(""); setSplitMode("tag"); }} style={{ flex:1,background:currentIntent==="attributed"?T.info+"22":"none",border:`1px solid ${currentIntent==="attributed"?T.info:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                        <div style={{ fontSize:11,fontWeight:700,color:currentIntent==="attributed"?T.info:T.text }}>🏠 Attributed</div>
+                        <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>No collection</div>
+                      </button>
+                    </div>
+                    {currentIntent==="split"&&(<>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                        {(g.members||[]).map(pid=>{ const p=people.find(x=>String(x.id)===String(pid)); if(!p) return null; return (
+                          <button key={pid} onClick={()=>setSplitPeople(prev=>({...prev,[pid]:!prev[pid]}))} style={{ background:splitPeople[pid]?p.color+"22":"none",border:`1px solid ${splitPeople[pid]?p.color:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:splitPeople[pid]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                        ); })}
+                      </div>
+                      {Object.keys(splitPeople).filter(k=>splitPeople[k]).length>0&&(
+                        <div style={{ display:"flex",gap:6,marginBottom:8 }}>
+                          {[["equally","= Equal"],["amount","₹ Amount"],["percent","% Pct"]].map(([v,lb])=>(
+                            <button key={v} onClick={()=>setSplitCalc(v)} style={{ flex:1,background:splitCalc===v?T.accent+"22":"none",border:`1px solid ${splitCalc===v?T.accent:T.border}`,borderRadius:20,padding:"4px",cursor:"pointer",fontSize:10,fontWeight:700,color:splitCalc===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{lb}</button>
+                          ))}
                         </div>
                       )}
-                      {allocRows.map(row=>{
-                        const isP = row.targetType==="person";
-                        const target = isP ? getPerson(row.targetId) : groups.find(g=>g.id===row.targetId);
-                        const tColor = target?.color||T.sub;
-                        const hasItems = (row.items||[]).length > 0;
-                        const itemsTotal = (row.items||[]).reduce((s,i)=>s+rowItemAmount(i),0);
-                        return (
-                          <div key={row.id} style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:9 }}>
-                            <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-                              <button onClick={()=>setAllocTargetPicker({ rowId:row.id, targetType:row.targetType })} style={{ flex:1,background:T.card,border:`1px solid ${tColor}55`,borderRadius:10,padding:"8px 10px",color:tColor,fontSize:12,fontWeight:800,fontFamily:"Nunito,sans-serif",minWidth:0,textAlign:"left",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer" }}>
-                                {target ? `${target.emoji||target.icon||""} ${target.name}` : (isP?"Person":"Group")}
-                              </button>
-                              {hasItems
-                                ? <span style={{ color:itemsTotal>0?T.accent:T.sub,fontSize:14,fontWeight:500,minWidth:92,textAlign:"right",padding:"6px 0",flexShrink:0 }}>{sym}{fmt(itemsTotal)}</span>
-                                : <input type="number" min="0" placeholder={sym} value={row.amount} onChange={e=>updateRow(row.id,"amount",e.target.value)} style={{ ...inp,width:102,marginBottom:0,flex:"none",textAlign:"right",padding:"9px 10px",fontSize:15,fontWeight:800 }}/>
-                              }
-                              <button onClick={()=>updateRow(row.id,"mode",modeCycle(row.mode))} title={row.mode==="owes"?"Collect":(row.mode==="i_owe"?"I Owe":"Attribute")} style={{ background:modeColor(row.mode)+"22",border:`1px solid ${modeColor(row.mode)}`,borderRadius:10,padding:"7px 10px",cursor:"pointer",fontSize:14,fontWeight:900,color:modeColor(row.mode),fontFamily:"Nunito,sans-serif",lineHeight:1,flexShrink:0,minWidth:40 }}>{modeShort(row.mode)}</button>
-                              <button onClick={()=>toggleItems(row.id)} title="Itemise for this target" style={{ background:hasItems?T.accent+"22":"none",border:`1px solid ${hasItems?T.accent:T.border}`,borderRadius:20,padding:"4px 7px",cursor:"pointer",fontSize:11,color:hasItems?T.accent:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>📋</button>
-                              <button onClick={()=>removeRow(row.id)} title="Remove this person or group from the breakup" style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Remove</button>
-                            </div>
-                            {row.showItems&&(
-                              <div style={{ marginTop:8,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
-                                {(row.items||[]).map(item=>{
-                                  const maxQty = item.sourceItemId ? remainingQtyFor(allocRows,row.id,item.sourceItemId,item.id) : 0;
-                                  const itemAmt = rowItemAmount(item);
-                                  return (
-                                  <div key={item.id}>
-                                    <div style={{ display:"grid",gridTemplateColumns:"1.1fr 0.45fr auto auto",gap:6,alignItems:"center",marginBottom:3 }}>
-                                      <select value={item.sourceItemId||""} onChange={e=>updateItem(row.id,item.id,"sourceItemId",e.target.value)} style={{ ...inp,marginBottom:0,fontSize:11,padding:"6px 8px" }}>
-                                        <option value="">select bought item</option>
-                                        {(lineItems||[]).filter(li=>Math.max(0,parseFloat(li.qty)||0)>0 && (li.label||"").trim()).map(li=>{
-                                          const boughtQty = Math.max(0,parseFloat(li.qty)||0);
-                                          const leftQty = remainingQtyFor(allocRows,row.id,li.id,item.id);
-                                          return <option key={li.id} value={li.id}>{li.label} (bought {fmt(boughtQty)} • left {fmt(leftQty)})</option>;
-                                        })}
-                                      </select>
-                                      <input type="number" min="0" max={maxQty} placeholder="qty" value={item.qty||""} onChange={e=>updateItem(row.id,item.id,"qty",e.target.value)} style={{ ...inp,width:"100%",marginBottom:0,textAlign:"right",fontSize:11,padding:"6px 8px",flex:"none" }}/>
-                                      <span style={{ color:itemAmt>0?T.accent:T.sub,fontSize:12,fontWeight:800,minWidth:70,textAlign:"right" }}>{sym}{fmt(itemAmt)}</span>
-                                      <button onClick={()=>removeItem(row.id,item.id)} style={{ background:"none",border:"none",cursor:"pointer",color:T.sub,fontSize:14,padding:"0 3px",lineHeight:1 }}>×</button>
-                                    </div>
-                                    <div style={{ color:T.sub,fontSize:10,marginBottom:6 }}>You can add up to {fmt(maxQty)} more qty for this selected item in this line.</div>
-                                  </div>
-                                );})}
-                                <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:2 }}>
-                                  <button onClick={()=>addItem(row.id)} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ item</button>
-                                  {hasItems&&itemsTotal>0&&<span style={{ color:T.sub,fontSize:11 }}>= {sym}{fmt(itemsTotal)}</span>}
-                                </div>
-                                {!(lineItems||[]).some(li=>Math.max(0,parseFloat(li.qty)||0)>0 && (li.label||"").trim())&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>Add bought items above first, then itemise here.</div>}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                      <div style={{ display:"flex",gap:8,marginBottom:10 }}>
-                        <button onClick={addPersonRow} style={{ flex:1,background:"none",border:`1px dashed #ec4899`,borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:12,color:"#ec4899",fontFamily:"Nunito,sans-serif",fontWeight:700 }}>+ Person</button>
-                        <button onClick={addGroupRow} style={{ flex:1,background:"none",border:`1px dashed #3b82f6`,borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:12,color:"#3b82f6",fontFamily:"Nunito,sans-serif",fontWeight:700 }}>+ Group</button>
-                      </div>
-                      {amt>0&&<div style={{ background:T.input,borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                        <span style={{ color:T.sub,fontSize:12 }}>🧑 Yours (remainder)</span>
-                        <span style={{ color:allocTotal>amt+0.01?T.danger:T.accent,fontSize:14,fontWeight:800 }}>{sym}{fmt(myRemainder)}{allocTotal>amt+0.01&&" ⚠"}</span>
-                      </div>}
-                      {allocTargetPicker&&(()=>{
-                        const pickerRow = allocRows.find(r=>r.id===allocTargetPicker.rowId);
-                        const pickerType = allocTargetPicker.targetType || pickerRow?.targetType || "person";
-                        const pickerTargets = pickerType==="person" ? people.filter(p=>!p.isMe) : groups;
-                        return (
-                          <div style={{ position:"fixed",inset:0,zIndex:1200,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",padding:14 }} onClick={()=>setAllocTargetPicker(null)}>
-                            <div style={{ width:"min(680px,96vw)",maxHeight:"86vh",overflow:"auto",background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:14 }} onClick={e=>e.stopPropagation()}>
-                              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-                                <div style={{ color:T.text,fontSize:16,fontWeight:800 }}>Select target</div>
-                                <button onClick={()=>setAllocTargetPicker(null)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:12,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
-                              </div>
-                              <div style={{ display:"flex",gap:8,marginBottom:12 }}>
-                                {[["person","👤 Person"],["group","👥 Group"]].map(([type,label])=>(
-                                  <button key={type} onClick={()=>setAllocTargetPicker(prev=>prev?{...prev,targetType:type}:prev)} style={{ flex:1,background:pickerType===type?T.accent+"22":"none",border:`1px solid ${pickerType===type?T.accent:T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:12,fontWeight:800,color:pickerType===type?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
-                                ))}
-                              </div>
-                              <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:8 }}>
-                                {pickerTargets.map(target=>{
-                                  const active = Boolean(pickerRow) && pickerRow.targetId===target.id && pickerRow.targetType===pickerType;
-                                  const c = target.color||T.accent;
-                                  return (
-                                    <button key={target.id} onClick={()=>{
-                                      if(pickerRow){
-                                        updateRow(pickerRow.id,"targetType",pickerType);
-                                        updateRow(pickerRow.id,"targetId",target.id);
-                                      } else {
-                                        setAllocRows(prev=>[...prev,{id:genId(),targetType:pickerType,targetId:target.id,amount:"",mode:pickerType==="group"?"owes":"spent_on",items:[],showItems:false}]);
-                                      }
-                                      setAllocTargetPicker(null);
-                                    }} style={{ background:active?c+"22":T.input,border:`1px solid ${active?c:T.border}`,borderRadius:10,padding:"12px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
-                                      <div style={{ color:active?c:T.text,fontSize:13,fontWeight:800 }}>{target.emoji||target.icon} {target.name}</div>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                              {!pickerTargets.length&&<div style={{ color:T.sub,fontSize:12 }}>No {pickerType}s available yet.</div>}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  );
+                      {splitCalc==="amount"&&Object.keys(splitPeople).filter(k=>splitPeople[k]).map(pid=>{ const p=people.find(x=>String(x.id)===String(pid)); if(!p) return null; return (
+                        <div key={pid} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:6 }}>
+                          <span style={{ color:T.text,fontSize:12,flex:1 }}>{p.emoji} {p.name}</span>
+                          <input type="text" inputMode="decimal" placeholder="0" value={splitCustom[pid]||""} onChange={e=>{ try{ setSplitCustom(prev=>({...prev,[pid]:cleanMoneyInput(e.target.value)})); }catch(err){} }} style={{ ...inpSm,width:80,textAlign:"right" }}/>
+                        </div>
+                      ); })}
+                    </>)}
+                  </div>);
                 })()}
+              </div>
+            )}
 
-                {/* TAG UI */}
-                {splitMode==="tag"&&(
+            {/* LINK TO BILL / SUBSCRIPTION */}
+            {txnType==="expense"&&(
+              <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:billerLinkId?10:0 }}>
+                  <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>📎 Link to Bill / Subscription (optional)</span>
+                  {billerLinkId&&<button onClick={()=>{ setBillerLinkId(""); setShowMembershipPanel(false); }} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Remove</button>}
+                </div>
+                {!billerLinkId&&(
+                  <select style={inp} value="" onChange={e=>{
+                    const id=e.target.value;
+                    if(!id) return;
+                    setBillerLinkId(id);
+                    const ba=billerAccounts.find(b=>b.id===id);
+                    if(ba && getBillerActionType(ba.type)==="membership") setShowMembershipPanel(true);
+                  }}>
+                    <option value="">Select biller account...</option>
+                    {billerAccounts.map(ba=>(<option key={ba.id} value={ba.id}>{getBillerIcon(ba.type)} {ba.name} — {ba.type}</option>))}
+                  </select>
+                )}
+                {linkedBA&&(
                   <div>
-                    <span style={{ color:T.sub,fontSize:11,display:"block",marginBottom:8 }}>Tag this expense to</span>
-                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
-                      {["person","group","both","itemize"].map(mode=>(
-                        <button key={mode} onClick={()=>setTagMode(mode)} style={{ background:tagMode===mode?T.accent+"22":"none",border:`1px solid ${tagMode===mode?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagMode===mode?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{mode==="itemize"?"📋 Itemize":mode[0].toUpperCase()+mode.slice(1)}</button>
-                      ))}
+                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:showMembershipPanel?10:0 }}>
+                      <span style={{ fontSize:20 }}>{getBillerIcon(linkedBA.type)}</span>
+                      <div>
+                        <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>{linkedBA.name}</div>
+                        <div style={{ color:T.sub,fontSize:10 }}>{linkedBA.type}{linkedBA.consumerNo?` · #${linkedBA.consumerNo}`:""}</div>
+                      </div>
+                      {linkedBAType==="membership"&&(
+                        <button onClick={()=>setShowMembershipPanel(v=>!v)} style={{ marginLeft:"auto",background:showMembershipPanel?T.accent+"22":"none",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{showMembershipPanel?"Hide dates":"+ Add dates"}</button>
+                      )}
                     </div>
-
-                    {(tagMode==="person"||tagMode==="both")&&tagMode!=="itemize"&&(
-                      <>
-                        <div style={{ color:T.sub,fontSize:11,display:"block",marginBottom:8 }}>Person</div>
-                        <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
-                          {people.map(p=>(
-                            <button key={p.id} onClick={()=>setTagPerson(p.id)} style={{ background:tagPerson===p.id?p.color+"22":"none",border:`1px solid ${tagPerson===p.id?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagPerson===p.id?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}{p.isMe?" (Me)":""}</button>
-                          ))}
+                    {/* Membership panel */}
+                    {showMembershipPanel&&linkedBAType==="membership"&&(
+                      <div style={{ display:"flex",flexDirection:"column",gap:10,background:T.card,borderRadius:10,padding:"10px",marginTop:8 }}>
+                        <div>
+                          <span style={lbl}>Member</span>
+                          <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                            <button onClick={()=>setLinkMemberPersonId("self")} style={{ background:linkMemberPersonId==="self"?T.accent+"22":"none",border:`1px solid ${linkMemberPersonId==="self"?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkMemberPersonId==="self"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>Me</button>
+                            {people.map(p=>(<button key={p.id} onClick={()=>setLinkMemberPersonId(String(p.id))} style={{ background:linkMemberPersonId===String(p.id)?T.accent+"22":"none",border:`1px solid ${linkMemberPersonId===String(p.id)?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkMemberPersonId===String(p.id)?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>))}
+                          </div>
                         </div>
-                      </>
-                    )}
-
-                    {(tagMode==="group"||tagMode==="both")&&tagMode!=="itemize"&&(
-                      <>
-                        <div style={{ color:T.sub,fontSize:11,display:"block",marginBottom:8 }}>Group</div>
-                        <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
-                          <button onClick={()=>setTagGroup("")} style={{ background:!tagGroup?"#88888822":"none",border:`1px solid ${!tagGroup?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>None</button>
-                          {groups.map(g=>(
-                            <button key={g.id} onClick={()=>setTagGroup(g.id)} style={{ background:tagGroup===g.id?g.color+"22":"none",border:`1px solid ${tagGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>
-                          ))}
+                        <div style={{ display:"flex",gap:6 }}>
+                          {["monthly","quarterly","halfyearly","annual"].map(c=>(<button key={c} onClick={()=>setLinkCycle(c)} style={{ flex:1,background:linkCycle===c?T.accent+"22":"none",border:`1px solid ${linkCycle===c?T.accent:T.border}`,borderRadius:10,padding:"5px 2px",cursor:"pointer",fontSize:9,fontWeight:700,color:linkCycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>))}
                         </div>
-                      </>
-                    )}
-
-                    {tagMode==="itemize"&&(
-                      <div style={{ background:T.input,borderRadius:12,padding:"12px 14px",marginBottom:10 }}>
-                        <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>📋 Itemized tagging</div>
-                        <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>
-                          Total bill: <b style={{ color:T.text }}>{sym}{fmt(amt)}</b>
-                          {tagItemsTotal>0&&<span style={{ color:Math.abs(tagItemsTotal-amt)<0.01?"#22c55e":"#ef4444",fontWeight:700 }}> · Allocated: {sym}{fmt(tagItemsTotal)}{Math.abs(tagItemsTotal-amt)>0.01?" ⚠ doesn't match total":""}</span>}
+                        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
+                          <div><span style={lbl}>Valid From</span><input style={inp} type="date" value={linkValidFrom} onChange={e=>setLinkValidFrom(e.target.value)}/></div>
+                          <div><span style={lbl}>No. of cycles</span><input style={inp} type="number" min="1" value={linkBulkMonths} onChange={e=>setLinkBulkMonths(e.target.value)}/></div>
+                          <div><span style={lbl}>Grace days</span><input style={inp} type="number" min="0" value={linkGraceDays} onChange={e=>setLinkGraceDays(e.target.value)}/></div>
                         </div>
-                        {tagItems.map((item)=>{
-                          const isP=item.targetType==="person";
-                          const targetObj=isP?people.find(p=>p.id===item.targetId):groups.find(g=>g.id===item.targetId);
-                          const itemColor=targetObj?.color||T.sub;
-                          return (
-                            <div key={item.id} style={{ display:"flex",gap:6,alignItems:"center",marginBottom:8 }}>
-                              <button onClick={()=>setTagItems(prev=>prev.map(it=>it.id===item.id?{...it,targetType:isP?"group":"person",targetId:""}:it))} style={{ background:isP?"#ec489922":"#3b82f622",border:`1px solid ${isP?"#ec4899":"#3b82f6"}`,borderRadius:20,padding:"4px 8px",cursor:"pointer",fontSize:13,color:isP?"#ec4899":"#3b82f6",fontFamily:"Nunito,sans-serif",minWidth:34,textAlign:"center" }}>{isP?"👤":"👥"}</button>
-                              <select value={item.targetId} onChange={e=>updateTagItem(item.id,"targetId",e.target.value)} style={{ flex:1,background:T.card,border:`1px solid ${item.targetId?itemColor:T.border}`,borderRadius:8,padding:"6px 8px",color:T.text,fontSize:12,fontFamily:"Nunito,sans-serif",outline:"none" }}>
-                                <option value="">— {isP?"person":"group"} —</option>
-                                {isP?people.map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}{p.isMe?" (Me)":""}</option>):groups.map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
-                              </select>
-                              <input type="number" placeholder="₹" value={item.amount} onChange={e=>updateTagItem(item.id,"amount",e.target.value)} style={{ ...inp,width:80,marginBottom:0,flex:"none" }}/>
-                              {tagItems.length>1&&<button onClick={()=>removeTagItem(item.id)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"3px 8px",cursor:"pointer",fontSize:16,color:T.sub,fontFamily:"Nunito,sans-serif",lineHeight:1 }}>×</button>}
-                            </div>
-                          );
-                        })}
-                        <button onClick={addTagItem} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:12,color:T.accent,fontFamily:"Nunito,sans-serif",fontWeight:700,width:"100%",marginTop:2 }}>+ Add item</button>
+                        {linkValidUntil&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(linkValidUntil)||linkValidUntil}</span></div>}
                       </div>
                     )}
-
-                    {tagPerson&&(()=>{
-                      const p=getPerson(tagPerson);
-                      const grp=tagMode==="both"&&tagGroup?groups.find(g=>g.id===tagGroup):null;
-                      const pAmt=parseFloat(tagPersonAmount)||0;
-                      const gAmt=parseFloat(tagGroupAmount)||0;
-                      const allocTotal=tagMode==="both"?(pAmt+gAmt):0;
-                      const allocMismatch=tagMode==="both"&&pAmt>0&&gAmt>0&&Math.abs(allocTotal-amt)>0.01;
-                      return (
-                        <div style={{ background:T.input,borderRadius:12,padding:"12px 14px",marginBottom:10 }}>
-                          <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>
-                            {tagMode==="both"?"Split between personal & group":""}
-                            {tagMode==="person"?`${p.emoji} ${p.name} — spend tracking`:""}
-                          </div>
-                          <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>
-                            Total bill: <b style={{ color:T.text }}>{sym}{fmt(amt)}</b>
-                            {tagMode==="both"&&pAmt>0&&gAmt>0&&<span style={{ color:allocMismatch?"#ef4444":"#22c55e",fontWeight:700 }}> · Allocated: {sym}{fmt(allocTotal)}{allocMismatch?" ⚠ doesn't match total":""}</span>}
-                            {tagMode==="person"&&pAmt>0&&<span style={{ color:p.color,fontWeight:700 }}> · Tagged: {sym}{fmt(pAmt)}</span>}
-                          </div>
-                          {tagMode==="both"?(
-                            <div style={{ display:"flex",gap:8 }}>
-                              <div style={{ flex:1 }}>
-                                <span style={{ ...lbl,color:p.color }}>{p.emoji} {p.name}{p.isMe?" (Me)":""}</span>
-                                <input style={{ ...inp,borderColor:pAmt>0?p.color:undefined }} type="number" placeholder={`Personal share`} value={tagPersonAmount} onChange={e=>setTagPersonAmount(e.target.value)}/>
-                              </div>
-                              <div style={{ flex:1 }}>
-                                <span style={{ ...lbl,color:grp?grp.color:T.sub }}>{grp?`${grp.icon} ${grp.name}`:"Group"}</span>
-                                <input style={{ ...inp,borderColor:gAmt>0?(grp?.color||T.accent):undefined }} type="number" placeholder={`Group share`} value={tagGroupAmount} onChange={e=>setTagGroupAmount(e.target.value)}/>
-                              </div>
-                            </div>
-                          ):(
-                            <div>
-                              <span style={lbl}>Amount spent on {p.name} (optional — defaults to full amount)</span>
-                              <input style={inp} type="number" placeholder={`e.g. ${fmt(amt)} (full) or part of it`} value={tagPersonAmount} onChange={e=>setTagPersonAmount(e.target.value)}/>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
                   </div>
                 )}
               </div>
             )}
-
-            {/* NOTE */}
-            {txnType!=="cc_payment"&&txnType!=="transfer"&&<input style={inp} placeholder="Note (optional)" value={note} onChange={e=>setNote(e.target.value)}/>}
 
             {/* QUICK FLAGS */}
             {txnType==="expense"&&(
@@ -4922,14 +5017,23 @@ function AppContent({ onLock }) {
               </button>
               {showSms&&<div style={{ padding:"0 14px 14px" }}>
                 {smsImportStatus&&/unable|empty|not available|error/i.test(smsImportStatus)&&<div style={{ color:T.warn,fontSize:11,fontWeight:700,marginBottom:6 }}>{smsImportStatus}</div>}
-                <textarea
-                  style={{ ...inp,height:80,resize:"none",marginBottom:6,cursor:smsBusy?"wait":"text" }}
-                  placeholder={smsBusy?"Fetching SMS…":`Tap to import SMS${isNative?"":" (copy SMS first)"} or paste here…`}
-                  value={smsTxt}
-                  onFocus={()=>{ if(!smsTxt && !smsBusy) importSms(isNative?"phone":"clipboard"); }}
-                  onChange={e=>{ setSmsTxt(e.target.value); parseSms(e.target.value); }}
-                />
+                <div style={{ display:"flex",gap:6,marginBottom:6 }}>
+                  <textarea
+                    style={{ ...inp,height:80,resize:"none",flex:1,marginBottom:0,cursor:smsBusy?"wait":"text" }}
+                    placeholder="Paste bank SMS here..."
+                    value={smsTxt}
+                    onChange={e=>{ setSmsTxt(e.target.value); parseSms(e.target.value, { adjustBalance: true }); }}
+                    onPaste={e=>{ const txt=e.clipboardData?.getData("text")||""; if(txt){ e.preventDefault(); setSmsTxt(txt); parseSms(txt, { adjustBalance:true }); } }}
+                  />
+                  <button onClick={async()=>{
+                    try{
+                      const txt = await navigator.clipboard.readText();
+                      if(txt){ setSmsTxt(txt); parseSms(txt,{ adjustBalance:true }); }
+                    }catch(e){ /* permission denied, user must paste manually */ }
+                  }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0,alignSelf:"stretch" }}>📋<br/>Paste</button>
+                </div>
                 {smsParseMeta?.balanceAdjusted&&<div style={{ color:T.success,fontSize:11,fontWeight:700 }}>✅ Balance synced ({smsParseMeta.balanceDiff>0?"+":""}{sym}{fmt(smsParseMeta.balanceDiff)})</div>}
+                {smsParseMeta?.emiLoanId&&<div style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:10,padding:"6px 10px",display:"flex",justifyContent:"space-between",alignItems:"center" }}><span style={{ color:T.warn,fontSize:11,fontWeight:700 }}>🔗 EMI match: {smsParseMeta.emiLoanName}</span><button onClick={()=>{ setExpensePaymentMode("emi"); }} style={{ background:T.warn+"22",border:`1px solid ${T.warn}`,borderRadius:20,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Link</button></div>}
               </div>}
             </div>
 
@@ -4971,6 +5075,73 @@ function AppContent({ onLock }) {
               <button onClick={closeModal} style={btnG}>Cancel</button>
               <button onClick={submit} style={{ ...btnP,opacity:canSubmit?1:0.5 }}>{canSubmit?(isEditing?"Save Changes ✓":"Add ✓"):txnType==="investment"?"Fill name & amount":"Fill vendor & amount"}</button>
             </div>
+          </div>
+        </div>
+      </div>
+      {showItemSheet&&useItemizedLines&&(
+        <ItemSheetModal
+          editingItemId={editingItemId}
+          lineItems={lineItems}
+          onClose={()=>{ setShowItemSheet(false); setEditingItemId(null); }}
+          onSave={item=>{
+            if(editingItemId){
+              setLineItems(prev=>prev.map(x=>x.id===editingItemId?{...x,...item}:x));
+            } else {
+              setLineItems(prev=>[...prev,{...item,id:genId()}]);
+            }
+          }}
+          cats={cats} getCat={getCat}
+          measureUnits={measureUnits||["nos","kg","g","l","ml","pkt","pcs","box","pair","set"]}
+          formatMeasureUnitLabel={u=>u}
+          sym={sym} fmt={fmt} T={T} inp={inp} lbl={lbl}
+        />
+      )}
+      </>
+    );
+  };
+
+  // ── ITEM SHEET MODAL (B3) ───────────────────────────────────────────────────────
+  const ItemSheetModal = ({ editingItemId, lineItems, onClose, onSave, cats, getCat, measureUnits, formatMeasureUnitLabel, sym, fmt, T, inp, lbl }) => {
+    const editItem = editingItemId ? lineItems.find(x=>x.id===editingItemId) : null;
+    const [iName, setIName] = useState(editItem?.label||"");
+    const [iQty, setIQty] = useState(String(editItem?.qty||"1"));
+    const [iUnit, setIUnit] = useState(editItem?.unit||"nos");
+    const [iPrice, setIPrice] = useState(String(editItem?.unitPrice||""));
+    const [iCatId, setICatId] = useState(editItem?.catId||"");
+    const [iSubId, setISubId] = useState(editItem?.subId||"");
+    const iTotal = (parseFloat(iQty)||0) * (parseFloat(iPrice)||0);
+    const iCat = iCatId ? getCat(iCatId) : null;
+    const handleSave = () => {
+      if(!iName.trim()) return;
+      onSave({ id: editingItemId||genId(), label:iName.trim(), qty:iQty, unit:iUnit, unitPrice:iPrice, catId:iCatId||null, subId:iSubId||null });
+      onClose();
+    };
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:350,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"82vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{editingItemId?"Edit Item":"Add Item"}</div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Item Name *</span>
+              <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. Milk, Petrol, Shampoo" value={iName} onChange={e=>setIName(e.target.value)} autoFocus/>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
+              <div><span style={lbl}>Qty</span><input style={{ ...inp,textAlign:"center" }} type="number" min="0" placeholder="1" value={iQty} onChange={e=>setIQty(e.target.value)}/></div>
+              <div><span style={lbl}>Unit</span><select style={inp} value={iUnit} onChange={e=>setIUnit(e.target.value)}>{(measureUnits||[]).map(u=><option key={u} value={u}>{formatMeasureUnitLabel?formatMeasureUnitLabel(u):u}</option>)}</select></div>
+              <div><span style={lbl}>Price/unit</span><input style={{ ...inp,textAlign:"right" }} type="number" min="0" placeholder="0" value={iPrice} onChange={e=>setIPrice(e.target.value)}/></div>
+            </div>
+            {iQty&&iPrice&&<div style={{ background:T.input,borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+              <span style={{ color:T.sub,fontSize:12 }}>Item total</span>
+              <span style={{ color:T.accent,fontSize:14,fontWeight:800 }}>{sym}{fmt(iTotal)}</span>
+            </div>}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+              <div><span style={lbl}>Category</span><select style={inp} value={iCatId} onChange={e=>{setICatId(e.target.value);setISubId("");}}><option value="">Select</option>{(cats||[]).map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}</select></div>
+              <div><span style={lbl}>Sub-category</span><select style={inp} value={iSubId} onChange={e=>setISubId(e.target.value)}><option value="">Select</option>{(iCat?.subs||[]).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+            </div>
+            <button onClick={handleSave} disabled={!iName.trim()} style={{ background:iName.trim()?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:iName.trim()?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{editingItemId?"Save Changes ✓":"Add Item ✓"}</button>
           </div>
         </div>
       </div>
@@ -5113,22 +5284,24 @@ function AppContent({ onLock }) {
             return { ...x, people:{ ...x.people, [pid]:{ ...x.people[pid], settled:nextRemaining<=0, settledAmt:nextSettled, remainingAmt:nextRemaining } }, ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGroupSettled } : {}) };
           })
         ]);
-        // If the txn is linked to a bill (paidBillId), also clear that bill's splitPeople for this person
-        if(t.paidBillId){
-          setBills(prev=>prev.map(b=>{
-            if(String(b.id)!==String(t.paidBillId) || !b.splitPeople?.[pid]) return b;
-            const origAmt = Number(b.splitPeople[pid].amount||0);
-            const prevP = Number(b.splitPeople[pid].settledAmt||0);
-            const nextP = Math.min(origAmt, prevP + appliedAmt);
-            const nextPRem = Math.max(0, origAmt - nextP);
-            const addedP = nextP - prevP;
-            const groupCap = Number(b.groupCollectiveAmount||0);
-            const nextGrp = groupCap > 0 ? Math.min(groupCap, Number(b.groupCollectiveSettledAmt||0) + addedP) : b.groupCollectiveSettledAmt;
-            const updatedSplit = { ...b.splitPeople, [pid]:{ ...b.splitPeople[pid], settled:nextPRem<=0, settledAmt:nextP, remainingAmt:nextPRem } };
-            const allOwedSettled = Object.values(updatedSplit).filter(i=>i.mode==="owes").every(i=>i.settled);
-            return { ...b, splitPeople:updatedSplit, ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGrp } : {}), ...(allOwedSettled ? { status:"paid", paidDate:todayStr() } : {}) };
-          }));
-        }
+        // Update any bill that mirrors this person's split
+        // Covers: (a) bills linked via paidBillId, (b) bills whose splitPeople mirrors the txn split
+        setBills(prev=>prev.map(b=>{
+          const isPaidBillLink = t.paidBillId && String(b.id)===String(t.paidBillId);
+          const isMirroredSplit = !t.paidBillId && b.splitPeople?.[pid] && b.splitPeople[pid].mode==="owes" && !b.splitPeople[pid].settled && remainingShare(b.splitPeople[pid])>0;
+          if(!isPaidBillLink && !isMirroredSplit) return b;
+          if(!b.splitPeople?.[pid]) return b;
+          const origAmt = Number(b.splitPeople[pid].amount||0);
+          const prevP = Number(b.splitPeople[pid].settledAmt||0);
+          const nextP = Math.min(origAmt, prevP + appliedAmt);
+          const nextPRem = Math.max(0, origAmt - nextP);
+          const addedP = nextP - prevP;
+          const groupCap = Number(b.groupCollectiveAmount||0);
+          const nextGrp = groupCap > 0 ? Math.min(groupCap, Number(b.groupCollectiveSettledAmt||0) + addedP) : b.groupCollectiveSettledAmt;
+          const updatedSplit = { ...b.splitPeople, [pid]:{ ...b.splitPeople[pid], settled:nextPRem<=0, settledAmt:nextP, remainingAmt:nextPRem } };
+          const allOwedSettled = Object.values(updatedSplit).filter(i=>i.mode==="owes").every(i=>i.settled);
+          return { ...b, splitPeople:updatedSplit, ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGrp } : {}), ...(allOwedSettled ? { status:"paid", paidDate:todayStr() } : {}) };
+        }));
       }
     };
 
@@ -5265,6 +5438,8 @@ function AppContent({ onLock }) {
     const [openingBalance,setOpeningBalance]=useState("");
     const [openingBalanceDate,setOpeningBalanceDate]=useState(todayStr());
     const [error,setError]=useState("");
+    const [accAttributedTo,setAccAttributedTo]=useState("");
+    const [accAttributeType,setAccAttributeType]=useState("person");
     const selectedAccountType = accountTypeOptions.find(item=>item.id===aType) || ACC_TYPES.find(item=>item.id===aType) || ACC_TYPES[0];
     const selectedAccountBaseType = selectedAccountType.baseType || selectedAccountType.id || "bank";
     const selectedAccountBucket = selectedAccountType.bucket || defaultAccountTypeBucket(selectedAccountBaseType);
@@ -5281,6 +5456,8 @@ function AppContent({ onLock }) {
         typeBucket:selectedAccountBucket,
         name:name.trim(),
         color,
+        attributedTo:accAttributedTo||null,
+        attributeType:accAttributedTo?accAttributeType:null,
       };
       if(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cash") setAccounts(p=>[...p,{...base,last4,openingBalance:parseMoney(openingBalance)||0,openingBalanceDate:openingBalanceDate||todayStr()}]);
       else if(selectedAccountBaseType==="cc") setAccounts(p=>[...p,{...base,last4,limit:parseFloat(limit)||0,outstanding:0,statementDate:parseInt(statementDate)||15,dueDate:parseInt(dueDate)||5,alertPct:Math.max(0,parseFloat(alertPct)||0),billingCycle:billingCycle||`${statementDate}th`}]);
@@ -5344,6 +5521,20 @@ function AppContent({ onLock }) {
             {error&&<div style={{ color:T.danger,fontSize:12,fontWeight:700 }}>⚠️ {error}</div>}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={()=>setShowAddAccount(false)} style={btnG}>Cancel</button>
+              {/* Account attribution */}
+              <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+                <div style={{ color:T.text,fontSize:12,fontWeight:700,marginBottom:8 }}>Tag to Person or Group (optional)</div>
+                <div style={{ color:T.sub,fontSize:10,marginBottom:10 }}>For wealth view — shows this account balance in their profile</div>
+                <div style={{ display:"flex",gap:6,marginBottom:8 }}>
+                  <button onClick={()=>setAccAttributeType("person")} style={{ flex:1,background:accAttributeType==="person"?T.accent+"22":"none",border:`1px solid ${accAttributeType==="person"?T.accent:T.border}`,borderRadius:10,padding:"6px",cursor:"pointer",fontSize:11,fontWeight:700,color:accAttributeType==="person"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 Person</button>
+                  <button onClick={()=>setAccAttributeType("group")} style={{ flex:1,background:accAttributeType==="group"?T.accent+"22":"none",border:`1px solid ${accAttributeType==="group"?T.accent:T.border}`,borderRadius:10,padding:"6px",cursor:"pointer",fontSize:11,fontWeight:700,color:accAttributeType==="group"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👥 Group</button>
+                </div>
+                <select style={inp} value={accAttributedTo} onChange={e=>setAccAttributedTo(e.target.value)}>
+                  <option value="">None (personal account)</option>
+                  {accAttributeType==="person" && people.filter(p=>!p.isMe).map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
+                  {accAttributeType==="group" && groups.map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
+                </select>
+              </div>
               <button onClick={submit} style={btnP}>Save Account</button>
             </div>
           </div>
@@ -5533,7 +5724,7 @@ function AppContent({ onLock }) {
             </div>
             <div>
               {metricConfig.show ? <>
-                <span style={lbl}>{metricConfig.label} (optional)</span>
+                <span style={lbl}>{metricConfig.label} {iType==="mf"?"(NAV per unit)":iType==="stocks"?"(units held)":iType==="gold"?"(grams)":"(optional)"}</span>
                 <input style={inp} type="text" inputMode="decimal" placeholder={metricConfig.placeholder} value={lastNav||""} onChange={e=>setLastNav(cleanMoneyInput(e.target.value))}/>
               </> : <div style={{ color:T.sub,fontSize:10,padding:"4px 0" }}>{metricConfig.hint}</div>}
               {metricConfig.show && metricConfig.hint && <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>{metricConfig.hint}</div>}
@@ -5937,6 +6128,43 @@ function AppContent({ onLock }) {
             ))}
           </div>
 
+          {/* Recurring schedule */}
+          {(()=>{
+            const groupKey = group.key || displayTitle;
+            const existing = recurringSchedules.find(r=>r.groupKey===groupKey);
+            return (
+              <div style={{ background:T.input,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>🔄 Recurring Schedule</div>
+                    {existing?<div style={{ color:T.success,fontSize:11,marginTop:2 }}>Active · {existing.day}th every month · {sym}{fmt(existing.amount)}</div>:<div style={{ color:T.sub,fontSize:11,marginTop:2 }}>Not set</div>}
+                  </div>
+                  <button onClick={()=>setEditingRecurring(editingRecurring===groupKey?null:groupKey)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{editingRecurring===groupKey?"Cancel":existing?"Edit":"Set up"}</button>
+                </div>
+                {editingRecurring===groupKey&&(
+                  <div style={{ marginTop:10,display:"flex",flexDirection:"column",gap:8 }}>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                      <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>DAY OF MONTH</div><input style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:14,fontWeight:800,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} type="number" min="1" max="31" placeholder="e.g. 3" defaultValue={existing?.day||""} id={`rec-day-${groupKey}`}/></div>
+                      <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>AMOUNT ({sym})</div><input style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:14,fontWeight:800,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} type="text" inputMode="decimal" placeholder="0" defaultValue={existing?.amount||""} id={`rec-amt-${groupKey}`}/></div>
+                    </div>
+                    <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>DEBIT ACCOUNT</div><select style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:13,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} defaultValue={existing?.accId||(accounts.find(a=>a.type!=="cc")?.id||"")} id={`rec-acc-${groupKey}`}>{accounts.filter(a=>a.type!=="cc").map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+                    <div style={{ display:"flex",gap:8 }}>
+                      <button onClick={()=>{
+                        const day = Number(document.getElementById(`rec-day-${groupKey}`)?.value||0);
+                        const amount = parseFloat(cleanMoneyInput(document.getElementById(`rec-amt-${groupKey}`)?.value||"0"))||0;
+                        const accId = document.getElementById(`rec-acc-${groupKey}`)?.value||"";
+                        if(!day||!amount) return;
+                        const record = { id:existing?.id||genId(), groupKey, investType:group.type, name:displayTitle, day, amount, accId, active:true, createdAt:existing?.createdAt||Date.now() };
+                        setRecurringSchedules(prev=>existing?prev.map(r=>r.groupKey===groupKey?record:r):[...prev,record]);
+                        setEditingRecurring(null);
+                      }} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Save Schedule</button>
+                      {existing&&<button onClick={()=>{ setRecurringSchedules(prev=>prev.filter(r=>r.groupKey!==groupKey)); setEditingRecurring(null); }} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>Remove</button>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <div style={{ ...card,marginBottom:0,textAlign:"left" }}>
             <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:10 }}>{type.id==="mf"?"Entries in this folio":"Holdings in this section"}</div>
             {group.items.map((inv,idx)=>{
@@ -5967,13 +6195,43 @@ function AppContent({ onLock }) {
               );
             })}
           </div>
+          {/* Transaction instalment history */}
+          {(()=>{
+            const groupKey = group.key || displayTitle;
+            const linkedTxns = txns.filter(t=>
+              t.type==="investment" &&
+              (t.linkedInvestmentId && group.items.some(inv=>String(inv.id)===String(t.linkedInvestmentId)) ||
+               t.recurringScheduleId && recurringSchedules.some(r=>r.groupKey===groupKey&&r.id===t.recurringScheduleId))
+            ).sort((a,b)=>b.date?.localeCompare(a.date||"")||0);
+            if(!linkedTxns.length) return null;
+            const totalInvested = linkedTxns.reduce((s,t)=>s+Number(t.amount||0),0);
+            return (
+              <div style={{ background:T.input,borderRadius:14,padding:"12px 14px",marginTop:12 }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:8 }}>📋 Payment History ({linkedTxns.length} instalments)</div>
+                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:10,padding:"6px 0",borderBottom:`1px solid ${T.border}` }}>
+                  <span style={{ color:T.sub,fontSize:11 }}>Total invested</span>
+                  <span style={{ color:T.success,fontSize:13,fontWeight:900 }}>{sym}{fmt(totalInvested)}</span>
+                </div>
+                {linkedTxns.slice(0,12).map(t=>(
+                  <div key={t.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${T.border}` }}>
+                    <div>
+                      <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{formatShortDate(t.date)||t.date}</div>
+                      <div style={{ color:T.sub,fontSize:10 }}>{accounts.find(a=>a.id===t.accId)?.name||"Account"}{t.investNav?` · NAV ₹${t.investNav}`:""}</div>
+                    </div>
+                    <div style={{ color:type.color,fontSize:12,fontWeight:800 }}>{sym}{fmt(t.amount)}</div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       </div>
     );
   };
 
   // ── HOME ───────────────────────────────────────────────────────────────────
-  const DEFAULT_CARD_ORDER = ["stats","categories","cc","bills","recent"];
+
+  const DEFAULT_CARD_ORDER = ["health","stats","categories","cc","bills","recent"];
   const KNOWN_CARD_KEYS = new Set(["stats","budget","categories","cc","bills","recent"]);
   const [cardOrder, setCardOrder] = useState(()=>{
     const saved = JSON.parse(localStorage.getItem("arth_card_order")||"null");
@@ -6040,6 +6298,10 @@ function AppContent({ onLock }) {
     txns,
     investments,
     bills,
+    billerAccounts,
+    memberships,
+    feePayments,
+    perPersonBudgets,
     liabilities,
     trackedAssets,
     loans,
@@ -6047,7 +6309,7 @@ function AppContent({ onLock }) {
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -6075,6 +6337,10 @@ function AppContent({ onLock }) {
     setTxns(normalizeTxns(snapshot.txns));
     setInvestments(Array.isArray(snapshot.investments) ? snapshot.investments : []);
     setBills(Array.isArray(snapshot.bills) ? snapshot.bills : []);
+    setBillerAccounts(Array.isArray(snapshot.billerAccounts) ? snapshot.billerAccounts : []);
+    setMemberships(Array.isArray(snapshot.memberships) ? snapshot.memberships : []);
+    setFeePayments(Array.isArray(snapshot.feePayments) ? snapshot.feePayments : []);
+    if(snapshot.perPersonBudgets) setPerPersonBudgets(snapshot.perPersonBudgets);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
@@ -6346,7 +6612,7 @@ function AppContent({ onLock }) {
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (idx, dir) => {
     const arr = cardOrder.map(x=>x); // fully mutable copy
@@ -6367,23 +6633,82 @@ function AppContent({ onLock }) {
     const totalUnbilled = ccSummaries.reduce((s,item)=>s+item.currentCycleSpend,0);
     const anyHighUtil = ccSummaries.some(item=>item.isOverAlert);
     const nextDueCard = [...ccSummaries].filter(item=>item.currentDue>0).sort((a,b)=>a.dueOn-b.dueOn)[0] || null;
-    const monthly = monthOverrides[viewMonth] || Math.round(annualBudget/12);
+    const baseMonthly = monthOverrides[viewMonth] || Math.round(annualBudget/12);
+    const monthly = (() => {
+      if(!budgetCarryForward) return baseMonthly;
+      const [y,m] = viewMonth.split("-").map(Number);
+      const prevMonth = m===1 ? `${y-1}-12` : `${y}-${String(m-1).padStart(2,"0")}`;
+      const prevBudget = monthOverrides[prevMonth] || Math.round(annualBudget/12);
+      const prevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(prevMonth)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
+      const carry = prevBudget - prevSpend;
+      return Math.max(0, baseMonthly + carry);
+    })();
     const budgetPct = Math.min(100,Math.round(myActual/Math.max(1,monthly)*100));
     const diff = monthly - myActual;
     const isOver = diff < 0;
 
+    // Financial Health calculations
+    const essentialCatIds = cats.filter(c=>c.fixed===true).map(c=>c.id);
+    const essentialSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>{
+      const tCats = (t.catIds||[t.catId]).filter(Boolean);
+      return tCats.some(cid=>essentialCatIds.includes(String(cid))) ? s+t.amount : s;
+    },0);
+    const discretionarySpend = myActual - essentialSpend;
+    const liquidSavings = liquidAssetsTotal;
+    const runwayMonths = essentialSpend > 0 ? Math.floor(liquidSavings / essentialSpend) : 0;
+    const runwayColor = runwayMonths >= 6 ? T.success : runwayMonths >= 3 ? T.warn : T.danger;
+
     const groupSpent = byCat.find(c=>c.id==="family")?.value || 0;
     const leftDays = daysLeft(viewMonth);
+    // Recurring investment reminders
+    const todayDate = new Date();
+    const todayDay = todayDate.getDate();
+    const todayStr2 = new Date().toISOString().split("T")[0];
+    const dueRecurring = recurringSchedules.filter(r=>r.active!==false && r.day===todayDay && (!r.snoozedUntil || r.snoozedUntil < todayStr2));
     const CARDS = {
+      health: (
+        <div key="health" style={{ ...card,padding:"16px 14px",background:`linear-gradient(135deg,${runwayColor}10,${T.card})`,border:`1px solid ${runwayColor}33` }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+            <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>💊 Financial Health</div>
+            <div style={{ background:runwayColor+"22",border:`1px solid ${runwayColor}44`,borderRadius:20,padding:"3px 10px" }}>
+              <span style={{ color:runwayColor,fontSize:11,fontWeight:800 }}>{runwayMonths >= 6 ? "Healthy" : runwayMonths >= 3 ? "Caution" : "At Risk"}</span>
+            </div>
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12 }}>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ color:runwayColor,fontSize:22,fontWeight:900 }}>{runwayMonths}</div>
+              <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>MONTHS RUNWAY</div>
+            </div>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ color:T.danger,fontSize:16,fontWeight:800 }}>{sym}{fmtK(essentialSpend)}</div>
+              <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>ESSENTIAL</div>
+            </div>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ color:T.warn,fontSize:16,fontWeight:800 }}>{sym}{fmtK(discretionarySpend)}</div>
+              <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>DISCRETIONARY</div>
+            </div>
+          </div>
+          <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:6 }}>
+            <div style={{ height:"100%",width:`${Math.min(100,Math.round(essentialSpend/Math.max(1,myActual)*100))}%`,background:T.danger,borderRadius:3 }}/>
+          </div>
+          <div style={{ display:"flex",justifyContent:"space-between" }}>
+            <span style={{ color:T.sub,fontSize:9 }}>Essential {Math.round(essentialSpend/Math.max(1,myActual)*100)}%</span>
+            <span style={{ color:T.sub,fontSize:9 }}>Discretionary {Math.round(discretionarySpend/Math.max(1,myActual)*100)}%</span>
+          </div>
+          <div style={{ marginTop:10,background:T.input,borderRadius:10,padding:"8px 12px" }}>
+            <div style={{ color:T.sub,fontSize:10 }}>Liquid savings: <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmtK(liquidSavings)}</span> ÷ monthly essential <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmtK(essentialSpend)}</span> = <span style={{ color:runwayColor,fontWeight:900 }}>{runwayMonths} months runway</span></div>
+          </div>
+        </div>
+      ),
       stats: (
         <div key="stats" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
           {[
-            {label:"Income",value:`${sym}${fmt(totalIncome)}`,color:T.success,icon:"💚",action:()=>{ setTab("transactions"); setFType("income"); }},
+            {label:"Income",value:M(`${sym}${fmt(totalIncome)}`),color:T.success,icon:"💚",action:()=>{ setTab("transactions"); setFType("income"); }},
             {label:"Investments",value:`${sym}${fmt(monthlyInvestmentFlow)}`,color:T.info,icon:"💹",action:()=>{ setSelectedInvestmentTypeView("all"); setShowInvestments(true); }},
             {label:"People & Groups",value:"",color:T.info,icon:"👥",action:()=>setTab("people")},
             {label:"Budget",value:`${sym}${fmt(monthly)}`,color:T.warn,icon:"🎯",action:()=>{ setShowSettings(true); setSettingsSection("budget"); }},
-            {label:"To Receive",value:`${sym}${fmt(totalOwedToMe + loanGivenTotal)}`,color:T.accent,icon:"🔄",action:()=>setShowReceivablesList(true),sub:loanGivenTotal>0?`splits + ${sym}${fmtK(loanGivenTotal)} loans`:totalOwedToMe>0?"outstanding":undefined},
-            {label:"Net Savings",value:`${sym}${fmtK(Math.max(0,totalIncome-myActual-monthlyInvestmentFlow))}`,color:T.success,icon:"💰",action:()=>setTab("home")},
+            {label:"To Receive",value:`${sym}${fmt(monthTotalOwedToMe + loanGivenTotal)}`,color:T.accent,icon:"🔄",action:()=>setShowReceivablesList(true),sub:(loanGivenTotal>0&&monthTotalOwedToMe>0)?`incl. ${sym}${fmtK(loanGivenTotal)} loans`:loanGivenTotal>0?`${sym}${fmtK(loanGivenTotal)} loans outstanding`:undefined},
+            {label:"Net Savings",value:M(`${sym}${fmtK(Math.max(0,totalIncome-myActual-monthlyInvestmentFlow))}`),color:T.success,icon:"💰",action:()=>setTab("home")},
           ].map(s=>(
             <div key={s.label} onClick={s.action} style={{ ...card,marginBottom:0,padding:"12px",cursor:"pointer" }}>
               <div style={{ fontSize:20,marginBottom:4 }}>{s.icon}</div>
@@ -6474,12 +6799,13 @@ function AppContent({ onLock }) {
                     <div style={{ color:isOverdue?T.danger:daysUntil<=3?T.warn:T.sub,fontSize:11 }}>{isOverdue?`${Math.abs(daysUntil)}d overdue`:daysUntil===0?"Due today":`Due in ${daysUntil}d`}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    {b.amount>0&&<div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(b.amount)}</div>}
+                    {b.amount>0&&<div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(getNetBillAmount(b))}</div>}
                     <button onClick={e=>{ e.stopPropagation();
                       const accId=b.accId||accounts.find(a=>a.type!=="cc")?.id||"";
                       setTxns(p=>[{id:Date.now(),type:"expense",desc:b.name,merchant:b.merchant||"",date:todayStr(),note:"Bill payment",catId:b.catId,catIds:b.catIds||[b.catId],subId:b.subId||null,accId,people:b.splitPeople||{},forPerson:"",groupId:b.groupId||null,groupCollectiveAmount:Number(b.groupCollectiveAmount||0),amount:b.amount||0,isBillPayment:true,billInvoiceNo:b.invoiceNo||null,paidBillId:b.id,paidBillName:b.name,imageBase64:b.imageBase64||null,paymentImageBase64:b.paymentImageBase64||null},...p]);
-                      setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:todayStr()}:x));
-                      if(b.recurring){ const next=new Date(b.dueDate); if(b.frequency==="monthly") next.setMonth(next.getMonth()+1); else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3); else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6); else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
+                      const _pd=todayStr();
+                      setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:_pd,lastPaidAmount:b.amount,lastPaidDate:_pd}:x));
+                      if(b.recurring && b.autoGenerate!==false){ const _nd=computeNextDueDate(b,_pd); const _np=computeNextPeriod(b,_pd); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:_nd,billDate:null,billPeriodFrom:null,billPeriodTo:null,paidDate:null,paidByTxnId:null,lastPaidAmount:b.amount,lastPaidDate:_pd,isPaused:false,pausedDate:null,resumeDate:null,pausedDays:0,createdDate:todayStr(),createdAt:Date.now(),...(_np||{})},...p]); }
                     }} style={{ background:T.success+"22",border:`1px solid ${T.success}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif" }}>Pay</button>
                   </div>
                 </div>
@@ -6549,6 +6875,46 @@ function AppContent({ onLock }) {
         </div>
 
         <div style={{ padding:"14px 16px 0" }}>
+          {/* Recurring investment reminders */}
+          {dueRecurring.length>0&&(
+            <div style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
+              <div style={{ color:T.info,fontSize:13,fontWeight:800,marginBottom:8 }}>💹 {dueRecurring.length} Investment{dueRecurring.length>1?"s":"" } due today</div>
+              {dueRecurring.map(r=>(
+                <div key={r.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{r.name}</div>
+                    <div style={{ color:T.sub,fontSize:10 }}>{sym}{fmt(r.amount)} · {accounts.find(a=>a.id===r.accId)?.name||"Account"}</div>
+                  </div>
+                  <div style={{ display:"flex",gap:6 }}>
+                    <button onClick={()=>{ setDefaultAddType("investment"); setShowAdd(true); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Record</button>
+                    <button onClick={()=>setRecurringSchedules(prev=>prev.map(x=>x.id===r.id?{...x,snoozedUntil:new Date(Date.now()+24*60*60*1000).toISOString().split("T")[0]}:x))} style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Snooze 1d</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Membership expiry alerts */}
+          {(()=>{
+            const today = new Date().toISOString().split("T")[0];
+            const in7 = new Date(Date.now()+7*24*60*60*1000).toISOString().split("T")[0];
+            const expiring = memberships.filter(m=>m.validUntil && m.validUntil >= today && m.validUntil <= in7);
+            const lapsed = memberships.filter(m=>m.validUntil && m.validUntil < today && (() => { const diffDays = Math.round((new Date()-new Date(m.validUntil))/(1000*60*60*24)); return diffDays <= 3; })());
+            if(!expiring.length && !lapsed.length) return null;
+            return (<div style={{ marginBottom:12 }}>
+              {expiring.map(m=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
+                <div key={m.id} style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:14,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <div><div style={{ color:T.warn,fontSize:12,fontWeight:800 }}>⚠️ {ba?.name||"Membership"} expiring</div><div style={{ color:T.sub,fontSize:10 }}>Until {formatShortDate(m.validUntil)||m.validUntil}</div></div>
+                  <button onClick={()=>{ setActiveBillerForAction(ba); }} style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Renew</button>
+                </div>
+              ); })}
+              {lapsed.map(m=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
+                <div key={m.id} style={{ background:T.danger+"16",border:`1px solid ${T.danger}33`,borderRadius:14,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <div><div style={{ color:T.danger,fontSize:12,fontWeight:800 }}>🔴 {ba?.name||"Membership"} lapsed</div><div style={{ color:T.sub,fontSize:10 }}>Expired {formatShortDate(m.validUntil)||m.validUntil}</div></div>
+                  <button onClick={()=>{ setActiveBillerForAction(ba); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Renew</button>
+                </div>
+              ); })}
+            </div>);
+          })()}
           {/* Edit cards toggle */}
           <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:8 }}>
             <button onClick={()=>setEditingCards(e=>!e)} style={{ background:editingCards?T.accent+"22":"none",border:`1px solid ${editingCards?T.accent:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:editingCards?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{editingCards?"✓ Done":"⠿ Arrange"}</button>
@@ -6624,6 +6990,17 @@ function AppContent({ onLock }) {
 
     return (
       <div style={{ padding:"14px 16px 0" }}>
+        {/* Search bar */}
+        <div style={{ background:T.input,borderRadius:24,padding:"10px 16px",display:"flex",alignItems:"center",gap:8,marginBottom:12 }}>
+          <span style={{ fontSize:15,color:T.sub }}>🔍</span>
+          <input
+            style={{ background:"none",border:"none",outline:"none",color:T.text,fontSize:13,fontFamily:"Nunito,sans-serif",flex:1 }}
+            placeholder="Search vendor, amount, account..."
+            value={txnSearch}
+            onChange={e=>setTxnSearch(e.target.value)}
+          />
+          {txnSearch&&<button onClick={()=>setTxnSearch("")} style={{ background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:14,fontFamily:"Nunito,sans-serif" }}>✕</button>}
+        </div>
         {txnReimbursableOnly&&(
           <div style={{ background:"#f0a50012",border:"1px solid #f0a50044",borderRadius:10,padding:"8px 12px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
             <span style={{ color:"#f0a500",fontSize:12,fontWeight:700 }}>💼 Showing pending reimbursements only</span>
@@ -6956,12 +7333,14 @@ function AppContent({ onLock }) {
     const [editingGroupMembers,setEditingGroupMembers]=useState([]);
     const [editingGroupIncludeMe,setEditingGroupIncludeMe]=useState(true);
     const [isEditingGroup,setIsEditingGroup]=useState(false);
+  const [editingGroupTypeId,setEditingGroupTypeId]=useState("");
     const [newColor,setNewColor]=useState(PALETTE[1]);
     const [newPersonType,setNewPersonType]=useState("contact");
     const [newCreditLimit,setNewCreditLimit]=useState("");
     const [newSpendBudget,setNewSpendBudget]=useState("");
     const [newGroupName,setNewGroupName]=useState("");
     const [newGroupType,setNewGroupType]=useState("");
+    const [newGroupTypeId,setNewGroupTypeId]=useState("");
     const [newGroupColor,setNewGroupColor]=useState(PALETTE[5]);
     const [newGroupMembers,setNewGroupMembers]=useState([]);
     const [newGroupIncludeMe,setNewGroupIncludeMe]=useState(true);
@@ -7033,7 +7412,9 @@ function AppContent({ onLock }) {
       if(!newGroupName.trim()) return;
       const gtlow=(newGroupType||"group").toLowerCase();
       const gicon=gtlow.includes("house")||gtlow.includes("flat")||gtlow.includes("property")?"🏠":gtlow.includes("trip")||gtlow.includes("travel")?"✈️":gtlow.includes("office")||gtlow.includes("work")?"💼":gtlow.includes("family")?"👨‍👩‍👧":gtlow.includes("friend")?"👫":gtlow.includes("society")||gtlow.includes("building")?"🏢":"👥";
-      setGroups(p=>[...p,{ id:genId(), type:newGroupType||"Group", name:newGroupName.trim(), icon:gicon, color:newGroupColor, members:newGroupMembers, includeMe:newGroupIncludeMe, manualLimit:parseFloat(newGroupManualLimit)||0 }]);
+      const gtMeta = GROUP_TYPES.find(t=>t.id===newGroupTypeId);
+      setGroups(p=>[...p,{ id:genId(), type:gtMeta?.label||newGroupType||"Group", typeId:newGroupTypeId||"other", name:newGroupName.trim(), icon:gtMeta?.icon||gicon, color:newGroupColor, members:newGroupMembers, includeMe:newGroupIncludeMe, manualLimit:parseFloat(newGroupManualLimit)||0, defaultIntent:gtMeta?.default||"split" }]);
+      setNewGroupName(""); setNewGroupMembers([]); setNewGroupManualLimit(""); setNewGroupIncludeMe(true); setNewGroupTypeId("");
       setNewGroupName(""); setNewGroupMembers([]); setNewGroupManualLimit(""); setNewGroupIncludeMe(true);
     };
 
@@ -7071,6 +7452,57 @@ function AppContent({ onLock }) {
       return (
         <div style={{ padding:"14px 16px 0" }}>
           <button onClick={()=>setSelectedPerson(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:13,fontWeight:700,marginBottom:16,fontFamily:"Nunito,sans-serif" }}>← People</button>
+          {/* Debt Transfer */}
+          {totalOwesMe>0&&(
+            <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:12 }}>
+              <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>🔀 Transfer debt to someone else</div>
+              <div style={{ color:T.sub,fontSize:10,marginBottom:8 }}>If {p.name} says another person will pay on their behalf</div>
+              <select style={{ ...inp,marginBottom:8 }} onChange={e=>{
+                const targetId = e.target.value;
+                if(!targetId) return;
+                const isGroup = targetId.startsWith("g_");
+                const realId = isGroup ? targetId.slice(2) : targetId;
+                if(!window.confirm(`Transfer ${p.name}'s debt of ${sym}${fmt(totalOwesMe)} to ${isGroup ? groups.find(g=>g.id===realId)?.name : people.find(x=>String(x.id)===realId)?.name}?`)) return;
+                // Mark all of person's splits as settled
+                setTxns(prev=>prev.map(t=>{
+                  if(t.type!=="expense") return t;
+                  const info = t.people?.[p.id] || t.splitPeople?.[p.id];
+                  if(!info||info.settled||info.mode!=="owes") return t;
+                  const updated = {...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0,transferredTo:realId};
+                  if(t.people?.[p.id]) return {...t,people:{...t.people,[p.id]:updated}};
+                  return {...t,splitPeople:{...t.splitPeople,[p.id]:updated}};
+                }));
+                // Add debt to target person
+                if(!isGroup){
+                  const newTxn = { id:genId(), type:"expense", amount:totalOwesMe, who:`Transferred from ${p.name}`, date:todayStr(), catIds:[], subIds:[], people:{[realId]:{amount:totalOwesMe,mode:"owes",settled:false,remainingAmt:totalOwesMe}}, createdAt:Date.now(), note:`Debt transferred from ${p.name}` };
+                  setTxns(prev=>[newTxn,...prev]);
+                }
+                e.target.value="";
+              }}>
+                <option value="">Select who will pay instead...</option>
+                {people.filter(x=>!x.isMe&&String(x.id)!==String(p.id)).map(x=>(<option key={x.id} value={x.id}>{x.emoji} {x.name}</option>))}
+                {groups.map(g=>(<option key={g.id} value={`g_${g.id}`}>{g.icon||"👥"} {g.name} (group)</option>))}
+              </select>
+            </div>
+          )}
+          {/* Tagged accounts */}
+          {(()=>{ const tagged=accounts.filter(a=>String(a.attributedTo)===String(p.id)); if(!tagged.length) return null; return (
+            <div style={{ ...card,marginBottom:12 }}>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>TAGGED ACCOUNTS</div>
+              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                {tagged.map(a=>{ const bal=accountBalance(a.id); return (
+                  <div key={a.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{a.name}</div>
+                    <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(bal)}</div>
+                  </div>
+                ); })}
+                <div style={{ borderTop:`1px solid ${T.border}`,paddingTop:6,display:"flex",justifyContent:"space-between" }}>
+                  <div style={{ color:T.sub,fontSize:11 }}>Total tagged wealth</div>
+                  <div style={{ color:T.success,fontSize:13,fontWeight:900 }}>{sym}{fmt(tagged.reduce((s,a)=>s+accountBalance(a.id),0))}</div>
+                </div>
+              </div>
+            </div>
+          ); })()}
           <div style={{ ...card,background:`linear-gradient(135deg,${p.color}14,${T.card})` }}>
             <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:16 }}>
               <div style={{ width:52,height:52,borderRadius:"50%",background:p.color+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26 }}>{p.emoji}</div>
@@ -7383,6 +7815,7 @@ function AppContent({ onLock }) {
         setEditingGroupBudget(String(g.manualLimit||""));
         setEditingGroupMembers([...(g.members||[])]);
         setEditingGroupIncludeMe(g.includeMe !== false);
+        setEditingGroupTypeId(g.typeId||"other");
         setIsEditingGroup(true);
       };
 
@@ -7391,18 +7824,24 @@ function AppContent({ onLock }) {
         setEditingGroupBudget(String(g.manualLimit||""));
         setEditingGroupMembers([...(g.members||[])]);
         setEditingGroupIncludeMe(g.includeMe !== false);
+        setEditingGroupTypeId(g.typeId||"other");
         setIsEditingGroup(false);
       };
 
       const saveGroupEdits = () => {
         const name = editingGroupName.trim();
         if(!name) return;
+        const gtMeta = GROUP_TYPES.find(t=>t.id===editingGroupTypeId);
         const updated = {
           ...g,
           name,
           manualLimit:parseMoney(editingGroupBudget),
           members:editingGroupMembers,
           includeMe:editingGroupIncludeMe,
+          typeId:editingGroupTypeId||g.typeId||"other",
+          type:gtMeta?.label||g.type,
+          icon:gtMeta?.icon||g.icon,
+          defaultIntent:gtMeta?.default||g.defaultIntent||"split",
         };
         setGroups(prev=>prev.map(x=>x.id===g.id?updated:x));
         setSelectedGroup(updated);
@@ -7412,6 +7851,24 @@ function AppContent({ onLock }) {
       return (
         <div style={{ padding:"14px 16px 0" }}>
           <button onClick={()=>setSelectedGroup(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:13,fontWeight:700,marginBottom:16,fontFamily:"Nunito,sans-serif" }}>← Groups</button>
+          {/* Group tagged accounts */}
+          {(()=>{ const tagged=accounts.filter(a=>String(a.attributedTo)===String(g.id)); if(!tagged.length) return null; return (
+            <div style={{ ...card,marginBottom:12 }}>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>TAGGED ACCOUNTS</div>
+              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                {tagged.map(a=>{ const bal=accountBalance(a.id); return (
+                  <div key={a.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{a.name}</div>
+                    <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(bal)}</div>
+                  </div>
+                ); })}
+                <div style={{ borderTop:`1px solid ${T.border}`,paddingTop:6,display:"flex",justifyContent:"space-between" }}>
+                  <div style={{ color:T.sub,fontSize:11 }}>Total group wealth</div>
+                  <div style={{ color:T.success,fontSize:13,fontWeight:900 }}>{sym}{fmt(tagged.reduce((s,a)=>s+accountBalance(a.id),0))}</div>
+                </div>
+              </div>
+            </div>
+          ); })()}
           <div style={card}>
             <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:14 }}>
               <div style={{ width:46,height:46,borderRadius:14,background:g.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24 }}>{g.icon}</div>
@@ -7420,6 +7877,15 @@ function AppContent({ onLock }) {
                   <div style={{ display:"flex",flexDirection:"column",gap:8,marginTop:2 }}>
                     <input value={editingGroupName} onChange={e=>setEditingGroupName(e.target.value)} style={{ ...inp, padding:"8px 10px", fontSize:16, fontWeight:700, width:"100%" }} placeholder="Group name" />
                     <input value={editingGroupBudget} onChange={e=>setEditingGroupBudget(e.target.value)} style={{ ...inp, padding:"8px 10px", fontSize:14, width:"100%" }} type="text" inputMode="decimal" placeholder="Group budget (0 = no budget)" />
+                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:4 }}>Group Type</div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6 }}>
+                      {GROUP_TYPES.map(gt=>(
+                        <button key={gt.id} onClick={()=>setEditingGroupTypeId(gt.id)} style={{ background:editingGroupTypeId===gt.id?T.accent+"22":"none",border:`1px solid ${editingGroupTypeId===gt.id?T.accent:T.border}`,borderRadius:10,padding:"6px 8px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
+                          <div style={{ fontSize:11,fontWeight:700,color:editingGroupTypeId===gt.id?T.accent:T.text }}>{gt.icon} {gt.label}</div>
+                          <div style={{ fontSize:9,color:T.sub }}>{gt.desc}</div>
+                        </button>
+                      ))}
+                    </div>
                     <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
                       <button onClick={saveGroupEdits} style={{ background:T.accent,border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#000",fontFamily:"Nunito,sans-serif" }}>Save</button>
                       <button onClick={cancelEditingGroup} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
@@ -7673,7 +8139,7 @@ function AppContent({ onLock }) {
                       <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{b.name}</div>
                       <div style={{ color:T.danger,fontSize:11 }}>Due {b.dueDate}</div>
                     </div>
-                    <div style={{ color:T.danger,fontSize:13,fontWeight:700 }}>{sym}{fmt(b.amount)}</div>
+                    <div style={{ color:T.danger,fontSize:13,fontWeight:700 }}>{sym}{fmt(getNetBillAmount(b))}</div>
                   </div>
                 ))}
                 <div style={{ marginBottom:12 }}/>
@@ -7725,9 +8191,18 @@ function AppContent({ onLock }) {
             <button key={v} onClick={()=>setSubView(v)} style={{ flex:1,background:subView===v?T.card:"transparent",border:subView===v?`1px solid ${T.border}`:"none",borderRadius:9,padding:"8px 0",cursor:"pointer",fontSize:13,fontWeight:700,color:subView===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
           ))}
         </div>
-        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16 }}>
-          <button onClick={()=>setSubView("people")} style={{ background:subView==="people"?T.accentSoft:T.card,border:`1px solid ${subView==="people"?T.accent:T.border}`,borderRadius:10,padding:"9px 12px",cursor:"pointer",fontSize:12,fontWeight:800,color:subView==="people"?T.accent:T.text,fontFamily:"Nunito,sans-serif" }}>+ Add Person</button>
-          <button onClick={()=>setSubView("groups")} style={{ background:subView==="groups"?T.accentSoft:T.card,border:`1px solid ${subView==="groups"?T.accent:T.border}`,borderRadius:10,padding:"9px 12px",cursor:"pointer",fontSize:12,fontWeight:800,color:subView==="groups"?T.accent:T.text,fontFamily:"Nunito,sans-serif" }}>+ Add Group</button>
+        <div style={{ display:"flex",gap:8,marginBottom:16,alignItems:"center" }}>
+          <button onClick={()=>setSubView(subView==="people"?"list":"people")} style={{ background:T.accent,border:"none",borderRadius:10,padding:"9px 18px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>+ Add</button>
+          <div style={{ display:"flex",gap:6,flex:1 }}>
+            {subView==="people"&&<div style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Adding Person</div>}
+            {subView==="groups"&&<div style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Adding Group</div>}
+          </div>
+          {(subView==="people"||subView==="groups")&&(
+            <div style={{ display:"flex",gap:6 }}>
+              <button onClick={()=>setSubView("people")} style={{ background:subView==="people"?T.accentSoft:"none",border:`1px solid ${subView==="people"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:subView==="people"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 Person</button>
+              <button onClick={()=>setSubView("groups")} style={{ background:subView==="groups"?T.accentSoft:"none",border:`1px solid ${subView==="groups"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:subView==="groups"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👥 Group</button>
+            </div>
+          )}
         </div>
 
         {subView==="people"&&<>
@@ -7802,11 +8277,11 @@ function AppContent({ onLock }) {
               String(l.personId||l.linkedPersonId||"")===String(p.id) &&
               Number(l.outstanding||0)>0
             ).reduce((sum,l)=>sum+Number(l.outstanding||0),0) : 0;
-            // For dependants: only show loan-based owed, not expense splits
-            const net = p.personType==="dependant"
-              ? personLoanOwed  // only loans, no expense splits
-              : splitNet + personLoanOwed; // contacts: both
-            const netLabel = p.personType==="dependant" ? "loan owed" : net>0 ? "owes you" : "you owe";
+            // Show combined splits + loans for all persons
+            const net = splitNet + personLoanOwed;
+            const netLabel = net>0
+              ? (personLoanOwed>0 && Math.abs(splitNet)<=0 ? "loan owed" : "owes you")
+              : net<0 ? "you owe" : "";
             const creditLimit=p.creditLimit||0;
             const atLimit=!p.isMe&&creditLimit>0&&(s?.owesMe||0)>=creditLimit*0.9;
             return (
@@ -7845,8 +8320,15 @@ function AppContent({ onLock }) {
             <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:12 }}>➕ New Group</div>
             <input style={{ ...inp,marginBottom:10 }} placeholder="Group name *" value={newGroupName} onChange={e=>setNewGroupName(e.target.value)}/>
             <div style={{ marginBottom:10 }}>
-              <span style={lbl}>Group type (e.g. Society, Trip, House)</span>
-              <input style={inp} placeholder="Optional" value={newGroupType} onChange={e=>setNewGroupType(e.target.value)}/>
+              <span style={lbl}>Group type</span>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:6 }}>
+                {GROUP_TYPES.map(gt=>(
+                  <button key={gt.id} onClick={()=>setNewGroupTypeId(newGroupTypeId===gt.id?"":gt.id)} style={{ background:newGroupTypeId===gt.id?T.accent+"22":"none",border:`1px solid ${newGroupTypeId===gt.id?T.accent:T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
+                    <div style={{ fontSize:12,fontWeight:700,color:newGroupTypeId===gt.id?T.accent:T.text }}>{gt.icon} {gt.label}</div>
+                    <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>{gt.desc}</div>
+                  </button>
+                ))}
+              </div>
             </div>
             <div style={{ marginBottom:10 }}>
               <span style={lbl}>Members</span>
@@ -8132,7 +8614,12 @@ function AppContent({ onLock }) {
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
             <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{isEditing?"Edit Loan":"Add Loan"}</div>
-            <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+            <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+              {isEditing && item?.status==="active" && Number(item?.outstanding||0)>0 && (
+                <button onClick={()=>{ onClose(); setRepaymentLoan(item); }} style={{ background:T.success+"22",border:`1px solid ${T.success}44`,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:800,color:T.success,fontFamily:"Nunito,sans-serif" }}>{direction==="taken"?"Pay EMI / Repay":"Record Receipt"}</button>
+              )}
+              <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+            </div>
           </div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
             <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -8496,7 +8983,7 @@ function AppContent({ onLock }) {
         meta:`${getLoanStatusMeta(loan).label}${loan.dueDate?` · due ${loan.dueDate}`:""}${loan.hasInterest&&Number(loan.interestRate||0)>0?` · ${loan.interestRate}% p.a.`:" · no interest"}`,
         value:`${sym}${fmt(loan.outstanding||0)}`,
         color:T.accent,
-        onClick:()=>setEditingLoan(loan),
+        onClick:()=>setRepaymentLoan(loan),
       })),
       trackedAssets: trackedAssets.map(asset=>({
         id:asset.id,
@@ -9096,11 +9583,6 @@ function AppContent({ onLock }) {
 
     if(settingsSection==="vehicles") return (()=>{
       const VEHICLE_TYPES=[{id:"car",label:"Car",icon:"🚗"},{id:"bike",label:"Bike",icon:"🏍️"},{id:"truck",label:"Truck",icon:"🚛"},{id:"auto",label:"Auto",icon:"🛺"},{id:"other",label:"Other",icon:"🚘"}];
-      const [editingVehicle,setEditingVehicle]=React.useState(null);
-      const [vType,setVType]=React.useState("car");
-      const [vNumber,setVNumber]=React.useState("");
-      const [vName,setVName]=React.useState("");
-      const [vColor,setVColor]=React.useState(PALETTE[2]);
       const openNew=()=>{ setEditingVehicle("new"); setVType("car"); setVNumber(""); setVName(""); setVColor(PALETTE[2]); };
       const openEdit=v=>{ setEditingVehicle(v.id); setVType(v.type||"car"); setVNumber(v.number||""); setVName(v.name||""); setVColor(v.color||PALETTE[2]); };
       const saveVehicle=()=>{
@@ -9225,6 +9707,114 @@ function AppContent({ onLock }) {
             );
           })}
         </div>
+      </div>
+    );
+
+    if(settingsSection==="releasenotes") return (
+      <div style={{ padding:"0 0 80px" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:18 }}>
+          <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:18,fontFamily:"Nunito,sans-serif" }}>←</button>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>🚀 Release Notes</div>
+        </div>
+        <div style={{ background:T.accent+"16",border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px 14px",marginBottom:16 }}>
+          <div style={{ color:T.accent,fontSize:12,fontWeight:800 }}>Current: {APP_VERSION}</div>
+          <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Auto-deployed from GitHub → Vercel</div>
+        </div>
+        {[
+          { month:"July 2026 - Sprint 3", items:[
+            "Lock mode (lock button) - tap to lock app, PIN to unlock, 5-attempt lockout",
+            "Masking (eye button) - hide all amounts, PIN to reveal for 60 seconds",
+            "Budget carry forward - surplus/deficit from last month rolls over",
+            "Per-person budgets - set monthly budget per person with progress bar",
+            "Financial Health Dashboard - runway months, essential vs discretionary",
+            "B10 fixed - To Receive now carries forward all unsettled debts from all time",
+            "Settlement fixed - person balance updates correctly after income settlement",
+            "TXN type jumping fixed - SMS parse no longer overrides manual type",
+            "SMS Paste button - one tap clipboard paste, no more 3-tap dance",
+            "Transaction detail view - tap any transaction to see full details",
+            "Debt transfer - move a persons debt to another person or group",
+            "Duplicate transaction warning - same amount + account within 5 minutes",
+            "SIP recurring schedule on folio - set day, amount, account per investment",
+            "SIP snooze - snooze reminders by 1 day",
+            "Membership expiry alerts on Home - 7 day warning + lapsed notification",
+            "Guest person - one-time person with amount badge on transaction card",
+            "Idle timer - 5 min before warning, 2 min to respond (was 60s)",
+            "PIN lockout - 5 wrong attempts locks for 30 minutes",
+            "Group type editing on existing groups",
+            "Transaction search in TXNS tab",
+          ]},
+          { month:"June 2026 - Sprint 2", items:[
+            "Bills tab redesigned with PhonePe-style grid and 35 biller types with icons",
+            "Membership system: recharge model per person, grace days, active/lapsed status",
+            "Fee payments: multi-month school/education fee distribution",
+            "Transaction link to biller: optional, non-intrusive",
+            "Privacy mode: income/savings hidden with PIN to reveal for 60 seconds",
+            "Exclude from Net Worth: per account toggle (e.g. Vyom Wallet)",
+            "Bill period dates: From/To for utility bills",
+            "Split fixes: 0 and decimal now work, clearing first amount no longer resets others",
+            "Auto-generate next bill no longer resets bill date to payment date",
+            "Cloud sync: GitHub + Vercel auto-deploy, Supabase auth working",
+            "Bugs fixed: B6 B8 B9 B11 B12 B13 B14 B15 B16",
+          ]},
+          { month:"April/May 2026", items:[
+            "Cloud sync infrastructure: Supabase auto-sync on every change",
+            "Biller Accounts: consumer number, type, attribution",
+            "Bills tab: My Bills + Bill History tabs",
+            "Auto-generate next bill on payment with pause/resume",
+            "Items UI: bottom-sheet redesign",
+            "CC refund reduces outstanding (B1 B1a B1b)",
+            "To Receive merged per person: splits + loans",
+          ]},
+        ].map(section=>(
+          <div key={section.month} style={{ marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:8 }}>{section.month}</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+              {section.items.map((item,i)=>(
+                <div key={i} style={{ display:"flex",gap:8,alignItems:"flex-start" }}>
+                  <span style={{ color:T.success,fontSize:12 }}>✅</span>
+                  <span style={{ color:T.sub,fontSize:12,lineHeight:1.4 }}>{item}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+
+    if(settingsSection==="cloudsync") return (
+      <div style={{ padding:"0 0 80px" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:18 }}>
+          <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:18,fontFamily:"Nunito,sans-serif" }}>←</button>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>Cloud Sync & Account</div>
+        </div>
+        {cloudUser ? (
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div style={{ background:T.success+"16",border:`1px solid ${T.success}33`,borderRadius:14,padding:"14px 16px" }}>
+              <div style={{ color:T.success,fontSize:13,fontWeight:800 }}>✅ Signed in</div>
+              <div style={{ color:T.sub,fontSize:12,marginTop:4 }}>{cloudUser.email}</div>
+              {lastSyncedAt&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Last synced: {formatBackupStamp(lastSyncedAt)}</div>}
+            </div>
+            <div style={{ background:T.card,borderRadius:14,padding:"14px 16px" }}>
+              <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>Auto-syncing across devices</div>
+              <div style={{ color:T.sub,fontSize:11 }}>Every change saves to cloud automatically. Sign in on any device to access your data.</div>
+            </div>
+            <button onClick={()=>pullCloudSnapshot()} disabled={cloudBusy} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{cloudBusy?"🔄 Syncing...":"🔄 Sync Now"}</button>
+            <button onClick={handleCloudSignOut} disabled={cloudBusy} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.danger,fontFamily:"Nunito,sans-serif" }}>Sign Out</button>
+            {cloudStatus&&<div style={{ color:T.sub,fontSize:11,textAlign:"center",marginTop:4 }}>{cloudStatus}</div>}
+          </div>
+        ) : (
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div style={{ background:T.card,borderRadius:14,padding:"14px 16px" }}>
+              <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>Sign in to sync across devices</div>
+              <div style={{ color:T.sub,fontSize:11 }}>Data stored safely in cloud. Sign in on any device to restore everything instantly.</div>
+            </div>
+            <input style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",color:T.text,fontSize:14,fontFamily:"Nunito,sans-serif",outline:"none" }} type="email" placeholder="Email address" autoComplete="email" autoCapitalize="none" value={syncEmail} onChange={e=>setSyncEmail(e.target.value)}/>
+            <input style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",color:T.text,fontSize:14,fontFamily:"Nunito,sans-serif",outline:"none" }} type="password" placeholder="Password" autoComplete="new-password" value={syncPassword} onChange={e=>setSyncPassword(e.target.value)}/>
+            <button onClick={()=>handleCloudAuth("signin")} disabled={cloudBusy||!syncEmail||!syncPassword} style={{ background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>{cloudBusy?"Please wait...":"Sign In"}</button>
+            <button onClick={()=>handleCloudAuth("signup")} disabled={cloudBusy||!syncEmail||!syncPassword} style={{ background:"none",border:`1px solid ${T.accent}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{cloudBusy?"Please wait...":"Create Account"}</button>
+            {cloudStatus&&<div style={{ color:cloudStatus.includes("failed")||cloudStatus.includes("error")?T.danger:T.sub,fontSize:11,textAlign:"center" }}>{cloudStatus}</div>}
+          </div>
+        )}
       </div>
     );
 
@@ -9522,12 +10112,14 @@ function AppContent({ onLock }) {
 
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Backup & Sync</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
+          <Row icon="🔑" title="Cloud Sync & Account" subtitle={cloudUser?.email ? `Signed in as ${cloudUser.email}${lastSyncedAt ? " · synced" : ""}` : "Sign in to sync across devices"} onClick={()=>setSettingsSection("cloudsync")}/>
           <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
         </div>
 
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Help</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 24px",overflow:"hidden" }}>
           <Row icon="📖" title="User Guides" subtitle="How-to guides for features" onClick={()=>setSettingsSection("guides")}/>
+          <Row icon="🚀" title="Release Notes" subtitle={`v${APP_VERSION} · What's new`} onClick={()=>setSettingsSection("releasenotes")}/>
         </div>
 
         <div style={{ color:T.sub,fontSize:10,textAlign:"center",padding:"0 16px 8px" }}>
@@ -9554,12 +10146,15 @@ function AppContent({ onLock }) {
     const [openingBalance, setOpeningBalance] = useState(String(a.openingBalance||"0"));
     const [openingBalanceDate, setOpeningBalanceDate] = useState(a.openingBalanceDate||todayStr());
     const [linkedBank, setLinkedBank] = useState(a.linkedBank||"");
+    const [excludeFromWealth, setExcludeFromWealth] = useState(a.excludeFromWealth||false);
+    const [accAttributedTo, setAccAttributedTo] = useState(a.attributedTo||"");
+    const [accAttributeType, setAccAttributeType] = useState(a.attributeType||"person");
     const banks = accounts.filter(x=>x.type==="bank"&&x.id!==a.id);
 
     const save = () => {
       if(!name.trim()) return;
       setAccounts(prev=>prev.map(x=>x.id===a.id?{
-        ...x, name:name.trim(), last4, color,
+        ...x, name:name.trim(), last4, color, excludeFromWealth, attributedTo:accAttributedTo||null, attributeType:accAttributedTo?accAttributeType:null,
         ...(a.type==="cc"&&{ limit:parseFloat(limit)||0, statementDate:parseInt(statementDate)||15, dueDate:parseInt(dueDate)||5, alertPct:Math.max(0,parseFloat(alertPct)||0), billingCycle:billingCycle||`${statementDate}th–${dueDate}th` }),
         ...((a.type==="bank"||a.type==="cash")&&{ openingBalance:parseMoney(openingBalance)||0, openingBalanceDate:openingBalanceDate||todayStr() }),
         ...(a.type==="upi"&&{ handle }),
@@ -9688,6 +10283,11 @@ function AppContent({ onLock }) {
               <span style={{ color:T.accent,fontSize:10,fontWeight:800 }}>{sym}{fmt(monthlySlice)}/month</span>
             </div>
           </div>
+          <div style={{ ...card,marginBottom:0,display:"flex",flexDirection:"column",justifyContent:"space-between" }}>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Carry Forward</div>
+            <div style={{ color:T.sub,fontSize:10,marginTop:6,lineHeight:1.4 }}>Surplus/deficit from last month adjusts this month's budget</div>
+            <button onClick={()=>setBudgetCarryForward(v=>!v)} style={{ marginTop:10,background:budgetCarryForward?T.success+"22":"none",border:`1px solid ${budgetCarryForward?T.success:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:budgetCarryForward?T.success:T.sub,fontFamily:"Nunito,sans-serif" }}>{budgetCarryForward?"ON ✅":"OFF"}</button>
+          </div>
           <div style={{ ...card,marginBottom:0 }}>
             <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Spent so far</div>
             <div style={{ color:T.danger,fontSize:22,fontWeight:900,marginTop:8 }}>{sym}{fmt(fySpend)}</div>
@@ -9739,6 +10339,51 @@ function AppContent({ onLock }) {
             </div>
           );
         })}
+
+        {/* Per-person budgets */}
+        <div style={{ marginTop:20,paddingBottom:80 }}>
+          <div style={{ color:T.text,fontSize:15,fontWeight:900,marginBottom:12 }}>👤 Per-Person Budgets</div>
+          {people.filter(p=>!p.isMe).map(p=>{
+            const monthBudget = perPersonBudgets[p.id] || 0;
+            const monthSpend = thisMonthTxns.filter(t=>{
+              if(t.type!=="expense") return false;
+              return String(t.taggedPersonId||t.forPersonId||"")===String(p.id) || t.people?.[p.id];
+            }).reduce((s,t)=>s+t.amount,0);
+            const pct = monthBudget>0 ? Math.min(100,Math.round(monthSpend/monthBudget*100)) : 0;
+            const isOver = monthSpend > monthBudget && monthBudget > 0;
+            return (
+              <div key={p.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,marginBottom:10,padding:"12px 14px" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                    <span style={{ fontSize:18 }}>{p.emoji}</span>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{p.name}</div>
+                  </div>
+                  <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                    <span style={{ color:T.sub,fontSize:11 }}>₹</span>
+                    <input
+                      style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
+                      type="text" inputMode="decimal" placeholder="Budget"
+                      value={perPersonBudgets[p.id]?String(perPersonBudgets[p.id]):""}
+                      onChange={e=>setPerPersonBudgets(prev=>({...prev,[p.id]:parseMoney(e.target.value)||0}))}
+                    />
+                    <span style={{ color:T.sub,fontSize:10 }}>/mo</span>
+                  </div>
+                </div>
+                {monthBudget>0&&(
+                  <>
+                    <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
+                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:pct>80?T.warn:p.color||T.success,borderRadius:3 }}/>
+                    </div>
+                    <div style={{ display:"flex",justifyContent:"space-between" }}>
+                      <span style={{ color:T.sub,fontSize:10 }}>Spent: {sym}{fmtK(monthSpend)}</span>
+                      <span style={{ color:isOver?T.danger:T.success,fontSize:10,fontWeight:700 }}>{isOver?`Over ${sym}${fmtK(monthSpend-monthBudget)}`:`Left ${sym}${fmtK(monthBudget-monthSpend)}`}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   };
@@ -9755,6 +10400,11 @@ function AppContent({ onLock }) {
     const [frequency,setFrequency]=useState(b.frequency||"monthly");
     const [merchant,setMerchant]=useState(b.merchant||"");
     const [invoiceNo,setInvoiceNo]=useState(b.invoiceNo||"");
+    const [billerAccountId,setBillerAccountId]=useState(b.billerAccountId||"");
+    const selectedBA = billerAccountId ? billerAccounts.find(x=>x.id===billerAccountId) : null;
+    const [autoGenerate,setAutoGenerate]=useState(b.autoGenerate!==false);
+    const [billPeriodFrom,setBillPeriodFrom]=useState(b.billPeriodFrom||"");
+    const [billPeriodTo,setBillPeriodTo]=useState(b.billPeriodTo||"");
     const [editPhoto,setEditPhoto]=useState(b.imageBase64||null);
     const [editSplitPeople,setEditSplitPeople]=useState(()=>{ const m={}; Object.entries(b.splitPeople||{}).forEach(([pid])=>m[pid]=true); return m; });
     const [editSplitCalc,setEditSplitCalc]=useState("equally");
@@ -9789,7 +10439,7 @@ function AppContent({ onLock }) {
       const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
       const myShare=editIncludeMe ? Math.max(0, editAmt-owedByOthers) : 0;
       const groupCollectiveAmount = editGroup ? Math.max(0, editAmt-owedByOthers-myShare) : 0;
-      setBills(prev=>prev.map(x=>x.id===b.id?{...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare}:x));
+      setBills(prev=>prev.map(x=>x.id===b.id?{...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null}:x));
       onClose();
     };
 
@@ -9801,7 +10451,21 @@ function AppContent({ onLock }) {
             <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
           </div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
-            <input style={inp} placeholder="Bill name * e.g. Common Meter Electric" value={name} onChange={e=>setName(e.target.value)}/>
+            <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>BILLER ACCOUNT</span>
+                <button onClick={()=>setShowAddBillerAccount(true)} style={{ background:"none",border:`1px solid ${T.accent}44`,borderRadius:16,padding:"2px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ New Account</button>
+              </div>
+              {billerAccounts.length===0
+                ? <div style={{ color:T.sub,fontSize:11 }}>No biller accounts yet. Add one first, or fill manually below.</div>
+                : <select style={inp} value={billerAccountId} onChange={e=>{ const id=e.target.value; setBillerAccountId(id); if(id){ const ba=billerAccounts.find(x=>x.id===id); if(ba){ setName(ba.name); setMerchant(ba.provider||ba.name); } } }}>
+                    <option value="">Select biller account (or fill manually)</option>
+                    {billerAccounts.map(ba=>(<option key={ba.id} value={ba.id}>{ba.name} {ba.consumerNo?`(${ba.consumerNo})`:""} - {ba.type}</option>))}
+                  </select>
+              }
+              {selectedBA&&<div style={{ marginTop:8,display:"flex",gap:6,flexWrap:"wrap" }}><span style={{ background:T.success+"16",border:`1px solid ${T.success}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.success }}>{selectedBA.type}</span>{selectedBA.consumerNo&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>#{selectedBA.consumerNo}</span>}{selectedBA.provider&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>{selectedBA.provider}</span>}</div>}
+            </div>
+            <input style={inp} placeholder="Bill name * e.g. April Electricity Bill" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
             <input style={inp} placeholder="Biller / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
             <input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>
             {duplicateInvoiceBill && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:-4 }}>This invoice number already exists for {duplicateInvoiceBill.name}.</div>}
@@ -9812,6 +10476,8 @@ function AppContent({ onLock }) {
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
               <div><span style={lbl}>Bill Date (generated on)</span><input style={inp} type="date" value={billDate} onChange={e=>setBillDate(e.target.value)}/></div>
               <div><span style={lbl}>Due Date (pay by)</span><input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
+              <div><span style={lbl}>Period From (optional)</span><input style={inp} type="date" value={billPeriodFrom} onChange={e=>setBillPeriodFrom(e.target.value)}/></div>
+              <div><span style={lbl}>Period To (optional)</span><input style={inp} type="date" value={billPeriodTo} onChange={e=>setBillPeriodTo(e.target.value)}/></div>
             </div>
             <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
               <div>
@@ -9889,6 +10555,13 @@ function AppContent({ onLock }) {
             </div>
             {editPhoto&&<img src={editPhoto} alt="bill" style={{ width:"100%",borderRadius:10,maxHeight:160,objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>}
 
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.input,borderRadius:12,padding:"12px 14px" }}>
+              <div>
+                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>Exclude from Net Worth</div>
+                <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>e.g. Vyom Wallet, kids accounts</div>
+              </div>
+              <button onClick={()=>setExcludeFromWealth(v=>!v)} style={{ background:excludeFromWealth?T.danger+"22":"none",border:`1px solid ${excludeFromWealth?T.danger:T.border}`,borderRadius:20,padding:"5px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:excludeFromWealth?T.danger:T.sub,fontFamily:"Nunito,sans-serif" }}>{excludeFromWealth?"Excluded":"Include"}</button>
+            </div>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={onClose} style={btnG}>Cancel</button>
               <button onClick={save} style={btnP}>Save Changes ✓</button>
@@ -9901,7 +10574,61 @@ function AppContent({ onLock }) {
 
   // ── TABS ───────────────────────────────────────────────────────────────────
   // ── BILLS PAGE ──────────────────────────────────────────────────────────────
+  // Biller type icon map
+  const BILLER_ICON = {
+    "Electricity": "⚡",
+    "Water": "💧",
+    "LPG Gas": "🛢️",
+    "Piped Gas": "🔥",
+    "Broadband": "📶",
+    "Landline": "📞",
+    "Cable TV": "📺",
+    "Mobile Postpaid": "📱",
+    "Mobile Prepaid": "📱",
+    "DTH": "📡",
+    "Fastag": "🚗",
+    "Metro Recharge": "🚇",
+    "NCMC Recharge": "💳",
+    "EV Recharge": "⚡",
+    "OTT / Streaming": "🎬",
+    "Insurance": "🛡️",
+    "Loan EMI": "🏦",
+    "Credit Card": "💳",
+    "Recurring Deposit": "📅",
+    "NPS": "🏦",
+    "School Fees": "🏫",
+    "Education Fees": "🎓",
+    "Municipal Tax": "🏛️",
+    "Municipal Services": "🏛️",
+    "Society Maintenance": "🏢",
+    "Gym / Fitness": "🏋️",
+    "Club Membership": "👥",
+    "Hospital": "🏥",
+    "Rental": "🏠",
+    "Prepaid Meter": "🔌",
+    "eChallan": "🚦",
+    "Fleet Card": "🚛",
+    "Donation": "❤️",
+    "B2B": "💼",
+    "Other Subscription": "🔔",
+    "Other": "📄",
+  };
+  const getBillerIcon = type => BILLER_ICON[type] || "📄";
+  const GROUP_TYPES = [
+    { id:"family",     label:"Family / Dependants", icon:"🏠", default:"attributed", desc:"Expenses attributed, no collection" },
+    { id:"friends",    label:"Friends / Social",    icon:"👥", default:"split",      desc:"Split and collect" },
+    { id:"relatives",  label:"Relatives",           icon:"👨‍👩‍👧", default:"split", desc:"Split, can override per expense" },
+    { id:"trip",       label:"Trip / Event",        icon:"✈️", default:"split",  desc:"Split and collect" },
+    { id:"office",     label:"Office / Work",       icon:"💼", default:"split",      desc:"Split and collect" },
+    { id:"building",   label:"Office Building",     icon:"🏢", default:"split",      desc:"Split and collect" },
+    { id:"society",    label:"Society",             icon:"🏛️", default:"split", desc:"Split and collect" },
+    { id:"business",   label:"Business",            icon:"🍳", default:"attributed", desc:"Tagged expenses, no collection" },
+    { id:"other",      label:"Other",               icon:"📄", default:"manual",     desc:"Choose per expense" },
+  ];
+  const getGroupTypeMeta = id => GROUP_TYPES.find(t=>t.id===id) || GROUP_TYPES[GROUP_TYPES.length-1];
+
   const BillsPage = () => {
+    const [billsTab, setBillsTab] = useState("mybills");
     const [bFilter, setBFilter] = useState("unpaid");
     const [expandedBillId, setExpandedBillId] = useState(null);
     const getBillDate = bill => bill?.billDate || bill?.createdDate || bill?.dueDate || "";
@@ -9918,13 +10645,117 @@ function AppContent({ onLock }) {
         if(bFilter==="paid") return paidB - paidA || dueA - dueB || billB - billA;
         return dueA - dueB || billB - billA;
       });
-    const totalUnpaid = bills.filter(b=>b.status==="unpaid").reduce((s,b)=>s+(b.amount||0),0);
+    const totalUnpaid = bills.filter(b=>b.status==="unpaid").reduce((s,b)=>s+getNetBillAmount(b),0);
+    const ccBillsDue = accounts.filter(a=>a.type==="cc").map(a=>{
+      const summary = getCardSummary(a);
+      if(!summary?.currentDue||summary.currentDue<=0) return null;
+      return { _isCC:true,id:`cc_due_${a.id}`,name:`${a.name} CC Bill`,type:"Credit Card",amount:summary.currentDue,dueDate:a.dueDate||"",accId:a.id,status:"unpaid" };
+    }).filter(Boolean);
+    const allUnpaid = [...ccBillsDue,...bills.filter(b=>b.status==="unpaid")];
     return (
-      <div style={{ padding:"14px 16px 0" }}>
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
-          <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>📅 Bills</div>
+      <div style={{ padding:"0 0 120px" }}>
+        {/* Tab bar */}
+        <div style={{ display:"flex",background:T.card,borderBottom:`1px solid ${T.border}`,position:"sticky",top:0,zIndex:10 }}>
+          {[["mybills","📋 My Bills"],["history","🕐 Bill History"]].map(([t,l])=>(
+            <button key={t} onClick={()=>setBillsTab(t)} style={{ flex:1,padding:"14px 8px",background:"none",border:"none",borderBottom:`2px solid ${billsTab===t?T.accent:"transparent"}`,cursor:"pointer",fontSize:13,fontWeight:800,color:billsTab===t?T.accent:T.sub,fontFamily:"Nunito,sans-serif",transition:"all 0.2s" }}>{l}</button>
+          ))}
         </div>
-        {totalUnpaid>0&&<div style={{ ...card,background:`linear-gradient(135deg,${T.danger}10,${T.card})`,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+
+        {/* MY BILLS TAB - PhonePe style */}
+        {billsTab==="mybills"&&(
+          <div style={{ paddingBottom:20 }}>
+            {/* Search bar */}
+            <div style={{ padding:"12px 16px 8px" }}>
+              <div style={{ background:T.input,borderRadius:24,padding:"10px 16px",display:"flex",alignItems:"center",gap:8 }}>
+                <span style={{ fontSize:16 }}>🔍</span>
+                <input
+                  style={{ background:"none",border:"none",outline:"none",color:T.text,fontSize:13,fontFamily:"Nunito,sans-serif",flex:1 }}
+                  placeholder="Search billers, categories..."
+                  value={billSearch||""}
+                  onChange={e=>setBillSearch(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* Active biller accounts - compact horizontal scroll */}
+            {billerAccounts.length>0&&(
+              <div style={{ padding:"8px 16px" }}>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>MY ACCOUNTS</div>
+                <div style={{ display:"flex",gap:10,overflowX:"auto",paddingBottom:8 }}>
+                  {billerAccounts.filter(ba=>!billSearch||(ba.name+ba.type+ba.consumerNo).toLowerCase().includes(billSearch.toLowerCase())).map(ba=>{
+                    const billsForAcc = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
+                    const unpaidCount = billsForAcc.filter(b=>b.status==="unpaid").length;
+                    const lastBill = [...billsForAcc].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
+                    const isExpiringSoon = ba.membershipEndDate && (new Date(ba.membershipEndDate)-new Date())/(1000*60*60*24) <= 30;
+                    return (
+                      <div key={ba.id} onClick={()=>setActiveBillerForAction(ba)} style={{ minWidth:120,background:T.card,borderRadius:16,padding:"12px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}`,position:"relative",flexShrink:0 }}>
+                        {unpaidCount>0&&<div style={{ position:"absolute",top:8,right:8,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>{unpaidCount}</div>}
+                        {isExpiringSoon&&<div style={{ position:"absolute",top:8,right:8,background:T.warn,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>!</div>}
+                        <div style={{ fontSize:28,marginBottom:6 }}>{getBillerIcon(ba.type)}</div>
+                        <div style={{ color:T.text,fontSize:11,fontWeight:800,lineHeight:1.2 }}>{ba.name}</div>
+                        <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>{lastBill?`${sym}${fmt(lastBill.amount)}`:"No bills"}</div>
+                      </div>
+                    );
+                  })}
+                  <div onClick={()=>setShowAddBillerAccount(true)} style={{ minWidth:80,background:"none",borderRadius:16,padding:"12px",cursor:"pointer",border:`2px dashed ${T.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+                    <div style={{ fontSize:24,color:T.sub }}>+</div>
+                    <div style={{ color:T.sub,fontSize:9,marginTop:4 }}>Add Account</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ALL SERVICES divider */}
+            <div style={{ display:"flex",alignItems:"center",gap:10,padding:"12px 16px 8px" }}>
+              <div style={{ flex:1,height:1,background:T.border }}/>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>ALL SERVICES</div>
+              <div style={{ flex:1,height:1,background:T.border }}/>
+            </div>
+
+            {/* Service categories grid */}
+            {[
+              { label:"Recharge", types:["Fastag","Mobile Postpaid","Mobile Prepaid","DTH","Broadband","Landline","Cable TV","Metro Recharge","NCMC Recharge","EV Recharge"] },
+              { label:"Utility Bills", types:["Electricity","LPG Gas","Piped Gas","Water"] },
+              { label:"Finances", types:["Loan EMI","Credit Card","Recurring Deposit","NPS","Insurance","Forex"] },
+              { label:"Education & Fitness", types:["School Fees","Education Fees","Gym / Fitness","Club Membership","Hospital"] },
+              { label:"Others", types:["Donation","Municipal Services","Municipal Tax","Society Maintenance","Rental","Prepaid Meter","eChallan","Fleet Card","B2B","Other Subscription","Other"] },
+            ].map(cat=>{
+              const filtered2 = billSearch ? cat.types.filter(t=>t.toLowerCase().includes(billSearch.toLowerCase())) : cat.types;
+              if(filtered2.length===0) return null;
+              return (
+                <div key={cat.label} style={{ padding:"8px 16px 4px" }}>
+                  <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:12 }}>{cat.label}</div>
+                  <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12 }}>
+                    {filtered2.map(type=>{
+                      const existingBA = billerAccounts.find(ba=>ba.type===type);
+                      const unpaid = existingBA ? bills.filter(b=>String(b.billerAccountId)===String(existingBA.id)&&b.status==="unpaid").length : 0;
+                      const actionType = getBillerActionType(type);
+                      return (
+                        <div key={type} onClick={()=>{
+                          if(existingBA){
+                            setActiveBillerForAction(existingBA);
+                          } else {
+                            setShowAddBillerAccount(true);
+                            setPreselectedBillerType(type);
+                          }
+                        }} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:6,cursor:"pointer",position:"relative" }}>
+                          {unpaid>0&&<div style={{ position:"absolute",top:-4,right:4,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 5px",fontSize:8,fontWeight:800 }}>{unpaid}</div>}
+                          <div style={{ width:56,height:56,background:T.card,borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,border:`1px solid ${T.border}` }}>{getBillerIcon(type)}</div>
+                          <div style={{ color:T.sub,fontSize:9,fontWeight:600,textAlign:"center",lineHeight:1.2 }}>{type}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* BILL HISTORY TAB */}
+        {billsTab==="history"&&(
+          <div style={{ padding:"14px 16px" }}>
+            {totalUnpaid>0&&<div style={{ ...card,background:`linear-gradient(135deg,${T.danger}10,${T.card})`,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
           <div>
             <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Total Unpaid</div>
             <div style={{ color:T.danger,fontSize:22,fontWeight:900,marginTop:4 }}>{sym}{fmt(totalUnpaid)}</div>
@@ -9957,7 +10788,7 @@ function AppContent({ onLock }) {
                 <div style={{ flex:1,minWidth:0,textAlign:"justify" }}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10 }}>
                     <div style={{ color:T.text,fontSize:14,fontWeight:800,flex:1,wordBreak:"break-word" }}>{b.name}</div>
-                    <div style={{ color:T.text,fontSize:15,fontWeight:800,whiteSpace:"nowrap",textAlign:"right" }}>{sym}{fmt(b.amount||0)}</div>
+                    <div style={{ color:T.text,fontSize:15,fontWeight:800,whiteSpace:"nowrap",textAlign:"right" }}>{sym}{fmt(getNetBillAmount(b))}</div>
                   </div>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:5 }}>
                     <span style={{ color:group?.color || T.sub,fontSize:10,fontWeight:700 }}>{group ? `${group.icon||"👥"} ${group.name}` : "Group: —"}</span>
@@ -10015,6 +10846,29 @@ function AppContent({ onLock }) {
                       {paymentImageSrc&&<button onClick={(e)=>{ e.stopPropagation(); setImageViewSrc(paymentImageSrc); }} style={{ background:T.success+"14",border:`1px solid ${T.success}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.success,fontFamily:"Nunito,sans-serif" }}>💳 View payment</button>}
                     </div>
                   )}
+                  {/* Bill period */}
+                  {(b.billPeriodFrom||b.billPeriodTo)&&(
+                    <div style={{ display:"flex",gap:6,marginBottom:4 }}>
+                      <span style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.info }}>📅 {formatShortDate(b.billPeriodFrom)||b.billPeriodFrom||"?"} → {formatShortDate(b.billPeriodTo)||b.billPeriodTo||"?"}</span>
+                    </div>
+                  )}
+                  {/* Plan / recharge details */}
+                  {(b.planType||b.planDesc)&&(
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:4 }}>
+                      {b.planType&&<span style={{ background:T.accent+"16",border:`1px solid ${T.accent}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.accent }}>{b.planType}</span>}
+                      {b.planDesc&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,color:T.sub }}>{b.planDesc}</span>}
+                    </div>
+                  )}
+              {/* Validity / period display */}
+                  {(b.validFrom||b.validUntil||b.periodStart||b.periodEnd)&&(
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:6 }}>
+                      {(b.periodStart||b.validFrom)&&<span style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.info }}>From {formatShortDate(b.periodStart||b.validFrom)}</span>}
+                      {(b.periodEnd||b.validUntil)&&<span style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.info }}>Until {formatShortDate(b.periodEnd||b.validUntil)}</span>}
+                      {b.membershipEndDate&&<span style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.warn }}>Ends {formatShortDate(b.membershipEndDate)}</span>}
+                      {b.freeTrialEndDate&&<span style={{ background:T.danger+"16",border:`1px solid ${T.danger}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.danger }}>Trial ends {formatShortDate(b.freeTrialEndDate)}</span>}
+                      {b.isPaused&&<span style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.warn }}>⏸️ Paused {b.pausedDays>0?`${b.pausedDays}d`:""}</span>}
+                    </div>
+                  )}
                   <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
                     {b.status==="unpaid"&&<button onClick={(e)=>{
                       e.stopPropagation();
@@ -10022,17 +10876,58 @@ function AppContent({ onLock }) {
                       const paymentTxnId = Date.now();
                       const paymentDate = todayStr();
                       setTxns(p=>[{id:paymentTxnId,type:"expense",desc:b.name,merchant:b.merchant||"",date:paymentDate,note:"Bill payment",catId:b.catId,catIds:b.catIds||[b.catId],subId:b.subId||null,accId:payAccId,people:b.splitPeople||{},forPerson:"",groupId:b.groupId||null,groupCollectiveAmount:Number(b.groupCollectiveAmount||0),amount:b.amount||0,isBillPayment:true,billInvoiceNo:b.invoiceNo||null,paidBillId:b.id,paidBillName:b.name,imageBase64:b.imageBase64||null,paymentImageBase64:b.paymentImageBase64||null},...p]);
-                      setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:paymentDate,paidByTxnId:paymentTxnId}:x));
-                      if(b.recurring){
-                        const next=new Date(b.dueDate);
-                        if(b.frequency==="monthly") next.setMonth(next.getMonth()+1);
-                        else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3);
-                        else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6);
-                        else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1);
-                        setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],amount:b.amount,paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]);
+                      setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:paymentDate,paidByTxnId:paymentTxnId,lastPaidAmount:b.amount,lastPaidDate:paymentDate}:x));
+                      if(b.recurring && b.autoGenerate!==false){
+                        const nextDue = computeNextDueDate(b, paymentDate);
+                        const nextPeriod = computeNextPeriod(b, paymentDate);
+                        const nextValidFrom = b.billingModel==="prorata" ? nextDue : null;
+                        const nextValidUntil = b.billingModel==="prorata" && b.validityDays
+                          ? (() => { const d=new Date(nextDue); d.setDate(d.getDate()+Number(b.validityDays)-1); return d.toISOString().split("T")[0]; })()
+                          : null;
+                        setBills(p=>[{...b,
+                          id:genId(),status:"unpaid",
+                          dueDate:nextDue,
+                          billDate:paymentDate,
+                          paidDate:null,paidByTxnId:null,
+                          lastPaidAmount:b.amount,
+                          lastPaidDate:paymentDate,
+                          amount:b.isUsageBased?b.amount:b.amount,
+                          createdDate:todayStr(),createdAt:Date.now(),
+                          isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0,
+                          ...(nextPeriod||{}),
+                          ...(nextValidFrom?{validFrom:nextValidFrom}:{}),
+                          ...(nextValidUntil?{validUntil:nextValidUntil}:{}),
+                        },...p]);
                       }
                     }} style={{ ...btnP,flex:1,padding:"9px" }}>✅ Mark as Paid</button>}
                     <button onClick={(e)=>{ e.stopPropagation(); setEditingBill(b); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+                    {b.recurring&&b.status==="unpaid"&&<button onClick={(e)=>{
+                      e.stopPropagation();
+                      if(b.isPaused){
+                        // Resume: calculate days paused, extend validUntil if applicable
+                        const pausedSince = b.pausedDate ? new Date(b.pausedDate) : new Date();
+                        const today = new Date();
+                        const daysPaused = Math.max(0, Math.round((today - pausedSince) / 86400000));
+                        const totalPausedDays = (b.pausedDays||0) + daysPaused;
+                        let newValidUntil = b.validUntil;
+                        if(b.validUntil){
+                          const vu = new Date(b.validUntil);
+                          vu.setDate(vu.getDate() + daysPaused);
+                          newValidUntil = vu.toISOString().split("T")[0];
+                        }
+                        let newPeriodEnd = b.periodEnd;
+                        if(b.periodEnd){
+                          const pe = new Date(b.periodEnd);
+                          pe.setDate(pe.getDate() + daysPaused);
+                          newPeriodEnd = pe.toISOString().split("T")[0];
+                        }
+                        setBills(p=>p.map(x=>x.id===b.id?{...x,isPaused:false,resumeDate:todayStr(),pausedDays:totalPausedDays,validUntil:newValidUntil,periodEnd:newPeriodEnd}:x));
+                      } else {
+                        // Pause
+                        const reason = window.prompt("Pause reason (optional):");
+                        setBills(p=>p.map(x=>x.id===b.id?{...x,isPaused:true,pausedDate:todayStr(),resumeDate:null,pauseReason:reason||null}:x));
+                      }
+                    }} style={{ background:b.isPaused?T.success+"22":T.warn+"22",border:`1px solid ${b.isPaused?T.success:T.warn}44`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:b.isPaused?T.success:T.warn,fontFamily:"Nunito,sans-serif" }}>{b.isPaused?"▶️ Resume":"⏸️ Pause"}</button>}
                     <button onClick={(e)=>{ e.stopPropagation(); setBills(p=>p.filter(x=>x.id!==b.id)); }} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
                   </div>
                 </div>
@@ -10040,13 +10935,344 @@ function AppContent({ onLock }) {
             </div>
           );
         })}
+          </div>
+        )}
       </div>
     );
   };
 
   // ── ADD BILL MODAL ───────────────────────────────────────────────────────────
+  // -- BILLER ACCOUNT MODAL --------------------------------------------------
+  const BillerAccountModal = ({ existing, onClose }) => {
+    const isEdit = !!existing;
+    const [baName, setBaName] = useState(existing?.name||"");
+    const [baType, setBaType] = useState(existing?.type||preselectedBillerType||"");
+    const [baConsumerNo, setBaConsumerNo] = useState(existing?.consumerNo||"");
+    const [baProvider, setBaProvider] = useState(existing?.provider||"");
+    const [baAttributedTo, setBaAttributedTo] = useState(existing?.attributedTo||"");
+    const [baAttributeType, setBaAttributeType] = useState(existing?.attributeType||"house");
+    const [baNote, setBaNote] = useState(existing?.note||"");
+    const SUB_TYPES = ["Gym / Fitness","Club Membership","School Fees","Education Fees","OTT / Streaming","Other Subscription","Insurance","Society Maintenance","Hospital","Rental"];
+    const isSubType = SUB_TYPES.includes(baType);
+    const [baSubStart, setBaSubStart] = useState(existing?.subStart||"");
+    const [baSubEnd, setBaSubEnd] = useState(existing?.subEnd||"");
+    const [baAutoRenew, setBaAutoRenew] = useState(existing?.autoRenew||false);
+    const [baBillingCycle, setBaBillingCycle] = useState(existing?.billingCycle||"monthly");
+    const daysToExpiry = baSubEnd ? Math.round((new Date(baSubEnd)-new Date())/(1000*60*60*24)) : null;
+    const BILLER_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","Mobile Postpaid","Mobile Prepaid","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","OTT / Streaming","Insurance","Loan EMI","Credit Card","Recurring Deposit","NPS","School Fees","Education Fees","Municipal Tax","Municipal Services","Society Maintenance","Gym / Fitness","Club Membership","Hospital","Rental","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Other Subscription","Other"];
+    const canSave = baName.trim() && baType;
+    const handleSave = () => {
+      if(!canSave) return;
+      const record = { id:existing?.id||genId(), name:baName.trim(), type:baType, consumerNo:baConsumerNo.trim(), provider:baProvider.trim(), attributedTo:baAttributedTo, attributeType:baAttributeType, note:baNote.trim(), createdAt:existing?.createdAt||Date.now(), subStart:baSubStart||null, subEnd:baSubEnd||null, autoRenew:baAutoRenew, billingCycle:baBillingCycle||null };
+      setBillerAccounts(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[...prev,record]);
+      onClose();
+    };
+    return (
+      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit Biller Account":"Add Biller Account"}</div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Biller Name *</span>
+              <input style={inp} placeholder="e.g. Home Electricity, Nidhi Jio, Netflix" value={baName} onChange={e=>setBaName(e.target.value)} autoFocus/>
+            </div>
+            <div>
+              <span style={lbl}>Biller Type *</span>
+              <select style={inp} value={baType} onChange={e=>setBaType(e.target.value)}>
+                <option value="">Select type</option>
+                {BILLER_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <span style={lbl}>Consumer / Account Number</span>
+              <input style={inp} placeholder="e.g. 60007895307" value={baConsumerNo} onChange={e=>setBaConsumerNo(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>Provider / Issuer</span>
+              <input style={inp} placeholder="e.g. Goa Electricity Dept, Jio, Adani" value={baProvider} onChange={e=>setBaProvider(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>Attributed To</span>
+              <div style={{ display:"flex",gap:6,marginBottom:8 }}>
+                {[["house","House"],["person","Person"],["group","Group"]].map(([v,l])=>(
+                  <button key={v} onClick={()=>{ setBaAttributeType(v); setBaAttributedTo(""); }} style={{ flex:1,background:baAttributeType===v?T.accent+"22":"none",border:`1px solid ${baAttributeType===v?T.accent:T.border}`,borderRadius:10,padding:"6px 4px",cursor:"pointer",fontSize:11,fontWeight:700,color:baAttributeType===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
+                ))}
+              </div>
+              {baAttributeType==="person"&&(
+                <select style={inp} value={baAttributedTo} onChange={e=>setBaAttributedTo(e.target.value)}>
+                  <option value="">Select person</option>
+                  {people.map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
+                </select>
+              )}
+              {baAttributeType==="group"&&(
+                <select style={inp} value={baAttributedTo} onChange={e=>setBaAttributedTo(e.target.value)}>
+                  <option value="">Select group</option>
+                  {groups.map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
+                </select>
+              )}
+              {baAttributeType==="house"&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Shared household expense.</div>}
+            </div>
+            <div>
+              <span style={lbl}>Note (optional)</span>
+              <input style={inp} placeholder="Any notes about this biller" value={baNote} onChange={e=>setBaNote(e.target.value)}/>
+            </div>
+            {/* Subscription fields */}
+            {isSubType&&(
+              <div style={{ background:T.input,borderRadius:12,padding:"12px" }}>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>SUBSCRIPTION / MEMBERSHIP</div>
+                <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                    <div><span style={lbl}>Start Date</span><input style={inp} type="date" value={baSubStart} onChange={e=>setBaSubStart(e.target.value)}/></div>
+                    <div><span style={lbl}>End / Renewal Date</span><input style={inp} type="date" value={baSubEnd} onChange={e=>setBaSubEnd(e.target.value)}/></div>
+                  </div>
+                  {daysToExpiry!==null&&(
+                    <div style={{ background:daysToExpiry<=7?T.danger+"16":daysToExpiry<=30?T.warn+"16":T.success+"16",border:`1px solid ${daysToExpiry<=7?T.danger:daysToExpiry<=30?T.warn:T.success}33`,borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}>
+                      <span style={{ color:T.sub,fontSize:11 }}>{daysToExpiry<0?"Expired":"Expires in"}</span>
+                      <span style={{ color:daysToExpiry<=7?T.danger:daysToExpiry<=30?T.warn:T.success,fontSize:12,fontWeight:800 }}>{daysToExpiry<0?`${Math.abs(daysToExpiry)} days ago`:`${daysToExpiry} days`}</span>
+                    </div>
+                  )}
+                  <div>
+                    <span style={lbl}>Billing Cycle</span>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                      {["monthly","quarterly","halfyearly","annual"].map(c=>(
+                        <button key={c} onClick={()=>setBaBillingCycle(c)} style={{ background:baBillingCycle===c?T.accent+"22":"none",border:`1px solid ${baBillingCycle===c?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:baBillingCycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+                    <span style={{ color:T.sub,fontSize:12 }}>Auto-renewal</span>
+                    <button onClick={()=>setBaAutoRenew(v=>!v)} style={{ background:baAutoRenew?T.success+"22":"none",border:`1px solid ${baAutoRenew?T.success:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:baAutoRenew?T.success:T.sub,fontFamily:"Nunito,sans-serif" }}>{baAutoRenew?"ON":"OFF"}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Biller Account"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+
+  // -- BILLING TYPE HELPERS --------------------------------------------------
+  const MEMBERSHIP_TYPES = ["Gym / Fitness","Club Membership","School Fees","Education Fees","Other Subscription","Insurance","Society Maintenance","Rental"];
+  const BILL_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Hospital","Other"];
+  const HYBRID_TYPES = ["Mobile Postpaid","Mobile Prepaid","OTT / Streaming","NPS","Recurring Deposit","Loan EMI","Credit Card","Municipal Tax","Municipal Services"];
+  const getBillerActionType = type => {
+    if(MEMBERSHIP_TYPES.includes(type)) return "membership";
+    if(BILL_TYPES.includes(type)) return "bill";
+    return "hybrid";
+  };
+
+  // -- ADD MEMBERSHIP MODAL --------------------------------------------------
+  const AddMembershipModal = ({ billerAccount, existing, onClose }) => {
+    const isEdit = !!existing;
+    const [memberPersonId, setMemberPersonId] = useState(existing?.personId||"self");
+    const [amount, setAmount] = useState(existing?.amount?String(existing.amount):"");
+    const [cycle, setCycle] = useState(existing?.cycle||"monthly");
+    const [validFrom, setValidFrom] = useState(existing?.validFrom||todayStr());
+    const [graceDays, setGraceDays] = useState(existing?.graceDays?String(existing.graceDays):"0");
+    const [bulkMonths, setBulkMonths] = useState("1");
+    const [accId, setAccId] = useState(existing?.accId||accounts.find(a=>a.type!=="cc")?.id||"");
+
+    const cycleMonths = { monthly:1, quarterly:3, halfyearly:6, annual:12 };
+    const totalMonths = Number(bulkMonths) * (cycleMonths[cycle]||1);
+    const validUntil = (() => {
+      if(!validFrom) return "";
+      const d = new Date(validFrom);
+      d.setMonth(d.getMonth() + totalMonths);
+      d.setDate(d.getDate() + Number(graceDays||0));
+      d.setDate(d.getDate()-1);
+      return d.toISOString().split("T")[0];
+    })();
+    const daysLeft = validUntil ? Math.round((new Date(validUntil)-new Date())/(1000*60*60*24)) : null;
+
+    const handleSave = () => {
+      if(!amount||!validFrom) return;
+      const record = {
+        id: existing?.id||genId(),
+        billerAccountId: billerAccount.id,
+        personId: memberPersonId,
+        amount: parseFloat(amount),
+        cycle,
+        bulkMonths: Number(bulkMonths),
+        graceDays: Number(graceDays||0),
+        validFrom,
+        validUntil,
+        accId,
+        paidDate: todayStr(),
+        createdAt: existing?.createdAt||Date.now(),
+        status: "active",
+      };
+      setMemberships(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[...prev,record]);
+      onClose();
+    };
+
+    const memberPerson = memberPersonId==="self" ? null : people.find(p=>String(p.id)===String(memberPersonId));
+    return (
+      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+            <div>
+              <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit Membership":"Add Membership"}</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{getBillerIcon(billerAccount.type)} {billerAccount.name}</div>
+            </div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Member</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                <button onClick={()=>setMemberPersonId("self")} style={{ background:memberPersonId==="self"?T.accent+"22":"none",border:`1px solid ${memberPersonId==="self"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:memberPersonId==="self"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>Me</button>
+                {people.map(p=>(
+                  <button key={p.id} onClick={()=>setMemberPersonId(String(p.id))} style={{ background:memberPersonId===String(p.id)?T.accent+"22":"none",border:`1px solid ${memberPersonId===String(p.id)?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:memberPersonId===String(p.id)?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <span style={lbl}>Billing Cycle</span>
+              <div style={{ display:"flex",gap:6 }}>
+                {["monthly","quarterly","halfyearly","annual"].map(c=>(
+                  <button key={c} onClick={()=>setCycle(c)} style={{ flex:1,background:cycle===c?T.accent+"22":"none",border:`1px solid ${cycle===c?T.accent:T.border}`,borderRadius:10,padding:"6px 4px",cursor:"pointer",fontSize:10,fontWeight:700,color:cycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>Amount (per cycle)</span><input style={inp} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/></div>
+              <div><span style={lbl}>No. of cycles paying</span><input style={inp} type="number" min="1" placeholder="1" value={bulkMonths} onChange={e=>setBulkMonths(e.target.value)}/></div>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>Valid From</span><input style={inp} type="date" value={validFrom} onChange={e=>setValidFrom(e.target.value)}/></div>
+              <div><span style={lbl}>Grace Days</span><input style={inp} type="number" min="0" placeholder="0" value={graceDays} onChange={e=>setGraceDays(e.target.value)}/></div>
+            </div>
+            {validUntil&&(
+              <div style={{ background:daysLeft>=0?T.success+"16":T.danger+"16",border:`1px solid ${daysLeft>=0?T.success:T.danger}33`,borderRadius:12,padding:"10px 14px" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <span style={{ color:T.sub,fontSize:11 }}>Valid Until</span>
+                  <span style={{ color:daysLeft>=0?T.success:T.danger,fontSize:13,fontWeight:800 }}>{formatShortDate(validUntil)||validUntil}</span>
+                </div>
+                <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>
+                  {Number(bulkMonths)>1?`${bulkMonths} cycles paid`:""}{Number(graceDays)>0?` + ${graceDays} grace days`:""}
+                  {daysLeft!==null&&` — ${daysLeft>=0?`${daysLeft} days remaining`:"Expired"}`}
+                </div>
+              </div>
+            )}
+            <div>
+              <span style={lbl}>Paid From Account</span>
+              <select style={inp} value={accId} onChange={e=>setAccId(e.target.value)}>
+                {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+            <button onClick={handleSave} disabled={!amount||!validFrom} style={{ background:amount&&validFrom?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:amount&&validFrom?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Membership"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // -- ADD FEE PAYMENT MODAL -------------------------------------------------
+  const AddFeePaymentModal = ({ billerAccount, onClose }) => {
+    const [amount, setAmount] = useState("");
+    const [payDate, setPayDate] = useState(todayStr());
+    const [monthsFrom, setMonthsFrom] = useState(todayStr().slice(0,7));
+    const [monthCount, setMonthCount] = useState("1");
+    const [accId, setAccId] = useState(accounts.find(a=>a.type!=="cc")?.id||"");
+    const [note, setNote] = useState("");
+
+    const monthsArr = (() => {
+      const arr = [];
+      const start = new Date(monthsFrom+"-01");
+      for(let i=0;i<Number(monthCount);i++){
+        const d = new Date(start);
+        d.setMonth(d.getMonth()+i);
+        arr.push(d.toISOString().slice(0,7));
+      }
+      return arr;
+    })();
+    const perMonth = amount && monthCount ? Math.round(parseFloat(amount)/Number(monthCount)) : 0;
+
+    const handleSave = () => {
+      if(!amount||!payDate) return;
+      const record = {
+        id: genId(),
+        billerAccountId: billerAccount.id,
+        amount: parseFloat(amount),
+        payDate,
+        monthsFrom,
+        monthCount: Number(monthCount),
+        monthsArr,
+        perMonth,
+        accId,
+        note: note.trim(),
+        createdAt: Date.now(),
+      };
+      setFeePayments(prev=>[record,...prev]);
+      onClose();
+    };
+
+    return (
+      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+            <div>
+              <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Add Fee Payment</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{getBillerIcon(billerAccount.type)} {billerAccount.name}</div>
+            </div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Total Amount Paid</span>
+              <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center" }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>Payment Date</span><input style={inp} type="date" value={payDate} onChange={e=>setPayDate(e.target.value)}/></div>
+              <div><span style={lbl}>No. of Months</span><input style={inp} type="number" min="1" max="12" placeholder="1" value={monthCount} onChange={e=>setMonthCount(e.target.value)}/></div>
+            </div>
+            <div>
+              <span style={lbl}>Covers From (Month)</span>
+              <input style={inp} type="month" value={monthsFrom} onChange={e=>setMonthsFrom(e.target.value)}/>
+            </div>
+            {monthsArr.length>0&&(
+              <div style={{ background:T.input,borderRadius:12,padding:"10px 14px" }}>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:8 }}>MONTHLY DISTRIBUTION</div>
+                {monthsArr.map(m=>(
+                  <div key={m} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}` }}>
+                    <span style={{ color:T.sub,fontSize:12 }}>{m}</span>
+                    <span style={{ color:T.accent,fontSize:12,fontWeight:800 }}>{sym}{fmt(perMonth)}</span>
+                  </div>
+                ))}
+                <div style={{ display:"flex",justifyContent:"space-between",marginTop:6 }}>
+                  <span style={{ color:T.sub,fontSize:11 }}>Total</span>
+                  <span style={{ color:T.text,fontSize:13,fontWeight:900 }}>{sym}{fmt(parseFloat(amount)||0)}</span>
+                </div>
+              </div>
+            )}
+            <div>
+              <span style={lbl}>Paid From</span>
+              <select style={inp} value={accId} onChange={e=>setAccId(e.target.value)}>
+                {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <span style={lbl}>Note (optional)</span>
+              <input style={inp} placeholder="e.g. Term 2 fees" value={note} onChange={e=>setNote(e.target.value)}/>
+            </div>
+            <button onClick={handleSave} disabled={!amount||!payDate} style={{ background:amount&&payDate?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:amount&&payDate?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>Add Fee Payment</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const AddBillModal = () => {
-    const [name,setName]=useState("");
+    const [billerAccountId,setBillerAccountId]=useState(defaultBillerAccountId||"");
+    const selectedBA = billerAccountId ? billerAccounts.find(b=>b.id===billerAccountId) : null;
+    const _preBA = defaultBillerAccountId ? billerAccounts.find(b=>b.id===defaultBillerAccountId) : null;
+    const [name,setName]=useState(_preBA?.name||"");
     const [amount,setAmount]=useState("");
     const [billDate,setBillDate]=useState(todayStr());
     const [dueDate,setDueDate]=useState("");
@@ -10054,9 +11280,22 @@ function AppContent({ onLock }) {
     const [subId,setSubId]=useState("");
     const [recurring,setRecurring]=useState(false);
     const [frequency,setFrequency]=useState("monthly");
-    const [merchant,setMerchant]=useState("");
+    const [merchant,setMerchant]=useState(_preBA?.provider||_preBA?.name||"");
     const [billPhoto,setBillPhoto]=useState(null);
     const [invoiceNo,setInvoiceNo]=useState("");
+    const [billerCategory,setBillerCategory]=useState(_preBA?.type||"");
+    const [consumerNumber,setConsumerNumber]=useState(_preBA?.consumerNo||"");
+    const [lastPaidAmount,setLastPaidAmount]=useState("");
+    const [autoGenerate,setAutoGenerate]=useState(true);
+    const [billPeriodFrom,setBillPeriodFrom]=useState("");
+    const [billPeriodTo,setBillPeriodTo]=useState("");
+    // Prepaid recharge fields
+    const isRecharge = ["Mobile Prepaid","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","DTH"].includes(billerCategory);
+    const [validityDays,setValidityDays]=useState("");
+    const [planType,setPlanType]=useState("");
+    const [planDesc,setPlanDesc]=useState("");
+    const [validFrom2,setValidFrom2]=useState(todayStr());
+    const validUntilCalc = validityDays && validFrom2 ? (()=>{ const d=new Date(validFrom2); d.setDate(d.getDate()+Number(validityDays)); return d.toISOString().split("T")[0]; })() : "";
     // Split state
     const [billSplitPeople,setBillSplitPeople]=useState({});
     const [billGroup,setBillGroup]=useState("");
@@ -10094,7 +11333,7 @@ function AppContent({ onLock }) {
       const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
       const myShare = billIncludeMe ? Math.max(0, amt-owedByOthers) : 0;
       const groupCollectiveAmount = billGroup ? Math.max(0, amt-owedByOthers-myShare) : 0;
-      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),amount:amt,dueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring,frequency,status:"unpaid",paidDate:null,billDate:billDate||todayStr(),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto};
+      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),amount:amt,dueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring,frequency,status:"unpaid",paidDate:null,billDate:billDate||todayStr(),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto,billerAccountId:billerAccountId||null,billerCategory:billerCategory||null,consumerNumber:consumerNumber.trim()||null,lastPaidAmount:lastPaidAmount?parseFloat(lastPaidAmount):null,autoGenerate,isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0,validityDays:validityDays?Number(validityDays):null,planType:planType||null,planDesc:planDesc.trim()||null,validFrom:validFrom2||null,validUntil:validUntilCalc||null,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null};
       setBills(p=>[newBill,...p]);
 
       const matchingTxn = txns.find(t=>t.type==="expense" && !t.isBillPayment && !t.paidBillId && Number(t.amount)===amt && (billCatIds[0]? t.catId===billCatIds[0] : true));
@@ -10103,6 +11342,7 @@ function AppContent({ onLock }) {
       }
 
       setShowAddBill(false);
+      setDefaultBillerAccountId("");
     };
 
     return (
@@ -10119,13 +11359,30 @@ function AppContent({ onLock }) {
             <input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>
             {duplicateInvoiceBill && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:-4 }}>This invoice number already exists for {duplicateInvoiceBill.name}.</div>}
 
+
+
             <div>
               <span style={lbl}>Amount ({sym}) *</span>
               <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center",border:`1px solid ${amount&&parseFloat(amount)>0?T.border:T.danger+"66"}` }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
             </div>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              {/* Prepaid recharge fields */}
+              {isRecharge&&(
+                <div style={{ gridColumn:"1/-1",background:T.input,borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:8 }}>
+                  <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>RECHARGE DETAILS</div>
+                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                    <div><span style={lbl}>Recharge Date</span><input style={inp} type="date" value={validFrom2} onChange={e=>setValidFrom2(e.target.value)}/></div>
+                    <div><span style={lbl}>Validity (days)</span><input style={inp} type="number" placeholder="28, 84, 365" value={validityDays} onChange={e=>setValidityDays(e.target.value)}/></div>
+                  </div>
+                  {validUntilCalc&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(validUntilCalc)||validUntilCalc}</span></div>}
+                  <div><span style={lbl}>Plan Type</span><div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>{["Voice+Data","Data Only","Unlimited Calls","SMS+Voice"].map(pt=>(<button key={pt} onClick={()=>setPlanType(p=>p===pt?"":pt)} style={{ background:planType===pt?T.accent+"22":"none",border:`1px solid ${planType===pt?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:planType===pt?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pt}</button>))}</div></div>
+                  <div><span style={lbl}>Plan Details</span><input style={inp} placeholder="e.g. 1.5GB/day + unlimited calls" value={planDesc} onChange={e=>setPlanDesc(e.target.value)}/></div>
+                </div>
+              )}
               <div><span style={lbl}>Bill Date (generated on)</span><input style={inp} type="date" value={billDate} onChange={e=>setBillDate(e.target.value)}/></div>
               <div><span style={lbl}>Due Date (pay by)</span><input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
+              <div><span style={lbl}>Period From (optional)</span><input style={inp} type="date" value={billPeriodFrom} onChange={e=>setBillPeriodFrom(e.target.value)}/></div>
+              <div><span style={lbl}>Period To (optional)</span><input style={inp} type="date" value={billPeriodTo} onChange={e=>setBillPeriodTo(e.target.value)}/></div>
             </div>
 
             <div>
@@ -10336,6 +11593,9 @@ function AppContent({ onLock }) {
           <div style={{ display:"flex",gap:8,alignItems:"center" }}>
             <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif" }}>💼{workTripMode?" ON":""}</button>
             <button onClick={()=>{ setShowSearch(true); setSearchQuery(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Search">🔍</button>
+            <button onClick={toggleMask} style={{ background:maskMode?T.warn+"22":"none",border:`1px solid ${maskMode?T.warn:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:maskMode?T.warn:T.sub }} title={maskMode?"Tap to reveal (PIN) or disable":"Tap to hide amounts"}>{maskMode?"🙈":"👁️"}</button>
+            <button onClick={onLock} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Lock app">🔒</button>
+
             <button onClick={()=>{ if(tab==="bills") setShowAddBill(true); else { const typeMap={"expense":"expense","income":"income","transfer":"transfer","cc_payment":"cc_payment","investment":"investment","settlement_in":"settlement_in"}; setDefaultAddType(typeMap[fType]||"expense"); setShowAdd(true); } }} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Nunito,sans-serif" }}>{tab==="bills"?"+ Add Bill":"+ Add"}</button>
           </div>
         </div>}
@@ -10439,6 +11699,126 @@ function AppContent({ onLock }) {
           </div>
         )}
         {showAddBill&&<AddBillModal/>}
+        {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); }}/>}
+        {editingBillerAccount&&<BillerAccountModal existing={editingBillerAccount} onClose={()=>setEditingBillerAccount(null)}/>}
+        {showAddMembership&&activeBillerForAction&&<AddMembershipModal billerAccount={activeBillerForAction} existing={editingMembership} onClose={()=>{ setShowAddMembership(false); setEditingMembership(null); }}/>}
+        {showAddFeePayment&&activeBillerForAction&&<AddFeePaymentModal billerAccount={activeBillerForAction} onClose={()=>{ setShowAddFeePayment(false); setActiveBillerForAction(null); }}/>}
+        {/* Biller Action Sheet */}
+        {activeBillerForAction&&!showAddMembership&&!showAddFeePayment&&!showAddBill&&(()=>{
+          const ba = activeBillerForAction;
+          const actionType = getBillerActionType(ba.type);
+          const baMemberships = memberships.filter(m=>m.billerAccountId===ba.id);
+          const baFees = feePayments.filter(f=>f.billerAccountId===ba.id);
+          const baBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
+          const activeMembership = baMemberships.filter(m=>m.validUntil>=todayStr()).sort((a,b2)=>b2.validUntil.localeCompare(a.validUntil))[0];
+          return (
+            <div onClick={e=>{ if(e.target===e.currentTarget) setActiveBillerForAction(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+              <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                    <span style={{ fontSize:28 }}>{getBillerIcon(ba.type)}</span>
+                    <div>
+                      <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{ba.name}</div>
+                      <div style={{ color:T.sub,fontSize:11 }}>{ba.type}{ba.consumerNo?` · #${ba.consumerNo}`:""}</div>
+                    </div>
+                  </div>
+                  <button onClick={()=>setActiveBillerForAction(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+                </div>
+                {/* Per-person membership status */}
+                {(()=>{
+                  const allPersonIds = ["self",...people.map(p=>String(p.id))];
+                  const personsWithMem = allPersonIds.filter(pid=>baMemberships.some(m=>String(m.personId)===pid));
+                  if(personsWithMem.length===0) return null;
+                  return (<div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
+                    {personsWithMem.map(pid=>{
+                      const personName = pid==="self"?"Me":(people.find(p=>String(p.id)===pid)?.name||"Unknown");
+                      const personMems = baMemberships.filter(m=>String(m.personId)===pid).sort((a,b2)=>b2.validUntil.localeCompare(a.validUntil));
+                      const latest = personMems[0];
+                      const isActive = latest && latest.validUntil >= todayStr();
+                      const daysLeft = latest ? Math.round((new Date(latest.validUntil)-new Date())/(1000*60*60*24)) : 0;
+                      return (
+                        <div key={pid} style={{ background:isActive?T.success+"16":T.danger+"16",border:`1px solid ${isActive?T.success:T.danger}33`,borderRadius:12,padding:"10px 14px" }}>
+                          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                            <span style={{ color:isActive?T.success:T.danger,fontSize:12,fontWeight:800 }}>{isActive?"✅":"⚠️"} {personName}</span>
+                            <span style={{ color:T.sub,fontSize:11 }}>{isActive?`Until ${formatShortDate(latest.validUntil)||latest.validUntil} (${daysLeft}d)`:"Lapsed"}</span>
+                          </div>
+                          {!isActive&&latest&&(
+                            <div style={{ marginTop:8 }}>
+                              <div style={{ color:T.sub,fontSize:10,marginBottom:6 }}>Last: {formatShortDate(latest.validUntil)||latest.validUntil}</div>
+                              <button onClick={()=>{ setActiveBillerForAction(null); setDefaultAddType("expense"); setShowAdd(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>🔄 Renew {personName}</button>
+                            </div>
+                          )}
+                          <div style={{ marginTop:4,display:"flex",flexWrap:"wrap",gap:4 }}>
+                            {personMems.slice(0,3).map(m=>(<span key={m.id} style={{ background:T.pill,borderRadius:20,padding:"1px 8px",fontSize:9,color:T.sub }}>{formatShortDate(m.validFrom)||m.validFrom} → {formatShortDate(m.validUntil)||m.validUntil}</span>))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>);
+                })()}
+                {/* Actions */}
+                <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
+                  {(actionType==="membership"||actionType==="hybrid")&&(
+                    <button onClick={()=>setShowAddMembership(true)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>💪 Add Membership / Renew</button>
+                  )}
+                  {(actionType==="bill"||actionType==="hybrid")&&(
+                    <button onClick={()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); setActiveBillerForAction(null); }} style={{ background:T.info+"22",border:`1px solid ${T.info}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>📄 Add Bill</button>
+                  )}
+                  {actionType==="membership"&&(
+                    <button onClick={()=>setShowAddFeePayment(true)} style={{ background:T.warn+"22",border:`1px solid ${T.warn}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.warn,fontFamily:"Nunito,sans-serif" }}>🏫 Add Fee Payment (multi-month)</button>
+                  )}
+                </div>
+                {/* History */}
+                {baMemberships.length>0&&(
+                  <div style={{ marginBottom:12 }}>
+                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>MEMBERSHIP HISTORY</div>
+                    {baMemberships.sort((a,b2)=>b2.createdAt-a.createdAt).slice(0,5).map(m=>(
+                      <div key={m.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                        <div>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{people.find(p=>String(p.id)===String(m.personId))?.name||"Me"} · {m.cycle}</div>
+                          <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(m.validFrom)||m.validFrom} to {formatShortDate(m.validUntil)||m.validUntil}{m.graceDays>0?` (+${m.graceDays}d grace)`:""}</div>
+                        </div>
+                        <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(m.amount)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {baFees.length>0&&(
+                  <div style={{ marginBottom:12 }}>
+                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>FEE PAYMENTS</div>
+                    {baFees.sort((a,b2)=>b2.createdAt-a.createdAt).slice(0,5).map(f=>(
+                      <div key={f.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                        <div>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{f.monthCount} months · {sym}{fmt(f.perMonth)}/mo</div>
+                          <div style={{ color:T.sub,fontSize:10 }}>{f.monthsArr?.[0]} to {f.monthsArr?.[f.monthsArr.length-1]}</div>
+                        </div>
+                        <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(f.amount)}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Edit / Delete biller account */}
+                <div style={{ display:"flex",gap:8,marginTop:8 }}>
+                  <button onClick={()=>{ setEditingBillerAccount(ba); setActiveBillerForAction(null); }} style={{ flex:1,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit Account</button>
+                  <button onClick={()=>{
+                    const linkedBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
+                    const linkedMem = memberships.filter(m=>m.billerAccountId===ba.id);
+                    const linkedFee = feePayments.filter(f=>f.billerAccountId===ba.id);
+                    const total = linkedBills.length+linkedMem.length+linkedFee.length;
+                    if(total>0){
+                      alert(`Cannot delete: ${ba.name} has ${total} linked record${total>1?"s":""}. Delete the bills, memberships and fee payments first.`);
+                      return;
+                    }
+                    if(window.confirm(`Delete ${ba.name}?`)){
+                      setBillerAccounts(prev=>prev.filter(x=>x.id!==ba.id));
+                      setActiveBillerForAction(null);
+                    }
+                  }} style={{ flex:1,background:"none",border:`1px solid ${T.danger}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete Account</button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         {editingBill&&<EditBillModal b={editingBill} onClose={()=>setEditingBill(null)}/>}
         {billMatchSuggestion&&(
           <div style={{ position:"fixed",bottom:90,left:"50%",transform:"translateX(-50%)",width:"calc(100% - 32px)",maxWidth:398,background:T.card,border:`1px solid ${T.success}66`,borderRadius:16,padding:"14px 16px",zIndex:300,boxShadow:`0 4px 24px ${T.sh}` }}>
@@ -10636,36 +12016,130 @@ function AppContent({ onLock }) {
                 <div style={{ color:T.text,fontSize:17,fontWeight:900 }}>Amounts to Receive</div>
                 <button onClick={()=>setShowReceivablesList(false)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
               </div>
-              <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})} receivables from people and groups</div>
-              {monthlyReceivablePeopleList.length===0 && monthlyCollectiveGroupReceivable<=0 ? (
-                <div style={{ color:T.sub,fontSize:12 }}>No pending amount to receive for this month.</div>
-              ) : (
-                <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-                  {monthlyReceivablePeopleList.map(item=>(
-                    <div key={item.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:T.input,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 12px" }}>
-                      <div style={{ minWidth:0,flex:1 }}>
-                        <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>{item.person?.emoji||"👤"} {item.person?.name||"Person"}</div>
-                        <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{item.person?.relation||"Pending receivable"}</div>
+              <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Splits, bills and loans you are owed</div>
+              {(()=>{
+                // Merge splits and loans per person into one row
+                const splitMap = {};
+                monthlyReceivablePeopleList.forEach(item=>{ splitMap[String(item.id)] = { person:item.person, splitAmt:item.amount }; });
+                const loanMap = {};
+                activeGivenLoans.forEach(loan=>{
+                  const pid = String(loan.personId||loan.linkedPersonId||"");
+                  if(!pid) return;
+                  loanMap[pid] = (loanMap[pid]||0) + Number(loan.outstanding||0);
+                });
+                const allPids = [...new Set([...Object.keys(splitMap), ...Object.keys(loanMap)])];
+                const hasAny = allPids.length>0 || monthlyCollectiveGroupReceivable>0;
+                if(!hasAny) return <div style={{ color:T.sub,fontSize:12 }}>No pending amount to receive.</div>;
+                return (
+                  <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                    {allPids.map(pid=>{
+                      const entry = splitMap[pid];
+                      const loanAmt = loanMap[pid]||0;
+                      const splitAmt = entry?.splitAmt||0;
+                      const person = entry?.person || people.find(p=>String(p.id)===pid);
+                      const total = splitAmt + loanAmt;
+                      const sub = splitAmt>0 && loanAmt>0
+                        ? `${sym}${fmt(splitAmt)} splits + ${sym}${fmt(loanAmt)} loan`
+                        : splitAmt>0 ? "from splits / bills"
+                        : `${sym}${fmt(loanAmt)} loan outstanding`;
+                      return (
+                        <div key={pid} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:T.input,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 12px" }}>
+                          <div style={{ minWidth:0,flex:1 }}>
+                            <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>{person?.emoji||"👤"} {person?.name||"Unknown"}</div>
+                            <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{sub}</div>
+                          </div>
+                          <div style={{ color:T.accent,fontSize:13,fontWeight:900 }}>{sym}{fmt(total)}</div>
+                        </div>
+                      );
+                    })}
+                    {monthlyCollectiveGroupReceivable>0 && (
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px 12px" }}>
+                        <div style={{ minWidth:0,flex:1 }}>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>👥 Group balances</div>
+                          <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Collective amount due</div>
+                        </div>
+                        <div style={{ color:T.accent,fontSize:13,fontWeight:900 }}>{sym}{fmt(monthlyCollectiveGroupReceivable)}</div>
                       </div>
-                      <div style={{ color:T.accent,fontSize:13,fontWeight:900 }}>{sym}{fmt(item.amount)}</div>
-                    </div>
-                  ))}
-                  {monthlyCollectiveGroupReceivable>0 && (
-                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px 12px" }}>
-                      <div style={{ minWidth:0,flex:1 }}>
-                        <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>👥 Group balances</div>
-                        <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Collective amount due in this month</div>
-                      </div>
-                      <div style={{ color:T.accent,fontSize:13,fontWeight:900 }}>{sym}{fmt(monthlyCollectiveGroupReceivable)}</div>
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
         {(showAddLoan||editingLoan)&&<LoanModal item={editingLoan} onClose={()=>{ setShowAddLoan(false); setEditingLoan(null); }}/>}        
-        {repaymentLoan&&<LoanRepaymentModal item={repaymentLoan} onClose={()=>setRepaymentLoan(null)}/>}        
+        {repaymentLoan&&<LoanRepaymentModal item={repaymentLoan} onClose={()=>setRepaymentLoan(null)}/>}
+        {/* Transaction Detail */}
+        {txnDetailId&&(()=>{
+          const t = txns.find(x=>x.id===txnDetailId);
+          if(!t) return null;
+          const acc = accounts.find(a=>a.id===t.accId);
+          const tCats = (t.catIds||[t.catId]).filter(Boolean).map(cid=>cats.find(c=>String(c.id)===String(cid))?.name).filter(Boolean);
+          const billerBA = t.billerLinkId ? billerAccounts.find(b=>b.id===t.billerLinkId) : null;
+          const color = txnColor(t.type,T);
+          return (
+            <div onClick={()=>setTxnDetailId(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+              <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16 }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{t.merchant||t.who||t.desc||"Transaction"}</div>
+                    <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>{formatShortDate(t.date)||t.date} · {acc?.name||"Account"}</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ color,fontSize:22,fontWeight:900 }}>{t.type==="income"?"+":t.type==="expense"?"-":""}{sym}{fmt(t.amount)}</div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{t.type?.toUpperCase()}</div>
+                  </div>
+                </div>
+                <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                  {tCats.length>0&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Category</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{tCats.join(", ")}</span></div>}
+                  {t.note&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Note</span><span style={{ color:T.text,fontSize:12 }}>{t.note}</span></div>}
+                  {t.transactionRef&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Ref</span><span style={{ color:T.text,fontSize:12 }}>{t.transactionRef}</span></div>}
+                  {t.priceMrp&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>MRP</span><span style={{ color:T.text,fontSize:12 }}>{sym}{fmt(t.priceMrp)}</span></div>}
+                  {t.priceDiscount&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Discount</span><span style={{ color:T.success,fontSize:12,fontWeight:700 }}>-{sym}{fmt(t.priceDiscount)}</span></div>}
+                  {t.emiInterestWaiver&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Interest waiver</span><span style={{ color:T.success,fontSize:12,fontWeight:700 }}>{sym}{fmt(t.emiInterestWaiver)}</span></div>}
+                  {t.emiGstOnInterest&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>GST on interest</span><span style={{ color:T.danger,fontSize:12,fontWeight:700 }}>{sym}{fmt(t.emiGstOnInterest)}</span></div>}
+                  {billerBA&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Linked biller</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{getBillerIcon(billerBA.type)} {billerBA.name}</span></div>}
+                  {t.guestPerson&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Guest person owes</span><span style={{ color:T.warn,fontSize:12,fontWeight:700 }}>{t.guestPerson} · {sym}{fmt(t.guestPersonAmount||0)}</span></div>}
+                  {t.reimbursable&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Reimbursable</span><span style={{ color:T.warn,fontSize:12,fontWeight:700 }}>{sym}{fmt(t.reimbursableAmount||t.amount)}</span></div>}
+                  {t.discount&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Discount applied</span><span style={{ color:T.success,fontSize:12,fontWeight:700 }}>-{sym}{fmt(t.discount)}</span></div>}
+                  {t.investFolio&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Folio</span><span style={{ color:T.text,fontSize:12 }}>{t.investFolio}</span></div>}
+                  {t.investNav&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>NAV</span><span style={{ color:T.text,fontSize:12 }}>{sym}{fmt(t.investNav)}</span></div>}
+                </div>
+                <div style={{ display:"flex",gap:8,marginTop:16 }}>
+                  <button onClick={()=>{ setTxnDetailId(null); setEditTxn(t); setShowAdd(true); }} style={{ flex:1,background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+                  <button onClick={()=>setTxnDetailId(null)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+        {/* Mask PIN reveal overlay */}
+        {showMaskPin&&(
+          <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:500,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
+            <div style={{ color:"#f0a500",fontSize:20,fontWeight:900,marginBottom:6 }}>👁️ Reveal Amounts</div>
+            <div style={{ color:"rgba(255,255,255,0.5)",fontSize:12,marginBottom:28 }}>Enter PIN to view for 60 seconds</div>
+            <div style={{ display:"flex",gap:12,marginBottom:24 }}>
+              {[0,1,2,3].map(i=>(<div key={i} style={{ width:14,height:14,borderRadius:"50%",background:maskPinInput.length>i?"#f0a500":"transparent",border:"2px solid #f0a500" }}/>))}
+            </div>
+            {maskPinError&&<div style={{ color:"#ef4444",fontSize:12,marginBottom:12,fontWeight:700 }}>Wrong PIN</div>}
+            <div style={{ display:"grid",gridTemplateColumns:"repeat(3,68px)",gap:10,marginBottom:20 }}>
+              {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map(k=>(
+                <button key={k} onClick={async()=>{
+                  if(k==="") return;
+                  if(k==="⌫"){ setMaskPinInput(p=>p.slice(0,-1)); return; }
+                  const np=maskPinInput+String(k); setMaskPinInput(np);
+                  if(np.length===4){
+                    const h=await hashPin(np);
+                    if(h===appPin||np===appPin){ onMaskReveal(); setMaskPinInput(""); }
+                    else { setMaskPinInput(""); setMaskPinError(true); setTimeout(()=>setMaskPinError(false),800); }
+                  }
+                }} style={{ width:68,height:68,borderRadius:34,background:k===""?"transparent":"rgba(255,255,255,0.1)",border:k===""?"none":"1px solid rgba(255,255,255,0.2)",color:"#fff",fontSize:k==="⌫"?16:20,fontWeight:700,cursor:k===""?"default":"pointer",fontFamily:"Nunito,sans-serif" }}>{k}</button>
+              ))}
+            </div>
+            <button onClick={()=>{ setShowMaskPin(false); setMaskMode(false); setMaskPinInput(""); }} style={{ background:"none",border:"1px solid rgba(255,255,255,0.3)",borderRadius:20,padding:"8px 20px",color:"rgba(255,255,255,0.6)",fontSize:12,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Cancel &amp; Disable Masking</button>
+          </div>
+        )}
+        
         {(showAddLiability||editingLiability)&&<LiabilityModal item={editingLiability} onClose={()=>{ setShowAddLiability(false); setEditingLiability(null); }}/>}
         {(showAddAsset||editingAsset)&&<AssetModal item={editingAsset} onClose={()=>{ setShowAddAsset(false); setEditingAsset(null); }}/>}
         {showAccDetail&&<AccDetailModal/>}
