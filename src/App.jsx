@@ -2751,9 +2751,9 @@ function AppContent({ onLock }) {
     const [includeMeInSplit, setIncludeMeInSplit] = useState(isEditing ? Boolean(sourceTxn?.people?.__me__) : true);
     const [catAllocations, setCatAllocations] = useState(isEditing ? (sourceTxn?.catAllocations || {}) : {});
     const [lastEditedCatId, setLastEditedCatId] = useState("");
-    const [investType, setInvestType] = useState(isEditing ? (sourceTxn.investType || linkedInvestment?.type || "mf") : "mf");
+    const [investType, setInvestType] = useState(isEditing ? (sourceTxn.investType || linkedInvestment?.type || "mf") : (safePrefill.investType||"mf"));
     const [investFreq, setInvestFreq] = useState(isEditing ? (sourceTxn.investFreq || linkedInvestment?.freq || "") : "");
-    const [investFolio, setInvestFolio] = useState(isEditing ? (sourceTxn.investFolio || linkedInvestment?.folioNo || "") : "");
+    const [investFolio, setInvestFolio] = useState(isEditing ? (sourceTxn.investFolio || linkedInvestment?.folioNo || "") : (safePrefill.investFolio||""));
     const [investNav, setInvestNav] = useState(isEditing ? String(sourceTxn.investNav ?? linkedInvestment?.lastNav ?? "") : "");
     const [showFolioSuggestions, setShowFolioSuggestions] = useState(false);
     const [expensePaymentMode, setExpensePaymentMode] = useState("full");
@@ -3350,7 +3350,9 @@ function AppContent({ onLock }) {
         if(smsBalance !== null){
           const appBal = accountBalance(primaryAccount.id);
           balanceDiff = smsBalance - appBal;
-          if(Math.abs(balanceDiff) > 0.01){
+          // Don't auto-adjust balance during paste — it triggers full re-render
+          // Only adjust when explicitly called from balance sync, not during SMS parse
+          if(Math.abs(balanceDiff) > 0.01 && options.forceAdjust){
             setAccounts(prev=>prev.map(a=>a.id===primaryAccount.id?{...a,openingBalance:Number(a.openingBalance||0)+balanceDiff}:a));
             balanceAdjusted = true;
           }
@@ -6886,7 +6888,19 @@ function AppContent({ onLock }) {
                     <div style={{ color:T.sub,fontSize:10 }}>{sym}{fmt(r.amount)} · {accounts.find(a=>a.id===r.accId)?.name||"Account"}</div>
                   </div>
                   <div style={{ display:"flex",gap:6 }}>
-                    <button onClick={()=>{ setDefaultAddType("investment"); setShowAdd(true); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Record</button>
+                    <button onClick={()=>{
+                      setAddPrefill({
+                        amount: String(r.amount||""),
+                        accId: r.accId||"",
+                        who: r.name||"",
+                        investFolio: r.name||"",
+                        investType: r.investType||"mf",
+                        date: todayStr(),
+                        recurringScheduleId: r.id,
+                      });
+                      setDefaultAddType("investment");
+                      setShowAdd(true);
+                    }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Record</button>
                     <button onClick={()=>setRecurringSchedules(prev=>prev.map(x=>x.id===r.id?{...x,snoozedUntil:new Date(Date.now()+24*60*60*1000).toISOString().split("T")[0]}:x))} style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Snooze 1d</button>
                   </div>
                 </div>

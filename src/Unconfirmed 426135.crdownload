@@ -1,0 +1,1310 @@
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+// Build-time version stamp: V4.DDMMYYHHmmss
+const _bt = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : new Date();
+const APP_VERSION = `V4.${String(_bt.getDate()).padStart(2,"0")}${String(_bt.getMonth()+1).padStart(2,"0")}${String(_bt.getFullYear()).slice(-2)}${String(_bt.getHours()).padStart(2,"0")}${String(_bt.getMinutes()).padStart(2,"0")}${String(_bt.getSeconds()).padStart(2,"0")}`;
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
+import { getCurrentCloudUser, isCloudSyncConfigured, loadCloudSnapshot, saveCloudSnapshot, signInWithPassword, signOutCloud, signUpWithPassword, supabase } from "./cloudSync";
+// smsBridge — stub (native SMS not available in web PWA)
+const isNativeSmsAvailable = () => false;
+const readCopiedSms = async () => ({ text: "", error: "Not supported" });
+const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
+
+// ─── THEME ───────────────────────────────────────────────────────────────────
+const DARK  = { bg:"#08080f", card:"#0f0f1a", border:"#1a1a2e", text:"#e8e4dc", accent:"#f0a500", accentSoft:"rgba(240,165,0,0.1)", success:"#22c55e", danger:"#ef4444", input:"#0b0b18", nav:"#0a0a16", sub:"#5a5a7a", pill:"#14142a", sh:"rgba(0,0,0,0.6)", info:"#06b6d4", purple:"#8b5cf6", warn:"#f97316" };
+const LIGHT = { bg:"#f4f3ef", card:"#ffffff", border:"#e5e1d8", text:"#1a1a2e", accent:"#d4920a", accentSoft:"rgba(212,146,10,0.08)", success:"#16a34a", danger:"#dc2626", input:"#ede9e3", nav:"#ffffff", sub:"#7a7890", pill:"#eeecea", sh:"rgba(0,0,0,0.06)", info:"#0891b2", purple:"#7c3aed", warn:"#ea6c00" };
+
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const PALETTE = ["#f0a500","#22c55e","#3b82f6","#ef4444","#a855f7","#06b6d4","#f97316","#ec4899","#84cc16","#14b8a6","#8b5cf6","#f43f5e","#0ea5e9","#10b981","#f59e0b"];
+const CAT_ICONS = ["🍽️","🍕","🍔","🍜","🥗","🍣","☕","🍺","🛒","🥩","🚗","🏍️","✈️","🚕","⛽","🅿️","🛍️","👗","👟","💄","💍","🧴","⚡","💧","📶","🔌","💊","🏥","🩺","🧘","🏋️","🎬","🎵","🎮","🎨","📚","🏠","🔧","🪴","🛋️","👶","🧒","🎒","✏️","🧸","💰","💳","📈","🏦","🪙","👤","🐕","🐈","🌿","🌍","☀️","🎁","🎂","💼","🖥️","📱","🔭","🪒","💇","💆","💅","🧖","🏊","🚴","⛳","🎯","🎪","🏟️","🚑","🔑","🛁","🧺","🪑","🖼️","⛵","🌊","⛰️","🎓","📖","🏛️"];
+const INVEST_TYPES = [{ id:"mf", name:"Mutual Funds / SIP", icon:"📈", color:"#3b82f6" },{ id:"stocks", name:"Stocks", icon:"📊", color:"#22c55e" },{ id:"fd", name:"Fixed Deposit", icon:"🏦", color:"#f0a500" },{ id:"gold", name:"Gold", icon:"🥇", color:"#f59e0b" },{ id:"ppf", name:"PPF / NPS", icon:"🏛️", color:"#8b5cf6" },{ id:"crypto", name:"Crypto", icon:"₿", color:"#f97316" },{ id:"realestate", name:"Real Estate", icon:"🏘️", color:"#06b6d4" },{ id:"custom", name:"Custom", icon:"💼", color:"#ec4899" }];
+const ACC_TYPES = [{ id:"bank", label:"Bank Account", icon:"🏦" },{ id:"cc", label:"Credit Card", icon:"💳" },{ id:"debit", label:"Debit Card", icon:"🏧" },{ id:"upi", label:"UPI", icon:"📱" },{ id:"cash", label:"Cash", icon:"💵" }];
+const LIABILITY_TYPES = [{ id:"mortgage", name:"Mortgage / Home Loan", icon:"🏠", color:"#f97316" },{ id:"student", name:"Student Loan", icon:"🎓", color:"#8b5cf6" },{ id:"car", name:"Car Loan", icon:"🚗", color:"#3b82f6" },{ id:"tax", name:"Tax Liability", icon:"🏛️", color:"#ef4444" },{ id:"personal", name:"Personal Loan", icon:"🏦", color:"#ec4899" },{ id:"other", name:"Other Liability", icon:"📦", color:"#78716c" }];
+const ASSET_TYPES = [{ id:"realestate", name:"Real Estate", icon:"🏠", color:"#06b6d4" },{ id:"vehicle", name:"Vehicle", icon:"🚗", color:"#3b82f6" },{ id:"valuable", name:"Valuable", icon:"💎", color:"#a855f7" },{ id:"gold", name:"Gold / Jewelry", icon:"🥇", color:"#f59e0b" },{ id:"other", name:"Other Asset", icon:"📦", color:"#22c55e" }];
+const DEFAULT_INCOME_TYPES = ["salary","interest","freelance","rental","royalty","dividend","capital_gains"];
+const INVESTMENT_FREQUENCY_OPTIONS = [
+  { value:"daily", label:"Daily" },
+  { value:"weekly", label:"Weekly" },
+  { value:"monthly", label:"Monthly" },
+  { value:"quarterly", label:"Quarterly" },
+  { value:"halfyearly", label:"Half-yearly" },
+  { value:"yearly", label:"Yearly" },
+];
+
+const ME = { id:"__me__", name:"Me", emoji:"🧑", relation:"Self", color:"#f0a500", personType:"dependant", isMe:true };
+
+const DEFAULT_CATS = [
+  { id:"housing", name:"Housing", icon:"🏠", color:"#06b6d4", budget:15000, fixed:true, subs:[{id:"h1",name:"Rent / EMI"},{id:"h2",name:"Maintenance"},{id:"h3",name:"Repairs"},{id:"h4",name:"Furniture & Appliances"},{id:"h5",name:"Renovation / Interiors"},{id:"h6",name:"Property Tax"}] },
+  { id:"utilities", name:"Utilities", icon:"⚡", color:"#f59e0b", budget:5000, fixed:true, subs:[{id:"u1",name:"Electricity"},{id:"u2",name:"Water"},{id:"u3",name:"Gas"},{id:"u4",name:"Internet / WiFi"},{id:"u5",name:"Mobile Bills"},{id:"u6",name:"Software Subscriptions"},{id:"u7",name:"Cloud Storage"}] },
+  { id:"groceries", name:"Groceries", icon:"🛒", color:"#22c55e", budget:10000, fixed:true, subs:[{id:"g1",name:"Staples"},{id:"g2",name:"Vegetables"},{id:"g3",name:"Fruits"},{id:"g4",name:"Dairy"},{id:"g5",name:"Snacks & Packaged Food"}] },
+  { id:"food", name:"Food & Dining", icon:"🍽️", color:"#f97316", budget:8000, fixed:false, subs:[{id:"f1",name:"Swiggy / Zomato"},{id:"f2",name:"Restaurants"},{id:"f3",name:"Cafes"},{id:"f4",name:"Treating Others"}] },
+  { id:"transport", name:"Transport", icon:"🚗", color:"#3b82f6", budget:5000, fixed:false, subs:[{id:"t1",name:"Fuel"},{id:"t2",name:"Uber / Ola"},{id:"t3",name:"Public Transport"},{id:"t4",name:"EMI"},{id:"t5",name:"Insurance"},{id:"t6",name:"Servicing & Repairs"},{id:"t7",name:"Parking & Tolls"},{id:"t8",name:"PUC"},{id:"t9",name:"Challan / Fine"}] },
+  { id:"financial", name:"Financial", icon:"💳", color:"#8b5cf6", budget:30000, fixed:true, subs:[{id:"fi1",name:"SIP / Mutual Funds"},{id:"fi2",name:"Stocks"},{id:"fi3",name:"PPF / NPS"},{id:"fi4",name:"Term Insurance"},{id:"fi5",name:"Health Insurance"},{id:"fi6",name:"Credit Card Bills"},{id:"fi7",name:"Loan EMI"},{id:"fi8",name:"Bank Charges"}] },
+  { id:"health", name:"Health", icon:"💊", color:"#ec4899", budget:3000, fixed:true, subs:[{id:"he1",name:"Doctor Consultation"},{id:"he2",name:"Medicines"},{id:"he3",name:"Diagnostics / Tests"},{id:"he4",name:"Health Checkups"},{id:"he5",name:"Supplements"}] },
+  { id:"fitness", name:"Fitness", icon:"🏋️", color:"#14b8a6", budget:2000, fixed:false, subs:[{id:"fit1",name:"Gym"},{id:"fit2",name:"Sports"},{id:"fit3",name:"Yoga / Trainer"},{id:"fit4",name:"Fitness Apps"}] },
+  { id:"personaldev", name:"Personal Development", icon:"📚", color:"#0ea5e9", budget:2000, fixed:false, subs:[{id:"pd1",name:"Courses"},{id:"pd2",name:"Books"},{id:"pd3",name:"Workshops"},{id:"pd4",name:"Coaching / Mentorship"}] },
+  { id:"lifestyle", name:"Lifestyle", icon:"👗", color:"#a855f7", budget:5000, fixed:false, subs:[{id:"l1",name:"Clothes"},{id:"l2",name:"Shoes"},{id:"l3",name:"Grooming / Salon"},{id:"l4",name:"Skincare / Cosmetics"},{id:"l5",name:"Accessories / Gadgets"}] },
+  { id:"entertainment", name:"Entertainment", icon:"🎬", color:"#f43f5e", budget:2000, fixed:false, subs:[{id:"e1",name:"OTT Subscriptions"},{id:"e2",name:"Movies"},{id:"e3",name:"Events / Shows"}] },
+  { id:"travel", name:"Travel", icon:"✈️", color:"#06b6d4", budget:5000, fixed:false, subs:[{id:"tr1",name:"Flights"},{id:"tr2",name:"Trains / Buses"},{id:"tr3",name:"Hotels"},{id:"tr4",name:"Local Transport"},{id:"tr5",name:"Activities"},{id:"tr6",name:"Shopping"}] },
+  { id:"family", name:"Groups & Social", icon:"👥", color:"#f0a500", budget:5000, fixed:false, subs:[{id:"fa1",name:"Gifts"},{id:"fa2",name:"Family Support"},{id:"fa3",name:"Festivals"},{id:"fa4",name:"Weddings / Functions"}] },
+  { id:"donations", name:"Donations", icon:"🙏", color:"#84cc16", budget:1000, fixed:false, subs:[{id:"d1",name:"Charity"},{id:"d2",name:"Religious Contributions"}] },
+  { id:"professional", name:"Professional", icon:"💼", color:"#475569", budget:2000, fixed:false, subs:[{id:"pr1",name:"Work Travel"},{id:"pr2",name:"Networking"},{id:"pr3",name:"Tools / Software"},{id:"pr4",name:"Office Setup"}] },
+  { id:"taxes", name:"Taxes", icon:"🏛️", color:"#dc2626", budget:5000, fixed:true, subs:[{id:"tx1",name:"Income Tax"},{id:"tx2",name:"CA / Filing Fees"}] },
+  { id:"emergency", name:"Emergency", icon:"🚑", color:"#ef4444", budget:5000, fixed:true, subs:[{id:"em1",name:"Medical Emergency"},{id:"em2",name:"Urgent Repairs"},{id:"em3",name:"Contingency"}] },
+  { id:"misc", name:"Miscellaneous", icon:"📦", color:"#78716c", budget:2000, fixed:false, subs:[{id:"m1",name:"Cash Expenses"},{id:"m2",name:"Tips"},{id:"m3",name:"Unplanned Purchases"}] },
+];
+
+const DEFAULT_ACCOUNTS = [
+  { id:"bank1", type:"bank", name:"ICICI Savings", last4:"3310", color:"#22c55e", openingBalance:0 },
+  { id:"cc1", type:"cc", name:"HDFC Sapphire", last4:"4242", color:"#3b82f6", limit:300000, outstanding:0, statementDate:15, dueDate:5, billingCycle:"15th–14th", alertPct:30 },
+  { id:"upi1", type:"upi", name:"GPay", handle:"", color:"#a855f7" },
+  { id:"cash1", type:"cash", name:"Cash Wallet", color:"#f0a500", openingBalance:0 },
+];
+const DEFAULT_MEASURE_UNITS = ["kg","g","ltr","ml","nos","pkt","dozen","box"];
+
+// ─── UTILS ───────────────────────────────────────────────────────────────────
+const genId = () => Math.random().toString(36).slice(2,9);
+const todayStr = () => new Date().toISOString().split("T")[0];
+const sym = "₹";
+const fmt = n => { const num = Number(n||0); return num.toLocaleString("en-IN", { minimumFractionDigits: num % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 }); };
+const fmtK = n => { const num = Number(n||0); if(num >= 100000) return (num/100000).toFixed(1).replace(/\.0$/,"")+"L"; if(num >= 1000) return (num/1000).toFixed(1).replace(/\.0$/,"")+"K"; return fmt(num); };
+const parseMoney = v => {
+  const cleaned = String(v ?? "").replace(/[₹,\s]/g,"");
+  const num = parseFloat(cleaned);
+  return Number.isFinite(num) ? num : 0;
+};
+const cleanMoneyInput = v => {
+  const stripped = String(v ?? "").replace(/[₹,\s]/g, "");
+  const cleaned = stripped.replace(/[^\d.]/g, "");
+  const dotIndex = cleaned.indexOf(".");
+  if(dotIndex === -1) return cleaned;
+  const whole = cleaned.slice(0, dotIndex);
+  const decimal = cleaned.slice(dotIndex + 1).replace(/\./g, "");
+  return `${whole}.${decimal}`;
+};
+const extractTxnReference = txt => {
+  const s = String(txt ?? "");
+  const labeled = s.match(/(?:utr|rrn|ref(?:erence)?(?:\s*(?:no\.?|id|number))?|txn(?:\s*(?:id|no|ref))?|transaction\s*(?:id|no|ref)?|upi\s*(?:ref(?:erence)?)?(?:\s*(?:no\.?|id))?|imps\s*(?:ref(?:no\.?)?)?|neft\s*(?:ref)?)[\s:#\/-]*([A-Z0-9]{6,})/i);
+  if(labeled?.[1]) return labeled[1].trim();
+  return "";
+};
+const extractSmsBalance = txt => {
+  const m = String(txt ?? "").match(/(?:avail(?:able)?[\s\w]{0,10}(?:bal(?:ance)?|limit)|(?:a\/c\s+)?bal(?:ance)?(?:\s+(?:is|:|-))?|closing\s+bal|avl\.?\s+bal|a\/c\s+bal)[\s:]*(?:Rs\.?|INR|\u20b9)?\s*([\d,]+(?:\.\d{1,2})?)/i);
+  return m ? parseFloat(m[1].replace(/,/g,"")) : null;
+};
+// F12: Compute next due date based on billing model
+const computeNextDueDate = (bill, paidDate) => {
+  const base = bill.billingModel === "prorata"
+    ? new Date(paidDate || bill.dueDate || bill.activationDate || new Date())
+    : new Date(bill.periodEnd || bill.dueDate || new Date());
+  const next = new Date(base);
+  const freq = bill.frequency || "monthly";
+  if(freq === "monthly") next.setMonth(next.getMonth() + 1);
+  else if(freq === "quarterly") next.setMonth(next.getMonth() + 3);
+  else if(freq === "halfyearly") next.setMonth(next.getMonth() + 6);
+  else if(freq === "annual" || freq === "yearly") next.setFullYear(next.getFullYear() + 1);
+  else if(freq === "custom" && bill.validityDays) next.setDate(next.getDate() + Number(bill.validityDays));
+  return next.toISOString().split("T")[0];
+};
+const computeNextPeriod = (bill, paidDate) => {
+  if(bill.billingModel !== "calendar" || !bill.periodStart || !bill.periodEnd) return null;
+  const start = new Date(bill.periodEnd); start.setDate(start.getDate() + 1);
+  const end = new Date(start);
+  const freq = bill.frequency || "monthly";
+  if(freq === "monthly") end.setMonth(end.getMonth() + 1);
+  else if(freq === "quarterly") end.setMonth(end.getMonth() + 3);
+  else if(freq === "halfyearly") end.setMonth(end.getMonth() + 6);
+  else if(freq === "annual" || freq === "yearly") end.setFullYear(end.getFullYear() + 1);
+  end.setDate(end.getDate() - 1);
+  return { periodStart: start.toISOString().split("T")[0], periodEnd: end.toISOString().split("T")[0] };
+};
+const normalizeIncomeTypeValue = value => String(value ?? "")
+  .trim()
+  .toLowerCase()
+  .replace(/&/g," and ")
+  .replace(/[^\w\s-]/g,"")
+  .replace(/[\s-]+/g,"_")
+  .replace(/^_+|_+$/g,"");
+const normalizeMeasureUnitValue = value => String(value ?? "")
+  .trim()
+  .toLowerCase()
+  .replace(/\./g, "")
+  .replace(/\s+/g, "_");
+const formatMeasureUnitLabel = value => String(value || "")
+  .replace(/_/g, " ")
+  .replace(/\b\w/g, ch=>ch.toUpperCase());
+const normalizeMeasureUnits = stored => {
+  const fromStored = Array.isArray(stored) ? stored : [];
+  return Array.from(new Set([...DEFAULT_MEASURE_UNITS, ...fromStored]
+    .map(normalizeMeasureUnitValue)
+    .filter(Boolean)));
+};
+const normalizeItemCatalog = stored => {
+  const list = Array.isArray(stored) ? stored : [];
+  return list
+    .map(item=>({
+      id:item?.id || genId(),
+      name:String(item?.name || "").trim(),
+      unit:normalizeMeasureUnitValue(item?.unit || "nos") || "nos",
+      catId:item?.catId || "",
+      subId:item?.subId || "",
+    }))
+    .filter(item=>item.name);
+};
+const formatIncomeTypeLabel = value => {
+  const normalized = normalizeIncomeTypeValue(value) || String(value ?? "").trim();
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map(part=>part.charAt(0).toUpperCase()+part.slice(1))
+    .join(" ");
+};
+const normalizeIncomeTypes = stored => Array.from(new Set(
+  [...DEFAULT_INCOME_TYPES, ...(Array.isArray(stored) ? stored : [])]
+    .map(normalizeIncomeTypeValue)
+    .filter(Boolean)
+));
+const normalizeLiabilityTypes = stored => {
+  const extras = [];
+  const seenIds = new Set(LIABILITY_TYPES.map(item=>item.id));
+  const seenNames = new Set(LIABILITY_TYPES.map(item=>normalizeIncomeTypeValue(item.name)));
+  (Array.isArray(stored) ? stored : []).forEach((entry, index) => {
+    const rawName = typeof entry === "string" ? entry : entry?.name;
+    const name = String(rawName ?? "").trim();
+    const normalizedName = normalizeIncomeTypeValue(name);
+    if(!name || !normalizedName || seenNames.has(normalizedName)) return;
+    let id = normalizedName || `liability_${index+1}`;
+    while(seenIds.has(id)) id = `${normalizedName}_${index+1}`;
+    seenIds.add(id);
+    seenNames.add(normalizedName);
+    extras.push({
+      id,
+      name,
+      icon: typeof entry === "object" && entry?.icon ? entry.icon : "🧾",
+      color: typeof entry === "object" && entry?.color ? entry.color : "#ef4444",
+      custom:true,
+    });
+  });
+  return extras;
+};
+const defaultAccountTypeBucket = baseType => baseType==="cc" ? "liability" : "cash";
+const inferAccountBucket = (value, fallback = "cash") => {
+  const text = String(value ?? "").toLowerCase();
+  if(/ppf|nps|pf\b|provident|retirement|fd\b|fixed deposit|term deposit|demat|broker|investment|mutual fund|sip\b|stocks?|equity|gold|crypto|real estate|property/.test(text)) return "investment";
+  return fallback;
+};
+const accountBucketLabel = bucket => bucket==="investment" ? "Investment / Wealth" : bucket==="liability" ? "Liability" : "Cash / Spending";
+const normalizeAccountTypes = (stored, extraBehaviors=[]) => {
+  const allBaseBehaviors = [...ACC_TYPES, ...(Array.isArray(extraBehaviors) ? extraBehaviors : [])];
+  const rawList = Array.isArray(stored) ? stored : [];
+  const overrides = new Map(
+    rawList
+      .filter(entry=>entry && typeof entry === "object" && entry.id)
+      .map(entry=>[String(entry.id), entry])
+  );
+  const defaults = allBaseBehaviors.map(item=>{
+    const override = overrides.get(item.id);
+    return {
+      ...item,
+      label:override?.label || item.label,
+      icon:override?.icon || item.icon,
+      baseType:item.id,
+      bucket:override?.bucket || defaultAccountTypeBucket(item.baseType||item.id),
+      custom:false,
+    };
+  });
+  const seenIds = new Set(defaults.map(item=>item.id));
+  const extras = [];
+  rawList.forEach((entry, index) => {
+    if(!entry || typeof entry !== "object") return;
+    const label = String(entry.label ?? entry.name ?? "").trim();
+    if(!label) return;
+    const requestedId = String(entry.id ?? "").trim();
+    if(requestedId && seenIds.has(requestedId)) return;
+    const baseType = allBaseBehaviors.some(item=>item.id===entry.baseType) ? entry.baseType : "bank";
+    let id = requestedId || normalizeIncomeTypeValue(label) || `account_type_${index+1}`;
+    while(seenIds.has(id)) id = `${normalizeIncomeTypeValue(label) || "account_type"}_${index+1}`;
+    seenIds.add(id);
+    const baseMeta = allBaseBehaviors.find(item=>item.id===baseType) || ACC_TYPES[0];
+    extras.push({
+      id,
+      label,
+      icon:entry.icon || baseMeta.icon,
+      baseType,
+      bucket:entry.bucket || inferAccountBucket(label, defaultAccountTypeBucket(baseType)),
+      custom:true,
+    });
+  });
+  return [...defaults, ...extras];
+};
+const normalizeVendorText = value => String(value ?? "")
+  .toLowerCase()
+  .replace(/[^a-z0-9\s]/g, " ")
+  .replace(/\s+/g, " ")
+  .trim();
+const VENDOR_CATEGORY_RULES = [
+  { pattern: /swiggy|zomato|dominos|pizza|burger|starbucks|kfc|mcd|restaurant|cafe/, catId: "food", label: "food delivery / dining vendor" },
+  { pattern: /uber|ola|rapido|petrol|fuel|shell|hpcl|iocl|parking|toll/, catId: "transport", label: "transport vendor" },
+  { pattern: /amazon|flipkart|myntra|ajio|nykaa|meesho/, catId: "lifestyle", label: "shopping vendor" },
+  { pattern: /apollo|pharmacy|medplus|hospital|clinic|diagnostic/, catId: "health", label: "health vendor" },
+  { pattern: /airtel|jio|bsnl|wifi|broadband|electricity|water|gas/, catId: "utilities", label: "utility bill vendor" },
+  { pattern: /netflix|spotify|hotstar|prime video|bookmyshow/, catId: "entertainment", label: "entertainment vendor" },
+  { pattern: /blinkit|zepto|bigbasket|instamart|grofers/, catId: "groceries", label: "grocery vendor" },
+];
+const investmentFreqLabel = freq => {
+  if(freq==="daily") return "Daily";
+  if(freq==="weekly") return "Weekly";
+  if(freq==="monthly") return "Monthly";
+  if(freq==="halfyearly") return "Half-yearly";
+  if(freq==="quarterly") return "Quarterly";
+  if(freq==="yearly") return "Yearly";
+  if(freq==="one-time") return "One-time";
+  return "";
+};
+const getInvestmentBudgetMeta = type => {
+  if(type==="mf") return { catId:"financial", subId:"fi1" };
+  if(type==="stocks" || type==="crypto" || type==="gold") return { catId:"financial", subId:"fi2" };
+  if(type==="ppf" || type==="fd" || type==="realestate") return { catId:"financial", subId:"fi3" };
+  return { catId:"financial", subId:null };
+};
+const getInvestmentMetricConfig = type => {
+  if(type==="mf") return { show:true, label:"NAV", placeholder:"e.g. 23.45", hint:"Track the latest NAV per unit for this fund.", shortLabel:"NAV" };
+  if(type==="stocks") return { show:true, label:"Units", placeholder:"e.g. 10", hint:"Track how many shares or units were bought.", shortLabel:"Units" };
+  if(type==="gold") return { show:true, label:"Weight (grams)", placeholder:"e.g. 12.5", hint:"Track gold weight in grams.", shortLabel:"Gold" };
+  if(type==="crypto") return { show:true, label:"Units", placeholder:"e.g. 0.015", hint:"Track the number of coins or tokens.", shortLabel:"Units" };
+  if(type==="ppf") return { show:false, label:"", placeholder:"", hint:"PPF / NPS is tracked by contribution amount; no NAV is required. If you created a PPF account, record the money movement as a Transfer into that account.", shortLabel:"" };
+  if(type==="fd") return { show:false, label:"", placeholder:"", hint:"FD is tracked by deposit value; no NAV is required.", shortLabel:"" };
+  if(type==="realestate") return { show:false, label:"", placeholder:"", hint:"Real estate is tracked by current value; no NAV is required.", shortLabel:"" };
+  return { show:false, label:"", placeholder:"", hint:"This holding is tracked by amount or current value.", shortLabel:"" };
+};
+const formatInvestmentMetric = (type, rawValue) => {
+  const value = Number(rawValue || 0);
+  if(!value) return "";
+  if(type==="mf") return `NAV ${fmt(value)}`;
+  if(type==="gold") return `${fmt(value)} g`;
+  if(type==="stocks" || type==="crypto") return `${fmt(value)} units`;
+  const config = getInvestmentMetricConfig(type);
+  return config.show && config.shortLabel ? `${config.shortLabel} ${fmt(value)}` : "";
+};
+const getInvestmentGroupMeta = inv => {
+  const type = String(inv?.type || "custom");
+  const folioNo = String(inv?.folioNo || "").trim();
+  const name = String(inv?.name || "Investment").trim() || "Investment";
+  if(type === "mf" && folioNo) return { key:`${type}|folio|${folioNo.toLowerCase()}`, folioNo, primaryName:name };
+  const normalizedName = normalizeVendorText(name);
+  if(normalizedName) return { key:`${type}|name|${normalizedName}`, folioNo:"", primaryName:name };
+  return { key:`${type}|single|${String(inv?.linkedInvestmentId || inv?.id || name)}`, folioNo:"", primaryName:name };
+};
+const inferInvestmentTypeId = value => {
+  const text = normalizeVendorText(value);
+  if(!text) return "custom";
+  if(/mutual fund|sip\b|mf\b/.test(text)) return "mf";
+  if(/stocks?|share|equity|demat/.test(text)) return "stocks";
+  if(/ppf|nps|pf\b|provident|retirement/.test(text)) return "ppf";
+  if(/fd\b|fixed deposit|term deposit/.test(text)) return "fd";
+  if(/gold|sovereign/.test(text)) return "gold";
+  if(/crypto|bitcoin|btc|eth/.test(text)) return "crypto";
+  if(/real estate|property|house|flat|plot/.test(text)) return "realestate";
+  return "custom";
+};
+const getTxnCategoryIds = txn => {
+  if(txn?.type==="investment") return [];
+  if(Array.isArray(txn?.catIds) && txn.catIds.length) return txn.catIds.filter(Boolean);
+  if(txn?.catId) return [txn.catId];
+  return [];
+};
+const getTxnSubIds = txn => {
+  if(txn?.type==="investment") return [];
+  if(Array.isArray(txn?.subIds) && txn.subIds.length) return txn.subIds.filter(Boolean);
+  if(txn?.subId) return [txn.subId];
+  return [];
+};
+const daysInMonth = (monthKey) => {
+  if(monthKey){
+    const [y,m] = monthKey.split("-").map(Number);
+    if(!y||!m) return 31;
+    return new Date(y, m, 0).getDate();
+  }
+  const n = new Date();
+  return new Date(n.getFullYear(), n.getMonth()+1, 0).getDate();
+};
+const daysLeft = (monthKey) => {
+  const today = new Date();
+  const nowKey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
+  if(!monthKey || monthKey === nowKey){
+    return Math.max(0, daysInMonth(nowKey) - today.getDate());
+  }
+  if(monthKey < nowKey) return 0;
+  return daysInMonth(monthKey);
+};
+const getMonthBounds = (monthKey = todayStr().slice(0,7)) => {
+  const [year, month] = String(monthKey || todayStr().slice(0,7)).split("-").map(Number);
+  const safeYear = year || new Date().getFullYear();
+  const safeMonth = month || (new Date().getMonth() + 1);
+  const start = `${safeYear}-${String(safeMonth).padStart(2,"0")}-01`;
+  const end = `${safeYear}-${String(safeMonth).padStart(2,"0")}-${String(new Date(safeYear, safeMonth, 0).getDate()).padStart(2,"0")}`;
+  return { start, end };
+};
+const getPreviousMonthKey = (monthKey = todayStr().slice(0,7)) => {
+  const [year, month] = String(monthKey || todayStr().slice(0,7)).split("-").map(Number);
+  const ref = new Date((year || new Date().getFullYear()), (month || 1) - 2, 1);
+  return `${ref.getFullYear()}-${String(ref.getMonth()+1).padStart(2,"0")}`;
+};
+const MONTH_NAME_MAP = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, sept:9, oct:10, nov:11, dec:12 };
+const toFourDigitYear = year => {
+  const num = Number(year);
+  if(!Number.isFinite(num)) return null;
+  if(num >= 100) return num;
+  return num >= 70 ? 1900 + num : 2000 + num;
+};
+const buildIsoDate = (year, month, day) => {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if(!y || !m || !d || m < 1 || m > 12) return "";
+  const maxDay = new Date(y, m, 0).getDate();
+  if(d < 1 || d > maxDay) return "";
+  return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+};
+const normalizeToIsoDate = value => {
+  if(!value) return "";
+  if(value instanceof Date && !Number.isNaN(value.getTime())){
+    return buildIsoDate(value.getFullYear(), value.getMonth()+1, value.getDate());
+  }
+  const cleaned = String(value)
+    .trim()
+    .replace(/\b(\d{1,2})(st|nd|rd|th)\b/gi, "$1")
+    .replace(/,/g, " ")
+    .replace(/\s+/g, " ");
+  if(!cleaned) return "";
+
+  let match = cleaned.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if(match) return buildIsoDate(match[1], match[2], match[3]);
+
+  match = cleaned.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+  if(match){
+    const first = Number(match[1]);
+    const second = Number(match[2]);
+    const year = toFourDigitYear(match[3]);
+    if(!year) return "";
+    if(first > 12 && second <= 12) return buildIsoDate(year, second, first);
+    if(second > 12 && first <= 12) return buildIsoDate(year, first, second);
+    return buildIsoDate(year, second, first); // default DD/MM for ambiguous numeric dates
+  }
+
+  match = cleaned.match(/^([A-Za-z]+)\s+(\d{1,2})\s+(\d{2,4})$/);
+  if(match){
+    const month = MONTH_NAME_MAP[match[1].slice(0,4).toLowerCase()] || MONTH_NAME_MAP[match[1].slice(0,3).toLowerCase()];
+    const year = toFourDigitYear(match[3]);
+    return month && year ? buildIsoDate(year, month, match[2]) : "";
+  }
+
+  match = cleaned.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{2,4})$/);
+  if(match){
+    const month = MONTH_NAME_MAP[match[2].slice(0,4).toLowerCase()] || MONTH_NAME_MAP[match[2].slice(0,3).toLowerCase()];
+    const year = toFourDigitYear(match[3]);
+    return month && year ? buildIsoDate(year, month, match[1]) : "";
+  }
+
+  const fallback = new Date(cleaned);
+  if(!Number.isNaN(fallback.getTime())){
+    return buildIsoDate(fallback.getFullYear(), fallback.getMonth()+1, fallback.getDate());
+  }
+  return "";
+};
+const extractDateFromText = text => {
+  const patterns = [
+    /\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b/,
+    /\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/,
+    /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*,)?\s+\d{2,4}\b/i,
+    /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*(?:\s*,)?\s+\d{2,4}\b/i,
+  ];
+  for(const pattern of patterns){
+    const match = String(text || "").match(pattern);
+    const iso = normalizeToIsoDate(match?.[0] || "");
+    if(iso) return iso;
+  }
+  return "";
+};
+const toDateOnly = value => {
+  const iso = normalizeToIsoDate(value);
+  if(!iso) return null;
+  const [y,m,d] = iso.split("-").map(Number);
+  return new Date(y, m-1, d, 12, 0, 0, 0);
+};
+const formatShortDate = value => {
+  const d = toDateOnly(value);
+  if(!d) return "";
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = d.toLocaleString("en-IN", { month:"short" });
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+const getRecordedSortValue = item => {
+  if(!item) return 0;
+  const activityText = item.date || item.paidDate || item.createdDate || item.dueDate || "";
+  const activityTime = toDateOnly(activityText)?.getTime() || 0;
+  if(Number.isFinite(activityTime) && activityTime > 0) return activityTime;
+  const updatedAt = Number(item.updatedAt || 0);
+  if(Number.isFinite(updatedAt) && updatedAt > 0) return updatedAt;
+  const createdAt = Number(item.createdAt || 0);
+  if(Number.isFinite(createdAt) && createdAt > 0) return createdAt;
+  const numericId = Number(item.id || 0);
+  if(Number.isFinite(numericId) && numericId > 0) return numericId;
+  return 0;
+};
+const isDateInRange = (txnDate, startDate, endDate) => {
+  const txnTime = toDateOnly(txnDate)?.getTime();
+  if(!txnTime) return !startDate && !endDate;
+  const startTime = startDate ? toDateOnly(startDate)?.getTime() : null;
+  const endTime = endDate ? toDateOnly(endDate)?.getTime() : null;
+  if(startTime && txnTime < startTime) return false;
+  if(endTime && txnTime > endTime) return false;
+  return true;
+};
+const txnHasPerson = (txn, personId) => {
+  if(!txn || !personId || personId === "all") return true;
+  if(String(txn.forPerson||"")===String(personId)) return true;
+  if(String(txn.fromPersonId||"")===String(personId)) return true;
+  if(String(txn.toPersonId||"")===String(personId)) return true;
+  return Object.keys(txn.people||{}).some(pid=>String(pid)===String(personId));
+};
+const nearlyEqualMoney = (a,b) => Math.abs(Number(a||0) - Number(b||0)) < 0.01;
+const dateAtDay = (year, monthIndex, day) => {
+  const safeDay = Math.max(1, Number(day)||1);
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  return new Date(year, monthIndex, Math.min(safeDay, lastDay), 12, 0, 0, 0);
+};
+const getNextDueDate = (startDate, dueDay) => {
+  const base = toDateOnly(startDate) || new Date();
+  const safeDay = Math.max(1, Math.min(31, parseInt(dueDay || base.getDate(), 10) || base.getDate()));
+  let candidate = dateAtDay(base.getFullYear(), base.getMonth(), safeDay);
+  if(candidate < base) candidate = dateAtDay(base.getFullYear(), base.getMonth() + 1, safeDay);
+  return candidate.toISOString().split("T")[0];
+};
+const getCardCycleDates = (card, refDate = new Date()) => {
+  const statementDay = Math.max(1, Math.min(31, parseInt(card?.statementDate || 15, 10)));
+  const dueDay = Math.max(1, Math.min(31, parseInt(card?.dueDate || 5, 10)));
+  const ref = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate(), 12, 0, 0, 0);
+
+  let lastStatementDate = dateAtDay(ref.getFullYear(), ref.getMonth(), statementDay);
+  if(ref < lastStatementDate) lastStatementDate = dateAtDay(ref.getFullYear(), ref.getMonth() - 1, statementDay);
+
+  const prevStatementDate = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth() - 1, statementDay);
+  const nextStatementDate = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth() + 1, statementDay);
+
+  let dueOn = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth(), dueDay);
+  if(dueOn <= lastStatementDate) dueOn = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth() + 1, dueDay);
+
+  return { prevStatementDate, lastStatementDate, nextStatementDate, dueOn };
+};
+const accIcon = value => {
+  if(value && typeof value === "object" && value.typeIcon) return value.typeIcon;
+  const t = typeof value === "object" ? value?.type : value;
+  return t==="bank"?"🏦":t==="cc"?"💳":t==="debit"?"🏧":t==="upi"?"📱":"💵";
+};
+const accLabel = value => {
+  if(value && typeof value === "object" && value.typeLabel) return value.typeLabel;
+  const t = typeof value === "object" ? value?.type : value;
+  return t==="bank"?"Bank Account":t==="cc"?"Credit Card":t==="debit"?"Debit Card":t==="upi"?"UPI":"Cash";
+};
+const isInvestmentAccount = account => {
+  if(!account || account.type==="cc") return false;
+  if(account.typeBucket==="investment" || account.bucket==="investment" || account.accountTypeBucket==="investment") return true;
+  const fallback = defaultAccountTypeBucket(account.type || account.baseType || "bank");
+  return inferAccountBucket(`${account.typeLabel||account.label||""} ${account.name||""} ${account.accountTypeId||account.baseType||""}`, fallback) === "investment";
+};
+const txnColor = (txnOrType,T) => {
+  const type = typeof txnOrType === "string" ? txnOrType : txnOrType?.type;
+  const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
+  if(isRefund) return T.text;
+  if(type==="income") return T.success;
+  if(type==="expense") return T.danger;
+  if(type==="transfer" || type==="settlement_in" || type==="settlement_out") return T.info;
+  if(type==="cc_payment" || type==="cc_emi") return T.purple;
+  if(type==="investment") return T.info;
+  return T.sub;
+};
+const txnLabel = txnOrType => {
+  const type = typeof txnOrType === "string" ? txnOrType : txnOrType?.type;
+  const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
+  if(isRefund) return "Refund";
+  const hasSettlementLinks = typeof txnOrType === "object" && (txnOrType?.settlementLinks?.length||0)>0;
+  if(type==="settlement_in") return hasSettlementLinks ? "Repayment" : "Reimbursement";
+  return type==="income"?"Income":type==="transfer"?"Transfer":type==="cc_payment"?"CC Payment":type==="cc_emi"?"CC EMI":type==="settlement_out"?"Settlement Out":type==="investment"?"Investment":"Expense";
+};
+const txnEmoji = txnOrType => {
+  const type = typeof txnOrType === "string" ? txnOrType : txnOrType?.type;
+  const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
+  if(isRefund) return "↩️";
+  return type==="income"?"💚":type==="transfer"?"🔄":type==="cc_payment"?"💳":type==="cc_emi"?"💳":type==="settlement_in"?"💼":type==="settlement_out"?"📤":type==="investment"?"💹":"💸";
+};
+const getTxnDisplayTitle = txn => {
+  if(!txn) return "—";
+  const desc = String(txn.desc || "").trim();
+  const merchant = String(txn.merchant || "").trim();
+  const note = String(txn.note || "").trim();
+  if(txn.type === "cc_payment" || txn.type === "transfer") return desc || note || merchant || "—";
+  return desc || merchant || note || "—";
+};
+const extractSmsLast4s = txt => {
+  const text = String(txt||"");
+  const hits = [];
+  const patterns = [
+    /(?:a\/c|acct|account|card|ending(?:\s+with)?|xx|x{2,}|\*{2,}|last\s*4)[^\d]{0,12}(\d{4})/ig,
+    /(?:xx|x{2,}|\*{2,})\s*(\d{4})/ig,
+  ];
+  patterns.forEach(rx=>{
+    for(const match of text.matchAll(rx)){
+      if(match[1]) hits.push(match[1]);
+    }
+  });
+  return Array.from(new Set(hits));
+};
+const detectSmsDirection = txt => {
+  const text = String(txt||"").toLowerCase();
+  if(/\b(credited|received|deposited|refund(?:ed)?|reversal|cashback|salary)\b/.test(text)) return "credit";
+  if(/\b(debited|spent|paid|purchase|withdrawn|sent|dr)\b/.test(text)) return "debit";
+  return "";
+};
+const findSmsAccountMatches = (txt, accounts=[]) => {
+  const text = String(txt||"");
+  const lower = text.toLowerCase();
+  const last4s = extractSmsLast4s(text);
+  const upiHandles = Array.from(new Set([...text.matchAll(/\b[a-z0-9._-]{2,}@[a-z][a-z0-9.-]{1,}\b/ig)].map(m=>m[0].toLowerCase())));
+  return accounts
+    .map(account=>{
+      let score = 0;
+      const accLast4 = String(account?.last4||"").trim();
+      const accNameTokens = String(account?.name||"").toLowerCase().split(/\s+/).filter(token=>token.length>2);
+      if(accLast4 && last4s.includes(accLast4)) score += 10;
+      if(account?.handle){
+        const handle = String(account.handle).toLowerCase();
+        if(upiHandles.some(item=>item.includes(handle) || handle.includes(item))) score += 8;
+      }
+      if(accNameTokens.some(token=>lower.includes(token))) score += 2;
+      if(account?.type==="cc" && /\b(credit card|visa|mastercard|rupay|amex|card)\b/i.test(text)) score += 3;
+      if(account?.type==="debit" && /\b(debit card|atm card)\b/i.test(text)) score += 3;
+      if(account?.type==="upi" && /\b(upi|vpa)\b/i.test(text)) score += 3;
+      if(account?.type==="bank" && /\b(a\/c|account|acct|savings|current)\b/i.test(text)) score += 1;
+      return score>0 ? { account, score } : null;
+    })
+    .filter(Boolean)
+    .sort((a,b)=>b.score-a.score || String(a.account?.name||"").localeCompare(String(b.account?.name||"")));
+};
+const remainingShare = info => {
+  if(!info) return 0;
+  if(info.settled) return 0;
+  return Math.max(0, Number(info?.remainingAmt ?? info?.amount ?? 0));
+};
+const linkedSettlementKey = t => t?.type==="settlement_in" && t?.againstTxnId
+  ? [t.fromPersonId||"", t.againstTxnId||"", t.date||"", Number(t.amount||0), t.accId||""].join("|")
+  : null;
+const dedupeSettlementTxns = txns => {
+  const seenLinked = new Set();
+  const seenLegacy = new Set();
+  return txns.filter(t=>{
+    if(t.type!=="settlement_in") return true;
+    const linkedKey = linkedSettlementKey(t);
+    if(linkedKey){
+      if(seenLinked.has(linkedKey)) return false;
+      seenLinked.add(linkedKey);
+      return true;
+    }
+    const legacyKey = `${t.fromPersonId||""}_${t.date||""}_${Number(t.amount||0)}`;
+    if(seenLegacy.has(legacyKey)) return false;
+    seenLegacy.add(legacyKey);
+    return true;
+  });
+};
+const CLOUD_SCHEMA_VERSION = 1;
+const CAT_MAP = {"food":"food","grocery":"groceries","groceries":"groceries","transport":"transport","bills":"utilities","utilities":"utilities","health":"health","shopping":"lifestyle","household":"housing","selfcare":"lifestyle","baby":"family","entertainment":"entertainment","financial":"financial","fitness":"fitness","travel":"travel","misc":"misc","donations":"donations","professional":"professional","taxes":"taxes","emergency":"emergency","personaldev":"personaldev","family":"family","lifestyle":"lifestyle","housing":"housing"};
+const normalizeCats = stored => {
+  const list = Array.isArray(stored) ? stored : null;
+  const hasLatestDefaults = list?.some(c=>c.id==="housing"||c.id==="utilities"||c.id==="financial");
+  return hasLatestDefaults ? list : DEFAULT_CATS;
+};
+const normalizeAccounts = stored => (Array.isArray(stored) && stored.length ? stored : DEFAULT_ACCOUNTS).map(acc=>{
+  const baseType = ACC_TYPES.some(item=>item.id===acc?.type) ? acc.type : "bank";
+  const typeMeta = normalizeAccountTypes([]).find(item=>item.id===String(acc?.accountTypeId || baseType)) || ACC_TYPES.find(item=>item.id===baseType) || ACC_TYPES[0];
+  const typeLabel = acc?.typeLabel || typeMeta.label || accLabel(baseType);
+  const typeBucket = acc?.typeBucket || typeMeta.bucket || inferAccountBucket(`${typeLabel} ${acc?.name||""} ${acc?.accountTypeId || baseType}`, defaultAccountTypeBucket(baseType));
+  return {
+    ...acc,
+    type:baseType,
+    accountTypeId:acc?.accountTypeId || typeMeta.id || baseType,
+    typeLabel,
+    typeIcon:acc?.typeIcon || typeMeta.icon || accIcon(baseType),
+    typeBucket,
+    openingBalance:Number(acc?.openingBalance||0),
+    openingBalanceDate:acc?.openingBalanceDate||"",
+  };
+});
+const normalizePeople = stored => {
+  const list = Array.isArray(stored) ? stored : [];
+  return list.find(p=>p.id==="__me__") ? list : [ME, ...list];
+};
+const normalizeTxns = stored => {
+  const list = Array.isArray(stored) ? stored : [];
+  const normalizeTxnCatId = value => {
+    const raw = String(value ?? "").trim();
+    if(!raw) return "";
+    const cleaned = raw.replace(/!+$/g, "");
+    return CAT_MAP[cleaned.toLowerCase()] || CAT_MAP[cleaned] || cleaned;
+  };
+  return dedupeSettlementTxns(list.map(t=>{
+    const normalizedTxn = t.type==="settlement_in"
+      ? { ...t, isRefund: t.isRefund ?? !t.fromPersonId }
+      : t;
+    const hasSplitPeople = normalizedTxn.type==="expense" && Object.entries(normalizedTxn.people||{}).some(([pid,info])=>pid!=="__me__" && info?.mode==="owes" && Number(info?.amount||0)>0);
+    const trackingMode = normalizedTxn.type==="expense"
+      ? (normalizedTxn.trackingMode || (hasSplitPeople ? "split" : (normalizedTxn.forPerson || normalizedTxn.groupId ? "tag" : "none")))
+      : normalizedTxn.trackingMode;
+    const preparedTxn = normalizedTxn.type==="expense"
+      ? {
+          ...normalizedTxn,
+          trackingMode,
+          groupCollectiveAmount: (trackingMode==="split"||trackingMode==="allocate") ? Number(normalizedTxn.groupCollectiveAmount||0) : 0,
+        }
+      : normalizedTxn;
+    const normalizedCatIds = (Array.isArray(preparedTxn.catIds) && preparedTxn.catIds.length
+      ? preparedTxn.catIds
+      : (preparedTxn.catId ? [preparedTxn.catId] : []))
+      .map(normalizeTxnCatId)
+      .filter(Boolean);
+    const normalizedCatId = normalizeTxnCatId(preparedTxn.catId || normalizedCatIds[0] || "") || null;
+    return {
+      ...preparedTxn,
+      catId: normalizedCatId,
+      catIds: normalizedCatIds.length ? normalizedCatIds : (normalizedCatId ? [normalizedCatId] : []),
+    };
+  }));
+};
+const normalizeLoans = stored => (Array.isArray(stored) ? stored : []).map(loan=>({
+  ...loan,
+  direction:loan?.direction==="taken"?"taken":"given",
+  principal:Number(loan?.principal ?? loan?.amount ?? 0),
+  outstanding:Number(loan?.outstanding ?? loan?.principal ?? loan?.amount ?? 0),
+  startDate:loan?.startDate || loan?.date || todayStr(),
+  dueDate:loan?.dueDate || "",
+  hasInterest:loan?.hasInterest ?? Number(loan?.interestRate||0)>0,
+  interestRate:Number(loan?.interestRate||0),
+  repayments:Array.isArray(loan?.repayments)?loan.repayments:[],
+  status:loan?.status || (Number(loan?.outstanding ?? loan?.principal ?? loan?.amount ?? 0)<=0 ? "closed" : "active"),
+}));
+const formatSyncTime = value => {
+  if(!value) return "Not yet synced";
+  const d = new Date(value);
+  if(Number.isNaN(d.getTime())) return "Not yet synced";
+  return d.toLocaleString("en-IN", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" });
+};
+
+// ─── SECURITY ────────────────────────────────────────────────────────────────
+async function hashPin(pin) {
+  const data = new TextEncoder().encode(pin + "|arth_v1");
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+// ─── PIN SCREEN ───────────────────────────────────────────────────────────────
+function PinScreen({ onUnlock, isSetup, onCancel }) {
+  const [pin, setPin] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [step, setStep] = useState("enter");
+  const [error, setError] = useState("");
+  const handleKey = k => {
+    setError("");
+    if(k==="del"){ step==="confirm"?setConfirm(p=>p.slice(0,-1)):setPin(p=>p.slice(0,-1)); return; }
+    if(isSetup){
+      if(step==="enter"){ const np=pin+k; setPin(np); if(np.length===4) setStep("confirm"); }
+      else { const nc=confirm+k; setConfirm(nc); if(nc.length===4){ if(nc===pin) onUnlock(pin); else { setError("PINs don't match. Try again."); setPin(""); setConfirm(""); setStep("enter"); } } }
+    } else { const np=pin+k; setPin(np); if(np.length===4){ onUnlock(np); setPin(""); } }
+  };
+  // B16: Physical keyboard support
+  React.useEffect(() => {
+    const handler = e => {
+      if(e.key >= "0" && e.key <= "9") handleKey(e.key);
+      else if(e.key === "Backspace" || e.key === "Delete") handleKey("del");
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [pin, confirm, step]);
+  const cur = step==="confirm"?confirm:pin;
+  const hiddenInputRef = React.useRef(null);
+  React.useEffect(() => { hiddenInputRef.current?.focus(); }, [cur.length]);
+  return (
+    <div style={{minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Nunito,sans-serif"}}>
+      {/* B15: Hidden input keeps mobile keyboard context */}
+      <input ref={hiddenInputRef} type="tel" inputMode="numeric" pattern="[0-9]*" style={{position:"absolute",opacity:0,width:1,height:1,pointerEvents:"none"}} onChange={e=>{ const v=e.target.value.replace(/\D/g,""); if(v) { handleKey(v[v.length-1]); e.target.value=""; } }} onKeyDown={e=>{ if(e.key==="Backspace") handleKey("del"); }}/>
+      <div style={{fontSize:52,marginBottom:12,color:"#f0a500",fontWeight:900,fontFamily:"Nunito,sans-serif"}}>₹</div>
+      <div style={{color:"#f0a500",fontSize:30,fontWeight:900,marginBottom:6}}>Arth</div>
+      <div style={{color:"#5a5a7a",fontSize:13,marginBottom:40,textAlign:"center"}}>{isSetup?step==="enter"?"Set your 4-digit PIN":"Confirm your PIN":"Enter your PIN"}</div>
+      <div style={{display:"flex",gap:18,marginBottom:14}}>
+        {[0,1,2,3].map(i=><div key={i} style={{width:18,height:18,borderRadius:"50%",background:cur.length>i?"#f0a500":"transparent",border:"2px solid",borderColor:cur.length>i?"#f0a500":"#2a2a3a",transition:"all 0.15s"}}/>)}
+      </div>
+      {error&&<div style={{color:"#ef4444",fontSize:12,marginBottom:14,textAlign:"center"}}>{error}</div>}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,width:252,marginTop:12}}>
+        {["1","2","3","4","5","6","7","8","9","","0","del"].map((k,i)=>k===""?<div key={i}/>:
+          <button key={i} onClick={()=>handleKey(k)} style={{background:"#0f0f1a",border:"1px solid #1a1a2e",borderRadius:14,padding:"19px 0",fontSize:k==="del"?18:24,fontWeight:700,color:k==="del"?"#5a5a7a":"#e8e4dc",cursor:"pointer",fontFamily:"Nunito,sans-serif"}}>{k==="del"?"⌫":k}</button>
+        )}
+      </div>
+      {onCancel&&<button onClick={onCancel} style={{marginTop:18,background:"none",border:"1px solid #2a2a3a",borderRadius:12,padding:"10px 22px",cursor:"pointer",fontSize:13,fontWeight:700,color:"#5a5a7a",fontFamily:"Nunito,sans-serif"}}>Cancel</button>}
+    </div>
+  );
+}
+
+// ─── ROOT ─────────────────────────────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state={hasError:false,error:""}; }
+  static getDerivedStateFromError(e){ return {hasError:true,error:String(e)}; }
+  componentDidCatch(e,info){ console.error("Arth error:",e,info); }
+  render(){
+    if(this.state.hasError) return (
+      <div style={{minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Nunito,sans-serif"}}>
+        <div style={{fontSize:48,marginBottom:16}}>⚠️</div>
+        <div style={{color:"#f0a500",fontSize:20,fontWeight:900,marginBottom:8}}>Something went wrong</div>
+        <div style={{color:"#5a5a7a",fontSize:12,marginBottom:24,textAlign:"center",maxWidth:300}}>{this.state.error}</div>
+        <button onClick={()=>this.setState({hasError:false,error:""})} style={{background:"#f0a500",color:"#000",border:"none",borderRadius:12,padding:"12px 24px",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"Nunito,sans-serif"}}>Try Again</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
+export default function Arth() {
+  const [appPin, setAppPin] = useState(()=>localStorage.getItem("arth_pin")||"");
+  const [unlocked, setUnlocked] = useState(false);
+  const idleTimer = useRef(null);
+  const idleWarnTimer = useRef(null);
+  const countdownInterval = useRef(null);
+  const resetIdleRef = useRef(null);
+  const [showIdleWarning, setShowIdleWarning] = useState(false);
+  const [idleCountdown, setIdleCountdown] = useState(120);
+  // PIN lockout state — must be declared before any early returns (Rules of Hooks)
+  const [pinAttempts, setPinAttempts] = useState(0);
+  const [pinLockedUntil, setPinLockedUntil] = useState(()=>Number(sessionStorage.getItem("arth_pin_locked_until")||0));
+  const pinIsLocked = pinLockedUntil > Date.now();
+  const pinLockMinsLeft = pinIsLocked ? Math.ceil((pinLockedUntil-Date.now())/60000) : 0;
+  const lock = useCallback(()=>{ setUnlocked(false); setShowIdleWarning(false); setIdleCountdown(120); },[]);
+
+  // Two-phase idle timer: warn at 5 minutes, lock 2 minutes later (7 min total)
+  useEffect(()=>{
+    if(!unlocked) return;
+    const WARN_MS = 5 * 60_000;   // 5 minutes before warning
+    const LOCK_MS = 2 * 60_000;   // 2 more minutes to respond
+    const clearAll = ()=>{ clearTimeout(idleTimer.current); clearTimeout(idleWarnTimer.current); clearInterval(countdownInterval.current); };
+    const reset = ()=>{
+      clearAll();
+      setShowIdleWarning(false);
+      setIdleCountdown(120);
+      idleWarnTimer.current = setTimeout(()=>{
+        setShowIdleWarning(true);
+        let cd = 120;
+        setIdleCountdown(cd);
+        countdownInterval.current = setInterval(()=>{ cd--; setIdleCountdown(cd); if(cd<=0) clearInterval(countdownInterval.current); }, 1000);
+        idleTimer.current = setTimeout(lock, LOCK_MS);
+      }, WARN_MS);
+    };
+    resetIdleRef.current = reset;
+    const events = ["mousemove","keydown","touchstart","touchend","click","scroll","pointerdown"];
+    events.forEach(e=>window.addEventListener(e,reset,{passive:true}));
+    reset();
+    return ()=>{ events.forEach(e=>window.removeEventListener(e,reset)); clearAll(); resetIdleRef.current=null; };
+  },[unlocked,lock]);
+
+  // Pause timers when app goes to background; reset fresh when returning
+  useEffect(()=>{
+    if(!unlocked) return;
+    const clearAll = ()=>{ clearTimeout(idleTimer.current); clearTimeout(idleWarnTimer.current); clearInterval(countdownInterval.current); };
+    const handle = ()=>{
+      if(document.visibilityState==="hidden"){
+        // Pause all timers — don't lock while user is in another app
+        clearAll();
+        setShowIdleWarning(false);
+      } else if(document.visibilityState==="visible"){
+        // Give a fresh 60s when returning
+        resetIdleRef.current?.();
+      }
+    };
+    document.addEventListener("visibilitychange",handle);
+    return ()=>document.removeEventListener("visibilitychange",handle);
+  },[unlocked]);
+
+  if(!appPin) return <PinScreen isSetup onUnlock={async pin=>{
+    const hash = await hashPin(pin);
+    localStorage.setItem("arth_pin",hash);
+    setAppPin(hash);
+    setUnlocked(true);
+  }}/>;
+
+  if(!unlocked) return (
+    <div style={{ minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
+      {pinIsLocked ? (
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:48,marginBottom:12 }}>🔒</div>
+          <div style={{ color:"#f0a500",fontSize:18,fontWeight:900,marginBottom:8 }}>Too many attempts</div>
+          <div style={{ color:"rgba(255,255,255,0.5)",fontSize:13 }}>Try again in {pinLockMinsLeft} minute{pinLockMinsLeft!==1?"s":""}</div>
+        </div>
+      ) : (
+        <PinScreen isSetup={false} onUnlock={async pin=>{
+          if(appPin.length<=6){
+            if(String(pin)===String(appPin)){
+              const hash = await hashPin(pin);
+              localStorage.setItem("arth_pin",hash);
+              setAppPin(hash);
+              setUnlocked(true);
+              setPinAttempts(0);
+            } else {
+              const na = pinAttempts+1;
+              setPinAttempts(na);
+              if(na>=5){ const lu=Date.now()+30*60*1000; setPinLockedUntil(lu); sessionStorage.setItem("arth_pin_locked_until",String(lu)); setPinAttempts(0); }
+            }
+          } else {
+            const hash = await hashPin(pin);
+            if(hash===appPin){ setUnlocked(true); setPinAttempts(0); }
+            else {
+              const na = pinAttempts+1;
+              setPinAttempts(na);
+              if(na>=5){ const lu=Date.now()+30*60*1000; setPinLockedUntil(lu); sessionStorage.setItem("arth_pin_locked_until",String(lu)); setPinAttempts(0); }
+            }
+          }
+        }}/>
+      )}
+    </div>
+  );
+
+  return <>
+    <ErrorBoundary><AppContent onLock={lock}/></ErrorBoundary>
+    {showIdleWarning && (
+      <div onClick={()=>resetIdleRef.current?.()} style={{position:"fixed",bottom:0,left:0,right:0,zIndex:99999,background:"#1a1a1aee",backdropFilter:"blur(8px)",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:"2px solid #f0a500",cursor:"pointer"}}>
+        <span style={{color:"#fff",fontSize:13,fontWeight:700}}>🔒 Locking in {idleCountdown}s due to inactivity</span>
+        <button onClick={e=>{e.stopPropagation();resetIdleRef.current?.();}} style={{background:"#f0a500",color:"#000",border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif"}}>Stay active</button>
+      </div>
+    )}
+  </>;
+}
+
+// ─── APP ──────────────────────────────────────────────────────────────────────
+function AppContent({ onLock }) {
+  const [dark, setDark] = useState(()=>JSON.parse(localStorage.getItem("arth_dark")??"true"));
+  const [autoDetectExpenseCategory, setAutoDetectExpenseCategory] = useState(()=>JSON.parse(localStorage.getItem("arth_auto_category")??"true"));
+  const [workTripMode, setWorkTripMode] = useState(()=>JSON.parse(localStorage.getItem("arth_work_trip")??"false"));
+  const T = dark?DARK:LIGHT;
+  useEffect(()=>localStorage.setItem("arth_dark",JSON.stringify(dark)),[dark]);
+  useEffect(()=>localStorage.setItem("arth_auto_category",JSON.stringify(autoDetectExpenseCategory)),[autoDetectExpenseCategory]);
+  useEffect(()=>localStorage.setItem("arth_work_trip",JSON.stringify(workTripMode)),[workTripMode]);
+  // Request persistent storage so browser never evicts app data under disk pressure
+  useEffect(()=>{ navigator.storage?.persist?.(); },[]);
+
+  // ── STATE ──────────────────────────────────────────────────────────────────
+  const [tab, setTab] = useState("home");
+  const [viewMonth, setViewMonth] = useState(()=>{ const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`; });
+  const [cats, setCats] = useState(()=>normalizeCats(JSON.parse(localStorage.getItem("arth_cats")||"null")));
+  const [customBaseBehaviors, setCustomBaseBehaviors] = useState(()=>JSON.parse(localStorage.getItem("arth_custom_base_behaviors")||"[]"));
+  const [accountTypes, setAccountTypes] = useState(()=>normalizeAccountTypes(JSON.parse(localStorage.getItem("arth_account_types")||"null")));
+  const [incomeTypes, setIncomeTypes] = useState(()=>normalizeIncomeTypes(JSON.parse(localStorage.getItem("arth_income_types")||"null")));
+  const [customLiabilityTypes, setCustomLiabilityTypes] = useState(()=>normalizeLiabilityTypes(JSON.parse(localStorage.getItem("arth_liability_types")||"null")));
+  const [accounts, setAccounts] = useState(()=>normalizeAccounts(JSON.parse(localStorage.getItem("arth_accounts")||"null")));
+  const [balanceCheckpoints, setBalanceCheckpoints] = useState(()=>JSON.parse(localStorage.getItem("arth_checkpoints")||"{}"));
+  const [people, setPeople] = useState(()=>normalizePeople(JSON.parse(localStorage.getItem("arth_people")||"[]")));
+  const [groups, setGroups] = useState(()=>JSON.parse(localStorage.getItem("arth_groups")||"[]"));
+  const [measureUnits, setMeasureUnits] = useState(()=>normalizeMeasureUnits(JSON.parse(localStorage.getItem("arth_measure_units")||"null")));
+  const [itemCatalog, setItemCatalog] = useState(()=>normalizeItemCatalog(JSON.parse(localStorage.getItem("arth_item_catalog")||"[]")));
+  const [txns, setTxns] = useState(()=>normalizeTxns(JSON.parse(localStorage.getItem("arth_txns")||"[]")));
+  const [investments, setInvestments] = useState(()=>JSON.parse(localStorage.getItem("arth_investments")||"[]"));
+  const [recurringSchedules, setRecurringSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_recurring")||"[]"));
+  const [gifts, setGifts] = useState(()=>JSON.parse(localStorage.getItem("arth_gifts")||"[]"));
+  const [showAddGift, setShowAddGift] = useState(false);
+  const [giftForPersonId, setGiftForPersonId] = useState(null);
+  const [giftFilter, setGiftFilter] = useState(null);
+  const [editingRecurring, setEditingRecurring] = useState(null);
+  const [editingVehicle, setEditingVehicle] = useState(null);
+  const [vType, setVType] = useState("car");
+  const [vNumber, setVNumber] = useState("");
+  const [vName, setVName] = useState("");
+  const [vColor, setVColor] = useState(PALETTE[2]);
+  const [bills, setBills] = useState(()=>JSON.parse(localStorage.getItem("arth_bills")||"[]"));
+  const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
+  const [memberships, setMemberships] = useState(()=>JSON.parse(localStorage.getItem("arth_memberships")||"[]"));
+  const [feePayments, setFeePayments] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_payments")||"[]"));
+  const [showAddMembership, setShowAddMembership] = useState(false);
+  const [editingMembership, setEditingMembership] = useState(null);
+  const [showAddFeePayment, setShowAddFeePayment] = useState(false);
+  const [activeBillerForAction, setActiveBillerForAction] = useState(null);
+  const [showAddBillerAccount, setShowAddBillerAccount] = useState(false);
+  const [editingBillerAccount, setEditingBillerAccount] = useState(null);
+  const [billSearch, setBillSearch] = useState("");
+  const [preselectedBillerType, setPreselectedBillerType] = useState("");
+  const [liabilities, setLiabilities] = useState(()=>JSON.parse(localStorage.getItem("arth_liabilities")||"[]"));
+  const [trackedAssets, setTrackedAssets] = useState(()=>JSON.parse(localStorage.getItem("arth_assets")||"[]"));
+  const [vehicles, setVehicles] = useState(()=>JSON.parse(localStorage.getItem("arth_vehicles")||"[]"));
+  const [loans, setLoans] = useState(()=>normalizeLoans(JSON.parse(localStorage.getItem("arth_loans")||"[]")));
+  const [ccEmiPlans, setCcEmiPlans] = useState(()=>JSON.parse(localStorage.getItem("arth_cc_emi_plans")||"[]"));
+  const currentFYStartYear = new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1;
+  const [annualBudget, setAnnualBudget] = useState(()=>Number(localStorage.getItem("arth_annual_budget")||600000));
+  const [perPersonBudgets, setPerPersonBudgets] = useState(()=>JSON.parse(localStorage.getItem("arth_person_budgets")||"{}"));
+  const [gifts, setGifts] = useState(()=>JSON.parse(localStorage.getItem("arth_gifts")||"[]"));
+  const [showAddGift, setShowAddGift] = useState(false);
+  const [giftForPersonId, setGiftForPersonId] = useState(null);
+  const [budgetCarryForward, setBudgetCarryForward] = useState(()=>JSON.parse(localStorage.getItem("arth_budget_carry")||"false"));
+  const [lastFYTarget, setLastFYTarget] = useState(()=>Number(localStorage.getItem("arth_last_fy_target")||0));
+  const [selectedBudgetFY, setSelectedBudgetFY] = useState(currentFYStartYear);
+  const [monthOverrides, setMonthOverrides] = useState(()=>JSON.parse(localStorage.getItem("arth_month_overrides")||"{}"));
+  const [monthBudget] = useState(()=>Number(localStorage.getItem("arth_budget")||50000));
+
+  useEffect(()=>localStorage.setItem("arth_cats",JSON.stringify(cats)),[cats]);
+  useEffect(()=>localStorage.setItem("arth_account_types",JSON.stringify(accountTypes)),[accountTypes]);
+  useEffect(()=>localStorage.setItem("arth_income_types",JSON.stringify(incomeTypes)),[incomeTypes]);
+  useEffect(()=>localStorage.setItem("arth_liability_types",JSON.stringify(customLiabilityTypes)),[customLiabilityTypes]);
+  useEffect(()=>localStorage.setItem("arth_accounts",JSON.stringify(accounts)),[accounts]);
+  useEffect(()=>localStorage.setItem("arth_checkpoints",JSON.stringify(balanceCheckpoints)),[balanceCheckpoints]);
+  useEffect(()=>localStorage.setItem("arth_people",JSON.stringify(people)),[people]);
+  useEffect(()=>localStorage.setItem("arth_groups",JSON.stringify(groups)),[groups]);
+  useEffect(()=>localStorage.setItem("arth_custom_base_behaviors",JSON.stringify(customBaseBehaviors)),[customBaseBehaviors]);
+  useEffect(()=>localStorage.setItem("arth_measure_units",JSON.stringify(measureUnits)),[measureUnits]);
+  useEffect(()=>localStorage.setItem("arth_item_catalog",JSON.stringify(itemCatalog)),[itemCatalog]);
+  useEffect(()=>localStorage.setItem("arth_txns",JSON.stringify(txns)),[txns]);
+  useEffect(()=>localStorage.setItem("arth_investments",JSON.stringify(investments)),[investments]);
+  useEffect(()=>localStorage.setItem("arth_recurring",JSON.stringify(recurringSchedules)),[recurringSchedules]);
+  useEffect(()=>localStorage.setItem("arth_gifts",JSON.stringify(gifts)),[gifts]);
+  useEffect(()=>localStorage.setItem("arth_budget",monthBudget),[monthBudget]);
+  useEffect(()=>localStorage.setItem("arth_bills",JSON.stringify(bills)),[bills]);
+  useEffect(()=>localStorage.setItem("arth_biller_accounts",JSON.stringify(billerAccounts)),[billerAccounts]);
+  useEffect(()=>localStorage.setItem("arth_memberships",JSON.stringify(memberships)),[memberships]);
+  useEffect(()=>localStorage.setItem("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
+  useEffect(()=>localStorage.setItem("arth_liabilities",JSON.stringify(liabilities)),[liabilities]);
+  useEffect(()=>localStorage.setItem("arth_assets",JSON.stringify(trackedAssets)),[trackedAssets]);
+  useEffect(()=>localStorage.setItem("arth_vehicles",JSON.stringify(vehicles)),[vehicles]);
+  useEffect(()=>localStorage.setItem("arth_loans",JSON.stringify(loans)),[loans]);
+  useEffect(()=>localStorage.setItem("arth_cc_emi_plans",JSON.stringify(ccEmiPlans)),[ccEmiPlans]);
+  useEffect(()=>localStorage.setItem("arth_annual_budget",annualBudget),[annualBudget]);
+  useEffect(()=>localStorage.setItem("arth_person_budgets",JSON.stringify(perPersonBudgets)),[perPersonBudgets]);
+  useEffect(()=>localStorage.setItem("arth_gifts",JSON.stringify(gifts)),[gifts]);
+  useEffect(()=>localStorage.setItem("arth_budget_carry",JSON.stringify(budgetCarryForward)),[budgetCarryForward]);
+  useEffect(()=>localStorage.setItem("arth_last_fy_target",lastFYTarget),[lastFYTarget]);
+  useEffect(()=>localStorage.setItem("arth_month_overrides",JSON.stringify(monthOverrides)),[monthOverrides]);
+
+  // ── MODAL STATE ────────────────────────────────────────────────────────────
+  const [showAdd, setShowAdd] = useState(false);
+  const [defaultAddType, setDefaultAddType] = useState("expense");
+  const [addPrefill, setAddPrefill] = useState(null);
+  const [showInvestments, setShowInvestments] = useState(false);
+  const [showAddBill, setShowAddBill] = useState(false);
+  const [defaultBillerAccountId, setDefaultBillerAccountId] = useState("");
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [editingMonthBudget, setEditingMonthBudget] = useState(null); // month key
+  const [editingMonthVal, setEditingMonthVal] = useState("");
+  const [editingCheckpoint, setEditingCheckpoint] = useState(null); // account id
+  const [editingCheckpointVal, setEditingCheckpointVal] = useState("");
+  const [editingCheckpointDate, setEditingCheckpointDate] = useState(todayStr());
+  const [editingOpeningBalanceVal, setEditingOpeningBalanceVal] = useState("");
+  const [editingOpeningBalanceDate, setEditingOpeningBalanceDate] = useState(todayStr());
+  const [editingBill, setEditingBill] = useState(null);
+  const [editingPerson, setEditingPerson] = useState(null);
+  const [editingTxn, setEditingTxn] = useState(null);
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [showAddInvestment, setShowAddInvestment] = useState(false);
+  const [editingInvestment, setEditingInvestment] = useState(null);
+  const [showAddLiability, setShowAddLiability] = useState(false);
+  const [showAddAsset, setShowAddAsset] = useState(false);
+  const [showAddLoan, setShowAddLoan] = useState(false);
+  const [showAccDetail, setShowAccDetail] = useState(null);
+  const [showWealthBreakdown, setShowWealthBreakdown] = useState(null);
+  const [selectedInvestmentDetail, setSelectedInvestmentDetail] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsSection, setSettingsSection] = useState(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [confirmDeleteCat, setConfirmDeleteCat] = useState(null);
+  const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(null);
+  const [confirmDeleteTxn, setConfirmDeleteTxn] = useState(null);
+  const [billMatchSuggestion, setBillMatchSuggestion] = useState(null);
+  const [refundMatchSuggestion, setRefundMatchSuggestion] = useState(null);
+  const [reimbursementMatchSuggestion, setReimbursementMatchSuggestion] = useState(null);
+  const [imageViewSrc, setImageViewSrc] = useState(null);
+  const [refundSourceTxn, setRefundSourceTxn] = useState(null);
+  const [budgetOverrideMonth, setBudgetOverrideMonth] = useState(null);
+  const [budgetOverrideVal, setBudgetOverrideVal] = useState("");
+  const [selectedPerson, setSelectedPerson] = useState(null);
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [groupViewMode, setGroupViewMode] = useState("overall");
+  const [showGroupOwesBreakdown, setShowGroupOwesBreakdown] = useState(false);
+  const [groupSpendFilter, setGroupSpendFilter] = useState(null);
+  const [personViewMode, setPersonViewMode] = useState("overall");
+  const [linkTxnModal, setLinkTxnModal] = useState(null);
+  const [settleTxn, setSettleTxn] = useState(null);
+  const [showTxnUpiPicker, setShowTxnUpiPicker] = useState(false);
+  const [pendingTxnShare, setPendingTxnShare] = useState(null);
+  const [expandedTxn, setExpandedTxn] = useState(null);
+  const defaultTxnMonth = viewMonth || todayStr().slice(0,7);
+  const [fType, setFType] = useState("All");
+  const [txnSearch, setTxnSearch] = useState("");
+  const [txnDetailId, setTxnDetailId] = useState(null);
+  const [maskMode, setMaskMode] = useState(false);
+  const [maskRevealActive, setMaskRevealActive] = useState(false);
+  const [maskRevealTimer, setMaskRevealTimer] = useState(null);
+  const [showMaskPin, setShowMaskPin] = useState(false);
+  const [maskPinInput, setMaskPinInput] = useState("");
+  const [maskPinError, setMaskPinError] = useState(false);
+  const M = v => (maskMode && !maskRevealActive) ? "₹•••••" : v;
+  const toggleMask = () => {
+    if(!maskMode){ setMaskMode(true); setMaskRevealActive(false); }
+    else if(maskRevealActive){ setMaskRevealActive(false); if(maskRevealTimer) clearTimeout(maskRevealTimer); }
+    else { setShowMaskPin(true); setMaskPinInput(""); setMaskPinError(false); }
+  };
+  const onMaskReveal = () => {
+    setShowMaskPin(false); setMaskRevealActive(true);
+    if(maskRevealTimer) clearTimeout(maskRevealTimer);
+    const t = setTimeout(()=>setMaskRevealActive(false), 60000);
+    setMaskRevealTimer(t);
+  };
+  const [txnDatePreset, setTxnDatePreset] = useState("current_month");
+  const [txnSort, setTxnSort] = useState("date_desc");
+  const [txnDateFrom, setTxnDateFrom] = useState(()=>getMonthBounds(defaultTxnMonth).start);
+  const [txnDateTo, setTxnDateTo] = useState(()=>getMonthBounds(defaultTxnMonth).end);
+  const [txnAmountFrom, setTxnAmountFrom] = useState("");
+  const [txnAmountTo, setTxnAmountTo] = useState("");
+  const [txnCategoryFilter, setTxnCategoryFilter] = useState("all");
+  const [txnPersonFilter, setTxnPersonFilter] = useState("all");
+  const [expenseSourceFilter, setExpenseSourceFilter] = useState("all");
+  const [expenseCardFilter, setExpenseCardFilter] = useState("all");
+  const [incomeTypeFilter, setIncomeTypeFilter] = useState("all");
+  const [incomeAccountFilter, setIncomeAccountFilter] = useState("all");
+  const [investmentTypeFilter, setInvestmentTypeFilter] = useState("all");
+  const [txnReimbursableOnly, setTxnReimbursableOnly] = useState(false);
+  const [txnGroupFilter, setTxnGroupFilter] = useState("all");
+  const [selectedInvestmentTypeView, setSelectedInvestmentTypeView] = useState("all");
+  const [editingLiability, setEditingLiability] = useState(null);
+  const [editingAsset, setEditingAsset] = useState(null);
+  const [editingLoan, setEditingLoan] = useState(null);
+  const [repaymentLoan, setRepaymentLoan] = useState(null);
+  const [showReceivablesList, setShowReceivablesList] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState(null);
+  const [editingCategoryName, setEditingCategoryName] = useState("");
+
+  const dataUrlToShareFile = async (dataUrl, fallbackName = "arth-bill") => {
+    if(!dataUrl || typeof File === "undefined") return null;
+    try{
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      const ext = blob.type?.split("/")?.[1]?.split(";")?.[0] || "jpg";
+      return new File([blob], `${fallbackName}.${ext}`, { type:blob.type || "image/jpeg" });
+    }catch{
+      return null;
+    }
+  };
+
+  const doTxnShare = useCallback(async (shareRequest, upiHandle = "") => {
+    if(!shareRequest) return;
+    const { recipientName, amount, contextLabel, dueDate, imageBase64, shareTitle } = shareRequest;
+    const linkedLabel = upiHandle ? (() => {
+      const acc = accounts.find(a=>a.type==="upi"&&a.handle===upiHandle);
+      const linked = acc?.linkedAccount ? accounts.find(b=>b.id===acc.linkedAccount) : null;
+      return linked ? ` (${linked.name})` : "";
+    })() : "";
+    const dueLabel = dueDate ? (formatShortDate(dueDate) || dueDate) : "";
+    const lines = [
+      `Hi ${recipientName},`,
+      `Your share towards ${contextLabel} is ${sym}${fmt(amount)}.`,
+      dueLabel ? `Kindly clear it before ${dueLabel}.` : "Kindly clear it when convenient.",
+      upiHandle ? `Payment UPI: ${upiHandle}${linkedLabel}` : "",
+      "- sent via Arth",
+    ].filter(Boolean).join("\n");
+    try {
+      const file = await dataUrlToShareFile(imageBase64, (shareTitle || contextLabel || "arth-bill").replace(/[^\w-]+/g, "-").slice(0, 48));
+      const payload = { title:shareTitle || "Arth share request", text:lines };
+      if(file && navigator.canShare?.({ files:[file] })) payload.files = [file];
+      if(navigator.share){ await navigator.share(payload); }
+      else { await navigator.clipboard.writeText(lines); alert("Payment request copied to clipboard!"); }
+    } catch(e){
+      if(e?.name!=="AbortError") navigator.clipboard?.writeText(lines).catch(()=>{});
+    }
+  }, [accounts]);
+
+  const sharePaymentRequest = useCallback((recipientName, amount, contextLabel, details = {}) => {
+    const safeAmount = Number(amount||0);
+    if(!recipientName || !(safeAmount>0)) return;
+    const request = { recipientName, amount:safeAmount, contextLabel:contextLabel || "shared expense", ...details };
+    const upiAccs = accounts.filter(a=>a.type==="upi"&&a.handle);
+    if(upiAccs.length<=1){
+      doTxnShare(request, upiAccs[0]?.handle||"");
+      return;
+    }
+    setPendingTxnShare(request);
+    setShowTxnUpiPicker(true);
+  }, [accounts, doTxnShare]);
+
+  const openInvestmentComposer = () => {
+    setShowInvestments(false);
+    setShowAddInvestment(false);
+    setEditingInvestment(null);
+    setSelectedInvestmentTypeView("all");
+    setDefaultAddType("investment");
+    setShowAdd(true);
+  };
+  const applyTxnDatePreset = useCallback((preset, baseMonth = viewMonth || todayStr().slice(0,7)) => {
+    if(preset === "all"){
+      setTxnDatePreset("all");
+      setTxnDateFrom("");
+      setTxnDateTo("");
+      return;
+    }
+    if(preset === "last_month"){
+      const { start, end } = getMonthBounds(getPreviousMonthKey(baseMonth));
+      setTxnDatePreset("last_month");
+      setTxnDateFrom(start);
+      setTxnDateTo(end);
+      return;
+    }
+    if(preset === "custom"){
+      setTxnDatePreset("custom");
+      return;
+    }
+    const { start, end } = getMonthBounds(baseMonth);
+    setTxnDatePreset("current_month");
+    setTxnDateFrom(start);
+    setTxnDateTo(end);
+  }, [viewMonth]);
+  const openLoanDraft = useCallback((overrides = {}) => {
+    setEditingLoan({ _isDraft:true, direction:"given", startDate:todayStr(), ...overrides });
+    setShowAddLoan(true);
+  }, []);
+
+  useEffect(()=>{
+    if(txnDatePreset === "current_month"){
+      const { start, end } = getMonthBounds(viewMonth || todayStr().slice(0,7));
+      setTxnDateFrom(start);
+      setTxnDateTo(end);
+    } else if(txnDatePreset === "last_month"){
+      const { start, end } = getMonthBounds(getPreviousMonthKey(viewMonth || todayStr().slice(0,7)));
+      setTxnDateFrom(start);
+      setTxnDateTo(end);
+    }
+  }, [txnDatePreset, viewMonth]);
+
+  // ── LOOKUPS ────────────────────────────────────────────────────────────────
+  const getCat = useCallback(id=>{
+    if(!id) return {name:"?",color:"#888",icon:"❓",subs:[]};
+    const matched = cats.find(c=>c.id===id || c.id.toLowerCase()===String(id).toLowerCase());
+    return matched || {name:"?",color:"#888",icon:"❓",subs:[]};
+  },[cats]);
+  const getAcc = useCallback(id=>accounts.find(a=>a.id===id)||{name:"?",color:"#888",type:"cash"},[accounts]);
+  const getPerson = useCallback(id=>people.find(p=>p.id===id)||{name:"?",emoji:"👤",color:"#888",relation:"",personType:"contact"},[people]);
+  const getGroup = useCallback(id=>groups.find(g=>g.id===id)||null,[groups]);
+  const getRefundCandidates = useCallback((refundTxn, excludeRefundId = null)=>{
+    if(!refundTxn || refundTxn.type!=="settlement_in" || !refundTxn.isRefund) return [];
+    const refundAmt = Number(refundTxn.amount||0);
+    if(!refundAmt) return [];
+    const refundDate = toDateOnly(refundTxn.date) || new Date();
+    const refundText = `${refundTxn.desc||""} ${refundTxn.merchant||""}`.toLowerCase();
+    const linkedExpenseIds = new Set(
+      txns
+        .filter(t=>t.type==="settlement_in" && t.againstTxnId && String(t.id)!==String(excludeRefundId||refundTxn.id||""))
+        .map(t=>String(t.againstTxnId))
+    );
+
+    return txns
+      .filter(t=>t.type==="expense" && !linkedExpenseIds.has(String(t.id)) && nearlyEqualMoney(t.amount, refundAmt))
+      .filter(t=>{
+        const txnDate = toDateOnly(t.date);
+        return !txnDate || txnDate <= refundDate;
+      })
+      .map(t=>{
+        const txnText = `${t.desc||""} ${t.merchant||""}`.toLowerCase();
+        const merchantMatch = refundText && txnText && (
+          refundText.includes(txnText) ||
+          txnText.includes(refundText) ||
+          refundText.split(/\s+/).some(word=>word.length>3 && txnText.includes(word))
+        );
+        const txnDate = toDateOnly(t.date) || refundDate;
+        const dayGap = Math.abs(Math.round((refundDate - txnDate)/(1000*60*60*24)));
+        const score = (merchantMatch ? 12 : 0) + (t.accId && refundTxn.accId && t.accId===refundTxn.accId ? 5 : 0) + Math.max(0, 45 - Math.min(dayGap, 45));
+        return { ...t, _refundScore:score, _dayGap:dayGap, _merchantMatch:merchantMatch };
+      })
+      .sort((a,b)=>b._refundScore-a._refundScore || new Date(b.date||0)-new Date(a.date||0))
+      .slice(0,3);
+  },[txns]);
+
+  // ── CURRENT MONTH FILTER ───────────────────────────────────────────────────
+  const cm = viewMonth;
+  const thisMonthTxns = useMemo(()=>txns.filter(t=>t.date&&t.date.startsWith(cm)),[txns,cm]);
+  const expenses = useMemo(()=>thisMonthTxns.filter(t=>t.type==="expense"),[thisMonthTxns]);
+  const refundTotalsByBill = useMemo(()=>txns.reduce((map,txn)=>{
+    if(txn.type!=="settlement_in" || !txn.isRefund || !txn.againstBillId) return map;
+    const key = String(txn.againstBillId);
+    map[key] = (map[key]||0) + Number(txn.amount||0);
+    return map;
+  },{}), [txns]);
+  const getNetBillAmount = useCallback(bill=>Math.max(0, Number(bill?.amount||0) - Number(refundTotalsByBill[String(bill?.id)]||0)),[refundTotalsByBill]);
+  const refundTotalsByExpense = useMemo(()=>txns.reduce((map,txn)=>{
+    if(txn.type!=="settlement_in" || !txn.againstTxnId) return map;
+    const key = String(txn.againstTxnId);
+    map[key] = (map[key]||0) + Number(txn.amount||0);
+    return map;
+  },{}),[txns]);
+  const getNetExpenseAmount = useCallback(expense=>Math.max(0, Number(expense?.amount||0) - Number(refundTotalsByExpense[String(expense?.id)]||0)),[refundTotalsByExpense]);
+  const getGroupCollectiveDue = useCallback(expense=>{
+    if(!expense?.groupId || expense?.type!=="expense") return 0;
+    const hasIndividualReceivable = Object.entries(expense?.people||{}).some(([pid,info])=>pid!=="__me__" && info?.mode==="owes" && Number(info?.amount||0)>0 && !info?.settled);
+    const trackingMode = expense?.trackingMode || (hasIndividualReceivable ? "split" : (expense?.forPerson || expense?.groupId ? "tag" : "none"));
+    // Handle both split and allocate (Txn breakup unified mode)
+    if(trackingMode!=="split" && trackingMode!=="allocate") return 0;
+    if(expense.groupCollectiveAmount !== undefined && expense.groupCollectiveAmount !== null){
+      return Math.max(0, Number(expense.groupCollectiveAmount||0) - Number(expense.groupCollectiveSettledAmt||0));
+    }
+    return hasIndividualReceivable ? 0 : Math.max(0, Number(expense.amount||0));
+  },[]);
+  const getMyExpenseAmount = useCallback(expense=>{
+    const netAmount = getNetExpenseAmount(expense);
+    if(!(netAmount>0)) return 0;
+
+    const trackingMode = expense?.trackingMode
+      || (Object.keys(expense?.people||{}).some(pid=>pid!=="__me__") ? "split" : (expense?.forPerson || expense?.groupId ? "tag" : "none"));
+    const meId = people.find(person=>person.isMe)?.id;
+    let attributedAway = 0;
+
+    Object.entries(expense?.people||{}).forEach(([pid,info])=>{
+      if(pid==="__me__") return;
+      const mode = info?.mode;
+      const part = Number(info?.amount||0);
+      if(!(part>0)) return;
+      if(mode==="owes") attributedAway += part;
+    });
+
+    const groupAllocations = Array.isArray(expense?.groupAllocations) ? expense.groupAllocations : [];
+    groupAllocations.forEach(groupPart=>{
+      const mode = groupPart?.mode;
+      const part = Number(groupPart?.amount||0);
+      if(!(part>0)) return;
+      if(mode==="owes") attributedAway += part;
+    });
+
+    if((trackingMode==="split" || trackingMode==="allocate") && groupAllocations.length===0){
+      const collectivePart = Number(expense?.groupCollectiveAmount||0);
+      if(collectivePart>0) attributedAway += collectivePart;
+    }
+
+    return Math.max(0, netAmount - attributedAway);
+  },[getNetExpenseAmount]);
+
+  // ── COMPUTED ───────────────────────────────────────────────────────────────
+  const myActual = useMemo(()=>expenses.reduce((sum,expense)=>sum+getMyExpenseAmount(expense),0),[expenses,getMyExpenseAmount]);
+
+  const totalIncome = useMemo(()=>thisMonthTxns.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0),[thisMonthTxns]);
+  const monthlyInvestmentFlow = useMemo(()=>thisMonthTxns.reduce((sum,t)=>{
+    if(t.type==="investment") return sum + Number(t.amount||0);
+    if(t.type==="transfer" && t.toAccId && isInvestmentAccount(getAcc(t.toAccId))) return sum + Number(t.amount||0);
+    return sum;
+  },0),[thisMonthTxns,getAcc]);
+  const trackedInvestments = useMemo(()=>{
+    const txnsById = new Map(txns.map(t=>[String(t.id), t]));
+    const saved = (investments||[]).flatMap(inv=>{
+      const linkedTxn = inv.linkedTxnId ? txnsById.get(String(inv.linkedTxnId)) : null;
+      if(inv.linkedTxnId && (!linkedTxn || linkedTxn.type!=="investment")) return [];
+      return [{
+        ...inv,
+        linkedInvestmentId:inv.id,
+        linkedTxnId:linkedTxn?.id ?? inv.linkedTxnId ?? null,
+        type:linkedTxn?.investType || inv.type || "mf",
+        name:linkedTxn?.desc || linkedTxn?.merchant || inv.name || "Investment",
+        amount:Number(linkedTxn?.amount ?? inv.amount ?? 0),
+ 
