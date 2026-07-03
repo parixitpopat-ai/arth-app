@@ -912,6 +912,10 @@ function AppContent({ onLock }) {
   const [txns, setTxns] = useState(()=>normalizeTxns(JSON.parse(localStorage.getItem("arth_txns")||"[]")));
   const [investments, setInvestments] = useState(()=>JSON.parse(localStorage.getItem("arth_investments")||"[]"));
   const [recurringSchedules, setRecurringSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_recurring")||"[]"));
+  const [gifts, setGifts] = useState(()=>JSON.parse(localStorage.getItem("arth_gifts")||"[]"));
+  const [showAddGift, setShowAddGift] = useState(false);
+  const [giftForPersonId, setGiftForPersonId] = useState(null);
+  const [giftFilter, setGiftFilter] = useState(null);
   const [editingRecurring, setEditingRecurring] = useState(null);
   const [editingVehicle, setEditingVehicle] = useState(null);
   const [vType, setVType] = useState("car");
@@ -938,6 +942,9 @@ function AppContent({ onLock }) {
   const currentFYStartYear = new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1;
   const [annualBudget, setAnnualBudget] = useState(()=>Number(localStorage.getItem("arth_annual_budget")||600000));
   const [perPersonBudgets, setPerPersonBudgets] = useState(()=>JSON.parse(localStorage.getItem("arth_person_budgets")||"{}"));
+  const [gifts, setGifts] = useState(()=>JSON.parse(localStorage.getItem("arth_gifts")||"[]"));
+  const [showAddGift, setShowAddGift] = useState(false);
+  const [giftForPersonId, setGiftForPersonId] = useState(null);
   const [budgetCarryForward, setBudgetCarryForward] = useState(()=>JSON.parse(localStorage.getItem("arth_budget_carry")||"false"));
   const [lastFYTarget, setLastFYTarget] = useState(()=>Number(localStorage.getItem("arth_last_fy_target")||0));
   const [selectedBudgetFY, setSelectedBudgetFY] = useState(currentFYStartYear);
@@ -958,6 +965,7 @@ function AppContent({ onLock }) {
   useEffect(()=>localStorage.setItem("arth_txns",JSON.stringify(txns)),[txns]);
   useEffect(()=>localStorage.setItem("arth_investments",JSON.stringify(investments)),[investments]);
   useEffect(()=>localStorage.setItem("arth_recurring",JSON.stringify(recurringSchedules)),[recurringSchedules]);
+  useEffect(()=>localStorage.setItem("arth_gifts",JSON.stringify(gifts)),[gifts]);
   useEffect(()=>localStorage.setItem("arth_budget",monthBudget),[monthBudget]);
   useEffect(()=>localStorage.setItem("arth_bills",JSON.stringify(bills)),[bills]);
   useEffect(()=>localStorage.setItem("arth_biller_accounts",JSON.stringify(billerAccounts)),[billerAccounts]);
@@ -970,6 +978,7 @@ function AppContent({ onLock }) {
   useEffect(()=>localStorage.setItem("arth_cc_emi_plans",JSON.stringify(ccEmiPlans)),[ccEmiPlans]);
   useEffect(()=>localStorage.setItem("arth_annual_budget",annualBudget),[annualBudget]);
   useEffect(()=>localStorage.setItem("arth_person_budgets",JSON.stringify(perPersonBudgets)),[perPersonBudgets]);
+  useEffect(()=>localStorage.setItem("arth_gifts",JSON.stringify(gifts)),[gifts]);
   useEffect(()=>localStorage.setItem("arth_budget_carry",JSON.stringify(budgetCarryForward)),[budgetCarryForward]);
   useEffect(()=>localStorage.setItem("arth_last_fy_target",lastFYTarget),[lastFYTarget]);
   useEffect(()=>localStorage.setItem("arth_month_overrides",JSON.stringify(monthOverrides)),[monthOverrides]);
@@ -6304,6 +6313,7 @@ function AppContent({ onLock }) {
     memberships,
     feePayments,
     perPersonBudgets,
+    gifts,
     liabilities,
     trackedAssets,
     loans,
@@ -6343,6 +6353,8 @@ function AppContent({ onLock }) {
     setMemberships(Array.isArray(snapshot.memberships) ? snapshot.memberships : []);
     setFeePayments(Array.isArray(snapshot.feePayments) ? snapshot.feePayments : []);
     if(snapshot.perPersonBudgets) setPerPersonBudgets(snapshot.perPersonBudgets);
+    if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
+    if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
@@ -7499,6 +7511,34 @@ function AppContent({ onLock }) {
               </select>
             </div>
           )}
+          {/* Gift button */}
+          <button onClick={()=>{ setGiftForPersonId(p.id); setShowAddGift(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",marginBottom:12,width:"100%",textAlign:"left" }}>🎁 Record Gift for {p.name}</button>
+          {/* Gift history */}
+          {(()=>{
+            const personGifts = gifts.filter(g=>String(g.personId)===String(p.id)).sort((a,b)=>b.createdAt-a.createdAt);
+            if(!personGifts.length) return null;
+            const totalGifts = personGifts.reduce((s,g)=>s+Number(g.amount||0),0);
+            return (
+              <div style={{ ...card,marginBottom:12 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>🎁 Gifts Received</div>
+                  <div style={{ color:T.success,fontSize:13,fontWeight:900 }}>{sym}{fmt(totalGifts)} total</div>
+                </div>
+                <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                  {personGifts.slice(0,10).map(g=>(
+                    <div key={g.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${T.border}` }}>
+                      <div>
+                        <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{g.fromWhom} · {g.occasion}</div>
+                        <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(g.date)||g.date}{g.note?` · ${g.note}`:""}</div>
+                      </div>
+                      <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(g.amount)}</div>
+                    </div>
+                  ))}
+                  {personGifts.length>10&&<div style={{ color:T.sub,fontSize:10,textAlign:"center" }}>+{personGifts.length-10} more</div>}
+                </div>
+              </div>
+            );
+          })()}
           {/* Tagged accounts */}
           {(()=>{ const tagged=accounts.filter(a=>String(a.attributedTo)===String(p.id)); if(!tagged.length) return null; return (
             <div style={{ ...card,marginBottom:12 }}>
@@ -7517,6 +7557,45 @@ function AppContent({ onLock }) {
               </div>
             </div>
           ); })()}
+          {/* Gifts section */}
+          {(()=>{
+            const personGifts = gifts.filter(g=>String(g.personId)===String(p.id)).sort((a,b)=>b.date?.localeCompare(a.date||"")||0);
+            const totalGifts = personGifts.reduce((s,g)=>s+Number(g.amount||0),0);
+            const [showGiftFilter, setShowGiftFilter] = [giftFilter, setGiftFilter];
+            const filtered = showGiftFilter ? personGifts.filter(g=>g.occasion===showGiftFilter||g.fromWhom===showGiftFilter) : personGifts;
+            return (
+              <div style={{ ...card,marginBottom:12 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>🎁 Gifts</div>
+                    {totalGifts>0&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{personGifts.length} gifts · {sym}{fmt(totalGifts)} total</div>}
+                  </div>
+                  <button onClick={()=>{ setGiftForPersonId(p.id); setShowAddGift(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}33`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Gift</button>
+                </div>
+                {personGifts.length>0&&(
+                  <>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                      {[...new Set(personGifts.map(g=>g.occasion))].map(o=>(
+                        <button key={o} onClick={()=>setShowGiftFilter(showGiftFilter===o?null:o)} style={{ background:showGiftFilter===o?T.accent+"22":"none",border:`1px solid ${showGiftFilter===o?T.accent:T.border}`,borderRadius:20,padding:"2px 8px",cursor:"pointer",fontSize:9,fontWeight:700,color:showGiftFilter===o?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{o}</button>
+                      ))}
+                    </div>
+                    {filtered.slice(0,10).map(g=>(
+                      <div key={g.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                        <div>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>From {g.fromWhom}</div>
+                          <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{g.occasion} · {formatShortDate(g.date)||g.date}</div>
+                          {g.note&&<div style={{ color:T.sub,fontSize:10 }}>{g.note}</div>}
+                        </div>
+                        <div style={{ color:T.success,fontSize:13,fontWeight:800 }}>{sym}{fmt(g.amount)}</div>
+                      </div>
+                    ))}
+                    {personGifts.length>10&&<div style={{ color:T.sub,fontSize:10,textAlign:"center",marginTop:6 }}>+{personGifts.length-10} more</div>}
+                  </>
+                )}
+                {personGifts.length===0&&<div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"10px 0" }}>No gifts recorded yet</div>}
+              </div>
+            );
+          })()}
           <div style={{ ...card,background:`linear-gradient(135deg,${p.color}14,${T.card})` }}>
             <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:16 }}>
               <div style={{ width:52,height:52,borderRadius:"50%",background:p.color+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26 }}>{p.emoji}</div>
@@ -11081,6 +11160,75 @@ function AppContent({ onLock }) {
     return "hybrid";
   };
 
+  // -- ADD GIFT MODAL --------------------------------------------------------
+  const GIFT_OCCASIONS = ["Birthday","Diwali","Eid","Christmas","Wedding","Anniversary","New Year","Navratri","Holi","Rakhi","Other"];
+
+  const AddGiftModal = ({ personId, onClose }) => {
+    const person = people.find(p=>String(p.id)===String(personId));
+    const [amount, setAmount] = useState("");
+    const [fromWhom, setFromWhom] = useState("");
+    const [occasion, setOccasion] = useState("");
+    const [giftDate, setGiftDate] = useState(todayStr());
+    const [note, setNote] = useState("");
+
+    const handleSave = () => {
+      if(!amount||!fromWhom) return;
+      const record = {
+        id: genId(),
+        personId: String(personId),
+        amount: parseFloat(amount),
+        fromWhom: fromWhom.trim(),
+        occasion: occasion||"Other",
+        date: giftDate,
+        note: note.trim(),
+        createdAt: Date.now(),
+      };
+      setGifts(prev=>[record,...prev]);
+      onClose();
+    };
+
+    return (
+      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+            <div>
+              <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🎁 Record Gift</div>
+              {person&&<div style={{ color:T.sub,fontSize:11,marginTop:2 }}>for {person.emoji} {person.name}</div>}
+            </div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Amount ({sym})</span>
+              <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder="0" value={amount} onChange={e=>setAmount(cleanMoneyInput(e.target.value))}/>
+            </div>
+            <div>
+              <span style={lbl}>Given by *</span>
+              <input style={inp} placeholder="e.g. Nana, Dadi, Sachin Masa" value={fromWhom} onChange={e=>setFromWhom(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>Occasion</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {GIFT_OCCASIONS.map(o=>(
+                  <button key={o} onClick={()=>setOccasion(o===occasion?"":o)} style={{ background:occasion===o?T.accent+"22":"none",border:`1px solid ${occasion===o?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:occasion===o?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{o}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <span style={lbl}>Date</span>
+              <input style={inp} type="date" value={giftDate} onChange={e=>setGiftDate(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>Note (optional)</span>
+              <input style={inp} placeholder="e.g. Cash in envelope, transferred to wallet" value={note} onChange={e=>setNote(e.target.value)}/>
+            </div>
+            <button onClick={handleSave} disabled={!amount||!fromWhom} style={{ background:amount&&fromWhom?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:amount&&fromWhom?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>Save Gift</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // -- ADD MEMBERSHIP MODAL --------------------------------------------------
   const AddMembershipModal = ({ billerAccount, existing, onClose }) => {
     const isEdit = !!existing;
@@ -11188,6 +11336,75 @@ function AppContent({ onLock }) {
   };
 
   // -- ADD FEE PAYMENT MODAL -------------------------------------------------
+  // -- ADD GIFT MODAL --------------------------------------------------
+  const GIFT_OCCASIONS = ["Birthday","Diwali","Eid","Christmas","Wedding","Anniversary","Navratri","Holi","Baby Shower","Graduation","New Year","Just Because","Other"];
+
+  const AddGiftModal = ({ personId, onClose }) => {
+    const person = people.find(p=>String(p.id)===String(personId));
+    const [amount, setAmount] = useState("");
+    const [fromWhom, setFromWhom] = useState("");
+    const [occasion, setOccasion] = useState("");
+    const [date, setDate] = useState(todayStr());
+    const [note, setNote] = useState("");
+
+    const handleSave = () => {
+      if(!amount||!fromWhom) return;
+      const record = {
+        id: genId(),
+        personId: String(personId),
+        amount: parseFloat(amount),
+        fromWhom: fromWhom.trim(),
+        occasion: occasion||"Other",
+        date,
+        note: note.trim(),
+        createdAt: Date.now(),
+      };
+      setGifts(prev=>[record,...prev]);
+      onClose();
+    };
+
+    return (
+      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+            <div>
+              <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🎁 Add Gift</div>
+              {person&&<div style={{ color:T.sub,fontSize:11,marginTop:2 }}>for {person.emoji} {person.name}</div>}
+            </div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>×</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Amount ({sym}) *</span>
+              <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder="0" value={amount} onChange={e=>setAmount(cleanMoneyInput(e.target.value))}/>
+            </div>
+            <div>
+              <span style={lbl}>From *</span>
+              <input style={inp} placeholder="e.g. Nana, Dadi, Sachin Masa" value={fromWhom} onChange={e=>setFromWhom(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>Date</span>
+              <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>Occasion</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {GIFT_OCCASIONS.map(o=>(
+                  <button key={o} onClick={()=>setOccasion(occasion===o?"":o)} style={{ background:occasion===o?T.accent+"22":"none",border:`1px solid ${occasion===o?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:occasion===o?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{o}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <span style={lbl}>Note (optional)</span>
+              <input style={inp} placeholder="e.g. Cash in envelope" value={note} onChange={e=>setNote(e.target.value)}/>
+            </div>
+            <button onClick={handleSave} disabled={!amount||!fromWhom} style={{ background:amount&&fromWhom?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:amount&&fromWhom?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>Save Gift</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const AddFeePaymentModal = ({ billerAccount, onClose }) => {
     const [amount, setAmount] = useState("");
     const [payDate, setPayDate] = useState(todayStr());
@@ -11713,7 +11930,7 @@ function AppContent({ onLock }) {
           </div>
         )}
         {showAddBill&&<AddBillModal/>}
-        {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); }}/>}
+        {showAddGift&&giftForPersonId&&<AddGiftModal personId={giftForPersonId} onClose={()=>{ setShowAddGift(false); setGiftForPersonId(null); }}/>}
         {editingBillerAccount&&<BillerAccountModal existing={editingBillerAccount} onClose={()=>setEditingBillerAccount(null)}/>}
         {showAddMembership&&activeBillerForAction&&<AddMembershipModal billerAccount={activeBillerForAction} existing={editingMembership} onClose={()=>{ setShowAddMembership(false); setEditingMembership(null); }}/>}
         {showAddFeePayment&&activeBillerForAction&&<AddFeePaymentModal billerAccount={activeBillerForAction} onClose={()=>{ setShowAddFeePayment(false); setActiveBillerForAction(null); }}/>}
