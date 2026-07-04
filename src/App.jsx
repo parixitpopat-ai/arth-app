@@ -6747,10 +6747,17 @@ function AppContent({ onLock }) {
       if(!acc[key]) acc[key] = {key,name:inv.name||key,type:inv.type||"mf",amount:inv.amount||0,accId:inv.paymentAccId||"",items:[]};
       acc[key].items.push(inv);
       return acc;
-    },{}));
+    },{})).sort((a,b)=>{
+      // Sort by most recent transaction date desc
+      const latestA = txns.filter(t=>t.type==="investment"&&t.investFolio===a.key).sort((x,y)=>(y.date||"").localeCompare(x.date||""))[0]?.date||"";
+      const latestB = txns.filter(t=>t.type==="investment"&&t.investFolio===b.key).sort((x,y)=>(y.date||"").localeCompare(x.date||""))[0]?.date||"";
+      return latestB.localeCompare(latestA);
+    });
     // Check which folios already have a txn this month
     const recordedFoliosThisMonth = new Set(thisMonthTxns.filter(t=>t.type==="investment"&&t.investFolio).map(t=>t.investFolio));
-    const allFoliosDue = investmentGroups.filter(g=>!recordedFoliosThisMonth.has(g.key) && !dueRecurring.some(r=>r.name===g.name));
+    const allFoliosDue = investmentGroups
+      .filter(g=>!recordedFoliosThisMonth.has(g.key) && !dueRecurring.some(r=>r.name===g.name))
+      .sort((a,b)=>a.name.localeCompare(b.name));
     const CARDS = {
       household: (
         <div key="household" style={{ ...card,padding:"16px 14px" }}>
@@ -10923,6 +10930,16 @@ function AppContent({ onLock }) {
   ];
   const getGroupTypeMeta = id => GROUP_TYPES.find(t=>t.id===id) || GROUP_TYPES[GROUP_TYPES.length-1];
 
+  // -- BILLING TYPE HELPERS --------------------------------------------------
+  const MEMBERSHIP_TYPES = ["Gym / Fitness","Club Membership","School Fees","Education Fees","Other Subscription","Insurance","Society Maintenance","Rental"];
+  const BILL_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Hospital","Other"];
+  const HYBRID_TYPES = ["Mobile Postpaid","Mobile Prepaid","OTT / Streaming","NPS","Recurring Deposit","Loan EMI","Credit Card","Municipal Tax","Municipal Services"];
+  const getBillerActionType = type => {
+    if(MEMBERSHIP_TYPES.includes(type)) return "membership";
+    if(BILL_TYPES.includes(type)) return "bill";
+    return "hybrid";
+  };
+
   const BillsPage = () => {
     const [billsTab, setBillsTab] = useState("mybills");
     const [bFilter, setBFilter] = useState("unpaid");
@@ -11350,17 +11367,6 @@ function AppContent({ onLock }) {
         </div>
       </div>
     );
-  };
-
-
-  // -- BILLING TYPE HELPERS --------------------------------------------------
-  const MEMBERSHIP_TYPES = ["Gym / Fitness","Club Membership","School Fees","Education Fees","Other Subscription","Insurance","Society Maintenance","Rental"];
-  const BILL_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Hospital","Other"];
-  const HYBRID_TYPES = ["Mobile Postpaid","Mobile Prepaid","OTT / Streaming","NPS","Recurring Deposit","Loan EMI","Credit Card","Municipal Tax","Municipal Services"];
-  const getBillerActionType = type => {
-    if(MEMBERSHIP_TYPES.includes(type)) return "membership";
-    if(BILL_TYPES.includes(type)) return "bill";
-    return "hybrid";
   };
 
 
@@ -12473,6 +12479,7 @@ function AppContent({ onLock }) {
                 </div>
                 <div style={{ display:"flex",gap:8,marginTop:16 }}>
                   <button onClick={()=>{ setTxnDetailId(null); setEditTxn(t); setShowAdd(true); }} style={{ flex:1,background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+                  <button onClick={()=>{ if(window.confirm("Delete this transaction?")){ removeTxnAndLinkedInvestment(t); setTxnDetailId(null); } }} style={{ background:T.danger+"18",border:`1px solid ${T.danger}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
                   <button onClick={()=>setTxnDetailId(null)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
                 </div>
               </div>
