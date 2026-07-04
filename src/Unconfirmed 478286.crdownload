@@ -1,0 +1,2762 @@
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+// Build-time version stamp: V4.DDMMYYHHmmss
+const _bt = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : new Date();
+const APP_VERSION = `V4.${String(_bt.getDate()).padStart(2,"0")}${String(_bt.getMonth()+1).padStart(2,"0")}${String(_bt.getFullYear()).slice(-2)}${String(_bt.getHours()).padStart(2,"0")}${String(_bt.getMinutes()).padStart(2,"0")}${String(_bt.getSeconds()).padStart(2,"0")}`;
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
+import { getCurrentCloudUser, isCloudSyncConfigured, loadCloudSnapshot, saveCloudSnapshot, signInWithPassword, signOutCloud, signUpWithPassword, supabase } from "./cloudSync";
+// smsBridge — stub (native SMS not available in web PWA)
+const isNativeSmsAvailable = () => false;
+const readCopiedSms = async () => ({ text: "", error: "Not supported" });
+const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
+
+// ─── THEME ───────────────────────────────────────────────────────────────────
+const DARK  = { bg:"#08080f", card:"#0f0f1a", border:"#1a1a2e", text:"#e8e4dc", accent:"#f0a500", accentSoft:"rgba(240,165,0,0.1)", success:"#22c55e", danger:"#ef4444", input:"#0b0b18", nav:"#0a0a16", sub:"#5a5a7a", pill:"#14142a", sh:"rgba(0,0,0,0.6)", info:"#06b6d4", purple:"#8b5cf6", warn:"#f97316" };
+const LIGHT = { bg:"#f4f3ef", card:"#ffffff", border:"#e5e1d8", text:"#1a1a2e", accent:"#d4920a", accentSoft:"rgba(212,146,10,0.08)", success:"#16a34a", danger:"#dc2626", input:"#ede9e3", nav:"#ffffff", sub:"#7a7890", pill:"#eeecea", sh:"rgba(0,0,0,0.06)", info:"#0891b2", purple:"#7c3aed", warn:"#ea6c00" };
+
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const PALETTE = ["#f0a500","#22c55e","#3b82f6","#ef4444","#a855f7","#06b6d4","#f97316","#ec4899","#84cc16","#14b8a6","#8b5cf6","#f43f5e","#0ea5e9","#10b981","#f59e0b"];
+const CAT_ICONS = ["🍽️","🍕","🍔","🍜","🥗","🍣","☕","🍺","🛒","🥩","🚗","🏍️","✈️","🚕","⛽","🅿️","🛍️","👗","👟","💄","💍","🧴","⚡","💧","📶","🔌","💊","🏥","🩺","🧘","🏋️","🎬","🎵","🎮","🎨","📚","🏠","🔧","🪴","🛋️","👶","🧒","🎒","✏️","🧸","💰","💳","📈","🏦","🪙","👤","🐕","🐈","🌿","🌍","☀️","🎁","🎂","💼","🖥️","📱","🔭","🪒","💇","💆","💅","🧖","🏊","🚴","⛳","🎯","🎪","🏟️","🚑","🔑","🛁","🧺","🪑","🖼️","⛵","🌊","⛰️","🎓","📖","🏛️"];
+const INVEST_TYPES = [{ id:"mf", name:"Mutual Funds / SIP", icon:"📈", color:"#3b82f6" },{ id:"stocks", name:"Stocks", icon:"📊", color:"#22c55e" },{ id:"fd", name:"Fixed Deposit", icon:"🏦", color:"#f0a500" },{ id:"gold", name:"Gold", icon:"🥇", color:"#f59e0b" },{ id:"ppf", name:"PPF / NPS", icon:"🏛️", color:"#8b5cf6" },{ id:"crypto", name:"Crypto", icon:"₿", color:"#f97316" },{ id:"realestate", name:"Real Estate", icon:"🏘️", color:"#06b6d4" },{ id:"custom", name:"Custom", icon:"💼", color:"#ec4899" }];
+const ACC_TYPES = [{ id:"bank", label:"Bank Account", icon:"🏦" },{ id:"cc", label:"Credit Card", icon:"💳" },{ id:"debit", label:"Debit Card", icon:"🏧" },{ id:"upi", label:"UPI", icon:"📱" },{ id:"cash", label:"Cash", icon:"💵" }];
+const LIABILITY_TYPES = [{ id:"mortgage", name:"Mortgage / Home Loan", icon:"🏠", color:"#f97316" },{ id:"student", name:"Student Loan", icon:"🎓", color:"#8b5cf6" },{ id:"car", name:"Car Loan", icon:"🚗", color:"#3b82f6" },{ id:"tax", name:"Tax Liability", icon:"🏛️", color:"#ef4444" },{ id:"personal", name:"Personal Loan", icon:"🏦", color:"#ec4899" },{ id:"other", name:"Other Liability", icon:"📦", color:"#78716c" }];
+const ASSET_TYPES = [{ id:"realestate", name:"Real Estate", icon:"🏠", color:"#06b6d4" },{ id:"vehicle", name:"Vehicle", icon:"🚗", color:"#3b82f6" },{ id:"valuable", name:"Valuable", icon:"💎", color:"#a855f7" },{ id:"gold", name:"Gold / Jewelry", icon:"🥇", color:"#f59e0b" },{ id:"other", name:"Other Asset", icon:"📦", color:"#22c55e" }];
+const DEFAULT_INCOME_TYPES = ["salary","interest","freelance","rental","royalty","dividend","capital_gains"];
+const INVESTMENT_FREQUENCY_OPTIONS = [
+  { value:"daily", label:"Daily" },
+  { value:"weekly", label:"Weekly" },
+  { value:"monthly", label:"Monthly" },
+  { value:"quarterly", label:"Quarterly" },
+  { value:"halfyearly", label:"Half-yearly" },
+  { value:"yearly", label:"Yearly" },
+];
+
+const ME = { id:"__me__", name:"Me", emoji:"🧑", relation:"Self", color:"#f0a500", personType:"dependant", isMe:true };
+
+const DEFAULT_CATS = [
+  { id:"housing", name:"Housing", icon:"🏠", color:"#06b6d4", budget:15000, fixed:true, subs:[{id:"h1",name:"Rent / EMI"},{id:"h2",name:"Maintenance"},{id:"h3",name:"Repairs"},{id:"h4",name:"Furniture & Appliances"},{id:"h5",name:"Renovation / Interiors"},{id:"h6",name:"Property Tax"}] },
+  { id:"utilities", name:"Utilities", icon:"⚡", color:"#f59e0b", budget:5000, fixed:true, subs:[{id:"u1",name:"Electricity"},{id:"u2",name:"Water"},{id:"u3",name:"Gas"},{id:"u4",name:"Internet / WiFi"},{id:"u5",name:"Mobile Bills"},{id:"u6",name:"Software Subscriptions"},{id:"u7",name:"Cloud Storage"}] },
+  { id:"groceries", name:"Groceries", icon:"🛒", color:"#22c55e", budget:10000, fixed:true, subs:[{id:"g1",name:"Staples"},{id:"g2",name:"Vegetables"},{id:"g3",name:"Fruits"},{id:"g4",name:"Dairy"},{id:"g5",name:"Snacks & Packaged Food"}] },
+  { id:"food", name:"Food & Dining", icon:"🍽️", color:"#f97316", budget:8000, fixed:false, subs:[{id:"f1",name:"Swiggy / Zomato"},{id:"f2",name:"Restaurants"},{id:"f3",name:"Cafes"},{id:"f4",name:"Treating Others"}] },
+  { id:"transport", name:"Transport", icon:"🚗", color:"#3b82f6", budget:5000, fixed:false, subs:[{id:"t1",name:"Fuel"},{id:"t2",name:"Uber / Ola"},{id:"t3",name:"Public Transport"},{id:"t4",name:"EMI"},{id:"t5",name:"Insurance"},{id:"t6",name:"Servicing & Repairs"},{id:"t7",name:"Parking & Tolls"},{id:"t8",name:"PUC"},{id:"t9",name:"Challan / Fine"}] },
+  { id:"financial", name:"Financial", icon:"💳", color:"#8b5cf6", budget:30000, fixed:true, subs:[{id:"fi1",name:"SIP / Mutual Funds"},{id:"fi2",name:"Stocks"},{id:"fi3",name:"PPF / NPS"},{id:"fi4",name:"Term Insurance"},{id:"fi5",name:"Health Insurance"},{id:"fi6",name:"Credit Card Bills"},{id:"fi7",name:"Loan EMI"},{id:"fi8",name:"Bank Charges"}] },
+  { id:"health", name:"Health", icon:"💊", color:"#ec4899", budget:3000, fixed:true, subs:[{id:"he1",name:"Doctor Consultation"},{id:"he2",name:"Medicines"},{id:"he3",name:"Diagnostics / Tests"},{id:"he4",name:"Health Checkups"},{id:"he5",name:"Supplements"}] },
+  { id:"fitness", name:"Fitness", icon:"🏋️", color:"#14b8a6", budget:2000, fixed:false, subs:[{id:"fit1",name:"Gym"},{id:"fit2",name:"Sports"},{id:"fit3",name:"Yoga / Trainer"},{id:"fit4",name:"Fitness Apps"}] },
+  { id:"personaldev", name:"Personal Development", icon:"📚", color:"#0ea5e9", budget:2000, fixed:false, subs:[{id:"pd1",name:"Courses"},{id:"pd2",name:"Books"},{id:"pd3",name:"Workshops"},{id:"pd4",name:"Coaching / Mentorship"}] },
+  { id:"lifestyle", name:"Lifestyle", icon:"👗", color:"#a855f7", budget:5000, fixed:false, subs:[{id:"l1",name:"Clothes"},{id:"l2",name:"Shoes"},{id:"l3",name:"Grooming / Salon"},{id:"l4",name:"Skincare / Cosmetics"},{id:"l5",name:"Accessories / Gadgets"}] },
+  { id:"entertainment", name:"Entertainment", icon:"🎬", color:"#f43f5e", budget:2000, fixed:false, subs:[{id:"e1",name:"OTT Subscriptions"},{id:"e2",name:"Movies"},{id:"e3",name:"Events / Shows"}] },
+  { id:"travel", name:"Travel", icon:"✈️", color:"#06b6d4", budget:5000, fixed:false, subs:[{id:"tr1",name:"Flights"},{id:"tr2",name:"Trains / Buses"},{id:"tr3",name:"Hotels"},{id:"tr4",name:"Local Transport"},{id:"tr5",name:"Activities"},{id:"tr6",name:"Shopping"}] },
+  { id:"family", name:"Groups & Social", icon:"👥", color:"#f0a500", budget:5000, fixed:false, subs:[{id:"fa1",name:"Gifts"},{id:"fa2",name:"Family Support"},{id:"fa3",name:"Festivals"},{id:"fa4",name:"Weddings / Functions"}] },
+  { id:"donations", name:"Donations", icon:"🙏", color:"#84cc16", budget:1000, fixed:false, subs:[{id:"d1",name:"Charity"},{id:"d2",name:"Religious Contributions"}] },
+  { id:"professional", name:"Professional", icon:"💼", color:"#475569", budget:2000, fixed:false, subs:[{id:"pr1",name:"Work Travel"},{id:"pr2",name:"Networking"},{id:"pr3",name:"Tools / Software"},{id:"pr4",name:"Office Setup"}] },
+  { id:"taxes", name:"Taxes", icon:"🏛️", color:"#dc2626", budget:5000, fixed:true, subs:[{id:"tx1",name:"Income Tax"},{id:"tx2",name:"CA / Filing Fees"}] },
+  { id:"emergency", name:"Emergency", icon:"🚑", color:"#ef4444", budget:5000, fixed:true, subs:[{id:"em1",name:"Medical Emergency"},{id:"em2",name:"Urgent Repairs"},{id:"em3",name:"Contingency"}] },
+  { id:"misc", name:"Miscellaneous", icon:"📦", color:"#78716c", budget:2000, fixed:false, subs:[{id:"m1",name:"Cash Expenses"},{id:"m2",name:"Tips"},{id:"m3",name:"Unplanned Purchases"}] },
+];
+
+const DEFAULT_ACCOUNTS = [
+  { id:"bank1", type:"bank", name:"ICICI Savings", last4:"3310", color:"#22c55e", openingBalance:0 },
+  { id:"cc1", type:"cc", name:"HDFC Sapphire", last4:"4242", color:"#3b82f6", limit:300000, outstanding:0, statementDate:15, dueDate:5, billingCycle:"15th–14th", alertPct:30 },
+  { id:"upi1", type:"upi", name:"GPay", handle:"", color:"#a855f7" },
+  { id:"cash1", type:"cash", name:"Cash Wallet", color:"#f0a500", openingBalance:0 },
+];
+const DEFAULT_MEASURE_UNITS = ["kg","g","ltr","ml","nos","pkt","dozen","box"];
+
+// ─── UTILS ───────────────────────────────────────────────────────────────────
+const genId = () => Math.random().toString(36).slice(2,9);
+const todayStr = () => new Date().toISOString().split("T")[0];
+const sym = "₹";
+const fmt = n => { const num = Number(n||0); return num.toLocaleString("en-IN", { minimumFractionDigits: num % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 }); };
+const fmtK = n => { const num = Number(n||0); if(num >= 100000) return (num/100000).toFixed(1).replace(/\.0$/,"")+"L"; if(num >= 1000) return (num/1000).toFixed(1).replace(/\.0$/,"")+"K"; return fmt(num); };
+const parseMoney = v => {
+  const cleaned = String(v ?? "").replace(/[₹,\s]/g,"");
+  const num = parseFloat(cleaned);
+  return Number.isFinite(num) ? num : 0;
+};
+const cleanMoneyInput = v => {
+  const stripped = String(v ?? "").replace(/[₹,\s]/g, "");
+  const cleaned = stripped.replace(/[^\d.]/g, "");
+  const dotIndex = cleaned.indexOf(".");
+  if(dotIndex === -1) return cleaned;
+  const whole = cleaned.slice(0, dotIndex);
+  const decimal = cleaned.slice(dotIndex + 1).replace(/\./g, "");
+  return `${whole}.${decimal}`;
+};
+const extractTxnReference = txt => {
+  const s = String(txt ?? "");
+  const labeled = s.match(/(?:utr|rrn|ref(?:erence)?(?:\s*(?:no\.?|id|number))?|txn(?:\s*(?:id|no|ref))?|transaction\s*(?:id|no|ref)?|upi\s*(?:ref(?:erence)?)?(?:\s*(?:no\.?|id))?|imps\s*(?:ref(?:no\.?)?)?|neft\s*(?:ref)?)[\s:#\/-]*([A-Z0-9]{6,})/i);
+  if(labeled?.[1]) return labeled[1].trim();
+  return "";
+};
+const extractSmsBalance = txt => {
+  const m = String(txt ?? "").match(/(?:avail(?:able)?[\s\w]{0,10}(?:bal(?:ance)?|limit)|(?:a\/c\s+)?bal(?:ance)?(?:\s+(?:is|:|-))?|closing\s+bal|avl\.?\s+bal|a\/c\s+bal)[\s:]*(?:Rs\.?|INR|\u20b9)?\s*([\d,]+(?:\.\d{1,2})?)/i);
+  return m ? parseFloat(m[1].replace(/,/g,"")) : null;
+};
+// F12: Compute next due date based on billing model
+const computeNextDueDate = (bill, paidDate) => {
+  const base = bill.billingModel === "prorata"
+    ? new Date(paidDate || bill.dueDate || bill.activationDate || new Date())
+    : new Date(bill.periodEnd || bill.dueDate || new Date());
+  const next = new Date(base);
+  const freq = bill.frequency || "monthly";
+  if(freq === "monthly") next.setMonth(next.getMonth() + 1);
+  else if(freq === "quarterly") next.setMonth(next.getMonth() + 3);
+  else if(freq === "halfyearly") next.setMonth(next.getMonth() + 6);
+  else if(freq === "annual" || freq === "yearly") next.setFullYear(next.getFullYear() + 1);
+  else if(freq === "custom" && bill.validityDays) next.setDate(next.getDate() + Number(bill.validityDays));
+  return next.toISOString().split("T")[0];
+};
+const computeNextPeriod = (bill, paidDate) => {
+  if(bill.billingModel !== "calendar" || !bill.periodStart || !bill.periodEnd) return null;
+  const start = new Date(bill.periodEnd); start.setDate(start.getDate() + 1);
+  const end = new Date(start);
+  const freq = bill.frequency || "monthly";
+  if(freq === "monthly") end.setMonth(end.getMonth() + 1);
+  else if(freq === "quarterly") end.setMonth(end.getMonth() + 3);
+  else if(freq === "halfyearly") end.setMonth(end.getMonth() + 6);
+  else if(freq === "annual" || freq === "yearly") end.setFullYear(end.getFullYear() + 1);
+  end.setDate(end.getDate() - 1);
+  return { periodStart: start.toISOString().split("T")[0], periodEnd: end.toISOString().split("T")[0] };
+};
+const normalizeIncomeTypeValue = value => String(value ?? "")
+  .trim()
+  .toLowerCase()
+  .replace(/&/g," and ")
+  .replace(/[^\w\s-]/g,"")
+  .replace(/[\s-]+/g,"_")
+  .replace(/^_+|_+$/g,"");
+const normalizeMeasureUnitValue = value => String(value ?? "")
+  .trim()
+  .toLowerCase()
+  .replace(/\./g, "")
+  .replace(/\s+/g, "_");
+const formatMeasureUnitLabel = value => String(value || "")
+  .replace(/_/g, " ")
+  .replace(/\b\w/g, ch=>ch.toUpperCase());
+const normalizeMeasureUnits = stored => {
+  const fromStored = Array.isArray(stored) ? stored : [];
+  return Array.from(new Set([...DEFAULT_MEASURE_UNITS, ...fromStored]
+    .map(normalizeMeasureUnitValue)
+    .filter(Boolean)));
+};
+const normalizeItemCatalog = stored => {
+  const list = Array.isArray(stored) ? stored : [];
+  return list
+    .map(item=>({
+      id:item?.id || genId(),
+      name:String(item?.name || "").trim(),
+      unit:normalizeMeasureUnitValue(item?.unit || "nos") || "nos",
+      catId:item?.catId || "",
+      subId:item?.subId || "",
+    }))
+    .filter(item=>item.name);
+};
+const formatIncomeTypeLabel = value => {
+  const normalized = normalizeIncomeTypeValue(value) || String(value ?? "").trim();
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map(part=>part.charAt(0).toUpperCase()+part.slice(1))
+    .join(" ");
+};
+const normalizeIncomeTypes = stored => Array.from(new Set(
+  [...DEFAULT_INCOME_TYPES, ...(Array.isArray(stored) ? stored : [])]
+    .map(normalizeIncomeTypeValue)
+    .filter(Boolean)
+));
+const normalizeLiabilityTypes = stored => {
+  const extras = [];
+  const seenIds = new Set(LIABILITY_TYPES.map(item=>item.id));
+  const seenNames = new Set(LIABILITY_TYPES.map(item=>normalizeIncomeTypeValue(item.name)));
+  (Array.isArray(stored) ? stored : []).forEach((entry, index) => {
+    const rawName = typeof entry === "string" ? entry : entry?.name;
+    const name = String(rawName ?? "").trim();
+    const normalizedName = normalizeIncomeTypeValue(name);
+    if(!name || !normalizedName || seenNames.has(normalizedName)) return;
+    let id = normalizedName || `liability_${index+1}`;
+    while(seenIds.has(id)) id = `${normalizedName}_${index+1}`;
+    seenIds.add(id);
+    seenNames.add(normalizedName);
+    extras.push({
+      id,
+      name,
+      icon: typeof entry === "object" && entry?.icon ? entry.icon : "🧾",
+      color: typeof entry === "object" && entry?.color ? entry.color : "#ef4444",
+      custom:true,
+    });
+  });
+  return extras;
+};
+const defaultAccountTypeBucket = baseType => baseType==="cc" ? "liability" : "cash";
+const inferAccountBucket = (value, fallback = "cash") => {
+  const text = String(value ?? "").toLowerCase();
+  if(/ppf|nps|pf\b|provident|retirement|fd\b|fixed deposit|term deposit|demat|broker|investment|mutual fund|sip\b|stocks?|equity|gold|crypto|real estate|property/.test(text)) return "investment";
+  return fallback;
+};
+const accountBucketLabel = bucket => bucket==="investment" ? "Investment / Wealth" : bucket==="liability" ? "Liability" : "Cash / Spending";
+const normalizeAccountTypes = (stored, extraBehaviors=[]) => {
+  const allBaseBehaviors = [...ACC_TYPES, ...(Array.isArray(extraBehaviors) ? extraBehaviors : [])];
+  const rawList = Array.isArray(stored) ? stored : [];
+  const overrides = new Map(
+    rawList
+      .filter(entry=>entry && typeof entry === "object" && entry.id)
+      .map(entry=>[String(entry.id), entry])
+  );
+  const defaults = allBaseBehaviors.map(item=>{
+    const override = overrides.get(item.id);
+    return {
+      ...item,
+      label:override?.label || item.label,
+      icon:override?.icon || item.icon,
+      baseType:item.id,
+      bucket:override?.bucket || defaultAccountTypeBucket(item.baseType||item.id),
+      custom:false,
+    };
+  });
+  const seenIds = new Set(defaults.map(item=>item.id));
+  const extras = [];
+  rawList.forEach((entry, index) => {
+    if(!entry || typeof entry !== "object") return;
+    const label = String(entry.label ?? entry.name ?? "").trim();
+    if(!label) return;
+    const requestedId = String(entry.id ?? "").trim();
+    if(requestedId && seenIds.has(requestedId)) return;
+    const baseType = allBaseBehaviors.some(item=>item.id===entry.baseType) ? entry.baseType : "bank";
+    let id = requestedId || normalizeIncomeTypeValue(label) || `account_type_${index+1}`;
+    while(seenIds.has(id)) id = `${normalizeIncomeTypeValue(label) || "account_type"}_${index+1}`;
+    seenIds.add(id);
+    const baseMeta = allBaseBehaviors.find(item=>item.id===baseType) || ACC_TYPES[0];
+    extras.push({
+      id,
+      label,
+      icon:entry.icon || baseMeta.icon,
+      baseType,
+      bucket:entry.bucket || inferAccountBucket(label, defaultAccountTypeBucket(baseType)),
+      custom:true,
+    });
+  });
+  return [...defaults, ...extras];
+};
+const normalizeVendorText = value => String(value ?? "")
+  .toLowerCase()
+  .replace(/[^a-z0-9\s]/g, " ")
+  .replace(/\s+/g, " ")
+  .trim();
+const VENDOR_CATEGORY_RULES = [
+  { pattern: /swiggy|zomato|dominos|pizza|burger|starbucks|kfc|mcd|restaurant|cafe/, catId: "food", label: "food delivery / dining vendor" },
+  { pattern: /uber|ola|rapido|petrol|fuel|shell|hpcl|iocl|parking|toll/, catId: "transport", label: "transport vendor" },
+  { pattern: /amazon|flipkart|myntra|ajio|nykaa|meesho/, catId: "lifestyle", label: "shopping vendor" },
+  { pattern: /apollo|pharmacy|medplus|hospital|clinic|diagnostic/, catId: "health", label: "health vendor" },
+  { pattern: /airtel|jio|bsnl|wifi|broadband|electricity|water|gas/, catId: "utilities", label: "utility bill vendor" },
+  { pattern: /netflix|spotify|hotstar|prime video|bookmyshow/, catId: "entertainment", label: "entertainment vendor" },
+  { pattern: /blinkit|zepto|bigbasket|instamart|grofers/, catId: "groceries", label: "grocery vendor" },
+];
+const investmentFreqLabel = freq => {
+  if(freq==="daily") return "Daily";
+  if(freq==="weekly") return "Weekly";
+  if(freq==="monthly") return "Monthly";
+  if(freq==="halfyearly") return "Half-yearly";
+  if(freq==="quarterly") return "Quarterly";
+  if(freq==="yearly") return "Yearly";
+  if(freq==="one-time") return "One-time";
+  return "";
+};
+const getInvestmentBudgetMeta = type => {
+  if(type==="mf") return { catId:"financial", subId:"fi1" };
+  if(type==="stocks" || type==="crypto" || type==="gold") return { catId:"financial", subId:"fi2" };
+  if(type==="ppf" || type==="fd" || type==="realestate") return { catId:"financial", subId:"fi3" };
+  return { catId:"financial", subId:null };
+};
+const getInvestmentMetricConfig = type => {
+  if(type==="mf") return { show:true, label:"NAV", placeholder:"e.g. 23.45", hint:"Track the latest NAV per unit for this fund.", shortLabel:"NAV" };
+  if(type==="stocks") return { show:true, label:"Units", placeholder:"e.g. 10", hint:"Track how many shares or units were bought.", shortLabel:"Units" };
+  if(type==="gold") return { show:true, label:"Weight (grams)", placeholder:"e.g. 12.5", hint:"Track gold weight in grams.", shortLabel:"Gold" };
+  if(type==="crypto") return { show:true, label:"Units", placeholder:"e.g. 0.015", hint:"Track the number of coins or tokens.", shortLabel:"Units" };
+  if(type==="ppf") return { show:false, label:"", placeholder:"", hint:"PPF / NPS is tracked by contribution amount; no NAV is required. If you created a PPF account, record the money movement as a Transfer into that account.", shortLabel:"" };
+  if(type==="fd") return { show:false, label:"", placeholder:"", hint:"FD is tracked by deposit value; no NAV is required.", shortLabel:"" };
+  if(type==="realestate") return { show:false, label:"", placeholder:"", hint:"Real estate is tracked by current value; no NAV is required.", shortLabel:"" };
+  return { show:false, label:"", placeholder:"", hint:"This holding is tracked by amount or current value.", shortLabel:"" };
+};
+const formatInvestmentMetric = (type, rawValue) => {
+  const value = Number(rawValue || 0);
+  if(!value) return "";
+  if(type==="mf") return `NAV ${fmt(value)}`;
+  if(type==="gold") return `${fmt(value)} g`;
+  if(type==="stocks" || type==="crypto") return `${fmt(value)} units`;
+  const config = getInvestmentMetricConfig(type);
+  return config.show && config.shortLabel ? `${config.shortLabel} ${fmt(value)}` : "";
+};
+const getInvestmentGroupMeta = inv => {
+  const type = String(inv?.type || "custom");
+  const folioNo = String(inv?.folioNo || "").trim();
+  const name = String(inv?.name || "Investment").trim() || "Investment";
+  if(type === "mf" && folioNo) return { key:`${type}|folio|${folioNo.toLowerCase()}`, folioNo, primaryName:name };
+  const normalizedName = normalizeVendorText(name);
+  if(normalizedName) return { key:`${type}|name|${normalizedName}`, folioNo:"", primaryName:name };
+  return { key:`${type}|single|${String(inv?.linkedInvestmentId || inv?.id || name)}`, folioNo:"", primaryName:name };
+};
+const inferInvestmentTypeId = value => {
+  const text = normalizeVendorText(value);
+  if(!text) return "custom";
+  if(/mutual fund|sip\b|mf\b/.test(text)) return "mf";
+  if(/stocks?|share|equity|demat/.test(text)) return "stocks";
+  if(/ppf|nps|pf\b|provident|retirement/.test(text)) return "ppf";
+  if(/fd\b|fixed deposit|term deposit/.test(text)) return "fd";
+  if(/gold|sovereign/.test(text)) return "gold";
+  if(/crypto|bitcoin|btc|eth/.test(text)) return "crypto";
+  if(/real estate|property|house|flat|plot/.test(text)) return "realestate";
+  return "custom";
+};
+const getTxnCategoryIds = txn => {
+  if(txn?.type==="investment") return [];
+  if(Array.isArray(txn?.catIds) && txn.catIds.length) return txn.catIds.filter(Boolean);
+  if(txn?.catId) return [txn.catId];
+  return [];
+};
+const getTxnSubIds = txn => {
+  if(txn?.type==="investment") return [];
+  if(Array.isArray(txn?.subIds) && txn.subIds.length) return txn.subIds.filter(Boolean);
+  if(txn?.subId) return [txn.subId];
+  return [];
+};
+const daysInMonth = (monthKey) => {
+  if(monthKey){
+    const [y,m] = monthKey.split("-").map(Number);
+    if(!y||!m) return 31;
+    return new Date(y, m, 0).getDate();
+  }
+  const n = new Date();
+  return new Date(n.getFullYear(), n.getMonth()+1, 0).getDate();
+};
+const daysLeft = (monthKey) => {
+  const today = new Date();
+  const nowKey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
+  if(!monthKey || monthKey === nowKey){
+    return Math.max(0, daysInMonth(nowKey) - today.getDate());
+  }
+  if(monthKey < nowKey) return 0;
+  return daysInMonth(monthKey);
+};
+const getMonthBounds = (monthKey = todayStr().slice(0,7)) => {
+  const [year, month] = String(monthKey || todayStr().slice(0,7)).split("-").map(Number);
+  const safeYear = year || new Date().getFullYear();
+  const safeMonth = month || (new Date().getMonth() + 1);
+  const start = `${safeYear}-${String(safeMonth).padStart(2,"0")}-01`;
+  const end = `${safeYear}-${String(safeMonth).padStart(2,"0")}-${String(new Date(safeYear, safeMonth, 0).getDate()).padStart(2,"0")}`;
+  return { start, end };
+};
+const getPreviousMonthKey = (monthKey = todayStr().slice(0,7)) => {
+  const [year, month] = String(monthKey || todayStr().slice(0,7)).split("-").map(Number);
+  const ref = new Date((year || new Date().getFullYear()), (month || 1) - 2, 1);
+  return `${ref.getFullYear()}-${String(ref.getMonth()+1).padStart(2,"0")}`;
+};
+const MONTH_NAME_MAP = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, sept:9, oct:10, nov:11, dec:12 };
+const toFourDigitYear = year => {
+  const num = Number(year);
+  if(!Number.isFinite(num)) return null;
+  if(num >= 100) return num;
+  return num >= 70 ? 1900 + num : 2000 + num;
+};
+const buildIsoDate = (year, month, day) => {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if(!y || !m || !d || m < 1 || m > 12) return "";
+  const maxDay = new Date(y, m, 0).getDate();
+  if(d < 1 || d > maxDay) return "";
+  return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+};
+const normalizeToIsoDate = value => {
+  if(!value) return "";
+  if(value instanceof Date && !Number.isNaN(value.getTime())){
+    return buildIsoDate(value.getFullYear(), value.getMonth()+1, value.getDate());
+  }
+  const cleaned = String(value)
+    .trim()
+    .replace(/\b(\d{1,2})(st|nd|rd|th)\b/gi, "$1")
+    .replace(/,/g, " ")
+    .replace(/\s+/g, " ");
+  if(!cleaned) return "";
+
+  let match = cleaned.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if(match) return buildIsoDate(match[1], match[2], match[3]);
+
+  match = cleaned.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+  if(match){
+    const first = Number(match[1]);
+    const second = Number(match[2]);
+    const year = toFourDigitYear(match[3]);
+    if(!year) return "";
+    if(first > 12 && second <= 12) return buildIsoDate(year, second, first);
+    if(second > 12 && first <= 12) return buildIsoDate(year, first, second);
+    return buildIsoDate(year, second, first); // default DD/MM for ambiguous numeric dates
+  }
+
+  match = cleaned.match(/^([A-Za-z]+)\s+(\d{1,2})\s+(\d{2,4})$/);
+  if(match){
+    const month = MONTH_NAME_MAP[match[1].slice(0,4).toLowerCase()] || MONTH_NAME_MAP[match[1].slice(0,3).toLowerCase()];
+    const year = toFourDigitYear(match[3]);
+    return month && year ? buildIsoDate(year, month, match[2]) : "";
+  }
+
+  match = cleaned.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{2,4})$/);
+  if(match){
+    const month = MONTH_NAME_MAP[match[2].slice(0,4).toLowerCase()] || MONTH_NAME_MAP[match[2].slice(0,3).toLowerCase()];
+    const year = toFourDigitYear(match[3]);
+    return month && year ? buildIsoDate(year, month, match[1]) : "";
+  }
+
+  const fallback = new Date(cleaned);
+  if(!Number.isNaN(fallback.getTime())){
+    return buildIsoDate(fallback.getFullYear(), fallback.getMonth()+1, fallback.getDate());
+  }
+  return "";
+};
+const extractDateFromText = text => {
+  const patterns = [
+    /\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b/,
+    /\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/,
+    /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*,)?\s+\d{2,4}\b/i,
+    /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*(?:\s*,)?\s+\d{2,4}\b/i,
+  ];
+  for(const pattern of patterns){
+    const match = String(text || "").match(pattern);
+    const iso = normalizeToIsoDate(match?.[0] || "");
+    if(iso) return iso;
+  }
+  return "";
+};
+const toDateOnly = value => {
+  const iso = normalizeToIsoDate(value);
+  if(!iso) return null;
+  const [y,m,d] = iso.split("-").map(Number);
+  return new Date(y, m-1, d, 12, 0, 0, 0);
+};
+const formatShortDate = value => {
+  const d = toDateOnly(value);
+  if(!d) return "";
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = d.toLocaleString("en-IN", { month:"short" });
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+const getRecordedSortValue = item => {
+  if(!item) return 0;
+  const activityText = item.date || item.paidDate || item.createdDate || item.dueDate || "";
+  const activityTime = toDateOnly(activityText)?.getTime() || 0;
+  if(Number.isFinite(activityTime) && activityTime > 0) return activityTime;
+  const updatedAt = Number(item.updatedAt || 0);
+  if(Number.isFinite(updatedAt) && updatedAt > 0) return updatedAt;
+  const createdAt = Number(item.createdAt || 0);
+  if(Number.isFinite(createdAt) && createdAt > 0) return createdAt;
+  const numericId = Number(item.id || 0);
+  if(Number.isFinite(numericId) && numericId > 0) return numericId;
+  return 0;
+};
+const isDateInRange = (txnDate, startDate, endDate) => {
+  const txnTime = toDateOnly(txnDate)?.getTime();
+  if(!txnTime) return !startDate && !endDate;
+  const startTime = startDate ? toDateOnly(startDate)?.getTime() : null;
+  const endTime = endDate ? toDateOnly(endDate)?.getTime() : null;
+  if(startTime && txnTime < startTime) return false;
+  if(endTime && txnTime > endTime) return false;
+  return true;
+};
+const txnHasPerson = (txn, personId) => {
+  if(!txn || !personId || personId === "all") return true;
+  if(String(txn.forPerson||"")===String(personId)) return true;
+  if(String(txn.fromPersonId||"")===String(personId)) return true;
+  if(String(txn.toPersonId||"")===String(personId)) return true;
+  return Object.keys(txn.people||{}).some(pid=>String(pid)===String(personId));
+};
+const nearlyEqualMoney = (a,b) => Math.abs(Number(a||0) - Number(b||0)) < 0.01;
+const dateAtDay = (year, monthIndex, day) => {
+  const safeDay = Math.max(1, Number(day)||1);
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  return new Date(year, monthIndex, Math.min(safeDay, lastDay), 12, 0, 0, 0);
+};
+const getNextDueDate = (startDate, dueDay) => {
+  const base = toDateOnly(startDate) || new Date();
+  const safeDay = Math.max(1, Math.min(31, parseInt(dueDay || base.getDate(), 10) || base.getDate()));
+  let candidate = dateAtDay(base.getFullYear(), base.getMonth(), safeDay);
+  if(candidate < base) candidate = dateAtDay(base.getFullYear(), base.getMonth() + 1, safeDay);
+  return candidate.toISOString().split("T")[0];
+};
+const getCardCycleDates = (card, refDate = new Date()) => {
+  const statementDay = Math.max(1, Math.min(31, parseInt(card?.statementDate || 15, 10)));
+  const dueDay = Math.max(1, Math.min(31, parseInt(card?.dueDate || 5, 10)));
+  const ref = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate(), 12, 0, 0, 0);
+
+  let lastStatementDate = dateAtDay(ref.getFullYear(), ref.getMonth(), statementDay);
+  if(ref < lastStatementDate) lastStatementDate = dateAtDay(ref.getFullYear(), ref.getMonth() - 1, statementDay);
+
+  const prevStatementDate = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth() - 1, statementDay);
+  const nextStatementDate = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth() + 1, statementDay);
+
+  let dueOn = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth(), dueDay);
+  if(dueOn <= lastStatementDate) dueOn = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth() + 1, dueDay);
+
+  return { prevStatementDate, lastStatementDate, nextStatementDate, dueOn };
+};
+const accIcon = value => {
+  if(value && typeof value === "object" && value.typeIcon) return value.typeIcon;
+  const t = typeof value === "object" ? value?.type : value;
+  return t==="bank"?"🏦":t==="cc"?"💳":t==="debit"?"🏧":t==="upi"?"📱":"💵";
+};
+const accLabel = value => {
+  if(value && typeof value === "object" && value.typeLabel) return value.typeLabel;
+  const t = typeof value === "object" ? value?.type : value;
+  return t==="bank"?"Bank Account":t==="cc"?"Credit Card":t==="debit"?"Debit Card":t==="upi"?"UPI":"Cash";
+};
+const isInvestmentAccount = account => {
+  if(!account || account.type==="cc") return false;
+  if(account.typeBucket==="investment" || account.bucket==="investment" || account.accountTypeBucket==="investment") return true;
+  const fallback = defaultAccountTypeBucket(account.type || account.baseType || "bank");
+  return inferAccountBucket(`${account.typeLabel||account.label||""} ${account.name||""} ${account.accountTypeId||account.baseType||""}`, fallback) === "investment";
+};
+const txnColor = (txnOrType,T) => {
+  const type = typeof txnOrType === "string" ? txnOrType : txnOrType?.type;
+  const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
+  if(isRefund) return T.text;
+  if(type==="income") return T.success;
+  if(type==="expense") return T.danger;
+  if(type==="transfer" || type==="settlement_in" || type==="settlement_out") return T.info;
+  if(type==="cc_payment" || type==="cc_emi") return T.purple;
+  if(type==="investment") return T.info;
+  return T.sub;
+};
+const txnLabel = txnOrType => {
+  const type = typeof txnOrType === "string" ? txnOrType : txnOrType?.type;
+  const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
+  if(isRefund) return "Refund";
+  const hasSettlementLinks = typeof txnOrType === "object" && (txnOrType?.settlementLinks?.length||0)>0;
+  if(type==="settlement_in") return hasSettlementLinks ? "Repayment" : "Reimbursement";
+  return type==="income"?"Income":type==="transfer"?"Transfer":type==="cc_payment"?"CC Payment":type==="cc_emi"?"CC EMI":type==="settlement_out"?"Settlement Out":type==="investment"?"Investment":"Expense";
+};
+const txnEmoji = txnOrType => {
+  const type = typeof txnOrType === "string" ? txnOrType : txnOrType?.type;
+  const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
+  if(isRefund) return "↩️";
+  return type==="income"?"💚":type==="transfer"?"🔄":type==="cc_payment"?"💳":type==="cc_emi"?"💳":type==="settlement_in"?"💼":type==="settlement_out"?"📤":type==="investment"?"💹":"💸";
+};
+const getTxnDisplayTitle = txn => {
+  if(!txn) return "—";
+  const desc = String(txn.desc || "").trim();
+  const merchant = String(txn.merchant || "").trim();
+  const note = String(txn.note || "").trim();
+  if(txn.type === "cc_payment" || txn.type === "transfer") return desc || note || merchant || "—";
+  return desc || merchant || note || "—";
+};
+const extractSmsLast4s = txt => {
+  const text = String(txt||"");
+  const hits = [];
+  const patterns = [
+    /(?:a\/c|acct|account|card|ending(?:\s+with)?|xx|x{2,}|\*{2,}|last\s*4)[^\d]{0,12}(\d{4})/ig,
+    /(?:xx|x{2,}|\*{2,})\s*(\d{4})/ig,
+  ];
+  patterns.forEach(rx=>{
+    for(const match of text.matchAll(rx)){
+      if(match[1]) hits.push(match[1]);
+    }
+  });
+  return Array.from(new Set(hits));
+};
+const detectSmsDirection = txt => {
+  const text = String(txt||"").toLowerCase();
+  if(/\b(credited|received|deposited|refund(?:ed)?|reversal|cashback|salary)\b/.test(text)) return "credit";
+  if(/\b(debited|spent|paid|purchase|withdrawn|sent|dr)\b/.test(text)) return "debit";
+  return "";
+};
+const findSmsAccountMatches = (txt, accounts=[]) => {
+  const text = String(txt||"");
+  const lower = text.toLowerCase();
+  const last4s = extractSmsLast4s(text);
+  const upiHandles = Array.from(new Set([...text.matchAll(/\b[a-z0-9._-]{2,}@[a-z][a-z0-9.-]{1,}\b/ig)].map(m=>m[0].toLowerCase())));
+  return accounts
+    .map(account=>{
+      let score = 0;
+      const accLast4 = String(account?.last4||"").trim();
+      const accNameTokens = String(account?.name||"").toLowerCase().split(/\s+/).filter(token=>token.length>2);
+      if(accLast4 && last4s.includes(accLast4)) score += 10;
+      if(account?.handle){
+        const handle = String(account.handle).toLowerCase();
+        if(upiHandles.some(item=>item.includes(handle) || handle.includes(item))) score += 8;
+      }
+      if(accNameTokens.some(token=>lower.includes(token))) score += 2;
+      if(account?.type==="cc" && /\b(credit card|visa|mastercard|rupay|amex|card)\b/i.test(text)) score += 3;
+      if(account?.type==="debit" && /\b(debit card|atm card)\b/i.test(text)) score += 3;
+      if(account?.type==="upi" && /\b(upi|vpa)\b/i.test(text)) score += 3;
+      if(account?.type==="bank" && /\b(a\/c|account|acct|savings|current)\b/i.test(text)) score += 1;
+      return score>0 ? { account, score } : null;
+    })
+    .filter(Boolean)
+    .sort((a,b)=>b.score-a.score || String(a.account?.name||"").localeCompare(String(b.account?.name||"")));
+};
+const remainingShare = info => {
+  if(!info) return 0;
+  if(info.settled) return 0;
+  return Math.max(0, Number(info?.remainingAmt ?? info?.amount ?? 0));
+};
+const linkedSettlementKey = t => t?.type==="settlement_in" && t?.againstTxnId
+  ? [t.fromPersonId||"", t.againstTxnId||"", t.date||"", Number(t.amount||0), t.accId||""].join("|")
+  : null;
+const dedupeSettlementTxns = txns => {
+  const seenLinked = new Set();
+  const seenLegacy = new Set();
+  return txns.filter(t=>{
+    if(t.type!=="settlement_in") return true;
+    const linkedKey = linkedSettlementKey(t);
+    if(linkedKey){
+      if(seenLinked.has(linkedKey)) return false;
+      seenLinked.add(linkedKey);
+      return true;
+    }
+    const legacyKey = `${t.fromPersonId||""}_${t.date||""}_${Number(t.amount||0)}`;
+    if(seenLegacy.has(legacyKey)) return false;
+    seenLegacy.add(legacyKey);
+    return true;
+  });
+};
+const CLOUD_SCHEMA_VERSION = 1;
+const CAT_MAP = {"food":"food","grocery":"groceries","groceries":"groceries","transport":"transport","bills":"utilities","utilities":"utilities","health":"health","shopping":"lifestyle","household":"housing","selfcare":"lifestyle","baby":"family","entertainment":"entertainment","financial":"financial","fitness":"fitness","travel":"travel","misc":"misc","donations":"donations","professional":"professional","taxes":"taxes","emergency":"emergency","personaldev":"personaldev","family":"family","lifestyle":"lifestyle","housing":"housing"};
+const normalizeCats = stored => {
+  const list = Array.isArray(stored) ? stored : null;
+  const hasLatestDefaults = list?.some(c=>c.id==="housing"||c.id==="utilities"||c.id==="financial");
+  return hasLatestDefaults ? list : DEFAULT_CATS;
+};
+const normalizeAccounts = stored => (Array.isArray(stored) && stored.length ? stored : DEFAULT_ACCOUNTS).map(acc=>{
+  const baseType = ACC_TYPES.some(item=>item.id===acc?.type) ? acc.type : "bank";
+  const typeMeta = normalizeAccountTypes([]).find(item=>item.id===String(acc?.accountTypeId || baseType)) || ACC_TYPES.find(item=>item.id===baseType) || ACC_TYPES[0];
+  const typeLabel = acc?.typeLabel || typeMeta.label || accLabel(baseType);
+  const typeBucket = acc?.typeBucket || typeMeta.bucket || inferAccountBucket(`${typeLabel} ${acc?.name||""} ${acc?.accountTypeId || baseType}`, defaultAccountTypeBucket(baseType));
+  return {
+    ...acc,
+    type:baseType,
+    accountTypeId:acc?.accountTypeId || typeMeta.id || baseType,
+    typeLabel,
+    typeIcon:acc?.typeIcon || typeMeta.icon || accIcon(baseType),
+    typeBucket,
+    openingBalance:Number(acc?.openingBalance||0),
+    openingBalanceDate:acc?.openingBalanceDate||"",
+  };
+});
+const normalizePeople = stored => {
+  const list = Array.isArray(stored) ? stored : [];
+  return list.find(p=>p.id==="__me__") ? list : [ME, ...list];
+};
+const normalizeTxns = stored => {
+  const list = Array.isArray(stored) ? stored : [];
+  const normalizeTxnCatId = value => {
+    const raw = String(value ?? "").trim();
+    if(!raw) return "";
+    const cleaned = raw.replace(/!+$/g, "");
+    return CAT_MAP[cleaned.toLowerCase()] || CAT_MAP[cleaned] || cleaned;
+  };
+  return dedupeSettlementTxns(list.map(t=>{
+    const normalizedTxn = t.type==="settlement_in"
+      ? { ...t, isRefund: t.isRefund ?? !t.fromPersonId }
+      : t;
+    const hasSplitPeople = normalizedTxn.type==="expense" && Object.entries(normalizedTxn.people||{}).some(([pid,info])=>pid!=="__me__" && info?.mode==="owes" && Number(info?.amount||0)>0);
+    const trackingMode = normalizedTxn.type==="expense"
+      ? (normalizedTxn.trackingMode || (hasSplitPeople ? "split" : (normalizedTxn.forPerson || normalizedTxn.groupId ? "tag" : "none")))
+      : normalizedTxn.trackingMode;
+    const preparedTxn = normalizedTxn.type==="expense"
+      ? {
+          ...normalizedTxn,
+          trackingMode,
+          groupCollectiveAmount: (trackingMode==="split"||trackingMode==="allocate") ? Number(normalizedTxn.groupCollectiveAmount||0) : 0,
+        }
+      : normalizedTxn;
+    const normalizedCatIds = (Array.isArray(preparedTxn.catIds) && preparedTxn.catIds.length
+      ? preparedTxn.catIds
+      : (preparedTxn.catId ? [preparedTxn.catId] : []))
+      .map(normalizeTxnCatId)
+      .filter(Boolean);
+    const normalizedCatId = normalizeTxnCatId(preparedTxn.catId || normalizedCatIds[0] || "") || null;
+    return {
+      ...preparedTxn,
+      catId: normalizedCatId,
+      catIds: normalizedCatIds.length ? normalizedCatIds : (normalizedCatId ? [normalizedCatId] : []),
+    };
+  }));
+};
+const normalizeLoans = stored => (Array.isArray(stored) ? stored : []).map(loan=>({
+  ...loan,
+  direction:loan?.direction==="taken"?"taken":"given",
+  principal:Number(loan?.principal ?? loan?.amount ?? 0),
+  outstanding:Number(loan?.outstanding ?? loan?.principal ?? loan?.amount ?? 0),
+  startDate:loan?.startDate || loan?.date || todayStr(),
+  dueDate:loan?.dueDate || "",
+  hasInterest:loan?.hasInterest ?? Number(loan?.interestRate||0)>0,
+  interestRate:Number(loan?.interestRate||0),
+  repayments:Array.isArray(loan?.repayments)?loan.repayments:[],
+  status:loan?.status || (Number(loan?.outstanding ?? loan?.principal ?? loan?.amount ?? 0)<=0 ? "closed" : "active"),
+}));
+const formatSyncTime = value => {
+  if(!value) return "Not yet synced";
+  const d = new Date(value);
+  if(Number.isNaN(d.getTime())) return "Not yet synced";
+  return d.toLocaleString("en-IN", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" });
+};
+
+// ─── SECURITY ────────────────────────────────────────────────────────────────
+async function hashPin(pin) {
+  const data = new TextEncoder().encode(pin + "|arth_v1");
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
+}
+
+// ─── PIN SCREEN ───────────────────────────────────────────────────────────────
+function PinScreen({ onUnlock, isSetup, onCancel }) {
+  const [pin, setPin] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [step, setStep] = useState("enter");
+  const [error, setError] = useState("");
+  const handleKey = k => {
+    setError("");
+    if(k==="del"){ step==="confirm"?setConfirm(p=>p.slice(0,-1)):setPin(p=>p.slice(0,-1)); return; }
+    if(isSetup){
+      if(step==="enter"){ const np=pin+k; setPin(np); if(np.length===4) setStep("confirm"); }
+      else { const nc=confirm+k; setConfirm(nc); if(nc.length===4){ if(nc===pin) onUnlock(pin); else { setError("PINs don't match. Try again."); setPin(""); setConfirm(""); setStep("enter"); } } }
+    } else { const np=pin+k; setPin(np); if(np.length===4){ onUnlock(np); setPin(""); } }
+  };
+  // B16: Physical keyboard support
+  React.useEffect(() => {
+    const handler = e => {
+      if(e.key >= "0" && e.key <= "9") handleKey(e.key);
+      else if(e.key === "Backspace" || e.key === "Delete") handleKey("del");
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [pin, confirm, step]);
+  const cur = step==="confirm"?confirm:pin;
+  const hiddenInputRef = React.useRef(null);
+  React.useEffect(() => { hiddenInputRef.current?.focus(); }, [cur.length]);
+  return (
+    <div style={{minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Nunito,sans-serif"}}>
+      {/* B15: Hidden input keeps mobile keyboard context */}
+      <input ref={hiddenInputRef} type="tel" inputMode="numeric" pattern="[0-9]*" style={{position:"absolute",opacity:0,width:1,height:1,pointerEvents:"none"}} onChange={e=>{ const v=e.target.value.replace(/\D/g,""); if(v) { handleKey(v[v.length-1]); e.target.value=""; } }} onKeyDown={e=>{ if(e.key==="Backspace") handleKey("del"); }}/>
+      <div style={{fontSize:52,marginBottom:12,color:"#f0a500",fontWeight:900,fontFamily:"Nunito,sans-serif"}}>₹</div>
+      <div style={{color:"#f0a500",fontSize:30,fontWeight:900,marginBottom:6}}>Arth</div>
+      <div style={{color:"#5a5a7a",fontSize:13,marginBottom:40,textAlign:"center"}}>{isSetup?step==="enter"?"Set your 4-digit PIN":"Confirm your PIN":"Enter your PIN"}</div>
+      <div style={{display:"flex",gap:18,marginBottom:14}}>
+        {[0,1,2,3].map(i=><div key={i} style={{width:18,height:18,borderRadius:"50%",background:cur.length>i?"#f0a500":"transparent",border:"2px solid",borderColor:cur.length>i?"#f0a500":"#2a2a3a",transition:"all 0.15s"}}/>)}
+      </div>
+      {error&&<div style={{color:"#ef4444",fontSize:12,marginBottom:14,textAlign:"center"}}>{error}</div>}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,width:252,marginTop:12}}>
+        {["1","2","3","4","5","6","7","8","9","","0","del"].map((k,i)=>k===""?<div key={i}/>:
+          <button key={i} onClick={()=>handleKey(k)} style={{background:"#0f0f1a",border:"1px solid #1a1a2e",borderRadius:14,padding:"19px 0",fontSize:k==="del"?18:24,fontWeight:700,color:k==="del"?"#5a5a7a":"#e8e4dc",cursor:"pointer",fontFamily:"Nunito,sans-serif"}}>{k==="del"?"⌫":k}</button>
+        )}
+      </div>
+      {onCancel&&<button onClick={onCancel} style={{marginTop:18,background:"none",border:"1px solid #2a2a3a",borderRadius:12,padding:"10px 22px",cursor:"pointer",fontSize:13,fontWeight:700,color:"#5a5a7a",fontFamily:"Nunito,sans-serif"}}>Cancel</button>}
+    </div>
+  );
+}
+
+// ─── ROOT ─────────────────────────────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state={hasError:false,error:""}; }
+  static getDerivedStateFromError(e){ return {hasError:true,error:String(e)}; }
+  componentDidCatch(e,info){ console.error("Arth error:",e,info); }
+  render(){
+    if(this.state.hasError) return (
+      <div style={{minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Nunito,sans-serif"}}>
+        <div style={{fontSize:48,marginBottom:16}}>⚠️</div>
+        <div style={{color:"#f0a500",fontSize:20,fontWeight:900,marginBottom:8}}>Something went wrong</div>
+        <div style={{color:"#5a5a7a",fontSize:12,marginBottom:24,textAlign:"center",maxWidth:300}}>{this.state.error}</div>
+        <button onClick={()=>this.setState({hasError:false,error:""})} style={{background:"#f0a500",color:"#000",border:"none",borderRadius:12,padding:"12px 24px",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"Nunito,sans-serif"}}>Try Again</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
+export default function Arth() {
+  const [appPin, setAppPin] = useState(()=>localStorage.getItem("arth_pin")||"");
+  const [unlocked, setUnlocked] = useState(false);
+  const idleTimer = useRef(null);
+  const idleWarnTimer = useRef(null);
+  const countdownInterval = useRef(null);
+  const resetIdleRef = useRef(null);
+  const [showIdleWarning, setShowIdleWarning] = useState(false);
+  const [idleCountdown, setIdleCountdown] = useState(120);
+  // PIN lockout state — must be declared before any early returns (Rules of Hooks)
+  const [pinAttempts, setPinAttempts] = useState(0);
+  const [pinLockedUntil, setPinLockedUntil] = useState(()=>Number(sessionStorage.getItem("arth_pin_locked_until")||0));
+  const pinIsLocked = pinLockedUntil > Date.now();
+  const pinLockMinsLeft = pinIsLocked ? Math.ceil((pinLockedUntil-Date.now())/60000) : 0;
+  const lock = useCallback(()=>{ setUnlocked(false); setShowIdleWarning(false); setIdleCountdown(120); },[]);
+
+  // Two-phase idle timer: warn at 5 minutes, lock 2 minutes later (7 min total)
+  useEffect(()=>{
+    if(!unlocked) return;
+    const WARN_MS = 5 * 60_000;   // 5 minutes before warning
+    const LOCK_MS = 2 * 60_000;   // 2 more minutes to respond
+    const clearAll = ()=>{ clearTimeout(idleTimer.current); clearTimeout(idleWarnTimer.current); clearInterval(countdownInterval.current); };
+    const reset = ()=>{
+      clearAll();
+      setShowIdleWarning(false);
+      setIdleCountdown(120);
+      idleWarnTimer.current = setTimeout(()=>{
+        setShowIdleWarning(true);
+        let cd = 120;
+        setIdleCountdown(cd);
+        countdownInterval.current = setInterval(()=>{ cd--; setIdleCountdown(cd); if(cd<=0) clearInterval(countdownInterval.current); }, 1000);
+        idleTimer.current = setTimeout(lock, LOCK_MS);
+      }, WARN_MS);
+    };
+    resetIdleRef.current = reset;
+    const events = ["mousemove","keydown","touchstart","touchend","click","scroll","pointerdown"];
+    events.forEach(e=>window.addEventListener(e,reset,{passive:true}));
+    reset();
+    return ()=>{ events.forEach(e=>window.removeEventListener(e,reset)); clearAll(); resetIdleRef.current=null; };
+  },[unlocked,lock]);
+
+  // Pause timers when app goes to background; reset fresh when returning
+  useEffect(()=>{
+    if(!unlocked) return;
+    const clearAll = ()=>{ clearTimeout(idleTimer.current); clearTimeout(idleWarnTimer.current); clearInterval(countdownInterval.current); };
+    const handle = ()=>{
+      if(document.visibilityState==="hidden"){
+        // Pause all timers — don't lock while user is in another app
+        clearAll();
+        setShowIdleWarning(false);
+      } else if(document.visibilityState==="visible"){
+        // Give a fresh 60s when returning
+        resetIdleRef.current?.();
+      }
+    };
+    document.addEventListener("visibilitychange",handle);
+    return ()=>document.removeEventListener("visibilitychange",handle);
+  },[unlocked]);
+
+  if(!appPin) return <PinScreen isSetup onUnlock={async pin=>{
+    const hash = await hashPin(pin);
+    localStorage.setItem("arth_pin",hash);
+    setAppPin(hash);
+    setUnlocked(true);
+  }}/>;
+
+  if(!unlocked) return (
+    <div style={{ minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
+      {pinIsLocked ? (
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:48,marginBottom:12 }}>🔒</div>
+          <div style={{ color:"#f0a500",fontSize:18,fontWeight:900,marginBottom:8 }}>Too many attempts</div>
+          <div style={{ color:"rgba(255,255,255,0.5)",fontSize:13 }}>Try again in {pinLockMinsLeft} minute{pinLockMinsLeft!==1?"s":""}</div>
+        </div>
+      ) : (
+        <PinScreen isSetup={false} onUnlock={async pin=>{
+          if(appPin.length<=6){
+            if(String(pin)===String(appPin)){
+              const hash = await hashPin(pin);
+              localStorage.setItem("arth_pin",hash);
+              setAppPin(hash);
+              setUnlocked(true);
+              setPinAttempts(0);
+            } else {
+              const na = pinAttempts+1;
+              setPinAttempts(na);
+              if(na>=5){ const lu=Date.now()+30*60*1000; setPinLockedUntil(lu); sessionStorage.setItem("arth_pin_locked_until",String(lu)); setPinAttempts(0); }
+            }
+          } else {
+            const hash = await hashPin(pin);
+            if(hash===appPin){ setUnlocked(true); setPinAttempts(0); }
+            else {
+              const na = pinAttempts+1;
+              setPinAttempts(na);
+              if(na>=5){ const lu=Date.now()+30*60*1000; setPinLockedUntil(lu); sessionStorage.setItem("arth_pin_locked_until",String(lu)); setPinAttempts(0); }
+            }
+          }
+        }}/>
+      )}
+    </div>
+  );
+
+  return <>
+    <ErrorBoundary><AppContent onLock={lock}/></ErrorBoundary>
+    {showIdleWarning && (
+      <div onClick={()=>resetIdleRef.current?.()} style={{position:"fixed",bottom:0,left:0,right:0,zIndex:99999,background:"#1a1a1aee",backdropFilter:"blur(8px)",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:"2px solid #f0a500",cursor:"pointer"}}>
+        <span style={{color:"#fff",fontSize:13,fontWeight:700}}>🔒 Locking in {idleCountdown}s due to inactivity</span>
+        <button onClick={e=>{e.stopPropagation();resetIdleRef.current?.();}} style={{background:"#f0a500",color:"#000",border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif"}}>Stay active</button>
+      </div>
+    )}
+  </>;
+}
+
+// ─── APP ──────────────────────────────────────────────────────────────────────
+function AppContent({ onLock }) {
+  const [dark, setDark] = useState(()=>JSON.parse(localStorage.getItem("arth_dark")??"true"));
+  const [autoDetectExpenseCategory, setAutoDetectExpenseCategory] = useState(()=>JSON.parse(localStorage.getItem("arth_auto_category")??"true"));
+  const [workTripMode, setWorkTripMode] = useState(()=>JSON.parse(localStorage.getItem("arth_work_trip")??"false"));
+  const T = dark?DARK:LIGHT;
+  useEffect(()=>localStorage.setItem("arth_dark",JSON.stringify(dark)),[dark]);
+  useEffect(()=>localStorage.setItem("arth_auto_category",JSON.stringify(autoDetectExpenseCategory)),[autoDetectExpenseCategory]);
+  useEffect(()=>localStorage.setItem("arth_work_trip",JSON.stringify(workTripMode)),[workTripMode]);
+  // Request persistent storage so browser never evicts app data under disk pressure
+  useEffect(()=>{ navigator.storage?.persist?.(); },[]);
+
+  // ── STATE ──────────────────────────────────────────────────────────────────
+  const [tab, setTab] = useState("home");
+  const [viewMonth, setViewMonth] = useState(()=>{ const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`; });
+  const [cats, setCats] = useState(()=>normalizeCats(JSON.parse(localStorage.getItem("arth_cats")||"null")));
+  const [customBaseBehaviors, setCustomBaseBehaviors] = useState(()=>JSON.parse(localStorage.getItem("arth_custom_base_behaviors")||"[]"));
+  const [accountTypes, setAccountTypes] = useState(()=>normalizeAccountTypes(JSON.parse(localStorage.getItem("arth_account_types")||"null")));
+  const [incomeTypes, setIncomeTypes] = useState(()=>normalizeIncomeTypes(JSON.parse(localStorage.getItem("arth_income_types")||"null")));
+  const [customLiabilityTypes, setCustomLiabilityTypes] = useState(()=>normalizeLiabilityTypes(JSON.parse(localStorage.getItem("arth_liability_types")||"null")));
+  const [accounts, setAccounts] = useState(()=>normalizeAccounts(JSON.parse(localStorage.getItem("arth_accounts")||"null")));
+  const [balanceCheckpoints, setBalanceCheckpoints] = useState(()=>JSON.parse(localStorage.getItem("arth_checkpoints")||"{}"));
+  const [people, setPeople] = useState(()=>normalizePeople(JSON.parse(localStorage.getItem("arth_people")||"[]")));
+  const [groups, setGroups] = useState(()=>JSON.parse(localStorage.getItem("arth_groups")||"[]"));
+  const [measureUnits, setMeasureUnits] = useState(()=>normalizeMeasureUnits(JSON.parse(localStorage.getItem("arth_measure_units")||"null")));
+  const [itemCatalog, setItemCatalog] = useState(()=>normalizeItemCatalog(JSON.parse(localStorage.getItem("arth_item_catalog")||"[]")));
+  const [txns, setTxns] = useState(()=>normalizeTxns(JSON.parse(localStorage.getItem("arth_txns")||"[]")));
+  const [investments, setInvestments] = useState(()=>JSON.parse(localStorage.getItem("arth_investments")||"[]"));
+  const [recurringSchedules, setRecurringSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_recurring")||"[]"));
+  const [gifts, setGifts] = useState(()=>JSON.parse(localStorage.getItem("arth_gifts")||"[]"));
+  const [showAddGift, setShowAddGift] = useState(false);
+  const [giftForPersonId, setGiftForPersonId] = useState(null);
+  const [giftFilter, setGiftFilter] = useState(null);
+  const [expandedSection, setExpandedSection] = useState(null);
+  const [editTxn, setEditTxn] = useState(null);
+  const [defaultGroupId, setDefaultGroupId] = useState(()=>localStorage.getItem("arth_default_group")||"");
+  const [editingRecurring, setEditingRecurring] = useState(null);
+  const [editingVehicle, setEditingVehicle] = useState(null);
+  const [vType, setVType] = useState("car");
+  const [vNumber, setVNumber] = useState("");
+  const [vName, setVName] = useState("");
+  const [vColor, setVColor] = useState(PALETTE[2]);
+  const [bills, setBills] = useState(()=>JSON.parse(localStorage.getItem("arth_bills")||"[]"));
+  const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
+  const [memberships, setMemberships] = useState(()=>JSON.parse(localStorage.getItem("arth_memberships")||"[]"));
+  const [feePayments, setFeePayments] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_payments")||"[]"));
+  const [showAddMembership, setShowAddMembership] = useState(false);
+  const [editingMembership, setEditingMembership] = useState(null);
+  const [showAddFeePayment, setShowAddFeePayment] = useState(false);
+  const [activeBillerForAction, setActiveBillerForAction] = useState(null);
+  const [showAddBillerAccount, setShowAddBillerAccount] = useState(false);
+  const [editingBillerAccount, setEditingBillerAccount] = useState(null);
+  const [billSearch, setBillSearch] = useState("");
+  const [preselectedBillerType, setPreselectedBillerType] = useState("");
+  const [liabilities, setLiabilities] = useState(()=>JSON.parse(localStorage.getItem("arth_liabilities")||"[]"));
+  const [trackedAssets, setTrackedAssets] = useState(()=>JSON.parse(localStorage.getItem("arth_assets")||"[]"));
+  const [vehicles, setVehicles] = useState(()=>JSON.parse(localStorage.getItem("arth_vehicles")||"[]"));
+  const [loans, setLoans] = useState(()=>normalizeLoans(JSON.parse(localStorage.getItem("arth_loans")||"[]")));
+  const [ccEmiPlans, setCcEmiPlans] = useState(()=>JSON.parse(localStorage.getItem("arth_cc_emi_plans")||"[]"));
+  const currentFYStartYear = new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1;
+  const [annualBudget, setAnnualBudget] = useState(()=>Number(localStorage.getItem("arth_annual_budget")||600000));
+  const [perPersonBudgets, setPerPersonBudgets] = useState(()=>JSON.parse(localStorage.getItem("arth_person_budgets")||"{}"));
+  const [budgetCarryForward, setBudgetCarryForward] = useState(()=>JSON.parse(localStorage.getItem("arth_budget_carry")||"false"));
+  const [lastFYTarget, setLastFYTarget] = useState(()=>Number(localStorage.getItem("arth_last_fy_target")||0));
+  const [selectedBudgetFY, setSelectedBudgetFY] = useState(currentFYStartYear);
+  const [monthOverrides, setMonthOverrides] = useState(()=>JSON.parse(localStorage.getItem("arth_month_overrides")||"{}"));
+  const [monthBudget] = useState(()=>Number(localStorage.getItem("arth_budget")||50000));
+
+  useEffect(()=>localStorage.setItem("arth_cats",JSON.stringify(cats)),[cats]);
+  useEffect(()=>localStorage.setItem("arth_account_types",JSON.stringify(accountTypes)),[accountTypes]);
+  useEffect(()=>localStorage.setItem("arth_income_types",JSON.stringify(incomeTypes)),[incomeTypes]);
+  useEffect(()=>localStorage.setItem("arth_liability_types",JSON.stringify(customLiabilityTypes)),[customLiabilityTypes]);
+  useEffect(()=>localStorage.setItem("arth_accounts",JSON.stringify(accounts)),[accounts]);
+  useEffect(()=>localStorage.setItem("arth_checkpoints",JSON.stringify(balanceCheckpoints)),[balanceCheckpoints]);
+  useEffect(()=>localStorage.setItem("arth_people",JSON.stringify(people)),[people]);
+  useEffect(()=>localStorage.setItem("arth_groups",JSON.stringify(groups)),[groups]);
+  useEffect(()=>localStorage.setItem("arth_custom_base_behaviors",JSON.stringify(customBaseBehaviors)),[customBaseBehaviors]);
+  useEffect(()=>localStorage.setItem("arth_measure_units",JSON.stringify(measureUnits)),[measureUnits]);
+  useEffect(()=>localStorage.setItem("arth_item_catalog",JSON.stringify(itemCatalog)),[itemCatalog]);
+  useEffect(()=>localStorage.setItem("arth_txns",JSON.stringify(txns)),[txns]);
+  useEffect(()=>localStorage.setItem("arth_investments",JSON.stringify(investments)),[investments]);
+  useEffect(()=>localStorage.setItem("arth_recurring",JSON.stringify(recurringSchedules)),[recurringSchedules]);
+  useEffect(()=>localStorage.setItem("arth_gifts",JSON.stringify(gifts)),[gifts]);
+  useEffect(()=>localStorage.setItem("arth_budget",monthBudget),[monthBudget]);
+  useEffect(()=>localStorage.setItem("arth_bills",JSON.stringify(bills)),[bills]);
+  useEffect(()=>localStorage.setItem("arth_biller_accounts",JSON.stringify(billerAccounts)),[billerAccounts]);
+  useEffect(()=>localStorage.setItem("arth_memberships",JSON.stringify(memberships)),[memberships]);
+  useEffect(()=>localStorage.setItem("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
+  useEffect(()=>localStorage.setItem("arth_liabilities",JSON.stringify(liabilities)),[liabilities]);
+  useEffect(()=>localStorage.setItem("arth_assets",JSON.stringify(trackedAssets)),[trackedAssets]);
+  useEffect(()=>localStorage.setItem("arth_vehicles",JSON.stringify(vehicles)),[vehicles]);
+  useEffect(()=>localStorage.setItem("arth_loans",JSON.stringify(loans)),[loans]);
+  useEffect(()=>localStorage.setItem("arth_cc_emi_plans",JSON.stringify(ccEmiPlans)),[ccEmiPlans]);
+  useEffect(()=>localStorage.setItem("arth_annual_budget",annualBudget),[annualBudget]);
+  useEffect(()=>localStorage.setItem("arth_person_budgets",JSON.stringify(perPersonBudgets)),[perPersonBudgets]);
+  useEffect(()=>localStorage.setItem("arth_gifts",JSON.stringify(gifts)),[gifts]);
+  useEffect(()=>localStorage.setItem("arth_budget_carry",JSON.stringify(budgetCarryForward)),[budgetCarryForward]);
+  useEffect(()=>{ if(defaultGroupId) localStorage.setItem("arth_default_group",defaultGroupId); else localStorage.removeItem("arth_default_group"); },[defaultGroupId]);
+  useEffect(()=>localStorage.setItem("arth_last_fy_target",lastFYTarget),[lastFYTarget]);
+  useEffect(()=>localStorage.setItem("arth_month_overrides",JSON.stringify(monthOverrides)),[monthOverrides]);
+
+  // ── MODAL STATE ────────────────────────────────────────────────────────────
+  const [showAdd, setShowAdd] = useState(false);
+  const [defaultAddType, setDefaultAddType] = useState("expense");
+  const [addPrefill, setAddPrefill] = useState(null);
+  const [showInvestments, setShowInvestments] = useState(false);
+  const [showAddBill, setShowAddBill] = useState(false);
+  const [defaultBillerAccountId, setDefaultBillerAccountId] = useState("");
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [editingMonthBudget, setEditingMonthBudget] = useState(null); // month key
+  const [editingMonthVal, setEditingMonthVal] = useState("");
+  const [editingCheckpoint, setEditingCheckpoint] = useState(null); // account id
+  const [editingCheckpointVal, setEditingCheckpointVal] = useState("");
+  const [editingCheckpointDate, setEditingCheckpointDate] = useState(todayStr());
+  const [editingOpeningBalanceVal, setEditingOpeningBalanceVal] = useState("");
+  const [editingOpeningBalanceDate, setEditingOpeningBalanceDate] = useState(todayStr());
+  const [editingBill, setEditingBill] = useState(null);
+  const [editingPerson, setEditingPerson] = useState(null);
+  const [editingTxn, setEditingTxn] = useState(null);
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [showAddInvestment, setShowAddInvestment] = useState(false);
+  const [editingInvestment, setEditingInvestment] = useState(null);
+  const [showAddLiability, setShowAddLiability] = useState(false);
+  const [showAddAsset, setShowAddAsset] = useState(false);
+  const [showAddLoan, setShowAddLoan] = useState(false);
+  const [showAccDetail, setShowAccDetail] = useState(null);
+  const [showWealthBreakdown, setShowWealthBreakdown] = useState(null);
+  const [selectedInvestmentDetail, setSelectedInvestmentDetail] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsSection, setSettingsSection] = useState(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [confirmDeleteCat, setConfirmDeleteCat] = useState(null);
+  const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(null);
+  const [confirmDeleteTxn, setConfirmDeleteTxn] = useState(null);
+  const [billMatchSuggestion, setBillMatchSuggestion] = useState(null);
+  const [refundMatchSuggestion, setRefundMatchSuggestion] = useState(null);
+  const [reimbursementMatchSuggestion, setReimbursementMatchSuggestion] = useState(null);
+  const [imageViewSrc, setImageViewSrc] = useState(null);
+  const [refundSourceTxn, setRefundSourceTxn] = useState(null);
+  const [budgetOverrideMonth, setBudgetOverrideMonth] = useState(null);
+  const [budgetOverrideVal, setBudgetOverrideVal] = useState("");
+  const [selectedPerson, setSelectedPerson] = useState(null);
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [groupViewMode, setGroupViewMode] = useState("overall");
+  const [showGroupOwesBreakdown, setShowGroupOwesBreakdown] = useState(false);
+  const [groupSpendFilter, setGroupSpendFilter] = useState(null);
+  const [personViewMode, setPersonViewMode] = useState("overall");
+  const [linkTxnModal, setLinkTxnModal] = useState(null);
+  const [settleTxn, setSettleTxn] = useState(null);
+  const [showTxnUpiPicker, setShowTxnUpiPicker] = useState(false);
+  const [pendingTxnShare, setPendingTxnShare] = useState(null);
+  const [expandedTxn, setExpandedTxn] = useState(null);
+  const defaultTxnMonth = viewMonth || todayStr().slice(0,7);
+  const [fType, setFType] = useState("All");
+  const [txnSearch, setTxnSearch] = useState("");
+  const [txnDetailId, setTxnDetailId] = useState(null);
+  const [maskMode, setMaskMode] = useState(false);
+  const [maskRevealActive, setMaskRevealActive] = useState(false);
+  const [maskRevealTimer, setMaskRevealTimer] = useState(null);
+  const [showMaskPin, setShowMaskPin] = useState(false);
+  const [maskPinInput, setMaskPinInput] = useState("");
+  const [maskPinError, setMaskPinError] = useState(false);
+  const M = v => (maskMode && !maskRevealActive) ? "₹•••••" : v;
+  const toggleMask = () => {
+    if(!maskMode){ setMaskMode(true); setMaskRevealActive(false); }
+    else if(maskRevealActive){ setMaskRevealActive(false); if(maskRevealTimer) clearTimeout(maskRevealTimer); }
+    else { setShowMaskPin(true); setMaskPinInput(""); setMaskPinError(false); }
+  };
+  const onMaskReveal = () => {
+    setShowMaskPin(false); setMaskRevealActive(true);
+    if(maskRevealTimer) clearTimeout(maskRevealTimer);
+    const t = setTimeout(()=>setMaskRevealActive(false), 60000);
+    setMaskRevealTimer(t);
+  };
+  const [txnDatePreset, setTxnDatePreset] = useState("current_month");
+  const [txnSort, setTxnSort] = useState("date_desc");
+  const [txnDateFrom, setTxnDateFrom] = useState(()=>getMonthBounds(defaultTxnMonth).start);
+  const [txnDateTo, setTxnDateTo] = useState(()=>getMonthBounds(defaultTxnMonth).end);
+  const [txnAmountFrom, setTxnAmountFrom] = useState("");
+  const [txnAmountTo, setTxnAmountTo] = useState("");
+  const [txnCategoryFilter, setTxnCategoryFilter] = useState("all");
+  const [txnPersonFilter, setTxnPersonFilter] = useState("all");
+  const [expenseSourceFilter, setExpenseSourceFilter] = useState("all");
+  const [expenseCardFilter, setExpenseCardFilter] = useState("all");
+  const [incomeTypeFilter, setIncomeTypeFilter] = useState("all");
+  const [incomeAccountFilter, setIncomeAccountFilter] = useState("all");
+  const [investmentTypeFilter, setInvestmentTypeFilter] = useState("all");
+  const [txnReimbursableOnly, setTxnReimbursableOnly] = useState(false);
+  const [txnGroupFilter, setTxnGroupFilter] = useState("all");
+  const [selectedInvestmentTypeView, setSelectedInvestmentTypeView] = useState("all");
+  const [editingLiability, setEditingLiability] = useState(null);
+  const [editingAsset, setEditingAsset] = useState(null);
+  const [editingLoan, setEditingLoan] = useState(null);
+  const [repaymentLoan, setRepaymentLoan] = useState(null);
+  const [showReceivablesList, setShowReceivablesList] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState(null);
+  const [editingCategoryName, setEditingCategoryName] = useState("");
+
+  const dataUrlToShareFile = async (dataUrl, fallbackName = "arth-bill") => {
+    if(!dataUrl || typeof File === "undefined") return null;
+    try{
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      const ext = blob.type?.split("/")?.[1]?.split(";")?.[0] || "jpg";
+      return new File([blob], `${fallbackName}.${ext}`, { type:blob.type || "image/jpeg" });
+    }catch{
+      return null;
+    }
+  };
+
+  const doTxnShare = useCallback(async (shareRequest, upiHandle = "") => {
+    if(!shareRequest) return;
+    const { recipientName, amount, contextLabel, dueDate, imageBase64, shareTitle } = shareRequest;
+    const linkedLabel = upiHandle ? (() => {
+      const acc = accounts.find(a=>a.type==="upi"&&a.handle===upiHandle);
+      const linked = acc?.linkedAccount ? accounts.find(b=>b.id===acc.linkedAccount) : null;
+      return linked ? ` (${linked.name})` : "";
+    })() : "";
+    const dueLabel = dueDate ? (formatShortDate(dueDate) || dueDate) : "";
+    const lines = [
+      `Hi ${recipientName},`,
+      `Your share towards ${contextLabel} is ${sym}${fmt(amount)}.`,
+      dueLabel ? `Kindly clear it before ${dueLabel}.` : "Kindly clear it when convenient.",
+      upiHandle ? `Payment UPI: ${upiHandle}${linkedLabel}` : "",
+      "- sent via Arth",
+    ].filter(Boolean).join("\n");
+    try {
+      const file = await dataUrlToShareFile(imageBase64, (shareTitle || contextLabel || "arth-bill").replace(/[^\w-]+/g, "-").slice(0, 48));
+      const payload = { title:shareTitle || "Arth share request", text:lines };
+      if(file && navigator.canShare?.({ files:[file] })) payload.files = [file];
+      if(navigator.share){ await navigator.share(payload); }
+      else { await navigator.clipboard.writeText(lines); alert("Payment request copied to clipboard!"); }
+    } catch(e){
+      if(e?.name!=="AbortError") navigator.clipboard?.writeText(lines).catch(()=>{});
+    }
+  }, [accounts]);
+
+  const sharePaymentRequest = useCallback((recipientName, amount, contextLabel, details = {}) => {
+    const safeAmount = Number(amount||0);
+    if(!recipientName || !(safeAmount>0)) return;
+    const request = { recipientName, amount:safeAmount, contextLabel:contextLabel || "shared expense", ...details };
+    const upiAccs = accounts.filter(a=>a.type==="upi"&&a.handle);
+    if(upiAccs.length<=1){
+      doTxnShare(request, upiAccs[0]?.handle||"");
+      return;
+    }
+    setPendingTxnShare(request);
+    setShowTxnUpiPicker(true);
+  }, [accounts, doTxnShare]);
+
+  const openInvestmentComposer = () => {
+    setShowInvestments(false);
+    setShowAddInvestment(false);
+    setEditingInvestment(null);
+    setSelectedInvestmentTypeView("all");
+    setDefaultAddType("investment");
+    setShowAdd(true);
+  };
+  const applyTxnDatePreset = useCallback((preset, baseMonth = viewMonth || todayStr().slice(0,7)) => {
+    if(preset === "all"){
+      setTxnDatePreset("all");
+      setTxnDateFrom("");
+      setTxnDateTo("");
+      return;
+    }
+    if(preset === "last_month"){
+      const { start, end } = getMonthBounds(getPreviousMonthKey(baseMonth));
+      setTxnDatePreset("last_month");
+      setTxnDateFrom(start);
+      setTxnDateTo(end);
+      return;
+    }
+    if(preset === "custom"){
+      setTxnDatePreset("custom");
+      return;
+    }
+    const { start, end } = getMonthBounds(baseMonth);
+    setTxnDatePreset("current_month");
+    setTxnDateFrom(start);
+    setTxnDateTo(end);
+  }, [viewMonth]);
+  const openLoanDraft = useCallback((overrides = {}) => {
+    setEditingLoan({ _isDraft:true, direction:"given", startDate:todayStr(), ...overrides });
+    setShowAddLoan(true);
+  }, []);
+
+  useEffect(()=>{
+    if(txnDatePreset === "current_month"){
+      const { start, end } = getMonthBounds(viewMonth || todayStr().slice(0,7));
+      setTxnDateFrom(start);
+      setTxnDateTo(end);
+    } else if(txnDatePreset === "last_month"){
+      const { start, end } = getMonthBounds(getPreviousMonthKey(viewMonth || todayStr().slice(0,7)));
+      setTxnDateFrom(start);
+      setTxnDateTo(end);
+    }
+  }, [txnDatePreset, viewMonth]);
+
+  // ── LOOKUPS ────────────────────────────────────────────────────────────────
+  const getCat = useCallback(id=>{
+    if(!id) return {name:"?",color:"#888",icon:"❓",subs:[]};
+    const matched = cats.find(c=>c.id===id || c.id.toLowerCase()===String(id).toLowerCase());
+    return matched || {name:"?",color:"#888",icon:"❓",subs:[]};
+  },[cats]);
+  const getAcc = useCallback(id=>accounts.find(a=>a.id===id)||{name:"?",color:"#888",type:"cash"},[accounts]);
+  const getPerson = useCallback(id=>people.find(p=>p.id===id)||{name:"?",emoji:"👤",color:"#888",relation:"",personType:"contact"},[people]);
+  const getGroup = useCallback(id=>groups.find(g=>g.id===id)||null,[groups]);
+  const getRefundCandidates = useCallback((refundTxn, excludeRefundId = null)=>{
+    if(!refundTxn || refundTxn.type!=="settlement_in" || !refundTxn.isRefund) return [];
+    const refundAmt = Number(refundTxn.amount||0);
+    if(!refundAmt) return [];
+    const refundDate = toDateOnly(refundTxn.date) || new Date();
+    const refundText = `${refundTxn.desc||""} ${refundTxn.merchant||""}`.toLowerCase();
+    const linkedExpenseIds = new Set(
+      txns
+        .filter(t=>t.type==="settlement_in" && t.againstTxnId && String(t.id)!==String(excludeRefundId||refundTxn.id||""))
+        .map(t=>String(t.againstTxnId))
+    );
+
+    return txns
+      .filter(t=>t.type==="expense" && !linkedExpenseIds.has(String(t.id)) && nearlyEqualMoney(t.amount, refundAmt))
+      .filter(t=>{
+        const txnDate = toDateOnly(t.date);
+        return !txnDate || txnDate <= refundDate;
+      })
+      .map(t=>{
+        const txnText = `${t.desc||""} ${t.merchant||""}`.toLowerCase();
+        const merchantMatch = refundText && txnText && (
+          refundText.includes(txnText) ||
+          txnText.includes(refundText) ||
+          refundText.split(/\s+/).some(word=>word.length>3 && txnText.includes(word))
+        );
+        const txnDate = toDateOnly(t.date) || refundDate;
+        const dayGap = Math.abs(Math.round((refundDate - txnDate)/(1000*60*60*24)));
+        const score = (merchantMatch ? 12 : 0) + (t.accId && refundTxn.accId && t.accId===refundTxn.accId ? 5 : 0) + Math.max(0, 45 - Math.min(dayGap, 45));
+        return { ...t, _refundScore:score, _dayGap:dayGap, _merchantMatch:merchantMatch };
+      })
+      .sort((a,b)=>b._refundScore-a._refundScore || new Date(b.date||0)-new Date(a.date||0))
+      .slice(0,3);
+  },[txns]);
+
+  // ── CURRENT MONTH FILTER ───────────────────────────────────────────────────
+  const cm = viewMonth;
+  const thisMonthTxns = useMemo(()=>txns.filter(t=>t.date&&t.date.startsWith(cm)),[txns,cm]);
+  const expenses = useMemo(()=>thisMonthTxns.filter(t=>t.type==="expense"),[thisMonthTxns]);
+  const refundTotalsByBill = useMemo(()=>txns.reduce((map,txn)=>{
+    if(txn.type!=="settlement_in" || !txn.isRefund || !txn.againstBillId) return map;
+    const key = String(txn.againstBillId);
+    map[key] = (map[key]||0) + Number(txn.amount||0);
+    return map;
+  },{}), [txns]);
+  const getNetBillAmount = useCallback(bill=>Math.max(0, Number(bill?.amount||0) - Number(refundTotalsByBill[String(bill?.id)]||0)),[refundTotalsByBill]);
+  const refundTotalsByExpense = useMemo(()=>txns.reduce((map,txn)=>{
+    if(txn.type!=="settlement_in" || !txn.againstTxnId) return map;
+    const key = String(txn.againstTxnId);
+    map[key] = (map[key]||0) + Number(txn.amount||0);
+    return map;
+  },{}),[txns]);
+  const getNetExpenseAmount = useCallback(expense=>Math.max(0, Number(expense?.amount||0) - Number(refundTotalsByExpense[String(expense?.id)]||0)),[refundTotalsByExpense]);
+  const getGroupCollectiveDue = useCallback(expense=>{
+    if(!expense?.groupId || expense?.type!=="expense") return 0;
+    const hasIndividualReceivable = Object.entries(expense?.people||{}).some(([pid,info])=>pid!=="__me__" && info?.mode==="owes" && Number(info?.amount||0)>0 && !info?.settled);
+    const trackingMode = expense?.trackingMode || (hasIndividualReceivable ? "split" : (expense?.forPerson || expense?.groupId ? "tag" : "none"));
+    // Handle both split and allocate (Txn breakup unified mode)
+    if(trackingMode!=="split" && trackingMode!=="allocate") return 0;
+    if(expense.groupCollectiveAmount !== undefined && expense.groupCollectiveAmount !== null){
+      return Math.max(0, Number(expense.groupCollectiveAmount||0) - Number(expense.groupCollectiveSettledAmt||0));
+    }
+    return hasIndividualReceivable ? 0 : Math.max(0, Number(expense.amount||0));
+  },[]);
+  const getMyExpenseAmount = useCallback(expense=>{
+    const netAmount = getNetExpenseAmount(expense);
+    if(!(netAmount>0)) return 0;
+
+    const trackingMode = expense?.trackingMode
+      || (Object.keys(expense?.people||{}).some(pid=>pid!=="__me__") ? "split" : (expense?.forPerson || expense?.groupId ? "tag" : "none"));
+    const meId = people.find(person=>person.isMe)?.id;
+    let attributedAway = 0;
+
+    Object.entries(expense?.people||{}).forEach(([pid,info])=>{
+      if(pid==="__me__") return;
+      const mode = info?.mode;
+      const part = Number(info?.amount||0);
+      if(!(part>0)) return;
+      if(mode==="owes") attributedAway += part;
+    });
+
+    const groupAllocations = Array.isArray(expense?.groupAllocations) ? expense.groupAllocations : [];
+    groupAllocations.forEach(groupPart=>{
+      const mode = groupPart?.mode;
+      const part = Number(groupPart?.amount||0);
+      if(!(part>0)) return;
+      if(mode==="owes") attributedAway += part;
+    });
+
+    if((trackingMode==="split" || trackingMode==="allocate") && groupAllocations.length===0){
+      const collectivePart = Number(expense?.groupCollectiveAmount||0);
+      if(collectivePart>0) attributedAway += collectivePart;
+    }
+
+    return Math.max(0, netAmount - attributedAway);
+  },[getNetExpenseAmount]);
+
+  // ── COMPUTED ───────────────────────────────────────────────────────────────
+  const myActual = useMemo(()=>expenses.reduce((sum,expense)=>sum+getMyExpenseAmount(expense),0),[expenses,getMyExpenseAmount]);
+
+  const totalIncome = useMemo(()=>thisMonthTxns.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0),[thisMonthTxns]);
+  const monthlyInvestmentFlow = useMemo(()=>thisMonthTxns.reduce((sum,t)=>{
+    if(t.type==="investment") return sum + Number(t.amount||0);
+    if(t.type==="transfer" && t.toAccId && isInvestmentAccount(getAcc(t.toAccId))) return sum + Number(t.amount||0);
+    return sum;
+  },0),[thisMonthTxns,getAcc]);
+  const trackedInvestments = useMemo(()=>{
+    const txnsById = new Map(txns.map(t=>[String(t.id), t]));
+    const saved = (investments||[]).flatMap(inv=>{
+      const linkedTxn = inv.linkedTxnId ? txnsById.get(String(inv.linkedTxnId)) : null;
+      if(inv.linkedTxnId && (!linkedTxn || linkedTxn.type!=="investment")) return [];
+      return [{
+        ...inv,
+        linkedInvestmentId:inv.id,
+        linkedTxnId:linkedTxn?.id ?? inv.linkedTxnId ?? null,
+        type:linkedTxn?.investType || inv.type || "mf",
+        name:linkedTxn?.desc || linkedTxn?.merchant || inv.name || "Investment",
+        amount:Number(linkedTxn?.amount ?? inv.amount ?? 0),
+        currentValue:Number(linkedTxn?.amount ?? inv.currentValue ?? inv.amount ?? 0),
+        freq:linkedTxn?.investFreq || inv.freq || "",
+        folioNo:String(linkedTxn?.investFolio ?? inv.folioNo ?? inv.folio ?? "").trim(),
+        startDate:linkedTxn?.investStartDate || inv.startDate || linkedTxn?.date || todayStr(),
+        paymentAccId:linkedTxn?.accId || inv.paymentAccId || "",
+        lastNav:Number(linkedTxn?.investNav ?? inv.lastNav ?? 0),
+        lastNavDate:linkedTxn?.date || inv.lastNavDate || inv.startDate || todayStr(),
+      }];
+    });
+    const knownTxnIds = new Set(saved.map(inv=>String(inv.linkedTxnId)).filter(Boolean));
+
+    const derivedFromTxns = txns
+      .filter(t=>t.type==="investment" && !knownTxnIds.has(String(t.id)))
+      .map(t=>({
+        id:`txn_${t.id}`,
+        type:t.investType||"mf",
+        name:t.desc||t.merchant||"Investment",
+        amount:Number(t.amount||0),
+        currentValue:Number(t.amount||0),
+        freq:t.investFreq||"",
+        folioNo:String(t.investFolio||"").trim(),
+        startDate:t.investStartDate || t.date || todayStr(),
+        linkedTxnId:t.id,
+        linkedInvestmentId:t.linkedInvestmentId || null,
+        source:"transaction",
+        paymentAccId:t.accId || "",
+        lastNav:Number(t.investNav || 0),
+        lastNavDate:t.date || todayStr(),
+      }));
+
+    return [...saved, ...derivedFromTxns];
+  },[investments,txns]);
+  const investmentFolioGroups = useMemo(()=>{
+    const map = new Map();
+    trackedInvestments.forEach(inv=>{
+      const grouping = getInvestmentGroupMeta(inv);
+      const key = grouping.key;
+      if(!map.has(key)){
+        map.set(key, {
+          id:key,
+          type:inv.type,
+          folioNo:grouping.folioNo,
+          primaryName:grouping.primaryName,
+          latestNameDate:inv.lastNavDate || inv.startDate || "",
+          items:[],
+          total:0,
+        });
+      }
+      const group = map.get(key);
+      const latestNameDate = inv.lastNavDate || inv.startDate || "";
+      if((inv.name||"") && String(group.latestNameDate||"") <= String(latestNameDate||"")){
+        group.primaryName = inv.name || group.primaryName;
+        group.latestNameDate = latestNameDate;
+      }
+      group.items.push(inv);
+      group.total += Number(inv.currentValue ?? inv.amount ?? 0);
+    });
+    return Array.from(map.values()).sort((a,b)=>b.total-a.total);
+  },[trackedInvestments]);
+  const monthlyInvestmentCommitment = useMemo(()=>trackedInvestments.reduce((sum,inv)=>inv.freq==="monthly"?sum+Number(inv.amount||0):sum,0),[trackedInvestments]);
+
+  const getInvestmentTxn = useCallback(inv=>{
+    const linkedTxnId = inv?.linkedTxnId || (String(inv?.id||"").startsWith("txn_") ? String(inv.id).slice(4) : "");
+    return linkedTxnId ? txns.find(t=>String(t.id)===String(linkedTxnId)) || null : null;
+  },[txns]);
+  const investmentTemplateOptions = useMemo(()=>{
+    const templates = new Map();
+    trackedInvestments.forEach(inv=>{
+      const linkedTxn = getInvestmentTxn(inv);
+      const folioKey = String(inv.folioNo||"").trim().toLowerCase();
+      const nameKey = String(inv.name||"").trim().toLowerCase();
+      const primaryKey = folioKey || nameKey;
+      if(!primaryKey) return;
+      const key = `${inv.type||"mf"}|${primaryKey}`;
+      const lastUsed = linkedTxn?.date || inv.lastNavDate || inv.startDate || "";
+      const candidate = {
+        key,
+        type:inv.type || "mf",
+        name:inv.name || "Investment",
+        folioNo:String(inv.folioNo||"").trim(),
+        amount:Number(linkedTxn?.amount ?? inv.amount ?? 0),
+        freq:linkedTxn?.investFreq || inv.freq || "",
+        accId:linkedTxn?.accId || inv.paymentAccId || "",
+        nav:Number(linkedTxn?.investNav ?? inv.lastNav ?? 0),
+        startDate:inv.startDate || linkedTxn?.date || "",
+        lastUsed,
+        label:String(inv.folioNo||"").trim()
+          ? `Folio ${String(inv.folioNo).trim()} · ${inv.name || "Investment"}`
+          : (inv.name || "Investment"),
+      };
+      const existing = templates.get(key);
+      if(!existing || String(existing.lastUsed||"") < String(lastUsed||"")){
+        templates.set(key, candidate);
+      }
+    });
+    return Array.from(templates.values()).sort((a,b)=>String(b.lastUsed||"").localeCompare(String(a.lastUsed||"")));
+  },[trackedInvestments,getInvestmentTxn]);
+
+  const removeTxnAndLinkedInvestment = useCallback(txn=>{
+    if(!txn) return;
+    if(getAcc(txn.accId)?.type==="cc" && txn.type==="expense"){
+      setAccounts(prev=>prev.map(a=>a.id===txn.accId?{...a,outstanding:Math.max(0,(a.outstanding||0)-Number(txn.amount||0))}:a));
+    }
+    // B1b: Delete refund on CC -> add amount back to outstanding
+    if(txn.type==="settlement_in" && txn.isRefund && getAcc(txn.accId)?.type==="cc"){
+      setAccounts(prev=>prev.map(a=>a.id===txn.accId?{...a,outstanding:(a.outstanding||0)+Number(txn.amount||0)}:a));
+    }
+    // If deleting a repayment/settlement, reverse the settled amounts on original txns + bills
+    if(txn.type==="settlement_in" && !txn.isRefund && txn.settlementLinks?.length){
+      const links = txn.settlementLinks;
+      const personId = txn.fromPersonId;
+      // Reverse person-level splits
+      setTxns(prev=>prev.map(t=>{
+        const link = links.find(l=>(l.kind==="txn"||l.kind==="group-txn")&&String(l.id)===String(t.id));
+        if(!link) return t;
+        const pid = link.personId || personId;
+        const reversedAmt = Number(link.amount||0);
+        // Reverse groupCollectiveSettledAmt
+        const prevGrp = Number(t.groupCollectiveSettledAmt||0);
+        const nextGrp = t.groupCollectiveAmount>0 ? Math.max(0, prevGrp - reversedAmt) : prevGrp;
+        // Reverse person split if exists
+        if(pid && t.people?.[pid]){
+          const info = t.people[pid];
+          const prevSettled = Number(info.settledAmt||0);
+          const nextSettled = Math.max(0, prevSettled - reversedAmt);
+          const origAmt = Number(info.amount||0);
+          const nextRemaining = Math.min(origAmt, origAmt - nextSettled);
+          return { ...t,
+            people:{ ...t.people, [pid]:{ ...info, settled:false, settledAmt:nextSettled, remainingAmt:nextRemaining } },
+            ...(t.groupCollectiveAmount>0 ? { groupCollectiveSettledAmt:nextGrp } : {})
+          };
+        }
+        return { ...t, ...(t.groupCollectiveAmount>0 ? { groupCollectiveSettledAmt:nextGrp } : {}) };
+      }));
+      // Reverse bill-level splits
+      setBills(prev=>prev.map(b=>{
+        const link = links.find(l=>(l.kind==="bill"||l.kind==="group-bill")&&String(l.id)===String(b.id));
+        if(!link) return b;
+        const pid = link.personId || personId;
+        const reversedAmt = Number(link.amount||0);
+        const prevGrp = Number(b.groupCollectiveSettledAmt||0);
+        const nextGrp = b.groupCollectiveAmount>0 ? Math.max(0, prevGrp - reversedAmt) : prevGrp;
+        if(pid && b.splitPeople?.[pid]){
+          const info = b.splitPeople[pid];
+          const prevSettled = Number(info.settledAmt||0);
+          const nextSettled = Math.max(0, prevSettled - reversedAmt);
+          const origAmt = Number(info.amount||0);
+          const nextRemaining = Math.min(origAmt, origAmt - nextSettled);
+          return { ...b,
+            status: "unpaid",
+            paidDate: null,
+            splitPeople:{ ...b.splitPeople, [pid]:{ ...info, settled:false, settledAmt:nextSettled, remainingAmt:nextRemaining } },
+            ...(b.groupCollectiveAmount>0 ? { groupCollectiveSettledAmt:nextGrp } : {})
+          };
+        }
+        return { ...b, status:"unpaid", paidDate:null, ...(b.groupCollectiveAmount>0 ? { groupCollectiveSettledAmt:nextGrp } : {}) };
+      }));
+    }
+    setTxns(prev=>prev.filter(x=>String(x.id)!==String(txn.id)));
+    if(txn.type==="investment"){
+      setInvestments(prev=>prev.filter(x=>String(x.id)!==String(txn.linkedInvestmentId||"") && String(x.linkedTxnId)!==String(txn.id)));
+    }
+  },[getAcc, setBills]);
+
+  const removeInvestmentEntry = useCallback(inv=>{
+    const linkedTxn = getInvestmentTxn(inv);
+    if(linkedTxn){
+      removeTxnAndLinkedInvestment(linkedTxn);
+    } else {
+      const targetId = inv?.linkedInvestmentId || inv?.id;
+      setInvestments(prev=>prev.filter(x=>String(x.id)!==String(targetId)));
+    }
+    setSelectedInvestmentDetail(prev=>{
+      if(!prev) return prev;
+      const nextItems = prev.items.filter(item=>String(item.id)!==String(inv?.id));
+      if(nextItems.length===0) return null;
+      return {
+        ...prev,
+        items:nextItems,
+        total:nextItems.reduce((sum,item)=>sum+Number(item.currentValue ?? item.amount ?? 0),0),
+      };
+    });
+  },[getInvestmentTxn,removeTxnAndLinkedInvestment]);
+
+  const openInvestmentEditor = useCallback(inv=>{
+    const linkedTxn = getInvestmentTxn(inv);
+    setSelectedInvestmentDetail(null);
+    if(linkedTxn){
+      setEditingTxn(linkedTxn);
+      return;
+    }
+    const targetId = inv?.linkedInvestmentId || inv?.id;
+    const sourceItem = investments.find(x=>String(x.id)===String(targetId)) || inv;
+    setEditingInvestment(sourceItem);
+    setShowAddInvestment(true);
+  },[getInvestmentTxn,investments]);
+
+  const openInvestmentQuickAdd = useCallback(inv=>{
+    const linkedTxn = getInvestmentTxn(inv);
+    const sourceItem = linkedTxn ? {
+      ...inv,
+      paymentAccId: linkedTxn.accId || inv?.paymentAccId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "",
+      startDate: inv?.startDate || linkedTxn?.date || todayStr(),
+      lastNavDate: todayStr(),
+    } : inv;
+    setSelectedInvestmentDetail(null);
+    setEditingInvestment({
+      _prefillOnly:true,
+      type:sourceItem?.type || "mf",
+      name:sourceItem?.name || "Investment",
+      folioNo:String(sourceItem?.folioNo || "").trim(),
+      amount:Number(sourceItem?.amount || 0),
+      freq:sourceItem?.freq || "",
+      paymentAccId:sourceItem?.paymentAccId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "",
+      lastNav:Number(sourceItem?.lastNav || linkedTxn?.investNav || 0),
+      startDate:sourceItem?.startDate || todayStr(),
+      lastNavDate:sourceItem?.lastNavDate || todayStr(),
+      reminder:null,
+    });
+    setShowAddInvestment(true);
+  },[accounts,getInvestmentTxn]);
+
+  const byCat = useMemo(()=>cats.map(c=>({
+    name:c.name,
+    value:expenses.filter(expense=>getTxnCategoryIds(expense).includes(c.id)).reduce((sum,expense)=>{
+      const txnCatIds = getTxnCategoryIds(expense);
+      const catCount = txnCatIds.length || 1;
+      return sum+(getMyExpenseAmount(expense)/catCount);
+    },0),
+    color:c.color,id:c.id,icon:c.icon,budget:c.budget
+  })).filter(c=>c.value>0),[expenses,cats,getMyExpenseAmount]);
+
+  const settlements = useMemo(()=>{
+    const receivables = {};
+    const payables = {};
+    const meId = people.find(p=>p.isMe)?.id;
+
+    txns.forEach(t=>{
+      if(t.type==="expense"){
+        // Check F8 style (t.people) and legacy (t.splitPeople)
+        const peopleMap = {...(t.splitPeople||{}), ...(t.people||{})};
+        Object.entries(peopleMap).forEach(([pid,info])=>{
+          if(pid==="__me__" || pid===meId || info.mode!=="owes" || info.settled) return;
+          receivables[pid] = (receivables[pid]||0) + remainingShare(info);
+        });
+      }
+
+      if(t.type==="expense"){
+        // forPerson attribution → counts as receivable (skip self)
+        if(t.forPerson && t.forPerson!==meId && Number(t.tagPersonAmount||0)>0){
+          const pid=t.forPerson;
+          if(!(t.people?.[pid]?.mode==="owes"&&!t.people[pid].settled))
+            receivables[pid]=(receivables[pid]||0)+Number(t.tagPersonAmount);
+        }
+        // tagItems person entries → count as receivable (skip self)
+        (t.tagItems||[]).forEach(item=>{
+          if(item.targetType!=="person"||!item.targetId||item.targetId===meId||!Number(item.amount||0)) return;
+          const pid=item.targetId;
+          if(t.people?.[pid]?.mode==="owes"&&!t.people[pid].settled) return;
+          receivables[pid]=(receivables[pid]||0)+Number(item.amount);
+        });
+      }
+
+      if(t.type==="settlement_in"&&t.fromPersonId&&Number(t.extraAmount||0)>0&&(t.settlementLinks||[]).length>0){
+        payables[t.fromPersonId] = (payables[t.fromPersonId]||0) + Number(t.extraAmount||0);
+      }
+
+      if(t.type==="settlement_out"&&t.toPersonId){
+        payables[t.toPersonId] = (payables[t.toPersonId]||0) + Number(t.amount||0);
+      }
+      // Txn breakup O mode (owes_by_me) — I owe this person
+      if(t.type==="expense"&&t.people){
+        Object.entries(t.people).forEach(([pid,info])=>{
+          if(pid==="__me__" || info.mode!=="owes_by_me") return;
+          payables[pid] = (payables[pid]||0) + Number(info.amount||0);
+        });
+      }
+    });
+
+    const txnById = new Map(txns.map(t=>[t.id,t]));
+    bills.forEach(b=>{
+      if(!b.splitPeople) return;
+      // If this bill has a linked expense that also tracks the same person, skip —
+      // the expense is the source of truth and is already counted above.
+      const linkedTxn = b.paidByTxnId ? txnById.get(b.paidByTxnId) : null;
+      const linkedTxnHasPeople = linkedTxn?.people && Object.keys(linkedTxn.people).length > 0;
+      if(linkedTxnHasPeople) return;
+      Object.entries(b.splitPeople).forEach(([pid,info])=>{
+        if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
+        receivables[pid] = (receivables[pid]||0) + remainingShare(info);
+      });
+    });
+
+    const ids = new Set([...Object.keys(receivables), ...Object.keys(payables)]);
+    const map = {};
+    ids.forEach(pid=>{
+      map[pid] = {
+        owesMe: Number(receivables[pid]||0),
+        iOwe: Math.max(0, Number(payables[pid]||0)),
+      };
+    });
+
+    return map;
+  },[txns,bills,people]);
+
+  const personSpend = useMemo(()=>{
+    const map={};
+    thisMonthTxns.forEach(t=>{
+      if(t.type!=="expense") return;
+      // forPerson tag (old-style)
+      if(t.forPerson){
+        if(!map[t.forPerson]) map[t.forPerson]=0;
+        map[t.forPerson]+=(t.tagPersonAmount||t.amount);
+      }
+      // tagItems (itemized tag)
+      if(t.tagItems?.length){
+        t.tagItems.forEach(item=>{
+          if(item.targetType==="person"&&item.targetId){
+            if(!map[item.targetId]) map[item.targetId]=0;
+            map[item.targetId]+=Number(item.amount||0);
+          }
+        });
+      }
+      // Txn breakup / allocate: mode="spent_on" (A=Attribute) counts as spend on person
+      if(t.people){
+        Object.entries(t.people).forEach(([pid,info])=>{
+          if(pid==="__me__") return;
+          if(info.mode==="spent_on"&&Number(info.amount||0)>0){
+            if(!map[pid]) map[pid]=0;
+            map[pid]+=Number(info.amount||0);
+          }
+        });
+      }
+      // allocations array (unified/allocate mode)
+      if(t.allocations?.length){
+        t.allocations.forEach(alloc=>{
+          if(alloc.targetType==="person"&&alloc.targetId&&alloc.mode==="spent_on"&&Number(alloc.amount||0)>0){
+            if(!map[alloc.targetId]) map[alloc.targetId]=0;
+            map[alloc.targetId]+=Number(alloc.amount||0);
+          }
+        });
+      }
+    });
+    return map;
+  },[thisMonthTxns]);
+
+  const directOwedToMe = useMemo(()=>Object.values(settlements).reduce((s,p)=>s+(p.owesMe||0),0),[settlements]);
+  const receivablePeopleList = useMemo(()=>Object.entries(settlements)
+    .filter(([,info])=>Number(info?.owesMe||0)>0)
+    .map(([pid,info])=>({
+      id:pid,
+      person:getPerson(pid),
+      amount:Number(info?.owesMe||0),
+    }))
+    .sort((a,b)=>b.amount-a.amount)
+  ,[settlements,getPerson]);
+  const monthlyReceivables = useMemo(()=>{
+    const map = {};
+
+    // B10 fix: use ALL txns not just thisMonthTxns — unpaid debts carry forward
+    txns.forEach(t=>{
+      if(t.type!=="expense") return;
+      // Check both F8 (t.people) and legacy (t.splitPeople)
+      const peopleMap = {...(t.splitPeople||{}), ...(t.people||{})};
+      Object.entries(peopleMap).forEach(([pid,info])=>{
+        if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
+        map[pid] = (map[pid]||0) + remainingShare(info);
+      });
+    });
+
+    bills
+      .filter(b=>b.status==="unpaid" && b.splitPeople)
+      .forEach(b=>{
+        Object.entries(b.splitPeople||{}).forEach(([pid,info])=>{
+          if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
+          map[pid] = (map[pid]||0) + remainingShare(info);
+        });
+      });
+
+    return map;
+  },[txns,bills,cm]);
+  const monthDirectOwedToMe = useMemo(()=>Object.values(monthlyReceivables).reduce((sum,amount)=>sum+Number(amount||0),0),[monthlyReceivables]);
+  const monthlyReceivablePeopleList = useMemo(()=>Object.entries(monthlyReceivables)
+    .filter(([,amount])=>Number(amount||0)>0)
+    .map(([pid,amount])=>({
+      id:pid,
+      person:getPerson(pid),
+      amount:Number(amount||0),
+    }))
+    .sort((a,b)=>b.amount-a.amount)
+  ,[monthlyReceivables,getPerson]);
+  const monthlyCollectiveGroupReceivable = useMemo(()=>{
+    const txnCollective = txns
+      .filter(t=>t.type==="expense" && t.date && String(t.date).startsWith(cm))
+      .reduce((sum,t)=>sum + getGroupCollectiveDue(t),0);
+    const billCollective = bills
+      .filter(b=>b.status==="unpaid")
+      .filter(b=>(b.dueDate&&String(b.dueDate).startsWith(cm)) || (b.createdDate&&String(b.createdDate).startsWith(cm)))
+      .reduce((sum,b)=>sum + Number(b.groupCollectiveAmount||0),0);
+    return txnCollective + billCollective;
+  },[txns,bills,cm,getGroupCollectiveDue]);
+  const monthTotalOwedToMe = useMemo(()=>monthDirectOwedToMe + monthlyCollectiveGroupReceivable,[monthDirectOwedToMe,monthlyCollectiveGroupReceivable]);
+  const collectiveGroupReceivable = useMemo(()=>{
+    const txnCollective = txns.reduce((sum,t)=>sum + getGroupCollectiveDue(t),0);
+    const billCollective = bills.filter(b=>b.status==="unpaid").reduce((sum,b)=>sum + Number(b.groupCollectiveAmount||0),0);
+    return txnCollective + billCollective;
+  },[txns,bills,getGroupCollectiveDue]);
+  const totalOwedToMe = useMemo(()=>directOwedToMe + collectiveGroupReceivable,[directOwedToMe,collectiveGroupReceivable]);
+  const remaining = monthBudget-myActual;
+  const safePerDay = monthBudget>0?Math.max(0,Math.round(remaining/Math.max(1,daysLeft()))):null;
+
+  const expenseBaseTxns = useMemo(()=>txns.filter(t=>t.type==="expense" && isDateInRange(t.date, txnDateFrom, txnDateTo)),[txns,txnDateFrom,txnDateTo]);
+  const incomeBaseTxns = useMemo(()=>txns.filter(t=>t.type==="income" && isDateInRange(t.date, txnDateFrom, txnDateTo)),[txns,txnDateFrom,txnDateTo]);
+  const investmentBaseTxns = useMemo(()=>txns.filter(t=>t.type==="investment" && isDateInRange(t.date, txnDateFrom, txnDateTo)),[txns,txnDateFrom,txnDateTo]);
+
+  const filteredTxns = useMemo(()=>[
+    ...txns
+  ].filter(t=>{
+    if(fType!=="All" && t.type!==fType) return false;
+    if(!isDateInRange(t.date, txnDateFrom, txnDateTo)) return false;
+
+    const txnAmount = Number(t.amount||0);
+    if(txnAmountFrom && txnAmount < parseMoney(txnAmountFrom)) return false;
+    if(txnAmountTo && txnAmount > parseMoney(txnAmountTo)) return false;
+
+    if(txnCategoryFilter!=="all"){
+      const txnCats = getTxnCategoryIds(t);
+      if(!txnCats.some(id=>String(id)===String(txnCategoryFilter))) return false;
+    }
+
+    if(txnPersonFilter!=="all" && !txnHasPerson(t, txnPersonFilter)) return false;
+
+    if(txnGroupFilter!=="all"){
+      const inGroup = t.groupId===txnGroupFilter || (t.groupAllocations||[]).some(ga=>ga.groupId===txnGroupFilter);
+      if(!inGroup) return false;
+    }
+
+    if(fType==="expense"){
+      const accType = accounts.find(a=>a.id===t.accId)?.type || "";
+      if(expenseSourceFilter!=="all" && accType!==expenseSourceFilter) return false;
+      if(expenseSourceFilter==="cc" && expenseCardFilter!=="all" && String(t.accId)!==String(expenseCardFilter)) return false;
+    }
+
+    if(fType==="income"){
+      if(incomeTypeFilter!=="all" && normalizeIncomeTypeValue(t.incomeType||"salary")!==String(incomeTypeFilter)) return false;
+      if(incomeAccountFilter!=="all" && String(t.accId||"")!==String(incomeAccountFilter)) return false;
+    }
+
+    if(fType==="investment" && investmentTypeFilter!=="all" && String(t.investType||"mf")!==String(investmentTypeFilter)) return false;
+
+    if(txnReimbursableOnly && !(t.reimbursable && !t.reimbursedByTxnId)) return false;
+
+    // Text search
+    if(txnSearch&&txnSearch.trim()){
+      const q = txnSearch.trim().toLowerCase();
+      const merchant = (t.merchant||t.who||t.desc||"").toLowerCase();
+      const note = (t.note||"").toLowerCase();
+      const amount = String(t.amount||"");
+      const acc = accounts.find(a=>a.id===t.accId);
+      const accName = (acc?.name||"").toLowerCase();
+      if(!merchant.includes(q)&&!note.includes(q)&&!amount.includes(q)&&!accName.includes(q)) return false;
+    }
+
+    return true;
+  }).sort((a,b)=>{
+    const recordedA = getRecordedSortValue(a);
+    const recordedB = getRecordedSortValue(b);
+    const dateA = new Date(a.date||0).getTime();
+    const dateB = new Date(b.date||0).getTime();
+    const amountA = Number(a.amount||0);
+    const amountB = Number(b.amount||0);
+    const tieDesc = String(b.id||"").localeCompare(String(a.id||""), undefined, { numeric:true, sensitivity:"base" });
+    const tieAsc = String(a.id||"").localeCompare(String(b.id||""), undefined, { numeric:true, sensitivity:"base" });
+
+    if(txnSort==="date_desc"){
+      if(dateB !== dateA) return dateB - dateA;
+      if(recordedB !== recordedA) return recordedB - recordedA;
+      return tieDesc;
+    }
+    if(txnSort==="date_asc"){
+      if(dateA !== dateB) return dateA - dateB;
+      if(recordedA !== recordedB) return recordedA - recordedB;
+      return tieAsc;
+    }
+    if(txnSort==="amount_desc"){
+      if(amountB !== amountA) return amountB - amountA;
+      if(recordedB !== recordedA) return recordedB - recordedA;
+      return tieDesc;
+    }
+    if(txnSort==="amount_asc"){
+      if(amountA !== amountB) return amountA - amountB;
+      if(recordedB !== recordedA) return recordedB - recordedA;
+      return tieDesc;
+    }
+
+    if(recordedB !== recordedA) return recordedB - recordedA;
+    if(dateB !== dateA) return dateB - dateA;
+    return tieDesc;
+  }),[txns,fType,txnDateFrom,txnDateTo,txnAmountFrom,txnAmountTo,txnCategoryFilter,txnPersonFilter,txnGroupFilter,accounts,expenseSourceFilter,expenseCardFilter,incomeTypeFilter,incomeAccountFilter,investmentTypeFilter,txnSort,txnReimbursableOnly,txnSearch]);
+
+  const accountBalance = useCallback((accId, endDate=null)=>{
+    const acc=accounts.find(a=>a.id===accId);
+    if(!acc||acc.type==="cc") return 0;
+    const openingDate = acc.openingBalanceDate || "";
+    const linkedDebitIds = acc.type==="bank"
+      ? accounts.filter(a=>(a.type==="debit" && a.linkedBank===accId) || (a.type==="upi" && a.linkedAccount===accId)).map(a=>a.id)
+      : [];
+    let bal=Number(acc.openingBalance||0);
+    txns.forEach(t=>{
+      if(!isDateInRange(t.date, openingDate, endDate)) return;
+      if(t.type==="income"&&t.accId===accId) bal+=Number(t.amount||0);
+      if(t.type==="settlement_in"&&t.accId===accId) bal+=Number(t.amount||0);
+      if(t.type==="expense"){
+        if(t.accId===accId || linkedDebitIds.includes(t.accId)) bal-=Number(t.amount||0);
+      }
+      if(t.type==="investment"){
+        if(t.accId===accId || linkedDebitIds.includes(t.accId)) bal-=Number(t.amount||0);
+      }
+      if(t.type==="transfer"){
+        if(t.fromAccId===accId || linkedDebitIds.includes(t.fromAccId)) bal-=Number(t.amount||0);
+        if(t.toAccId===accId || linkedDebitIds.includes(t.toAccId)) bal+=Number(t.amount||0);
+      }
+      if(t.type==="cc_payment" && (t.fromAccId===accId || linkedDebitIds.includes(t.fromAccId))) bal-=Number(t.amount||0);
+    });
+    return bal;
+  },[txns,accounts]);
+
+  const bankBalance = useCallback(accId=>{
+    const acc=accounts.find(a=>a.id===accId);
+    if(!acc||acc.type!=="bank") return 0;
+    return accountBalance(accId);
+  },[accounts,accountBalance]);
+  const accountReconciliationGap = useCallback(accId=>{
+    const checkpoint = balanceCheckpoints[accId];
+    if(!checkpoint?.date) return 0;
+    const expectedAtDate = accountBalance(accId, checkpoint.date);
+    return Number(checkpoint.amount||0) - Number(expectedAtDate||0);
+  },[balanceCheckpoints,accountBalance]);
+  const effectiveAccountBalance = useCallback(accId=>{
+    const acc = accounts.find(a=>a.id===accId);
+    if(!acc || acc.type==="cc") return 0;
+    const computed = accountBalance(accId);
+    return acc.type==="bank" ? computed + accountReconciliationGap(accId) : computed;
+  },[accounts,accountBalance,accountReconciliationGap]);
+
+  const investmentAccounts = useMemo(()=>accounts.filter(a=>isInvestmentAccount(a)),[accounts]);
+  const cashBankTotal = useMemo(()=>accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+effectiveAccountBalance(a.id),0),[accounts,effectiveAccountBalance]);
+  const cashWalletTotal = useMemo(()=>accounts.filter(a=>a.type==="cash" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+accountBalance(a.id),0),[accounts,accountBalance]);
+  const upiTotal = useMemo(()=>accounts.filter(a=>a.type==="upi" && !isInvestmentAccount(a) && !a.linkedAccount).reduce((sum,a)=>sum+accountBalance(a.id),0),[accounts,accountBalance]);
+  const liquidAssetsTotal = useMemo(()=>accounts.filter(a=>a.type!=="cc" && !isInvestmentAccount(a) && !a.excludeFromWealth).reduce((sum,a)=>sum+(a.type==="bank" ? effectiveAccountBalance(a.id) : accountBalance(a.id)),0),[accounts,accountBalance,effectiveAccountBalance]);
+  const reconciliationGapTotal = useMemo(()=>accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a)).reduce((sum,a)=>sum+accountReconciliationGap(a.id),0),[accounts,accountReconciliationGap]);
+  const reconciledBankCount = useMemo(()=>accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a) && balanceCheckpoints[a.id]?.date).length,[accounts,balanceCheckpoints]);
+  const investmentAccountTotal = useMemo(()=>investmentAccounts.reduce((sum,a)=>sum+accountBalance(a.id),0),[investmentAccounts,accountBalance]);
+  const investmentDashboardGroups = useMemo(()=>{
+    const map = new Map();
+    trackedInvestments.forEach(inv=>{
+      const grouping = getInvestmentGroupMeta(inv);
+      const key = grouping.key;
+      const typeMeta = INVEST_TYPES.find(type=>type.id===inv.type);
+      if(!map.has(key)){
+        map.set(key, {
+          id:key,
+          type:inv.type || "custom",
+          folioNo:grouping.folioNo || "",
+          primaryName:grouping.primaryName || inv.name || "Investment",
+          firstStartDate:inv.startDate || inv.lastNavDate || "",
+          title:grouping.folioNo ? `Folio ${grouping.folioNo}` : grouping.primaryName,
+          trackedTotal:0,
+          accountTotal:0,
+          itemCount:0,
+          accountCount:0,
+          color:typeMeta?.color || T.info,
+          accounts:[],
+          items:[],
+        });
+      }
+      const group = map.get(key);
+      if(grouping.folioNo) group.folioNo = grouping.folioNo;
+      if(grouping.primaryName) group.primaryName = grouping.primaryName;
+      const itemStartDate = inv.startDate || inv.lastNavDate || "";
+      if(itemStartDate && (!group.firstStartDate || String(itemStartDate) < String(group.firstStartDate))) group.firstStartDate = itemStartDate;
+      group.title = grouping.folioNo ? `Folio ${grouping.folioNo}` : (grouping.primaryName || group.title);
+      group.trackedTotal += Number(inv.currentValue ?? inv.amount ?? 0);
+      group.itemCount += 1;
+      group.items.push(inv);
+    });
+    investmentAccounts.forEach(account=>{
+      const typeId = inferInvestmentTypeId(`${account.typeLabel||""} ${account.name||""}`);
+      const grouping = getInvestmentGroupMeta({ type:typeId, name:account.name || account.typeLabel || "Investment", id:account.id, linkedInvestmentId:account.id });
+      const key = grouping.key;
+      const typeMeta = INVEST_TYPES.find(type=>type.id===typeId);
+      if(!map.has(key)){
+        map.set(key, {
+          id:key,
+          type:typeId,
+          title:grouping.primaryName,
+          trackedTotal:0,
+          accountTotal:0,
+          itemCount:0,
+          accountCount:0,
+          color:account.color || typeMeta?.color || T.info,
+          accounts:[],
+        });
+      }
+      const group = map.get(key);
+      group.accountTotal += Number(accountBalance(account.id) || 0);
+      group.accountCount += 1;
+      group.accounts.push(account);
+      if(!group.title || group.title === "Investment") group.title = account.name || grouping.primaryName;
+      if(!group.color) group.color = account.color || typeMeta?.color || T.info;
+    });
+    return Array.from(map.values())
+      .map(group=>({
+        ...group,
+        total:group.trackedTotal>0 && group.accountTotal>0 ? Math.max(group.trackedTotal, group.accountTotal) : (group.trackedTotal + group.accountTotal),
+      }))
+      .filter(group=>group.total>0)
+      .sort((a,b)=>b.total-a.total);
+  },[trackedInvestments,investmentAccounts,accountBalance]);
+  const investmentAssetsTotal = useMemo(()=>investmentDashboardGroups.reduce((sum,group)=>sum+Number(group.total||0),0),[investmentDashboardGroups]);
+  const investmentTypeSummaries = useMemo(()=>INVEST_TYPES.map(type=>{
+    const groups = investmentDashboardGroups.filter(group=>group.type===type.id && Number(group.total||0)>0);
+    if(!groups.length) return null;
+    return {
+      ...type,
+      total:groups.reduce((sum,group)=>sum+Number(group.total||0),0),
+      groupCount:groups.length,
+    };
+  }).filter(Boolean),[investmentDashboardGroups]);
+  const trackedAssetsTotal = useMemo(()=>trackedAssets.reduce((sum,a)=>sum+Number(a.currentValue||0),0),[trackedAssets]);
+  const cardOutstanding = useCallback((card)=>{
+    if(!card) return 0;
+    const cardId = typeof card === "string" ? card : card.id;
+    const cardObj = typeof card === "string" ? accounts.find(a=>a.id===card) : card;
+    const { prevStatementDate, lastStatementDate } = getCardCycleDates(cardObj||{}, new Date());
+    const linkedUpiIds = accounts.filter(a=>a.type==="upi"&&a.linkedAccount===cardId).map(a=>a.id);
+    const allIds = [cardId, ...linkedUpiIds];
+    const today = todayStr();
+    // Charges in the last billing cycle only (prevStatementDate < date ≤ lastStatementDate)
+    const lastCycleCharges = txns.reduce((sum,t)=>{
+      if((t.type!=="expense"&&t.type!=="investment"&&t.type!=="cc_emi")||!allIds.includes(t.accId)) return sum;
+      if(!t.date||String(t.date)>today) return sum;
+      const d=toDateOnly(t.date);
+      if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
+      return sum+Number(t.amount||0);
+    },0);
+    // Refunds within cycle reduce charges
+    const inCycleRefunds = txns.reduce((sum,t)=>{
+      if(t.type!=="settlement_in"||!t.isRefund||!allIds.includes(t.accId)) return sum;
+      const d=toDateOnly(t.date);
+      if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
+      return sum+Number(t.amount||0);
+    },0);
+    // Payments AFTER statement date reduce outstanding
+    const paymentsSinceStatement = txns.reduce((sum,t)=>{
+      const isCcPayment = t.type==="cc_payment" && t.toAccId===cardId;
+      const isCcRefund = t.type==="settlement_in" && t.isRefund && allIds.includes(t.accId);
+      if(!isCcPayment && !isCcRefund) return sum;
+      const d=toDateOnly(t.date);
+      if(!d||!lastStatementDate||d<=lastStatementDate) return sum;
+      return sum+Number(t.amount||0);
+    },0);
+    return Math.max(0, lastCycleCharges - inCycleRefunds - paymentsSinceStatement);
+  },[txns,accounts]);
+  const creditCardLiabilityTotal = useMemo(()=>accounts.reduce((sum,a)=>sum+(a.type==="cc"?cardOutstanding(a):0),0),[accounts,cardOutstanding]);
+  const otherLiabilityTotal = useMemo(()=>liabilities.reduce((sum,l)=>sum+Number(l.outstanding||0),0),[liabilities]);
+  const getCardSummary = useCallback((card)=>{
+    const { prevStatementDate, lastStatementDate, nextStatementDate, dueOn } = getCardCycleDates(card, new Date());
+    const linkedUpiIds = accounts.filter(a=>a.type==="upi"&&a.linkedAccount===card.id).map(a=>a.id);
+    const allIds = [card.id, ...linkedUpiIds];
+    const today = new Date();
+    const todayMid = new Date(today.getFullYear(),today.getMonth(),today.getDate(),12,0,0,0);
+    const todayS = todayStr();
+    // Outstanding = last closed billing cycle charges (prevStatementDate < date ≤ lastStatementDate)
+    const lastCycleCharges = txns.reduce((sum,t)=>{
+      if((t.type!=="expense"&&t.type!=="investment"&&t.type!=="cc_emi")||!allIds.includes(t.accId)) return sum;
+      if(!t.date||String(t.date)>todayS) return sum;
+      const d=toDateOnly(t.date);
+      if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
+      return sum+Number(t.amount||0);
+    },0);
+    // Refunds WITHIN the billing cycle reduce charges directly
+    const inCycleRefunds = txns.reduce((sum,t)=>{
+      if(t.type!=="settlement_in"||!t.isRefund||!allIds.includes(t.accId)) return sum;
+      const d=toDateOnly(t.date);
+      if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
+      return sum+Number(t.amount||0);
+    },0);
+    // Payments AND refunds AFTER statement date reduce outstanding
+    const paymentsSinceStatement = txns.reduce((sum,t)=>{
+      const isCcPayment = t.type==="cc_payment" && t.toAccId===card.id;
+      const isCcRefund = t.type==="settlement_in" && t.isRefund && allIds.includes(t.accId);
+      if(!isCcPayment && !isCcRefund) return sum;
+      const d=toDateOnly(t.date);
+      if(!d||!lastStatementDate||d<=lastStatementDate) return sum;
+      return sum+Number(t.amount||0);
+    },0);
+    const totalOutstanding = Math.max(0, lastCycleCharges - inCycleRefunds - paymentsSinceStatement);
+    // Unbilled = current open cycle charges (after lastStatementDate, up to today)
+    const currentCycleSpend = Math.max(0, txns.reduce((sum,t)=>{
+      if((t.type!=="expense"&&t.type!=="cc_emi")||!allIds.includes(t.accId)) return sum;
+      const txnDate=toDateOnly(t.date);
+      if(!txnDate||!lastStatementDate||txnDate<=lastStatementDate||txnDate>todayMid) return sum;
+      return sum+Number(t.amount||0);
+    },0));
+    // Due Now = unpaid statement amount (already net of payments above)
+    const currentDue = totalOutstanding;
+    const alertPct=Number(card.alertPct??30);
+    const thresholdAmount=card.limit?(Number(card.limit||0)*alertPct)/100:0;
+    const isOverAlert=Boolean(card.limit)&&alertPct>0&&currentCycleSpend>=thresholdAmount&&currentCycleSpend>0;
+    const daysToDue=Math.ceil((dueOn-todayMid)/(1000*60*60*24));
+    return { prevStatementDate,lastStatementDate,nextStatementDate,dueOn,totalOutstanding,currentCycleSpend,currentDue,alertPct,thresholdAmount,isOverAlert,daysToDue };
+  },[txns,accounts]);
+  const groupReceivableTotal = useCallback(groupId=>{
+    const txnOwed = txns.filter(t=>t.type==="expense" && (
+      t.groupId===groupId ||
+      // Also include Txn breakup allocations where this group has mode=owes
+      t.groupAllocations?.some(g=>g.groupId===groupId&&g.mode==="owes"&&Number(g.amount||0)>0)
+    )).reduce((sum,t)=>{
+      // If this group is in groupAllocations with mode=owes, use its specific amount
+      const groupAlloc = t.groupAllocations?.find(g=>g.groupId===groupId&&g.mode==="owes");
+      if(groupAlloc) {
+        // Use ratio of settled to calculate remaining
+        const totalCollective = Number(t.groupCollectiveAmount||0);
+        const totalSettled = Number(t.groupCollectiveSettledAmt||0);
+        const groupAmt = Number(groupAlloc.amount||0);
+        const settledRatio = totalCollective>0 ? Math.min(1, totalSettled/totalCollective) : 0;
+        const remaining = Math.max(0, groupAmt - (groupAmt * settledRatio));
+        return sum + remaining;
+      }
+      // Primary groupId case: use people splits + collective
+      return sum + Object.entries(t.people||{}).reduce((inner,[pid,info])=>{
+        if(pid==="__me__" || info.mode!=="owes" || info.settled) return inner;
+        return inner + remainingShare(info);
+      },0) + getGroupCollectiveDue(t);
+    },0);
+    const billOwed = bills.filter(b=>b.groupId===groupId&&b.status==="unpaid").reduce((sum,b)=>
+      sum + Object.entries(b.splitPeople||{}).reduce((inner,[pid,info])=>{
+        if(pid==="__me__" || info.mode!=="owes" || info.settled) return inner;
+        return inner + remainingShare(info);
+      },0) + Number(b.groupCollectiveAmount||0)
+    ,0);
+    // Add individual member outstanding (expenses tagged to group members individually)
+    const group = groups.find(g=>g.id===groupId);
+    const memberIndividualOwed = (group?.members||[]).reduce((sum,memberId)=>{
+      const memberTxnOwed = txns.filter(t=>
+        t.type==="expense" &&
+        t.people?.[memberId]?.mode==="owes" &&
+        !t.people?.[memberId]?.settled &&
+        !t.groupId // not a group expense - avoid double counting
+      ).reduce((s,t)=>s+remainingShare(t.people[memberId]),0);
+      const memberLoanOwed = loans.filter(l=>
+        l.direction!=="taken" &&
+        l.status==="active" &&
+        String(l.personId||l.linkedPersonId||"")===String(memberId)
+      ).reduce((s,l)=>s+Number(l.outstanding||0),0);
+      return sum + memberTxnOwed + memberLoanOwed;
+    },0);
+    return txnOwed + billOwed + memberIndividualOwed;
+  },[txns,bills,loans,groups,getGroupCollectiveDue]);
+
+  const getPersonReceivableItems = useCallback(personId=>{
+    if(!personId) return [];
+    const txnItems = txns
+      .filter(t=>{
+        if(t.type!=="expense") return false;
+        // Check both F8 (t.people) and legacy (t.splitPeople)
+        const info = t.people?.[personId] || t.splitPeople?.[personId];
+        return info?.mode==="owes" && !info?.settled && remainingShare(info)>0;
+      })
+      .map(t=>{
+        const info = t.people?.[personId] || t.splitPeople?.[personId];
+        return ({
+          key:`txn:${t.id}`,
+          kind:"txn",
+          id:t.id,
+          date:t.date||"",
+          title:t.desc||t.merchant||"Expense",
+          subtitle:[formatShortDate(t.date)||t.date, t.groupId&&getGroup(t.groupId)?.name].filter(Boolean).join(" · "),
+          amount:remainingShare(info),
+          originalAmount:Number(info?.amount||0),
+        });
+      });
+    const txnItemIdSet = new Set(txnItems.map(i=>i.id));
+    // Also collect bill IDs that are explicitly claimed by a txn in txnItems (via paidBillId)
+    const txnClaimedBillIds = new Set(
+      txnItems.map(i=>txns.find(t=>t.id===i.id)?.paidBillId).filter(Boolean)
+    );
+    const billItems = bills
+      .filter(b=>{
+        if(!b.splitPeople?.[personId] || b.splitPeople[personId]?.mode!=="owes") return false;
+        if(b.splitPeople[personId]?.settled || remainingShare(b.splitPeople[personId])<=0) return false;
+        // If this bill has a linked expense txn (paidByTxnId) that already tracks this person's split,
+        // OR a txn in txnItems explicitly paid this bill (paidBillId), skip — the txn is source of truth.
+        if(b.paidByTxnId && txnItemIdSet.has(b.paidByTxnId)) return false;
+        if(txnClaimedBillIds.has(b.id)) return false;
+        return true;
+      })
+      .map(b=>({
+        key:`bill:${b.id}`,
+        kind:"bill",
+        id:b.id,
+        date:b.dueDate||b.billDate||b.createdDate||"",
+        title:b.name||b.merchant||"Bill",
+        subtitle:[formatShortDate(b.dueDate)||b.dueDate, b.groupId&&getGroup(b.groupId)?.name, "bill"].filter(Boolean).join(" · "),
+        amount:remainingShare(b.splitPeople[personId]),
+        originalAmount:Number(b.splitPeople[personId]?.amount||0),
+      }));
+    const taggedItems = txns.filter(t=>{
+      if(t.type!=="expense") return false;
+      const viaFP = t.forPerson===personId && Number(t.tagPersonAmount||0)>0;
+      const viaTI = t.tagItems?.some(i=>i.targetType==="person"&&i.targetId===personId&&Number(i.amount||0)>0);
+      if(!viaFP&&!viaTI) return false;
+      return !(t.people?.[personId]?.mode==="owes"&&!t.people?.[personId]?.settled);
+    }).map(t=>{
+      const amt = (t.forPerson===personId && Number(t.tagPersonAmount||0)>0)
+        ? Number(t.tagPersonAmount)
+        : Number(t.tagItems?.find(i=>i.targetType==="person"&&i.targetId===personId)?.amount||0);
+      return { key:`tagged:${t.id}`, kind:"tagged", id:t.id, date:t.date||"",
+        title:t.desc||t.merchant||"Expense",
+        subtitle:[formatShortDate(t.date)||t.date,"attributed"].filter(Boolean).join(" · "),
+        amount:amt, originalAmount:amt };
+    });
+    return [...txnItems,...billItems,...taggedItems].sort((a,b)=>
+      (toDateOnly(a.date)?.getTime()||0) - (toDateOnly(b.date)?.getTime()||0) ||
+      String(a.title||"").localeCompare(String(b.title||""), "en", { sensitivity:"base" })
+    );
+  },[txns,bills,getGroup]);
+
+  const getGroupReceivableItems = useCallback(groupId=>{
+    if(!groupId) return [];
+    const txnItems = txns
+      .filter(t=>{
+        if(t.type!=="expense") return false;
+        if(t.groupId===groupId) return true;
+        // Also include txns where this group has an allocation (multi-group "Txn break up")
+        return t.groupAllocations?.some(g=>g.groupId===groupId&&g.mode==="owes"&&Number(g.amount||0)>0);
+      })
+      .flatMap(t=>{
+        // Use this group's specific allocation amount when available (multi-group case)
+        const groupAlloc = t.groupAllocations?.find(g=>g.groupId===groupId&&g.mode==="owes");
+        const groupAmt = groupAlloc ? Number(groupAlloc.amount||0) : Number(t.groupCollectiveAmount||0);
+        // For settled tracking: if multiple groups, approximate by ratio; single group uses full settledAmt
+        const totalCollective = Number(t.groupCollectiveAmount||0);
+        const totalSettled = Number(t.groupCollectiveSettledAmt||0);
+        const settledAmt = (groupAlloc && totalCollective>0) ? Math.min(groupAmt, totalSettled*(groupAmt/totalCollective)) : totalSettled;
+        const remaining = Math.max(0, groupAmt - settledAmt);
+        if(remaining<=0) return [];
+        return [{ key:`group-txn:${t.id}`, kind:"group-txn", id:t.id, groupId, date:t.date||"", title:t.desc||t.merchant||"Expense", subtitle:[formatShortDate(t.date)||t.date, getGroup(groupId)?.name].filter(Boolean).join(" · "), amount:remaining }];
+      });
+    const txnItemIds = new Set(txnItems.map(i=>i.id));
+    const billItems = bills
+      .filter(b=>b.groupId===groupId&&b.status!=="paid"&&Number(b.groupCollectiveAmount||0)>0&&(!b.paidByTxnId||!txnItemIds.has(b.paidByTxnId)))
+      .flatMap(b=>{
+        const remaining = Math.max(0, Number(b.groupCollectiveAmount||0) - Number(b.groupCollectiveSettledAmt||0));
+        if(remaining<=0) return [];
+        return [{ key:`group-bill:${b.id}`, kind:"group-bill", id:b.id, groupId, date:b.dueDate||b.billDate||b.createdDate||"", title:b.name||b.merchant||"Bill", subtitle:[formatShortDate(b.dueDate)||b.dueDate, getGroup(groupId)?.name, "bill"].filter(Boolean).join(" · "), amount:remaining }];
+      });
+    return [...txnItems,...billItems].sort((a,b)=>(toDateOnly(a.date)?.getTime()||0)-(toDateOnly(b.date)?.getTime()||0));
+  },[txns,bills,getGroup]);
+
+  const applyRepaymentAllocations = useCallback((personId, settlementLinks)=>{
+    const links = (settlementLinks||[])
+      .map(link=>({ ...link, amount:Math.max(0, Number(link.amount||0)) }))
+      .filter(link=>link.id&&link.amount>0);
+    if(!links.length) return;
+
+    const personLinks = links.filter(l=>l.kind==="txn"||l.kind==="bill");
+    const groupTxnLinks = links.filter(l=>l.kind==="group-txn");
+    const groupBillLinks = links.filter(l=>l.kind==="group-bill");
+
+    if(personId && personLinks.length) {
+      setTxns(prev=>prev.map(txn=>{
+        if(txn.type!=="expense" || !txn.people?.[personId]) return txn;
+        const link = personLinks.find(item=>item.kind==="txn"&&String(item.id)===String(txn.id));
+        if(!link) return txn;
+        const info = txn.people[personId];
+        const originalAmt = Number(info.amount||0);
+        const prevSettled = Number(info.settledAmt||0);
+        const nextSettled = Math.min(originalAmt, prevSettled + Number(link.amount||0));
+        const nextRemaining = Math.max(0, originalAmt-nextSettled);
+        const addedAmt = nextSettled - prevSettled;
+        // Also advance group collective tracking so the same txn can't be settled again via the group path
+        const groupCap = Number(txn.groupCollectiveAmount||0);
+        const nextGroupSettled = groupCap > 0
+          ? Math.min(groupCap, Number(txn.groupCollectiveSettledAmt||0) + addedAmt)
+          : txn.groupCollectiveSettledAmt;
+        return { ...txn,
+          people:{ ...txn.people, [personId]:{ ...info, settled:nextRemaining<=0, settledAmt:nextSettled, remainingAmt:nextRemaining } },
+          ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGroupSettled } : {})
+        };
+      }));
+      setBills(prev=>prev.map(bill=>{
+        if(!bill.splitPeople?.[personId]) return bill;
+        const link = personLinks.find(item=>item.kind==="bill"&&String(item.id)===String(bill.id));
+        if(!link) return bill;
+        const info = bill.splitPeople[personId];
+        const originalAmt = Number(info.amount||0);
+        const prevSettled = Number(info.settledAmt||0);
+        const nextSettled = Math.min(originalAmt, prevSettled + Number(link.amount||0));
+        const nextRemaining = Math.max(0, originalAmt-nextSettled);
+        const addedAmt = nextSettled - prevSettled;
+        // Also advance group collective tracking so the same bill can't be settled again via the group path
+        const groupCap = Number(bill.groupCollectiveAmount||0);
+        const nextGroupSettled = groupCap > 0
+          ? Math.min(groupCap, Number(bill.groupCollectiveSettledAmt||0) + addedAmt)
+          : bill.groupCollectiveSettledAmt;
+        return { ...bill,
+          splitPeople:{ ...bill.splitPeople, [personId]:{ ...info, settled:nextRemaining<=0, settledAmt:nextSettled, remainingAmt:nextRemaining } },
+          ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGroupSettled } : {})
+        };
+      }));
+    }
+
+    if(groupTxnLinks.length) {
+      setTxns(prev=>prev.map(txn=>{
+        if(txn.type!=="expense") return txn;
+        const link = groupTxnLinks.find(l=>String(l.id)===String(txn.id));
+        if(!link) return txn;
+        const prevSettled = Number(txn.groupCollectiveSettledAmt||0);
+        const cap = Number(txn.groupCollectiveAmount||0);
+        const nextGroupSettled = cap>0 ? Math.min(cap, prevSettled + Number(link.amount||0)) : prevSettled;
+        const linkPersonId = link.personId || personId;
+        let updatedPeople = txn.people;
+        if(linkPersonId && txn.people?.[linkPersonId]) {
+          const info = txn.people[linkPersonId];
+          const origAmt = Number(info.amount||0);
+          const prevPSettled = Number(info.settledAmt||0);
+          const nextPSettled = Math.min(origAmt, prevPSettled + Number(link.amount||0));
+          const nextPRemaining = Math.max(0, origAmt - nextPSettled);
+          updatedPeople = { ...txn.people, [linkPersonId]:{ ...info, settled:nextPRemaining<=0, settledAmt:nextPSettled, remainingAmt:nextPRemaining } };
+        }
+        return { ...txn, ...(cap>0?{groupCollectiveSettledAmt:nextGroupSettled}:{}), people:updatedPeople };
+      }));
+    }
+
+    if(groupBillLinks.length) {
+      setBills(prev=>prev.map(bill=>{
+        const link = groupBillLinks.find(l=>String(l.id)===String(bill.id));
+        if(!link) return bill;
+        const prevSettled = Number(bill.groupCollectiveSettledAmt||0);
+        const cap = Number(bill.groupCollectiveAmount||0);
+        const nextGroupSettled = cap>0 ? Math.min(cap, prevSettled + Number(link.amount||0)) : prevSettled;
+        const linkPersonId = link.personId || personId;
+        let updatedSplitPeople = bill.splitPeople;
+        if(linkPersonId && bill.splitPeople?.[linkPersonId]) {
+          const info = bill.splitPeople[linkPersonId];
+          const origAmt = Number(info.amount||0);
+          const prevPSettled = Number(info.settledAmt||0);
+          const nextPSettled = Math.min(origAmt, prevPSettled + Number(link.amount||0));
+          const nextPRemaining = Math.max(0, origAmt - nextPSettled);
+          updatedSplitPeople = { ...bill.splitPeople, [linkPersonId]:{ ...info, settled:nextPRemaining<=0, settledAmt:nextPSettled, remainingAmt:nextPRemaining } };
+        }
+        const allOwedSettled = Object.entries(updatedSplitPeople||{}).filter(([p])=>p!=="__me__").every(([,i])=>i.settled||i.mode!=="owes");
+        return { ...bill, ...(cap>0?{groupCollectiveSettledAmt:nextGroupSettled}:{}), splitPeople:updatedSplitPeople, ...(allOwedSettled?{status:"paid",paidDate:todayStr()}:{}) };
+      }));
+    }
+
+    // tagged (attributed) items — convert attribution to a settled split entry
+    const taggedLinks = links.filter(l=>l.kind==="tagged");
+    if(personId && taggedLinks.length){
+      setTxns(prev=>prev.map(t=>{
+        const link=taggedLinks.find(l=>String(l.id)===String(t.id));
+        if(!link) return t;
+        if(t.people?.[personId]) return t; // already has a split entry
+        return { ...t, people:{ ...(t.people||{}), [personId]:{ amount:link.amount, mode:"owes", settled:true, settledAmt:link.amount, remainingAmt:0 } } };
+      }));
+    }
+  },[]);
+
+  const _groupReceivableTotalAll = useMemo(()=>groups.reduce((sum,g)=>sum+groupReceivableTotal(g.id),0),[groups,groupReceivableTotal]);
+  const activeLoans = useMemo(()=>loans.filter(loan=>loan.status==="active" && Number(loan.outstanding||0)>0),[loans]);
+  const isCreditCardBackedLoan = useCallback(loan=>loan?.direction==="taken" && (loan?.sourceType==="cc" || loan?.ccLinked===true || (loan?.autoScheduled && loan?.scheduledInstallmentIds?.length>0)),[]);
+  const loanGivenTotal = useMemo(()=>activeLoans.filter(loan=>loan.direction!=="taken").reduce((sum,loan)=>sum+Number(loan.outstanding||0),0),[activeLoans]);
+  const activeGivenLoans = useMemo(()=>activeLoans.filter(loan=>loan.direction!=="taken" && !isCreditCardBackedLoan(loan)),[activeLoans,isCreditCardBackedLoan]);
+  const loanTakenTotal = useMemo(()=>activeLoans.filter(loan=>loan.direction==="taken" && !isCreditCardBackedLoan(loan)).reduce((sum,loan)=>sum+Number(loan.outstanding||0),0),[activeLoans,isCreditCardBackedLoan]);
+  const upcomingEmiLoans = useMemo(()=>activeLoans.filter(loan=>loan.direction==="taken" && !isCreditCardBackedLoan(loan) && Number(loan.emiAmount||0)>0),[activeLoans,isCreditCardBackedLoan]);
+  const monthlyEmiCommitment = useMemo(()=>upcomingEmiLoans.reduce((sum,loan)=>sum+Number(loan.emiAmount||0),0),[upcomingEmiLoans]);
+  const totalAssetsValue = liquidAssetsTotal + investmentAssetsTotal + trackedAssetsTotal + totalOwedToMe + loanGivenTotal;
+  // CC-backed EMI loans are already reflected in creditCardLiabilityTotal (via cc_emi txns on the card).
+  // loanTakenTotal excludes CC-backed loans via isCreditCardBackedLoan to prevent double-counting.
+  const totalLiabilitiesValue = creditCardLiabilityTotal + otherLiabilityTotal + loanTakenTotal;
+  const netWorthValue = totalAssetsValue - totalLiabilitiesValue;
+
+  // ── STYLES ─────────────────────────────────────────────────────────────────
+  const card = { background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:16, marginBottom:12 };
+  const lbl = { color:T.sub, fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.2, display:"block", marginBottom:6 };
+  const inp = { background:T.input, border:`1px solid ${T.border}`, borderRadius:10, padding:"11px 14px", color:T.text, fontSize:16, width:"100%", outline:"none", fontFamily:"Nunito,sans-serif", boxSizing:"border-box" };
+  const inpSm = { background:T.input, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px 10px", color:T.text, fontSize:16, outline:"none", fontFamily:"Nunito,sans-serif" };
+  const btnP = { background:T.accent, color:"#000", border:"none", borderRadius:12, padding:13, cursor:"pointer", fontSize:14, fontWeight:800, width:"100%", fontFamily:"Nunito,sans-serif" };
+  const btnG = { background:"none", border:`1px solid ${T.border}`, color:T.sub, borderRadius:12, padding:13, cursor:"pointer", fontSize:14, fontWeight:700, fontFamily:"Nunito,sans-serif" };
+  const ttStyle = { background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px 12px", fontSize:12, color:T.text };
+  const lightSelect = { ...inp, background:"#fff", color:"#111" };
+
+  const Chip = ({ color, children, onClick, active }) => (
+    <button onClick={onClick} style={{ background:active?color+"22":"none", border:`1px solid ${active?color:T.border}`, borderRadius:20, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:700, color:active?color:T.sub, whiteSpace:"nowrap", fontFamily:"Nunito,sans-serif" }}>{children}</button>
+  );
+  const AccountChipGroup = ({ items, value, onChange }) => (
+    <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+      {items.map(account=>(
+        <button
+          key={account.id}
+          onClick={()=>onChange(account.id)}
+          style={{
+            background:value===account.id?account.color+"22":"none",
+            border:`1px solid ${value===account.id?account.color:T.border}`,
+            borderRadius:20,
+            padding:"5px 12px",
+            cursor:"pointer",
+            fontSize:11,
+            color:value===account.id?account.color:T.sub,
+            fontWeight:700,
+            fontFamily:"Nunito,sans-serif"
+          }}
+        >
+          {accIcon(account.type)} {account.name}
+        </button>
+      ))}
+    </div>
+  );
+  const IncomeTypeChips = ({ options, value, onChange }) => (
+    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
+      {options.map(type=>(
+        <button
+          key={type}
+          onClick={()=>onChange(type)}
+          style={{
+            background:value===type?T.accent+"22":"none",
+            border:`1px solid ${value===type?T.accent:T.border}`,
+            borderRadius:20,
+            padding:"5px 12px",
+            cursor:"pointer",
+            fontSize:11,
+            color:value===type?T.accent:T.sub,
+            fontWeight:700,
+            fontFamily:"Nunito,sans-serif"
+          }}
+        >
+          {formatIncomeTypeLabel(type)}
+        </button>
+      ))}
+    </div>
+  );
+  const InvestmentTypeChips = ({ value, onChange }) => (
+    <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
+      {INVEST_TYPES.map(it=><Chip key={it.id} color={it.color} active={value===it.id} onClick={()=>onChange(it.id)}>{it.icon} {it.name.split("/")[0]}</Chip>)}
+    </div>
+  );
+  const InvestmentFrequencySelect = ({ value, onChange, emptyLabel="One-time / not fixed", styleOverride }) => (
+    <select style={styleOverride || lightSelect} value={value} onChange={e=>onChange(e.target.value)}>
+      <option value="" style={{ background:"#fff",color:"#111" }}>{emptyLabel}</option>
+      {INVESTMENT_FREQUENCY_OPTIONS.map(option=>(
+        <option key={option.value} value={option.value} style={{ background:"#fff",color:"#111" }}>{option.label}</option>
+      ))}
+    </select>
+  );
+
+  // ── TXN ROW ────────────────────────────────────────────────────────────────
+  const TxnRow = ({ t, last, onEditTxn }) => {
+    const txnCatIds = getTxnCategoryIds(t).filter(cid=>getCat(cid));
+    const txnSubIds = getTxnSubIds(t).filter(sid=>cats.some(cat=>cat.subs?.some(sub=>sub.id===sid)));
+    const cat = txnCatIds[0] ? getCat(txnCatIds[0]) : null;
+    const txnTitle = getTxnDisplayTitle(t);
+    const invTypeMeta = t.type==="investment" ? INVEST_TYPES.find(i=>i.id===t.investType) : null;
+    const investmentMetricText = t.type==="investment" ? formatInvestmentMetric(t.investType||"mf", t.investNav) : "";
+    const acc = t.accId?getAcc(t.accId):t.fromAccId?getAcc(t.fromAccId):null;
+    const color = t.type==="investment" ? (invTypeMeta?.color||txnColor(t,T)) : txnColor(t,T);
+    const refundTone = t.type==="settlement_in" && t.isRefund ? txnColor(t,T) : T.info;
+    const isPlus = t.type==="income"||t.type==="settlement_in";
+    const isExpanded = expandedTxn===t.id;
+    const owedPeople = t.type==="expense"?Object.entries(t.people||{}).filter(([pid,info])=>info.mode==="owes"&&!info.settled&&pid!=="__me__"&&remainingShare(info)>0):[];
+    const groupCollectiveDue = t.type==="expense" ? getGroupCollectiveDue(t) : 0;
+    const totalOwed = owedPeople.reduce((s,[,info])=>s+remainingShare(info),0) + groupCollectiveDue;
+    const myShare = t.type==="expense"?Math.max(0, Number(t.amount||0)-Object.entries(t.people||{}).filter(([pid,info])=>info.mode==="owes"&&pid!=="__me__").reduce((s,[,info])=>s+Number(info.amount||0),0)-groupCollectiveDue):t.amount;
+    const allSettled = t.type==="expense"&&Object.keys(t.people||{}).filter(p=>p!=="__me__").length>0&&Object.entries(t.people||{}).filter(([p])=>p!=="__me__").every(([,i])=>i.settled||i.mode!=="owes");
+    const refundTarget = t.type==="settlement_in" && t.againstTxnId ? txns.find(x=>String(x.id)===String(t.againstTxnId)) : null;
+    const linkedRefunds = t.type==="expense" ? txns.filter(x=>x.type==="settlement_in" && x.againstTxnId && String(x.againstTxnId)===String(t.id) && (x.isRefund || !x.fromPersonId)) : [];
+    const refundedAmount = linkedRefunds.reduce((sum,row)=>sum+Number(row.amount||0),0);
+    const netAfterRefund = t.type==="expense" ? Math.max(0, Number(t.amount||0) - refundedAmount) : Number(t.amount||0);
+    const refundStatus = refundedAmount<=0 ? "" : refundedAmount >= Number(t.amount||0) - 0.01 ? "Refunded" : "Partially Refunded";
+    const repaymentLinkedTxns = t.type==="settlement_in" && !t.isRefund && t.settlementLinks?.length
+      ? t.settlementLinks.filter(l=>l.kind==="txn"||l.kind==="group-txn").map(link=>({ link, txn:txns.find(x=>String(x.id)===String(link.id)) })).filter(x=>x.txn)
+      : [];
+    const repaymentLinkedBills = t.type==="settlement_in" && !t.isRefund && t.settlementLinks?.length
+      ? t.settlementLinks.filter(l=>l.kind==="bill"||l.kind==="group-bill").map(link=>({ link, bill:bills.find(b=>String(b.id)===String(link.id)) })).filter(x=>x.bill)
+      : [];
+    const linkedRepayments = t.type==="expense"
+      ? txns.filter(x=>x.type==="settlement_in"&&!x.isRefund&&x.settlementLinks?.some(l=>(l.kind==="txn"||l.kind==="group-txn")&&String(l.id)===String(t.id)))
+      : [];
+    const dateLabel = formatShortDate(t.date) || "--";
+
+    const handleEditTxn = (txn, e) => {
+      e?.stopPropagation?.();
+      setExpandedTxn(null);
+      if(typeof onEditTxn === "function") onEditTxn(txn);
+      else setEditingTxn(txn);
+    };
+
+    const deleteTxn = e => {
+      e.stopPropagation();
+      setConfirmDeleteTxn(t);
+    };
+
+    const writeOff = e => {
+      e.stopPropagation();
+      setTxns(p=>p.map(x=>x.id===t.id?{...x,writtenOff:true,people:Object.fromEntries(Object.entries(x.people||{}).map(([pid,info])=>[pid,{...info,settled:true}]))}:x));
+      setExpandedTxn(null);
+    };
+
+    return (
+      <div style={{ borderBottom:!last?`1px solid ${T.border}`:"none" }}>
+        {/* COLLAPSED ROW */}
+        <div onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex", alignItems:"center", gap:12, padding:"11px 0", cursor:"pointer" }}>
+          <div style={{ width:38,height:38,borderRadius:10,background:color+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0,position:"relative" }}>
+            {t.type==="expense" && cat ? cat.icon : t.type==="investment" && invTypeMeta ? invTypeMeta.icon : txnEmoji(t)}
+            {allSettled&&<div style={{position:"absolute",bottom:-3,right:-3,fontSize:9,background:T.card,borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✅</div>}
+          </div>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ color:t.writtenOff?T.sub:T.text, fontSize:13, fontWeight:700, marginBottom:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textDecoration:t.writtenOff?"line-through":"none" }}>
+              {txnTitle}
+            </div>
+            <div style={{ display:"flex", gap:5, flexWrap:"wrap", alignItems:"center", justifyContent:"flex-start" }}>
+              {t.type==="expense"&&(
+                <>
+                  {txnCatIds.map(cid=>{
+                    const c=getCat(cid);
+                    if(!c) return null;
+                    return <span key={cid} style={{ background:c.color+"20",color:c.color,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{c.name.split(" ")[0]}</span>;
+                  })}
+                </>
+              )}
+              {t.type==="investment"&&invTypeMeta&&<span style={{ background:invTypeMeta.color+"20",color:invTypeMeta.color,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{invTypeMeta.icon} {invTypeMeta.name.split("/")[0]}</span>}
+              {t.type==="investment"&&t.investFolio&&<span style={{ background:T.pill,color:T.sub,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>Folio {t.investFolio}</span>}
+              {investmentMetricText&&<span style={{ color:T.sub,fontSize:10 }}>{investmentMetricText}</span>}
+              {t.catAllocations&&Object.keys(t.catAllocations).length>0&&<span style={{ color:T.sub,fontSize:10 }}>{Object.entries(t.catAllocations).map(([cid,val])=>`${getCat(cid).name.split(" ")[0]} ${sym}${fmt(val)}`).join(" · ")}</span>}
+              {acc&&<span style={{ color:T.sub,fontSize:10 }}>{accIcon(acc.type)} {acc.name}</span>}
+              {t.transactionRef&&<span style={{ color:T.sub,fontSize:10 }}># {t.transactionRef}</span>}
+              {totalOwed>0&&!allSettled&&<span style={{ color:T.accent,fontSize:10,fontWeight:700 }}>↗ {sym}{fmt(totalOwed)}</span>}
+              {t.type==="settlement_in"&&t.isRefund&&<span style={{ background:refundTone+"18",color:refundTone,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>↩ Refund</span>}
+              {t.type==="settlement_in"&&!t.isRefund&&t.settlementLinks?.length>0&&<span style={{ background:T.info+"18",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💰 Repayment</span>}
+              {t.type==="expense"&&refundedAmount>0&&<span style={{ background:T.info+"20",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>↩ {refundStatus}</span>}
+              {t.type==="expense"&&linkedRepayments.length>0&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💰 Repaid</span>}
+              {t.billerLinkId&&(()=>{ const ba=billerAccounts.find(b=>b.id===t.billerLinkId); if(!ba) return null; const mem=memberships.filter(m=>m.billerAccountId===ba.id&&m.txnId===t.id)[0]; return <span style={{ background:T.accent+"18",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{getBillerIcon(ba.type)} {ba.name}{mem?` · ${formatShortDate(mem.validFrom)||mem.validFrom}→${formatShortDate(mem.validUntil)||mem.validUntil}`:""}</span>; })()}
+              {t.guestPerson&&<span style={{ background:T.warn+"18",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>👤 {t.guestPerson} owes {sym}{fmt(t.guestPersonAmount||0)}</span>}
+              {t.type==="expense"&&t.reimbursable&&!t.reimbursedByTxnId&&<span style={{ background:"#f0a50018",color:"#f0a500",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimb.{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
+              {t.type==="expense"&&t.reimbursedByTxnId&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimbursed{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
+              {t.isAutoEmiInstallment&&<span style={{ background:T.warn+"18",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💳 EMI {t.emiInstallmentNum}/{t.emiTotalInstallments}</span>}
+              {t.type==="cc_emi"&&t.ccEmiPlanId&&<span style={{ background:T.purple+"18",color:T.purple,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💳 EMI {t.installmentNo}/{t.ccEmiTenure||"?"}</span>}
+              {t.vehicleId&&(()=>{ const v=vehicles.find(x=>x.id===t.vehicleId); if(!v) return null; const vIcon=v.type==="bike"?"🏍️":v.type==="truck"?"🚛":v.type==="auto"?"🛺":"🚗"; const last4=(v.number||"").replace(/\s/g,"").slice(-4)||v.number||""; return <span style={{ background:"#3b82f618",color:"#3b82f6",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{vIcon} {last4}</span>; })()}
+              {t.imageBase64&&<span style={{ fontSize:10 }}>📷</span>}
+            </div>
+          </div>
+          <div style={{ textAlign:"right", flexShrink:0 }}>
+            <div style={{ color, fontSize:14, fontWeight:800, lineHeight:1.2 }}>{isPlus?"+":" "}{M(`${sym}${fmt(t.amount)}`)}</div>
+            {t.type==="expense"&&refundedAmount>0&&<div style={{ color:T.info,fontSize:10,marginTop:1,fontWeight:500 }}>net {sym}{fmt(netAfterRefund)}</div>}
+            {t.type==="expense"&&myShare>0&&myShare<t.amount&&<div style={{ color:T.sub,fontSize:10,marginTop:2,fontWeight:500 }}>mine {sym}{fmt(myShare)}</div>}
+            <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{dateLabel}</div>
+          </div>
+          <div style={{ color:T.sub,fontSize:11,flexShrink:0 }}>{isExpanded?"▲":"▼"}</div>
+        </div>
+
+        {/* EXPANDED DETAIL */}
+        {isExpanded&&(
+          <div style={{ background:T.input,borderRadius:12,padding:14,marginBottom:12 }}>
+            <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:10 }}>{txnTitle}</div>
+            <div style={{ display:"flex",gap:5,flexWrap:"wrap",marginBottom:10 }}>
+              <span style={{ background:color+"20",color,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{txnLabel(t)}</span>
+              {t.type==="investment"&&invTypeMeta&&<span style={{ background:invTypeMeta.color+"20",color:invTypeMeta.color,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{invTypeMeta.icon} {invTypeMeta.name.split("/")[0]}</span>}
+              {t.type==="investment"&&t.investFolio&&<span style={{ background:T.pill,color:T.sub,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>Folio {t.investFolio}</span>}
+              {investmentMetricText&&<span style={{ background:T.info+"18",color:T.info,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{investmentMetricText}</span>}
+              {cat&&t.type==="expense"&&<span style={{ background:cat.color+"20",color:cat.color,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{cat.icon} {cat.name}</span>}
+              {t.type==="expense"&&txnSubIds.map(sid=>{
+                const parentCat = cats.find(c=>c.subs?.some(s=>s.id===sid));
+                const sub = parentCat?.subs?.find(s=>s.id===sid);
+                if(!sub) return null;
+                return <span key={sid} style={{ background:(parentCat?.color||"#888")+"20",color:(parentCat?.color||"#888"),borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{sub.name}</span>;
+              })}
+              {t.merchant&&t.type!=="cc_payment"&&t.type!=="transfer"&&<span style={{ background:T.pill,color:T.sub,borderRadius:20,padding:"2px 9px",fontSize:10 }}>@ {t.merchant}</span>}
+              {acc&&<span style={{ background:acc.color+"20",color:acc.color,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{accIcon(acc.type)} {acc.name}</span>}
+              {t.groupId&&getGroup(t.groupId)&&<span style={{ background:T.pill,color:T.sub,borderRadius:20,padding:"2px 9px",fontSize:10 }}>👥 {getGroup(t.groupId).name}</span>}
+              {allSettled&&<span style={{ background:T.success+"20",color:T.success,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>✅ Settled</span>}
+              {t.type==="settlement_in"&&t.isRefund&&<span style={{ background:refundTone+"18",color:refundTone,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>↩ Refund</span>}
+              {t.type==="settlement_in"&&!t.isRefund&&t.settlementLinks?.length>0&&<span style={{ background:T.info+"18",color:T.info,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>💰 Repayment</span>}
+              {t.type==="expense"&&refundedAmount>0&&<span style={{ background:T.info+"20",color:T.info,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>↩ {refundStatus}</span>}
+              {t.type==="expense"&&linkedRepayments.length>0&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>💰 Repaid</span>}
+              {t.writtenOff&&<span style={{ background:T.sub+"20",color:T.sub,borderRadius:20,padding:"2px 9px",fontSize:10 }}>Written off</span>}
+              {t.smsRaw&&<span style={{ background:T.info+"20",color:T.info,borderRadius:20,padding:"2px 9px",fontSize:10 }}>📱 SMS</span>}
+              {t.transactionRef&&<span style={{ background:T.pill,color:T.text,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>🔖 {t.transactionRef}</span>}
+            {t.isBillPayment&&<span style={{ background:T.accent+"20",color:T.accent,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>🧾 Bill{t.billInvoiceNo?` #${t.billInvoiceNo}`:""}</span>}
+            </div>
+            {t.type==="expense"&&Object.keys(t.people||{}).filter(p=>p!=="__me__").length>0&&(
+              <div style={{ marginBottom:10 }}>
+                {Object.entries(t.people).filter(([p])=>p!=="__me__").map(([pid,info])=>{
+                  const p=getPerson(pid);
+                  const left = remainingShare(info);
+                  const canShare = info.mode==="owes" && !info.settled && left>0;
+                  return <div key={pid} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:11,color:info.settled?T.sub:info.mode==="owes"?T.accent:T.sub,textDecoration:info.settled?"line-through":"none",marginBottom:4 }}>
+                    {p.emoji} {p.name}: {sym}{fmt(info.settled ? info.amount : remainingShare(info))} {info.mode==="owes"?info.settled?"✅ paid":"owes you":"on me"}
+                    {canShare&&<button onClick={e=>{ e.stopPropagation(); sharePaymentRequest(p.name,left,txnTitle,{ dueDate:t.dueDate||t.date, imageBase64:t.imageBase64||t.paymentImageBase64||null, shareTitle:txnTitle }); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Share</button>}
+                  </div>;
+                })}
+              </div>
+            )}
+            {t.forPerson&&<div style={{ fontSize:11,color:"#ec4899",marginBottom:8 }}>👤 for {getPerson(t.forPerson).name}{t.tagPersonAmount&&t.tagPersonAmount!==t.amount?` · ${sym}${fmt(t.tagPersonAmount)} personal`:""}{ t.tagGroupAmount&&t.groupId?` · ${sym}${fmt(t.tagGroupAmount)} → ${getGroup(t.groupId)?.name||"group"}`:""}</div>}
+            {t.tagItems?.length>0&&<div style={{ fontSize:11,marginBottom:8,display:"flex",flexWrap:"wrap",gap:4 }}>{t.tagItems.map(item=>{const isP=item.targetType==="person";const obj=isP?getPerson(item.targetId):getGroup(item.targetId);return <span key={item.id} style={{ background:T.pill,color:obj?.color||T.sub,borderRadius:20,padding:"2px 8px" }}>{isP?"👤":"👥"} {obj?.name||"?"} {sym}{fmt(item.amount)}</span>})}</div>}
+            {t.type==="expense"&&groupCollectiveDue>0&&<div style={{ fontSize:11,color:T.info,marginBottom:8,fontWeight:700 }}>👥 {getGroup(t.groupId)?.name||"Group"} collectively owes {sym}{fmt(groupCollectiveDue)}</div>}
+            {t.transactionRef&&<div style={{ fontSize:11,color:T.sub,marginBottom:8 }}>🔖 Transaction ID: {t.transactionRef}</div>}
+            {t.note&&<div style={{ fontSize:11,color:T.sub,marginBottom:8 }}>📝 {t.note}</div>}
+            {t.type==="expense"&&(t.priceMrp||t.priceInterestRate||t.priceInterest||t.priceProcessingFee)&&(
+              <div style={{ background:T.card,borderRadius:8,padding:"8px 10px",fontSize:11,marginBottom:8,display:"flex",flexDirection:"column",gap:4 }}>
+                <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginBottom:2 }}>Price Breakdown</div>
+                {t.priceMrp&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub }}>MRP</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(t.priceMrp)}</span></div>}
+                {t.priceDiscount&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub }}>Discount</span><span style={{ color:T.success,fontWeight:700 }}>−{sym}{fmt(t.priceDiscount)}</span></div>}
+                {t.priceProcessingFee&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub }}>Processing Fee</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(t.priceProcessingFee)}</span></div>}
+                {t.priceInterestRate&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub }}>Interest Rate</span><span style={{ color:T.text,fontWeight:700 }}>{t.priceInterestRate}% p.a.</span></div>}
+                {t.priceInterestAmt&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub }}>Monthly Interest</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(t.priceInterestAmt)}</span></div>}
+                {t.priceGstAmt&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub }}>GST on Interest</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(t.priceGstAmt)}</span></div>}
+                {!t.priceInterestRate&&t.priceInterest&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub }}>Interest</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(t.priceInterest)}</span></div>}
+                {!t.priceInterestRate&&t.priceTax&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub }}>GST / Tax</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(t.priceTax)}</span></div>}
+              </div>
+            )}
+            {refundTarget&&<div style={{ fontSize:11,color:T.info,marginBottom:8,fontWeight:700 }}>↩ Linked expense: {refundTarget.desc||refundTarget.merchant||"Original spend"} · {formatShortDate(refundTarget.date)}</div>}
+            {t.type==="expense"&&linkedRefunds.length>0&&<>
+              <div style={{ fontSize:11,color:T.info,marginBottom:6,fontWeight:700 }}>↩ Linked refund{linkedRefunds.length>1?"s":""}: {linkedRefunds.map(row=>`${sym}${fmt(row.amount)} on ${formatShortDate(row.date)}`).join(" · ")}</div>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                {linkedRefunds.map(row=><button key={row.id} onClick={e=>handleEditTxn(row, e)} style={{ background:T.info+"14",border:`1px solid ${T.info}33`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.info,fontFamily:"Nunito,sans-serif" }}>↩ Open refund {sym}{fmt(row.amount)}</button>)}
+              </div>
+              <div style={{ fontSize:11,color:T.text,marginBottom:8,fontWeight:700 }}>Net after refund: {sym}{fmt(netAfterRefund)}</div>
+            </>}
+            {t.type==="settlement_in"&&!t.isRefund&&repaymentLinkedTxns.length>0&&<>
+              {repaymentLinkedTxns.map(({link,txn})=>(
+                <div key={link.id+link.kind} style={{ fontSize:11,color:T.info,marginBottom:4,fontWeight:700 }}>💰 Linked expense: {txn.desc||txn.merchant||"Expense"} · {formatShortDate(txn.date)}</div>
+              ))}
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                {repaymentLinkedTxns.map(({link,txn})=><button key={link.id+link.kind} onClick={e=>handleEditTxn(txn,e)} style={{ background:T.info+"14",border:`1px solid ${T.info}33`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.info,fontFamily:"Nunito,sans-serif" }}>💰 Open expense {sym}{fmt(link.amount)}</button>)}
+              </div>
+            </>}
+            {t.type==="settlement_in"&&!t.isRefund&&repaymentLinkedBills.length>0&&<>
+              {repaymentLinkedBills.map(({link,bill})=>(
+                <div key={link.id+link.kind} style={{ fontSize:11,color:T.accent,marginBottom:4,fontWeight:700 }}>🧾 Linked bill: {bill.name||bill.vendor||"Bill"} · {sym}{fmt(link.amount)}</div>
+              ))}
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                {repaymentLinkedBills.map(({link,bill})=><button key={link.id+link.kind} onClick={e=>{ e.stopPropagation(); setEditingBill(bill); }} style={{ background:T.accent+"14",border:`1px solid ${T.accent}33`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>🧾 Open bill {sym}{fmt(link.amount)}</button>)}
+              </div>
+            </>}
+            {t.type==="settlement_in"&&!t.isRefund&&!t.settlementLinks?.length&&t.fromPersonId&&(
+              <button onClick={e=>{ e.stopPropagation(); setLinkTxnModal({ settlement:t, mode:"pick_expense" }); }} style={{ background:T.info+"14",border:`1px solid ${T.info}33`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.info,fontFamily:"Nunito,sans-serif",marginBottom:8 }}>🔗 Link to expense</button>
+            )}
+            {t.type==="expense"&&linkedRepayments.length>0&&<>
+              <div style={{ fontSize:11,color:T.success,marginBottom:6,fontWeight:700 }}>💰 Repaid: {linkedRepayments.map(x=>`${sym}${fmt(x.settlementLinks?.find(l=>String(l.id)===String(t.id))?.amount||0)} on ${formatShortDate(x.date)}`).join(" · ")}</div>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                {linkedRepayments.map(x=><button key={x.id} onClick={e=>handleEditTxn(x,e)} style={{ background:T.success+"14",border:`1px solid ${T.success}33`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif" }}>💰 Open repayment {sym}{fmt(x.settlementLinks?.find(l=>String(l.id)===String(t.id))?.amount||0)}</button>)}
+              </div>
+            </>}
+            {t.type==="expense"&&linkedRepayments.length===0&&Object.values(t.people||{}).some(i=>i.mode==="owes"&&i.settled)&&(
+              <button onClick={e=>{ e.stopPropagation(); setLinkTxnModal({ expense:t, mode:"pick_settlement" }); }} style={{ background:T.success+"14",border:`1px solid ${T.success}33`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif",marginBottom:8 }}>🔗 Link repayment</button>
+            )}
+            {t.paidBillName&&<div style={{ fontSize:11,color:T.accent,marginBottom:8,fontWeight:700 }}>🧾 Pays: {t.paidBillName}{t.billInvoiceNo?` · #${t.billInvoiceNo}`:""}</div>}
+            {t.imageBase64&&<img src={t.imageBase64} alt="receipt" onClick={e=>{e.stopPropagation();setImageViewSrc(t.imageBase64);}} style={{ width:"100%",borderRadius:8,maxHeight:140,objectFit:"cover",marginBottom:10,cursor:"zoom-in" }} onError={e=>e.target.style.display="none"}/>}
+            {t.paymentImageBase64&&<img src={t.paymentImageBase64} alt="payment" onClick={e=>{e.stopPropagation();setImageViewSrc(t.paymentImageBase64);}} style={{ width:"100%",borderRadius:8,maxHeight:140,objectFit:"cover",marginBottom:10,cursor:"zoom-in" }} onError={e=>e.target.style.display="none"}/>}
+
+            {/* Settlement buttons */}
+            {owedPeople.length>0&&!t.writtenOff&&(
+              <div style={{ marginBottom:10 }}>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Pending: {sym}{fmt(totalOwed)}</div>
+                <button onClick={e=>{e.stopPropagation();setSettleTxn(t);setExpandedTxn(null);}} style={{ background:T.success+"20",border:`1px solid ${T.success}44`,borderRadius:10,padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif",width:"100%" }}>
+                  💰 Settle with {owedPeople.map(([pid])=>getPerson(pid).name).join(", ")}
+                </button>
+              </div>
+            )}
+            {owedPeople.length>0&&!t.writtenOff&&(
+              <div style={{ marginBottom:10 }}>
+                <div style={{ color:T.sub,fontSize:11,marginBottom:6 }}>Can't collect? Write it off.</div>
+                <button onClick={writeOff} style={{ background:"none",border:`1px solid ${T.sub}44`,borderRadius:20,padding:"5px 14px",cursor:"pointer",fontSize:11,color:T.sub,fontFamily:"Nunito,sans-serif" }}>✏️ Write off {sym}{fmt(totalOwed)}</button>
+              </div>
+            )}
+
+            <div style={{ display:"flex",gap:8,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
+              <button onClick={e=>handleEditTxn(t, e)} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"7px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+              <button onClick={deleteTxn} style={{ background:T.danger+"18",border:`1px solid ${T.danger}33`,borderRadius:8,padding:"7px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif",marginLeft:"auto" }}>🗑 Delete</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── UNIQUE VENDORS FOR AUTOCOMPLETE ────────────────────────────────────────
+  const uniqueVendors = useMemo(() => {
+    const vendors = new Set();
+    txns.forEach(t => {
+      if (t.merchant && t.merchant.trim()) {
+        vendors.add(t.merchant.trim());
+      }
+    });
+    return Array.from(vendors).sort();
+  }, [txns]);
+  const searchResults = useMemo(()=>{
+    const q = searchQuery.trim().toLowerCase();
+    if(q.length < 2) return [];
+    const results = [];
+    txns.filter(t=>(t.merchant||"").toLowerCase().includes(q)||(t.notes||"").toLowerCase().includes(q)||String(t.amount||"").includes(q))
+      .slice(0,12).forEach(t=>results.push({kind:"txn",key:`txn-${t.id}`,id:t.id,title:t.merchant||(t.type==="settlement_in"?"Settlement":"Txn"),sub:`${t.type} · ${sym}${fmt(t.amount)}${t.date?" · "+t.date:""}`,item:t}));
+    bills.filter(b=>(b.merchant||"").toLowerCase().includes(q)||(b.notes||"").toLowerCase().includes(q)||String(b.amount||"").includes(q))
+      .slice(0,6).forEach(b=>results.push({kind:"bill",key:`bill-${b.id}`,id:b.id,title:b.merchant||"Bill",sub:`Bill · ${sym}${fmt(b.amount)}${b.dueDate?" · due "+b.dueDate:""}`,item:b}));
+    people.filter(p=>(p.name||"").toLowerCase().includes(q))
+      .forEach(p=>results.push({kind:"person",key:`person-${p.id}`,id:p.id,title:`${p.emoji||"👤"} ${p.name}`,sub:"Person",item:p}));
+    groups.filter(g=>(g.name||"").toLowerCase().includes(g.id)||((g.name||"").toLowerCase().includes(q)))
+      .forEach(g=>results.push({kind:"group",key:`group-${g.id}`,id:g.id,title:`${g.icon||"👥"} ${g.name}`,sub:"Group",item:g}));
+    cats.filter(c=>(c.name||"").toLowerCase().includes(q))
+      .forEach(c=>results.push({kind:"cat",key:`cat-${c.id}`,id:c.id,title:`${c.icon||""} ${c.name}`,sub:"Category",item:c}));
+    return results.slice(0,30);
+  },[searchQuery,txns,bills,people,groups,cats]);
+
+  const accountTypeOptions = useMemo(
+    () => normalizeAccountTypes(accountTypes, customBaseBehaviors),
+    [accountTypes, customBaseBehaviors]
+  );
+  const incomeTypeOptions = useMemo(
+    () => normalizeIncomeTypes([
+      ...incomeTypes,
+      ...txns.filter(t=>t.type==="income").map(t=>t.incomeType||"salary"),
+    ]),
+    [incomeTypes, txns]
+  );
+  const liabilityTypeOptions = useMemo(
+    () => [...LIABILITY_TYPES, ...customLiabilityTypes],
+    [customLiabilityTypes]
+  );
+
+  // ── ADD TRANSACTION MODAL (new flow) ───────────────────────────────────────
+  const AddModal = ({ defaultType="expense", prefillTxn=null, prefill=null, editTxn=null, onClose=null }) => {
+    const sourceTxn = editTxn || null;
+    const linkedInvestment = sourceTxn?.linkedInvestmentId
+      ? investments.find(inv=>String(inv.id)===String(sourceTxn.linkedInvestmentId) || String(inv.linkedTxnId||"")===String(sourceTxn.id||"")) || null
+      : null;
+    const isEditing = Boolean(sourceTxn);
+    const refundPrefill = !isEditing && prefillTxn?.type==="expense" ? prefillTxn : null;
+    const safePrefill = prefill || {};
+    const initialRefundAmount = refundPrefill ? String(getNetExpenseAmount(refundPrefill) || Number(refundPrefill.amount||0) || "") : "";
+    const initialTxnType = isEditing ? (sourceTxn.type || defaultType || "expense") : (refundPrefill ? "settlement_in" : (defaultType||"expense"));
+    const recentTxnSort = (a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a) || Number(b.updatedAt||0)-Number(a.updatedAt||0) || String(b.id||"").localeCompare(String(a.id||""), undefined, { numeric:true, sensitivity:"base" });
+    const recentSpendAccId = [...txns]
+      .filter(t=>(t.type==="expense" || t.type==="investment") && t.accId && accounts.some(a=>String(a.id)===String(t.accId)))
+      .sort(recentTxnSort)[0]?.accId || "";
+    const recentInflowAccId = [...txns]
+      .filter(t=>(t.type==="income" || t.type==="settlement_in") && t.accId && accounts.some(a=>String(a.id)===String(t.accId) && a.type!=="cc"))
+      .sort(recentTxnSort)[0]?.accId || "";
+    const recentFromAccId = [...txns]
+      .filter(t=>(t.type==="transfer" || t.type==="cc_payment") && t.fromAccId && accounts.some(a=>String(a.id)===String(t.fromAccId)))
+      .sort(recentTxnSort)[0]?.fromAccId || "";
+    const recentCardAccId = [...txns]
+      .filter(t=>t.type==="cc_payment" && t.toAccId && accounts.some(a=>String(a.id)===String(t.toAccId)))
+      .sort(recentTxnSort)[0]?.toAccId || "";
+    const firstBankOrSafeAccId = (accounts.find(a=>a.type==="bank") || accounts.find(a=>a.type==="upi") || accounts.find(a=>a.type==="cash") || accounts.find(a=>a.type==="cc") || accounts[0])?.id || "";
+    const defaultSpendAccId = recentSpendAccId || firstBankOrSafeAccId;
+    const defaultInflowAccId = recentInflowAccId || firstBankOrSafeAccId;
+    const defaultFromAccId = recentFromAccId || (accounts.find(a=>a.type==="bank") || accounts.find(a=>a.type==="cash") || accounts.find(a=>a.type==="upi") || accounts[0])?.id || "";
+    const defaultToCardId = recentCardAccId || accounts.find(a=>a.type==="cc")?.id || "";
+    const defaultAccId = (initialTxnType==="income" || initialTxnType==="settlement_in") ? defaultInflowAccId : defaultSpendAccId;
+    const initialCatIds = (isEditing
+      ? getTxnCategoryIds(sourceTxn)
+      : (Array.isArray(safePrefill.catIds) ? safePrefill.catIds.filter(Boolean) : (safePrefill.catId ? [safePrefill.catId] : [])))
+      .filter(cid=>cats.some(cat=>cat.id===cid));
+    const initialSubIds = (isEditing
+      ? getTxnSubIds(sourceTxn)
+      : (Array.isArray(safePrefill.subIds) ? safePrefill.subIds.filter(Boolean) : (safePrefill.subId ? [safePrefill.subId] : [])))
+      .filter(sid=>initialCatIds.some(cid=>getCat(cid)?.subs?.some(sub=>sub.id===sid)));
+    const initialTrackingMode = isEditing && sourceTxn?.type==="expense"
+      ? (sourceTxn.splitMode || sourceTxn.trackingMode ||
+          (Object.keys(sourceTxn.people||{}).some(pid=>pid!=="__me__"&&sourceTxn.people[pid]?.mode==="owes") ? "split" :
+          (sourceTxn.forPerson||sourceTxn.taggedPersonId||sourceTxn.groupId ? "tag" : "none")))
+      : "unified";
+    const initialSplitPeople = isEditing && sourceTxn?.type==="expense"
+      ? Object.fromEntries(Object.entries(sourceTxn.people||{}).filter(([pid])=>pid!=="__me__").map(([pid])=>[pid, true]))
+      : {};
+    const initialSplitCustom = isEditing && sourceTxn?.type==="expense"
+      ? Object.fromEntries(Object.entries(sourceTxn.people||{}).filter(([pid])=>pid!=="__me__").map(([pid,info])=>[pid, String(info?.amount ?? "")]))
+      : {};
+    const initialCollectMap = isEditing && sourceTxn?.type==="expense"
+      ? Object.fromEntries(Object.entries(sourceTxn.people||{}).filter(([pid])=>pid!=="__me__").map(([pid,info])=>[pid, info?.mode !== "spent_on"]))
+      : {};
+    const initialSettlementKind = isEditing && sourceTxn?.type==="settlement_in"
+      ? (sourceTxn.isRefund ? "refund" : (sourceTxn.fromPersonId||sourceTxn.settlementLinks?.length) ? "repayment" : "reimbursement")
+      : (refundPrefill ? "refund" : "refund");
+
+    const [txnType, setTxnType] = useState(initialTxnType);
+    const [incomeType, setIncomeType] = useState(sourceTxn?.incomeType || safePrefill.incomeType || "salary");
+    const incomeTypeChoices = normalizeIncomeTypes([...incomeTypeOptions, incomeType]);
+    const [who, setWho] = useState(
+      isEditing
+        ? (sourceTxn.type==="cc_payment"||sourceTxn.type==="transfer"
+            ? (sourceTxn.desc || sourceTxn.note || "")
+            : (sourceTxn.merchant || sourceTxn.desc || ""))
+        : (refundPrefill?.merchant || refundPrefill?.desc || safePrefill.who || "")
+    );
+    const [amount, setAmount] = useState(isEditing ? String(sourceTxn.amount ?? "") : (initialRefundAmount || String(safePrefill.amount || "")));
+    const [date, setDate] = useState(isEditing ? (sourceTxn.date || todayStr()) : (safePrefill.date || todayStr()));
+    const [catIds, setCatIds] = useState(initialCatIds);  // multiple categories
+    const [subIds, setSubIds] = useState(initialSubIds);  // multiple subcats
+    const [accId, setAccId] = useState(isEditing ? (sourceTxn.accId || sourceTxn.fromAccId || defaultAccId) : (refundPrefill?.accId || safePrefill.accId || defaultAccId));
+    const [fromAccId, setFromAccId] = useState(isEditing ? (sourceTxn.fromAccId || defaultFromAccId) : (safePrefill.fromAccId || defaultFromAccId));
+    const [toAccId, setToAccId] = useState(isEditing ? (sourceTxn.toAccId || defaultToCardId) : (safePrefill.toAccId || defaultToCardId));
+    const [note, setNote] = useState(isEditing ? (sourceTxn.note || "") : (refundPrefill ? `Refund for ${refundPrefill.desc||refundPrefill.merchant||"expense"}` : (safePrefill.note || "")));
+    const [billerLinkId, setBillerLinkId] = useState(isEditing ? (sourceTxn.billerLinkId||"") : "");
+    const [settleSelectedIds, setSettleSelectedIds] = useState({});
+    const [guestPersonName, setGuestPersonName] = useState("");
+    const [discount, setDiscount] = useState("");
+    const [guestPersonAmount, setGuestPersonAmount] = useState("");
+    const [showGuestPerson, setShowGuestPerson] = useState(false);
+    const [showMembershipPanel, setShowMembershipPanel] = useState(false);
+    const [linkValidFrom, setLinkValidFrom] = useState(todayStr());
+    const [linkCycle, setLinkCycle] = useState("monthly");
+    const [linkBulkMonths, setLinkBulkMonths] = useState("1");
+    const [linkGraceDays, setLinkGraceDays] = useState("0");
+    const [linkMemberPersonId, setLinkMemberPersonId] = useState("self");
+    const linkedBA = billerLinkId ? billerAccounts.find(b=>b.id===billerLinkId) : null;
+    const linkedBAType = linkedBA ? getBillerActionType(linkedBA.type) : null;
+    const cycleMonthsMap = { monthly:1, quarterly:3, halfyearly:6, annual:12 };
+    const linkValidUntil = linkValidFrom && linkBulkMonths ? (()=>{ const d=new Date(linkValidFrom); d.setMonth(d.getMonth()+Number(linkBulkMonths)*(cycleMonthsMap[linkCycle]||1)); d.setDate(d.getDate()+Number(linkGraceDays||0)-1); return d.toISOString().split("T")[0]; })() : "";
+    const [imageBase64, setImageBase64] = useState(sourceTxn?.imageBase64 || null);
+    const [paymentImageBase64, setPaymentImageBase64] = useState(sourceTxn?.paymentImageBase64 || null);
+    const isNative = isNativeSmsAvailable();
+
+    const [smsRaw, setSmsRaw] = useState(sourceTxn?.smsRaw || "");
+    const [showSms, setShowSms] = useState(Boolean(sourceTxn?.smsRaw));
+    const [smsTxt, setSmsTxt] = useState(sourceTxn?.smsRaw || "");
+    const [userSetTxnType, setUserSetTxnType] = useState(isEditing);
+    const [smsParseMeta, setSmsParseMeta] = useState(null);
+    const [smsBusy, setSmsBusy] = useState(false);
+    const [smsImportStatus, setSmsImportStatus] = useState("");
+    const [showPriceBreakdown, setShowPriceBreakdown] = useState(isEditing && !!(sourceTxn?.priceMrp||sourceTxn?.priceDiscount||sourceTxn?.priceProcessingFee||sourceTxn?.priceInterestRate));
+    const [priceMrp, setPriceMrp] = useState(isEditing ? String(sourceTxn?.priceMrp||"") : "");
+    const [priceDiscount, setPriceDiscount] = useState(isEditing ? String(sourceTxn?.priceDiscount||"") : "");
+    const [priceProcessingFee, setPriceProcessingFee] = useState(isEditing ? String(sourceTxn?.priceProcessingFee||"") : "");
+    const [priceInterestRate, setPriceInterestRate] = useState(isEditing ? String(sourceTxn?.priceInterestRate||"") : "");
+    const [splitMode, setSplitMode] = useState(initialTrackingMode); // none | split | tag | allocate | unified
+    const [showAdvancedTracking, setShowAdvancedTracking] = useState(isEditing && ["split","tag","allocate"].includes(initialTrackingMode));
+    const [splitGroup, setSplitGroup] = useState(isEditing && sourceTxn?.type==="expense" && initialTrackingMode==="split" ? (sourceTxn.groupId || "") : "");
+    // Apply default group for new expenses
+    useEffect(()=>{
+      if(!isEditing && defaultGroupId && txnType==="expense" && !tagGroup && !splitGroup){
+        const g = groups.find(x=>x.id===defaultGroupId);
+        if(g){
+          const di = g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
+          if(di==="attributed"){ setTagGroup(defaultGroupId); setSplitMode("tag"); }
+          else { setSplitGroup(defaultGroupId); setSplitMode("split"); }
+        }
+      }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    },[]);
+    const [tagGroup, setTagGroup] = useState(isEditing && sourceTxn?.type==="expense" && (initialTrackingMode==="tag"||initialTrackingMode==="split") ? 
