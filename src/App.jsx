@@ -2858,6 +2858,7 @@ function AppContent({ onLock }) {
     );
     const [refundExpenseSearch, setRefundExpenseSearch] = useState("");
     const [transactionRef, setTransactionRef] = useState(isEditing ? (sourceTxn?.transactionRef || "") : "");
+    const [refDupWarning, setRefDupWarning] = useState("");
     const [repaymentAllocations, setRepaymentAllocations] = useState(()=>Object.fromEntries((sourceTxn?.settlementLinks||[]).map(link=>[`${link.kind}:${link.id}`, String(link.amount||"")])));
     const [repaymentTouched, setRepaymentTouched] = useState(isEditing&&Boolean(sourceTxn?.settlementLinks?.length));
     const [repaymentPartialKey, setRepaymentPartialKey] = useState(null);
@@ -2966,6 +2967,7 @@ function AppContent({ onLock }) {
     },[txnType,who,amount,date,note,accId,catIds,subIds,splitMode,useItemizedLines,lineItems,tagMode,tagPerson,tagGroup,tagItems,splitPeople,transactionRef,isEditing]);
 
     const closeModal = () => {
+      try{ localStorage.removeItem(DRAFT_KEY); }catch{}
       setShowAdd(false);
       setRefundSourceTxn(null);
       setAddPrefill(null);
@@ -3456,13 +3458,14 @@ function AppContent({ onLock }) {
     );
 
     const submit = () => {
-      if(!hasTxnSubject || !amt) return;
+      if(!hasTxnSubject){ setRefDupWarning("Enter a vendor/note before saving."); return; }
+      if(!amt){ setRefDupWarning("Enter an amount before saving."); return; }
+      setRefDupWarning("");
+      // Duplicate UPI/bank ref is only a warning now — never blocks the save (previously used alert(), which
+      // could silently fail to render in some WebViews, making Save look like it did nothing).
       if(transactionRef.trim()){
         const refConflict = txns.find(x => x.transactionRef === transactionRef.trim() && String(x.id) !== String(sourceTxn?.id||""));
-        if(refConflict){
-          alert(`UPI/bank ref "${transactionRef.trim()}" already used in another transaction. Use a different reference or clear the field.`);
-          return;
-        }
+        if(refConflict) setRefDupWarning(`Note: UPI/bank ref "${transactionRef.trim()}" is already used on another transaction — saved anyway.`);
       }
       const resolvedTxnId = isEditing ? sourceTxn.id : Date.now();
       const baseLabel = who.trim() || sourceTxn?.desc || sourceTxn?.merchant || note.trim() || "";
@@ -5133,6 +5136,9 @@ function AppContent({ onLock }) {
               )}
             </div>
 
+            {refDupWarning&&(
+              <div style={{ background:T.warn+"18",border:`1px solid ${T.warn}44`,borderRadius:10,padding:"8px 12px",color:T.warn,fontSize:11,fontWeight:700 }}>{refDupWarning}</div>
+            )}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={closeModal} style={btnG}>Cancel</button>
               <button onClick={submit} style={{ ...btnP,opacity:canSubmit?1:0.5 }}>{canSubmit?(isEditing?"Save Changes ✓":"Add ✓"):txnType==="investment"?"Fill name & amount":"Fill vendor & amount"}</button>
