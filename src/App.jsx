@@ -3228,9 +3228,11 @@ function AppContent({ onLock }) {
       if(exactMatch) applyInvestmentTemplate(exactMatch);
     },[txnType,investType,investFolio,investmentTemplateOptions,applyInvestmentTemplate]);
 
-    useEffect(()=>{
-      if(lockedInvestFolioStartDate && date !== lockedInvestFolioStartDate) setDate(lockedInvestFolioStartDate);
-    },[lockedInvestFolioStartDate,date]);
+    // Don't override transaction date with folio start date
+    // lockedInvestFolioStartDate is only for the investment record's startDate, not the txn date
+    // useEffect(()=>{
+    //   if(lockedInvestFolioStartDate && date !== lockedInvestFolioStartDate) setDate(lockedInvestFolioStartDate);
+    // },[lockedInvestFolioStartDate,date]);
 
     useEffect(()=>{
       if(txnType!=="expense" || expensePaymentMode!=="emi") return;
@@ -3971,7 +3973,8 @@ function AppContent({ onLock }) {
         const invId = (isEditing ? (sourceTxn?.linkedInvestmentId || linkedInvestment?.id) : null) || genId();
         const folioNo = investType==="mf" ? investFolio.trim() : "";
         const metricValue = investmentMetricConfig.show ? Math.max(0, parseMoney(investNav)||0) : 0;
-        const commonStartDate = lockedInvestFolioStartDate || date || todayStr();
+        const commonStartDate = lockedInvestFolioStartDate || date || todayStr(); // folio's original start date
+        const txnDate = date || todayStr(); // actual transaction date (today for monthly SIP)
         // Find matching recurring schedule for auto-link
         const matchingSchedule = recurringSchedules.find(r=>r.active!==false && (r.name===who.trim() || (folioNo && r.groupKey && r.groupKey.includes(folioNo))));
         const inv = { id:invId, type:investType, name:who.trim()||"Investment", amount:amt, currentValue:amt, freq:investFreq||"", folioNo, startDate:commonStartDate, linkedTxnId:resolvedTxnId, paymentAccId:accId, lastNav:metricValue, lastNavDate:date, transactionRef:transactionRef.trim()||null, recurringScheduleId:matchingSchedule?.id||null };
@@ -3984,7 +3987,7 @@ function AppContent({ onLock }) {
         upsertTxn({
           ...base,
           amount:amt,
-          date:date || commonStartDate,
+          date:txnDate,
           accId,
           investType,
           investFreq:investFreq||"",
