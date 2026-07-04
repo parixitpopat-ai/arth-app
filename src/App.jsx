@@ -918,6 +918,7 @@ function AppContent({ onLock }) {
   const [giftFilter, setGiftFilter] = useState(null);
   const [expandedSection, setExpandedSection] = useState(null);
   const [editTxn, setEditTxn] = useState(null);
+  const [defaultGroupId, setDefaultGroupId] = useState(()=>localStorage.getItem("arth_default_group")||"");
   const [editingRecurring, setEditingRecurring] = useState(null);
   const [editingVehicle, setEditingVehicle] = useState(null);
   const [vType, setVType] = useState("car");
@@ -979,6 +980,7 @@ function AppContent({ onLock }) {
   useEffect(()=>localStorage.setItem("arth_person_budgets",JSON.stringify(perPersonBudgets)),[perPersonBudgets]);
   useEffect(()=>localStorage.setItem("arth_gifts",JSON.stringify(gifts)),[gifts]);
   useEffect(()=>localStorage.setItem("arth_budget_carry",JSON.stringify(budgetCarryForward)),[budgetCarryForward]);
+  useEffect(()=>{ if(defaultGroupId) localStorage.setItem("arth_default_group",defaultGroupId); else localStorage.removeItem("arth_default_group"); },[defaultGroupId]);
   useEffect(()=>localStorage.setItem("arth_last_fy_target",lastFYTarget),[lastFYTarget]);
   useEffect(()=>localStorage.setItem("arth_month_overrides",JSON.stringify(monthOverrides)),[monthOverrides]);
 
@@ -2677,8 +2679,7 @@ function AppContent({ onLock }) {
     const initialTrackingMode = isEditing && sourceTxn?.type==="expense"
       ? (sourceTxn.splitMode || sourceTxn.trackingMode ||
           (Object.keys(sourceTxn.people||{}).some(pid=>pid!=="__me__"&&sourceTxn.people[pid]?.mode==="owes") ? "split" :
-          (sourceTxn.forPerson||sourceTxn.taggedPersonId ? "tag" :
-          (sourceTxn.groupId ? "tag" : "none"))))
+          (sourceTxn.forPerson||sourceTxn.taggedPersonId||sourceTxn.groupId ? "tag" : "none")))
       : "unified";
     const initialSplitPeople = isEditing && sourceTxn?.type==="expense"
       ? Object.fromEntries(Object.entries(sourceTxn.people||{}).filter(([pid])=>pid!=="__me__").map(([pid])=>[pid, true]))
@@ -2746,6 +2747,19 @@ function AppContent({ onLock }) {
     const [splitMode, setSplitMode] = useState(initialTrackingMode); // none | split | tag | allocate | unified
     const [showAdvancedTracking, setShowAdvancedTracking] = useState(isEditing && ["split","tag","allocate"].includes(initialTrackingMode));
     const [splitGroup, setSplitGroup] = useState(isEditing && sourceTxn?.type==="expense" && initialTrackingMode==="split" ? (sourceTxn.groupId || "") : "");
+    // Apply default group for new expenses
+    useEffect(()=>{
+      if(!isEditing && defaultGroupId && txnType==="expense" && !tagGroup && !splitGroup){
+        const g = groups.find(x=>x.id===defaultGroupId);
+        if(g){
+          const di = g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
+          if(di==="attributed"){ setTagGroup(defaultGroupId); setSplitMode("tag"); }
+          else { setSplitGroup(defaultGroupId); setSplitMode("split"); }
+        }
+      }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    },[]);
+    const [tagGroup, setTagGroup] = useState(isEditing && sourceTxn?.type==="expense" && (initialTrackingMode==="tag"||initialTrackingMode==="split") ? (sourceTxn.groupId || "") : "");
     const initialAllocRows = isEditing && sourceTxn?.type==="expense" && initialTrackingMode==="allocate"
       ? (sourceTxn.allocations||[]).map(a=>({...a}))
       : [];
@@ -3775,6 +3789,9 @@ function AppContent({ onLock }) {
           forPerson:forPersonVal,
           groupId:groupIdVal,
           trackingMode:normalizedTrackingMode,
+          splitMode:normalizedTrackingMode,
+          tagMode:tagMode||null,
+          taggedPersonId:forPersonVal||null,
           groupCollectiveAmount,
           allocations:(splitMode==="allocate" || splitMode==="unified")?allocRows.filter(r=>r.targetId).map(r=>{
             const normalizedItems = (r.items||[])
@@ -6246,7 +6263,7 @@ function AppContent({ onLock }) {
 
   // ── HOME ───────────────────────────────────────────────────────────────────
 
-  const DEFAULT_CARD_ORDER = ["health","stats","categories","cc","bills","recent"];
+  const DEFAULT_CARD_ORDER = ["household","health","stats","categories","cc","bills","recent"];
   const KNOWN_CARD_KEYS = new Set(["stats","budget","categories","cc","bills","recent"]);
   const [cardOrder, setCardOrder] = useState(()=>{
     const saved = JSON.parse(localStorage.getItem("arth_card_order")||"null");
@@ -6677,13 +6694,81 @@ function AppContent({ onLock }) {
     const runwayColor = runwayMonths >= 6 ? T.success : runwayMonths >= 3 ? T.warn : T.danger;
 
     const groupSpent = byCat.find(c=>c.id==="family")?.value || 0;
+    const householdGroups = groups.filter(g=>g.typeId==="family"||g.defaultIntent==="attributed");
+    const householdTotal = householdGroups.reduce((s,g)=>s+thisMonthTxns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id)).reduce((ss,t)=>ss+t.amount,0),0);
+    // Amortized bills - spread multi-month fees across billing period
+    const amortizedBillsThisMonth = bills.filter(b=>b.billPeriodFrom&&b.billPeriodTo&&b.amount>0).map(b=>{
+      const from = new Date(b.billPeriodFrom);
+      const to = new Date(b.billPeriodTo);
+      const totalMonths = Math.max(1, Math.round((to-from)/(1000*60*60*24*30)));
+      const monthlyShare = Math.round(b.amount/totalMonths);
+      const currDate = new Date(viewMonth+"-01");
+      return (currDate >= from && currDate <= to) ? {...b, amortizedAmount:monthlyShare, totalMonths} : null;
+    }).filter(Boolean);
     const leftDays = daysLeft(viewMonth);
     // Recurring investment reminders
     const todayDate = new Date();
     const todayDay = todayDate.getDate();
     const todayStr2 = new Date().toISOString().split("T")[0];
     const dueRecurring = recurringSchedules.filter(r=>r.active!==false && r.day===todayDay && (!r.snoozedUntil || r.snoozedUntil < todayStr2));
+    // All investment folios for dashboard recording
+    const investmentGroups = Object.values(investments.reduce((acc,inv)=>{
+      const key = inv.folioNo||inv.name||inv.id;
+      if(!acc[key]) acc[key] = {key,name:inv.name||key,type:inv.type||"mf",amount:inv.amount||0,accId:inv.paymentAccId||"",items:[]};
+      acc[key].items.push(inv);
+      return acc;
+    },{}));
+    // Check which folios already have a txn this month
+    const recordedFoliosThisMonth = new Set(thisMonthTxns.filter(t=>t.type==="investment"&&t.investFolio).map(t=>t.investFolio));
+    const allFoliosDue = investmentGroups.filter(g=>!recordedFoliosThisMonth.has(g.key) && !dueRecurring.some(r=>r.name===g.name));
     const CARDS = {
+      household: (
+        <div key="household" style={{ ...card,padding:"16px 14px" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+            <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>🏠 Household Cost</div>
+            <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmtK(householdTotal)}</div>
+          </div>
+          {(()=>{
+            const householdGroups = groups.filter(g=>g.typeId==="family"||g.defaultIntent==="attributed");
+            if(!householdGroups.length) return <div style={{ color:T.sub,fontSize:11 }}>Tag expenses to a Family group to see household costs</div>;
+            return (<>
+              {householdGroups.map(g=>{
+                const items = thisMonthTxns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id));
+                const gSpend = items.reduce((s,t)=>s+t.amount,0);
+                if(!items.length) return null;
+                return (<div key={g.id} style={{ marginBottom:10 }}>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>{g.icon||"👥"} {g.name.toUpperCase()}</div>
+                  {items.map(t=>(
+                    <div key={t.id} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}` }}>
+                      <span style={{ color:T.text,fontSize:12 }}>{t.merchant||t.who||t.desc||"Expense"}</span>
+                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(t.amount)}</span>
+                    </div>
+                  ))}
+                  <div style={{ display:"flex",justifyContent:"space-between",paddingTop:4 }}>
+                    <span style={{ color:T.sub,fontSize:10 }}>Total</span>
+                    <span style={{ color:T.accent,fontSize:12,fontWeight:800 }}>{sym}{fmt(gSpend)}</span>
+                  </div>
+                </div>);
+              })}
+              {amortizedBillsThisMonth.length>0&&(
+                <div style={{ marginTop:8,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>AMORTIZED FEES</div>
+                  {amortizedBillsThisMonth.map(b=>(
+                    <div key={b.id} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}` }}>
+                      <div><span style={{ color:T.text,fontSize:12 }}>{b.name}</span><span style={{ color:T.sub,fontSize:9,marginLeft:6 }}>({b.totalMonths}mo)</span></div>
+                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(b.amortizedAmount)}/mo</span>
+                    </div>
+                  ))}
+                  <div style={{ display:"flex",justifyContent:"space-between",paddingTop:4 }}>
+                    <span style={{ color:T.sub,fontSize:10 }}>Amortized total</span>
+                    <span style={{ color:T.accent,fontSize:12,fontWeight:800 }}>{sym}{fmt(amortizedBillsThisMonth.reduce((s,b)=>s+b.amortizedAmount,0))}</span>
+                  </div>
+                </div>
+              )}
+            </>);
+          })()}
+        </div>
+      ),
       health: (
         <div key="health" style={{ ...card,padding:"16px 14px",background:`linear-gradient(135deg,${runwayColor}10,${T.card})`,border:`1px solid ${runwayColor}33` }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
@@ -6921,6 +7006,28 @@ function AppContent({ onLock }) {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+          {/* All investment folios not yet recorded this month */}
+          {allFoliosDue.length>0&&(
+            <div style={{ background:T.accent+"10",border:`1px solid ${T.accent}22`,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
+              <div style={{ color:T.accent,fontSize:13,fontWeight:800,marginBottom:8 }}>💹 {allFoliosDue.length} investment{allFoliosDue.length>1?"s":""} not recorded this month</div>
+              {allFoliosDue.slice(0,5).map(g=>(
+                <div key={g.key} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{g.name}</div>
+                    <div style={{ color:T.sub,fontSize:10 }}>{g.type?.toUpperCase()||"INVESTMENT"}{g.amount?` · ${sym}${fmt(g.amount)}`:""}</div>
+                  </div>
+                  <div style={{ display:"flex",gap:6 }}>
+                    <button onClick={()=>{
+                      setAddPrefill({ amount:String(g.amount||""), accId:g.accId||"", who:g.name||"", investFolio:g.key||"", investType:g.type||"mf", date:todayStr() });
+                      setDefaultAddType("investment"); setShowAdd(true);
+                    }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Record</button>
+                    <button onClick={()=>{ const key=g.key; setTxns(prev=>[{id:genId(),type:"investment",investFolio:key,investType:g.type||"mf",amount:0,date:todayStr(),skippedMonth:true,createdAt:Date.now()},...prev]); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Skip</button>
+                  </div>
+                </div>
+              ))}
+              {allFoliosDue.length>5&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>+{allFoliosDue.length-5} more</div>}
             </div>
           )}
           {/* Membership expiry alerts */}
@@ -7678,10 +7785,22 @@ function AppContent({ onLock }) {
             )}
 
             {!p.isMe&&s.owesMe>0&&<button onClick={()=>{
-              const pendingTxns=txns.filter(x=>x.type==="expense"&&x.people?.[p.id]?.mode==="owes"&&!x.people[p.id]?.settled&&remainingShare(x.people[p.id])>0);
+              const pendingTxns=txns.filter(x=>{
+                if(x.type!=="expense") return false;
+                const info = x.people?.[p.id] || x.splitPeople?.[p.id];
+                return info?.mode==="owes" && !info?.settled && remainingShare(info)>0;
+              });
               const pendingBills=bills.filter(x=>x.status==="unpaid"&&x.splitPeople?.[p.id]?.mode==="owes"&&remainingShare(x.splitPeople[p.id])>0);
               if(!pendingTxns.length&&!pendingBills.length){
-                setSettleTxn({ id:"person_settle_"+p.id, type:"expense", desc:`Settlement with ${p.name}`, amount:s.owesMe, people:{ [p.id]:{ amount:s.owesMe, mode:"owes", settled:false } }, _isFallbackSettle:true });
+                // No specific txns found but balance shows — force clear
+                setTxns(prev=>prev.map(t=>{
+                  if(t.type!=="expense") return t;
+                  const info = t.people?.[p.id] || t.splitPeople?.[p.id];
+                  if(!info||info.settled||info.mode!=="owes") return t;
+                  const settled = {...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0};
+                  if(t.people?.[p.id]) return {...t,people:{...t.people,[p.id]:settled}};
+                  return {...t,splitPeople:{...t.splitPeople,[p.id]:settled}};
+                }));
                 return;
               }
               if(pendingTxns.length===1&&!pendingBills.length){
@@ -10439,6 +10558,17 @@ function AppContent({ onLock }) {
             <div style={{ color:T.info,fontSize:22,fontWeight:900,marginTop:8 }}>{sym}{fmt(avgSpendPerMonth)}</div>
             <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>{monthsElapsed} month{monthsElapsed===1?"":"s"} tracked</div>
           </div>
+        </div>
+
+        {/* Default group for expenses */}
+        <div style={{ ...card,marginBottom:16 }}>
+          <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>🏠 Default Group for Expenses</div>
+          <div style={{ color:T.sub,fontSize:10,marginBottom:10 }}>Auto-tag all new expenses to this group (e.g. UG-2 for household costs). You can still override per transaction.</div>
+          <select style={inp} value={defaultGroupId} onChange={e=>setDefaultGroupId(e.target.value)}>
+            <option value="">None — tag manually each time</option>
+            {groups.map(g=><option key={g.id} value={g.id}>{g.icon||"👥"} {g.name}</option>)}
+          </select>
+          {defaultGroupId&&<div style={{ color:T.success,fontSize:10,marginTop:6 }}>✅ New expenses auto-tagged to {groups.find(g=>g.id===defaultGroupId)?.name}</div>}
         </div>
 
         <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:10 }}>Month by Month</div>
