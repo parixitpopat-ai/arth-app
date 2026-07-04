@@ -1557,10 +1557,14 @@ function AppContent({ onLock }) {
 
       if(t.type==="expense"){
         // forPerson attribution → counts as receivable (skip self)
-        if(t.forPerson && t.forPerson!==meId && Number(t.tagPersonAmount||0)>0){
+        // Use tagPersonAmount if set, otherwise full amount (F8 "They owe me back")
+        if(t.forPerson && t.forPerson!==meId){
           const pid=t.forPerson;
-          if(!(t.people?.[pid]?.mode==="owes"&&!t.people[pid].settled))
-            receivables[pid]=(receivables[pid]||0)+Number(t.tagPersonAmount);
+          const alreadyCounted = t.people?.[pid]?.mode==="owes"&&!t.people[pid]?.settled;
+          if(!alreadyCounted){
+            const amt = Number(t.tagPersonAmount||0)>0 ? Number(t.tagPersonAmount) : (t.tagMode==="person"?Number(t.amount||0):0);
+            if(amt>0) receivables[pid]=(receivables[pid]||0)+amt;
+          }
         }
         // tagItems person entries → count as receivable (skip self)
         (t.tagItems||[]).forEach(item=>{
@@ -1668,6 +1672,7 @@ function AppContent({ onLock }) {
     const map = {};
 
     // B10 fix: use ALL txns not just thisMonthTxns — unpaid debts carry forward
+    const meId = people.find(p=>p.isMe)?.id;
     txns.forEach(t=>{
       if(t.type!=="expense") return;
       // Check both F8 (t.people) and legacy (t.splitPeople)
@@ -1676,6 +1681,14 @@ function AppContent({ onLock }) {
         if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
         map[pid] = (map[pid]||0) + remainingShare(info);
       });
+      // forPerson + tagMode=person — old txns before people map fix
+      if(t.forPerson && t.forPerson!==meId && t.tagMode==="person"){
+        const pid = t.forPerson;
+        if(!peopleMap[pid]) { // not already counted above
+          const amt = Number(t.tagPersonAmount||0)>0 ? Number(t.tagPersonAmount) : Number(t.amount||0);
+          if(amt>0) map[pid] = (map[pid]||0) + amt;
+        }
+      }
     });
 
     bills
@@ -2076,10 +2089,14 @@ function AppContent({ onLock }) {
         if(t.type!=="expense") return false;
         // Check both F8 (t.people) and legacy (t.splitPeople)
         const info = t.people?.[personId] || t.splitPeople?.[personId];
-        return info?.mode==="owes" && !info?.settled && remainingShare(info)>0;
+        if(info?.mode==="owes" && !info?.settled && remainingShare(info)>0) return true;
+        // Also catch forPerson + tagMode=person (old txns before people map fix)
+        if(String(t.forPerson||"")===String(personId) && t.tagMode==="person" && !info) return true;
+        return false;
       })
       .map(t=>{
         const info = t.people?.[personId] || t.splitPeople?.[personId];
+        const amt = info ? remainingShare(info) : (Number(t.tagPersonAmount||0)||Number(t.amount||0));
         return ({
           key:`txn:${t.id}`,
           kind:"txn",
@@ -2087,8 +2104,8 @@ function AppContent({ onLock }) {
           date:t.date||"",
           title:t.desc||t.merchant||"Expense",
           subtitle:[formatShortDate(t.date)||t.date, t.groupId&&getGroup(t.groupId)?.name].filter(Boolean).join(" · "),
-          amount:remainingShare(info),
-          originalAmount:Number(info?.amount||0),
+          amount:amt,
+          originalAmount:Number(info?.amount||0)||amt,
         });
       });
     const txnItemIdSet = new Set(txnItems.map(i=>i.id));
