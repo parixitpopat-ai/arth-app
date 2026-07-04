@@ -3784,7 +3784,18 @@ function AppContent({ onLock }) {
           tagGroupAmount:tagGrpAmt,
           tagItems:savedTagItems,
           vehicleId:vehicleId||null,
-          people:splitMode==="split"||splitMode==="allocate"||splitMode==="unified"?psplit:{},
+          people:(()=>{
+            if(splitMode==="split"||splitMode==="allocate"||splitMode==="unified") return psplit;
+            // tagMode="person" = they owe me back — save as receivable in people map
+            if(splitMode==="tag" && tagMode==="person" && tagPerson){
+              return { [tagPerson]: { amount:amt, mode:"owes", settled:false, remainingAmt:amt } };
+            }
+            // tagMode="attribute" = for them, no collection — save in people as spent_on
+            if(splitMode==="tag" && tagMode==="attribute" && tagPerson){
+              return { [tagPerson]: { amount:amt, mode:"spent_on", settled:false } };
+            }
+            return {};
+          })(),
           forPerson:forPersonVal,
           groupId:groupIdVal,
           trackingMode:normalizedTrackingMode,
@@ -4906,7 +4917,7 @@ function AppContent({ onLock }) {
                   return (<div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
                     <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>This expense on {p.name} —</div>
                     <div style={{ display:"flex",gap:8 }}>
-                      <button onClick={()=>{ setTagMode("person"); setSplitMode("split"); setSplitGroup(""); setSplitPeople({[tagPerson]:true}); setSplitCalc("equally"); }} style={{ flex:1,background:tagMode==="person"?T.success+"22":"none",border:`1px solid ${tagMode==="person"?T.success:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                      <button onClick={()=>{ setTagMode("person"); setSplitMode("tag"); setSplitPeople({[tagPerson]:true}); setSplitCalc("equally"); setSplitGroup(""); }} style={{ flex:1,background:tagMode==="person"?T.success+"22":"none",border:`1px solid ${tagMode==="person"?T.success:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                         <div style={{ fontSize:11,fontWeight:700,color:tagMode==="person"?T.success:T.text }}>💸 They owe me back</div>
                         <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Tracked in receivables</div>
                       </button>
