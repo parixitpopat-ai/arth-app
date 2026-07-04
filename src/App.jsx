@@ -944,9 +944,6 @@ function AppContent({ onLock }) {
   const currentFYStartYear = new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1;
   const [annualBudget, setAnnualBudget] = useState(()=>Number(localStorage.getItem("arth_annual_budget")||600000));
   const [perPersonBudgets, setPerPersonBudgets] = useState(()=>JSON.parse(localStorage.getItem("arth_person_budgets")||"{}"));
-  const [gifts, setGifts] = useState(()=>JSON.parse(localStorage.getItem("arth_gifts")||"[]"));
-  const [showAddGift, setShowAddGift] = useState(false);
-  const [giftForPersonId, setGiftForPersonId] = useState(null);
   const [budgetCarryForward, setBudgetCarryForward] = useState(()=>JSON.parse(localStorage.getItem("arth_budget_carry")||"false"));
   const [lastFYTarget, setLastFYTarget] = useState(()=>Number(localStorage.getItem("arth_last_fy_target")||0));
   const [selectedBudgetFY, setSelectedBudgetFY] = useState(currentFYStartYear);
