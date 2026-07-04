@@ -2772,7 +2772,6 @@ function AppContent({ onLock }) {
          (sourceTxn.forPerson||sourceTxn.taggedPersonId) ? (sourceTxn.splitMode==="tag"?"attribute":"person") :
          sourceTxn.groupId ? "group" : "person"))
       : "person");
-    const [tagGroup, setTagGroup] = useState(isEditing && sourceTxn?.type==="expense" && (initialTrackingMode==="tag"||initialTrackingMode==="split") ? (sourceTxn.groupId || "") : "");
     const [splitPeople, setSplitPeople] = useState(initialSplitPeople);
     const [splitCalc, setSplitCalc] = useState(isEditing && sourceTxn?.type==="expense" && Object.keys(initialSplitCustom).length ? "amount" : "equally"); // equally | amount | percent | share
     const [splitCustom, setSplitCustom] = useState(initialSplitCustom);
