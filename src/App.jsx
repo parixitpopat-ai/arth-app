@@ -942,6 +942,7 @@ function AppContent({ onLock }) {
   const [editingBillerAccount, setEditingBillerAccount] = useState(null);
   const [billSearch, setBillSearch] = useState("");
   const [preselectedBillerType, setPreselectedBillerType] = useState("");
+  const [preselectedBillerProvider, setPreselectedBillerProvider] = useState("");
   const [liabilities, setLiabilities] = useState(()=>JSON.parse(localStorage.getItem("arth_liabilities")||"[]"));
   const [trackedAssets, setTrackedAssets] = useState(()=>JSON.parse(localStorage.getItem("arth_assets")||"[]"));
   const [vehicles, setVehicles] = useState(()=>JSON.parse(localStorage.getItem("arth_vehicles")||"[]"));
@@ -11066,7 +11067,7 @@ function AppContent({ onLock }) {
 
   // -- BILLING TYPE HELPERS --------------------------------------------------
   const MEMBERSHIP_TYPES = ["Gym / Fitness","Club Membership","School Fees","Education Fees","Other Subscription","Insurance","Society Maintenance","Rental"];
-  const BILL_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Hospital","Other"];
+  const BILL_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Hospital","Other","Mobile Prepaid","Mobile Postpaid","Credit Card","Recurring Deposit","NPS","Municipal Tax","Municipal Services"];
   const HYBRID_TYPES = ["Mobile Postpaid","Mobile Prepaid","OTT / Streaming","NPS","Recurring Deposit","Loan EMI","Credit Card","Municipal Tax","Municipal Services"];
   const getBillerActionType = type => {
     if(MEMBERSHIP_TYPES.includes(type)) return "membership";
@@ -11448,8 +11449,14 @@ function AppContent({ onLock }) {
     const isEdit = !!existing;
     const [baName, setBaName] = useState(existing?.name||"");
     const [baType, setBaType] = useState(existing?.type||preselectedBillerType||"");
+    // If arriving from a specific category tap (not editing), the type is already decided —
+    // don't make the person re-pick from all 35 chips. Show a locked badge with a Change option instead.
+    // If a provider was also preselected (adding another account under an existing provider group,
+    // e.g. another number under "Jio"), lock that in too so it's not re-typed either.
+    const [showTypePicker, setShowTypePicker] = useState(!(!existing && preselectedBillerType));
     const [baConsumerNo, setBaConsumerNo] = useState(existing?.consumerNo||"");
-    const [baProvider, setBaProvider] = useState(existing?.provider||"");
+    const [baProvider, setBaProvider] = useState(existing?.provider||preselectedBillerProvider||"");
+    const providerIsLocked = !existing && !!preselectedBillerProvider;
     const [baAttributedTo, setBaAttributedTo] = useState(existing?.attributedTo||"");
     const [baAttributeType, setBaAttributeType] = useState(existing?.attributeType||"house");
     const [baNote, setBaNote] = useState(existing?.note||"");
@@ -11496,16 +11503,23 @@ function AppContent({ onLock }) {
             </div>
             <div>
               <span style={lbl}>Biller Type *</span>
-              <div style={{ display:"flex",flexWrap:"wrap",gap:8 }}>
-                {BILLER_TYPES.map(t=>{
-                  const isSelected = baType===t;
-                  return (
-                    <button key={t} onClick={()=>setBaType(t)} style={{ display:"flex",alignItems:"center",gap:5,background:isSelected?T.accent+"22":T.input,border:`1px solid ${isSelected?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>
-                      <span>{getBillerIcon(t)}</span>{t}
-                    </button>
-                  );
-                })}
-              </div>
+              {!showTypePicker ? (
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.accent+"18",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"8px 14px" }}>
+                  <span style={{ fontSize:13,fontWeight:700,color:T.accent }}>{getBillerIcon(baType)} {baType}</span>
+                  <button onClick={()=>setShowTypePicker(true)} style={{ background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Change</button>
+                </div>
+              ) : (
+                <div style={{ display:"flex",flexWrap:"wrap",gap:8 }}>
+                  {BILLER_TYPES.map(t=>{
+                    const isSelected = baType===t;
+                    return (
+                      <button key={t} onClick={()=>setBaType(t)} style={{ display:"flex",alignItems:"center",gap:5,background:isSelected?T.accent+"22":T.input,border:`1px solid ${isSelected?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>
+                        <span>{getBillerIcon(t)}</span>{t}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
             <div>
               <span style={lbl}>Consumer / Account Number</span>
@@ -11513,13 +11527,20 @@ function AppContent({ onLock }) {
             </div>
             <div>
               <span style={lbl}>Provider / Issuer</span>
-              <input style={inp} placeholder="e.g. Goa Electricity Dept, Jio, Adani" value={baProvider} onChange={e=>setBaProvider(e.target.value)}/>
+              {providerIsLocked ? (
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.accent+"18",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"8px 14px" }}>
+                  <span style={{ fontSize:13,fontWeight:700,color:T.accent }}>{baProvider}</span>
+                  <span style={{ fontSize:10,color:T.sub }}>Adding another account here</span>
+                </div>
+              ) : (
+                <input style={inp} placeholder="e.g. Goa Electricity Dept, Jio, Adani" value={baProvider} onChange={e=>setBaProvider(e.target.value)}/>
+              )}
             </div>
             <div>
               <span style={lbl}>Attributed To</span>
-              <div style={{ display:"flex",gap:6,marginBottom:8 }}>
-                {[["house","House"],["person","Person"],["group","Group"]].map(([v,l])=>(
-                  <button key={v} onClick={()=>{ setBaAttributeType(v); setBaAttributedTo(""); }} style={{ flex:1,background:baAttributeType===v?T.accent+"22":"none",border:`1px solid ${baAttributeType===v?T.accent:T.border}`,borderRadius:10,padding:"6px 4px",cursor:"pointer",fontSize:11,fontWeight:700,color:baAttributeType===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
+              <div style={{ display:"flex",gap:6,marginBottom:8,flexWrap:"wrap" }}>
+                {[["house","House"],["person","Person"],["group","Group"],...(vehicles.length>0?[["vehicle","Vehicle"]]:[])].map(([v,l])=>(
+                  <button key={v} onClick={()=>{ setBaAttributeType(v); setBaAttributedTo(""); }} style={{ flex:1,minWidth:70,background:baAttributeType===v?T.accent+"22":"none",border:`1px solid ${baAttributeType===v?T.accent:T.border}`,borderRadius:10,padding:"6px 4px",cursor:"pointer",fontSize:11,fontWeight:700,color:baAttributeType===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
                 ))}
               </div>
               {baAttributeType==="person"&&(
@@ -11540,6 +11561,16 @@ function AppContent({ onLock }) {
                 }}>
                   <option value="">Select group</option>
                   {groups.map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
+                </select>
+              )}
+              {baAttributeType==="vehicle"&&(
+                <select style={inp} value={baAttributedTo} onChange={e=>{
+                  const vid=e.target.value;
+                  setBaAttributedTo(vid);
+                  if(!baName.trim()){ const v=vehicles.find(x=>x.id===vid); if(v) setBaName(v.name||v.number||"Vehicle"); }
+                }}>
+                  <option value="">Select vehicle</option>
+                  {vehicles.map(v=><option key={v.id} value={v.id}>{v.name||v.number||"Vehicle"}{v.number?` · ${v.number}`:""}</option>)}
                 </select>
               )}
               {baAttributeType==="house"&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Shared household expense.</div>}
@@ -12302,7 +12333,7 @@ function AppContent({ onLock }) {
             </div>
           </div>
         )}
-        {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); }}/>}
+        {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); setPreselectedBillerProvider(""); }}/>}
         {categoryAccountsView&&(()=>{
           const type = categoryAccountsView;
           const accsOfType = billerAccounts.filter(ba=>ba.type===type);
@@ -12346,11 +12377,14 @@ function AppContent({ onLock }) {
                             </div>
                           );
                         })}
+                        {grp.key!=="Other"&&(
+                          <button onClick={()=>{ setShowAddBillerAccount(true); setPreselectedBillerType(type); setPreselectedBillerProvider(grp.key); setCategoryAccountsView(null); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:12,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add another under {grp.key}</button>
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
-                <button onClick={()=>{ setShowAddBillerAccount(true); setPreselectedBillerType(type); setCategoryAccountsView(null); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add another {type} account</button>
+                <button onClick={()=>{ setShowAddBillerAccount(true); setPreselectedBillerType(type); setPreselectedBillerProvider(""); setCategoryAccountsView(null); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add another {type} account</button>
               </div>
             </div>
           );
