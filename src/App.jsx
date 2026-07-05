@@ -5099,6 +5099,13 @@ function AppContent({ onLock }) {
                     setBillerLinkId(id);
                     const ba=billerAccounts.find(b=>b.id===id);
                     if(ba && getBillerActionType(ba.type)==="membership") setShowMembershipPanel(true);
+                    // Auto-attribute from the biller account's own "Attributed To" setting — but only if
+                    // nothing has been manually chosen yet in "Who is this for?", so this never overwrites
+                    // a deliberate choice the person already made.
+                    if(ba && ba.attributedTo && splitMode==="none" && attributePersonIds.length===0){
+                      if(ba.attributeType==="person"){ setTagPerson(String(ba.attributedTo)); setSplitMode("tag"); setTagMode("attribute"); setTagGroup(""); setSplitGroup(""); }
+                      else if(ba.attributeType==="group"){ setTagGroup(String(ba.attributedTo)); setSplitMode("tag"); setTagMode("attribute"); setTagPerson(""); setSplitGroup(""); }
+                    }
                   }}>
                     <option value="">Select biller account...</option>
                     {billerAccounts.map(ba=>(<option key={ba.id} value={ba.id}>{getBillerIcon(ba.type)} {ba.name} — {ba.type}</option>))}
@@ -11400,9 +11407,23 @@ function AppContent({ onLock }) {
     const daysToExpiry = baSubEnd ? Math.round((new Date(baSubEnd)-new Date())/(1000*60*60*24)) : null;
     const BILLER_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","Mobile Postpaid","Mobile Prepaid","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","OTT / Streaming","Insurance","Loan EMI","Credit Card","Recurring Deposit","NPS","School Fees","Education Fees","Municipal Tax","Municipal Services","Society Maintenance","Gym / Fitness","Club Membership","Hospital","Rental","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Other Subscription","Other"];
     const canSave = baName.trim() && baType;
+    const [duplicateError, setDuplicateError] = useState("");
     const handleSave = () => {
       if(!canSave) return;
-      const record = { id:existing?.id||genId(), name:baName.trim(), type:baType, consumerNo:baConsumerNo.trim(), provider:baProvider.trim(), attributedTo:baAttributedTo, attributeType:baAttributeType, note:baNote.trim(), createdAt:existing?.createdAt||Date.now(), subStart:baSubStart||null, subEnd:baSubEnd||null, autoRenew:baAutoRenew, billingCycle:baBillingCycle||null };
+      const trimmedConsumerNo = baConsumerNo.trim();
+      if(trimmedConsumerNo){
+        // Unique within the same type+provider (e.g. two Jio Prepaid accounts can't share a number),
+        // but the same number is fine across different biller types/providers (e.g. Jio Prepaid vs Jio Fiber).
+        const dup = billerAccounts.find(ba=>
+          ba.id!==(existing?.id||"") &&
+          ba.type===baType &&
+          (ba.provider||"").trim().toLowerCase()===baProvider.trim().toLowerCase() &&
+          (ba.consumerNo||"").trim()===trimmedConsumerNo
+        );
+        if(dup){ setDuplicateError(`"${trimmedConsumerNo}" is already used by "${dup.name}" under ${baType}${baProvider?` (${baProvider})`:""}. Use a different number, or edit that account instead.`); return; }
+      }
+      setDuplicateError("");
+      const record = { id:existing?.id||genId(), name:baName.trim(), type:baType, consumerNo:trimmedConsumerNo, provider:baProvider.trim(), attributedTo:baAttributedTo, attributeType:baAttributeType, note:baNote.trim(), createdAt:existing?.createdAt||Date.now(), subStart:baSubStart||null, subEnd:baSubEnd||null, autoRenew:baAutoRenew, billingCycle:baBillingCycle||null };
       setBillerAccounts(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[...prev,record]);
       onClose();
     };
@@ -11488,6 +11509,7 @@ function AppContent({ onLock }) {
                 </div>
               </div>
             )}
+            {duplicateError&&<div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",color:T.danger,fontSize:11,fontWeight:700 }}>{duplicateError}</div>}
             <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Biller Account"}</button>
           </div>
         </div>
@@ -12214,6 +12236,15 @@ function AppContent({ onLock }) {
         {categoryAccountsView&&(()=>{
           const type = categoryAccountsView;
           const accsOfType = billerAccounts.filter(ba=>ba.type===type);
+          // Group by provider (e.g. "Jio" vs "Airtel" within Mobile Prepaid) so accounts under the same
+          // specific biller cluster together, rather than one flat mixed list across providers.
+          const providerGroups = [];
+          accsOfType.forEach(ba=>{
+            const key = (ba.provider||"").trim() || "Other";
+            let grp = providerGroups.find(g=>g.key.toLowerCase()===key.toLowerCase());
+            if(!grp){ grp = { key, accounts:[] }; providerGroups.push(grp); }
+            grp.accounts.push(ba);
+          });
           return (
             <div onClick={e=>{ if(e.target===e.currentTarget) setCategoryAccountsView(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
               <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"80vh",overflowY:"auto" }}>
@@ -12225,22 +12256,29 @@ function AppContent({ onLock }) {
                   <button onClick={()=>setCategoryAccountsView(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
                 </div>
                 <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>ACCOUNTS ({accsOfType.length})</div>
-                <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
-                  {accsOfType.map(ba=>{
-                    const baBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
-                    const unpaidCount = baBills.filter(b=>b.status==="unpaid").length;
-                    const lastBill = [...baBills].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
-                    return (
-                      <div key={ba.id} onClick={()=>{ setActiveBillerForAction(ba); setCategoryAccountsView(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}` }}>
-                        <div>
-                          <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{ba.name}</div>
-                          <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{ba.consumerNo?`#${ba.consumerNo}`:ba.provider||""}</div>
-                          {lastBill&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Last: {sym}{fmt(lastBill.amount)} · {formatShortDate(lastBill.date)||lastBill.date}</div>}
-                        </div>
-                        {unpaidCount>0&&<div style={{ background:T.danger,color:"#fff",borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:800 }}>{unpaidCount} unpaid</div>}
+                <div style={{ display:"flex",flexDirection:"column",gap:14,marginBottom:14 }}>
+                  {providerGroups.map(grp=>(
+                    <div key={grp.key}>
+                      {providerGroups.length>1&&<div style={{ color:T.accent,fontSize:11,fontWeight:800,letterSpacing:0.5,marginBottom:6 }}>{grp.key.toUpperCase()}</div>}
+                      <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                        {grp.accounts.map(ba=>{
+                          const baBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
+                          const unpaidCount = baBills.filter(b=>b.status==="unpaid").length;
+                          const lastBill = [...baBills].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
+                          return (
+                            <div key={ba.id} onClick={()=>{ setActiveBillerForAction(ba); setCategoryAccountsView(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}` }}>
+                              <div>
+                                <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{ba.name}</div>
+                                <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{ba.consumerNo?`#${ba.consumerNo}`:ba.provider||""}</div>
+                                {lastBill&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Last: {sym}{fmt(lastBill.amount)} · {formatShortDate(lastBill.date)||lastBill.date}</div>}
+                              </div>
+                              {unpaidCount>0&&<div style={{ background:T.danger,color:"#fff",borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:800 }}>{unpaidCount} unpaid</div>}
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
                 <button onClick={()=>{ setShowAddBillerAccount(true); setPreselectedBillerType(type); setCategoryAccountsView(null); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add another {type} account</button>
               </div>
