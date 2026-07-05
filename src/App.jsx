@@ -2736,6 +2736,7 @@ function AppContent({ onLock }) {
     const [note, setNote] = useState(isEditing ? (sourceTxn.note || "") : (refundPrefill ? `Refund for ${refundPrefill.desc||refundPrefill.merchant||"expense"}` : (safePrefill.note || "")));
     const [billerLinkId, setBillerLinkId] = useState(isEditing ? (sourceTxn.billerLinkId||"") : "");
     const [settleSelectedIds, setSettleSelectedIds] = useState({});
+    const [settleAmounts, setSettleAmounts] = useState({});
     const [guestPersonName, setGuestPersonName] = useState("");
     const [discount, setDiscount] = useState("");
     const [guestPersonAmount, setGuestPersonAmount] = useState("");
@@ -2807,6 +2808,11 @@ function AppContent({ onLock }) {
     const [settlementTagGroup, setSettlementTagGroup] = useState(isEditing && sourceTxn?.type==="settlement_in" ? (sourceTxn.fromGroupId||"") : "");
     const [collectMap, setCollectMap] = useState(initialCollectMap);
     const [includeMeInSplit, setIncludeMeInSplit] = useState(isEditing ? Boolean(sourceTxn?.people?.__me__) : true);
+    // Multi-person attribution with custom per-person amounts (e.g. 70/30), distinct from single-person
+    // tag/owe flow and from group split/collect. Restored on edit from a people map with 2+ spent_on entries.
+    const initialAttributeEntries = isEditing ? Object.entries(sourceTxn?.people||{}).filter(([pid,info])=>pid!=="__me__" && info?.mode==="spent_on") : [];
+    const [attributePeople, setAttributePeople] = useState(()=> initialAttributeEntries.length>1 ? Object.fromEntries(initialAttributeEntries.map(([pid])=>[pid,true])) : {});
+    const [attributeAmounts, setAttributeAmounts] = useState(()=> initialAttributeEntries.length>1 ? Object.fromEntries(initialAttributeEntries.map(([pid,info])=>[pid,String(info.amount||0)])) : {});
     const [catAllocations, setCatAllocations] = useState(isEditing ? (sourceTxn?.catAllocations || {}) : {});
     const [lastEditedCatId, setLastEditedCatId] = useState("");
     const [investType, setInvestType] = useState(isEditing ? (sourceTxn.investType || linkedInvestment?.type || "mf") : (safePrefill.investType||"mf"));
@@ -3181,10 +3187,21 @@ function AppContent({ onLock }) {
     },[]);
     useEffect(()=>{
       if(txnType!=="expense" || catIds.length<=1) return;
-      const hasAll = catIds.every(cid=>catAllocations[cid]!==undefined && catAllocations[cid]!=="");
-      if(hasAll) return;
-      setCatAllocations(buildEqualCategoryAllocations(catIds, amt));
+      // Only backfill categories that have never been given a value at all (key missing entirely).
+      // Previously this checked for non-empty values too, so clearing one field to type a new number
+      // (e.g. clearing "50" to type "70") looked identical to "never set" and reset the whole map back
+      // to an equal split before the new digit could be typed.
+      const hasAllKeys = catIds.every(cid=>catAllocations[cid]!==undefined);
+      if(hasAllKeys) return;
+      setCatAllocations(prev=>({ ...buildEqualCategoryAllocations(catIds, amt), ...prev }));
     },[txnType,catIds,amt,catAllocations,buildEqualCategoryAllocations]);
+    const attributePersonIds = Object.keys(attributePeople).filter(pid=>attributePeople[pid]);
+    useEffect(()=>{
+      if(attributePersonIds.length<=1) return;
+      const hasAllKeys = attributePersonIds.every(pid=>attributeAmounts[pid]!==undefined);
+      if(hasAllKeys) return;
+      setAttributeAmounts(prev=>({ ...buildEqualCategoryAllocations(attributePersonIds, amt), ...prev }));
+    },[attributePersonIds.join(","),amt,attributeAmounts,buildEqualCategoryAllocations]);
     const emiDownPaymentValue = showEmiDownPayment ? Math.min(amt, Math.max(0, parseMoney(emiDownPayment)||0)) : 0;
     const financedAmount = Math.max(0, amt - emiDownPaymentValue);
     const investmentSuggestions = useMemo(()=>{
@@ -3814,6 +3831,11 @@ function AppContent({ onLock }) {
           tagItems:savedTagItems,
           vehicleId:vehicleId||null,
           people:(()=>{
+            // Multi-person attribution with custom per-person amounts — checked first since it's a
+            // separate selection path from the single-person tag flow below.
+            if(attributePersonIds.length>0){
+              return Object.fromEntries(attributePersonIds.map(pid=>[pid,{ amount:Number(attributeAmounts[pid])||0, mode:"spent_on", settled:false }]));
+            }
             if(splitMode==="split"||splitMode==="allocate"||splitMode==="unified") return psplit;
             // tagMode="person" = they owe me back — save as receivable in people map
             if(splitMode==="tag" && tagMode==="person" && tagPerson){
@@ -3901,40 +3923,54 @@ function AppContent({ onLock }) {
         if(!isEditing){
           const pending = txns.filter(t=>t.type==="expense" && t.reimbursable && !t.reimbursedByTxnId);
           if(pending.length>0) setReimbursementMatchSuggestion({ incomeTxnId:resolvedTxnId, pending });
-          // Process settlements if any selected
-          const selectedIds = Object.keys(settleSelectedIds).filter(k=>settleSelectedIds[k]);
-          if(selectedIds.length>0){
-            setTxns(prev=>prev.map(t=>{
-              if(t.type!=="expense") return t;
-              let updated = {...t}; let changed = false;
-              selectedIds.forEach(id=>{
-                const grp = groups.find(g=>g.id===id);
-                if(!grp){
-                  const info = updated.people?.[id] || updated.splitPeople?.[id];
-                  if(info && !info.settled && info.mode==="owes"){
-                    const s = {...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0};
-                    if(updated.people?.[id]){ updated={...updated,people:{...updated.people,[id]:s}}; changed=true; }
-                    else if(updated.splitPeople?.[id]){ updated={...updated,splitPeople:{...updated.splitPeople,[id]:s}}; changed=true; }
-                  }
-                } else {
-                  if(updated.groupId===id){ updated={...updated,groupCollectiveSettledAmt:Number(updated.groupCollectiveAmount||0)}; changed=true; }
-                  (grp.members||[]).forEach(pid=>{
-                    const info = updated.people?.[pid] || updated.splitPeople?.[pid];
-                    if(info && !info.settled && info.mode==="owes"){
-                      const s = {...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0};
-                      if(updated.people?.[pid]){ updated={...updated,people:{...updated.people,[pid]:s}}; changed=true; }
-                      else if(updated.splitPeople?.[pid]){ updated={...updated,splitPeople:{...updated.splitPeople,[pid]:s}}; changed=true; }
-                    }
-                  });
-                }
-              });
-              return changed ? updated : t;
-            }));
-            setLoans(prev=>prev.map(l=>{
-              if(l.direction==="taken"||l.status!=="active") return l;
-              const pid = String(l.personId||l.linkedPersonId||"");
-              return selectedIds.includes(pid) ? {...l,status:"closed",outstanding:0} : l;
-            }));
+          // Process settlements — per specific transaction/loan row, with the exact (possibly partial) amount entered
+          const selectedKeys = Object.keys(settleSelectedIds).filter(k=>settleSelectedIds[k]);
+          if(selectedKeys.length>0){
+            const paidFor = (key)=>Math.max(0, parseFloat(settleAmounts[key])||0);
+            const txnKeys = selectedKeys.filter(k=>k.startsWith("txn_"));
+            const grpKeys = selectedKeys.filter(k=>k.startsWith("grp_"));
+            const loanKeys = selectedKeys.filter(k=>k.startsWith("loan_"));
+            if(txnKeys.length>0 || grpKeys.length>0){
+              setTxns(prev=>prev.map(t=>{
+                let updated = t; let changed = false;
+                txnKeys.forEach(key=>{
+                  // key = txn_{txnId}_{personId} — split on first two underscores only, personId may itself not contain underscores (genId doesn't produce them)
+                  const rest = key.slice(4);
+                  const sep = rest.indexOf("_");
+                  const txnId = rest.slice(0,sep);
+                  const pid = rest.slice(sep+1);
+                  if(String(t.id)!==String(txnId)) return;
+                  const info = updated.people?.[pid] || updated.splitPeople?.[pid];
+                  if(!info || info.settled || info.mode!=="owes") return;
+                  const paid = Math.min(paidFor(key), remainingShare(info));
+                  const newRemaining = Math.max(0, remainingShare(info)-paid);
+                  const s = {...info, settledAmt:Number(info.settledAmt||0)+paid, remainingAmt:newRemaining, settled:newRemaining<=0.01};
+                  if(updated.people?.[pid]){ updated={...updated,people:{...updated.people,[pid]:s}}; changed=true; }
+                  else if(updated.splitPeople?.[pid]){ updated={...updated,splitPeople:{...updated.splitPeople,[pid]:s}}; changed=true; }
+                });
+                grpKeys.forEach(key=>{
+                  // key = grp_{txnId}_{groupId}
+                  const rest = key.slice(4);
+                  const sep = rest.indexOf("_");
+                  const txnId = rest.slice(0,sep);
+                  const gid = rest.slice(sep+1);
+                  if(String(t.id)!==String(txnId) || String(updated.groupId)!==String(gid)) return;
+                  const paid = Math.min(paidFor(key), Number(updated.groupCollectiveAmount||0)-Number(updated.groupCollectiveSettledAmt||0));
+                  updated = {...updated, groupCollectiveSettledAmt:Number(updated.groupCollectiveSettledAmt||0)+paid};
+                  changed = true;
+                });
+                return changed ? updated : t;
+              }));
+            }
+            if(loanKeys.length>0){
+              setLoans(prev=>prev.map(l=>{
+                const key = `loan_${l.id}`;
+                if(!loanKeys.includes(key)) return l;
+                const paid = Math.min(paidFor(key), Number(l.outstanding||0));
+                const newOutstanding = Math.max(0, Number(l.outstanding||0)-paid);
+                return {...l, outstanding:newOutstanding, status:newOutstanding<=0.01?"closed":l.status};
+              }));
+            }
           }
         }
       } else if(txnType==="transfer"){
@@ -4381,57 +4417,81 @@ function AppContent({ onLock }) {
                 <IncomeTypeChips options={incomeTypeChoices} value={incomeType} onChange={setIncomeType} />
                 <span style={lbl}>Into account</span>
                 <AccountChipGroup items={nonCCAccs} value={accId} onChange={setAccId} />
-                {/* Settlement multi-select */}
+                {/* Settlement multi-select — per-transaction rows with editable partial amounts */}
                 {(()=>{
-                  const allOutstanding = [
-                    ...people.filter(p=>!p.isMe).map(p=>{
-                      const s=settlements[p.id]||{owesMe:0};
-                      const loanOwed=activeLoans.filter(l=>l.direction!=="taken"&&l.status==="active"&&String(l.personId||l.linkedPersonId||"")===String(p.id)).reduce((sum,l)=>sum+Number(l.outstanding||0),0);
-                      const total=(s.owesMe||0)+loanOwed;
-                      if(total<=0) return null;
-                      return { type:"person", id:p.id, label:`${p.emoji} ${p.name}`, amount:total, color:p.color };
-                    }).filter(Boolean),
-                    ...groups.map(g=>{
-                      const groupTxns = txns.filter(t=>t.type==="expense"&&t.groupId===g.id&&t.trackingMode!=="none");
-                      const groupOwed = groupTxns.reduce((s,t)=>s+(getGroupCollectiveDue(t)||0),0);
-                      const memberOwed = (g.members||[]).reduce((s,pid)=>{
-                        const ps=settlements[pid]||{owesMe:0};
-                        return s+(ps.owesMe||0);
-                      },0);
-                      const total=groupOwed+memberOwed;
-                      if(total<=0) return null;
-                      return { type:"group", id:g.id, label:`${g.icon||"\xf0\x9f\x91\xa5"} ${g.name}`, amount:total, color:g.color };
-                    }).filter(Boolean),
-                  ];
-                  if(allOutstanding.length===0) return null;
+                  const outstandingRows = [];
+                  txns.forEach(t=>{
+                    if(t.type!=="expense") return;
+                    const peopleMap = (t.people && Object.keys(t.people).length) ? t.people : (t.splitPeople||{});
+                    Object.entries(peopleMap).forEach(([pid,info])=>{
+                      if(pid==="__me__" || info?.mode!=="owes") return;
+                      const rem = remainingShare(info);
+                      if(rem<=0) return;
+                      const p = getPerson(pid);
+                      outstandingRows.push({ key:`txn_${t.id}_${pid}`, kind:"txn", txnId:t.id, personId:pid, label:`${p.emoji||"👤"} ${p.name}`, sub:`${t.merchant||t.who||t.desc||"Expense"} · ${formatShortDate(t.date)||t.date}`, remaining:rem, color:p.color });
+                    });
+                    if(t.groupId){
+                      const due = getGroupCollectiveDue(t)||0;
+                      if(due>0){
+                        const g = groups.find(x=>x.id===t.groupId);
+                        if(g) outstandingRows.push({ key:`grp_${t.id}_${g.id}`, kind:"group", txnId:t.id, groupId:g.id, label:`${g.icon||"👥"} ${g.name}`, sub:`${t.merchant||t.who||t.desc||"Expense"} · ${formatShortDate(t.date)||t.date}`, remaining:due, color:g.color });
+                      }
+                    }
+                  });
+                  activeLoans.filter(l=>l.direction!=="taken").forEach(l=>{
+                    const pid = String(l.personId||l.linkedPersonId||"");
+                    const p = pid ? getPerson(pid) : null;
+                    if(!p) return;
+                    outstandingRows.push({ key:`loan_${l.id}`, kind:"loan", loanId:l.id, personId:pid, label:`${p.emoji||"👤"} ${p.name}`, sub:`Loan given${l.note?` · ${l.note}`:""}`, remaining:Number(l.outstanding||0), color:p.color });
+                  });
+                  if(outstandingRows.length===0) return null;
                   // Only show settlement for receivable-type income, not salary/interest/passive
                   const NON_SETTLEMENT_TYPES = ["salary","interest","dividend","capital_gains","royalty"];
                   const currentIncomeType = normalizeIncomeTypeValue(incomeType||"salary")||"salary";
                   if(NON_SETTLEMENT_TYPES.includes(currentIncomeType)) return null;
+                  const selectedCount = Object.keys(settleSelectedIds).filter(k=>settleSelectedIds[k]).length;
+                  const selectedTotal = outstandingRows.filter(r=>settleSelectedIds[r.key]).reduce((s,r)=>s+(parseFloat(settleAmounts[r.key])||0),0);
                   return (
                     <div style={{ marginTop:12 }}>
-                      <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>SETTLE OUTSTANDING (optional)</div>
+                      <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>SETTLE OUTSTANDING (optional) — pick specific expenses, edit amount if it's a partial payment</div>
                       <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-                        {allOutstanding.map(item=>{
-                          const isSelected=!!settleSelectedIds[item.id];
+                        {outstandingRows.map(row=>{
+                          const isSelected=!!settleSelectedIds[row.key];
                           return (
-                            <div key={item.id} onClick={()=>setSettleSelectedIds(prev=>({...prev,[item.id]:!prev[item.id]}))} style={{ display:"flex",alignItems:"center",gap:10,background:isSelected?item.color+"16":T.input,border:`1px solid ${isSelected?item.color:T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer" }}>
-                              <div style={{ width:20,height:20,borderRadius:5,background:isSelected?item.color:"none",border:`2px solid ${isSelected?item.color:T.border}`,display:"flex",alignItems:"center",justifyContent:"center" }}>
-                                {isSelected&&<span style={{ color:"#fff",fontSize:12,fontWeight:900 }}>\xe2\x9c\x93</span>}
+                            <div key={row.key} style={{ background:isSelected?row.color+"16":T.input,border:`1px solid ${isSelected?row.color:T.border}`,borderRadius:12,padding:"10px 14px" }}>
+                              <div onClick={()=>{
+                                setSettleSelectedIds(prev=>({...prev,[row.key]:!prev[row.key]}));
+                                setSettleAmounts(prev=>prev[row.key]!==undefined?prev:{...prev,[row.key]:String(row.remaining)});
+                              }} style={{ display:"flex",alignItems:"center",gap:10,cursor:"pointer" }}>
+                                <div style={{ width:20,height:20,borderRadius:5,background:isSelected?row.color:"none",border:`2px solid ${isSelected?row.color:T.border}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+                                  {isSelected&&<span style={{ color:"#fff",fontSize:12,fontWeight:900 }}>✓</span>}
+                                </div>
+                                <div style={{ flex:1,minWidth:0 }}>
+                                  <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{row.label}</div>
+                                  <div style={{ color:T.sub,fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{row.sub}</div>
+                                </div>
+                                <div style={{ color:row.color,fontSize:12,fontWeight:800 }}>{sym}{fmt(row.remaining)} owed</div>
                               </div>
-                              <div style={{ flex:1 }}>
-                                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{item.label}</div>
-                                <div style={{ color:T.sub,fontSize:10 }}>{item.type==="group"?"Group + members total":"Outstanding"}</div>
-                              </div>
-                              <div style={{ color:item.color,fontSize:13,fontWeight:800 }}>{sym}{fmt(item.amount)}</div>
+                              {isSelected&&(
+                                <div style={{ display:"flex",alignItems:"center",justifyContent:"flex-end",gap:8,marginTop:8 }}>
+                                  <span style={{ color:T.sub,fontSize:11 }}>Received</span>
+                                  <input style={{ ...inpSm, width:90, textAlign:"right" }} type="number" min="0" max={row.remaining} value={settleAmounts[row.key]??""} placeholder="0" onChange={e=>{
+                                    const raw=e.target.value;
+                                    if(raw===""){ setSettleAmounts(prev=>({...prev,[row.key]:""})); return; }
+                                    const parsed=parseFloat(raw);
+                                    const safe=Number.isFinite(parsed)?Math.max(0,Math.min(row.remaining,parsed)):0;
+                                    setSettleAmounts(prev=>({...prev,[row.key]:String(Math.round(safe*100)/100)}));
+                                  }}/>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
                       </div>
-                      {Object.keys(settleSelectedIds).filter(k=>settleSelectedIds[k]).length>0&&(
+                      {selectedCount>0&&(
                         <div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",marginTop:8,display:"flex",justifyContent:"space-between" }}>
-                          <span style={{ color:T.sub,fontSize:11 }}>Settling</span>
-                          <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{Object.keys(settleSelectedIds).filter(k=>settleSelectedIds[k]).length} items selected</span>
+                          <span style={{ color:T.sub,fontSize:11 }}>Settling {selectedCount} item{selectedCount>1?"s":""}</span>
+                          <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{sym}{fmt(selectedTotal)}</span>
                         </div>
                       )}
                     </div>
@@ -4915,12 +4975,13 @@ function AppContent({ onLock }) {
               <div>
                 <span style={lbl}>Who is this for? (optional)</span>
                 <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:10 }}>
-                  <button onClick={()=>{ setSplitMode("none"); setTagPerson(""); setTagGroup(""); setSplitPeople({}); setSplitGroup(""); }} style={{ background:splitMode==="none"?T.accent+"22":"none",border:`1px solid ${splitMode==="none"?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:splitMode==="none"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>😎 Me only</button>
+                  <button onClick={()=>{ setSplitMode("none"); setTagPerson(""); setTagGroup(""); setSplitPeople({}); setSplitGroup(""); setAttributePeople({}); setAttributeAmounts({}); }} style={{ background:splitMode==="none"?T.accent+"22":"none",border:`1px solid ${splitMode==="none"?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:splitMode==="none"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>😎 Me only</button>
                   {people.filter(p=>!p.isMe).map(p=>{ const isSelected=tagPerson===String(p.id); return (
-                    <button key={p.id} onClick={()=>{ if(tagPerson===String(p.id)){ setTagPerson(""); setSplitMode("none"); } else { setTagPerson(String(p.id)); setSplitMode("tag"); setTagGroup(""); setSplitGroup(""); } }} style={{ background:isSelected?p.color+"22":"none",border:`1px solid ${isSelected?p.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                    <button key={p.id} onClick={()=>{ setAttributePeople({}); setAttributeAmounts({}); if(tagPerson===String(p.id)){ setTagPerson(""); setSplitMode("none"); } else { setTagPerson(String(p.id)); setSplitMode("tag"); setTagGroup(""); setSplitGroup(""); } }} style={{ background:isSelected?p.color+"22":"none",border:`1px solid ${isSelected?p.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
                   ); })}
                   {groups.map(g=>{ const isSelected=tagGroup===g.id||splitGroup===g.id; return (
                     <button key={g.id} onClick={()=>{
+                      setAttributePeople({}); setAttributeAmounts({});
                       if(isSelected){ setTagGroup(""); setSplitGroup(""); setSplitMode("none"); }
                       else {
                         const di=g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
@@ -4930,8 +4991,33 @@ function AppContent({ onLock }) {
                     }} style={{ background:isSelected?g.color+"22":"none",border:`1px solid ${isSelected?g.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon||"👥"} {g.name}</button>
                   ); })}
                   <button onClick={()=>setShowGuestPerson(v=>!v)} style={{ background:showGuestPerson?T.warn+"22":"none",border:`1px solid ${showGuestPerson?T.warn:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showGuestPerson?T.warn:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 One-time</button>
+                  <button onClick={()=>{
+                    if(attributePersonIds.length>0){ setAttributePeople({}); setAttributeAmounts({}); }
+                    else { setSplitMode("none"); setTagPerson(""); setTagGroup(""); setSplitPeople({}); setSplitGroup(""); setAttributePeople({__pending__:true}); }
+                  }} style={{ background:(attributePersonIds.length>0||attributePeople.__pending__)?T.purple+"22":"none",border:`1px solid ${(attributePersonIds.length>0||attributePeople.__pending__)?T.purple:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:(attributePersonIds.length>0||attributePeople.__pending__)?T.purple:T.sub,fontFamily:"Nunito,sans-serif" }}>👥 Multiple people</button>
                 </div>
-                {/* Guest person - one time, not saved */}
+                {/* Multi-person attribution with custom per-person amounts */}
+                {(attributePersonIds.length>0||attributePeople.__pending__)&&(
+                  <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
+                    <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>Select everyone this expense is for — no collection, budget attributed to each</div>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
+                      {people.filter(p=>!p.isMe).map(p=>{ const isOn=Boolean(attributePeople[p.id]); return (
+                        <button key={p.id} onClick={()=>{ setAttributePeople(prev=>{ const next={...prev}; delete next.__pending__; if(next[p.id]) delete next[p.id]; else next[p.id]=true; return next; }); setAttributeAmounts(prev=>{ const next={...prev}; delete next[p.id]; return next; }); }} style={{ background:isOn?p.color+"22":"none",border:`1px solid ${isOn?p.color:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:isOn?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                      ); })}
+                    </div>
+                    {attributePersonIds.length>0&&(
+                      <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                        {attributePersonIds.map(pid=>{ const p=getPerson(pid); return (
+                          <div key={pid} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
+                            <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{p.emoji} {p.name}</span>
+                            <input style={{ ...inpSm, width:90, textAlign:"right" }} type="number" min="0" value={attributeAmounts[pid]||""} placeholder="0" onChange={e=>setAttributeAmounts(prev=>updateCategoryAllocation(attributePersonIds,pid,e.target.value,amt,prev))}/>
+                          </div>
+                        ); })}
+                        <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Total: {sym}{fmt(attributePersonIds.reduce((s,pid)=>s+(parseFloat(attributeAmounts[pid])||0),0))} of {sym}{fmt(amt)}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {showGuestPerson&&(
                   <div style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
                     <div style={{ color:T.warn,fontSize:11,fontWeight:700,marginBottom:8 }}>👤 One-time person — not saved to your contacts</div>
@@ -5186,9 +5272,28 @@ function AppContent({ onLock }) {
     const [iSubId, setISubId] = useState(editItem?.subId||"");
     const iTotal = (parseFloat(iQty)||0) * (parseFloat(iPrice)||0);
     const iCat = iCatId ? getCat(iCatId) : null;
+    // Item memory: look up a previously-used item by name (case-insensitive) and auto-fill its
+    // remembered category/sub-category/unit — but only into fields still empty, so it never
+    // overwrites something the user already chose (same fight-the-user pitfall as the category-split bug).
+    const applyItemMemory = () => {
+      if(editingItemId || !iName.trim()) return;
+      const match = itemCatalog.find(it=>it.name.toLowerCase()===iName.trim().toLowerCase());
+      if(!match) return;
+      if(!iCatId && match.catId) setICatId(match.catId);
+      if(!iSubId && match.subId) setISubId(match.subId);
+      if(iUnit==="nos" && match.unit) setIUnit(match.unit);
+    };
     const handleSave = () => {
       if(!iName.trim()) return;
       onSave({ id: editingItemId||genId(), label:iName.trim(), qty:iQty, unit:iUnit, unitPrice:iPrice, catId:iCatId||null, subId:iSubId||null });
+      // Remember this item's category/sub-category/unit for next time, keyed by name (case-insensitive).
+      const nameKey = iName.trim();
+      setItemCatalog(prev=>{
+        const idx = prev.findIndex(it=>it.name.toLowerCase()===nameKey.toLowerCase());
+        const entry = { id: idx>=0?prev[idx].id:genId(), name:nameKey, unit:iUnit||"nos", catId:iCatId||"", subId:iSubId||"" };
+        if(idx>=0){ const next=[...prev]; next[idx]=entry; return next; }
+        return [...prev, entry];
+      });
       onClose();
     };
     return (
@@ -5201,7 +5306,7 @@ function AppContent({ onLock }) {
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
             <div>
               <span style={lbl}>Item Name *</span>
-              <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. Milk, Petrol, Shampoo" value={iName} onChange={e=>setIName(e.target.value)} autoFocus/>
+              <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. Milk, Petrol, Shampoo" value={iName} onChange={e=>setIName(e.target.value)} onBlur={applyItemMemory} autoFocus/>
             </div>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
               <div><span style={lbl}>Qty</span><input style={{ ...inp,textAlign:"center" }} type="number" min="0" placeholder="1" value={iQty} onChange={e=>setIQty(e.target.value)}/></div>
