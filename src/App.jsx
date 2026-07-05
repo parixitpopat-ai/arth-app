@@ -6306,11 +6306,16 @@ function AppContent({ onLock }) {
   // ── HOME ───────────────────────────────────────────────────────────────────
 
   const DEFAULT_CARD_ORDER = ["household","health","stats","categories","cc","bills","recent"];
-  const KNOWN_CARD_KEYS = new Set(["stats","budget","categories","cc","bills","recent"]);
+  const KNOWN_CARD_KEYS = new Set(DEFAULT_CARD_ORDER);
   const [cardOrder, setCardOrder] = useState(()=>{
     const saved = JSON.parse(localStorage.getItem("arth_card_order")||"null");
     const filtered = Array.isArray(saved) ? saved.filter(k=>KNOWN_CARD_KEYS.has(k)) : [];
-    return filtered.length ? filtered : DEFAULT_CARD_ORDER;
+    // Backfill any card keys added to the app after this user's order was last saved,
+    // instead of silently dropping them forever (previous bug: new cards never appeared
+    // for existing users/accounts since the filter only removed invalid keys, never added new ones).
+    const missing = DEFAULT_CARD_ORDER.filter(k=>!filtered.includes(k));
+    const merged = [...filtered, ...missing];
+    return merged.length ? merged : DEFAULT_CARD_ORDER;
   });
   const [editingCards, setEditingCards] = useState(false);
   const [syncEmail, setSyncEmail] = useState("");
