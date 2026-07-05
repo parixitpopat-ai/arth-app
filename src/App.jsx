@@ -936,6 +936,7 @@ function AppContent({ onLock }) {
   const [activeBillerForAction, setActiveBillerForAction] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null); // { message, onConfirm }
   const askConfirm = (message, onConfirm) => setConfirmDialog({ message, onConfirm });
+  const [categoryAccountsView, setCategoryAccountsView] = useState(null); // holds biller "type" string when viewing its accounts list
   const [showAddBillerAccount, setShowAddBillerAccount] = useState(false);
   const [editingBillerAccount, setEditingBillerAccount] = useState(null);
   const [billSearch, setBillSearch] = useState("");
@@ -11060,16 +11061,16 @@ function AppContent({ onLock }) {
                   <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:12 }}>{cat.label}</div>
                   <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12 }}>
                     {filtered2.map(type=>{
-                      const existingBA = billerAccounts.find(ba=>ba.type===type);
-                      const unpaid = existingBA ? bills.filter(b=>String(b.billerAccountId)===String(existingBA.id)&&b.status==="unpaid").length : 0;
+                      const accsOfType = billerAccounts.filter(ba=>ba.type===type);
+                      const unpaid = accsOfType.reduce((sum,ba)=>sum+bills.filter(b=>String(b.billerAccountId)===String(ba.id)&&b.status==="unpaid").length,0);
                       const actionType = getBillerActionType(type);
                       return (
                         <div key={type} onClick={()=>{
-                          if(existingBA){
-                            setActiveBillerForAction(existingBA);
-                          } else {
+                          if(accsOfType.length===0){
                             setShowAddBillerAccount(true);
                             setPreselectedBillerType(type);
+                          } else {
+                            setCategoryAccountsView(type);
                           }
                         }} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:6,cursor:"pointer",position:"relative" }}>
                           {unpaid>0&&<div style={{ position:"absolute",top:-4,right:4,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 5px",fontSize:8,fontWeight:800 }}>{unpaid}</div>}
@@ -12105,6 +12106,42 @@ function AppContent({ onLock }) {
           </div>
         )}
         {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); }}/>}
+        {categoryAccountsView&&(()=>{
+          const type = categoryAccountsView;
+          const accsOfType = billerAccounts.filter(ba=>ba.type===type);
+          return (
+            <div onClick={e=>{ if(e.target===e.currentTarget) setCategoryAccountsView(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+              <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"80vh",overflowY:"auto" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                    <span style={{ fontSize:24 }}>{getBillerIcon(type)}</span>
+                    <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{type}</div>
+                  </div>
+                  <button onClick={()=>setCategoryAccountsView(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+                </div>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>ACCOUNTS ({accsOfType.length})</div>
+                <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
+                  {accsOfType.map(ba=>{
+                    const baBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
+                    const unpaidCount = baBills.filter(b=>b.status==="unpaid").length;
+                    const lastBill = [...baBills].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
+                    return (
+                      <div key={ba.id} onClick={()=>{ setActiveBillerForAction(ba); setCategoryAccountsView(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}` }}>
+                        <div>
+                          <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{ba.name}</div>
+                          <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{ba.consumerNo?`#${ba.consumerNo}`:ba.provider||""}</div>
+                          {lastBill&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Last: {sym}{fmt(lastBill.amount)} · {formatShortDate(lastBill.date)||lastBill.date}</div>}
+                        </div>
+                        {unpaidCount>0&&<div style={{ background:T.danger,color:"#fff",borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:800 }}>{unpaidCount} unpaid</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+                <button onClick={()=>{ setShowAddBillerAccount(true); setPreselectedBillerType(type); setCategoryAccountsView(null); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add another {type} account</button>
+              </div>
+            </div>
+          );
+        })()}
         {showAddMembership&&activeBillerForAction&&<AddMembershipModal billerAccount={activeBillerForAction} existing={editingMembership} onClose={()=>{ setShowAddMembership(false); setEditingMembership(null); }}/>}
         {showAddFeePayment&&activeBillerForAction&&<AddFeePaymentModal billerAccount={activeBillerForAction} onClose={()=>{ setShowAddFeePayment(false); setActiveBillerForAction(null); }}/>}
         {/* Biller Action Sheet */}
@@ -12481,6 +12518,13 @@ function AppContent({ onLock }) {
           const tCats = (t.catIds||[t.catId]).filter(Boolean).map(cid=>cats.find(c=>String(c.id)===String(cid))?.name).filter(Boolean);
           const billerBA = t.billerLinkId ? billerAccounts.find(b=>b.id===t.billerLinkId) : null;
           const color = txnColor(t.type,T);
+          // Who this transaction is attributed to — group and/or person, restored from t.groupId / t.people / t.forPerson.
+          const attrGroup = t.groupId ? groups.find(g=>g.id===t.groupId) : null;
+          const attrGroupLabel = attrGroup ? (t.splitMode==="split" ? "Split (collect)" : "Attributed") : null;
+          const attrPersonId = t.forPerson || t.taggedPersonId || Object.keys(t.people||{}).find(pid=>pid!=="__me__") || null;
+          const attrPerson = attrPersonId ? getPerson(attrPersonId) : null;
+          const attrPersonInfo = attrPersonId ? (t.people?.[attrPersonId] || t.splitPeople?.[attrPersonId]) : null;
+          const attrPersonLabel = attrPersonInfo?.mode==="owes" ? "Owes you" : attrPersonInfo?.mode==="spent_on" ? "Attributed to" : null;
           return (
             <div onClick={()=>setTxnDetailId(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
               <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
@@ -12496,6 +12540,8 @@ function AppContent({ onLock }) {
                 </div>
                 <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
                   {tCats.length>0&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Category</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{tCats.join(", ")}</span></div>}
+                  {attrGroup&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>{attrGroupLabel}</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{attrGroup.icon||"👥"} {attrGroup.name}</span></div>}
+                  {attrPerson&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>{attrPersonLabel||"Who is this for"}</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{attrPerson.emoji||"👤"} {attrPerson.name}</span></div>}
                   {t.note&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Note</span><span style={{ color:T.text,fontSize:12 }}>{t.note}</span></div>}
                   {t.transactionRef&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Ref</span><span style={{ color:T.text,fontSize:12 }}>{t.transactionRef}</span></div>}
                   {t.priceMrp&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>MRP</span><span style={{ color:T.text,fontSize:12 }}>{sym}{fmt(t.priceMrp)}</span></div>}
