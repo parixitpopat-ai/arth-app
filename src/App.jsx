@@ -934,6 +934,7 @@ function AppContent({ onLock }) {
   const [editingMembership, setEditingMembership] = useState(null);
   const [showAddFeePayment, setShowAddFeePayment] = useState(false);
   const [activeBillerForAction, setActiveBillerForAction] = useState(null);
+  const [attachExpensesFor, setAttachExpensesFor] = useState(null); // holds the biller account while picking old unlinked expenses to attach
   const [confirmDialog, setConfirmDialog] = useState(null); // { message, onConfirm }
   const askConfirm = (message, onConfirm) => setConfirmDialog({ message, onConfirm });
   const [categoryAccountsView, setCategoryAccountsView] = useState(null); // holds biller "type" string when viewing its accounts list
@@ -11388,6 +11389,60 @@ function AppContent({ onLock }) {
   };
 
   // ── ADD BILL MODAL ───────────────────────────────────────────────────────────
+  // -- ATTACH PAST EXPENSES MODAL ---------------------------------------------
+  const AttachExpensesModal = ({ ba, onClose }) => {
+    const [search, setSearch] = useState("");
+    const [selectedIds, setSelectedIds] = useState({});
+    const candidates = txns
+      .filter(t=>t.type==="expense" && !t.billerLinkId)
+      .filter(t=>{
+        if(!search.trim()) return true;
+        const q = search.trim().toLowerCase();
+        const cat = (t.catIds||[t.catId]).filter(Boolean).map(cid=>getCat(cid)?.name||"").join(" ");
+        return `${t.merchant||""} ${t.who||""} ${t.desc||""} ${t.note||""} ${cat}`.toLowerCase().includes(q);
+      })
+      .sort((a,b)=>(b.createdAt||0)-(a.createdAt||0))
+      .slice(0,100);
+    const selectedCount = Object.keys(selectedIds).filter(k=>selectedIds[k]).length;
+    const handleAttach = () => {
+      const ids = Object.keys(selectedIds).filter(k=>selectedIds[k]);
+      if(ids.length===0){ onClose(); return; }
+      setTxns(prev=>prev.map(t=>ids.includes(String(t.id))?{...t,billerLinkId:ba.id}:t));
+      onClose();
+    };
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:320,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Attach past expenses to {ba.name}</div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ color:T.sub,fontSize:11,marginBottom:12 }}>Only expenses not already linked to any biller account are shown. Search helps narrow down old entries.</div>
+          <input style={{ ...inp,marginBottom:12 }} placeholder="Search by vendor, note, or category..." value={search} onChange={e=>setSearch(e.target.value)}/>
+          <div style={{ display:"flex",flexDirection:"column",gap:6,marginBottom:14 }}>
+            {candidates.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"20px 0" }}>No matching unlinked expenses found.</div>}
+            {candidates.map(t=>{
+              const isSelected = !!selectedIds[t.id];
+              return (
+                <div key={t.id} onClick={()=>setSelectedIds(prev=>({...prev,[t.id]:!prev[t.id]}))} style={{ display:"flex",alignItems:"center",gap:10,background:isSelected?T.purple+"16":T.input,border:`1px solid ${isSelected?T.purple:T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer" }}>
+                  <div style={{ width:20,height:20,borderRadius:5,background:isSelected?T.purple:"none",border:`2px solid ${isSelected?T.purple:T.border}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+                    {isSelected&&<span style={{ color:"#fff",fontSize:12,fontWeight:900 }}>✓</span>}
+                  </div>
+                  <div style={{ flex:1,minWidth:0 }}>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{t.merchant||t.who||t.desc||"Expense"}</div>
+                    <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(t.date)||t.date}</div>
+                  </div>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(t.amount)}</div>
+                </div>
+              );
+            })}
+          </div>
+          <button onClick={handleAttach} disabled={selectedCount===0} style={{ width:"100%",background:selectedCount>0?T.purple:T.border,border:"none",borderRadius:14,padding:"13px",cursor:selectedCount>0?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>{selectedCount>0?`Attach ${selectedCount} expense${selectedCount>1?"s":""}`:"Select expenses to attach"}</button>
+        </div>
+      </div>
+    );
+  };
+
   // -- BILLER ACCOUNT MODAL --------------------------------------------------
   const BillerAccountModal = ({ existing, onClose }) => {
     const isEdit = !!existing;
@@ -11441,10 +11496,16 @@ function AppContent({ onLock }) {
             </div>
             <div>
               <span style={lbl}>Biller Type *</span>
-              <select style={inp} value={baType} onChange={e=>setBaType(e.target.value)}>
-                <option value="">Select type</option>
-                {BILLER_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
-              </select>
+              <div style={{ display:"flex",flexWrap:"wrap",gap:8 }}>
+                {BILLER_TYPES.map(t=>{
+                  const isSelected = baType===t;
+                  return (
+                    <button key={t} onClick={()=>setBaType(t)} style={{ display:"flex",alignItems:"center",gap:5,background:isSelected?T.accent+"22":T.input,border:`1px solid ${isSelected?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>
+                      <span>{getBillerIcon(t)}</span>{t}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <div>
               <span style={lbl}>Consumer / Account Number</span>
@@ -11462,13 +11523,21 @@ function AppContent({ onLock }) {
                 ))}
               </div>
               {baAttributeType==="person"&&(
-                <select style={inp} value={baAttributedTo} onChange={e=>setBaAttributedTo(e.target.value)}>
+                <select style={inp} value={baAttributedTo} onChange={e=>{
+                  const pid=e.target.value;
+                  setBaAttributedTo(pid);
+                  if(!baName.trim()){ const p=people.find(x=>String(x.id)===pid); if(p) setBaName(p.name); }
+                }}>
                   <option value="">Select person</option>
                   {people.map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
                 </select>
               )}
               {baAttributeType==="group"&&(
-                <select style={inp} value={baAttributedTo} onChange={e=>setBaAttributedTo(e.target.value)}>
+                <select style={inp} value={baAttributedTo} onChange={e=>{
+                  const gid=e.target.value;
+                  setBaAttributedTo(gid);
+                  if(!baName.trim()){ const g=groups.find(x=>x.id===gid); if(g) setBaName(g.name); }
+                }}>
                   <option value="">Select group</option>
                   {groups.map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
                 </select>
@@ -12221,6 +12290,7 @@ function AppContent({ onLock }) {
         {showAddBill&&<AddBillModal/>}
         {showAddGift&&giftForPersonId&&<AddGiftModal personId={giftForPersonId} onClose={()=>{ setShowAddGift(false); setGiftForPersonId(null); }}/>}
         {editingBillerAccount&&<BillerAccountModal existing={editingBillerAccount} onClose={()=>setEditingBillerAccount(null)}/>}
+        {attachExpensesFor&&<AttachExpensesModal ba={attachExpensesFor} onClose={()=>setAttachExpensesFor(null)}/>}
         {confirmDialog&&(
           <div onClick={e=>{ if(e.target===e.currentTarget) setConfirmDialog(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
             <div style={{ background:T.card,borderRadius:18,padding:"20px 18px",width:"100%",maxWidth:360 }}>
@@ -12351,6 +12421,7 @@ function AppContent({ onLock }) {
                   {actionType==="membership"&&(
                     <button onClick={()=>setShowAddFeePayment(true)} style={{ background:T.warn+"22",border:`1px solid ${T.warn}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.warn,fontFamily:"Nunito,sans-serif" }}>🏫 Add Fee Payment (multi-month)</button>
                   )}
+                  <button onClick={()=>{ setAttachExpensesFor(ba); }} style={{ background:T.purple+"22",border:`1px solid ${T.purple}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.purple,fontFamily:"Nunito,sans-serif" }}>🔗 Attach Past Expenses</button>
                 </div>
                 {/* History */}
                 {baMemberships.length>0&&(
