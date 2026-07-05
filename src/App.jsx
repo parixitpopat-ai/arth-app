@@ -912,6 +912,7 @@ function AppContent({ onLock }) {
   const [txns, setTxns] = useState(()=>normalizeTxns(JSON.parse(localStorage.getItem("arth_txns")||"[]")));
   const [investments, setInvestments] = useState(()=>JSON.parse(localStorage.getItem("arth_investments")||"[]"));
   const [recurringSchedules, setRecurringSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_recurring")||"[]"));
+  const [skippedInvestmentMonths, setSkippedInvestmentMonths] = useState(()=>JSON.parse(localStorage.getItem("arth_skipped_investments")||"[]"));
   const [gifts, setGifts] = useState(()=>JSON.parse(localStorage.getItem("arth_gifts")||"[]"));
   const [showAddGift, setShowAddGift] = useState(false);
   const [giftForPersonId, setGiftForPersonId] = useState(null);
@@ -933,6 +934,8 @@ function AppContent({ onLock }) {
   const [editingMembership, setEditingMembership] = useState(null);
   const [showAddFeePayment, setShowAddFeePayment] = useState(false);
   const [activeBillerForAction, setActiveBillerForAction] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null); // { message, onConfirm }
+  const askConfirm = (message, onConfirm) => setConfirmDialog({ message, onConfirm });
   const [showAddBillerAccount, setShowAddBillerAccount] = useState(false);
   const [editingBillerAccount, setEditingBillerAccount] = useState(null);
   const [billSearch, setBillSearch] = useState("");
@@ -965,6 +968,7 @@ function AppContent({ onLock }) {
   useEffect(()=>localStorage.setItem("arth_txns",JSON.stringify(txns)),[txns]);
   useEffect(()=>localStorage.setItem("arth_investments",JSON.stringify(investments)),[investments]);
   useEffect(()=>localStorage.setItem("arth_recurring",JSON.stringify(recurringSchedules)),[recurringSchedules]);
+  useEffect(()=>localStorage.setItem("arth_skipped_investments",JSON.stringify(skippedInvestmentMonths)),[skippedInvestmentMonths]);
   useEffect(()=>localStorage.setItem("arth_gifts",JSON.stringify(gifts)),[gifts]);
   useEffect(()=>localStorage.setItem("arth_budget",monthBudget),[monthBudget]);
   useEffect(()=>localStorage.setItem("arth_bills",JSON.stringify(bills)),[bills]);
@@ -3494,11 +3498,13 @@ function AppContent({ onLock }) {
         );
       };
 
-      // Duplicate transaction warning
+      // Duplicate transaction warning — non-blocking (window.confirm() has the same silent-failure risk as
+      // alert() did: if it doesn't render in some WebViews, it auto-resolves to false and would silently
+      // cancel the save). Warn inline instead, and let the save proceed.
       if(!isEditing && txnType==="expense" && amt>0){
         const dupWindow = 5*60*1000; // 5 minutes
         const dup = txns.find(t=>t.type==="expense" && Math.abs(t.amount-amt)<0.01 && String(t.accId)===String(accId) && Math.abs(Date.now()-(t.createdAt||0))<dupWindow);
-        if(dup && !window.confirm(`Possible duplicate: ${sym}${fmt(amt)} from the same account was recorded ${Math.round((Date.now()-(dup.createdAt||0))/60000)} minute(s) ago. Add anyway?`)) return;
+        if(dup) setRefDupWarning(`Note: a matching ${sym}${fmt(amt)} expense from this account was recorded ${Math.round((Date.now()-(dup.createdAt||0))/60000)} minute(s) ago — saved anyway.`);
       }
       // Create membership record if linked biller is membership type
       if(billerLinkId && showMembershipPanel && linkedBAType==="membership" && linkValidFrom && !isEditing){
@@ -4917,7 +4923,7 @@ function AppContent({ onLock }) {
                       if(isSelected){ setTagGroup(""); setSplitGroup(""); setSplitMode("none"); }
                       else {
                         const di=g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
-                        if(di==="attributed"){ setTagGroup(g.id); setSplitMode("tag"); setTagPerson(""); setSplitGroup(""); }
+                        if(di==="attributed"){ setTagGroup(g.id); setSplitMode("tag"); setTagMode("attribute"); setTagPerson(""); setSplitGroup(""); }
                         else { setSplitGroup(g.id); setSplitMode("split"); setTagGroup(""); setTagPerson(""); }
                       }
                     }} style={{ background:isSelected?g.color+"22":"none",border:`1px solid ${isSelected?g.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon||"👥"} {g.name}</button>
@@ -4962,7 +4968,7 @@ function AppContent({ onLock }) {
                         <div style={{ fontSize:11,fontWeight:700,color:currentIntent==="split"?T.accent:T.text }}>⚖️ Split (collect)</div>
                         <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Group owes their share</div>
                       </button>
-                      <button onClick={()=>{ setTagGroup(g.id); setSplitGroup(""); setSplitMode("tag"); }} style={{ flex:1,background:currentIntent==="attributed"?T.info+"22":"none",border:`1px solid ${currentIntent==="attributed"?T.info:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                      <button onClick={()=>{ setTagGroup(g.id); setSplitGroup(""); setSplitMode("tag"); setTagMode("attribute"); }} style={{ flex:1,background:currentIntent==="attributed"?T.info+"22":"none",border:`1px solid ${currentIntent==="attributed"?T.info:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                         <div style={{ fontSize:11,fontWeight:700,color:currentIntent==="attributed"?T.info:T.text }}>🏠 Attributed</div>
                         <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>No collection</div>
                       </button>
@@ -6761,8 +6767,9 @@ function AppContent({ onLock }) {
     });
     // Check which folios already have a txn this month
     const recordedFoliosThisMonth = new Set(thisMonthTxns.filter(t=>t.type==="investment"&&t.investFolio).map(t=>t.investFolio));
+    const thisMonthKey = todayStr().slice(0,7);
     const allFoliosDue = investmentGroups
-      .filter(g=>!recordedFoliosThisMonth.has(g.key) && !dueRecurring.some(r=>r.name===g.name))
+      .filter(g=>!recordedFoliosThisMonth.has(g.key) && !dueRecurring.some(r=>r.name===g.name) && !skippedInvestmentMonths.includes(`${g.key}_${thisMonthKey}`))
       .sort((a,b)=>a.name.localeCompare(b.name));
     const CARDS = {
       household: (
@@ -7066,7 +7073,7 @@ function AppContent({ onLock }) {
                       setAddPrefill({ amount:String(g.amount||""), accId:g.accId||"", who:g.name||"", investFolio:g.key||"", investType:g.type||"mf", date:todayStr() });
                       setDefaultAddType("investment"); setShowAdd(true);
                     }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Record</button>
-                    <button onClick={()=>{ const key=g.key; setTxns(prev=>[{id:genId(),type:"investment",investFolio:key,investType:g.type||"mf",amount:0,date:todayStr(),skippedMonth:true,createdAt:Date.now()},...prev]); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Skip</button>
+                    <button onClick={()=>{ const key=g.key; setSkippedInvestmentMonths(prev=>prev.includes(`${key}_${thisMonthKey}`)?prev:[...prev,`${key}_${thisMonthKey}`]); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Skip</button>
                   </div>
                 </div>
               ))}
@@ -7642,7 +7649,9 @@ function AppContent({ onLock }) {
                 if(!targetId) return;
                 const isGroup = targetId.startsWith("g_");
                 const realId = isGroup ? targetId.slice(2) : targetId;
-                if(!window.confirm(`Transfer ${p.name}'s debt of ${sym}${fmt(totalOwesMe)} to ${isGroup ? groups.find(g=>g.id===realId)?.name : people.find(x=>String(x.id)===realId)?.name}?`)) return;
+                const targetName = isGroup ? groups.find(g=>g.id===realId)?.name : people.find(x=>String(x.id)===realId)?.name;
+                e.target.value="";
+                askConfirm(`Transfer ${p.name}'s debt of ${sym}${fmt(totalOwesMe)} to ${targetName}?`, ()=>{
                 // Mark all of person's splits as settled
                 setTxns(prev=>prev.map(t=>{
                   if(t.type!=="expense") return t;
@@ -7657,7 +7666,7 @@ function AppContent({ onLock }) {
                   const newTxn = { id:genId(), type:"expense", amount:totalOwesMe, who:`Transferred from ${p.name}`, date:todayStr(), catIds:[], subIds:[], people:{[realId]:{amount:totalOwesMe,mode:"owes",settled:false,remainingAmt:totalOwesMe}}, createdAt:Date.now(), note:`Debt transferred from ${p.name}` };
                   setTxns(prev=>[newTxn,...prev]);
                 }
-                e.target.value="";
+                });
               }}>
                 <option value="">Select who will pay instead...</option>
                 {people.filter(x=>!x.isMe&&String(x.id)!==String(p.id)).map(x=>(<option key={x.id} value={x.id}>{x.emoji} {x.name}</option>))}
@@ -12079,6 +12088,18 @@ function AppContent({ onLock }) {
         {showAddBill&&<AddBillModal/>}
         {showAddGift&&giftForPersonId&&<AddGiftModal personId={giftForPersonId} onClose={()=>{ setShowAddGift(false); setGiftForPersonId(null); }}/>}
         {editingBillerAccount&&<BillerAccountModal existing={editingBillerAccount} onClose={()=>setEditingBillerAccount(null)}/>}
+        {confirmDialog&&(
+          <div onClick={e=>{ if(e.target===e.currentTarget) setConfirmDialog(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
+            <div style={{ background:T.card,borderRadius:18,padding:"20px 18px",width:"100%",maxWidth:360 }}>
+              <div style={{ color:T.text,fontSize:14,fontWeight:700,lineHeight:1.5,marginBottom:18,whiteSpace:"pre-line" }}>{confirmDialog.message}</div>
+              <div style={{ display:"grid",gridTemplateColumns:confirmDialog.onConfirm?"1fr 1fr":"1fr",gap:10 }}>
+                {confirmDialog.onConfirm&&<button onClick={()=>setConfirmDialog(null)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>}
+                <button onClick={()=>{ const fn=confirmDialog.onConfirm; setConfirmDialog(null); fn?.(); }} style={{ background:confirmDialog.onConfirm?T.danger:T.accent,border:"none",borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:800,color:confirmDialog.onConfirm?"#fff":"#000",fontFamily:"Nunito,sans-serif" }}>{confirmDialog.onConfirm?"Confirm":"OK"}</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); }}/>}
         {showAddMembership&&activeBillerForAction&&<AddMembershipModal billerAccount={activeBillerForAction} existing={editingMembership} onClose={()=>{ setShowAddMembership(false); setEditingMembership(null); }}/>}
         {showAddFeePayment&&activeBillerForAction&&<AddFeePaymentModal billerAccount={activeBillerForAction} onClose={()=>{ setShowAddFeePayment(false); setActiveBillerForAction(null); }}/>}
         {/* Biller Action Sheet */}
@@ -12184,13 +12205,13 @@ function AppContent({ onLock }) {
                     const linkedFee = feePayments.filter(f=>f.billerAccountId===ba.id);
                     const total = linkedBills.length+linkedMem.length+linkedFee.length;
                     if(total>0){
-                      alert(`Cannot delete: ${ba.name} has ${total} linked record${total>1?"s":""}. Delete the bills, memberships and fee payments first.`);
+                      askConfirm(`Cannot delete: ${ba.name} has ${total} linked record${total>1?"s":""}. Delete the bills, memberships and fee payments first.`,null);
                       return;
                     }
-                    if(window.confirm(`Delete ${ba.name}?`)){
+                    askConfirm(`Delete ${ba.name}?`,()=>{
                       setBillerAccounts(prev=>prev.filter(x=>x.id!==ba.id));
                       setActiveBillerForAction(null);
-                    }
+                    });
                   }} style={{ flex:1,background:"none",border:`1px solid ${T.danger}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete Account</button>
                 </div>
               </div>
@@ -12485,7 +12506,7 @@ function AppContent({ onLock }) {
                 </div>
                 <div style={{ display:"flex",gap:8,marginTop:16 }}>
                   <button onClick={()=>{ setTxnDetailId(null); setEditTxn(t); setShowAdd(true); }} style={{ flex:1,background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
-                  <button onClick={()=>{ if(window.confirm("Delete this transaction?")){ removeTxnAndLinkedInvestment(t); setTxnDetailId(null); } }} style={{ background:T.danger+"18",border:`1px solid ${T.danger}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
+                  <button onClick={()=>askConfirm("Delete this transaction?",()=>{ removeTxnAndLinkedInvestment(t); setTxnDetailId(null); })} style={{ background:T.danger+"18",border:`1px solid ${T.danger}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
                   <button onClick={()=>setTxnDetailId(null)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
                 </div>
               </div>
