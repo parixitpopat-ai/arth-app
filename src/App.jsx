@@ -11098,8 +11098,8 @@ function AppContent({ onLock }) {
 
   // -- BILLING TYPE HELPERS --------------------------------------------------
   const MEMBERSHIP_TYPES = ["Gym / Fitness","Club Membership","School Fees","Education Fees","Other Subscription","Insurance","Society Maintenance","Rental"];
-  const BILL_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Hospital","Other","Mobile Prepaid","Mobile Postpaid","Credit Card","Recurring Deposit","NPS","Municipal Tax","Municipal Services"];
-  const BILLER_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","Mobile Postpaid","Mobile Prepaid","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","OTT / Streaming","Insurance","Loan EMI","Credit Card","Recurring Deposit","NPS","School Fees","Education Fees","Municipal Tax","Municipal Services","Society Maintenance","Gym / Fitness","Club Membership","Hospital","Rental","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Other Subscription","Other"];
+  const BILL_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Hospital","Other","Mobile Prepaid","Mobile Postpaid","Credit Card","Recurring Deposit","NPS","Municipal Tax","Municipal Services","OTT / Streaming"];
+  const BILLER_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","Mobile Postpaid","Mobile Prepaid","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","OTT / Streaming","Insurance","Credit Card","Recurring Deposit","NPS","School Fees","Education Fees","Municipal Tax","Municipal Services","Society Maintenance","Gym / Fitness","Club Membership","Hospital","Rental","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Other Subscription","Other"];
   const HYBRID_TYPES = ["Mobile Postpaid","Mobile Prepaid","OTT / Streaming","NPS","Recurring Deposit","Loan EMI","Credit Card","Municipal Tax","Municipal Services"];
   const getBillerActionType = type => {
     if(MEMBERSHIP_TYPES.includes(type)) return "membership";
@@ -11168,7 +11168,10 @@ function AppContent({ onLock }) {
                     const lastBill = [...billsForAcc].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
                     const isExpiringSoon = ba.membershipEndDate && (new Date(ba.membershipEndDate)-new Date())/(1000*60*60*24) <= 30;
                     return (
-                      <div key={ba.id} onClick={()=>setActiveBillerForAction(ba)} style={{ minWidth:120,background:T.card,borderRadius:16,padding:"12px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}`,position:"relative",flexShrink:0 }}>
+                      <div key={ba.id} onClick={()=>{
+                        if(ba.billerId){ const shell=billers.find(b=>b.id===ba.billerId); if(shell){ setActiveBillerShell(shell); return; } }
+                        setActiveBillerForAction(ba);
+                      }} style={{ minWidth:120,background:T.card,borderRadius:16,padding:"12px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}`,position:"relative",flexShrink:0 }}>
                         {unpaidCount>0&&<div style={{ position:"absolute",top:8,right:8,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>{unpaidCount}</div>}
                         {isExpiringSoon&&<div style={{ position:"absolute",top:8,right:8,background:T.warn,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>!</div>}
                         <div style={{ fontSize:28,marginBottom:6 }}>{getBillerIcon(ba.type)}</div>
@@ -11177,9 +11180,9 @@ function AppContent({ onLock }) {
                       </div>
                     );
                   })}
-                  <div onClick={()=>setShowAddBillerAccount(true)} style={{ minWidth:80,background:"none",borderRadius:16,padding:"12px",cursor:"pointer",border:`2px dashed ${T.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+                  <div onClick={()=>setShowAddBillerModal(true)} style={{ minWidth:80,background:"none",borderRadius:16,padding:"12px",cursor:"pointer",border:`2px dashed ${T.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
                     <div style={{ fontSize:24,color:T.sub }}>+</div>
-                    <div style={{ color:T.sub,fontSize:9,marginTop:4 }}>Add Account</div>
+                    <div style={{ color:T.sub,fontSize:9,marginTop:4 }}>Add Biller</div>
                   </div>
                 </div>
               </div>
@@ -11196,7 +11199,7 @@ function AppContent({ onLock }) {
             {[
               { label:"Recharge", types:["Fastag","Mobile Postpaid","Mobile Prepaid","DTH","Broadband","Landline","Cable TV","Metro Recharge","NCMC Recharge","EV Recharge"] },
               { label:"Utility Bills", types:["Electricity","LPG Gas","Piped Gas","Water"] },
-              { label:"Finances", types:["Loan EMI","Credit Card","Recurring Deposit","NPS","Insurance","Forex"] },
+              { label:"Finances", types:["Credit Card","Recurring Deposit","NPS","Insurance","Forex"] },
               { label:"Education & Fitness", types:["School Fees","Education Fees","Gym / Fitness","Club Membership","Hospital"] },
               { label:"Others", types:["Donation","Municipal Services","Municipal Tax","Society Maintenance","Rental","Prepaid Meter","eChallan","Fleet Card","B2B","Other Subscription","Other"] },
             ].map(cat=>{
@@ -11546,7 +11549,7 @@ function AppContent({ onLock }) {
     const [baAttributedTo, setBaAttributedTo] = useState(existing?.attributedTo||"");
     const [baAttributeType, setBaAttributeType] = useState(existing?.attributeType||"house");
     const [baNote, setBaNote] = useState(existing?.note||"");
-    const SUB_TYPES = ["Gym / Fitness","Club Membership","School Fees","Education Fees","OTT / Streaming","Other Subscription","Insurance","Society Maintenance","Hospital","Rental"];
+    const SUB_TYPES = ["Gym / Fitness","Club Membership","School Fees","Education Fees","Other Subscription","Insurance","Society Maintenance","Hospital","Rental"];
     const isSubType = SUB_TYPES.includes(baType);
     const [baSubStart, setBaSubStart] = useState(existing?.subStart||"");
     const [baSubEnd, setBaSubEnd] = useState(existing?.subEnd||"");
