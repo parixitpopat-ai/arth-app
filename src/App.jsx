@@ -1134,20 +1134,46 @@ function AppContent({ onLock }) {
 
   const doTxnShare = useCallback(async (shareRequest, upiHandle = "") => {
     if(!shareRequest) return;
-    const { recipientName, amount, contextLabel, dueDate, imageBase64, shareTitle } = shareRequest;
+    const { recipientName, amount, contextLabel, dueDate, imageBase64, shareTitle, billDate, billPeriodFrom, billPeriodTo, totalAmount } = shareRequest;
     const linkedLabel = upiHandle ? (() => {
       const acc = accounts.find(a=>a.type==="upi"&&a.handle===upiHandle);
       const linked = acc?.linkedAccount ? accounts.find(b=>b.id===acc.linkedAccount) : null;
       return linked ? ` (${linked.name})` : "";
     })() : "";
     const dueLabel = dueDate ? (formatShortDate(dueDate) || dueDate) : "";
-    const lines = [
-      `Hi ${recipientName},`,
-      `Your share towards ${contextLabel} is ${sym}${fmt(amount)}.`,
-      dueLabel ? `Kindly clear it before ${dueLabel}.` : "Kindly clear it when convenient.",
-      upiHandle ? `Payment UPI: ${upiHandle}${linkedLabel}` : "",
-      "- sent via Arth",
-    ].filter(Boolean).join("\n");
+    const hasBillDetails = billDate || billPeriodFrom || billPeriodTo;
+    let lines;
+    if(hasBillDetails){
+      const billDateLabel = billDate ? (formatShortDate(billDate)||billDate) : "-";
+      const fromLabel = billPeriodFrom ? (formatShortDate(billPeriodFrom)||billPeriodFrom) : "-";
+      const toLabel = billPeriodTo ? (formatShortDate(billPeriodTo)||billPeriodTo) : "-";
+      // Auto-calculate number of days spanned by the bill period, inclusive of both ends.
+      const numDays = (billPeriodFrom && billPeriodTo) ? (Math.round((new Date(billPeriodTo)-new Date(billPeriodFrom))/(1000*60*60*24))+1) : null;
+      lines = [
+        `Hello ${recipientName},`,
+        `Your share of ${contextLabel} is as below.`,
+        "",
+        `Bill Date - ${billDateLabel}`,
+        `Due Date - ${dueLabel||"-"}`,
+        `From Date - ${fromLabel}`,
+        `To Date - ${toLabel}`,
+        numDays!==null ? `No of days - ${numDays}` : "No of days - -",
+        `Total Amount - ${sym}${fmt(totalAmount??amount)}`,
+        `Your Share - ${sym}${fmt(amount)}`,
+        "",
+        dueLabel ? `Kindly pay before ${dueLabel}` : "Kindly pay when convenient.",
+        upiHandle ? `Payment UPI: ${upiHandle}${linkedLabel}` : "",
+        "- sent via Arth",
+      ].filter(Boolean).join("\n");
+    } else {
+      lines = [
+        `Hi ${recipientName},`,
+        `Your share towards ${contextLabel} is ${sym}${fmt(amount)}.`,
+        dueLabel ? `Kindly clear it before ${dueLabel}.` : "Kindly clear it when convenient.",
+        upiHandle ? `Payment UPI: ${upiHandle}${linkedLabel}` : "",
+        "- sent via Arth",
+      ].filter(Boolean).join("\n");
+    }
     try {
       const file = await dataUrlToShareFile(imageBase64, (shareTitle || contextLabel || "arth-bill").replace(/[^\w-]+/g, "-").slice(0, 48));
       const payload = { title:shareTitle || "Arth share request", text:lines };
@@ -11303,7 +11329,7 @@ function AppContent({ onLock }) {
                         <div key={pid} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:11,color:info.mode==="owes"?(info.settled?T.success:Number(info.settledAmt||0)>0?T.warn:T.accent):T.sub,marginBottom:2 }}>
                           <span>{p.emoji} {p.name}</span>
                           <div style={{ display:"flex",alignItems:"center",gap:6 }}>
-                            {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind==="bill"&&String(l.id)===String(b.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canShare=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canShare&&<button onClick={e=>{ e.stopPropagation(); sharePaymentRequest(p.name,left,b.name||"Bill",{ dueDate:b.dueDate||b.billDate, imageBase64:b.imageBase64||paymentImageSrc||billImageSrc||null, shareTitle:b.name||"Bill" }); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Share</button>; })()}
+                            {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind==="bill"&&String(l.id)===String(b.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canShare=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canShare&&<button onClick={e=>{ e.stopPropagation(); sharePaymentRequest(p.name,left,b.name||"Bill",{ dueDate:b.dueDate||b.billDate, billDate:b.billDate, billPeriodFrom:b.billPeriodFrom, billPeriodTo:b.billPeriodTo, totalAmount:b.amount, imageBase64:b.imageBase64||paymentImageSrc||billImageSrc||null, shareTitle:b.name||"Bill" }); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Share</button>; })()}
                             {(()=>{ const owed=Number(info.amount||0); const left=remainingShare(info); const paid=Number(info.settledAmt||0); if(info.mode!=="owes") return <span>Owes {sym}{fmt(owed)} | on you</span>; if(left<=0) return <span>Settled {sym}{fmt(owed)}</span>; if(paid>0) return <span>Owes {sym}{fmt(owed)} | Partly settled {sym}{fmt(paid)} | Bal. {sym}{fmt(left)}</span>; return <span>Owes {sym}{fmt(owed)} | Bal. {sym}{fmt(left)}</span>; })()}
                             {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind==="bill"&&String(l.id)===String(b.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canSettle=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canSettle&&<button onClick={e=>{ e.stopPropagation(); setSettleTxn({ id:"bill_person_settle_"+b.id+"_"+pid, type:"expense", desc:b.name, amount:left, people:{ [pid]:{ amount:left, mode:"owes", settled:false } }, _billIds:[b.id], _isBillSettle:true }); }} style={{ background:T.success+"18",border:`1px solid ${T.success}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>💰 Settle</button>; })()}
                           </div>
