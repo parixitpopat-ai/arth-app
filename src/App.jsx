@@ -67,6 +67,13 @@ const todayStr = () => new Date().toISOString().split("T")[0];
 const sym = "₹";
 const fmt = n => { const num = Number(n||0); return num.toLocaleString("en-IN", { minimumFractionDigits: num % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 }); };
 const fmtK = n => { const num = Number(n||0); if(num >= 100000) return (num/100000).toFixed(1).replace(/\.0$/,"")+"L"; if(num >= 1000) return (num/1000).toFixed(1).replace(/\.0$/,"")+"K"; return fmt(num); };
+// Wraps localStorage.setItem so a QuotaExceededError (or any other storage failure) never crashes
+// the whole app via an uncaught exception inside a useEffect — it fails that one save silently
+// instead, logging to console for debugging. Does not attempt to free space or retry.
+const safeSetLocalStorage = (key, value) => {
+  try { localStorage.setItem(key, value); }
+  catch(e) { console.error(`localStorage save failed for "${key}":`, e); }
+};
 const parseMoney = v => {
   const cleaned = String(v ?? "").replace(/[₹,\s]/g,"");
   const num = parseFloat(cleaned);
@@ -831,7 +838,7 @@ export default function Arth() {
 
   if(!appPin) return <PinScreen isSetup onUnlock={async pin=>{
     const hash = await hashPin(pin);
-    localStorage.setItem("arth_pin",hash);
+    safeSetLocalStorage("arth_pin",hash);
     setAppPin(hash);
     setUnlocked(true);
   }}/>;
@@ -849,7 +856,7 @@ export default function Arth() {
           if(appPin.length<=6){
             if(String(pin)===String(appPin)){
               const hash = await hashPin(pin);
-              localStorage.setItem("arth_pin",hash);
+              safeSetLocalStorage("arth_pin",hash);
               setAppPin(hash);
               setUnlocked(true);
               setPinAttempts(0);
@@ -889,9 +896,9 @@ function AppContent({ onLock }) {
   const [autoDetectExpenseCategory, setAutoDetectExpenseCategory] = useState(()=>JSON.parse(localStorage.getItem("arth_auto_category")??"true"));
   const [workTripMode, setWorkTripMode] = useState(()=>JSON.parse(localStorage.getItem("arth_work_trip")??"false"));
   const T = dark?DARK:LIGHT;
-  useEffect(()=>localStorage.setItem("arth_dark",JSON.stringify(dark)),[dark]);
-  useEffect(()=>localStorage.setItem("arth_auto_category",JSON.stringify(autoDetectExpenseCategory)),[autoDetectExpenseCategory]);
-  useEffect(()=>localStorage.setItem("arth_work_trip",JSON.stringify(workTripMode)),[workTripMode]);
+  useEffect(()=>safeSetLocalStorage("arth_dark",JSON.stringify(dark)),[dark]);
+  useEffect(()=>safeSetLocalStorage("arth_auto_category",JSON.stringify(autoDetectExpenseCategory)),[autoDetectExpenseCategory]);
+  useEffect(()=>safeSetLocalStorage("arth_work_trip",JSON.stringify(workTripMode)),[workTripMode]);
   // Request persistent storage so browser never evicts app data under disk pressure
   useEffect(()=>{ navigator.storage?.persist?.(); },[]);
 
@@ -963,26 +970,26 @@ function AppContent({ onLock }) {
   const [monthOverrides, setMonthOverrides] = useState(()=>JSON.parse(localStorage.getItem("arth_month_overrides")||"{}"));
   const [monthBudget] = useState(()=>Number(localStorage.getItem("arth_budget")||50000));
 
-  useEffect(()=>localStorage.setItem("arth_cats",JSON.stringify(cats)),[cats]);
-  useEffect(()=>localStorage.setItem("arth_account_types",JSON.stringify(accountTypes)),[accountTypes]);
-  useEffect(()=>localStorage.setItem("arth_income_types",JSON.stringify(incomeTypes)),[incomeTypes]);
-  useEffect(()=>localStorage.setItem("arth_liability_types",JSON.stringify(customLiabilityTypes)),[customLiabilityTypes]);
-  useEffect(()=>localStorage.setItem("arth_accounts",JSON.stringify(accounts)),[accounts]);
-  useEffect(()=>localStorage.setItem("arth_checkpoints",JSON.stringify(balanceCheckpoints)),[balanceCheckpoints]);
-  useEffect(()=>localStorage.setItem("arth_people",JSON.stringify(people)),[people]);
-  useEffect(()=>localStorage.setItem("arth_groups",JSON.stringify(groups)),[groups]);
-  useEffect(()=>localStorage.setItem("arth_custom_base_behaviors",JSON.stringify(customBaseBehaviors)),[customBaseBehaviors]);
-  useEffect(()=>localStorage.setItem("arth_measure_units",JSON.stringify(measureUnits)),[measureUnits]);
-  useEffect(()=>localStorage.setItem("arth_item_catalog",JSON.stringify(itemCatalog)),[itemCatalog]);
-  useEffect(()=>localStorage.setItem("arth_txns",JSON.stringify(txns)),[txns]);
-  useEffect(()=>localStorage.setItem("arth_investments",JSON.stringify(investments)),[investments]);
-  useEffect(()=>localStorage.setItem("arth_recurring",JSON.stringify(recurringSchedules)),[recurringSchedules]);
-  useEffect(()=>localStorage.setItem("arth_skipped_investments",JSON.stringify(skippedInvestmentMonths)),[skippedInvestmentMonths]);
-  useEffect(()=>localStorage.setItem("arth_gifts",JSON.stringify(gifts)),[gifts]);
-  useEffect(()=>localStorage.setItem("arth_budget",monthBudget),[monthBudget]);
-  useEffect(()=>localStorage.setItem("arth_bills",JSON.stringify(bills)),[bills]);
-  useEffect(()=>localStorage.setItem("arth_biller_accounts",JSON.stringify(billerAccounts)),[billerAccounts]);
-  useEffect(()=>localStorage.setItem("arth_billers",JSON.stringify(billers)),[billers]);
+  useEffect(()=>safeSetLocalStorage("arth_cats",JSON.stringify(cats)),[cats]);
+  useEffect(()=>safeSetLocalStorage("arth_account_types",JSON.stringify(accountTypes)),[accountTypes]);
+  useEffect(()=>safeSetLocalStorage("arth_income_types",JSON.stringify(incomeTypes)),[incomeTypes]);
+  useEffect(()=>safeSetLocalStorage("arth_liability_types",JSON.stringify(customLiabilityTypes)),[customLiabilityTypes]);
+  useEffect(()=>safeSetLocalStorage("arth_accounts",JSON.stringify(accounts)),[accounts]);
+  useEffect(()=>safeSetLocalStorage("arth_checkpoints",JSON.stringify(balanceCheckpoints)),[balanceCheckpoints]);
+  useEffect(()=>safeSetLocalStorage("arth_people",JSON.stringify(people)),[people]);
+  useEffect(()=>safeSetLocalStorage("arth_groups",JSON.stringify(groups)),[groups]);
+  useEffect(()=>safeSetLocalStorage("arth_custom_base_behaviors",JSON.stringify(customBaseBehaviors)),[customBaseBehaviors]);
+  useEffect(()=>safeSetLocalStorage("arth_measure_units",JSON.stringify(measureUnits)),[measureUnits]);
+  useEffect(()=>safeSetLocalStorage("arth_item_catalog",JSON.stringify(itemCatalog)),[itemCatalog]);
+  useEffect(()=>safeSetLocalStorage("arth_txns",JSON.stringify(txns)),[txns]);
+  useEffect(()=>safeSetLocalStorage("arth_investments",JSON.stringify(investments)),[investments]);
+  useEffect(()=>safeSetLocalStorage("arth_recurring",JSON.stringify(recurringSchedules)),[recurringSchedules]);
+  useEffect(()=>safeSetLocalStorage("arth_skipped_investments",JSON.stringify(skippedInvestmentMonths)),[skippedInvestmentMonths]);
+  useEffect(()=>safeSetLocalStorage("arth_gifts",JSON.stringify(gifts)),[gifts]);
+  useEffect(()=>safeSetLocalStorage("arth_budget",monthBudget),[monthBudget]);
+  useEffect(()=>safeSetLocalStorage("arth_bills",JSON.stringify(bills)),[bills]);
+  useEffect(()=>safeSetLocalStorage("arth_biller_accounts",JSON.stringify(billerAccounts)),[billerAccounts]);
+  useEffect(()=>safeSetLocalStorage("arth_billers",JSON.stringify(billers)),[billers]);
   // One-time migration: existing biller accounts predate the parent "Biller" concept and don't have a
   // billerId yet. Group them by type+provider (same key as the account-list provider grouping) and
   // create a parent shell for each group, linking the existing accounts to it. Idempotent — only touches
@@ -1008,20 +1015,20 @@ function AppContent({ onLock }) {
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
-  useEffect(()=>localStorage.setItem("arth_memberships",JSON.stringify(memberships)),[memberships]);
-  useEffect(()=>localStorage.setItem("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
-  useEffect(()=>localStorage.setItem("arth_liabilities",JSON.stringify(liabilities)),[liabilities]);
-  useEffect(()=>localStorage.setItem("arth_assets",JSON.stringify(trackedAssets)),[trackedAssets]);
-  useEffect(()=>localStorage.setItem("arth_vehicles",JSON.stringify(vehicles)),[vehicles]);
-  useEffect(()=>localStorage.setItem("arth_loans",JSON.stringify(loans)),[loans]);
-  useEffect(()=>localStorage.setItem("arth_cc_emi_plans",JSON.stringify(ccEmiPlans)),[ccEmiPlans]);
-  useEffect(()=>localStorage.setItem("arth_annual_budget",annualBudget),[annualBudget]);
-  useEffect(()=>localStorage.setItem("arth_person_budgets",JSON.stringify(perPersonBudgets)),[perPersonBudgets]);
-  useEffect(()=>localStorage.setItem("arth_gifts",JSON.stringify(gifts)),[gifts]);
-  useEffect(()=>localStorage.setItem("arth_budget_carry",JSON.stringify(budgetCarryForward)),[budgetCarryForward]);
-  useEffect(()=>{ if(defaultGroupId) localStorage.setItem("arth_default_group",defaultGroupId); else localStorage.removeItem("arth_default_group"); },[defaultGroupId]);
-  useEffect(()=>localStorage.setItem("arth_last_fy_target",lastFYTarget),[lastFYTarget]);
-  useEffect(()=>localStorage.setItem("arth_month_overrides",JSON.stringify(monthOverrides)),[monthOverrides]);
+  useEffect(()=>safeSetLocalStorage("arth_memberships",JSON.stringify(memberships)),[memberships]);
+  useEffect(()=>safeSetLocalStorage("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
+  useEffect(()=>safeSetLocalStorage("arth_liabilities",JSON.stringify(liabilities)),[liabilities]);
+  useEffect(()=>safeSetLocalStorage("arth_assets",JSON.stringify(trackedAssets)),[trackedAssets]);
+  useEffect(()=>safeSetLocalStorage("arth_vehicles",JSON.stringify(vehicles)),[vehicles]);
+  useEffect(()=>safeSetLocalStorage("arth_loans",JSON.stringify(loans)),[loans]);
+  useEffect(()=>safeSetLocalStorage("arth_cc_emi_plans",JSON.stringify(ccEmiPlans)),[ccEmiPlans]);
+  useEffect(()=>safeSetLocalStorage("arth_annual_budget",annualBudget),[annualBudget]);
+  useEffect(()=>safeSetLocalStorage("arth_person_budgets",JSON.stringify(perPersonBudgets)),[perPersonBudgets]);
+  useEffect(()=>safeSetLocalStorage("arth_gifts",JSON.stringify(gifts)),[gifts]);
+  useEffect(()=>safeSetLocalStorage("arth_budget_carry",JSON.stringify(budgetCarryForward)),[budgetCarryForward]);
+  useEffect(()=>{ if(defaultGroupId) safeSetLocalStorage("arth_default_group",defaultGroupId); else localStorage.removeItem("arth_default_group"); },[defaultGroupId]);
+  useEffect(()=>safeSetLocalStorage("arth_last_fy_target",lastFYTarget),[lastFYTarget]);
+  useEffect(()=>safeSetLocalStorage("arth_month_overrides",JSON.stringify(monthOverrides)),[monthOverrides]);
 
   // ── MODAL STATE ────────────────────────────────────────────────────────────
   const [showAdd, setShowAdd] = useState(false);
@@ -3045,7 +3052,7 @@ function AppContent({ onLock }) {
     useEffect(()=>{
       if(isEditing) return;
       const t=setTimeout(()=>{
-        try{ localStorage.setItem(DRAFT_KEY,JSON.stringify({txnType,who,amount,date,note,accId,catIds,subIds,splitMode,useItemizedLines,lineItems,tagMode,tagPerson,tagGroup,tagItems,splitPeople,transactionRef})); }catch{}
+        try{ safeSetLocalStorage(DRAFT_KEY,JSON.stringify({txnType,who,amount,date,note,accId,catIds,subIds,splitMode,useItemizedLines,lineItems,tagMode,tagPerson,tagGroup,tagItems,splitPeople,transactionRef})); }catch{}
       },600);
       return ()=>clearTimeout(t);
     },[txnType,who,amount,date,note,accId,catIds,subIds,splitMode,useItemizedLines,lineItems,tagMode,tagPerson,tagGroup,tagItems,splitPeople,transactionRef,isEditing]);
@@ -6524,17 +6531,17 @@ function AppContent({ onLock }) {
   const cloudSnapshotRef = useRef(null);
 
   useEffect(() => {
-    localStorage.setItem("arth_card_order", JSON.stringify(cardOrder));
+    safeSetLocalStorage("arth_card_order", JSON.stringify(cardOrder));
   }, [cardOrder]);
   useEffect(() => {
-    localStorage.setItem("arth_auto_backup_enabled", JSON.stringify(autoBackupEnabled));
+    safeSetLocalStorage("arth_auto_backup_enabled", JSON.stringify(autoBackupEnabled));
   }, [autoBackupEnabled]);
   useEffect(() => {
-    localStorage.setItem("arth_auto_backup_frequency", autoBackupFrequency);
+    safeSetLocalStorage("arth_auto_backup_frequency", autoBackupFrequency);
   }, [autoBackupFrequency]);
   useEffect(() => {
     try{
-      localStorage.setItem("arth_auto_backups", JSON.stringify((Array.isArray(autoBackups) ? autoBackups : []).slice(0, 3)));
+      safeSetLocalStorage("arth_auto_backups", JSON.stringify((Array.isArray(autoBackups) ? autoBackups : []).slice(0, 3)));
     }catch(err){
       console.warn("Unable to persist auto backups", err);
       if(autoBackupEnabled) setBackupStatus("Auto backups are limited by device storage. Please download a manual backup too.");
@@ -6891,7 +6898,7 @@ function AppContent({ onLock }) {
     arr[swap] = tmp;
     const newArr = arr.map(x=>x);
     setCardOrder(newArr);
-    localStorage.setItem("arth_card_order", JSON.stringify(newArr));
+    safeSetLocalStorage("arth_card_order", JSON.stringify(newArr));
   };
 
   const Home = () => {
@@ -10472,7 +10479,7 @@ function AppContent({ onLock }) {
         onCancel={()=>setSettingsSection("security")}
         onUnlock={async pin=>{
           const hash = await hashPin(pin);
-          localStorage.setItem("arth_pin",hash);
+          safeSetLocalStorage("arth_pin",hash);
           setAppPin(hash);
           setSettingsSection("security");
         }}
@@ -12514,7 +12521,7 @@ function AppContent({ onLock }) {
 
       {showWealthPin&&hasAppPin&&(
           <div style={{ position:"fixed",inset:0,zIndex:500,background:"rgba(0,0,0,0.92)" }}>
-            <PinScreen isSetup={false} onUnlock={async pin=>{ const stored=localStorage.getItem("arth_pin")||""; const match=stored.length<=6?String(pin)===stored:(await hashPin(pin))===stored; if(match){ if(stored.length<=6){ const h=await hashPin(pin); localStorage.setItem("arth_pin",h); } setWealthUnlocked(true); setShowWealthPin(false); setTab("wealth"); } }}/>
+            <PinScreen isSetup={false} onUnlock={async pin=>{ const stored=localStorage.getItem("arth_pin")||""; const match=stored.length<=6?String(pin)===stored:(await hashPin(pin))===stored; if(match){ if(stored.length<=6){ const h=await hashPin(pin); safeSetLocalStorage("arth_pin",h); } setWealthUnlocked(true); setShowWealthPin(false); setTab("wealth"); } }}/>
           </div>
         )}
 
