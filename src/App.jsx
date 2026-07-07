@@ -10980,7 +10980,7 @@ function AppContent({ onLock }) {
                 {groups.map(g=><button key={g.id} onClick={()=>{setEditGroup(editGroup===g.id?"":g.id); setEditSplitPeople({});}} style={{ background:editGroup===g.id?g.color+"22":"none",border:`1px solid ${editGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>)}
               </div>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:editSelectedPids.length>0?10:0 }}>
-                {people.filter(p=>!p.isMe).map(p=><button key={p.id} onClick={()=>setEditSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:editSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${editSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+                {(editGroup ? people.filter(p=>!p.isMe && (getGroup(editGroup)?.members||[]).includes(p.id)) : people.filter(p=>!p.isMe)).map(p=><button key={p.id} onClick={()=>setEditSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:editSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${editSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
               </div>
               {editSelectedPids.length>0&&<>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
@@ -11024,13 +11024,6 @@ function AppContent({ onLock }) {
             </div>
             {editPhoto&&<img src={editPhoto} alt="bill" style={{ width:"100%",borderRadius:10,maxHeight:160,objectFit:"cover" }} onError={e=>e.target.style.display="none"}/>}
 
-            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.input,borderRadius:12,padding:"12px 14px" }}>
-              <div>
-                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>Exclude from Net Worth</div>
-                <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>e.g. Vyom Wallet, kids accounts</div>
-              </div>
-              <button onClick={()=>setExcludeFromWealth(v=>!v)} style={{ background:excludeFromWealth?T.danger+"22":"none",border:`1px solid ${excludeFromWealth?T.danger:T.border}`,borderRadius:20,padding:"5px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:excludeFromWealth?T.danger:T.sub,fontFamily:"Nunito,sans-serif" }}>{excludeFromWealth?"Excluded":"Include"}</button>
-            </div>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={onClose} style={btnG}>Cancel</button>
               <button onClick={save} style={btnP}>Save Changes ✓</button>
@@ -12118,7 +12111,7 @@ function AppContent({ onLock }) {
                 {groups.map(g=><button key={g.id} onClick={()=>handleGroupSelect(billGroup===g.id?"":g.id)} style={{ background:billGroup===g.id?g.color+"22":"none",border:`1px solid ${billGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>)}
               </div>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:selectedPids.length>0?10:0 }}>
-                {people.filter(p=>!p.isMe).map(p=><button key={p.id} onClick={()=>setBillSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:billSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${billSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+                {(billGroup ? people.filter(p=>!p.isMe && (getGroup(billGroup)?.members||[]).includes(p.id)) : people.filter(p=>!p.isMe)).map(p=><button key={p.id} onClick={()=>setBillSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:billSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${billSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
               </div>
 
               {selectedPids.length>0&&<>
