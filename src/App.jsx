@@ -948,6 +948,7 @@ function AppContent({ onLock }) {
   const [showAddBillerModal, setShowAddBillerModal] = useState(false);
   const [addBillerPresetType, setAddBillerPresetType] = useState("");
   const [activeBillerShell, setActiveBillerShell] = useState(null);
+  const [showAddYouOwe, setShowAddYouOwe] = useState(null); // holds personId when open
   const [liabilities, setLiabilities] = useState(()=>JSON.parse(localStorage.getItem("arth_liabilities")||"[]"));
   const [trackedAssets, setTrackedAssets] = useState(()=>JSON.parse(localStorage.getItem("arth_assets")||"[]"));
   const [vehicles, setVehicles] = useState(()=>JSON.parse(localStorage.getItem("arth_vehicles")||"[]"));
@@ -1681,6 +1682,19 @@ function AppContent({ onLock }) {
     return map;
   },[txns,bills,people]);
 
+  const getPersonAttributedAmount = useCallback((t, pid) => {
+    if(t.type!=="expense") return 0;
+    let total = 0;
+    if(t.forPerson===pid) total += Number(t.tagPersonAmount||t.amount||0);
+    if(t.tagItems?.length){
+      t.tagItems.forEach(item=>{ if(item.targetType==="person"&&item.targetId===pid) total += Number(item.amount||0); });
+    }
+    if(t.people?.[pid]?.mode==="spent_on") total += Number(t.people[pid].amount||0);
+    if(t.allocations?.length){
+      t.allocations.forEach(alloc=>{ if(alloc.targetType==="person"&&alloc.targetId===pid&&alloc.mode==="spent_on") total += Number(alloc.amount||0); });
+    }
+    return total;
+  },[]);
   const personSpend = useMemo(()=>{
     const map={};
     thisMonthTxns.forEach(t=>{
@@ -7955,9 +7969,10 @@ function AppContent({ onLock }) {
                     <div style={{ height:"100%",width:`${creditPct}%`,background:creditPct>80?T.danger:T.success,borderRadius:2 }}/>
                   </div><div style={{ color:T.sub,fontSize:9 }}>Credit limit: {sym}{fmt(creditLimit)}</div></>}
                 </div>
-                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",textAlign:"center" }}>
+                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",textAlign:"center",position:"relative" }}>
                   <div style={{ color:T.danger,fontSize:18,fontWeight:800 }}>{sym}{fmt(s.iOwe)}</div>
                   <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>You Owe</div>
+                  <button onClick={()=>setShowAddYouOwe(p.id)} style={{ position:"absolute",top:4,right:4,background:"none",border:`1px solid ${T.border}`,borderRadius:8,width:20,height:20,cursor:"pointer",fontSize:13,color:T.sub,lineHeight:1,fontFamily:"Nunito,sans-serif" }}>+</button>
                 </div>
               </div>
             )}
@@ -8012,6 +8027,65 @@ function AppContent({ onLock }) {
                 {spent>spendBudget && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:4 }}>⚠️ Over budget by {sym}{fmt(spent-spendBudget)}</div>}</>}
               </div>
             )}
+
+            {(()=>{
+              // Category breakdown of this person's attributed spend, this month
+              const catTotals = {};
+              thisMonthTxns.forEach(t=>{
+                const amt = getPersonAttributedAmount(t, p.id);
+                if(amt<=0) return;
+                (t.catIds||[t.catId]).filter(Boolean).forEach(cid=>{
+                  catTotals[cid] = (catTotals[cid]||0) + amt/((t.catIds||[t.catId]).filter(Boolean).length||1);
+                });
+              });
+              const rows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
+              if(rows.length===0) return null;
+              return (
+                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:14 }}>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginBottom:8 }}>Category breakdown — this month</div>
+                  <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                    {rows.slice(0,6).map(r=>(
+                      <div key={r.cat.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                        <span style={{ color:T.text,fontSize:12 }}>{r.cat.icon} {r.cat.name}</span>
+                        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(r.amt)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {(()=>{
+              // Monthly history — last 6 months of this person's attributed spend vs their budget
+              const months = [];
+              const now = new Date();
+              for(let i=0;i<6;i++){
+                const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+                const monthKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+                const monthTxns = txns.filter(t=>t.date&&t.date.startsWith(monthKey));
+                const monthSpend = p.isMe
+                  ? monthTxns.reduce((s,t)=>s+getPersonAttributedAmount(t,"__me__"),0)
+                  : monthTxns.reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
+                months.push({ label:d.toLocaleDateString("en-IN",{month:"short",year:"2-digit"}), spend:monthSpend });
+              }
+              if(months.every(m=>m.spend===0)) return null;
+              return (
+                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:14 }}>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginBottom:8 }}>Monthly history</div>
+                  <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                    {months.map((m,i)=>{
+                      const over = spendBudget>0 && m.spend>spendBudget;
+                      return (
+                        <div key={i} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                          <span style={{ color:T.sub,fontSize:11 }}>{m.label}</span>
+                          <span style={{ color:over?T.danger:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(m.spend)}{over?" ⚠️":""}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {!p.isMe&&s.owesMe>0&&<button onClick={()=>{
               const pendingTxns=txns.filter(x=>{
@@ -11445,6 +11519,64 @@ function AppContent({ onLock }) {
   };
 
   // ── ADD BILL MODAL ───────────────────────────────────────────────────────────
+  // -- ADD YOU OWE MODAL (standalone, no underlying expense needed) -----------
+  const AddYouOweModal = ({ personId, onClose }) => {
+    const p = getPerson(personId);
+    const [amount, setAmount] = useState("");
+    const [note, setNote] = useState("");
+    const [date, setDate] = useState(todayStr());
+    const canSave = parseFloat(amount)>0;
+    const handleSave = () => {
+      if(!canSave) return;
+      const amt = parseFloat(amount);
+      const newTxn = {
+        id: genId(),
+        type: "settlement_in",
+        desc: `You owe ${p.name}${note.trim()?` — ${note.trim()}`:""}`,
+        merchant: "",
+        date: date||todayStr(),
+        note: note.trim(),
+        amount: amt,
+        appliedAmount: 0,
+        extraAmount: amt,
+        accId: null,
+        fromPersonId: personId,
+        groupId: null,
+        againstTxnId: null,
+        settlementLinks: [],
+        createdAt: Date.now(),
+      };
+      setTxns(prev=>[newTxn, ...prev]);
+      onClose();
+    };
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:320,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>You Owe {p.name}</div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>For money you're holding that isn't yours — like change someone gave you extra, unrelated to any expense.</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Amount *</span>
+              <input style={{ ...inp,fontSize:16,fontWeight:700 }} type="number" min="0" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)} autoFocus/>
+            </div>
+            <div>
+              <span style={lbl}>Note (optional)</span>
+              <input style={inp} placeholder="e.g. Change owed — no small notes" value={note} onChange={e=>setNote(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>Date</span>
+              <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+            </div>
+            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.danger:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>Add to You Owe</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // -- ATTACH PAST EXPENSES MODAL ---------------------------------------------
   const AttachExpensesModal = ({ ba, onClose }) => {
     const [search, setSearch] = useState("");
@@ -12429,6 +12561,7 @@ function AppContent({ onLock }) {
         {showAddGift&&giftForPersonId&&<AddGiftModal personId={giftForPersonId} onClose={()=>{ setShowAddGift(false); setGiftForPersonId(null); }}/>}
         {editingBillerAccount&&<BillerAccountModal existing={editingBillerAccount} onClose={()=>setEditingBillerAccount(null)}/>}
         {attachExpensesFor&&<AttachExpensesModal ba={attachExpensesFor} onClose={()=>setAttachExpensesFor(null)}/>}
+        {showAddYouOwe&&<AddYouOweModal personId={showAddYouOwe} onClose={()=>setShowAddYouOwe(null)}/>}
         {confirmDialog&&(
           <div onClick={e=>{ if(e.target===e.currentTarget) setConfirmDialog(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
             <div style={{ background:T.card,borderRadius:18,padding:"20px 18px",width:"100%",maxWidth:360 }}>
