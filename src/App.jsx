@@ -2891,6 +2891,12 @@ function AppContent({ onLock }) {
     // Multi-person attribution with custom per-person amounts (e.g. 70/30), distinct from single-person
     // tag/owe flow and from group split/collect. Restored on edit from a people map with 2+ spent_on entries.
     const initialAttributeEntries = isEditing ? Object.entries(sourceTxn?.people||{}).filter(([pid,info])=>pid!=="__me__" && info?.mode==="spent_on") : [];
+    // Unified multi-row attribution: each row is a person OR group, with its own amount and
+    // independent mode — A=Attribute (spent_on, no collection), O=Own (you owe them), C=Collect (they owe you).
+    // Replaces the old people-only "attributePeople" mechanism with the older Allocate-mode concept
+    // (brought back per explicit request, generalized to include groups in the same list).
+    const initialAllocRows = isEditing && Array.isArray(sourceTxn?.allocRows) ? sourceTxn.allocRows : [];
+    const [allocRows, setAllocRows] = useState(initialAllocRows);
     const [attributePeople, setAttributePeople] = useState(()=> initialAttributeEntries.length>1 ? Object.fromEntries(initialAttributeEntries.map(([pid])=>[pid,true])) : {});
     const [attributeAmounts, setAttributeAmounts] = useState(()=> initialAttributeEntries.length>1 ? Object.fromEntries(initialAttributeEntries.map(([pid,info])=>[pid,String(info.amount||0)])) : {});
     const [catAllocations, setCatAllocations] = useState(isEditing ? (sourceTxn?.catAllocations || {}) : {});
@@ -3910,7 +3916,25 @@ function AppContent({ onLock }) {
           tagGroupAmount:tagGrpAmt,
           tagItems:savedTagItems,
           vehicleId:vehicleId||null,
+          groupAllocations: allocRows.some(r=>r.targetType==="group"&&r.targetId&&parseFloat(r.amount)>0)
+            ? allocRows.filter(r=>r.targetType==="group"&&r.targetId&&parseFloat(r.amount)>0).map(r=>({ groupId:r.targetId, amount:Number(r.amount)||0 }))
+            : (sourceTxn?.groupAllocations||undefined),
+          allocRows: allocRows.length>0 ? allocRows.filter(r=>r.targetId) : (sourceTxn?.allocRows||undefined),
           people:(()=>{
+            // Unified Allocate rows — checked first, highest priority. Each row (person or group)
+            // maps A->spent_on, C->owes, O->i_owe. Groups are included in this same map via isGroup,
+            // since a transaction can only hold one groupId but may need multiple groups allocated.
+            const validRows = allocRows.filter(r=>r.targetId && parseFloat(r.amount)>0);
+            if(validRows.length>0){
+              const modeMap = { A:"spent_on", C:"owes", O:"owes_by_me" };
+              return Object.fromEntries(validRows.map(r=>[r.targetId,{
+                amount: Number(r.amount)||0,
+                mode: modeMap[r.mode]||"spent_on",
+                isGroup: r.targetType==="group",
+                settled: false,
+                ...(modeMap[r.mode]==="owes" ? { remainingAmt: Number(r.amount)||0 } : {}),
+              }]));
+            }
             // Multi-person attribution with custom per-person amounts — checked first since it's a
             // separate selection path from the single-person tag flow below.
             if(attributePersonIds.length>0){
@@ -5072,30 +5096,50 @@ function AppContent({ onLock }) {
                   ); })}
                   <button onClick={()=>setShowGuestPerson(v=>!v)} style={{ background:showGuestPerson?T.warn+"22":"none",border:`1px solid ${showGuestPerson?T.warn:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showGuestPerson?T.warn:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 One-time</button>
                   <button onClick={()=>{
-                    if(attributePersonIds.length>0){ setAttributePeople({}); setAttributeAmounts({}); }
-                    else { setSplitMode("none"); setTagPerson(""); setTagGroup(""); setSplitPeople({}); setSplitGroup(""); setAttributePeople({__pending__:true}); }
-                  }} style={{ background:(attributePersonIds.length>0||attributePeople.__pending__)?T.purple+"22":"none",border:`1px solid ${(attributePersonIds.length>0||attributePeople.__pending__)?T.purple:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:(attributePersonIds.length>0||attributePeople.__pending__)?T.purple:T.sub,fontFamily:"Nunito,sans-serif" }}>👥 Multiple people</button>
+                    if(allocRows.length>0){ setAllocRows([]); }
+                    else { setSplitMode("none"); setTagPerson(""); setTagGroup(""); setSplitPeople({}); setSplitGroup(""); setAttributePeople({}); setAttributeAmounts({}); setAllocRows([{ id:genId(), targetType:"person", targetId:"", mode:"A", amount:"" }]); }
+                  }} style={{ background:allocRows.length>0?T.purple+"22":"none",border:`1px solid ${allocRows.length>0?T.purple:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:allocRows.length>0?T.purple:T.sub,fontFamily:"Nunito,sans-serif" }}>🔀 Allocate</button>
                 </div>
-                {/* Multi-person attribution with custom per-person amounts */}
-                {(attributePersonIds.length>0||attributePeople.__pending__)&&(
+                {/* Unified multi-row allocation — any mix of people and groups, each with its own amount and mode */}
+                {allocRows.length>0&&(
                   <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
-                    <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>Select everyone this expense is for — no collection, budget attributed to each</div>
-                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
-                      {people.filter(p=>!p.isMe).map(p=>{ const isOn=Boolean(attributePeople[p.id]); return (
-                        <button key={p.id} onClick={()=>{ setAttributePeople(prev=>{ const next={...prev}; delete next.__pending__; if(next[p.id]) delete next[p.id]; else next[p.id]=true; return next; }); setAttributeAmounts(prev=>{ const next={...prev}; delete next[p.id]; return next; }); }} style={{ background:isOn?p.color+"22":"none",border:`1px solid ${isOn?p.color:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:isOn?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
-                      ); })}
-                    </div>
-                    {attributePersonIds.length>0&&(
-                      <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-                        {attributePersonIds.map(pid=>{ const p=getPerson(pid); return (
-                          <div key={pid} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
-                            <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{p.emoji} {p.name}</span>
-                            <input style={{ ...inpSm, width:90, textAlign:"right" }} type="number" min="0" value={attributeAmounts[pid]||""} placeholder="0" onChange={e=>setAttributeAmounts(prev=>updateCategoryAllocation(attributePersonIds,pid,e.target.value,amt,prev))}/>
+                    <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>Add anyone this expense involves — set A (Attribute, no collection), O (you owe them), or C (they owe you) per row</div>
+                    <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                      {allocRows.map(row=>{
+                        const target = row.targetType==="group" ? groups.find(g=>g.id===row.targetId) : getPerson(row.targetId);
+                        return (
+                          <div key={row.id} style={{ display:"flex",flexDirection:"column",gap:6,background:T.card,borderRadius:10,padding:"8px 10px" }}>
+                            <div style={{ display:"flex",gap:6,alignItems:"center" }}>
+                              <select value={`${row.targetType}:${row.targetId}`} onChange={e=>{
+                                const [tt,tid]=e.target.value.split(":");
+                                setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,targetType:tt,targetId:tid}:r));
+                              }} style={{ ...inpSm,flex:1 }}>
+                                <option value=":">Select person or group...</option>
+                                <optgroup label="People">
+                                  {people.filter(p=>!p.isMe).map(p=><option key={p.id} value={`person:${p.id}`}>{p.emoji} {p.name}</option>)}
+                                </optgroup>
+                                <optgroup label="Groups">
+                                  {groups.map(g=><option key={g.id} value={`group:${g.id}`}>{g.icon||"👥"} {g.name}</option>)}
+                                </optgroup>
+                              </select>
+                              <button onClick={()=>setAllocRows(prev=>prev.filter(r=>r.id!==row.id))} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>×</button>
+                            </div>
+                            {row.targetId&&(
+                              <div style={{ display:"flex",gap:6,alignItems:"center" }}>
+                                <div style={{ display:"flex",gap:4 }}>
+                                  {[["A","Attribute"],["O","Own"],["C","Collect"]].map(([m,label])=>(
+                                    <button key={m} title={label} onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,mode:m}:r))} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:800,color:row.mode===m?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{m}</button>
+                                  ))}
+                                </div>
+                                <input style={{ ...inpSm,flex:1,textAlign:"right" }} type="number" min="0" placeholder="0" value={row.amount} onChange={e=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,amount:e.target.value}:r))}/>
+                              </div>
+                            )}
                           </div>
-                        ); })}
-                        <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Total: {sym}{fmt(attributePersonIds.reduce((s,pid)=>s+(parseFloat(attributeAmounts[pid])||0),0))} of {sym}{fmt(amt)}</div>
-                      </div>
-                    )}
+                        );
+                      })}
+                      <button onClick={()=>setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:"", mode:"A", amount:"" }])} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"7px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add row</button>
+                      <div style={{ color:T.sub,fontSize:10 }}>Total allocated: {sym}{fmt(allocRows.reduce((s,r)=>s+(parseFloat(r.amount)||0),0))} of {sym}{fmt(amt)}</div>
+                    </div>
                   </div>
                 )}
                 {showGuestPerson&&(
@@ -6935,7 +6979,12 @@ function AppContent({ onLock }) {
 
     const groupSpent = byCat.find(c=>c.id==="family")?.value || 0;
     const householdGroups = groups.filter(g=>g.typeId==="family"||g.defaultIntent==="attributed");
-    const householdTotal = householdGroups.reduce((s,g)=>s+thisMonthTxns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id)).reduce((ss,t)=>ss+t.amount,0),0);
+    const householdTotal = householdGroups.reduce((s,g)=>{
+      const oldStyle = thisMonthTxns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id)).reduce((ss,t)=>ss+t.amount,0);
+      // New Allocate-rows style: group lives in t.groupAllocations (existing multi-group field), not the singular groupId
+      const allocStyle = thisMonthTxns.filter(t=>t.type==="expense"&&t.groupId!==g.id&&t.tagGroup!==g.id&&t.taggedGroupId!==g.id&&t.groupAllocations?.some(ga=>ga.groupId===g.id)).reduce((ss,t)=>ss+Number(t.groupAllocations.find(ga=>ga.groupId===g.id)?.amount||0),0);
+      return s+oldStyle+allocStyle;
+    },0);
     // Amortized bills - spread multi-month fees across billing period
     const amortizedBillsThisMonth = bills.filter(b=>b.billPeriodFrom&&b.billPeriodTo&&b.amount>0).map(b=>{
       const from = new Date(b.billPeriodFrom);
@@ -13033,10 +13082,21 @@ function AppContent({ onLock }) {
           const tCats = (t.catIds||[t.catId]).filter(Boolean).map(cid=>cats.find(c=>String(c.id)===String(cid))?.name).filter(Boolean);
           const billerBA = t.billerLinkId ? billerAccounts.find(b=>b.id===t.billerLinkId) : null;
           const color = txnColor(t.type,T);
-          // Who this transaction is attributed to — group and/or person, restored from t.groupId / t.people / t.forPerson.
-          const attrGroup = t.groupId ? groups.find(g=>g.id===t.groupId) : null;
+          // Who this transaction is attributed to. New transactions carry the full allocRows list
+          // (multiple people/groups, each with its own mode) — older ones fall back to the single
+          // groupId/forPerson/people-entry logic that predates Allocate.
+          const modeLabels = { A:"Attributed", O:"You owe", C:"Owes you" };
+          const allocDisplayRows = Array.isArray(t.allocRows) && t.allocRows.length>0
+            ? t.allocRows.filter(r=>r.targetId).map(r=>({
+                label: modeLabels[r.mode]||"Attributed",
+                target: r.targetType==="group" ? groups.find(g=>g.id===r.targetId) : getPerson(r.targetId),
+                isGroup: r.targetType==="group",
+                amount: r.amount,
+              })).filter(r=>r.target)
+            : null;
+          const attrGroup = !allocDisplayRows && t.groupId ? groups.find(g=>g.id===t.groupId) : null;
           const attrGroupLabel = attrGroup ? (t.splitMode==="split" ? "Split (collect)" : "Attributed") : null;
-          const attrPersonId = t.forPerson || t.taggedPersonId || Object.keys(t.people||{}).find(pid=>pid!=="__me__") || null;
+          const attrPersonId = !allocDisplayRows ? (t.forPerson || t.taggedPersonId || Object.keys(t.people||{}).find(pid=>pid!=="__me__") || null) : null;
           const attrPerson = attrPersonId ? getPerson(attrPersonId) : null;
           const attrPersonInfo = attrPersonId ? (t.people?.[attrPersonId] || t.splitPeople?.[attrPersonId]) : null;
           const attrPersonLabel = attrPersonInfo?.mode==="owes" ? "Owes you" : attrPersonInfo?.mode==="spent_on" ? "Attributed to" : null;
@@ -13055,6 +13115,9 @@ function AppContent({ onLock }) {
                 </div>
                 <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
                   {tCats.length>0&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Category</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{tCats.join(", ")}</span></div>}
+                  {allocDisplayRows&&allocDisplayRows.map((r,i)=>(
+                    <div key={i} style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>{r.label}</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{r.isGroup?(r.target.icon||"👥"):(r.target.emoji||"👤")} {r.target.name} · {sym}{fmt(r.amount)}</span></div>
+                  ))}
                   {attrGroup&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>{attrGroupLabel}</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{attrGroup.icon||"👥"} {attrGroup.name}</span></div>}
                   {attrPerson&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>{attrPersonLabel||"Who is this for"}</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{attrPerson.emoji||"👤"} {attrPerson.name}</span></div>}
                   {t.note&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Note</span><span style={{ color:T.text,fontSize:12 }}>{t.note}</span></div>}
