@@ -2891,12 +2891,6 @@ function AppContent({ onLock }) {
     // Multi-person attribution with custom per-person amounts (e.g. 70/30), distinct from single-person
     // tag/owe flow and from group split/collect. Restored on edit from a people map with 2+ spent_on entries.
     const initialAttributeEntries = isEditing ? Object.entries(sourceTxn?.people||{}).filter(([pid,info])=>pid!=="__me__" && info?.mode==="spent_on") : [];
-    // Unified multi-row attribution: each row is a person OR group, with its own amount and
-    // independent mode — A=Attribute (spent_on, no collection), O=Own (you owe them), C=Collect (they owe you).
-    // Replaces the old people-only "attributePeople" mechanism with the older Allocate-mode concept
-    // (brought back per explicit request, generalized to include groups in the same list).
-    const initialAllocRows = isEditing && Array.isArray(sourceTxn?.allocRows) ? sourceTxn.allocRows : [];
-    const [allocRows, setAllocRows] = useState(initialAllocRows);
     const [attributePeople, setAttributePeople] = useState(()=> initialAttributeEntries.length>1 ? Object.fromEntries(initialAttributeEntries.map(([pid])=>[pid,true])) : {});
     const [attributeAmounts, setAttributeAmounts] = useState(()=> initialAttributeEntries.length>1 ? Object.fromEntries(initialAttributeEntries.map(([pid,info])=>[pid,String(info.amount||0)])) : {});
     const [catAllocations, setCatAllocations] = useState(isEditing ? (sourceTxn?.catAllocations || {}) : {});
@@ -3916,25 +3910,7 @@ function AppContent({ onLock }) {
           tagGroupAmount:tagGrpAmt,
           tagItems:savedTagItems,
           vehicleId:vehicleId||null,
-          groupAllocations: allocRows.some(r=>r.targetType==="group"&&r.targetId&&parseFloat(r.amount)>0)
-            ? allocRows.filter(r=>r.targetType==="group"&&r.targetId&&parseFloat(r.amount)>0).map(r=>({ groupId:r.targetId, amount:Number(r.amount)||0 }))
-            : (sourceTxn?.groupAllocations||undefined),
-          allocRows: allocRows.length>0 ? allocRows.filter(r=>r.targetId) : (sourceTxn?.allocRows||undefined),
           people:(()=>{
-            // Unified Allocate rows — checked first, highest priority. Each row (person or group)
-            // maps A->spent_on, C->owes, O->i_owe. Groups are included in this same map via isGroup,
-            // since a transaction can only hold one groupId but may need multiple groups allocated.
-            const validRows = allocRows.filter(r=>r.targetId && parseFloat(r.amount)>0);
-            if(validRows.length>0){
-              const modeMap = { A:"spent_on", C:"owes", O:"owes_by_me" };
-              return Object.fromEntries(validRows.map(r=>[r.targetId,{
-                amount: Number(r.amount)||0,
-                mode: modeMap[r.mode]||"spent_on",
-                isGroup: r.targetType==="group",
-                settled: false,
-                ...(modeMap[r.mode]==="owes" ? { remainingAmt: Number(r.amount)||0 } : {}),
-              }]));
-            }
             // Multi-person attribution with custom per-person amounts — checked first since it's a
             // separate selection path from the single-person tag flow below.
             if(attributePersonIds.length>0){
@@ -5096,17 +5072,23 @@ function AppContent({ onLock }) {
                   ); })}
                   <button onClick={()=>setShowGuestPerson(v=>!v)} style={{ background:showGuestPerson?T.warn+"22":"none",border:`1px solid ${showGuestPerson?T.warn:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showGuestPerson?T.warn:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 One-time</button>
                   <button onClick={()=>{
-                    if(allocRows.length>0){ setAllocRows([]); }
-                    else { setSplitMode("none"); setTagPerson(""); setTagGroup(""); setSplitPeople({}); setSplitGroup(""); setAttributePeople({}); setAttributeAmounts({}); setAllocRows([{ id:genId(), targetType:"person", targetId:"", mode:"A", amount:"" }]); }
+                    if(allocRows.length>0){ setAllocRows([]); setSplitMode("none"); }
+                    else { setSplitMode("allocate"); setTagPerson(""); setTagGroup(""); setSplitPeople({}); setSplitGroup(""); setAttributePeople({}); setAttributeAmounts({}); setAllocRows([{ id:genId(), targetType:"person", targetId:"", mode:"spent_on", amount:"", items:[] }]); }
                   }} style={{ background:allocRows.length>0?T.purple+"22":"none",border:`1px solid ${allocRows.length>0?T.purple:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:allocRows.length>0?T.purple:T.sub,fontFamily:"Nunito,sans-serif" }}>🔀 Allocate</button>
                 </div>
-                {/* Unified multi-row allocation — any mix of people and groups, each with its own amount and mode */}
+                {/* Unified multi-row allocation — any mix of people and groups, each with its own amount/mode,
+                    optionally linked to specific purchased items instead of a flat amount */}
                 {allocRows.length>0&&(
                   <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
-                    <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>Add anyone this expense involves — set A (Attribute, no collection), O (you owe them), or C (they owe you) per row</div>
+                    <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>Add anyone this expense involves — Attribute (no collection), Own (you owe them), or Collect (they owe you) per row{lineItems?.length?" — link to specific items instead of a flat amount if you want":""}</div>
                     <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
                       {allocRows.map(row=>{
-                        const target = row.targetType==="group" ? groups.find(g=>g.id===row.targetId) : getPerson(row.targetId);
+                        const useItems = (row.items||[]).length>0;
+                        const rowItemTotal = (row.items||[]).reduce((s,i)=>{
+                          const src = (lineItems||[]).find(li=>li.id===i.sourceItemId);
+                          const unit = src ? (Number(src.qty)>0 ? Number(src.unitPrice||0) : Number(src.amount||0)) : 0;
+                          return s+(Number(i.qty)||0)*unit;
+                        },0);
                         return (
                           <div key={row.id} style={{ display:"flex",flexDirection:"column",gap:6,background:T.card,borderRadius:10,padding:"8px 10px" }}>
                             <div style={{ display:"flex",gap:6,alignItems:"center" }}>
@@ -5124,21 +5106,56 @@ function AppContent({ onLock }) {
                               </select>
                               <button onClick={()=>setAllocRows(prev=>prev.filter(r=>r.id!==row.id))} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>×</button>
                             </div>
-                            {row.targetId&&(
+                            {row.targetId&&(<>
                               <div style={{ display:"flex",gap:6,alignItems:"center" }}>
                                 <div style={{ display:"flex",gap:4 }}>
-                                  {[["A","Attribute"],["O","Own"],["C","Collect"]].map(([m,label])=>(
-                                    <button key={m} title={label} onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,mode:m}:r))} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:800,color:row.mode===m?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{m}</button>
+                                  {[["spent_on","A"],["i_owe","O"],["owes","C"]].map(([m,label])=>(
+                                    <button key={m} title={label==="A"?"Attribute":label==="O"?"Own":"Collect"} onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,mode:m}:r))} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:800,color:row.mode===m?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
                                   ))}
                                 </div>
-                                <input style={{ ...inpSm,flex:1,textAlign:"right" }} type="number" min="0" placeholder="0" value={row.amount} onChange={e=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,amount:e.target.value}:r))}/>
+                                {!useItems&&<input style={{ ...inpSm,flex:1,textAlign:"right" }} type="number" min="0" placeholder="0" value={row.amount} onChange={e=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,amount:e.target.value}:r))}/>}
+                                {useItems&&<div style={{ flex:1,textAlign:"right",color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(rowItemTotal)} (from items)</div>}
                               </div>
-                            )}
+                              {lineItems?.length>0&&(
+                                <button onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,items: useItems ? [] : []}:r))} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:10,fontWeight:700,textAlign:"left",fontFamily:"Nunito,sans-serif" }}>{useItems?"← Use flat amount instead":"Link to specific items instead →"}</button>
+                              )}
+                              {useItems&&(
+                                <div style={{ display:"flex",flexDirection:"column",gap:4,paddingLeft:8 }}>
+                                  {(lineItems||[]).map(li=>{
+                                    const existing = (row.items||[]).find(i=>i.sourceItemId===li.id);
+                                    const boughtQty = Math.max(0, parseFloat(li.qty)||0)||1;
+                                    return (
+                                      <div key={li.id} style={{ display:"flex",gap:6,alignItems:"center" }}>
+                                        <span style={{ flex:1,color:T.sub,fontSize:11 }}>{li.label} (of {boughtQty})</span>
+                                        <input style={{ ...inpSm,width:60,textAlign:"right" }} type="number" min="0" max={boughtQty} placeholder="0" value={existing?.qty||""} onChange={e=>{
+                                          const qty = e.target.value;
+                                          setAllocRows(prev=>prev.map(r=>{
+                                            if(r.id!==row.id) return r;
+                                            const items = (r.items||[]).filter(i=>i.sourceItemId!==li.id);
+                                            if(parseFloat(qty)>0) items.push({ sourceItemId:li.id, qty });
+                                            return {...r,items};
+                                          }));
+                                        }}/>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </>)}
                           </div>
                         );
                       })}
-                      <button onClick={()=>setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:"", mode:"A", amount:"" }])} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"7px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add row</button>
-                      <div style={{ color:T.sub,fontSize:10 }}>Total allocated: {sym}{fmt(allocRows.reduce((s,r)=>s+(parseFloat(r.amount)||0),0))} of {sym}{fmt(amt)}</div>
+                      <button onClick={()=>setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:"", mode:"spent_on", amount:"", items:[] }])} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"7px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add row</button>
+                      <div style={{ color:T.sub,fontSize:10 }}>Total allocated: {sym}{fmt(allocRows.reduce((s,r)=>{
+                        if((r.items||[]).length>0){
+                          return s+r.items.reduce((si,i)=>{
+                            const src=(lineItems||[]).find(li=>li.id===i.sourceItemId);
+                            const unit = src ? (Number(src.qty)>0?Number(src.unitPrice||0):Number(src.amount||0)) : 0;
+                            return si+(Number(i.qty)||0)*unit;
+                          },0);
+                        }
+                        return s+(parseFloat(r.amount)||0);
+                      },0))} of {sym}{fmt(amt)}</div>
                     </div>
                   </div>
                 )}
@@ -13082,12 +13099,12 @@ function AppContent({ onLock }) {
           const tCats = (t.catIds||[t.catId]).filter(Boolean).map(cid=>cats.find(c=>String(c.id)===String(cid))?.name).filter(Boolean);
           const billerBA = t.billerLinkId ? billerAccounts.find(b=>b.id===t.billerLinkId) : null;
           const color = txnColor(t.type,T);
-          // Who this transaction is attributed to. New transactions carry the full allocRows list
+          // Who this transaction is attributed to. New transactions carry the full allocations list
           // (multiple people/groups, each with its own mode) — older ones fall back to the single
           // groupId/forPerson/people-entry logic that predates Allocate.
-          const modeLabels = { A:"Attributed", O:"You owe", C:"Owes you" };
-          const allocDisplayRows = Array.isArray(t.allocRows) && t.allocRows.length>0
-            ? t.allocRows.filter(r=>r.targetId).map(r=>({
+          const modeLabels = { spent_on:"Attributed", i_owe:"You owe", owes:"Owes you" };
+          const allocDisplayRows = Array.isArray(t.allocations) && t.allocations.length>0
+            ? t.allocations.filter(r=>r.targetId).map(r=>({
                 label: modeLabels[r.mode]||"Attributed",
                 target: r.targetType==="group" ? groups.find(g=>g.id===r.targetId) : getPerson(r.targetId),
                 isGroup: r.targetType==="group",
