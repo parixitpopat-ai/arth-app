@@ -11940,10 +11940,16 @@ function AppContent({ onLock }) {
     const [graceDays, setGraceDays] = useState(existing?.graceDays?String(existing.graceDays):"0");
     const [bulkMonths, setBulkMonths] = useState("1");
     const [accId, setAccId] = useState(existing?.accId||accounts.find(a=>a.type!=="cc")?.id||"");
+    // Exact dates — needed for periods that don't fit a whole-month cycle (e.g. a 1-week catch-up),
+    // and for linking multiple membership periods to the same underlying payment transaction.
+    const [useExactDates, setUseExactDates] = useState(Boolean(existing?.useExactDates));
+    const [exactValidUntil, setExactValidUntil] = useState(existing?.validUntil||"");
+    const [linkedTxnId, setLinkedTxnId] = useState(existing?.linkedTxnId||"");
+    const recentTxnsForBiller = txns.filter(t=>t.type==="expense" && t.billerLinkId===billerAccount.id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,15);
 
     const cycleMonths = { monthly:1, quarterly:3, halfyearly:6, annual:12 };
     const totalMonths = Number(bulkMonths) * (cycleMonths[cycle]||1);
-    const validUntil = (() => {
+    const validUntil = useExactDates ? exactValidUntil : (() => {
       if(!validFrom) return "";
       const d = new Date(validFrom);
       d.setMonth(d.getMonth() + totalMonths);
@@ -11955,6 +11961,7 @@ function AppContent({ onLock }) {
 
     const handleSave = () => {
       if(!amount||!validFrom) return;
+      if(useExactDates && !exactValidUntil) return;
       const record = {
         id: existing?.id||genId(),
         billerAccountId: billerAccount.id,
@@ -11965,6 +11972,8 @@ function AppContent({ onLock }) {
         graceDays: Number(graceDays||0),
         validFrom,
         validUntil,
+        useExactDates,
+        linkedTxnId: linkedTxnId||null,
         accId,
         paidDate: todayStr(),
         createdAt: existing?.createdAt||Date.now(),
@@ -11995,22 +12004,40 @@ function AppContent({ onLock }) {
                 ))}
               </div>
             </div>
-            <div>
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.input,borderRadius:10,padding:"8px 12px" }}>
+              <div>
+                <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>Use exact dates</div>
+                <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>For periods that don't fit a whole month, like a 1-week catch-up</div>
+              </div>
+              <button onClick={()=>setUseExactDates(v=>!v)} style={{ background:useExactDates?T.accent+"22":"none",border:`1px solid ${useExactDates?T.accent:T.border}`,borderRadius:20,padding:"5px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:useExactDates?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{useExactDates?"On":"Off"}</button>
+            </div>
+            {!useExactDates&&(<div>
               <span style={lbl}>Billing Cycle</span>
               <div style={{ display:"flex",gap:6 }}>
                 {["monthly","quarterly","halfyearly","annual"].map(c=>(
                   <button key={c} onClick={()=>setCycle(c)} style={{ flex:1,background:cycle===c?T.accent+"22":"none",border:`1px solid ${cycle===c?T.accent:T.border}`,borderRadius:10,padding:"6px 4px",cursor:"pointer",fontSize:10,fontWeight:700,color:cycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>
                 ))}
               </div>
-            </div>
+            </div>)}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-              <div><span style={lbl}>Amount (per cycle)</span><input style={inp} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/></div>
-              <div><span style={lbl}>No. of cycles paying</span><input style={inp} type="number" min="1" placeholder="1" value={bulkMonths} onChange={e=>setBulkMonths(e.target.value)}/></div>
+              <div><span style={lbl}>Amount{useExactDates?"":" (per cycle)"}</span><input style={inp} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/></div>
+              {!useExactDates&&<div><span style={lbl}>No. of cycles paying</span><input style={inp} type="number" min="1" placeholder="1" value={bulkMonths} onChange={e=>setBulkMonths(e.target.value)}/></div>}
+              {useExactDates&&<div><span style={lbl}>Valid Until</span><input style={inp} type="date" value={exactValidUntil} onChange={e=>setExactValidUntil(e.target.value)}/></div>}
             </div>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
               <div><span style={lbl}>Valid From</span><input style={inp} type="date" value={validFrom} onChange={e=>setValidFrom(e.target.value)}/></div>
-              <div><span style={lbl}>Grace Days</span><input style={inp} type="number" min="0" placeholder="0" value={graceDays} onChange={e=>setGraceDays(e.target.value)}/></div>
+              {!useExactDates&&<div><span style={lbl}>Grace Days</span><input style={inp} type="number" min="0" placeholder="0" value={graceDays} onChange={e=>setGraceDays(e.target.value)}/></div>}
             </div>
+            {recentTxnsForBiller.length>0&&(
+              <div>
+                <span style={lbl}>Link to a specific payment (optional)</span>
+                <select style={inp} value={linkedTxnId} onChange={e=>setLinkedTxnId(e.target.value)}>
+                  <option value="">No specific transaction</option>
+                  {recentTxnsForBiller.map(t=><option key={t.id} value={t.id}>{sym}{fmt(t.amount)} · {formatShortDate(t.date)||t.date}{t.merchant?` · ${t.merchant}`:""}</option>)}
+                </select>
+                <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Link multiple membership periods to the same transaction — e.g. one payment covering a 1-week catch-up plus a new 3-month period.</div>
+              </div>
+            )}
             {validUntil&&(
               <div style={{ background:daysLeft>=0?T.success+"16":T.danger+"16",border:`1px solid ${daysLeft>=0?T.success:T.danger}33`,borderRadius:12,padding:"10px 14px" }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
