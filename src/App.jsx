@@ -950,6 +950,7 @@ function AppContent({ onLock }) {
   const [addBillerPresetType, setAddBillerPresetType] = useState("");
   const [activeBillerShell, setActiveBillerShell] = useState(null);
   const [showAddYouOwe, setShowAddYouOwe] = useState(null); // holds personId when open
+  const [viewingMembership, setViewingMembership] = useState(null); // holds the membership record for the detail view
   const [liabilities, setLiabilities] = useState(()=>JSON.parse(localStorage.getItem("arth_liabilities")||"[]"));
   const [trackedAssets, setTrackedAssets] = useState(()=>JSON.parse(localStorage.getItem("arth_assets")||"[]"));
   const [vehicles, setVehicles] = useState(()=>JSON.parse(localStorage.getItem("arth_vehicles")||"[]"));
@@ -11631,6 +11632,48 @@ function AppContent({ onLock }) {
 
   // ── ADD BILL MODAL ───────────────────────────────────────────────────────────
   // -- ADD YOU OWE MODAL (standalone, no underlying expense needed) -----------
+  // -- MEMBERSHIP DETAIL MODAL (tap a history row to see full details) --------
+  const MembershipDetailModal = ({ membership, onClose }) => {
+    const m = membership;
+    const person = people.find(p=>String(p.id)===String(m.personId));
+    const acc = accounts.find(a=>a.id===m.accId);
+    const linkedTxn = m.linkedTxnId ? txns.find(t=>t.id===m.linkedTxnId) : null;
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:330,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{person?.emoji||"👤"} {person?.name||"Me"}</div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ textAlign:"center",marginBottom:16 }}>
+            <div style={{ color:T.accent,fontSize:26,fontWeight:900 }}>{sym}{fmt(m.amount)}</div>
+            <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{m.useExactDates?"Exact period":`${m.cycle} × ${m.bulkMonths}`}</div>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+            <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Valid From</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{formatShortDate(m.validFrom)||m.validFrom}</span></div>
+            <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Valid Until</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{formatShortDate(m.validUntil)||m.validUntil}</span></div>
+            {m.paidDate&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Payment Date</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{formatShortDate(m.paidDate)||m.paidDate}</span></div>}
+            {m.graceDays>0&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Grace Days</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{m.graceDays}</span></div>}
+            {acc&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Paid From</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{acc.name}</span></div>}
+            {linkedTxn&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Linked Transaction</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{sym}{fmt(linkedTxn.amount)} · {formatShortDate(linkedTxn.date)||linkedTxn.date}</span></div>}
+            {m.note&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Note</span><span style={{ color:T.text,fontSize:12 }}>{m.note}</span></div>}
+          </div>
+          {m.monthlyDistribution?.length>1&&(
+            <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginTop:14 }}>
+              <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:6 }}>MONTHLY DISTRIBUTION</div>
+              {m.monthlyDistribution.map(md=>(
+                <div key={md.month} style={{ display:"flex",justifyContent:"space-between",padding:"3px 0" }}>
+                  <span style={{ color:T.sub,fontSize:12 }}>{md.month}</span>
+                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(md.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const AddYouOweModal = ({ personId, onClose }) => {
     const p = getPerson(personId);
     const [amount, setAmount] = useState("");
@@ -12639,6 +12682,7 @@ function AppContent({ onLock }) {
         {editingBillerAccount&&<BillerAccountModal existing={editingBillerAccount} onClose={()=>setEditingBillerAccount(null)}/>}
         {attachExpensesFor&&<AttachExpensesModal ba={attachExpensesFor} onClose={()=>setAttachExpensesFor(null)}/>}
         {showAddYouOwe&&<AddYouOweModal personId={showAddYouOwe} onClose={()=>setShowAddYouOwe(null)}/>}
+        {viewingMembership&&<MembershipDetailModal membership={viewingMembership} onClose={()=>setViewingMembership(null)}/>}
         {confirmDialog&&(
           <div onClick={e=>{ if(e.target===e.currentTarget) setConfirmDialog(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
             <div style={{ background:T.card,borderRadius:18,padding:"20px 18px",width:"100%",maxWidth:360 }}>
@@ -12794,10 +12838,11 @@ function AppContent({ onLock }) {
                   <div style={{ marginBottom:12 }}>
                     <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>MEMBERSHIP HISTORY</div>
                     {baMemberships.sort((a,b2)=>b2.createdAt-a.createdAt).slice(0,5).map(m=>(
-                      <div key={m.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                      <div key={m.id} onClick={()=>setViewingMembership(m)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
                         <div>
                           <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{people.find(p=>String(p.id)===String(m.personId))?.name||"Me"} · {m.cycle}</div>
                           <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(m.validFrom)||m.validFrom} to {formatShortDate(m.validUntil)||m.validUntil}{m.graceDays>0?` (+${m.graceDays}d grace)`:""}</div>
+                          {m.paidDate&&<div style={{ color:T.sub,fontSize:10 }}>Paid: {formatShortDate(m.paidDate)||m.paidDate}</div>}
                         </div>
                         <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(m.amount)}</div>
                       </div>
