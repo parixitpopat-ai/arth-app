@@ -2860,6 +2860,10 @@ function AppContent({ onLock }) {
       ? (sourceTxn.allocations||[]).map(a=>({...a}))
       : [];
     const [allocRows, setAllocRows] = useState(initialAllocRows);
+    // Distinguishes "explicitly chose Me only" from "haven't picked anyone yet" — both previously
+    // looked identical (allocRows.length===0), making the Me-only chip always appear selected with
+    // no way to show a genuinely untagged state.
+    const [explicitlyMeOnly, setExplicitlyMeOnly] = useState(false);
     const [allocTargetPicker, setAllocTargetPicker] = useState(null);
     const [tagMode, setTagMode] = useState(isEditing && sourceTxn?.type==="expense"
       ? (sourceTxn.tagMode ||
@@ -5048,13 +5052,13 @@ function AppContent({ onLock }) {
               <div>
                 <span style={lbl}>Who is this for? (optional)</span>
                 <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:10 }}>
-                  <button onClick={()=>{ setAllocRows([]); setSplitMode("none"); }} style={{ background:allocRows.length===0?T.accent+"22":"none",border:`1px solid ${allocRows.length===0?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:allocRows.length===0?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>😎 Me only</button>
+                  <button onClick={()=>{ setAllocRows([]); setSplitMode("none"); setExplicitlyMeOnly(true); }} style={{ background:explicitlyMeOnly?T.accent+"22":"none",border:`1px solid ${explicitlyMeOnly?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:explicitlyMeOnly?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>😎 Me only</button>
                   {people.filter(p=>!p.isMe).map(p=>{
                     const isSelected = allocRows.some(r=>r.targetType==="person"&&r.targetId===p.id);
                     return (
                       <button key={p.id} onClick={()=>{
                         if(isSelected){ setAllocRows(prev=>prev.filter(r=>!(r.targetType==="person"&&r.targetId===p.id))); }
-                        else { setSplitMode("allocate"); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:p.id, mode:"owes", amount:"", items:[] }]); }
+                        else { setSplitMode("allocate"); setExplicitlyMeOnly(false); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:p.id, mode:"owes", amount:"", items:[] }]); }
                       }} style={{ background:isSelected?p.color+"22":"none",border:`1px solid ${isSelected?p.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
                     );
                   })}
@@ -5066,6 +5070,7 @@ function AppContent({ onLock }) {
                         else {
                           const di = g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
                           setSplitMode("allocate");
+                          setExplicitlyMeOnly(false);
                           setAllocRows(prev=>[...prev,{ id:genId(), targetType:"group", targetId:g.id, mode:di==="attributed"?"spent_on":"owes", amount:"", items:[] }]);
                         }
                       }} style={{ background:isSelected?g.color+"22":"none",border:`1px solid ${isSelected?g.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon||"👥"} {g.name}</button>
