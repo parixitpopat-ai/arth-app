@@ -6507,16 +6507,18 @@ function AppContent({ onLock }) {
 
   const DEFAULT_CARD_ORDER = ["household","health","stats","categories","cc","bills","recent"];
   const KNOWN_CARD_KEYS = new Set(DEFAULT_CARD_ORDER);
-  const [cardOrder, setCardOrder] = useState(()=>{
-    const saved = JSON.parse(localStorage.getItem("arth_card_order")||"null");
+  // Filters out invalid saved keys AND backfills any card added to the app after this user's
+  // order was last saved. Must be applied every time cardOrder is set from a saved source
+  // (local OR cloud) — not just at initial mount — or a cloud sync restore will silently
+  // overwrite the backfilled result with the old, pre-fix array (bug: cards appeared briefly
+  // then vanished once cloud sync completed a moment after initial render).
+  const backfillCardOrder = (saved) => {
     const filtered = Array.isArray(saved) ? saved.filter(k=>KNOWN_CARD_KEYS.has(k)) : [];
-    // Backfill any card keys added to the app after this user's order was last saved,
-    // instead of silently dropping them forever (previous bug: new cards never appeared
-    // for existing users/accounts since the filter only removed invalid keys, never added new ones).
     const missing = DEFAULT_CARD_ORDER.filter(k=>!filtered.includes(k));
     const merged = [...filtered, ...missing];
     return merged.length ? merged : DEFAULT_CARD_ORDER;
-  });
+  };
+  const [cardOrder, setCardOrder] = useState(()=>backfillCardOrder(JSON.parse(localStorage.getItem("arth_card_order")||"null")));
   const [editingCards, setEditingCards] = useState(false);
   const [syncEmail, setSyncEmail] = useState("");
   const [syncPassword, setSyncPassword] = useState("");
@@ -6629,7 +6631,7 @@ function AppContent({ onLock }) {
     setAnnualBudget(Number(snapshot.annualBudget || 600000));
     setLastFYTarget(Number(snapshot.lastFYTarget || 0));
     setMonthOverrides(snapshot.monthOverrides && typeof snapshot.monthOverrides === "object" ? snapshot.monthOverrides : {});
-    if(Array.isArray(snapshot.cardOrder) && snapshot.cardOrder.length) setCardOrder(snapshot.cardOrder);
+    if(Array.isArray(snapshot.cardOrder) && snapshot.cardOrder.length) setCardOrder(backfillCardOrder(snapshot.cardOrder));
     window.setTimeout(() => { applyingCloudSnapshotRef.current = false; }, 0);
   }, [setCardOrder]);
 
