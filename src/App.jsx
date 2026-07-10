@@ -928,11 +928,6 @@ function AppContent({ onLock }) {
   const [editTxn, setEditTxn] = useState(null);
   const [defaultGroupId, setDefaultGroupId] = useState(()=>localStorage.getItem("arth_default_group")||"");
   const [editingRecurring, setEditingRecurring] = useState(null);
-  const [editingVehicle, setEditingVehicle] = useState(null);
-  const [vType, setVType] = useState("car");
-  const [vNumber, setVNumber] = useState("");
-  const [vName, setVName] = useState("");
-  const [vColor, setVColor] = useState(PALETTE[2]);
   const [bills, setBills] = useState(()=>JSON.parse(localStorage.getItem("arth_bills")||"[]"));
   const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
   const [billers, setBillers] = useState(()=>JSON.parse(localStorage.getItem("arth_billers")||"[]"));
@@ -1171,7 +1166,6 @@ function AppContent({ onLock }) {
         "",
         dueLabel ? `Kindly pay before ${dueLabel}` : "Kindly pay when convenient.",
         upiHandle ? `Payment UPI: ${upiHandle}${linkedLabel}` : "",
-        "- sent via Arth",
       ].filter(Boolean).join("\n");
     } else {
       lines = [
@@ -1179,7 +1173,6 @@ function AppContent({ onLock }) {
         `Your share towards ${contextLabel} is ${sym}${fmt(amount)}.`,
         dueLabel ? `Kindly clear it before ${dueLabel}.` : "Kindly clear it when convenient.",
         upiHandle ? `Payment UPI: ${upiHandle}${linkedLabel}` : "",
-        "- sent via Arth",
       ].filter(Boolean).join("\n");
     }
     try {
@@ -5055,97 +5048,87 @@ function AppContent({ onLock }) {
               <div>
                 <span style={lbl}>Who is this for? (optional)</span>
                 <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:10 }}>
-                  <button onClick={()=>{ setSplitMode("none"); setTagPerson(""); setTagGroup(""); setSplitPeople({}); setSplitGroup(""); setAttributePeople({}); setAttributeAmounts({}); }} style={{ background:splitMode==="none"?T.accent+"22":"none",border:`1px solid ${splitMode==="none"?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:splitMode==="none"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>😎 Me only</button>
-                  {people.filter(p=>!p.isMe).map(p=>{ const isSelected=tagPerson===String(p.id); return (
-                    <button key={p.id} onClick={()=>{ setAttributePeople({}); setAttributeAmounts({}); if(tagPerson===String(p.id)){ setTagPerson(""); setSplitMode("none"); } else { setTagPerson(String(p.id)); setSplitMode("tag"); setTagGroup(""); setSplitGroup(""); } }} style={{ background:isSelected?p.color+"22":"none",border:`1px solid ${isSelected?p.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
-                  ); })}
-                  {groups.map(g=>{ const isSelected=tagGroup===g.id||splitGroup===g.id; return (
-                    <button key={g.id} onClick={()=>{
-                      setAttributePeople({}); setAttributeAmounts({});
-                      if(isSelected){ setTagGroup(""); setSplitGroup(""); setSplitMode("none"); }
-                      else {
-                        const di=g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
-                        if(di==="attributed"){ setTagGroup(g.id); setSplitMode("tag"); setTagMode("attribute"); setTagPerson(""); setSplitGroup(""); }
-                        else { setSplitGroup(g.id); setSplitMode("split"); setTagGroup(""); setTagPerson(""); }
-                      }
-                    }} style={{ background:isSelected?g.color+"22":"none",border:`1px solid ${isSelected?g.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon||"👥"} {g.name}</button>
-                  ); })}
+                  <button onClick={()=>{ setAllocRows([]); setSplitMode("none"); }} style={{ background:allocRows.length===0?T.accent+"22":"none",border:`1px solid ${allocRows.length===0?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:allocRows.length===0?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>😎 Me only</button>
+                  {people.filter(p=>!p.isMe).map(p=>{
+                    const isSelected = allocRows.some(r=>r.targetType==="person"&&r.targetId===p.id);
+                    return (
+                      <button key={p.id} onClick={()=>{
+                        if(isSelected){ setAllocRows(prev=>prev.filter(r=>!(r.targetType==="person"&&r.targetId===p.id))); }
+                        else { setSplitMode("allocate"); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:p.id, mode:"owes", amount:"", items:[] }]); }
+                      }} style={{ background:isSelected?p.color+"22":"none",border:`1px solid ${isSelected?p.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                    );
+                  })}
+                  {groups.map(g=>{
+                    const isSelected = allocRows.some(r=>r.targetType==="group"&&r.targetId===g.id);
+                    return (
+                      <button key={g.id} onClick={()=>{
+                        if(isSelected){ setAllocRows(prev=>prev.filter(r=>!(r.targetType==="group"&&r.targetId===g.id))); }
+                        else {
+                          const di = g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
+                          setSplitMode("allocate");
+                          setAllocRows(prev=>[...prev,{ id:genId(), targetType:"group", targetId:g.id, mode:di==="attributed"?"spent_on":"owes", amount:"", items:[] }]);
+                        }
+                      }} style={{ background:isSelected?g.color+"22":"none",border:`1px solid ${isSelected?g.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon||"👥"} {g.name}</button>
+                    );
+                  })}
                   <button onClick={()=>setShowGuestPerson(v=>!v)} style={{ background:showGuestPerson?T.warn+"22":"none",border:`1px solid ${showGuestPerson?T.warn:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showGuestPerson?T.warn:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 One-time</button>
-                  <button onClick={()=>{
-                    if(allocRows.length>0){ setAllocRows([]); setSplitMode("none"); }
-                    else { setSplitMode("allocate"); setTagPerson(""); setTagGroup(""); setSplitPeople({}); setSplitGroup(""); setAttributePeople({}); setAttributeAmounts({}); setAllocRows([{ id:genId(), targetType:"person", targetId:"", mode:"spent_on", amount:"", items:[] }]); }
-                  }} style={{ background:allocRows.length>0?T.purple+"22":"none",border:`1px solid ${allocRows.length>0?T.purple:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:allocRows.length>0?T.purple:T.sub,fontFamily:"Nunito,sans-serif" }}>🔀 Allocate</button>
                 </div>
-                {/* Unified multi-row allocation — any mix of people and groups, each with its own amount/mode,
-                    optionally linked to specific purchased items instead of a flat amount */}
+                {/* Rows appear automatically for whoever's tapped above — set Attribute/Own/Collect + amount
+                    per row here, optionally linked to specific purchased items instead of a flat amount */}
                 {allocRows.length>0&&(
                   <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
-                    <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>Add anyone this expense involves — Attribute (no collection), Own (you owe them), or Collect (they owe you) per row{lineItems?.length?" — link to specific items instead of a flat amount if you want":""}</div>
                     <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
                       {allocRows.map(row=>{
+                        const target = row.targetType==="group" ? groups.find(g=>g.id===row.targetId) : getPerson(row.targetId);
                         const useItems = (row.items||[]).length>0;
                         const rowItemTotal = (row.items||[]).reduce((s,i)=>{
                           const src = (lineItems||[]).find(li=>li.id===i.sourceItemId);
                           const unit = src ? (Number(src.qty)>0 ? Number(src.unitPrice||0) : Number(src.amount||0)) : 0;
                           return s+(Number(i.qty)||0)*unit;
                         },0);
+                        if(!target) return null;
                         return (
                           <div key={row.id} style={{ display:"flex",flexDirection:"column",gap:6,background:T.card,borderRadius:10,padding:"8px 10px" }}>
-                            <div style={{ display:"flex",gap:6,alignItems:"center" }}>
-                              <select value={`${row.targetType}:${row.targetId}`} onChange={e=>{
-                                const [tt,tid]=e.target.value.split(":");
-                                setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,targetType:tt,targetId:tid}:r));
-                              }} style={{ ...inpSm,flex:1 }}>
-                                <option value=":">Select person or group...</option>
-                                <optgroup label="People">
-                                  {people.filter(p=>!p.isMe).map(p=><option key={p.id} value={`person:${p.id}`}>{p.emoji} {p.name}</option>)}
-                                </optgroup>
-                                <optgroup label="Groups">
-                                  {groups.map(g=><option key={g.id} value={`group:${g.id}`}>{g.icon||"👥"} {g.name}</option>)}
-                                </optgroup>
-                              </select>
-                              <button onClick={()=>setAllocRows(prev=>prev.filter(r=>r.id!==row.id))} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>×</button>
-                            </div>
-                            {row.targetId&&(<>
-                              <div style={{ display:"flex",gap:6,alignItems:"center" }}>
-                                <div style={{ display:"flex",gap:4 }}>
-                                  {[["spent_on","A"],["i_owe","O"],["owes","C"]].map(([m,label])=>(
-                                    <button key={m} title={label==="A"?"Attribute":label==="O"?"Own":"Collect"} onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,mode:m}:r))} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:800,color:row.mode===m?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
-                                  ))}
-                                </div>
-                                {!useItems&&<input style={{ ...inpSm,flex:1,textAlign:"right" }} type="number" min="0" placeholder="0" value={row.amount} onChange={e=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,amount:e.target.value}:r))}/>}
-                                {useItems&&<div style={{ flex:1,textAlign:"right",color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(rowItemTotal)} (from items)</div>}
+                            <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                              <span style={{ flex:1,color:T.text,fontSize:13,fontWeight:700 }}>{row.targetType==="group"?(target.icon||"👥"):(target.emoji||"👤")} {target.name}</span>
+                              <div style={{ display:"flex",gap:4 }}>
+                                {[["spent_on","A"],["i_owe","O"],["owes","C"]].map(([m,label])=>(
+                                  <button key={m} title={label==="A"?"Attribute":label==="O"?"Own":"Collect"} onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,mode:m}:r))} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:800,color:row.mode===m?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
+                                ))}
                               </div>
-                              {lineItems?.length>0&&(
-                                <button onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,items: useItems ? [] : []}:r))} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:10,fontWeight:700,textAlign:"left",fontFamily:"Nunito,sans-serif" }}>{useItems?"← Use flat amount instead":"Link to specific items instead →"}</button>
-                              )}
-                              {useItems&&(
-                                <div style={{ display:"flex",flexDirection:"column",gap:4,paddingLeft:8 }}>
-                                  {(lineItems||[]).map(li=>{
-                                    const existing = (row.items||[]).find(i=>i.sourceItemId===li.id);
-                                    const boughtQty = Math.max(0, parseFloat(li.qty)||0)||1;
-                                    return (
-                                      <div key={li.id} style={{ display:"flex",gap:6,alignItems:"center" }}>
-                                        <span style={{ flex:1,color:T.sub,fontSize:11 }}>{li.label} (of {boughtQty})</span>
-                                        <input style={{ ...inpSm,width:60,textAlign:"right" }} type="number" min="0" max={boughtQty} placeholder="0" value={existing?.qty||""} onChange={e=>{
-                                          const qty = e.target.value;
-                                          setAllocRows(prev=>prev.map(r=>{
-                                            if(r.id!==row.id) return r;
-                                            const items = (r.items||[]).filter(i=>i.sourceItemId!==li.id);
-                                            if(parseFloat(qty)>0) items.push({ sourceItemId:li.id, qty });
-                                            return {...r,items};
-                                          }));
-                                        }}/>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </>)}
+                            </div>
+                            <div style={{ display:"flex",gap:6,alignItems:"center" }}>
+                              {!useItems&&<input style={{ ...inpSm,flex:1,textAlign:"right" }} type="number" min="0" placeholder="0" value={row.amount} onChange={e=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,amount:e.target.value}:r))}/>}
+                              {useItems&&<div style={{ flex:1,textAlign:"right",color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(rowItemTotal)} (from items)</div>}
+                            </div>
+                            {lineItems?.length>0&&(
+                              <button onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,items: []}:r))} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:10,fontWeight:700,textAlign:"left",fontFamily:"Nunito,sans-serif" }}>{useItems?"← Use flat amount instead":"Link to specific items instead →"}</button>
+                            )}
+                            {useItems&&(
+                              <div style={{ display:"flex",flexDirection:"column",gap:4,paddingLeft:8 }}>
+                                {(lineItems||[]).map(li=>{
+                                  const existing = (row.items||[]).find(i=>i.sourceItemId===li.id);
+                                  const boughtQty = Math.max(0, parseFloat(li.qty)||0)||1;
+                                  return (
+                                    <div key={li.id} style={{ display:"flex",gap:6,alignItems:"center" }}>
+                                      <span style={{ flex:1,color:T.sub,fontSize:11 }}>{li.label} (of {boughtQty})</span>
+                                      <input style={{ ...inpSm,width:60,textAlign:"right" }} type="number" min="0" max={boughtQty} placeholder="0" value={existing?.qty||""} onChange={e=>{
+                                        const qty = e.target.value;
+                                        setAllocRows(prev=>prev.map(r=>{
+                                          if(r.id!==row.id) return r;
+                                          const items = (r.items||[]).filter(i=>i.sourceItemId!==li.id);
+                                          if(parseFloat(qty)>0) items.push({ sourceItemId:li.id, qty });
+                                          return {...r,items};
+                                        }));
+                                      }}/>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
-                      <button onClick={()=>setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:"", mode:"spent_on", amount:"", items:[] }])} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"7px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add row</button>
                       <div style={{ color:T.sub,fontSize:10 }}>Total allocated: {sym}{fmt(allocRows.reduce((s,r)=>{
                         if((r.items||[]).length>0){
                           return s+r.items.reduce((si,i)=>{
@@ -5186,43 +5169,6 @@ function AppContent({ onLock }) {
                   </div>);
                 })()}
                 {/* Group intent */}
-                {(tagGroup||splitGroup)&&(()=>{
-                  const g=groups.find(x=>x.id===(tagGroup||splitGroup)); if(!g) return null;
-                  const currentIntent=tagGroup?"attributed":"split";
-                  return (<div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:8 }}>
-                    <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>{g.icon} {g.name}</div>
-                    <div style={{ display:"flex",gap:8,marginBottom:10 }}>
-                      <button onClick={()=>{ setSplitGroup(g.id); setTagGroup(""); setSplitMode("split"); }} style={{ flex:1,background:currentIntent==="split"?T.accent+"22":"none",border:`1px solid ${currentIntent==="split"?T.accent:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
-                        <div style={{ fontSize:11,fontWeight:700,color:currentIntent==="split"?T.accent:T.text }}>⚖️ Split (collect)</div>
-                        <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>Group owes their share</div>
-                      </button>
-                      <button onClick={()=>{ setTagGroup(g.id); setSplitGroup(""); setSplitMode("tag"); setTagMode("attribute"); }} style={{ flex:1,background:currentIntent==="attributed"?T.info+"22":"none",border:`1px solid ${currentIntent==="attributed"?T.info:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
-                        <div style={{ fontSize:11,fontWeight:700,color:currentIntent==="attributed"?T.info:T.text }}>🏠 Attributed</div>
-                        <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>No collection</div>
-                      </button>
-                    </div>
-                    {currentIntent==="split"&&(<>
-                      <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
-                        {(g.members||[]).map(pid=>{ const p=people.find(x=>String(x.id)===String(pid)); if(!p) return null; return (
-                          <button key={pid} onClick={()=>setSplitPeople(prev=>({...prev,[pid]:!prev[pid]}))} style={{ background:splitPeople[pid]?p.color+"22":"none",border:`1px solid ${splitPeople[pid]?p.color:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:splitPeople[pid]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
-                        ); })}
-                      </div>
-                      {Object.keys(splitPeople).filter(k=>splitPeople[k]).length>0&&(
-                        <div style={{ display:"flex",gap:6,marginBottom:8 }}>
-                          {[["equally","= Equal"],["amount","₹ Amount"],["percent","% Pct"]].map(([v,lb])=>(
-                            <button key={v} onClick={()=>setSplitCalc(v)} style={{ flex:1,background:splitCalc===v?T.accent+"22":"none",border:`1px solid ${splitCalc===v?T.accent:T.border}`,borderRadius:20,padding:"4px",cursor:"pointer",fontSize:10,fontWeight:700,color:splitCalc===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{lb}</button>
-                          ))}
-                        </div>
-                      )}
-                      {splitCalc==="amount"&&Object.keys(splitPeople).filter(k=>splitPeople[k]).map(pid=>{ const p=people.find(x=>String(x.id)===String(pid)); if(!p) return null; return (
-                        <div key={pid} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:6 }}>
-                          <span style={{ color:T.text,fontSize:12,flex:1 }}>{p.emoji} {p.name}</span>
-                          <input type="text" inputMode="decimal" placeholder="0" value={splitCustom[pid]||""} onChange={e=>{ try{ setSplitCustom(prev=>({...prev,[pid]:cleanMoneyInput(e.target.value)})); }catch(err){} }} style={{ ...inpSm,width:80,textAlign:"right" }}/>
-                        </div>
-                      ); })}
-                    </>)}
-                  </div>);
-                })()}
               </div>
             )}
 
@@ -5243,9 +5189,9 @@ function AppContent({ onLock }) {
                     // Auto-attribute from the biller account's own "Attributed To" setting — but only if
                     // nothing has been manually chosen yet in "Who is this for?", so this never overwrites
                     // a deliberate choice the person already made.
-                    if(ba && ba.attributedTo && splitMode==="none" && attributePersonIds.length===0){
-                      if(ba.attributeType==="person"){ setTagPerson(String(ba.attributedTo)); setSplitMode("tag"); setTagMode("attribute"); setTagGroup(""); setSplitGroup(""); }
-                      else if(ba.attributeType==="group"){ setTagGroup(String(ba.attributedTo)); setSplitMode("tag"); setTagMode("attribute"); setTagPerson(""); setSplitGroup(""); }
+                    if(ba && ba.attributedTo && allocRows.length===0){
+                      if(ba.attributeType==="person"){ setSplitMode("allocate"); setAllocRows([{ id:genId(), targetType:"person", targetId:String(ba.attributedTo), mode:"spent_on", amount:"", items:[] }]); }
+                      else if(ba.attributeType==="group"){ setSplitMode("allocate"); setAllocRows([{ id:genId(), targetType:"group", targetId:String(ba.attributedTo), mode:"spent_on", amount:"", items:[] }]); }
                     }
                   }}>
                     <option value="">Select biller account...</option>
@@ -7821,7 +7767,6 @@ function AppContent({ onLock }) {
         `Hi ${recipientName}, your share towards ${contextLabel} is ${sym}${fmt(amount)}.`,
         upiHandle ? `Payment UPI: ${upiHandle}${linkedLabel}` : "",
         "Kindly clear it when convenient.",
-        "– sent via Arth",
       ].filter(Boolean).join("\n");
       try {
         if(navigator.share){ await navigator.share({ text: lines }); }
@@ -8202,7 +8147,47 @@ function AppContent({ onLock }) {
                 groupId:pendingTxns[0]?.groupId||pendingBills[0]?.groupId||null,
               });
             }} style={{ ...btnP,marginBottom:10 }}>💰 Settle with {p.name}</button>}
-            {!p.isMe&&s.owesMe>0&&<button onClick={()=>sharePaymentRequest(p.name,s.owesMe,"pending expenses")} style={{ ...btnP,marginBottom:10,background:T.accentSoft,border:`1px solid ${T.accent}55`,color:T.accent }}>📤 Request ₹{fmt(s.owesMe)} from {p.name}</button>}
+            {!p.isMe&&s.owesMe>0&&<button onClick={()=>{
+              const pendingTxnsForShare=txns.filter(x=>{
+                if(x.type!=="expense") return false;
+                const info = x.people?.[p.id] || x.splitPeople?.[p.id];
+                return info?.mode==="owes" && !info?.settled && remainingShare(info)>0;
+              });
+              const pendingBillsForShare=bills.filter(x=>x.status==="unpaid"&&x.splitPeople?.[p.id]?.mode==="owes"&&remainingShare(x.splitPeople[p.id])>0);
+              const totalItems = pendingTxnsForShare.length + pendingBillsForShare.length;
+              if(totalItems<=1){ sharePaymentRequest(p.name,s.owesMe,"pending expenses"); return; }
+              // Multiple outstanding items (expenses and/or bills, any mix) — one message, full itemized breakdown
+              const lines = [
+                `Hello ${p.name},`,
+                `Your total outstanding is ${sym}${fmt(s.owesMe)} against ${totalItems} item${totalItems>1?"s":""}. Details below.`,
+                "",
+              ];
+              let n = 1;
+              pendingTxnsForShare.forEach(t=>{
+                const info = t.people?.[p.id] || t.splitPeople?.[p.id];
+                const share = remainingShare(info);
+                lines.push(`${n}. ${t.merchant||t.who||t.desc||"Expense"}`);
+                if(t.date) lines.push(`   Date - ${formatShortDate(t.date)||t.date}`);
+                lines.push(`   Your Share - ${sym}${fmt(share)}`);
+                lines.push("");
+                n++;
+              });
+              pendingBillsForShare.forEach(b=>{
+                const share = remainingShare(b.splitPeople[p.id]);
+                lines.push(`${n}. ${b.name||"Bill"}`);
+                if(b.billDate) lines.push(`   Bill Date - ${formatShortDate(b.billDate)||b.billDate}`);
+                if(b.dueDate) lines.push(`   Due Date - ${formatShortDate(b.dueDate)||b.dueDate}`);
+                lines.push(`   Your Share - ${sym}${fmt(share)}`);
+                lines.push("");
+                n++;
+              });
+              lines.push(`Total - ${sym}${fmt(s.owesMe)}`);
+              const nearestDue = pendingBillsForShare.map(b=>b.dueDate).filter(Boolean).sort()[0];
+              lines.push(nearestDue ? `Kindly pay before ${formatShortDate(nearestDue)||nearestDue}` : "Kindly pay at your convenience.");
+              const text = lines.join("\n");
+              if(navigator.share){ navigator.share({ title:"Arth share request", text }); }
+              else { navigator.clipboard.writeText(text); alert("Payment request copied to clipboard!"); }
+            }} style={{ ...btnP,marginBottom:10,background:T.accentSoft,border:`1px solid ${T.accent}55`,color:T.accent }}>📤 Request ₹{fmt(s.owesMe)} from {p.name}</button>}
             <div style={{ display:"flex",gap:10 }}>
               <button onClick={()=>setEditingPerson(p)} style={{ ...btnP,background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,flex:1 }}>{p.isMe?"🎯 Edit My Budget":"✏️ Edit Profile"}</button>
               {!p.isMe&&<button onClick={()=>{ setPeople(prev=>prev.filter(x=>x.id!==p.id)); setSelectedPerson(null); }} style={{ ...btnP,background:"transparent",border:`1px solid ${T.danger}`,color:T.danger,flex:1 }}>🗑️ Remove</button>}
@@ -8683,7 +8668,6 @@ function AppContent({ onLock }) {
                     if(commonItems.length){ ls.push(`Common: ${sym}${fmt(cTotal)}`); commonItems.forEach(i=>ls.push(`  · ${i.desc} ${sym}${fmt(i.amount)}`)); ls.push(""); }
                     (g.members||[]).forEach(pid=>{ const items=personItems[pid]; if(!items?.length) return; const pm=getPerson(pid); const tot=items.reduce((s,i)=>s+i.amount,0); ls.push(`${pm.emoji} ${pm.name}: ${sym}${fmt(tot)}`); items.forEach(i=>ls.push(`  · ${i.desc} ${sym}${fmt(i.amount)}`)); ls.push(""); });
                     if(upiHandle) ls.push(`Pay to: ${upiHandle}`);
-                    ls.push("– sent via Arth");
                     return ls.join("\n").trim();
                   };
                   const doShare=async(upiHandle)=>{
@@ -9946,6 +9930,15 @@ function AppContent({ onLock }) {
   };
 
   const Settings = () => {
+    // Moved here from AppContent's top-level scope — these were only ever used inside this
+    // component, but living at the top level meant every keystroke re-rendered the entire
+    // AppContent, which recreates Settings as a brand-new function reference each time,
+    // causing React to fully unmount/remount it (and lose input focus) on every character typed.
+    const [editingVehicle, setEditingVehicle] = useState(null);
+    const [vType, setVType] = useState("car");
+    const [vNumber, setVNumber] = useState("");
+    const [vName, setVName] = useState("");
+    const [vColor, setVColor] = useState(PALETTE[2]);
     const [addSubTo,setAddSubTo]=useState(null);
     const [subInput,setSubInput]=useState("");
     const [newCatName,setNewCatName]=useState("");
