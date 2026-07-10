@@ -935,7 +935,6 @@ function AppContent({ onLock }) {
   const [feePayments, setFeePayments] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_payments")||"[]"));
   const [showAddMembership, setShowAddMembership] = useState(false);
   const [editingMembership, setEditingMembership] = useState(null);
-  const [showAddFeePayment, setShowAddFeePayment] = useState(false);
   const [activeBillerForAction, setActiveBillerForAction] = useState(null);
   const [attachExpensesFor, setAttachExpensesFor] = useState(null); // holds the biller account while picking old unlinked expenses to attach
   const [confirmDialog, setConfirmDialog] = useState(null); // { message, onConfirm }
@@ -1012,6 +1011,45 @@ function AppContent({ onLock }) {
   },[]);
   useEffect(()=>safeSetLocalStorage("arth_memberships",JSON.stringify(memberships)),[memberships]);
   useEffect(()=>safeSetLocalStorage("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
+  // One-time migration: Fee Payment was a separate, simpler mechanism (no grace days, no person,
+  // no exact-date concept) that's now merged into the single Membership mechanism. Convert each
+  // existing fee payment into an equivalent membership record (exact dates, since fee payments were
+  // always whole-calendar-months), then clear the legacy collection. Idempotent — once feePayments
+  // is empty, this becomes a no-op on every subsequent load.
+  useEffect(()=>{
+    if(feePayments.length===0) return;
+    const migrated = feePayments.map(f=>{
+      const monthsSorted = [...(f.monthsArr||[])].sort();
+      const validFrom = f.monthsFrom ? `${f.monthsFrom}-01` : (monthsSorted[0]?`${monthsSorted[0]}-01`:todayStr());
+      const lastMonth = monthsSorted[monthsSorted.length-1] || f.monthsFrom;
+      const validUntilDate = lastMonth ? new Date(`${lastMonth}-01`) : new Date(validFrom);
+      validUntilDate.setMonth(validUntilDate.getMonth()+1);
+      validUntilDate.setDate(validUntilDate.getDate()-1);
+      return {
+        id: f.id,
+        billerAccountId: f.billerAccountId,
+        personId: "self",
+        amount: f.amount,
+        cycle: "monthly",
+        bulkMonths: f.monthCount||1,
+        graceDays: 0,
+        validFrom,
+        validUntil: validUntilDate.toISOString().split("T")[0],
+        useExactDates: true,
+        linkedTxnId: null,
+        accId: f.accId,
+        note: f.note||"",
+        monthlyDistribution: (f.monthsArr||[]).map(m=>({ month:m, amount:f.perMonth||0 })),
+        paidDate: f.payDate,
+        createdAt: f.createdAt||Date.now(),
+        status: "active",
+        migratedFromFeePayment: true,
+      };
+    });
+    setMemberships(prev=>[...prev, ...migrated]);
+    setFeePayments([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
   useEffect(()=>safeSetLocalStorage("arth_liabilities",JSON.stringify(liabilities)),[liabilities]);
   useEffect(()=>safeSetLocalStorage("arth_assets",JSON.stringify(trackedAssets)),[trackedAssets]);
   useEffect(()=>safeSetLocalStorage("arth_vehicles",JSON.stringify(vehicles)),[vehicles]);
@@ -11958,6 +11996,21 @@ function AppContent({ onLock }) {
       return d.toISOString().split("T")[0];
     })();
     const daysLeft = validUntil ? Math.round((new Date(validUntil)-new Date())/(1000*60*60*24)) : null;
+    const [note, setNote] = useState(existing?.note||"");
+    // Auto-derived monthly distribution — replaces the separate Add Fee Payment mechanism's manual
+    // monthsFrom/monthCount entry. Any period (cycle-based or exact-dates) now automatically shows
+    // which calendar months it touches and how much of the amount falls in each, split evenly.
+    const monthlyDistribution = (() => {
+      if(!validFrom || !validUntil) return [];
+      const start = new Date(validFrom), end = new Date(validUntil);
+      if(end<start) return [];
+      const months = [];
+      let cur = new Date(start.getFullYear(), start.getMonth(), 1);
+      const last = new Date(end.getFullYear(), end.getMonth(), 1);
+      while(cur<=last){ months.push(`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,"0")}`); cur.setMonth(cur.getMonth()+1); }
+      const per = months.length ? Math.round((parseFloat(amount)||0)/months.length) : 0;
+      return months.map(m=>({ month:m, amount:per }));
+    })();
 
     const handleSave = () => {
       if(!amount||!validFrom) return;
@@ -11975,6 +12028,8 @@ function AppContent({ onLock }) {
         useExactDates,
         linkedTxnId: linkedTxnId||null,
         accId,
+        note: note.trim(),
+        monthlyDistribution,
         paidDate: todayStr(),
         createdAt: existing?.createdAt||Date.now(),
         status: "active",
@@ -12050,6 +12105,21 @@ function AppContent({ onLock }) {
                 </div>
               </div>
             )}
+            {monthlyDistribution.length>1&&(
+              <div style={{ background:T.input,borderRadius:12,padding:"10px 14px" }}>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:6 }}>MONTHLY DISTRIBUTION</div>
+                {monthlyDistribution.map(m=>(
+                  <div key={m.month} style={{ display:"flex",justifyContent:"space-between",padding:"3px 0" }}>
+                    <span style={{ color:T.sub,fontSize:12 }}>{m.month}</span>
+                    <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(m.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div>
+              <span style={lbl}>Note (optional)</span>
+              <input style={inp} placeholder="e.g. Cash in envelope" value={note} onChange={e=>setNote(e.target.value)}/>
+            </div>
             <div>
               <span style={lbl}>Paid From Account</span>
               <select style={inp} value={accId} onChange={e=>setAccId(e.target.value)}>
@@ -12133,99 +12203,6 @@ function AppContent({ onLock }) {
     );
   };
 
-  const AddFeePaymentModal = ({ billerAccount, onClose }) => {
-    const [amount, setAmount] = useState("");
-    const [payDate, setPayDate] = useState(todayStr());
-    const [monthsFrom, setMonthsFrom] = useState(todayStr().slice(0,7));
-    const [monthCount, setMonthCount] = useState("1");
-    const [accId, setAccId] = useState(accounts.find(a=>a.type!=="cc")?.id||"");
-    const [note, setNote] = useState("");
-
-    const monthsArr = (() => {
-      const arr = [];
-      const start = new Date(monthsFrom+"-01");
-      for(let i=0;i<Number(monthCount);i++){
-        const d = new Date(start);
-        d.setMonth(d.getMonth()+i);
-        arr.push(d.toISOString().slice(0,7));
-      }
-      return arr;
-    })();
-    const perMonth = amount && monthCount ? Math.round(parseFloat(amount)/Number(monthCount)) : 0;
-
-    const handleSave = () => {
-      if(!amount||!payDate) return;
-      const record = {
-        id: genId(),
-        billerAccountId: billerAccount.id,
-        amount: parseFloat(amount),
-        payDate,
-        monthsFrom,
-        monthCount: Number(monthCount),
-        monthsArr,
-        perMonth,
-        accId,
-        note: note.trim(),
-        createdAt: Date.now(),
-      };
-      setFeePayments(prev=>[record,...prev]);
-      onClose();
-    };
-
-    return (
-      <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
-        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
-            <div>
-              <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Add Fee Payment</div>
-              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{getBillerIcon(billerAccount.type)} {billerAccount.name}</div>
-            </div>
-            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
-          </div>
-          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
-            <div>
-              <span style={lbl}>Total Amount Paid</span>
-              <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center" }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
-            </div>
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-              <div><span style={lbl}>Payment Date</span><input style={inp} type="date" value={payDate} onChange={e=>setPayDate(e.target.value)}/></div>
-              <div><span style={lbl}>No. of Months</span><input style={inp} type="number" min="1" max="12" placeholder="1" value={monthCount} onChange={e=>setMonthCount(e.target.value)}/></div>
-            </div>
-            <div>
-              <span style={lbl}>Covers From (Month)</span>
-              <input style={inp} type="month" value={monthsFrom} onChange={e=>setMonthsFrom(e.target.value)}/>
-            </div>
-            {monthsArr.length>0&&(
-              <div style={{ background:T.input,borderRadius:12,padding:"10px 14px" }}>
-                <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:8 }}>MONTHLY DISTRIBUTION</div>
-                {monthsArr.map(m=>(
-                  <div key={m} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}` }}>
-                    <span style={{ color:T.sub,fontSize:12 }}>{m}</span>
-                    <span style={{ color:T.accent,fontSize:12,fontWeight:800 }}>{sym}{fmt(perMonth)}</span>
-                  </div>
-                ))}
-                <div style={{ display:"flex",justifyContent:"space-between",marginTop:6 }}>
-                  <span style={{ color:T.sub,fontSize:11 }}>Total</span>
-                  <span style={{ color:T.text,fontSize:13,fontWeight:900 }}>{sym}{fmt(parseFloat(amount)||0)}</span>
-                </div>
-              </div>
-            )}
-            <div>
-              <span style={lbl}>Paid From</span>
-              <select style={inp} value={accId} onChange={e=>setAccId(e.target.value)}>
-                {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <span style={lbl}>Note (optional)</span>
-              <input style={inp} placeholder="e.g. Term 2 fees" value={note} onChange={e=>setNote(e.target.value)}/>
-            </div>
-            <button onClick={handleSave} disabled={!amount||!payDate} style={{ background:amount&&payDate?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:amount&&payDate?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>Add Fee Payment</button>
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   const AddBillModal = () => {
     const [billerAccountId,setBillerAccountId]=useState(defaultBillerAccountId||"");
@@ -12750,13 +12727,11 @@ function AppContent({ onLock }) {
           );
         })()}
         {showAddMembership&&activeBillerForAction&&<AddMembershipModal billerAccount={activeBillerForAction} existing={editingMembership} onClose={()=>{ setShowAddMembership(false); setEditingMembership(null); }}/>}
-        {showAddFeePayment&&activeBillerForAction&&<AddFeePaymentModal billerAccount={activeBillerForAction} onClose={()=>{ setShowAddFeePayment(false); setActiveBillerForAction(null); }}/>}
         {/* Biller Action Sheet */}
-        {activeBillerForAction&&!showAddMembership&&!showAddFeePayment&&!showAddBill&&(()=>{
+        {activeBillerForAction&&!showAddMembership&&!showAddBill&&(()=>{
           const ba = activeBillerForAction;
           const actionType = getBillerActionType(ba.type);
           const baMemberships = memberships.filter(m=>m.billerAccountId===ba.id);
-          const baFees = feePayments.filter(f=>f.billerAccountId===ba.id);
           const baBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
           const activeMembership = baMemberships.filter(m=>m.validUntil>=todayStr()).sort((a,b2)=>b2.validUntil.localeCompare(a.validUntil))[0];
           return (
@@ -12812,9 +12787,6 @@ function AppContent({ onLock }) {
                   {(actionType==="bill"||actionType==="hybrid")&&(
                     <button onClick={()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); setActiveBillerForAction(null); }} style={{ background:T.info+"22",border:`1px solid ${T.info}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>📄 Add Bill</button>
                   )}
-                  {actionType==="membership"&&(
-                    <button onClick={()=>setShowAddFeePayment(true)} style={{ background:T.warn+"22",border:`1px solid ${T.warn}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.warn,fontFamily:"Nunito,sans-serif" }}>🏫 Add Fee Payment (multi-month)</button>
-                  )}
                   <button onClick={()=>{ setAttachExpensesFor(ba); }} style={{ background:T.purple+"22",border:`1px solid ${T.purple}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.purple,fontFamily:"Nunito,sans-serif" }}>🔗 Attach Past Expenses</button>
                 </div>
                 {/* History */}
@@ -12828,20 +12800,6 @@ function AppContent({ onLock }) {
                           <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(m.validFrom)||m.validFrom} to {formatShortDate(m.validUntil)||m.validUntil}{m.graceDays>0?` (+${m.graceDays}d grace)`:""}</div>
                         </div>
                         <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(m.amount)}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {baFees.length>0&&(
-                  <div style={{ marginBottom:12 }}>
-                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>FEE PAYMENTS</div>
-                    {baFees.sort((a,b2)=>b2.createdAt-a.createdAt).slice(0,5).map(f=>(
-                      <div key={f.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                        <div>
-                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{f.monthCount} months · {sym}{fmt(f.perMonth)}/mo</div>
-                          <div style={{ color:T.sub,fontSize:10 }}>{f.monthsArr?.[0]} to {f.monthsArr?.[f.monthsArr.length-1]}</div>
-                        </div>
-                        <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(f.amount)}</div>
                       </div>
                     ))}
                   </div>
