@@ -5092,6 +5092,15 @@ function AppContent({ onLock }) {
                 <span style={lbl}>Who is this for? (optional)</span>
                 <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:10 }}>
                   <button onClick={()=>{ setAllocRows([]); setSplitMode("none"); setExplicitlyMeOnly(true); }} style={{ background:explicitlyMeOnly?T.accent+"22":"none",border:`1px solid ${explicitlyMeOnly?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:explicitlyMeOnly?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>😎 Me only</button>
+                  {(()=>{
+                    const meRowSelected = allocRows.some(r=>r.targetType==="person"&&r.targetId==="__me__");
+                    return (
+                      <button onClick={()=>{
+                        if(meRowSelected){ setAllocRows(prev=>prev.filter(r=>!(r.targetType==="person"&&r.targetId==="__me__"))); }
+                        else { setSplitMode("allocate"); setExplicitlyMeOnly(false); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:"__me__", mode:"spent_on", amount:"", items:[] }]); }
+                      }} style={{ background:meRowSelected?T.accent+"22":"none",border:`1px solid ${meRowSelected?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:meRowSelected?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🙋 My share (part of this)</button>
+                    );
+                  })()}
                   {people.filter(p=>!p.isMe).map(p=>{
                     const isSelected = allocRows.some(r=>r.targetType==="person"&&r.targetId===p.id);
                     return (
@@ -11669,6 +11678,10 @@ function AppContent({ onLock }) {
               ))}
             </div>
           )}
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:16 }}>
+            <button onClick={()=>{ setEditingMembership(m); setShowAddMembership(true); onClose(); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+            <button onClick={onClose} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
+          </div>
         </div>
       </div>
     );
