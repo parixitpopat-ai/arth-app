@@ -955,6 +955,7 @@ function AppContent({ onLock }) {
   const [editingEvent, setEditingEvent] = useState(null);
   const [showEventsList, setShowEventsList] = useState(false);
   const [viewingEvent, setViewingEvent] = useState(null);
+  const [showNavDrawer, setShowNavDrawer] = useState(false);
   const [liabilities, setLiabilities] = useState(()=>JSON.parse(localStorage.getItem("arth_liabilities")||"[]"));
   const [trackedAssets, setTrackedAssets] = useState(()=>JSON.parse(localStorage.getItem("arth_assets")||"[]"));
   const [vehicles, setVehicles] = useState(()=>JSON.parse(localStorage.getItem("arth_vehicles")||"[]"));
@@ -11815,6 +11816,118 @@ function AppContent({ onLock }) {
     );
   };
 
+  // -- STATS PAGE (new module, starting with Cash Flow) -----------------------
+  const StatsPage = () => {
+    const [statsPeriod, setStatsPeriod] = useState("30D");
+    const now = new Date();
+    const daysBack = { "7D":7, "30D":30, "12W":84 }[statsPeriod] || 30;
+    const periodStart = new Date(now); periodStart.setDate(periodStart.getDate()-daysBack);
+    const periodTxns = txns.filter(t=>t.date && new Date(t.date)>=periodStart && new Date(t.date)<=now);
+    const income = periodTxns.filter(t=>t.type==="income").reduce((s,t)=>s+Number(t.amount||0),0);
+    const expenses = periodTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
+    const cashFlow = income - expenses;
+    const prevStart = new Date(periodStart); prevStart.setDate(prevStart.getDate()-daysBack);
+    const prevTxns = txns.filter(t=>t.date && new Date(t.date)>=prevStart && new Date(t.date)<periodStart);
+    const prevIncome = prevTxns.filter(t=>t.type==="income").reduce((s,t)=>s+Number(t.amount||0),0);
+    const prevExpenses = prevTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
+    const prevCashFlow = prevIncome - prevExpenses;
+    const pctChange = prevCashFlow!==0 ? Math.round(((cashFlow-prevCashFlow)/Math.abs(prevCashFlow))*100) : null;
+    // Daily trend for the chart
+    const dayBuckets = {};
+    for(let i=0;i<daysBack;i++){ const d=new Date(now); d.setDate(d.getDate()-i); dayBuckets[d.toISOString().split("T")[0]] = { income:0, expense:0 }; }
+    periodTxns.forEach(t=>{
+      const key = t.date;
+      if(!dayBuckets[key]) return;
+      if(t.type==="income") dayBuckets[key].income += Number(t.amount||0);
+      if(t.type==="expense") dayBuckets[key].expense += getMyExpenseAmount(t);
+    });
+    const chartData = Object.entries(dayBuckets).sort(([a],[b])=>a.localeCompare(b)).map(([date,v])=>({ date:date.slice(5), cashFlow: v.income - v.expense }));
+    return (
+      <div style={{ maxWidth:430,margin:"0 auto",minHeight:"100vh",paddingBottom:100,fontFamily:"Nunito,sans-serif" }}>
+        <div style={{ background:T.nav,borderBottom:`1px solid ${T.border}`,padding:"12px 18px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:50 }}>
+          <button onClick={()=>setTab("home")} style={{ background:"none",border:"none",cursor:"pointer",fontSize:18,color:T.text }}>←</button>
+          <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Stats</div>
+        </div>
+        <div style={{ padding:16,display:"flex",flexDirection:"column",gap:14 }}>
+          <div style={{ display:"flex",gap:6 }}>
+            {["7D","30D","12W"].map(p=>(
+              <button key={p} onClick={()=>setStatsPeriod(p)} style={{ flex:1,background:statsPeriod===p?T.accent:T.input,border:"none",borderRadius:12,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:800,color:statsPeriod===p?"#fff":T.sub,fontFamily:"Nunito,sans-serif" }}>{p}</button>
+            ))}
+          </div>
+          <div style={{ background:T.card,borderRadius:16,padding:16,border:`1px solid ${T.border}` }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Cash Flow</div>
+            <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>Am I spending less than I make?</div>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginTop:14 }}>
+              <div style={{ color:cashFlow>=0?T.success:T.danger,fontSize:24,fontWeight:900 }}>{sym}{fmt(Math.abs(cashFlow))}</div>
+              {pctChange!==null&&<div style={{ color:pctChange>=0?T.success:T.danger,fontSize:12,fontWeight:800 }}>{pctChange>=0?"+":""}{pctChange}% vs last period</div>}
+            </div>
+            <div style={{ marginTop:14 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",fontSize:12,color:T.sub,marginBottom:3 }}><span>Income</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(income)}</span></div>
+              <div style={{ height:6,background:T.input,borderRadius:4,overflow:"hidden" }}><div style={{ width:"100%",height:"100%",background:T.success }}/></div>
+            </div>
+            <div style={{ marginTop:10 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",fontSize:12,color:T.sub,marginBottom:3 }}><span>Expenses</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(expenses)}</span></div>
+              <div style={{ height:6,background:T.input,borderRadius:4,overflow:"hidden" }}><div style={{ width:income>0?`${Math.min(100,(expenses/income)*100)}%`:"100%",height:"100%",background:T.danger }}/></div>
+            </div>
+          </div>
+          <div style={{ background:T.card,borderRadius:16,padding:16,border:`1px solid ${T.border}` }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900,marginBottom:4 }}>Cash Flow Trend</div>
+            <div style={{ color:T.sub,fontSize:12,marginBottom:10 }}>In which periods was I saving more or less money?</div>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={chartData}>
+                <XAxis dataKey="date" tick={{ fontSize:9,fill:T.sub }} interval={Math.ceil(chartData.length/6)}/>
+                <YAxis tick={{ fontSize:9,fill:T.sub }}/>
+                <Tooltip formatter={v=>`${sym}${fmt(v)}`}/>
+                <Bar dataKey="cashFlow" radius={[3,3,0,0]}>
+                  {chartData.map((d,i)=><Cell key={i} fill={d.cashFlow>=0?T.success:T.danger}/>)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div style={{ background:T.card,borderRadius:16,padding:16,border:`1px solid ${T.border}` }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900,marginBottom:10 }}>Period to Period Comparison</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+              <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>This period</span><span style={{ color:cashFlow>=0?T.success:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(cashFlow)}</span></div>
+              <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Previous period</span><span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{sym}{fmt(prevCashFlow)}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // -- NAV DRAWER (slide-in menu, sits alongside bottom nav) ------------------
+  const NavDrawer = ({ onClose }) => {
+    const me = people.find(p=>p.isMe);
+    const goToTab = (t) => { setTab(t); setShowSettings(false); onClose(); };
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex" }}>
+        <div style={{ background:T.card,width:"78%",maxWidth:320,height:"100%",overflowY:"auto",display:"flex",flexDirection:"column" }}>
+          <div style={{ background:`linear-gradient(135deg, ${T.accent}, ${T.accent}cc)`,padding:"24px 20px",display:"flex",alignItems:"center",gap:12 }}>
+            <div style={{ width:52,height:52,borderRadius:"50%",background:"rgba(255,255,255,0.25)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24 }}>{me?.emoji||"🧑"}</div>
+            <div>
+              <div style={{ color:"#fff",fontSize:16,fontWeight:900 }}>{me?.name||"Me"}</div>
+              <div style={{ color:"#ffffffcc",fontSize:11,marginTop:2 }}>My Arth</div>
+            </div>
+          </div>
+          <div style={{ padding:"10px 8px",display:"flex",flexDirection:"column",gap:2 }}>
+            {[
+              { icon:"👤", label:"User Profile", onClick:()=>{ setTab("home"); setShowSettings(false); onClose(); } },
+              { icon:"💰", label:"Budget", onClick:()=>goToTab("budget") },
+              { icon:"🎯", label:"Goals", onClick:()=>{ alert("Goals — coming soon"); onClose(); } },
+              { icon:"📊", label:"Stats", onClick:()=>goToTab("stats") },
+            ].map(item=>(
+              <button key={item.label} onClick={item.onClick} style={{ display:"flex",alignItems:"center",gap:14,background:"none",border:"none",padding:"13px 14px",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:700,color:T.text,fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                <span style={{ fontSize:18 }}>{item.icon}</span>{item.label}
+              </button>
+            ))}
+            <div style={{ color:T.sub,fontSize:10,padding:"10px 14px 4px" }}>More options coming soon</div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const EventsListModal = ({ onClose }) => {
     return (
       <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:335,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
@@ -12742,6 +12855,7 @@ function AppContent({ onLock }) {
         {/* Top bar */}
         {!showSettings&&<div style={{ background:T.nav,borderBottom:`1px solid ${T.border}`,padding:"12px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:50 }}>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+            <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
             <div style={{ width:32,height:32,borderRadius:9,background:T.accentSoft,border:`1px solid ${T.accent}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:900,color:T.accent,fontFamily:"Nunito,sans-serif" }}>₹</div>
             <div>
               <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1 }}>Arth</div>
@@ -12762,6 +12876,7 @@ function AppContent({ onLock }) {
         {!showSettings&&tab==="home"&&<Home/>}
         {!showSettings&&tab==="transactions"&&<Transactions/>}
         {!showSettings&&tab==="people"&&<People/>}
+        {!showSettings&&tab==="stats"&&<StatsPage/>}
         {!showSettings&&tab==="budget"&&<BudgetPage/>}
         {!showSettings&&tab==="bills"&&<BillsPage/>}
         {!showSettings&&tab==="wealth"&&wealthUnlocked&&<WealthPage/>}
@@ -12865,6 +12980,7 @@ function AppContent({ onLock }) {
         {showAddEvent&&<AddEventModal existing={editingEvent} onClose={()=>{ setShowAddEvent(false); setEditingEvent(null); }}/>}
         {showEventsList&&<EventsListModal onClose={()=>setShowEventsList(false)}/>}
         {viewingEvent&&<EventDetailModal event={viewingEvent} onClose={()=>setViewingEvent(null)}/>}
+        {showNavDrawer&&<NavDrawer onClose={()=>setShowNavDrawer(false)}/>}
         {confirmDialog&&(
           <div onClick={e=>{ if(e.target===e.currentTarget) setConfirmDialog(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
             <div style={{ background:T.card,borderRadius:18,padding:"20px 18px",width:"100%",maxWidth:360 }}>
