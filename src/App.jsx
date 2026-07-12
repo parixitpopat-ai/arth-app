@@ -2907,10 +2907,6 @@ function AppContent({ onLock }) {
       ? (sourceTxn.allocations||[]).map(a=>({...a}))
       : [];
     const [allocRows, setAllocRows] = useState(initialAllocRows);
-    // Distinguishes "explicitly chose Me only" from "haven't picked anyone yet" — both previously
-    // looked identical (allocRows.length===0), making the Me-only chip always appear selected with
-    // no way to show a genuinely untagged state.
-    const [explicitlyMeOnly, setExplicitlyMeOnly] = useState(false);
     const [allocTargetPicker, setAllocTargetPicker] = useState(null);
     const [tagMode, setTagMode] = useState(isEditing && sourceTxn?.type==="expense"
       ? (sourceTxn.tagMode ||
@@ -5100,14 +5096,13 @@ function AppContent({ onLock }) {
               <div>
                 <span style={lbl}>Who is this for? (optional)</span>
                 <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:10 }}>
-                  <button onClick={()=>{ setAllocRows([]); setSplitMode("none"); setExplicitlyMeOnly(true); }} style={{ background:explicitlyMeOnly?T.accent+"22":"none",border:`1px solid ${explicitlyMeOnly?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:explicitlyMeOnly?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>😎 Me only</button>
                   {(()=>{
                     const meRowSelected = allocRows.some(r=>r.targetType==="person"&&r.targetId==="__me__");
                     return (
                       <button onClick={()=>{
                         if(meRowSelected){ setAllocRows(prev=>prev.filter(r=>!(r.targetType==="person"&&r.targetId==="__me__"))); }
-                        else { setSplitMode("allocate"); setExplicitlyMeOnly(false); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:"__me__", mode:"spent_on", amount:"", items:[] }]); }
-                      }} style={{ background:meRowSelected?T.accent+"22":"none",border:`1px solid ${meRowSelected?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:meRowSelected?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🙋 My share (part of this)</button>
+                        else { setSplitMode("allocate"); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:"__me__", mode:"spent_on", amount:"", items:[] }]); }
+                      }} style={{ background:meRowSelected?T.accent+"22":"none",border:`1px solid ${meRowSelected?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:meRowSelected?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🧑 Me</button>
                     );
                   })()}
                   {people.filter(p=>!p.isMe).map(p=>{
@@ -6597,7 +6592,7 @@ function AppContent({ onLock }) {
 
   // ── HOME ───────────────────────────────────────────────────────────────────
 
-  const DEFAULT_CARD_ORDER = ["household","health","stats","categories","cc","bills","recent"];
+  const DEFAULT_CARD_ORDER = ["stats","categories","cc","bills","recent"];
   const KNOWN_CARD_KEYS = new Set(DEFAULT_CARD_ORDER);
   // Filters out invalid saved keys AND backfills any card added to the app after this user's
   // order was last saved. Must be applied every time cardOrder is set from a saved source
@@ -6965,7 +6960,10 @@ function AppContent({ onLock }) {
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       if(!mounted) return;
       const nextUser = session?.user ?? null;
-      setCloudUser(nextUser);
+      // Supabase fires this listener on periodic token refresh too, not just real sign-in/out —
+      // calling setCloudUser with a fresh object every time forces a full app re-render on a
+      // recurring timer even when nothing actually changed. Only update when the identity differs.
+      setCloudUser(prev => (prev?.id === nextUser?.id) ? prev : nextUser);
       if(nextUser?.email) setSyncEmail(nextUser.email);
       if(!nextUser){
         setLastSyncedAt("");
@@ -7027,34 +7025,6 @@ function AppContent({ onLock }) {
     const diff = monthly - myActual;
     const isOver = diff < 0;
 
-    // Financial Health calculations
-    const essentialCatIds = cats.filter(c=>c.fixed===true).map(c=>c.id);
-    const essentialSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>{
-      const tCats = (t.catIds||[t.catId]).filter(Boolean);
-      return tCats.some(cid=>essentialCatIds.includes(String(cid))) ? s+getMyExpenseAmount(t) : s;
-    },0);
-    const discretionarySpend = myActual - essentialSpend;
-    const liquidSavings = liquidAssetsTotal;
-    const runwayMonths = essentialSpend > 0 ? Math.floor(liquidSavings / essentialSpend) : 0;
-    const runwayColor = runwayMonths >= 6 ? T.success : runwayMonths >= 3 ? T.warn : T.danger;
-
-    const groupSpent = byCat.find(c=>c.id==="family")?.value || 0;
-    const householdGroups = groups.filter(g=>g.typeId==="family"||g.defaultIntent==="attributed");
-    const householdTotal = householdGroups.reduce((s,g)=>{
-      const oldStyle = thisMonthTxns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id)).reduce((ss,t)=>ss+t.amount,0);
-      // New Allocate-rows style: group lives in t.groupAllocations (existing multi-group field), not the singular groupId
-      const allocStyle = thisMonthTxns.filter(t=>t.type==="expense"&&t.groupId!==g.id&&t.tagGroup!==g.id&&t.taggedGroupId!==g.id&&t.groupAllocations?.some(ga=>ga.groupId===g.id)).reduce((ss,t)=>ss+Number(t.groupAllocations.find(ga=>ga.groupId===g.id)?.amount||0),0);
-      return s+oldStyle+allocStyle;
-    },0);
-    // Amortized bills - spread multi-month fees across billing period
-    const amortizedBillsThisMonth = bills.filter(b=>b.billPeriodFrom&&b.billPeriodTo&&b.amount>0).map(b=>{
-      const from = new Date(b.billPeriodFrom);
-      const to = new Date(b.billPeriodTo);
-      const totalMonths = Math.max(1, Math.round((to-from)/(1000*60*60*24*30)));
-      const monthlyShare = Math.round(b.amount/totalMonths);
-      const currDate = new Date(viewMonth+"-01");
-      return (currDate >= from && currDate <= to) ? {...b, amortizedAmount:monthlyShare, totalMonths} : null;
-    }).filter(Boolean);
     const leftDays = daysLeft(viewMonth);
     // Recurring investment reminders
     const todayDate = new Date();
@@ -7080,87 +7050,6 @@ function AppContent({ onLock }) {
       .filter(g=>!recordedFoliosThisMonth.has(g.key) && !dueRecurring.some(r=>r.name===g.name) && !skippedInvestmentMonths.includes(`${g.key}_${thisMonthKey}`))
       .sort((a,b)=>a.name.localeCompare(b.name));
     const CARDS = {
-      household: (
-        <div key="household" style={{ ...card,padding:"16px 14px" }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-            <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>🏠 Household Cost</div>
-            <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmtK(householdTotal)}</div>
-          </div>
-          {(()=>{
-            const householdGroups = groups.filter(g=>g.typeId==="family"||g.defaultIntent==="attributed");
-            if(!householdGroups.length) return <div style={{ color:T.sub,fontSize:11 }}>Tag expenses to a Family group to see household costs</div>;
-            return (<>
-              {householdGroups.map(g=>{
-                const items = thisMonthTxns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id));
-                const gSpend = items.reduce((s,t)=>s+t.amount,0);
-                if(!items.length) return null;
-                return (<div key={g.id} style={{ marginBottom:10 }}>
-                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>{g.icon||"👥"} {g.name.toUpperCase()}</div>
-                  {items.map(t=>(
-                    <div key={t.id} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}` }}>
-                      <span style={{ color:T.text,fontSize:12 }}>{t.merchant||t.who||t.desc||"Expense"}</span>
-                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(t.amount)}</span>
-                    </div>
-                  ))}
-                  <div style={{ display:"flex",justifyContent:"space-between",paddingTop:4 }}>
-                    <span style={{ color:T.sub,fontSize:10 }}>Total</span>
-                    <span style={{ color:T.accent,fontSize:12,fontWeight:800 }}>{sym}{fmt(gSpend)}</span>
-                  </div>
-                </div>);
-              })}
-              {amortizedBillsThisMonth.length>0&&(
-                <div style={{ marginTop:8,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
-                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>AMORTIZED FEES</div>
-                  {amortizedBillsThisMonth.map(b=>(
-                    <div key={b.id} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}` }}>
-                      <div><span style={{ color:T.text,fontSize:12 }}>{b.name}</span><span style={{ color:T.sub,fontSize:9,marginLeft:6 }}>({b.totalMonths}mo)</span></div>
-                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(b.amortizedAmount)}/mo</span>
-                    </div>
-                  ))}
-                  <div style={{ display:"flex",justifyContent:"space-between",paddingTop:4 }}>
-                    <span style={{ color:T.sub,fontSize:10 }}>Amortized total</span>
-                    <span style={{ color:T.accent,fontSize:12,fontWeight:800 }}>{sym}{fmt(amortizedBillsThisMonth.reduce((s,b)=>s+b.amortizedAmount,0))}</span>
-                  </div>
-                </div>
-              )}
-            </>);
-          })()}
-        </div>
-      ),
-      health: (
-        <div key="health" style={{ ...card,padding:"16px 14px",background:`linear-gradient(135deg,${runwayColor}10,${T.card})`,border:`1px solid ${runwayColor}33` }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-            <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>💊 Financial Health</div>
-            <div style={{ background:runwayColor+"22",border:`1px solid ${runwayColor}44`,borderRadius:20,padding:"3px 10px" }}>
-              <span style={{ color:runwayColor,fontSize:11,fontWeight:800 }}>{runwayMonths >= 6 ? "Healthy" : runwayMonths >= 3 ? "Caution" : "At Risk"}</span>
-            </div>
-          </div>
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12 }}>
-            <div style={{ textAlign:"center" }}>
-              <div style={{ color:runwayColor,fontSize:22,fontWeight:900 }}>{runwayMonths}</div>
-              <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>MONTHS RUNWAY</div>
-            </div>
-            <div style={{ textAlign:"center" }}>
-              <div style={{ color:T.danger,fontSize:16,fontWeight:800 }}>{sym}{fmtK(essentialSpend)}</div>
-              <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>ESSENTIAL</div>
-            </div>
-            <div style={{ textAlign:"center" }}>
-              <div style={{ color:T.warn,fontSize:16,fontWeight:800 }}>{sym}{fmtK(discretionarySpend)}</div>
-              <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>DISCRETIONARY</div>
-            </div>
-          </div>
-          <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:6 }}>
-            <div style={{ height:"100%",width:`${Math.min(100,Math.round(essentialSpend/Math.max(1,myActual)*100))}%`,background:T.danger,borderRadius:3 }}/>
-          </div>
-          <div style={{ display:"flex",justifyContent:"space-between" }}>
-            <span style={{ color:T.sub,fontSize:9 }}>Essential {Math.round(essentialSpend/Math.max(1,myActual)*100)}%</span>
-            <span style={{ color:T.sub,fontSize:9 }}>Discretionary {Math.round(discretionarySpend/Math.max(1,myActual)*100)}%</span>
-          </div>
-          <div style={{ marginTop:10,background:T.input,borderRadius:10,padding:"8px 12px" }}>
-            <div style={{ color:T.sub,fontSize:10 }}>Liquid savings: <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmtK(liquidSavings)}</span> ÷ monthly essential <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmtK(essentialSpend)}</span> = <span style={{ color:runwayColor,fontWeight:900 }}>{runwayMonths} months runway</span></div>
-          </div>
-        </div>
-      ),
       stats: (
         <div key="stats" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
           {[
@@ -11820,7 +11709,7 @@ function AppContent({ onLock }) {
   const StatsPage = () => {
     const [statsPeriod, setStatsPeriod] = useState("30D");
     const now = new Date();
-    const daysBack = { "7D":7, "30D":30, "12W":84 }[statsPeriod] || 30;
+    const daysBack = { "7D":7, "30D":30, "12W":84, "Q":90, "HY":182, "Y":365 }[statsPeriod] || 30;
     const periodStart = new Date(now); periodStart.setDate(periodStart.getDate()-daysBack);
     const periodTxns = txns.filter(t=>t.date && new Date(t.date)>=periodStart && new Date(t.date)<=now);
     const income = periodTxns.filter(t=>t.type==="income").reduce((s,t)=>s+Number(t.amount||0),0);
@@ -11849,9 +11738,9 @@ function AppContent({ onLock }) {
           <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Stats</div>
         </div>
         <div style={{ padding:16,display:"flex",flexDirection:"column",gap:14 }}>
-          <div style={{ display:"flex",gap:6 }}>
-            {["7D","30D","12W"].map(p=>(
-              <button key={p} onClick={()=>setStatsPeriod(p)} style={{ flex:1,background:statsPeriod===p?T.accent:T.input,border:"none",borderRadius:12,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:800,color:statsPeriod===p?"#fff":T.sub,fontFamily:"Nunito,sans-serif" }}>{p}</button>
+          <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+            {["7D","30D","12W","Q","HY","Y"].map(p=>(
+              <button key={p} onClick={()=>setStatsPeriod(p)} style={{ flex:"1 1 30%",minWidth:60,background:statsPeriod===p?T.accent:T.input,border:"none",borderRadius:12,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:800,color:statsPeriod===p?"#fff":T.sub,fontFamily:"Nunito,sans-serif" }}>{p}</button>
             ))}
           </div>
           <div style={{ background:T.card,borderRadius:16,padding:16,border:`1px solid ${T.border}` }}>
@@ -11891,6 +11780,82 @@ function AppContent({ onLock }) {
               <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Previous period</span><span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{sym}{fmt(prevCashFlow)}</span></div>
             </div>
           </div>
+          {(()=>{
+            const essentialCatIds = cats.filter(c=>c.fixed===true).map(c=>c.id);
+            const essentialSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>{
+              const tCats = (t.catIds||[t.catId]).filter(Boolean);
+              return tCats.some(cid=>essentialCatIds.includes(String(cid))) ? s+getMyExpenseAmount(t) : s;
+            },0);
+            const myActualStats = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
+            const discretionarySpend = myActualStats - essentialSpend;
+            const runwayMonths = essentialSpend > 0 ? Math.floor(liquidAssetsTotal / essentialSpend) : 0;
+            const runwayColor = runwayMonths >= 6 ? T.success : runwayMonths >= 3 ? T.warn : T.danger;
+            return (
+              <div style={{ background:`linear-gradient(135deg,${runwayColor}10,${T.card})`,border:`1px solid ${runwayColor}33`,borderRadius:16,padding:16 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+                  <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>💊 Financial Health</div>
+                  <div style={{ background:runwayColor+"22",border:`1px solid ${runwayColor}44`,borderRadius:20,padding:"3px 10px" }}>
+                    <span style={{ color:runwayColor,fontSize:11,fontWeight:800 }}>{runwayMonths >= 6 ? "Healthy" : runwayMonths >= 3 ? "Caution" : "At Risk"}</span>
+                  </div>
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:12 }}>
+                  <div style={{ textAlign:"center" }}>
+                    <div style={{ color:runwayColor,fontSize:22,fontWeight:900 }}>{runwayMonths}</div>
+                    <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>MONTHS RUNWAY</div>
+                  </div>
+                  <div style={{ textAlign:"center" }}>
+                    <div style={{ color:T.danger,fontSize:16,fontWeight:800 }}>{sym}{fmt(essentialSpend)}</div>
+                    <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>ESSENTIAL</div>
+                  </div>
+                  <div style={{ textAlign:"center" }}>
+                    <div style={{ color:T.warn,fontSize:16,fontWeight:800 }}>{sym}{fmt(discretionarySpend)}</div>
+                    <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>DISCRETIONARY</div>
+                  </div>
+                </div>
+                <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:6 }}>
+                  <div style={{ height:"100%",width:`${Math.min(100,Math.round(essentialSpend/Math.max(1,myActualStats)*100))}%`,background:T.danger,borderRadius:3 }}/>
+                </div>
+                <div style={{ marginTop:10,background:T.input,borderRadius:10,padding:"8px 12px" }}>
+                  <div style={{ color:T.sub,fontSize:10 }}>Liquid savings: <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmt(liquidAssetsTotal)}</span> ÷ monthly essential <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmt(essentialSpend)}</span> = <span style={{ color:runwayColor,fontWeight:900 }}>{runwayMonths} months runway</span></div>
+                </div>
+              </div>
+            );
+          })()}
+          {(()=>{
+            const householdGroups = groups.filter(g=>g.typeId==="family"||g.defaultIntent==="attributed");
+            const householdTotal = householdGroups.reduce((s,g)=>{
+              const oldStyle = thisMonthTxns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id)).reduce((ss,t)=>ss+t.amount,0);
+              const allocStyle = thisMonthTxns.filter(t=>t.type==="expense"&&t.groupId!==g.id&&t.tagGroup!==g.id&&t.taggedGroupId!==g.id&&t.groupAllocations?.some(ga=>ga.groupId===g.id)).reduce((ss,t)=>ss+Number(t.groupAllocations.find(ga=>ga.groupId===g.id)?.amount||0),0);
+              return s+oldStyle+allocStyle;
+            },0);
+            if(!householdGroups.length) return null;
+            return (
+              <div style={{ background:T.card,borderRadius:16,padding:16,border:`1px solid ${T.border}` }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+                  <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🏠 Household Cost</div>
+                  <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(householdTotal)}</div>
+                </div>
+                {householdGroups.map(g=>{
+                  const items = thisMonthTxns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id));
+                  const gSpend = items.reduce((s,t)=>s+t.amount,0);
+                  if(!items.length) return null;
+                  return (<div key={g.id} style={{ marginBottom:10 }}>
+                    <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>{g.icon||"👥"} {g.name.toUpperCase()}</div>
+                    {items.map(t=>(
+                      <div key={t.id} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}` }}>
+                        <span style={{ color:T.text,fontSize:12 }}>{t.merchant||t.who||t.desc||"Expense"}</span>
+                        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(t.amount)}</span>
+                      </div>
+                    ))}
+                    <div style={{ display:"flex",justifyContent:"space-between",paddingTop:4 }}>
+                      <span style={{ color:T.sub,fontSize:10 }}>Total</span>
+                      <span style={{ color:T.accent,fontSize:12,fontWeight:800 }}>{sym}{fmt(gSpend)}</span>
+                    </div>
+                  </div>);
+                })}
+              </div>
+            );
+          })()}
         </div>
       </div>
     );
@@ -12853,22 +12818,23 @@ function AppContent({ onLock }) {
       <div style={{ maxWidth:430,margin:"0 auto",minHeight:"100vh",position:"relative",paddingBottom:80,fontFamily:"Nunito,sans-serif" }}>
 
         {/* Top bar */}
-        {!showSettings&&<div style={{ background:T.nav,borderBottom:`1px solid ${T.border}`,padding:"12px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:50 }}>
-          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-            <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
-            <div style={{ width:32,height:32,borderRadius:9,background:T.accentSoft,border:`1px solid ${T.accent}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:900,color:T.accent,fontFamily:"Nunito,sans-serif" }}>₹</div>
-            <div>
-              <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1 }}>Arth</div>
-              <div style={{ color:T.sub,fontSize:9,marginTop:1,textTransform:"uppercase",letterSpacing:1 }}>Personal Finance</div>
+        {!showSettings&&<div style={{ background:T.nav,borderBottom:`1px solid ${T.border}`,padding:"10px 18px 8px",position:"sticky",top:0,zIndex:50 }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+              <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
+              <div style={{ width:32,height:32,borderRadius:9,background:T.accentSoft,border:`1px solid ${T.accent}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:900,color:T.accent,fontFamily:"Nunito,sans-serif" }}>₹</div>
+              <div>
+                <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1 }}>Arth</div>
+                <div style={{ color:T.sub,fontSize:9,marginTop:1,textTransform:"uppercase",letterSpacing:1 }}>Personal Finance</div>
+              </div>
             </div>
-          </div>
-          <div style={{ display:"flex",gap:8,alignItems:"center" }}>
-            <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif" }}>💼{workTripMode?" ON":""}</button>
-            <button onClick={()=>{ setShowSearch(true); setSearchQuery(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Search">🔍</button>
-            <button onClick={toggleMask} style={{ background:maskMode?T.warn+"22":"none",border:`1px solid ${maskMode?T.warn:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:maskMode?T.warn:T.sub }} title={maskMode?"Tap to reveal (PIN) or disable":"Tap to hide amounts"}>{maskMode?"🙈":"👁️"}</button>
-            <button onClick={onLock} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:15,color:T.sub }} title="Lock app">🔒</button>
-
             <button onClick={()=>{ if(tab==="bills") setShowAddBill(true); else { const typeMap={"expense":"expense","income":"income","transfer":"transfer","cc_payment":"cc_payment","investment":"investment","settlement_in":"settlement_in"}; setDefaultAddType(typeMap[fType]||"expense"); setShowAdd(true); } }} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Nunito,sans-serif" }}>{tab==="bills"?"+ Add Bill":"+ Add"}</button>
+          </div>
+          <div style={{ display:"flex",gap:8,alignItems:"center",marginTop:8,justifyContent:"flex-end" }}>
+            <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif" }}>💼{workTripMode?" ON":""}</button>
+            <button onClick={()=>{ setShowSearch(true); setSearchQuery(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:14,color:T.sub }} title="Search">🔍</button>
+            <button onClick={toggleMask} style={{ background:maskMode?T.warn+"22":"none",border:`1px solid ${maskMode?T.warn:T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:14,color:maskMode?T.warn:T.sub }} title={maskMode?"Tap to reveal (PIN) or disable":"Tap to hide amounts"}>{maskMode?"🙈":"👁️"}</button>
+            <button onClick={onLock} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:14,color:T.sub }} title="Lock app">🔒</button>
           </div>
         </div>}
 
