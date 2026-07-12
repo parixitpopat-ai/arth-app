@@ -11829,6 +11829,56 @@ function AppContent({ onLock }) {
               </div>
             );
           })()}
+          {statsTab==="credit"&&(()=>{
+            const totalDebts = creditCardLiabilityTotal + loanTakenTotal;
+            const totalIncome = income; // reuses the same period income already computed for Cash Flow
+            const dtiPct = totalIncome>0 ? Math.round((totalDebts/totalIncome)*100) : 0;
+            return (
+              <div style={{ background:T.card,borderRadius:16,padding:16,border:`1px solid ${T.border}` }}>
+                <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Debt to Income Ratio</div>
+                <div style={{ color:T.sub,fontSize:12,marginTop:2,marginBottom:14 }}>What % of my income would it take to clear my debts?</div>
+                <div style={{ display:"flex",alignItems:"center",gap:20 }}>
+                  <div style={{ position:"relative",width:100,height:100 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={[{v:Math.min(100,dtiPct)},{v:Math.max(0,100-dtiPct)}]} dataKey="v" innerRadius={36} outerRadius={48} startAngle={90} endAngle={-270} stroke="none">
+                          <Cell fill={dtiPct>=50?T.danger:dtiPct>=25?T.warn:T.success}/><Cell fill={T.border}/>
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div style={{ position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:900,color:dtiPct>=50?T.danger:dtiPct>=25?T.warn:T.success }}>{dtiPct}%</div>
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ color:T.sub,fontSize:11 }}>Total debts</div>
+                    <div style={{ color:T.text,fontSize:16,fontWeight:800,marginBottom:8 }}>{sym}{fmt(totalDebts)}</div>
+                    <div style={{ color:T.sub,fontSize:11 }}>Total income (this period)</div>
+                    <div style={{ color:T.text,fontSize:16,fontWeight:800 }}>{sym}{fmt(totalIncome)}</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+          {statsTab==="credit"&&upcomingEmiLoans.length>0&&(
+            <div style={{ background:T.card,borderRadius:16,padding:16,border:`1px solid ${T.border}` }}>
+              <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Recurring Debts</div>
+              <div style={{ color:T.sub,fontSize:12,marginTop:2,marginBottom:14 }}>Which are my top recurring debt payments?</div>
+              <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+                {[...upcomingEmiLoans].sort((a,b)=>Number(b.emiAmount||0)-Number(a.emiAmount||0)).map(loan=>{
+                  const maxEmi = Math.max(...upcomingEmiLoans.map(l=>Number(l.emiAmount||0)),1);
+                  const pct = Math.round((Number(loan.emiAmount||0)/maxEmi)*100);
+                  return (
+                    <div key={loan.id}>
+                      <div style={{ display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3 }}>
+                        <span style={{ color:T.text,fontWeight:700 }}>{loan.name||"Loan"}</span>
+                        <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmt(loan.emiAmount)}/mo</span>
+                      </div>
+                      <div style={{ height:6,background:T.input,borderRadius:4,overflow:"hidden" }}><div style={{ width:`${pct}%`,height:"100%",background:T.warn }}/></div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {statsTab==="overview"&&(<>
           {(()=>{
             const essentialCatIds = cats.filter(c=>c.fixed===true).map(c=>c.id);
