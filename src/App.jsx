@@ -6980,7 +6980,7 @@ function AppContent({ onLock }) {
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (idx, dir) => {
     const arr = cardOrder.map(x=>x); // fully mutable copy
@@ -11698,6 +11698,7 @@ function AppContent({ onLock }) {
 
   // -- STATS PAGE (new module, starting with Cash Flow) -----------------------
   const StatsPage = () => {
+    const [statsTab, setStatsTab] = useState("cashflow");
     const [statsPeriod, setStatsPeriod] = useState("30D");
     const now = new Date();
     const daysBack = { "7D":7, "30D":30, "12W":84, "Q":90, "HY":182, "Y":365 }[statsPeriod] || 30;
@@ -11728,7 +11729,13 @@ function AppContent({ onLock }) {
           <button onClick={()=>setTab("home")} style={{ background:"none",border:"none",cursor:"pointer",fontSize:18,color:T.text }}>←</button>
           <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Stats</div>
         </div>
+        <div style={{ display:"flex",gap:6,padding:"10px 16px 0",overflowX:"auto" }}>
+          {[["cashflow","Cash Flow"],["credit","Credit"],["overview","Overview"]].map(([id,label])=>(
+            <button key={id} onClick={()=>setStatsTab(id)} style={{ background:"none",border:"none",borderBottom:statsTab===id?`2px solid ${T.accent}`:"2px solid transparent",padding:"6px 4px 10px",cursor:"pointer",fontSize:13,fontWeight:800,color:statsTab===id?T.text:T.sub,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap" }}>{label}</button>
+          ))}
+        </div>
         <div style={{ padding:16,display:"flex",flexDirection:"column",gap:14 }}>
+          {statsTab==="cashflow"&&(<>
           <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
             {["7D","30D","12W","Q","HY","Y"].map(p=>(
               <button key={p} onClick={()=>setStatsPeriod(p)} style={{ flex:"1 1 30%",minWidth:60,background:statsPeriod===p?T.accent:T.input,border:"none",borderRadius:12,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:800,color:statsPeriod===p?"#fff":T.sub,fontFamily:"Nunito,sans-serif" }}>{p}</button>
@@ -11771,7 +11778,8 @@ function AppContent({ onLock }) {
               <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Previous period</span><span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{sym}{fmt(prevCashFlow)}</span></div>
             </div>
           </div>
-          {(()=>{
+          </>)}
+          {statsTab==="credit"&&(()=>{
             const ccAccs = accounts.filter(a=>a.type==="cc");
             if(!ccAccs.length) return null;
             const totalLimit = ccAccs.reduce((s,a)=>s+Number(a.limit||0),0);
@@ -11821,6 +11829,7 @@ function AppContent({ onLock }) {
               </div>
             );
           })()}
+          {statsTab==="overview"&&(<>
           {(()=>{
             const essentialCatIds = cats.filter(c=>c.fixed===true).map(c=>c.id);
             const essentialSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>{
@@ -11897,6 +11906,7 @@ function AppContent({ onLock }) {
               </div>
             );
           })()}
+          </>)}
         </div>
       </div>
     );
