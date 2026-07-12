@@ -12070,13 +12070,6 @@ function AppContent({ onLock }) {
     const [baAttributedTo, setBaAttributedTo] = useState(existing?.attributedTo||"");
     const [baAttributeType, setBaAttributeType] = useState(existing?.attributeType||"house");
     const [baNote, setBaNote] = useState(existing?.note||"");
-    const SUB_TYPES = ["Gym / Fitness","Club Membership","School Fees","Education Fees","Other Subscription","Insurance","Society Maintenance","Hospital","Rental"];
-    const isSubType = SUB_TYPES.includes(baType);
-    const [baSubStart, setBaSubStart] = useState(existing?.subStart||"");
-    const [baSubEnd, setBaSubEnd] = useState(existing?.subEnd||"");
-    const [baAutoRenew, setBaAutoRenew] = useState(existing?.autoRenew||false);
-    const [baBillingCycle, setBaBillingCycle] = useState(existing?.billingCycle||"monthly");
-    const daysToExpiry = baSubEnd ? Math.round((new Date(baSubEnd)-new Date())/(1000*60*60*24)) : null;
     const canSave = baName.trim() && baType;
     const [duplicateError, setDuplicateError] = useState("");
     const handleSave = () => {
@@ -12094,7 +12087,7 @@ function AppContent({ onLock }) {
         if(dup){ setDuplicateError(`"${trimmedConsumerNo}" is already used by "${dup.name}" under ${baType}${baProvider?` (${baProvider})`:""}. Use a different number, or edit that account instead.`); return; }
       }
       setDuplicateError("");
-      const record = { id:existing?.id||genId(), billerId:existing?.billerId||preselectedBillerId||null, name:baName.trim(), type:baType, consumerNo:trimmedConsumerNo, provider:baProvider.trim(), attributedTo:baAttributedTo, attributeType:baAttributeType, note:baNote.trim(), createdAt:existing?.createdAt||Date.now(), subStart:baSubStart||null, subEnd:baSubEnd||null, autoRenew:baAutoRenew, billingCycle:baBillingCycle||null };
+      const record = { id:existing?.id||genId(), billerId:existing?.billerId||preselectedBillerId||null, name:baName.trim(), type:baType, consumerNo:trimmedConsumerNo, provider:baProvider.trim(), attributedTo:baAttributedTo, attributeType:baAttributeType, note:baNote.trim(), createdAt:existing?.createdAt||Date.now() };
       setBillerAccounts(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[...prev,record]);
       onClose();
     };
@@ -12188,36 +12181,6 @@ function AppContent({ onLock }) {
               <span style={lbl}>Note (optional)</span>
               <input style={inp} placeholder="Any notes about this biller" value={baNote} onChange={e=>setBaNote(e.target.value)}/>
             </div>
-            {/* Subscription fields */}
-            {isSubType&&(
-              <div style={{ background:T.input,borderRadius:12,padding:"12px" }}>
-                <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>SUBSCRIPTION / MEMBERSHIP</div>
-                <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-                    <div><span style={lbl}>Start Date</span><input style={inp} type="date" value={baSubStart} onChange={e=>setBaSubStart(e.target.value)}/></div>
-                    <div><span style={lbl}>End / Renewal Date</span><input style={inp} type="date" value={baSubEnd} onChange={e=>setBaSubEnd(e.target.value)}/></div>
-                  </div>
-                  {daysToExpiry!==null&&(
-                    <div style={{ background:daysToExpiry<=7?T.danger+"16":daysToExpiry<=30?T.warn+"16":T.success+"16",border:`1px solid ${daysToExpiry<=7?T.danger:daysToExpiry<=30?T.warn:T.success}33`,borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}>
-                      <span style={{ color:T.sub,fontSize:11 }}>{daysToExpiry<0?"Expired":"Expires in"}</span>
-                      <span style={{ color:daysToExpiry<=7?T.danger:daysToExpiry<=30?T.warn:T.success,fontSize:12,fontWeight:800 }}>{daysToExpiry<0?`${Math.abs(daysToExpiry)} days ago`:`${daysToExpiry} days`}</span>
-                    </div>
-                  )}
-                  <div>
-                    <span style={lbl}>Billing Cycle</span>
-                    <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                      {["monthly","quarterly","halfyearly","annual"].map(c=>(
-                        <button key={c} onClick={()=>setBaBillingCycle(c)} style={{ background:baBillingCycle===c?T.accent+"22":"none",border:`1px solid ${baBillingCycle===c?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:baBillingCycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
-                    <span style={{ color:T.sub,fontSize:12 }}>Auto-renewal</span>
-                    <button onClick={()=>setBaAutoRenew(v=>!v)} style={{ background:baAutoRenew?T.success+"22":"none",border:`1px solid ${baAutoRenew?T.success:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:baAutoRenew?T.success:T.sub,fontFamily:"Nunito,sans-serif" }}>{baAutoRenew?"ON":"OFF"}</button>
-                  </div>
-                </div>
-              </div>
-            )}
             {duplicateError&&<div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",color:T.danger,fontSize:11,fontWeight:700 }}>{duplicateError}</div>}
             <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Biller Account"}</button>
           </div>
