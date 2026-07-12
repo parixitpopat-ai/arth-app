@@ -2862,6 +2862,8 @@ function AppContent({ onLock }) {
     const [guestPersonAmount, setGuestPersonAmount] = useState("");
     const [showGuestPerson, setShowGuestPerson] = useState(false);
     const [showMembershipPanel, setShowMembershipPanel] = useState(false);
+    const [showBillPicker, setShowBillPicker] = useState(false);
+    const [showTripPicker, setShowTripPicker] = useState(false);
     const [linkValidFrom, setLinkValidFrom] = useState(todayStr());
     const [linkCycle, setLinkCycle] = useState("monthly");
     const [linkBulkMonths, setLinkBulkMonths] = useState("1");
@@ -5110,7 +5112,7 @@ function AppContent({ onLock }) {
                     return (
                       <button key={p.id} onClick={()=>{
                         if(isSelected){ setAllocRows(prev=>prev.filter(r=>!(r.targetType==="person"&&r.targetId===p.id))); }
-                        else { setSplitMode("allocate"); setExplicitlyMeOnly(false); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:p.id, mode:"owes", amount:"", items:[] }]); }
+                        else { setSplitMode("allocate"); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:p.id, mode:"owes", amount:"", items:[] }]); }
                       }} style={{ background:isSelected?p.color+"22":"none",border:`1px solid ${isSelected?p.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
                     );
                   })}
@@ -5122,7 +5124,6 @@ function AppContent({ onLock }) {
                         else {
                           const di = g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
                           setSplitMode("allocate");
-                          setExplicitlyMeOnly(false);
                           setAllocRows(prev=>[...prev,{ id:genId(), targetType:"group", targetId:g.id, mode:di==="attributed"?"spent_on":"owes", amount:"", items:[] }]);
                         }
                       }} style={{ background:isSelected?g.color+"22":"none",border:`1px solid ${isSelected?g.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon||"👥"} {g.name}</button>
@@ -5229,18 +5230,38 @@ function AppContent({ onLock }) {
               </div>
             )}
 
-            {/* LINK TO BILL / SUBSCRIPTION */}
+            {/* LINK TO BILL + TRIP — compact combined row, expands inline only when tapped */}
             {txnType==="expense"&&(
-              <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:billerLinkId?10:0 }}>
-                  <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>📎 Link to Bill / Subscription (optional)</span>
-                  {billerLinkId&&<button onClick={()=>{ setBillerLinkId(""); setShowMembershipPanel(false); }} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Remove</button>}
+              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                  {!billerLinkId&&(
+                    <button onClick={()=>setShowBillPicker(v=>!v)} style={{ background:showBillPicker?T.accent+"22":"none",border:`1px solid ${showBillPicker?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showBillPicker?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>📎 Link Bill</button>
+                  )}
+                  {linkedBA&&(
+                    <div style={{ display:"flex",alignItems:"center",gap:6,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:20,padding:"5px 12px" }}>
+                      <span style={{ fontSize:14 }}>{getBillerIcon(linkedBA.type)}</span>
+                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{linkedBA.name}</span>
+                      {linkedBAType==="membership"&&<button onClick={()=>setShowMembershipPanel(v=>!v)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{showMembershipPanel?"hide dates":"+dates"}</button>}
+                      <button onClick={()=>{ setBillerLinkId(""); setShowMembershipPanel(false); }} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:13,fontFamily:"Nunito,sans-serif" }}>×</button>
+                    </div>
+                  )}
+                  {!eventLinkId&&(
+                    <button onClick={()=>setShowTripPicker(v=>!v)} style={{ background:showTripPicker?T.accent+"22":"none",border:`1px solid ${showTripPicker?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showTripPicker?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>✈️ Link Trip</button>
+                  )}
+                  {eventLinkId&&(()=>{ const ev=events.find(x=>x.id===eventLinkId); if(!ev) return null; const et=EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1]; return (
+                    <div style={{ display:"flex",alignItems:"center",gap:6,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:20,padding:"5px 12px" }}>
+                      <span style={{ fontSize:14 }}>{et.icon}</span>
+                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{ev.name}</span>
+                      <button onClick={()=>setEventLinkId("")} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:13,fontFamily:"Nunito,sans-serif" }}>×</button>
+                    </div>
+                  ); })()}
                 </div>
-                {!billerLinkId&&(
+                {showBillPicker&&!billerLinkId&&(
                   <select style={inp} value="" onChange={e=>{
                     const id=e.target.value;
                     if(!id) return;
                     setBillerLinkId(id);
+                    setShowBillPicker(false);
                     const ba=billerAccounts.find(b=>b.id===id);
                     if(ba && getBillerActionType(ba.type)==="membership") setShowMembershipPanel(true);
                     // Auto-attribute from the biller account's own "Attributed To" setting — but only if
@@ -5255,63 +5276,32 @@ function AppContent({ onLock }) {
                     {billerAccounts.map(ba=>(<option key={ba.id} value={ba.id}>{getBillerIcon(ba.type)} {ba.name} — {ba.type}</option>))}
                   </select>
                 )}
-                {linkedBA&&(
-                  <div>
-                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:showMembershipPanel?10:0 }}>
-                      <span style={{ fontSize:20 }}>{getBillerIcon(linkedBA.type)}</span>
-                      <div>
-                        <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>{linkedBA.name}</div>
-                        <div style={{ color:T.sub,fontSize:10 }}>{linkedBA.type}{linkedBA.consumerNo?` · #${linkedBA.consumerNo}`:""}</div>
+                {showMembershipPanel&&linkedBAType==="membership"&&(
+                  <div style={{ display:"flex",flexDirection:"column",gap:10,background:T.input,borderRadius:10,padding:"10px" }}>
+                    <div>
+                      <span style={lbl}>Member</span>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                        <button onClick={()=>setLinkMemberPersonId("self")} style={{ background:linkMemberPersonId==="self"?T.accent+"22":"none",border:`1px solid ${linkMemberPersonId==="self"?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkMemberPersonId==="self"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>Me</button>
+                        {people.map(p=>(<button key={p.id} onClick={()=>setLinkMemberPersonId(String(p.id))} style={{ background:linkMemberPersonId===String(p.id)?T.accent+"22":"none",border:`1px solid ${linkMemberPersonId===String(p.id)?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkMemberPersonId===String(p.id)?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>))}
                       </div>
-                      {linkedBAType==="membership"&&(
-                        <button onClick={()=>setShowMembershipPanel(v=>!v)} style={{ marginLeft:"auto",background:showMembershipPanel?T.accent+"22":"none",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{showMembershipPanel?"Hide dates":"+ Add dates"}</button>
-                      )}
                     </div>
-                    {/* Membership panel */}
-                    {showMembershipPanel&&linkedBAType==="membership"&&(
-                      <div style={{ display:"flex",flexDirection:"column",gap:10,background:T.card,borderRadius:10,padding:"10px",marginTop:8 }}>
-                        <div>
-                          <span style={lbl}>Member</span>
-                          <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                            <button onClick={()=>setLinkMemberPersonId("self")} style={{ background:linkMemberPersonId==="self"?T.accent+"22":"none",border:`1px solid ${linkMemberPersonId==="self"?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkMemberPersonId==="self"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>Me</button>
-                            {people.map(p=>(<button key={p.id} onClick={()=>setLinkMemberPersonId(String(p.id))} style={{ background:linkMemberPersonId===String(p.id)?T.accent+"22":"none",border:`1px solid ${linkMemberPersonId===String(p.id)?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkMemberPersonId===String(p.id)?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>))}
-                          </div>
-                        </div>
-                        <div style={{ display:"flex",gap:6 }}>
-                          {["monthly","quarterly","halfyearly","annual"].map(c=>(<button key={c} onClick={()=>setLinkCycle(c)} style={{ flex:1,background:linkCycle===c?T.accent+"22":"none",border:`1px solid ${linkCycle===c?T.accent:T.border}`,borderRadius:10,padding:"5px 2px",cursor:"pointer",fontSize:9,fontWeight:700,color:linkCycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>))}
-                        </div>
-                        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
-                          <div><span style={lbl}>Valid From</span><input style={inp} type="date" value={linkValidFrom} onChange={e=>setLinkValidFrom(e.target.value)}/></div>
-                          <div><span style={lbl}>No. of cycles</span><input style={inp} type="number" min="1" value={linkBulkMonths} onChange={e=>setLinkBulkMonths(e.target.value)}/></div>
-                          <div><span style={lbl}>Grace days</span><input style={inp} type="number" min="0" value={linkGraceDays} onChange={e=>setLinkGraceDays(e.target.value)}/></div>
-                        </div>
-                        {linkValidUntil&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(linkValidUntil)||linkValidUntil}</span></div>}
-                      </div>
-                    )}
+                    <div style={{ display:"flex",gap:6 }}>
+                      {["monthly","quarterly","halfyearly","annual"].map(c=>(<button key={c} onClick={()=>setLinkCycle(c)} style={{ flex:1,background:linkCycle===c?T.accent+"22":"none",border:`1px solid ${linkCycle===c?T.accent:T.border}`,borderRadius:10,padding:"5px 2px",cursor:"pointer",fontSize:9,fontWeight:700,color:linkCycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>))}
+                    </div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
+                      <div><span style={lbl}>Valid From</span><input style={inp} type="date" value={linkValidFrom} onChange={e=>setLinkValidFrom(e.target.value)}/></div>
+                      <div><span style={lbl}>No. of cycles</span><input style={inp} type="number" min="1" value={linkBulkMonths} onChange={e=>setLinkBulkMonths(e.target.value)}/></div>
+                      <div><span style={lbl}>Grace days</span><input style={inp} type="number" min="0" value={linkGraceDays} onChange={e=>setLinkGraceDays(e.target.value)}/></div>
+                    </div>
+                    {linkValidUntil&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(linkValidUntil)||linkValidUntil}</span></div>}
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* LINK TO TRIP / OUTING */}
-            {txnType==="expense"&&(
-              <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                  <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>✈️ Link to Trip / Outing (optional)</span>
-                  {eventLinkId&&<button onClick={()=>setEventLinkId("")} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Remove</button>}
-                </div>
-                {!eventLinkId&&(
-                  <select style={{ ...inp,marginTop:8 }} value="" onChange={e=>setEventLinkId(e.target.value)}>
+                {showTripPicker&&!eventLinkId&&(
+                  <select style={inp} value="" onChange={e=>{ setEventLinkId(e.target.value); setShowTripPicker(false); }}>
                     <option value="">Select trip / outing...</option>
                     {events.map(ev=>{ const et=EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1]; return <option key={ev.id} value={ev.id}>{et.icon} {ev.name} — {formatShortDate(ev.date)||ev.date}</option>; })}
                   </select>
                 )}
-                {eventLinkId&&(()=>{ const ev=events.find(x=>x.id===eventLinkId); if(!ev) return null; const et=EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1]; return (
-                  <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:8 }}>
-                    <span style={{ fontSize:20 }}>{et.icon}</span>
-                    <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>{ev.name}</div>
-                  </div>
-                ); })()}
               </div>
             )}
             {txnType==="expense"&&(
@@ -8956,7 +8946,8 @@ function AppContent({ onLock }) {
               <div key={gtype} style={{ marginBottom:16 }}>
                 <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,marginBottom:10 }}>{gtype}</div>
                 {grps.map(g=>{
-                  const gTotalSpend = txns.filter(t=>t.groupId===g.id&&t.type==="expense").reduce((sum,t)=>sum+Number(t.amount||0),0) + bills.filter(b=>b.groupId===g.id&&b.status==="unpaid").reduce((sum,b)=>sum+Number(b.amount||0),0);
+                  const gCurMonth = todayStr().slice(0,7);
+                  const gTotalSpend = txns.filter(t=>t.groupId===g.id&&t.type==="expense"&&(t.date||"").startsWith(gCurMonth)).reduce((sum,t)=>sum+Number(t.amount||0),0) + bills.filter(b=>b.groupId===g.id&&b.status==="unpaid"&&(b.billDate||"").startsWith(gCurMonth)).reduce((sum,b)=>sum+Number(b.amount||0),0);
                   const gBudget = Number(g.manualLimit||0);
                   const gOver = gBudget>0 && gTotalSpend>gBudget;
                   return (
@@ -8965,7 +8956,7 @@ function AppContent({ onLock }) {
                       <div style={{ flex:1 }}>
                         <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{g.name}</div>
                         <div style={{ color:T.sub,fontSize:11,marginTop:1 }}>{(g.members?.length||0) + (g.includeMe===false?0:1)} members{g.includeMe===false?" · you not included":" · you included"}</div>
-                        <div style={{ color:gOver?T.danger:T.sub,fontSize:10,marginTop:2 }}>{gBudget>0?`Budget ${sym}${fmt(gBudget)} · `:""}Spent {sym}{fmt(gTotalSpend)}{gOver?` · ⚠️ Over ${sym}${fmt(gTotalSpend-gBudget)}`:""}</div>
+                        <div style={{ color:gOver?T.danger:T.sub,fontSize:10,marginTop:2 }}>{gBudget>0?`Budget ${sym}${fmt(gBudget)}/mo · `:""}This month {sym}{fmt(gTotalSpend)}{gOver?` · ⚠️ Over ${sym}${fmt(gTotalSpend-gBudget)}`:""}</div>
                       </div>
                       <div style={{ textAlign:"right" }}>
                         <div style={{ color:g.color,fontSize:14,fontWeight:800 }}>{sym}{fmt(groupReceivableTotal(g.id))}</div>
@@ -11780,6 +11771,56 @@ function AppContent({ onLock }) {
               <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Previous period</span><span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{sym}{fmt(prevCashFlow)}</span></div>
             </div>
           </div>
+          {(()=>{
+            const ccAccs = accounts.filter(a=>a.type==="cc");
+            if(!ccAccs.length) return null;
+            const totalLimit = ccAccs.reduce((s,a)=>s+Number(a.limit||0),0);
+            const totalOutstanding = ccAccs.reduce((s,a)=>s+cardOutstanding(a),0);
+            const utilPct = totalLimit>0 ? Math.round((totalOutstanding/totalLimit)*100) : 0;
+            const utilColor = utilPct>=70 ? T.danger : utilPct>=40 ? T.warn : T.success;
+            return (
+              <div style={{ background:T.card,borderRadius:16,padding:16,border:`1px solid ${T.border}` }}>
+                <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Credit Limit Utilization</div>
+                <div style={{ color:T.sub,fontSize:12,marginTop:2,marginBottom:14 }}>What % of all my credit limits am I using?</div>
+                <div style={{ display:"flex",alignItems:"center",gap:20,marginBottom:14 }}>
+                  <div style={{ position:"relative",width:100,height:100 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={[{v:utilPct},{v:100-utilPct}]} dataKey="v" innerRadius={36} outerRadius={48} startAngle={90} endAngle={-270} stroke="none">
+                          <Cell fill={utilColor}/><Cell fill={T.border}/>
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div style={{ position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:900,color:utilColor }}>{utilPct}%</div>
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ color:T.sub,fontSize:11 }}>Credit Balance</div>
+                    <div style={{ color:T.text,fontSize:16,fontWeight:800,marginBottom:8 }}>{sym}{fmt(totalOutstanding)}</div>
+                    <div style={{ color:T.sub,fontSize:11 }}>Total Credit Limit</div>
+                    <div style={{ color:T.text,fontSize:16,fontWeight:800 }}>{sym}{fmt(totalLimit)}</div>
+                  </div>
+                </div>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>BY CARD</div>
+                <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                  {ccAccs.map(a=>{
+                    const out = cardOutstanding(a);
+                    const lim = Number(a.limit||0);
+                    const pct = lim>0 ? Math.round((out/lim)*100) : 0;
+                    const c = pct>=70 ? T.danger : pct>=40 ? T.warn : T.success;
+                    return (
+                      <div key={a.id}>
+                        <div style={{ display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3 }}>
+                          <span style={{ color:T.text,fontWeight:700 }}>{a.name}</span>
+                          <span style={{ color:c,fontWeight:800 }}>{pct}% · {sym}{fmt(out)} / {sym}{fmt(lim)}</span>
+                        </div>
+                        <div style={{ height:6,background:T.input,borderRadius:4,overflow:"hidden" }}><div style={{ width:`${Math.min(100,pct)}%`,height:"100%",background:c }}/></div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
           {(()=>{
             const essentialCatIds = cats.filter(c=>c.fixed===true).map(c=>c.id);
             const essentialSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>{
