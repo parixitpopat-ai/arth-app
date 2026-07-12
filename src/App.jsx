@@ -951,9 +951,14 @@ function AppContent({ onLock }) {
   const [activeBillerShell, setActiveBillerShell] = useState(null);
   const [showAddYouOwe, setShowAddYouOwe] = useState(null); // holds personId when open
   const [viewingMembership, setViewingMembership] = useState(null); // holds the membership record for the detail view
+  const [showAddEvent, setShowAddEvent] = useState(false);
+  const [editingEvent, setEditingEvent] = useState(null);
+  const [showEventsList, setShowEventsList] = useState(false);
+  const [viewingEvent, setViewingEvent] = useState(null);
   const [liabilities, setLiabilities] = useState(()=>JSON.parse(localStorage.getItem("arth_liabilities")||"[]"));
   const [trackedAssets, setTrackedAssets] = useState(()=>JSON.parse(localStorage.getItem("arth_assets")||"[]"));
   const [vehicles, setVehicles] = useState(()=>JSON.parse(localStorage.getItem("arth_vehicles")||"[]"));
+  const [events, setEvents] = useState(()=>JSON.parse(localStorage.getItem("arth_events")||"[]"));
   const [loans, setLoans] = useState(()=>normalizeLoans(JSON.parse(localStorage.getItem("arth_loans")||"[]")));
   const [ccEmiPlans, setCcEmiPlans] = useState(()=>JSON.parse(localStorage.getItem("arth_cc_emi_plans")||"[]"));
   const currentFYStartYear = new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1;
@@ -1054,6 +1059,7 @@ function AppContent({ onLock }) {
   useEffect(()=>safeSetLocalStorage("arth_liabilities",JSON.stringify(liabilities)),[liabilities]);
   useEffect(()=>safeSetLocalStorage("arth_assets",JSON.stringify(trackedAssets)),[trackedAssets]);
   useEffect(()=>safeSetLocalStorage("arth_vehicles",JSON.stringify(vehicles)),[vehicles]);
+  useEffect(()=>safeSetLocalStorage("arth_events",JSON.stringify(events)),[events]);
   useEffect(()=>safeSetLocalStorage("arth_loans",JSON.stringify(loans)),[loans]);
   useEffect(()=>safeSetLocalStorage("arth_cc_emi_plans",JSON.stringify(ccEmiPlans)),[ccEmiPlans]);
   useEffect(()=>safeSetLocalStorage("arth_annual_budget",annualBudget),[annualBudget]);
@@ -2847,6 +2853,7 @@ function AppContent({ onLock }) {
     const [toAccId, setToAccId] = useState(isEditing ? (sourceTxn.toAccId || defaultToCardId) : (safePrefill.toAccId || defaultToCardId));
     const [note, setNote] = useState(isEditing ? (sourceTxn.note || "") : (refundPrefill ? `Refund for ${refundPrefill.desc||refundPrefill.merchant||"expense"}` : (safePrefill.note || "")));
     const [billerLinkId, setBillerLinkId] = useState(isEditing ? (sourceTxn.billerLinkId||"") : "");
+    const [eventLinkId, setEventLinkId] = useState(isEditing ? (sourceTxn.eventId||"") : "");
     const [settleSelectedIds, setSettleSelectedIds] = useState({});
     const [settleAmounts, setSettleAmounts] = useState({});
     const [guestPersonName, setGuestPersonName] = useState("");
@@ -3621,6 +3628,7 @@ function AppContent({ onLock }) {
         imageBase64,
         transactionRef:transactionRef.trim()||null,
         billerLinkId:billerLinkId||undefined,
+        eventId:eventLinkId||undefined,
         discount:discount?parseFloat(discount):undefined,
         guestPerson:guestPersonName.trim()||undefined,
         guestPersonAmount:guestPersonAmount?parseFloat(guestPersonAmount):undefined,
@@ -5289,7 +5297,27 @@ function AppContent({ onLock }) {
               </div>
             )}
 
-            {/* QUICK FLAGS */}
+            {/* LINK TO TRIP / OUTING */}
+            {txnType==="expense"&&(
+              <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>✈️ Link to Trip / Outing (optional)</span>
+                  {eventLinkId&&<button onClick={()=>setEventLinkId("")} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Remove</button>}
+                </div>
+                {!eventLinkId&&(
+                  <select style={{ ...inp,marginTop:8 }} value="" onChange={e=>setEventLinkId(e.target.value)}>
+                    <option value="">Select trip / outing...</option>
+                    {events.map(ev=>{ const et=EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1]; return <option key={ev.id} value={ev.id}>{et.icon} {ev.name} — {formatShortDate(ev.date)||ev.date}</option>; })}
+                  </select>
+                )}
+                {eventLinkId&&(()=>{ const ev=events.find(x=>x.id===eventLinkId); if(!ev) return null; const et=EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1]; return (
+                  <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:8 }}>
+                    <span style={{ fontSize:20 }}>{et.icon}</span>
+                    <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>{ev.name}</div>
+                  </div>
+                ); })()}
+              </div>
+            )}
             {txnType==="expense"&&(
               <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
                 <div style={{ display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:isBillPayment?10:0 }}>
@@ -5767,6 +5795,7 @@ function AppContent({ onLock }) {
     const [error,setError]=useState("");
     const [accAttributedTo,setAccAttributedTo]=useState("");
     const [accAttributeType,setAccAttributeType]=useState("person");
+    const [needsCalibration,setNeedsCalibration]=useState(aType==="cash");
     const selectedAccountType = accountTypeOptions.find(item=>item.id===aType) || ACC_TYPES.find(item=>item.id===aType) || ACC_TYPES[0];
     const selectedAccountBaseType = selectedAccountType.baseType || selectedAccountType.id || "bank";
     const selectedAccountBucket = selectedAccountType.bucket || defaultAccountTypeBucket(selectedAccountBaseType);
@@ -5786,7 +5815,7 @@ function AppContent({ onLock }) {
         attributedTo:accAttributedTo||null,
         attributeType:accAttributedTo?accAttributeType:null,
       };
-      if(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cash") setAccounts(p=>[...p,{...base,last4,openingBalance:parseMoney(openingBalance)||0,openingBalanceDate:openingBalanceDate||todayStr()}]);
+      if(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cash") setAccounts(p=>[...p,{...base,last4,openingBalance:parseMoney(openingBalance)||0,openingBalanceDate:openingBalanceDate||todayStr(),needsCalibration}]);
       else if(selectedAccountBaseType==="cc") setAccounts(p=>[...p,{...base,last4,limit:parseFloat(limit)||0,outstanding:0,statementDate:parseInt(statementDate)||15,dueDate:parseInt(dueDate)||5,alertPct:Math.max(0,parseFloat(alertPct)||0),billingCycle:billingCycle||`${statementDate}th`}]);
       else if(selectedAccountBaseType==="debit") setAccounts(p=>[...p,{...base,last4,linkedBank}]);
       else if(selectedAccountBaseType==="upi") setAccounts(p=>[...p,{...base,handle,linkedAccount:linkedUpiAccount||""}]);
@@ -5814,6 +5843,15 @@ function AppContent({ onLock }) {
                 <input style={inp} type="date" value={openingBalanceDate} onChange={e=>setOpeningBalanceDate(e.target.value)}/>
               </div>
             </div>}
+            {(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cash")&&(
+              <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.input,borderRadius:10,padding:"8px 12px" }}>
+                <div>
+                  <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>Needs manual calibration?</div>
+                  <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>Lets you periodically enter the actual balance and see the gap vs what Arth calculated — useful for cash, since small untracked spends drift the number over time.</div>
+                </div>
+                <button onClick={()=>setNeedsCalibration(v=>!v)} style={{ background:needsCalibration?T.accent+"22":"none",border:`1px solid ${needsCalibration?T.accent:T.border}`,borderRadius:20,padding:"5px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:needsCalibration?T.accent:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>{needsCalibration?"Yes":"No"}</button>
+              </div>
+            )}
             {selectedAccountBaseType==="cc"&&<>
               <input style={inp} type="number" placeholder={`Credit limit (${sym})`} value={limit} onChange={e=>setLimit(e.target.value)}/>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
@@ -6635,6 +6673,8 @@ function AppContent({ onLock }) {
     billerAccounts,
     memberships,
     feePayments,
+    vehicles,
+    events,
     perPersonBudgets,
     gifts,
     liabilities,
@@ -6675,6 +6715,8 @@ function AppContent({ onLock }) {
     setBillerAccounts(Array.isArray(snapshot.billerAccounts) ? snapshot.billerAccounts : []);
     setMemberships(Array.isArray(snapshot.memberships) ? snapshot.memberships : []);
     setFeePayments(Array.isArray(snapshot.feePayments) ? snapshot.feePayments : []);
+    setVehicles(Array.isArray(snapshot.vehicles) ? snapshot.vehicles : []);
+    setEvents(Array.isArray(snapshot.events) ? snapshot.events : []);
     if(snapshot.perPersonBudgets) setPerPersonBudgets(snapshot.perPersonBudgets);
     if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
     if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
@@ -6988,7 +7030,7 @@ function AppContent({ onLock }) {
     const essentialCatIds = cats.filter(c=>c.fixed===true).map(c=>c.id);
     const essentialSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>{
       const tCats = (t.catIds||[t.catId]).filter(Boolean);
-      return tCats.some(cid=>essentialCatIds.includes(String(cid))) ? s+t.amount : s;
+      return tCats.some(cid=>essentialCatIds.includes(String(cid))) ? s+getMyExpenseAmount(t) : s;
     },0);
     const discretionarySpend = myActual - essentialSpend;
     const liquidSavings = liquidAssetsTotal;
@@ -10362,11 +10404,17 @@ function AppContent({ onLock }) {
                             {a.type==="cc"&&`${sym}${fmt(ccSummary?.currentDue||0)} due now · ${sym}${fmt(ccSummary?.totalOutstanding||0)} total`}
                             {a.type==="debit"&&`Linked: ${linkedB?.name||"?"}`}
                             {a.type==="upi"&&`${a.handle||"UPI"} · ${sym}${fmt(bal)}`}
-                            {a.type==="cash"&&`Cash in hand: ${sym}${fmt(bal)}`}
+                            {a.type==="cash"&&<>
+                              <div>Cash in hand: {sym}{fmt(bal)}</div>
+                              {balanceCheckpoints[a.id]?.date&&(()=>{
+                                const gap = accountReconciliationGap(a.id);
+                                return <div style={{ color:Math.abs(gap)<0.01?T.success:T.warn,fontSize:10,marginTop:2 }}>Actual {formatShortDate(balanceCheckpoints[a.id].date)} · {Math.abs(gap)<0.01?"Matched":`Gap ${gap>=0?"+":"−"}${sym}${fmt(Math.abs(gap))}`}</div>;
+                              })()}
+                            </>}
                           </div>
                         </div>
                         <div style={{ display:"flex",gap:6,alignItems:"center" }}>
-                          {a.type==="bank"&&<button onClick={e=>{
+                          {(a.needsCalibration || (a.type==="bank" && a.needsCalibration!==false))&&<button onClick={e=>{
                             e.stopPropagation();
                             const checkpoint = balanceCheckpoints[a.id];
                             setEditingCheckpoint(a.id);
@@ -10792,6 +10840,7 @@ function AppContent({ onLock }) {
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Backup & Sync</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
           <Row icon="🔑" title="Cloud Sync & Account" subtitle={cloudUser?.email ? `Signed in as ${cloudUser.email}${lastSyncedAt ? " · synced" : ""}` : "Sign in to sync across devices"} onClick={()=>setSettingsSection("cloudsync")}/>
+          <Row icon="✈️" title="Trips & Outings" subtitle={events.length?`${events.length} trip${events.length!==1?"s":""} tracked`:"Tag expenses to a trip or outing"} onClick={()=>setShowEventsList(true)}/>
           <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
         </div>
 
@@ -10828,6 +10877,7 @@ function AppContent({ onLock }) {
     const [excludeFromWealth, setExcludeFromWealth] = useState(a.excludeFromWealth||false);
     const [accAttributedTo, setAccAttributedTo] = useState(a.attributedTo||"");
     const [accAttributeType, setAccAttributeType] = useState(a.attributeType||"person");
+    const [needsCalibration, setNeedsCalibration] = useState(a.needsCalibration ?? (a.type==="cash"));
     const banks = accounts.filter(x=>x.type==="bank"&&x.id!==a.id);
 
     const save = () => {
@@ -10835,7 +10885,7 @@ function AppContent({ onLock }) {
       setAccounts(prev=>prev.map(x=>x.id===a.id?{
         ...x, name:name.trim(), last4, color, excludeFromWealth, attributedTo:accAttributedTo||null, attributeType:accAttributedTo?accAttributeType:null,
         ...(a.type==="cc"&&{ limit:parseFloat(limit)||0, statementDate:parseInt(statementDate)||15, dueDate:parseInt(dueDate)||5, alertPct:Math.max(0,parseFloat(alertPct)||0), billingCycle:billingCycle||`${statementDate}th–${dueDate}th` }),
-        ...((a.type==="bank"||a.type==="cash")&&{ openingBalance:parseMoney(openingBalance)||0, openingBalanceDate:openingBalanceDate||todayStr() }),
+        ...((a.type==="bank"||a.type==="cash")&&{ openingBalance:parseMoney(openingBalance)||0, openingBalanceDate:openingBalanceDate||todayStr(), needsCalibration }),
         ...(a.type==="upi"&&{ handle }),
         ...(a.type==="debit"&&{ linkedBank }),
       }:x));
@@ -10865,6 +10915,12 @@ function AppContent({ onLock }) {
                 <input style={inp} type="date" value={openingBalanceDate} onChange={e=>setOpeningBalanceDate(e.target.value)}/>
               </div>
             </div>}
+            {(a.type==="bank"||a.type==="cash")&&(
+              <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.input,borderRadius:10,padding:"8px 12px" }}>
+                <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>Needs manual calibration?</div>
+                <button onClick={()=>setNeedsCalibration(v=>!v)} style={{ background:needsCalibration?T.accent+"22":"none",border:`1px solid ${needsCalibration?T.accent:T.border}`,borderRadius:20,padding:"5px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:needsCalibration?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{needsCalibration?"Yes":"No"}</button>
+              </div>
+            )}
             {a.type==="cc"&&<>
               <div><span style={lbl}>Credit limit ({sym})</span><input style={inp} type="number" value={limit} onChange={e=>setLimit(e.target.value)}/></div>
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
@@ -11642,6 +11698,153 @@ function AppContent({ onLock }) {
   // ── ADD BILL MODAL ───────────────────────────────────────────────────────────
   // -- ADD YOU OWE MODAL (standalone, no underlying expense needed) -----------
   // -- MEMBERSHIP DETAIL MODAL (tap a history row to see full details) --------
+  // -- EVENTS (F-Events-1: tag expenses to an occasion — trip, outing, date, celebration.
+  // Time-bound, not person-bound — distinct from Groups. Expenses still show normally in TXNS;
+  // this is just an additional lens to see "how much did this trip actually cost me.") ----------
+  const EVENT_TYPES = [
+    { id:"trip", label:"Trip", icon:"✈️" },
+    { id:"outing", label:"Outing", icon:"🚗" },
+    { id:"date", label:"Date", icon:"💕" },
+    { id:"celebration", label:"Celebration", icon:"🎉" },
+    { id:"other", label:"Other", icon:"📌" },
+  ];
+  const AddEventModal = ({ existing, onClose }) => {
+    const isEdit = Boolean(existing);
+    const [name, setName] = useState(existing?.name||"");
+    const [occasionType, setOccasionType] = useState(existing?.occasionType||"trip");
+    const [date, setDate] = useState(existing?.date||todayStr());
+    const [selectedPeople, setSelectedPeople] = useState(existing?.peopleIds||[]);
+    const canSave = name.trim();
+    const handleSave = () => {
+      if(!canSave) return;
+      const record = { id: existing?.id||genId(), name:name.trim(), occasionType, date, peopleIds:selectedPeople, createdAt:existing?.createdAt||Date.now() };
+      setEvents(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[record, ...prev]);
+      onClose();
+    };
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:340,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit":"Add"} Trip / Outing</div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Name *</span>
+              <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. Day out to North Goa" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
+            </div>
+            <div>
+              <span style={lbl}>Occasion</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {EVENT_TYPES.map(et=>(
+                  <button key={et.id} onClick={()=>setOccasionType(et.id)} style={{ display:"flex",alignItems:"center",gap:5,background:occasionType===et.id?T.accent+"22":T.input,border:`1px solid ${occasionType===et.id?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:occasionType===et.id?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{et.icon} {et.label}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <span style={lbl}>Date</span>
+              <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>People (optional)</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {people.map(p=>{
+                  const isOn = selectedPeople.includes(p.id);
+                  return (
+                    <button key={p.id} onClick={()=>setSelectedPeople(prev=>isOn?prev.filter(id=>id!==p.id):[...prev,p.id])} style={{ background:isOn?p.color+"22":T.input,border:`1px solid ${isOn?p.color:T.border}`,borderRadius:20,padding:"5px 11px",cursor:"pointer",fontSize:11,fontWeight:700,color:isOn?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                  );
+                })}
+              </div>
+            </div>
+            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Trip/Outing"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const EventDetailModal = ({ event, onClose }) => {
+    const linkedTxns = txns.filter(t=>t.eventId===event.id);
+    const total = linkedTxns.reduce((s,t)=>s+(t.type==="expense"?Number(t.amount||0):0),0);
+    const myTotal = linkedTxns.reduce((s,t)=>s+(t.type==="expense"?getMyExpenseAmount(t):0),0);
+    const et = EVENT_TYPES.find(x=>x.id===event.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1];
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:340,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+            <div>
+              <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{et.icon} {event.name}</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{formatShortDate(event.date)||event.date}</div>
+            </div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          {event.peopleIds?.length>0&&(
+            <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:14 }}>
+              {event.peopleIds.map(pid=>{ const p=getPerson(pid); return <span key={pid} style={{ background:T.input,borderRadius:20,padding:"4px 10px",fontSize:11,fontWeight:700,color:T.sub }}>{p.emoji} {p.name}</span>; })}
+            </div>
+          )}
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16 }}>
+            <div style={{ background:T.input,borderRadius:14,padding:"14px",textAlign:"center" }}>
+              <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>{sym}{fmt(total)}</div>
+              <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>OVERALL</div>
+            </div>
+            <div style={{ background:T.accentSoft,borderRadius:14,padding:"14px",textAlign:"center" }}>
+              <div style={{ color:T.accent,fontSize:20,fontWeight:900 }}>{sym}{fmt(myTotal)}</div>
+              <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>MY SHARE</div>
+            </div>
+          </div>
+          <div style={{ color:T.sub,fontSize:10,textAlign:"center",marginBottom:14 }}>{linkedTxns.length} expense{linkedTxns.length!==1?"s":""} · amounts below show what actually happened, full card charges included</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
+            {linkedTxns.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No expenses linked yet. Tag an expense to this trip from the transaction form.</div>}
+            {linkedTxns.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).map(t=>(
+              <div key={t.id} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"10px 14px",cursor:"pointer" }}>
+                <div>
+                  <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{t.merchant||t.who||t.desc||"Expense"}</div>
+                  <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(t.date)||t.date}</div>
+                </div>
+                <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(t.amount)}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+            <button onClick={()=>{ setEditingEvent(event); setShowAddEvent(true); onClose(); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+            <button onClick={()=>askConfirm(`Delete "${event.name}"? Linked expenses stay in your transactions, only the trip grouping is removed.`,()=>{ setEvents(prev=>prev.filter(x=>x.id!==event.id)); onClose(); })} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const EventsListModal = ({ onClose }) => {
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:335,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Trips & Outings</div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
+            {events.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No trips or outings yet.</div>}
+            {events.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(ev=>{
+              const et = EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1];
+              const total = txns.filter(t=>t.eventId===ev.id&&t.type==="expense").reduce((s,t)=>s+Number(t.amount||0),0);
+              return (
+                <div key={ev.id} onClick={()=>{ setViewingEvent(ev); onClose(); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer" }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{et.icon} {ev.name}</div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(ev.date)||ev.date}</div>
+                  </div>
+                  <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(total)}</div>
+                </div>
+              );
+            })}
+          </div>
+          <button onClick={()=>{ setEditingEvent(null); setShowAddEvent(true); onClose(); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>+ Add Trip / Outing</button>
+        </div>
+      </div>
+    );
+  };
+
   const MembershipDetailModal = ({ membership, onClose }) => {
     const m = membership;
     const person = people.find(p=>String(p.id)===String(m.personId));
@@ -12696,6 +12899,9 @@ function AppContent({ onLock }) {
         {attachExpensesFor&&<AttachExpensesModal ba={attachExpensesFor} onClose={()=>setAttachExpensesFor(null)}/>}
         {showAddYouOwe&&<AddYouOweModal personId={showAddYouOwe} onClose={()=>setShowAddYouOwe(null)}/>}
         {viewingMembership&&<MembershipDetailModal membership={viewingMembership} onClose={()=>setViewingMembership(null)}/>}
+        {showAddEvent&&<AddEventModal existing={editingEvent} onClose={()=>{ setShowAddEvent(false); setEditingEvent(null); }}/>}
+        {showEventsList&&<EventsListModal onClose={()=>setShowEventsList(false)}/>}
+        {viewingEvent&&<EventDetailModal event={viewingEvent} onClose={()=>setViewingEvent(null)}/>}
         {confirmDialog&&(
           <div onClick={e=>{ if(e.target===e.currentTarget) setConfirmDialog(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
             <div style={{ background:T.card,borderRadius:18,padding:"20px 18px",width:"100%",maxWidth:360 }}>
