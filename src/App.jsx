@@ -10832,6 +10832,8 @@ function AppContent({ onLock }) {
 
   // ── BUDGET PAGE ──────────────────────────────────────────────────────────────
   const BudgetPage = ({ embedded = false, onBack }) => {
+    const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
+    const [expandedBudgetCatId, setExpandedBudgetCatId] = useState(null);
     const fy = selectedBudgetFY;
     const fyLabel = `FY ${fy}–${fy+1}`;
     const now = new Date();
@@ -10978,12 +10980,13 @@ function AppContent({ onLock }) {
             const isOver = monthSpend > monthBudget && monthBudget > 0;
             return (
               <div key={p.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,marginBottom:10,padding:"12px 14px" }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                <div onClick={()=>{ setExpandedBudgetPersonId(prev=>prev===p.id?null:p.id); setExpandedBudgetCatId(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,cursor:"pointer" }}>
                   <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                    <span style={{ color:T.sub,fontSize:11 }}>{expandedBudgetPersonId===p.id?"▾":"▸"}</span>
                     <span style={{ fontSize:18 }}>{p.emoji}</span>
                     <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{p.name}</div>
                   </div>
-                  <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:6 }} onClick={e=>e.stopPropagation()}>
                     <span style={{ color:T.sub,fontSize:11 }}>₹</span>
                     <input
                       style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
@@ -11005,6 +11008,51 @@ function AppContent({ onLock }) {
                     </div>
                   </>
                 )}
+                {expandedBudgetPersonId===p.id&&(()=>{
+                  const catTotals = {};
+                  const catTxns = {};
+                  thisMonthTxns.filter(t=>t.type==="expense").forEach(t=>{
+                    const amt = getPersonAttributedAmount(t,p.id);
+                    if(amt<=0) return;
+                    const tCats = (t.catIds||[t.catId]).filter(Boolean);
+                    tCats.forEach(cid=>{
+                      const share = amt/tCats.length;
+                      catTotals[cid] = (catTotals[cid]||0)+share;
+                      if(!catTxns[cid]) catTxns[cid]=[];
+                      catTxns[cid].push({t,share});
+                    });
+                  });
+                  const rows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt, txns:catTxns[cid] })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
+                  if(!rows.length) return <div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"12px 0" }}>No spend recorded for {p.name} this month yet.</div>;
+                  return (
+                    <div style={{ marginTop:10,borderTop:`1px solid ${T.border}`,paddingTop:10 }}>
+                      {rows.map(r=>(
+                        <div key={r.cat.id}>
+                          <div onClick={()=>setExpandedBudgetCatId(prev=>prev===r.cat.id?null:r.cat.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",cursor:"pointer" }}>
+                            <span style={{ color:T.text,fontSize:12 }}>{r.cat.icon} {r.cat.name}</span>
+                            <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                              <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(r.amt)}</span>
+                              <span style={{ color:T.sub,fontSize:10 }}>{expandedBudgetCatId===r.cat.id?"▾":"▸"}</span>
+                            </span>
+                          </div>
+                          {expandedBudgetCatId===r.cat.id&&(
+                            <div style={{ background:T.input,borderRadius:10,padding:"6px 12px",marginBottom:6 }}>
+                              {r.txns.map(({t,share},i)=>(
+                                <div key={i} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:i<r.txns.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
+                                  <div>
+                                    <div style={{ color:T.text,fontSize:11,fontWeight:700 }}>{t.merchant||t.who||t.desc||"Expense"}</div>
+                                    <div style={{ color:T.sub,fontSize:9 }}>{formatShortDate(t.date)||t.date}</div>
+                                  </div>
+                                  <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{sym}{fmt(share)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             );
           })}
@@ -11742,6 +11790,8 @@ function AppContent({ onLock }) {
   const StatsPage = () => {
     const [statsTab, setStatsTab] = useState("cashflow");
     const [statsPeriod, setStatsPeriod] = useState("30D");
+    const [byPersonId, setByPersonId] = useState(people.find(p=>p.isMe)?.id||"__me__");
+    const [expandedCat, setExpandedCat] = useState(null);
     const now = new Date();
     const daysBack = { "7D":7, "30D":30, "12W":84, "Q":90, "HY":182, "Y":365 }[statsPeriod] || 30;
     const periodStart = new Date(now); periodStart.setDate(periodStart.getDate()-daysBack);
@@ -11772,7 +11822,7 @@ function AppContent({ onLock }) {
           <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Stats</div>
         </div>
         <div style={{ display:"flex",gap:6,padding:"10px 16px 0",overflowX:"auto" }}>
-          {[["cashflow","Cash Flow"],["credit","Credit"],["invest","Investments"],["overview","Overview"]].map(([id,label])=>(
+          {[["cashflow","Cash Flow"],["credit","Credit"],["invest","Investments"],["byperson","By Person"],["overview","Overview"]].map(([id,label])=>(
             <button key={id} onClick={()=>setStatsTab(id)} style={{ background:"none",border:"none",borderBottom:statsTab===id?`2px solid ${T.accent}`:"2px solid transparent",padding:"6px 4px 10px",cursor:"pointer",fontSize:13,fontWeight:800,color:statsTab===id?T.text:T.sub,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap" }}>{label}</button>
           ))}
         </div>
