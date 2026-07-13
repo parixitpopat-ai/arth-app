@@ -8016,7 +8016,7 @@ function AppContent({ onLock }) {
                 <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginBottom:4 }}>{p.isMe ? "Your personal budget spend this month" : `Spent on ${p.name} this month`}</div>
                 <div style={{ color:spent>spendBudget && spendBudget>0 ? T.danger : p.color,fontSize:20,fontWeight:900 }}>{sym}{fmt(spent)}</div>
                 {p.isMe && <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Overall spent this month: {sym}{fmt(overallSpentByMe)}</div>}
-                {spendBudget>0&&<><div style={{ height:3,background:T.border,borderRadius:2,marginTop:6,marginBottom:2 }}>
+                {spendBudget>0&&(p.personType==="dependant"||p.isMe)&&<><div style={{ height:3,background:T.border,borderRadius:2,marginTop:6,marginBottom:2 }}>
                   <div style={{ height:"100%",width:`${spentPct}%`,background:spentPct>90?T.danger:p.color,borderRadius:2 }}/>
                 </div><div style={{ color:T.sub,fontSize:9 }}>{spendBudget>0?`Budget: ${sym}${fmt(spendBudget)} · ${sym}${fmt(Math.max(0,spendBudget-spent))} remaining`:""}</div>
                 {spent>spendBudget && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:4 }}>⚠️ Over budget by {sym}{fmt(spent-spendBudget)}</div>}</>}
@@ -8069,7 +8069,7 @@ function AppContent({ onLock }) {
                   <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginBottom:8 }}>Monthly history</div>
                   <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
                     {months.map((m,i)=>{
-                      const over = spendBudget>0 && m.spend>spendBudget;
+                      const over = spendBudget>0 && (p.personType==="dependant"||p.isMe) && m.spend>spendBudget;
                       return (
                         <div key={i} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                           <span style={{ color:T.sub,fontSize:11 }}>{m.label}</span>
@@ -10721,7 +10721,6 @@ function AppContent({ onLock }) {
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Backup & Sync</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
           <Row icon="🔑" title="Cloud Sync & Account" subtitle={cloudUser?.email ? `Signed in as ${cloudUser.email}${lastSyncedAt ? " · synced" : ""}` : "Sign in to sync across devices"} onClick={()=>setSettingsSection("cloudsync")}/>
-          <Row icon="✈️" title="Trips & Outings" subtitle={events.length?`${events.length} trip${events.length!==1?"s":""} tracked`:"Tag expenses to a trip or outing"} onClick={()=>setShowEventsList(true)}/>
           <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
         </div>
 
@@ -10967,15 +10966,14 @@ function AppContent({ onLock }) {
           );
         })}
 
-        {/* Per-person budgets */}
-        <div style={{ marginTop:20,paddingBottom:80 }}>
+        {/* Per-person budgets — reads/writes the same spendBudget field as each person's own profile,
+            not a separate object, so the two can never disagree. Dependants only, matching the
+            restriction already enforced when setting this on the person's own profile. */}
+        <div style={{ marginTop:20 }}>
           <div style={{ color:T.text,fontSize:15,fontWeight:900,marginBottom:12 }}>👤 Per-Person Budgets</div>
-          {people.filter(p=>!p.isMe).map(p=>{
-            const monthBudget = perPersonBudgets[p.id] || 0;
-            const monthSpend = thisMonthTxns.filter(t=>{
-              if(t.type!=="expense") return false;
-              return String(t.taggedPersonId||t.forPersonId||"")===String(p.id) || t.people?.[p.id];
-            }).reduce((s,t)=>s+t.amount,0);
+          {people.filter(p=>!p.isMe && p.personType==="dependant").map(p=>{
+            const monthBudget = Number(p.spendBudget||0);
+            const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
             const pct = monthBudget>0 ? Math.min(100,Math.round(monthSpend/monthBudget*100)) : 0;
             const isOver = monthSpend > monthBudget && monthBudget > 0;
             return (
@@ -10990,8 +10988,8 @@ function AppContent({ onLock }) {
                     <input
                       style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
                       type="text" inputMode="decimal" placeholder="Budget"
-                      value={perPersonBudgets[p.id]?String(perPersonBudgets[p.id]):""}
-                      onChange={e=>setPerPersonBudgets(prev=>({...prev,[p.id]:parseMoney(e.target.value)||0}))}
+                      value={p.spendBudget?String(p.spendBudget):""}
+                      onChange={e=>{ const val=parseMoney(e.target.value)||0; setPeople(prev=>prev.map(x=>x.id===p.id?{...x,spendBudget:val}:x)); }}
                     />
                     <span style={{ color:T.sub,fontSize:10 }}>/mo</span>
                   </div>
@@ -11000,6 +10998,50 @@ function AppContent({ onLock }) {
                   <>
                     <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
                       <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:pct>80?T.warn:p.color||T.success,borderRadius:3 }}/>
+                    </div>
+                    <div style={{ display:"flex",justifyContent:"space-between" }}>
+                      <span style={{ color:T.sub,fontSize:10 }}>Spent: {sym}{fmtK(monthSpend)}</span>
+                      <span style={{ color:isOver?T.danger:T.success,fontSize:10,fontWeight:700 }}>{isOver?`Over ${sym}${fmtK(monthSpend-monthBudget)}`:`Left ${sym}${fmtK(monthBudget-monthSpend)}`}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Group budgets — reads/writes the same manualLimit field as each group's own profile */}
+        <div style={{ marginTop:20,paddingBottom:80 }}>
+          <div style={{ color:T.text,fontSize:15,fontWeight:900,marginBottom:12 }}>👥 Group Budgets</div>
+          {groups.map(g=>{
+            const monthBudget = Number(g.manualLimit||0);
+            const oldStyle = thisMonthTxns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id)).reduce((s,t)=>s+Number(t.amount||0),0);
+            const allocStyle = thisMonthTxns.filter(t=>t.type==="expense"&&t.groupId!==g.id&&t.tagGroup!==g.id&&t.taggedGroupId!==g.id&&t.groupAllocations?.some(ga=>ga.groupId===g.id)).reduce((s,t)=>s+Number(t.groupAllocations.find(ga=>ga.groupId===g.id)?.amount||0),0);
+            const monthSpend = oldStyle + allocStyle;
+            const pct = monthBudget>0 ? Math.min(100,Math.round(monthSpend/monthBudget*100)) : 0;
+            const isOver = monthSpend > monthBudget && monthBudget > 0;
+            return (
+              <div key={g.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,marginBottom:10,padding:"12px 14px" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                    <span style={{ fontSize:18 }}>{g.icon||"👥"}</span>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{g.name}</div>
+                  </div>
+                  <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                    <span style={{ color:T.sub,fontSize:11 }}>₹</span>
+                    <input
+                      style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
+                      type="text" inputMode="decimal" placeholder="Budget"
+                      value={g.manualLimit?String(g.manualLimit):""}
+                      onChange={e=>{ const val=parseMoney(e.target.value)||0; setGroups(prev=>prev.map(x=>x.id===g.id?{...x,manualLimit:val}:x)); }}
+                    />
+                    <span style={{ color:T.sub,fontSize:10 }}>/mo</span>
+                  </div>
+                </div>
+                {monthBudget>0&&(
+                  <>
+                    <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
+                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:pct>80?T.warn:T.success,borderRadius:3 }}/>
                     </div>
                     <div style={{ display:"flex",justifyContent:"space-between" }}>
                       <span style={{ color:T.sub,fontSize:10 }}>Spent: {sym}{fmtK(monthSpend)}</span>
@@ -11730,7 +11772,7 @@ function AppContent({ onLock }) {
           <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Stats</div>
         </div>
         <div style={{ display:"flex",gap:6,padding:"10px 16px 0",overflowX:"auto" }}>
-          {[["cashflow","Cash Flow"],["credit","Credit"],["overview","Overview"]].map(([id,label])=>(
+          {[["cashflow","Cash Flow"],["credit","Credit"],["invest","Investments"],["overview","Overview"]].map(([id,label])=>(
             <button key={id} onClick={()=>setStatsTab(id)} style={{ background:"none",border:"none",borderBottom:statsTab===id?`2px solid ${T.accent}`:"2px solid transparent",padding:"6px 4px 10px",cursor:"pointer",fontSize:13,fontWeight:800,color:statsTab===id?T.text:T.sub,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap" }}>{label}</button>
           ))}
         </div>
@@ -11879,6 +11921,7 @@ function AppContent({ onLock }) {
               </div>
             </div>
           )}
+          {statsTab==="invest"&&<div style={{ margin:"-16px" }}><Investments onClose={null}/></div>}
           {statsTab==="overview"&&(<>
           {(()=>{
             const essentialCatIds = cats.filter(c=>c.fixed===true).map(c=>c.id);
@@ -11981,6 +12024,7 @@ function AppContent({ onLock }) {
               { icon:"👤", label:"User Profile", onClick:()=>{ setTab("home"); setShowSettings(false); onClose(); } },
               { icon:"💰", label:"Budget", onClick:()=>goToTab("budget") },
               { icon:"🎯", label:"Goals", onClick:()=>{ alert("Goals — coming soon"); onClose(); } },
+              { icon:"✈️", label:"Trips & Outings", onClick:()=>{ setShowEventsList(true); onClose(); } },
               { icon:"📊", label:"Stats", onClick:()=>goToTab("stats") },
             ].map(item=>(
               <button key={item.label} onClick={item.onClick} style={{ display:"flex",alignItems:"center",gap:14,background:"none",border:"none",padding:"13px 14px",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:700,color:T.text,fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
