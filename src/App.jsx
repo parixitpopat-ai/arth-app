@@ -11788,10 +11788,12 @@ function AppContent({ onLock }) {
 
   // -- STATS PAGE (new module, starting with Cash Flow) -----------------------
   const StatsPage = () => {
-    const [statsTab, setStatsTab] = useState("cashflow");
+    const [statsTab, setStatsTab] = useState("overview");
     const [statsPeriod, setStatsPeriod] = useState("30D");
     const [byPersonId, setByPersonId] = useState(people.find(p=>p.isMe)?.id||"__me__");
     const [expandedCat, setExpandedCat] = useState(null);
+    const [overviewSeg, setOverviewSeg] = useState("summary");
+    const [expandedMonthKey, setExpandedMonthKey] = useState(null);
     const now = new Date();
     const daysBack = { "7D":7, "30D":30, "12W":84, "Q":90, "HY":182, "Y":365 }[statsPeriod] || 30;
     const periodStart = new Date(now); periodStart.setDate(periodStart.getDate()-daysBack);
@@ -11822,7 +11824,7 @@ function AppContent({ onLock }) {
           <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Stats</div>
         </div>
         <div style={{ display:"flex",gap:6,padding:"10px 16px 0",overflowX:"auto" }}>
-          {[["cashflow","Cash Flow"],["credit","Credit"],["invest","Investments"],["byperson","By Person"],["overview","Overview"]].map(([id,label])=>(
+          {[["overview","Overview"],["cashflow","Cash Flow"],["credit","Credit"],["invest","Investments"]].map(([id,label])=>(
             <button key={id} onClick={()=>setStatsTab(id)} style={{ background:"none",border:"none",borderBottom:statsTab===id?`2px solid ${T.accent}`:"2px solid transparent",padding:"6px 4px 10px",cursor:"pointer",fontSize:13,fontWeight:800,color:statsTab===id?T.text:T.sub,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap" }}>{label}</button>
           ))}
         </div>
@@ -11973,6 +11975,127 @@ function AppContent({ onLock }) {
           )}
           {statsTab==="invest"&&<div style={{ margin:"-16px" }}><Investments onClose={null}/></div>}
           {statsTab==="overview"&&(<>
+          <div style={{ display:"flex",background:T.input,borderRadius:12,padding:3,marginBottom:4 }}>
+            {[["person","👤 Person"],["month","📅 Month"],["summary","📊 Summary"]].map(([id,label])=>(
+              <button key={id} onClick={()=>setOverviewSeg(id)} style={{ flex:1,textAlign:"center",padding:"8px 4px",fontSize:12,fontWeight:800,borderRadius:9,border:"none",cursor:"pointer",background:overviewSeg===id?T.accentSoft:"none",color:overviewSeg===id?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
+            ))}
+          </div>
+          {overviewSeg==="person"&&(
+            <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+              <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                {people.filter(p=>p.isMe||p.personType==="dependant").map(p=>(
+                  <button key={p.id} onClick={()=>{ setByPersonId(p.id); setExpandedCat(null); }} style={{ background:byPersonId===p.id?T.accentSoft:"none",border:`1px solid ${byPersonId===p.id?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:byPersonId===p.id?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                ))}
+              </div>
+              {(()=>{
+                const person = getPerson(byPersonId);
+                const catTotals = {};
+                const catTxns = {};
+                thisMonthTxns.filter(t=>t.type==="expense").forEach(t=>{
+                  const amt = getPersonAttributedAmount(t,byPersonId);
+                  if(amt<=0) return;
+                  const tCats = (t.catIds||[t.catId]).filter(Boolean);
+                  tCats.forEach(cid=>{
+                    const share = amt/tCats.length;
+                    catTotals[cid] = (catTotals[cid]||0)+share;
+                    if(!catTxns[cid]) catTxns[cid]=[];
+                    catTxns[cid].push({t,share});
+                  });
+                });
+                const rows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt, txns:catTxns[cid] })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
+                return (
+                  <div style={{ background:T.card,borderRadius:16,padding:16,border:`1px solid ${T.border}` }}>
+                    <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Category Breakdown — {person.name}</div>
+                    <div style={{ color:T.sub,fontSize:12,marginTop:2,marginBottom:14 }}>This month, tap a category to see the transactions</div>
+                    {rows.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"12px 0" }}>No spend recorded yet this month.</div>}
+                    {rows.map(r=>(
+                      <div key={r.cat.id}>
+                        <div onClick={()=>setExpandedCat(prev=>prev===r.cat.id?null:r.cat.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
+                          <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{r.cat.icon} {r.cat.name}</span>
+                          <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                            <span style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(r.amt)}</span>
+                            <span style={{ color:T.sub,fontSize:10 }}>{expandedCat===r.cat.id?"▾":"▸"}</span>
+                          </span>
+                        </div>
+                        {expandedCat===r.cat.id&&(
+                          <div style={{ background:T.input,borderRadius:10,padding:"6px 12px",marginBottom:6 }}>
+                            {r.txns.map(({t,share},i)=>(
+                              <div key={i} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:i<r.txns.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
+                                <div>
+                                  <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{t.merchant||t.who||t.desc||"Expense"}</div>
+                                  <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(t.date)||t.date}</div>
+                                </div>
+                                <span style={{ color:T.sub,fontSize:12,fontWeight:700 }}>{sym}{fmt(share)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+          {overviewSeg==="month"&&(()=>{
+            const monthsList = [];
+            const nowD = new Date();
+            for(let i=5;i>=0;i--){
+              const d = new Date(nowD.getFullYear(), nowD.getMonth()-i, 1);
+              const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+              const mBudget = monthOverrides[key] || Math.round(Number(annualBudget||0)/12);
+              const mTxns = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(key));
+              const mSpend = mTxns.reduce((s,t)=>s+getMyExpenseAmount(t),0);
+              const pct = mBudget>0 ? Math.min(100,Math.round(mSpend/mBudget*100)) : 0;
+              const isOver = mSpend>mBudget && mBudget>0;
+              const isNow = key===`${nowD.getFullYear()}-${String(nowD.getMonth()+1).padStart(2,"0")}`;
+              monthsList.push({ key, label:d.toLocaleDateString("en-IN",{month:"short",year:"2-digit"}), mBudget, mSpend, pct, isOver, isNow, mTxns });
+            }
+            return (
+              <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                {monthsList.map(m=>(
+                  <div key={m.key} onClick={()=>setExpandedMonthKey(prev=>prev===m.key?null:m.key)} style={{ background:m.isNow?T.accentSoft:T.card,border:`1px solid ${m.isNow?T.accent:T.border}`,borderRadius:14,padding:14,cursor:"pointer" }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
+                      <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{m.label}{m.isNow&&<span style={{ color:T.accent,fontSize:10,fontWeight:800,marginLeft:4 }}>NOW</span>}</div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ color:m.isOver?T.danger:T.success,fontSize:11,fontWeight:800 }}>{m.isOver?"Over":"Left"}</div>
+                        <div style={{ color:m.isOver?T.danger:T.success,fontSize:13,fontWeight:900 }}>{sym}{fmt(Math.abs(m.mBudget-m.mSpend))}</div>
+                      </div>
+                    </div>
+                    <div style={{ height:5,background:T.border,borderRadius:3,margin:"8px 0 6px" }}>
+                      <div style={{ height:"100%",width:`${m.pct}%`,background:m.isOver?T.danger:m.isNow?T.accent:T.success,borderRadius:3 }}/>
+                    </div>
+                    <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:T.sub }}>
+                      <span>Spent {sym}{fmt(m.mSpend)} · Budget {sym}{fmt(m.mBudget)}</span>
+                      <span>{m.pct}% used</span>
+                    </div>
+                    {expandedMonthKey===m.key&&(()=>{
+                      const catTotals = {};
+                      m.mTxns.forEach(t=>{
+                        const amt = getMyExpenseAmount(t);
+                        if(amt<=0) return;
+                        const tCats = (t.catIds||[t.catId]).filter(Boolean);
+                        tCats.forEach(cid=>{ catTotals[cid]=(catTotals[cid]||0)+amt/tCats.length; });
+                      });
+                      const rows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
+                      if(!rows.length) return <div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"10px 0" }}>No spend recorded this month.</div>;
+                      return (
+                        <div style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}`,display:"flex",flexDirection:"column",gap:6 }} onClick={e=>e.stopPropagation()}>
+                          {rows.map(r=>(
+                            <div key={r.cat.id} style={{ display:"flex",justifyContent:"space-between",fontSize:12 }}>
+                              <span style={{ color:T.text }}>{r.cat.icon} {r.cat.name}</span>
+                              <span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(r.amt)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+          {overviewSeg==="summary"&&(<>
           {(()=>{
             const essentialCatIds = cats.filter(c=>c.fixed===true).map(c=>c.id);
             const essentialSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>{
@@ -12049,6 +12172,7 @@ function AppContent({ onLock }) {
               </div>
             );
           })()}
+          </>)}
           </>)}
         </div>
       </div>

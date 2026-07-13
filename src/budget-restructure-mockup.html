@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Budget restructure — mockup</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800;900&display=swap');
+  :root{
+    --bg:#08080f; --card:#0f0f1a; --border:#1a1a2e; --text:#e8e4dc;
+    --accent:#f0a500; --accentSoft:rgba(240,165,0,0.1); --sub:#5a5a7a;
+    --success:#22c55e; --danger:#ef4444; --input:#0b0b18; --nav:#0a0a16;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:#050508;font-family:'Nunito',sans-serif;color:var(--text);
+    display:flex;gap:24px;justify-content:center;flex-wrap:wrap;padding:24px;}
+  .phone{width:390px;background:var(--bg);border-radius:14px;overflow:hidden;}
+  .screenlabel{color:var(--sub);font-size:12px;font-weight:800;text-align:center;margin-bottom:8px;letter-spacing:1px;text-transform:uppercase;}
+  .col{display:flex;flex-direction:column;align-items:center;}
+  .topbar{background:var(--nav);border-bottom:1px solid var(--border);padding:14px 18px;
+    font-size:16px;font-weight:900;display:flex;align-items:center;gap:10px;}
+  .backarrow{color:var(--sub);font-size:16px;}
+  .subnav{display:flex;gap:0;border-bottom:1px solid var(--border);}
+  .subtab{flex:1;text-align:center;padding:12px 4px;font-size:13px;font-weight:800;color:var(--sub);border-bottom:2px solid transparent;}
+  .subtab.active{color:var(--accent);border-bottom:2px solid var(--accent);}
+  .tabs{display:flex;gap:6px;padding:10px 16px 0;overflow-x:auto;}
+  .tab{background:none;border:none;padding:6px 4px 10px;font-size:12px;font-weight:800;
+    color:var(--sub);white-space:nowrap;border-bottom:2px solid transparent;}
+  .tab.active{color:var(--text);border-bottom:2px solid var(--accent);}
+  .segmented{display:flex;background:var(--input);border-radius:12px;padding:3px;margin:14px 16px 0;}
+  .seg{flex:1;text-align:center;padding:8px 4px;font-size:12px;font-weight:800;color:var(--sub);border-radius:9px;}
+  .seg.active{background:var(--accentSoft);color:var(--accent);}
+  .content{padding:16px;display:flex;flex-direction:column;gap:12px;}
+  .mcard{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;cursor:pointer;}
+  .mcard.now{border:1px solid var(--accent);background:var(--accentSoft);}
+  .mrow{display:flex;justify-content:space-between;align-items:flex-start;}
+  .mleft{display:flex;flex-direction:column;}
+  .mmonth{font-size:14px;font-weight:900;color:var(--text);}
+  .mnow{color:var(--accent);font-size:10px;font-weight:800;margin-left:4px;}
+  .mright{text-align:right;}
+  .mstatus{font-size:11px;font-weight:800;}
+  .mstatus.over{color:var(--danger);}
+  .mstatus.left{color:var(--success);}
+  .mamt{font-size:13px;font-weight:900;}
+  .mamt.over{color:var(--danger);}
+  .mamt.left{color:var(--success);}
+  .bar{height:5px;background:var(--border);border-radius:3px;margin:8px 0 6px;overflow:hidden;}
+  .barfill{height:100%;border-radius:3px;}
+  .mfoot{display:flex;justify-content:space-between;font-size:10px;color:var(--sub);}
+  .expanded{margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;}
+  .catrow{display:flex;justify-content:space-between;font-size:12px;}
+  .catrow span:first-child{color:var(--text);}
+  .catrow span:last-child{color:var(--text);font-weight:700;}
+  .arrowdown{text-align:center;color:var(--sub);font-size:11px;margin-top:6px;}
+</style>
+</head>
+<body>
+
+<div class="col">
+  <div class="screenlabel">Budget → top-level</div>
+  <div class="phone">
+    <div class="topbar"><span class="backarrow">☰</span> Budget</div>
+    <div class="subnav">
+      <div class="subtab active">Overview</div>
+      <div class="subtab">Insights</div>
+      <div class="subtab">Budgets</div>
+    </div>
+    <div class="content">
+      <div class="mcard" style="cursor:default;">
+        <div style="font-size:13px;color:var(--sub);">Yearly Budget</div>
+        <div style="font-size:22px;font-weight:900;margin:4px 0;">₹3,60,000</div>
+        <div class="bar"><div class="barfill" style="width:42%;background:var(--accent);"></div></div>
+        <div class="mfoot"><span>Spent ₹1,50,000</span><span>Remaining ₹2,10,000</span></div>
+      </div>
+      <div style="color:var(--sub);font-size:11px;text-align:center;padding:8px 0;">Goals stays where it already is — in the ☰ drawer, unchanged</div>
+    </div>
+  </div>
+</div>
+
+<div class="col">
+  <div class="screenlabel">Budget → Insights</div>
+  <div class="phone">
+    <div class="topbar"><span class="backarrow">←</span> Insights</div>
+    <div class="tabs">
+      <button class="tab active">Overview</button>
+      <button class="tab">Cash Flow</button>
+      <button class="tab">Credit</button>
+      <button class="tab">Investments</button>
+    </div>
+    <div class="segmented">
+      <div class="seg">👤 Person</div>
+      <div class="seg active">📅 Month</div>
+      <div class="seg">📊 Summary</div>
+    </div>
+    <div class="content">
+
+      <div class="mcard">
+        <div class="mrow">
+          <div class="mleft"><span class="mmonth">Apr 26</span></div>
+          <div class="mright"><span class="mstatus over">Over</span><br/><span class="mamt over">₹9.3K</span></div>
+        </div>
+        <div class="bar"><div class="barfill" style="width:100%;background:var(--danger);"></div></div>
+        <div class="mfoot"><span>Spent ₹74.3K · Budget ₹65K</span><span>100% used</span></div>
+      </div>
+
+      <div class="mcard">
+        <div class="mrow">
+          <div class="mleft"><span class="mmonth">Jun 26</span></div>
+          <div class="mright"><span class="mstatus left">Left</span><br/><span class="mamt left">₹21K</span></div>
+        </div>
+        <div class="bar"><div class="barfill" style="width:68%;background:var(--success);"></div></div>
+        <div class="mfoot"><span>Spent ₹44K · Budget ₹65K</span><span>68% used</span></div>
+      </div>
+
+      <div class="mcard now">
+        <div class="mrow">
+          <div class="mleft"><span class="mmonth">Jul 26<span class="mnow">NOW</span></span></div>
+          <div class="mright"><span class="mstatus left">Left</span><br/><span class="mamt left">₹16.1K</span></div>
+        </div>
+        <div class="bar"><div class="barfill" style="width:75%;background:var(--accent);"></div></div>
+        <div class="mfoot"><span>Spent ₹48.9K · Budget ₹65K</span><span>75% used</span></div>
+        <div class="arrowdown">▾ tapped — category spend for July below</div>
+        <div class="expanded">
+          <div class="catrow"><span>🍽️ Food</span><span>₹18.2K</span></div>
+          <div class="catrow"><span>🚗 Transport</span><span>₹9.5K</span></div>
+          <div class="catrow"><span>🏠 Housing</span><span>₹12K</span></div>
+          <div class="catrow"><span>💊 Health</span><span>₹9.2K</span></div>
+        </div>
+      </div>
+
+      <div class="mcard" style="opacity:0.6;">
+        <div class="mrow">
+          <div class="mleft"><span class="mmonth">Aug 26</span></div>
+          <div class="mright"><span class="mstatus left">Left</span><br/><span class="mamt left">₹65K</span></div>
+        </div>
+        <div class="bar"><div class="barfill" style="width:0%;background:var(--success);"></div></div>
+        <div class="mfoot"><span>Spent ₹0 · Budget ₹65K</span><span>0% used</span></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
