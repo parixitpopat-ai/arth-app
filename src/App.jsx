@@ -12488,11 +12488,10 @@ function AppContent({ onLock }) {
     const isEdit = !!existing;
     const [baName, setBaName] = useState(existing?.name||"");
     const [baType, setBaType] = useState(existing?.type||preselectedBillerType||"");
-    // If arriving from a specific category tap (not editing), the type is already decided —
-    // don't make the person re-pick from all 35 chips. Show a locked badge with a Change option instead.
-    // If a provider was also preselected (adding another account under an existing provider group,
-    // e.g. another number under "Jio"), lock that in too so it's not re-typed either.
-    const [showTypePicker, setShowTypePicker] = useState(!(!existing && preselectedBillerType));
+    // The type should show locked (with a Change option) whenever it's already known — either arriving
+    // from a specific category tap (new account) or editing an existing account (type is already saved).
+    // Only show the full 35-chip grid when genuinely nothing is known yet.
+    const [showTypePicker, setShowTypePicker] = useState(!baType);
     const [baConsumerNo, setBaConsumerNo] = useState(existing?.consumerNo||"");
     const [baProvider, setBaProvider] = useState(existing?.provider||preselectedBillerProvider||"");
     const providerIsLocked = !existing && !!preselectedBillerProvider;
