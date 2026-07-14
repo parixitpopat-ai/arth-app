@@ -11412,35 +11412,51 @@ function AppContent({ onLock }) {
             </div>
 
             {/* Active biller accounts - compact horizontal scroll */}
-            {billerAccounts.length>0&&(
-              <div style={{ padding:"8px 16px" }}>
-                <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>MY ACCOUNTS</div>
-                <div style={{ display:"flex",gap:10,overflowX:"auto",paddingBottom:8 }}>
-                  {billerAccounts.filter(ba=>!billSearch||(ba.name+ba.type+ba.consumerNo).toLowerCase().includes(billSearch.toLowerCase())).map(ba=>{
-                    const billsForAcc = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
-                    const unpaidCount = billsForAcc.filter(b=>b.status==="unpaid").length;
-                    const lastBill = [...billsForAcc].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
-                    const isExpiringSoon = ba.membershipEndDate && (new Date(ba.membershipEndDate)-new Date())/(1000*60*60*24) <= 30;
-                    return (
-                      <div key={ba.id} onClick={()=>{
-                        if(ba.billerId){ const shell=billers.find(b=>b.id===ba.billerId); if(shell){ setActiveBillerShell(shell); return; } }
-                        setActiveBillerForAction(ba);
-                      }} style={{ minWidth:120,background:T.card,borderRadius:16,padding:"12px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}`,position:"relative",flexShrink:0 }}>
-                        {unpaidCount>0&&<div style={{ position:"absolute",top:8,right:8,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>{unpaidCount}</div>}
-                        {isExpiringSoon&&<div style={{ position:"absolute",top:8,right:8,background:T.warn,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>!</div>}
-                        <div style={{ fontSize:28,marginBottom:6 }}>{getBillerIcon(ba.type)}</div>
-                        <div style={{ color:T.text,fontSize:11,fontWeight:800,lineHeight:1.2 }}>{ba.name}</div>
-                        <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>{lastBill?`${sym}${fmt(lastBill.amount)}`:"No bills"}</div>
+            {billerAccounts.length>0&&(()=>{
+              // Group by shell (billerId) so each biller shows ONE tile regardless of how many
+              // accounts (nicknames) it has — tapping it reveals the individual accounts inside.
+              // Accounts without a billerId (legacy/unlinked) still show individually as a fallback.
+              const filtered = billerAccounts.filter(ba=>!billSearch||(ba.name+ba.type+ba.consumerNo+(ba.provider||"")).toLowerCase().includes(billSearch.toLowerCase()));
+              const shelled = filtered.filter(ba=>ba.billerId);
+              const unshelled = filtered.filter(ba=>!ba.billerId);
+              const shellGroups = {};
+              shelled.forEach(ba=>{ if(!shellGroups[ba.billerId]) shellGroups[ba.billerId]=[]; shellGroups[ba.billerId].push(ba); });
+              const tiles = [
+                ...Object.entries(shellGroups).map(([billerId,accs])=>{
+                  const shell = billers.find(b=>b.id===billerId);
+                  if(!shell) return null;
+                  const allBills = bills.filter(b=>accs.some(a=>String(a.id)===String(b.billerAccountId)));
+                  const unpaidCount = allBills.filter(b=>b.status==="unpaid").length;
+                  const lastBill = [...allBills].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
+                  return { key:"shell-"+billerId, icon:getBillerIcon(shell.type), name:shell.name, sub:accs.length>1?`${accs.length} accounts`:(lastBill?`${sym}${fmt(lastBill.amount)}`:"No bills"), unpaidCount, onClick:()=>setActiveBillerShell(shell) };
+                }).filter(Boolean),
+                ...unshelled.map(ba=>{
+                  const billsForAcc = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
+                  const unpaidCount = billsForAcc.filter(b=>b.status==="unpaid").length;
+                  const lastBill = [...billsForAcc].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
+                  return { key:"acc-"+ba.id, icon:getBillerIcon(ba.type), name:ba.name, sub:lastBill?`${sym}${fmt(lastBill.amount)}`:"No bills", unpaidCount, onClick:()=>setActiveBillerForAction(ba) };
+                }),
+              ];
+              return (
+                <div style={{ padding:"8px 16px" }}>
+                  <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>MY ACCOUNTS</div>
+                  <div style={{ display:"flex",gap:10,overflowX:"auto",paddingBottom:8 }}>
+                    {tiles.map(tile=>(
+                      <div key={tile.key} onClick={tile.onClick} style={{ minWidth:120,background:T.card,borderRadius:16,padding:"12px",cursor:"pointer",border:`1px solid ${tile.unpaidCount>0?T.danger+"44":T.border}`,position:"relative",flexShrink:0 }}>
+                        {tile.unpaidCount>0&&<div style={{ position:"absolute",top:8,right:8,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>{tile.unpaidCount}</div>}
+                        <div style={{ fontSize:28,marginBottom:6 }}>{tile.icon}</div>
+                        <div style={{ color:T.text,fontSize:11,fontWeight:800,lineHeight:1.2 }}>{tile.name}</div>
+                        <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>{tile.sub}</div>
                       </div>
-                    );
-                  })}
-                  <div onClick={()=>setShowAddBillerModal(true)} style={{ minWidth:80,background:"none",borderRadius:16,padding:"12px",cursor:"pointer",border:`2px dashed ${T.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
-                    <div style={{ fontSize:24,color:T.sub }}>+</div>
-                    <div style={{ color:T.sub,fontSize:9,marginTop:4 }}>Add Biller</div>
+                    ))}
+                    <div onClick={()=>setShowAddBillerModal(true)} style={{ minWidth:80,background:"none",borderRadius:16,padding:"12px",cursor:"pointer",border:`2px dashed ${T.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+                      <div style={{ fontSize:24,color:T.sub }}>+</div>
+                      <div style={{ color:T.sub,fontSize:9,marginTop:4 }}>Add Biller</div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* ALL SERVICES divider */}
             <div style={{ display:"flex",alignItems:"center",gap:10,padding:"12px 16px 8px" }}>
@@ -13342,6 +13358,7 @@ function AppContent({ onLock }) {
                   </div>
                   <button onClick={()=>setActiveBillerShell(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
                 </div>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:2 }}>PROVIDER: {(shell.provider||shell.name).toUpperCase()}</div>
                 <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>ACCOUNTS ({accs.length})</div>
                 <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
                   {accs.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No one added yet. Tap below to add Self, family, or anyone else.</div>}
@@ -13353,7 +13370,7 @@ function AppContent({ onLock }) {
                       <div key={ba.id} onClick={()=>{ setActiveBillerForAction(ba); setActiveBillerShell(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}` }}>
                         <div>
                           <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{ba.name}</div>
-                          <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{ba.consumerNo?`#${ba.consumerNo}`:"No account number yet"}</div>
+                          <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{ba.consumerNo?`#${ba.consumerNo}`:"No account number set"}</div>
                           {lastBill&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Last: {sym}{fmt(lastBill.amount)} · {formatShortDate(lastBill.date)||lastBill.date}</div>}
                         </div>
                         {unpaidCount>0&&<div style={{ background:T.danger,color:"#fff",borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:800 }}>{unpaidCount} unpaid</div>}
