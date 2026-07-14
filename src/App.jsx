@@ -12295,6 +12295,7 @@ function AppContent({ onLock }) {
     const person = m.personId==="self" ? null : people.find(p=>String(p.id)===String(m.personId));
     const acc = accounts.find(a=>a.id===m.accId);
     const ba = billerAccounts.find(b=>b.id===m.billerAccountId);
+    const linkedTxn = m.linkedTxnId ? txns.find(t=>t.id===m.linkedTxnId) : null;
     const periods = getMembershipPeriods(m);
     const today = todayStr();
     return (
@@ -12316,6 +12317,7 @@ function AppContent({ onLock }) {
             <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Member</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{person?.name||"Me"}</span></div>
             {m.paidDate&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Payment Date</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{formatShortDate(m.paidDate)||m.paidDate}</span></div>}
             {acc&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Payment Account</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{acc.name}</span></div>}
+            {linkedTxn&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Linked Transaction</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{sym}{fmt(linkedTxn.amount)} · {formatShortDate(linkedTxn.date)||linkedTxn.date}</span></div>}
             {m.note&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Note</span><span style={{ color:T.text,fontSize:12 }}>{m.note}</span></div>}
           </div>
 
@@ -12340,9 +12342,10 @@ function AppContent({ onLock }) {
             </div>
           </div>
 
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:8 }}>
-            <button onClick={()=>{ setEditingMembership(m); setShowAddMembership(true); onClose(); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
-            <button onClick={onClose} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginTop:8 }}>
+            <button onClick={()=>{ setEditingMembership(m); setShowAddMembership(true); onClose(); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:14,padding:"12px 4px",cursor:"pointer",fontSize:12,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+            <button onClick={()=>askConfirm(`Delete this payment (${sym}${fmt(m.amount)})? This removes it and all its allocated periods.`,()=>{ setMemberships(prev=>prev.filter(x=>x.id!==m.id)); onClose(); })} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"12px 4px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
+            <button onClick={onClose} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"12px 4px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
           </div>
         </div>
       </div>
@@ -12663,6 +12666,8 @@ function AppContent({ onLock }) {
     const [coverageMode, setCoverageMode] = useState((existingPeriods?.length||0)>1 ? "multiple" : "one");
     const [periods, setPeriods] = useState(existingPeriods?.length>1 ? existingPeriods : []);
     const [note, setNote] = useState(existing?.note||"");
+    const [linkedTxnId, setLinkedTxnId] = useState(existing?.linkedTxnId||"");
+    const recentTxnsForBiller = txns.filter(t=>t.type==="expense" && t.billerLinkId===billerAccount.id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,15);
 
     const planMonths = { monthly:1, quarterly:3, annual:12 };
     // Auto-compute end date from start + plan, unless Custom (user sets it directly) or in exact-dates use.
@@ -12697,6 +12702,7 @@ function AppContent({ onLock }) {
         accId,
         periods: finalPeriods,
         note: note.trim(),
+        linkedTxnId: linkedTxnId||null,
         paidDate: existing?.paidDate||todayStr(),
         createdAt: existing?.createdAt||Date.now(),
         status: "active",
@@ -12769,6 +12775,17 @@ function AppContent({ onLock }) {
                   <span style={{ color:T.sub,fontSize:11 }}>Allocated</span>
                   <span style={{ color:Math.abs(remaining)<0.5?T.success:T.warn,fontSize:12,fontWeight:800 }}>{sym}{fmt(allocatedTotal)} / {sym}{fmt(totalAmount)}</span>
                 </div>
+              </div>
+            )}
+
+            {recentTxnsForBiller.length>0&&(
+              <div>
+                <span style={lbl}>Link to a specific payment (optional)</span>
+                <select style={inp} value={linkedTxnId} onChange={e=>setLinkedTxnId(e.target.value)}>
+                  <option value="">No specific transaction</option>
+                  {recentTxnsForBiller.map(t=><option key={t.id} value={t.id}>{sym}{fmt(t.amount)} · {formatShortDate(t.date)||t.date}{t.merchant?` · ${t.merchant}`:""}</option>)}
+                </select>
+                <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Ties this payment to an expense you already recorded, so it isn't tracked twice.</div>
               </div>
             )}
 
