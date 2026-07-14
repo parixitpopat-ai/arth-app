@@ -64,6 +64,18 @@ const DEFAULT_MEASURE_UNITS = ["kg","g","ltr","ml","nos","pkt","dozen","box"];
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 const genId = () => Math.random().toString(36).slice(2,9);
 const todayStr = () => new Date().toISOString().split("T")[0];
+const addDaysToDateStr = (dateStr, days) => {
+  if(!dateStr) return dateStr;
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + Number(days||0));
+  return d.toISOString().split("T")[0];
+};
+// A membership period's real coverage end, accounting for any grace days attached to it. Grace
+// extends how long a period is treated as "active" before it's lapsed, but is never baked into
+// the stored `to` date itself — keeping `to` as the clean plan-end and `graceDays` as separate
+// metadata is what lets the UI show e.g. "Quarterly (+15d grace)" instead of silently stretching
+// the date. Every active/lapsed/expiring check should use this instead of comparing `to` directly.
+const getPeriodEffectiveEnd = (period) => addDaysToDateStr(period?.to, period?.graceDays||0);
 const sym = "₹";
 const fmt = n => { const num = Number(n||0); return num.toLocaleString("en-IN", { minimumFractionDigits: num % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 }); };
 const fmtK = n => { const num = Number(n||0); if(num >= 100000) return (num/100000).toFixed(1).replace(/\.0$/,"")+"L"; if(num >= 1000) return (num/1000).toFixed(1).replace(/\.0$/,"")+"K"; return fmt(num); };
@@ -1733,15 +1745,22 @@ function AppContent({ onLock }) {
   // equivalent single-period array for them so every other view can just read `.periods` uniformly.
   const getMembershipPeriods = useCallback((m) => {
     if(Array.isArray(m.periods) && m.periods.length) return m.periods;
-    if(m.validFrom && m.validUntil) return [{ id:m.id, label:m.cycle||"Period", from:m.validFrom, to:m.validUntil, amount:m.amount }];
+    if(m.validFrom && m.validUntil) {
+      // Old flat-field records (pre grace-redesign) baked grace days directly into `validUntil`,
+      // so re-applying `m.graceDays` on top here would double-count the extension. Only records
+      // saved after the redesign (marked `graceAppliedSeparately`) keep `validUntil` clean and
+      // carry `graceDays` as separate metadata the same way the `periods` array model does.
+      return [{ id:m.id, label:m.cycle||"Period", from:m.validFrom, to:m.validUntil, amount:m.amount, graceDays: m.graceAppliedSeparately ? Number(m.graceDays||0) : 0 }];
+    }
     return [];
   },[]);
   // The period that's active today, or if none is active, the most recent one (past or future).
+  // "Active" accounts for each period's own grace days, not just its nominal `to` date.
   const getCurrentPeriod = useCallback((m) => {
     const periods = getMembershipPeriods(m);
     if(!periods.length) return null;
     const today = todayStr();
-    return periods.find(p=>p.from<=today && today<=p.to) || [...periods].sort((a,b)=>(b.to||"").localeCompare(a.to||""))[0];
+    return periods.find(p=>p.from<=today && today<=getPeriodEffectiveEnd(p)) || [...periods].sort((a,b)=>(b.to||"").localeCompare(a.to||""))[0];
   },[getMembershipPeriods]);
   const getPersonAttributedAmount = useCallback((t, pid) => {
     if(t.type!=="expense") return 0;
@@ -2893,7 +2912,9 @@ function AppContent({ onLock }) {
       else setLinkMemberPersonId("self");
     },[linkedBA?.id]);
     const cycleMonthsMap = { monthly:1, quarterly:3, halfyearly:6, annual:12 };
-    const linkValidUntil = linkValidFrom && linkBulkMonths ? (()=>{ const d=new Date(linkValidFrom); d.setMonth(d.getMonth()+Number(linkBulkMonths)*(cycleMonthsMap[linkCycle]||1)); d.setDate(d.getDate()+Number(linkGraceDays||0)-1); return d.toISOString().split("T")[0]; })() : "";
+    // Grace days are no longer baked into this date — they're applied separately via
+    // getPeriodEffectiveEnd (graceAppliedSeparately below), consistent with the periods-array model.
+    const linkValidUntil = linkValidFrom && linkBulkMonths ? (()=>{ const d=new Date(linkValidFrom); d.setMonth(d.getMonth()+Number(linkBulkMonths)*(cycleMonthsMap[linkCycle]||1)); d.setDate(d.getDate()-1); return d.toISOString().split("T")[0]; })() : "";
     const [imageBase64, setImageBase64] = useState(sourceTxn?.imageBase64 || null);
     const [paymentImageBase64, setPaymentImageBase64] = useState(sourceTxn?.paymentImageBase64 || null);
     const isNative = isNativeSmsAvailable();
@@ -3678,6 +3699,7 @@ function AppContent({ onLock }) {
           cycle: linkCycle,
           bulkMonths: Number(linkBulkMonths),
           graceDays: Number(linkGraceDays||0),
+          graceAppliedSeparately: true,
           validFrom: linkValidFrom,
           validUntil: linkValidUntil,
           txnId: resolvedTxnId,
@@ -5310,7 +5332,12 @@ function AppContent({ onLock }) {
                       <div><span style={lbl}>No. of cycles</span><input style={inp} type="number" min="1" value={linkBulkMonths} onChange={e=>setLinkBulkMonths(e.target.value)}/></div>
                       <div><span style={lbl}>Grace days</span><input style={inp} type="number" min="0" value={linkGraceDays} onChange={e=>setLinkGraceDays(e.target.value)}/></div>
                     </div>
-                    {linkValidUntil&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(linkValidUntil)||linkValidUntil}</span></div>}
+                    {linkValidUntil&&(
+                      <div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",flexDirection:"column",gap:4 }}>
+                        <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Plan Ends</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(linkValidUntil)||linkValidUntil}</span></div>
+                        {Number(linkGraceDays||0)>0&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Active Until (+{linkGraceDays}d grace)</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(addDaysToDateStr(linkValidUntil,linkGraceDays))||linkValidUntil}</span></div>}
+                      </div>
+                    )}
                   </div>
                 )}
                 {showTripPicker&&!eventLinkId&&(
@@ -7289,19 +7316,19 @@ function AppContent({ onLock }) {
             const today = new Date().toISOString().split("T")[0];
             const in7 = new Date(Date.now()+7*24*60*60*1000).toISOString().split("T")[0];
             const withPeriod = memberships.map(m=>({ m, period:getCurrentPeriod(m) })).filter(x=>x.period);
-            const expiring = withPeriod.filter(x=>x.period.to>=today && x.period.to<=in7);
-            const lapsed = withPeriod.filter(x=>{ if(x.period.to>=today) return false; const diffDays = Math.round((new Date()-new Date(x.period.to))/(1000*60*60*24)); return diffDays<=3; });
+            const expiring = withPeriod.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); return eff>=today && eff<=in7; });
+            const lapsed = withPeriod.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); if(eff>=today) return false; const diffDays = Math.round((new Date()-new Date(eff))/(1000*60*60*24)); return diffDays<=3; });
             if(!expiring.length && !lapsed.length) return null;
             return (<div style={{ marginBottom:12 }}>
               {expiring.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
                 <div key={m.id} style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:14,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                  <div><div style={{ color:T.warn,fontSize:12,fontWeight:800 }}>⚠️ {ba?.name||"Membership"} expiring</div><div style={{ color:T.sub,fontSize:10 }}>Until {formatShortDate(period.to)||period.to}</div></div>
+                  <div><div style={{ color:T.warn,fontSize:12,fontWeight:800 }}>⚠️ {ba?.name||"Membership"} expiring</div><div style={{ color:T.sub,fontSize:10 }}>Until {formatShortDate(getPeriodEffectiveEnd(period))||getPeriodEffectiveEnd(period)}{period.graceDays>0?` (incl. +${period.graceDays}d grace)`:""}</div></div>
                   <button onClick={()=>{ setActiveBillerForAction(ba); }} style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Renew</button>
                 </div>
               ); })}
               {lapsed.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
                 <div key={m.id} style={{ background:T.danger+"16",border:`1px solid ${T.danger}33`,borderRadius:14,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                  <div><div style={{ color:T.danger,fontSize:12,fontWeight:800 }}>🔴 {ba?.name||"Membership"} lapsed</div><div style={{ color:T.sub,fontSize:10 }}>Expired {formatShortDate(period.to)||period.to}</div></div>
+                  <div><div style={{ color:T.danger,fontSize:12,fontWeight:800 }}>🔴 {ba?.name||"Membership"} lapsed</div><div style={{ color:T.sub,fontSize:10 }}>Expired {formatShortDate(getPeriodEffectiveEnd(period))||getPeriodEffectiveEnd(period)}{period.graceDays>0?` (incl. +${period.graceDays}d grace)`:""}</div></div>
                   <button onClick={()=>{ setActiveBillerForAction(ba); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Renew</button>
                 </div>
               ); })}
@@ -12324,12 +12351,13 @@ function AppContent({ onLock }) {
           <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>PAYMENT ALLOCATION</div>
           <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
             {periods.map(p=>{
-              const isCurrent = p.from<=today && today<=p.to;
-              const isPast = p.to<today;
+              const effEnd = getPeriodEffectiveEnd(p);
+              const isCurrent = p.from<=today && today<=effEnd;
+              const isPast = effEnd<today;
               return (
                 <div key={p.id} style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                    <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{isPast?"✅":isCurrent?"🟢":"⏳"} {p.label}</span>
+                    <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{isPast?"✅":isCurrent?"🟢":"⏳"} {p.label}{p.graceDays>0?` (+${p.graceDays}d grace)`:""}</span>
                     <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(p.amount)}</span>
                   </div>
                   <div style={{ color:T.sub,fontSize:10,marginTop:3 }}>{formatShortDate(p.from)||p.from} → {formatShortDate(p.to)||p.to}</div>
@@ -12656,7 +12684,7 @@ function AppContent({ onLock }) {
     const isEdit = !!existing;
     const derivedPersonId = (billerAccount.attributeType==="person" && billerAccount.attributedTo) ? String(billerAccount.attributedTo) : "self";
     const memberPersonId = existing?.personId||derivedPersonId;
-    const existingPeriods = existing?.periods || (existing ? [{ id:genId(), label:existing.cycle||"Period", from:existing.validFrom, to:existing.validUntil, amount:existing.amount }] : null);
+    const existingPeriods = existing?.periods || (existing ? [{ id:genId(), label:existing.cycle||"Period", from:existing.validFrom, to:existing.validUntil, amount:existing.amount, graceDays: existing.graceAppliedSeparately ? Number(existing.graceDays||0) : 0 }] : null);
 
     const [plan, setPlan] = useState(existing?.cycle||"monthly");
     const [startsOn, setStartsOn] = useState(existingPeriods?.[0]?.from||todayStr());
@@ -12665,6 +12693,9 @@ function AppContent({ onLock }) {
     const [accId, setAccId] = useState(existing?.accId||accounts.find(a=>a.type!=="cc")?.id||"");
     const [coverageMode, setCoverageMode] = useState((existingPeriods?.length||0)>1 ? "multiple" : "one");
     const [periods, setPeriods] = useState(existingPeriods?.length>1 ? existingPeriods : []);
+    // Grace period for the "one period" mode — a separate property on the period, not baked into
+    // the Ends date. "Multiple periods" mode holds its own graceDays per period row instead.
+    const [graceDays, setGraceDays] = useState((existingPeriods?.length===1 ? existingPeriods[0]?.graceDays : 0) || 0);
     const [note, setNote] = useState(existing?.note||"");
     const [linkedTxnId, setLinkedTxnId] = useState(existing?.linkedTxnId||"");
     const recentTxnsForBiller = txns.filter(t=>t.type==="expense" && t.billerLinkId===billerAccount.id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,15);
@@ -12683,7 +12714,7 @@ function AppContent({ onLock }) {
     const allocatedTotal = periods.reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
     const totalAmount = parseFloat(amount)||0;
     const remaining = totalAmount - allocatedTotal;
-    const addPeriod = () => setPeriods(prev=>[...prev,{ id:genId(), label:`Period ${prev.length+1}`, from:"", to:"", amount:remaining>0?String(remaining):"" }]);
+    const addPeriod = () => setPeriods(prev=>[...prev,{ id:genId(), label:`Period ${prev.length+1}`, from:"", to:"", amount:remaining>0?String(remaining):"", graceDays:0 }]);
     const updatePeriod = (id,field,val) => setPeriods(prev=>prev.map(p=>p.id===id?{...p,[field]:val}:p));
     const removePeriod = (id) => setPeriods(prev=>prev.filter(p=>p.id!==id));
 
@@ -12692,8 +12723,8 @@ function AppContent({ onLock }) {
     const handleSave = () => {
       if(!canSave) return;
       const finalPeriods = coverageMode==="one"
-        ? [{ id:genId(), label:plan.charAt(0).toUpperCase()+plan.slice(1), from:startsOn, to:endsOn, amount:totalAmount }]
-        : periods.map(p=>({ ...p, amount:parseFloat(p.amount)||0 }));
+        ? [{ id:existingPeriods?.length===1?existingPeriods[0].id:genId(), label:plan.charAt(0).toUpperCase()+plan.slice(1), from:startsOn, to:endsOn, amount:totalAmount, graceDays:Number(graceDays||0) }]
+        : periods.map(p=>({ ...p, amount:parseFloat(p.amount)||0, graceDays:Number(p.graceDays||0) }));
       const record = {
         id: existing?.id||genId(),
         billerAccountId: billerAccount.id,
@@ -12755,6 +12786,14 @@ function AppContent({ onLock }) {
               </div>
             </div>
 
+            {coverageMode==="one"&&(
+              <div>
+                <span style={lbl}>Grace days (optional)</span>
+                <input style={inp} type="number" min="0" placeholder="0" value={graceDays||""} onChange={e=>setGraceDays(e.target.value)}/>
+                <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Extra days this period stays Active past its Ends date before being marked lapsed — the Ends date itself doesn't change.</div>
+              </div>
+            )}
+
             {coverageMode==="multiple"&&(
               <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
                 {periods.map((p,i)=>(
@@ -12768,6 +12807,9 @@ function AppContent({ onLock }) {
                       <input style={inp} type="date" value={p.to} onChange={e=>updatePeriod(p.id,"to",e.target.value)}/>
                     </div>
                     <input style={{ ...inp,textAlign:"right",fontWeight:700 }} type="number" placeholder="0" value={p.amount} onChange={e=>updatePeriod(p.id,"amount",e.target.value)}/>
+                    <div>
+                      <input style={inp} type="number" min="0" placeholder="Grace days (optional)" value={p.graceDays||""} onChange={e=>updatePeriod(p.id,"graceDays",e.target.value)}/>
+                    </div>
                   </div>
                 ))}
                 <button onClick={addPeriod} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add Period</button>
@@ -13444,11 +13486,15 @@ function AppContent({ onLock }) {
                   // payment's most recent period is closest to today (covers both "mid-membership" and
                   // "just expired, not yet renewed" states).
                   const withCurrentPeriod = sorted.map(m=>({ m, period:getCurrentPeriod(m) })).filter(x=>x.period);
-                  const hero = withCurrentPeriod.find(x=>x.period.from<=today&&today<=x.period.to) || withCurrentPeriod[0];
+                  const hero = withCurrentPeriod.find(x=>x.period.from<=today&&today<=getPeriodEffectiveEnd(x.period)) || withCurrentPeriod[0];
                   const heroPeriod = hero?.period;
+                  const heroEffEnd = heroPeriod ? getPeriodEffectiveEnd(heroPeriod) : null;
+                  // Progress bar reflects the nominal plan length (from→to); "Days Left"/Active status
+                  // reflect the grace-extended effective end, so a lapsed-but-in-grace period still
+                  // shows Active with the true days remaining, without stretching the visual bar.
                   const daysTotal = heroPeriod ? Math.max(1,Math.round((new Date(heroPeriod.to)-new Date(heroPeriod.from))/86400000)+1) : 0;
-                  const daysLeft = heroPeriod ? Math.round((new Date(heroPeriod.to)-new Date())/86400000) : null;
-                  const daysElapsed = heroPeriod ? Math.max(0,daysTotal-(daysLeft||0)) : 0;
+                  const daysLeft = heroEffEnd ? Math.round((new Date(heroEffEnd)-new Date())/86400000) : null;
+                  const daysElapsed = heroPeriod ? Math.max(0,Math.round((new Date()-new Date(heroPeriod.from))/86400000)) : 0;
                   const isActive = daysLeft!==null && daysLeft>=0;
                   const heroColor = daysLeft===null ? T.sub : daysLeft<0 ? T.danger : daysLeft<=15 ? T.warn : T.success;
                   // Lifetime analytics — across every payment ever recorded for this account.
@@ -13467,7 +13513,7 @@ function AppContent({ onLock }) {
                               <span style={{ color:heroColor,fontSize:10,fontWeight:800 }}>{isActive?"Active":"Expired"}</span>
                             </div>
                           </div>
-                          <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>{formatShortDate(heroPeriod.from)||heroPeriod.from} → {formatShortDate(heroPeriod.to)||heroPeriod.to}</div>
+                          <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>{formatShortDate(heroPeriod.from)||heroPeriod.from} → {formatShortDate(heroPeriod.to)||heroPeriod.to}{heroPeriod.graceDays>0?` (+${heroPeriod.graceDays}d grace)`:""}</div>
                           <div style={{ color:heroColor,fontSize:13,fontWeight:800,marginBottom:6 }}>{daysLeft===null?"":daysLeft>=0?`${daysLeft} Days Left`:`Expired ${Math.abs(daysLeft)} days ago`}</div>
                           <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:8 }}>
                             <div style={{ height:"100%",width:`${Math.min(100,Math.round(daysElapsed/daysTotal*100))}%`,background:heroColor,borderRadius:3 }}/>
@@ -13487,7 +13533,7 @@ function AppContent({ onLock }) {
                           return (
                             <div key={m.id} onClick={()=>setViewingMembership(m)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"10px 12px",cursor:"pointer" }}>
                               <div>
-                                <div style={{ color:isCurrentRow?T.success:T.text,fontSize:11,fontWeight:800 }}>{isCurrentRow?"Current":"Completed"} · {period?.label||"Payment"}</div>
+                                <div style={{ color:isCurrentRow?T.success:T.text,fontSize:11,fontWeight:800 }}>{isCurrentRow?"Current":"Completed"} · {period?.label||"Payment"}{period?.graceDays>0?` (+${period.graceDays}d grace)`:""}</div>
                                 <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(period?.from)||period?.from} → {formatShortDate(period?.to)||period?.to}</div>
                               </div>
                               <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(m.amount)}</div>
