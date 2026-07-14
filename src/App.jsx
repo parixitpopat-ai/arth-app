@@ -5273,7 +5273,7 @@ function AppContent({ onLock }) {
                     }
                   }}>
                     <option value="">Select biller account...</option>
-                    {billerAccounts.map(ba=>(<option key={ba.id} value={ba.id}>{getBillerIcon(ba.type)} {ba.name} — {ba.type}</option>))}
+                    {billerAccounts.map(ba=>(<option key={ba.id} value={ba.id}>{getBillerIcon(ba.type)} {ba.name}{ba.provider?` — ${ba.provider}`:""}</option>))}
                   </select>
                 )}
                 {showMembershipPanel&&linkedBAType==="membership"&&(
@@ -10832,6 +10832,7 @@ function AppContent({ onLock }) {
 
   // ── BUDGET PAGE ──────────────────────────────────────────────────────────────
   const BudgetPage = ({ embedded = false, onBack }) => {
+    const [budgetSubTab, setBudgetSubTab] = useState("overview");
     const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
     const [expandedBudgetCatId, setExpandedBudgetCatId] = useState(null);
     const fy = selectedBudgetFY;
@@ -10868,6 +10869,13 @@ function AppContent({ onLock }) {
           <div style={{ color:T.text,fontSize:20,fontWeight:900,flex:1 }}>💰 Budget</div>
         </div>
 
+        <div style={{ display:"flex",gap:0,borderBottom:`1px solid ${T.border}`,marginBottom:14 }}>
+          {[["overview","Overview"],["insights","Insights"],["budgets","Budgets"]].map(id=>(
+            <button key={id[0]} onClick={()=>setBudgetSubTab(id[0])} style={{ flex:1,textAlign:"center",background:"none",border:"none",padding:"10px 4px",fontSize:13,fontWeight:800,cursor:"pointer",color:budgetSubTab===id[0]?T.accent:T.sub,borderBottom:budgetSubTab===id[0]?`2px solid ${T.accent}`:"2px solid transparent" }}>{id[1]}</button>
+          ))}
+        </div>
+
+        {budgetSubTab==="overview"&&(<>
         <div style={{ ...card,padding:"10px 12px",marginBottom:12 }}>
           <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:8 }}>
             <button onClick={()=>setSelectedBudgetFY(prev=>Math.max(currentFYStartYear-1, prev-1))} disabled={fy<=currentFYStartYear-1} style={{ background:T.pill,border:`1px solid ${T.border}`,color:fy<=currentFYStartYear-1?T.sub:T.text,borderRadius:8,padding:"6px 10px",cursor:fy<=currentFYStartYear-1?"not-allowed":"pointer",fontSize:11,fontWeight:800,fontFamily:"Nunito,sans-serif",opacity:fy<=currentFYStartYear-1?0.6:1 }}>← Last FY</button>
@@ -10967,7 +10975,11 @@ function AppContent({ onLock }) {
             </div>
           );
         })}
+        </>)}
 
+        {budgetSubTab==="insights"&&<div style={{ margin:"0 -16px" }}><StatsPage embedded/></div>}
+
+        {budgetSubTab==="budgets"&&(<>
         {/* Per-person budgets — reads/writes the same spendBudget field as each person's own profile,
             not a separate object, so the two can never disagree. Dependants only, matching the
             restriction already enforced when setting this on the person's own profile. */}
@@ -11101,6 +11113,7 @@ function AppContent({ onLock }) {
             );
           })}
         </div>
+        </>)}
       </div>
     );
   };
@@ -11177,7 +11190,7 @@ function AppContent({ onLock }) {
                 ? <div style={{ color:T.sub,fontSize:11 }}>No biller accounts yet. Add one first, or fill manually below.</div>
                 : <select style={inp} value={billerAccountId} onChange={e=>{ const id=e.target.value; setBillerAccountId(id); if(id){ const ba=billerAccounts.find(x=>x.id===id); if(ba){ setName(ba.name); setMerchant(ba.provider||ba.name); } } }}>
                     <option value="">Select biller account (or fill manually)</option>
-                    {billerAccounts.map(ba=>(<option key={ba.id} value={ba.id}>{ba.name} {ba.consumerNo?`(${ba.consumerNo})`:""} - {ba.type}</option>))}
+                    {billerAccounts.map(ba=>(<option key={ba.id} value={ba.id}>{ba.name}{ba.consumerNo?` (${ba.consumerNo})`:""}{ba.provider?` — ${ba.provider}`:""}</option>))}
                   </select>
               }
               {selectedBA&&<div style={{ marginTop:8,display:"flex",gap:6,flexWrap:"wrap" }}><span style={{ background:T.success+"16",border:`1px solid ${T.success}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.success }}>{selectedBA.type}</span>{selectedBA.consumerNo&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>#{selectedBA.consumerNo}</span>}{selectedBA.provider&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>{selectedBA.provider}</span>}</div>}
@@ -11787,7 +11800,7 @@ function AppContent({ onLock }) {
   };
 
   // -- STATS PAGE (new module, starting with Cash Flow) -----------------------
-  const StatsPage = () => {
+  const StatsPage = ({ embedded = false } = {}) => {
     const [statsTab, setStatsTab] = useState("overview");
     const [statsPeriod, setStatsPeriod] = useState("30D");
     const [byPersonId, setByPersonId] = useState(people.find(p=>p.isMe)?.id||"__me__");
@@ -11818,11 +11831,13 @@ function AppContent({ onLock }) {
     });
     const chartData = Object.entries(dayBuckets).sort(([a],[b])=>a.localeCompare(b)).map(([date,v])=>({ date:date.slice(5), cashFlow: v.income - v.expense }));
     return (
-      <div style={{ maxWidth:430,margin:"0 auto",minHeight:"100vh",paddingBottom:100,fontFamily:"Nunito,sans-serif" }}>
+      <div style={embedded?{ fontFamily:"Nunito,sans-serif" }:{ maxWidth:430,margin:"0 auto",minHeight:"100vh",paddingBottom:100,fontFamily:"Nunito,sans-serif" }}>
+        {!embedded&&(
         <div style={{ background:T.nav,borderBottom:`1px solid ${T.border}`,padding:"12px 18px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:50 }}>
           <button onClick={()=>setTab("home")} style={{ background:"none",border:"none",cursor:"pointer",fontSize:18,color:T.text }}>←</button>
           <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Stats</div>
         </div>
+        )}
         <div style={{ display:"flex",gap:6,padding:"10px 16px 0",overflowX:"auto" }}>
           {[["overview","Overview"],["cashflow","Cash Flow"],["credit","Credit"],["invest","Investments"]].map(([id,label])=>(
             <button key={id} onClick={()=>setStatsTab(id)} style={{ background:"none",border:"none",borderBottom:statsTab===id?`2px solid ${T.accent}`:"2px solid transparent",padding:"6px 4px 10px",cursor:"pointer",fontSize:13,fontWeight:800,color:statsTab===id?T.text:T.sub,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap" }}>{label}</button>
@@ -12199,7 +12214,6 @@ function AppContent({ onLock }) {
               { icon:"💰", label:"Budget", onClick:()=>goToTab("budget") },
               { icon:"🎯", label:"Goals", onClick:()=>{ alert("Goals — coming soon"); onClose(); } },
               { icon:"✈️", label:"Trips & Outings", onClick:()=>{ setShowEventsList(true); onClose(); } },
-              { icon:"📊", label:"Stats", onClick:()=>goToTab("stats") },
             ].map(item=>(
               <button key={item.label} onClick={item.onClick} style={{ display:"flex",alignItems:"center",gap:14,background:"none",border:"none",padding:"13px 14px",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:700,color:T.text,fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                 <span style={{ fontSize:18 }}>{item.icon}</span>{item.label}
@@ -12497,8 +12511,8 @@ function AppContent({ onLock }) {
           </div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
             <div>
-              <span style={lbl}>Biller Name *</span>
-              <input style={inp} placeholder="e.g. Home Electricity, Nidhi Jio, Netflix" value={baName} onChange={e=>setBaName(e.target.value)} autoFocus/>
+              <span style={lbl}>Nickname *</span>
+              <input style={inp} placeholder="e.g. M1, Flat 201, My Number, Me" value={baName} onChange={e=>setBaName(e.target.value)} autoFocus/>
             </div>
             <div>
               <span style={lbl}>Biller Type *</span>
@@ -12521,7 +12535,7 @@ function AppContent({ onLock }) {
               )}
             </div>
             <div>
-              <span style={lbl}>Consumer / Account Number</span>
+              <span style={lbl}>Account Number (optional — e.g. not applicable for gym)</span>
               <input style={inp} placeholder="e.g. 60007895307" value={baConsumerNo} onChange={e=>setBaConsumerNo(e.target.value)}/>
             </div>
             <div>
@@ -12737,7 +12751,7 @@ function AppContent({ onLock }) {
             )}
             <div>
               <span style={lbl}>Note (optional)</span>
-              <input style={inp} placeholder="e.g. Cash in envelope" value={note} onChange={e=>setNote(e.target.value)}/>
+              <input style={inp} placeholder="e.g. Paid in cash, or any other detail worth remembering" value={note} onChange={e=>setNote(e.target.value)}/>
             </div>
             <div>
               <span style={lbl}>Paid From Account</span>
@@ -13161,7 +13175,6 @@ function AppContent({ onLock }) {
         {!showSettings&&tab==="home"&&<Home/>}
         {!showSettings&&tab==="transactions"&&<Transactions/>}
         {!showSettings&&tab==="people"&&<People/>}
-        {!showSettings&&tab==="stats"&&<StatsPage/>}
         {!showSettings&&tab==="budget"&&<BudgetPage/>}
         {!showSettings&&tab==="bills"&&<BillsPage/>}
         {!showSettings&&tab==="wealth"&&wealthUnlocked&&<WealthPage/>}
