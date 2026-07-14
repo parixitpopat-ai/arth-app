@@ -1728,6 +1728,21 @@ function AppContent({ onLock }) {
     return map;
   },[txns,bills,people]);
 
+  // Normalizes a membership/payment record to its periods array — new records store `periods`
+  // directly; old records (pre-redesign) only had validFrom/validUntil/cycle, so synthesize an
+  // equivalent single-period array for them so every other view can just read `.periods` uniformly.
+  const getMembershipPeriods = useCallback((m) => {
+    if(Array.isArray(m.periods) && m.periods.length) return m.periods;
+    if(m.validFrom && m.validUntil) return [{ id:m.id, label:m.cycle||"Period", from:m.validFrom, to:m.validUntil, amount:m.amount }];
+    return [];
+  },[]);
+  // The period that's active today, or if none is active, the most recent one (past or future).
+  const getCurrentPeriod = useCallback((m) => {
+    const periods = getMembershipPeriods(m);
+    if(!periods.length) return null;
+    const today = todayStr();
+    return periods.find(p=>p.from<=today && today<=p.to) || [...periods].sort((a,b)=>(b.to||"").localeCompare(a.to||""))[0];
+  },[getMembershipPeriods]);
   const getPersonAttributedAmount = useCallback((t, pid) => {
     if(t.type!=="expense") return 0;
     let total = 0;
@@ -2591,7 +2606,7 @@ function AppContent({ onLock }) {
               {t.type==="settlement_in"&&!t.isRefund&&t.settlementLinks?.length>0&&<span style={{ background:T.info+"18",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💰 Repayment</span>}
               {t.type==="expense"&&refundedAmount>0&&<span style={{ background:T.info+"20",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>↩ {refundStatus}</span>}
               {t.type==="expense"&&linkedRepayments.length>0&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💰 Repaid</span>}
-              {t.billerLinkId&&(()=>{ const ba=billerAccounts.find(b=>b.id===t.billerLinkId); if(!ba) return null; const mem=memberships.filter(m=>m.billerAccountId===ba.id&&m.txnId===t.id)[0]; return <span style={{ background:T.accent+"18",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{getBillerIcon(ba.type)} {ba.name}{mem?` · ${formatShortDate(mem.validFrom)||mem.validFrom}→${formatShortDate(mem.validUntil)||mem.validUntil}`:""}</span>; })()}
+              {t.billerLinkId&&(()=>{ const ba=billerAccounts.find(b=>b.id===t.billerLinkId); if(!ba) return null; return <span style={{ background:T.accent+"18",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{getBillerIcon(ba.type)} {ba.name}</span>; })()}
               {t.guestPerson&&<span style={{ background:T.warn+"18",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>👤 {t.guestPerson} owes {sym}{fmt(t.guestPersonAmount||0)}</span>}
               {t.type==="expense"&&t.reimbursable&&!t.reimbursedByTxnId&&<span style={{ background:"#f0a50018",color:"#f0a500",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimb.{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
               {t.type==="expense"&&t.reimbursedByTxnId&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimbursed{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
@@ -7273,19 +7288,20 @@ function AppContent({ onLock }) {
           {(()=>{
             const today = new Date().toISOString().split("T")[0];
             const in7 = new Date(Date.now()+7*24*60*60*1000).toISOString().split("T")[0];
-            const expiring = memberships.filter(m=>m.validUntil && m.validUntil >= today && m.validUntil <= in7);
-            const lapsed = memberships.filter(m=>m.validUntil && m.validUntil < today && (() => { const diffDays = Math.round((new Date()-new Date(m.validUntil))/(1000*60*60*24)); return diffDays <= 3; })());
+            const withPeriod = memberships.map(m=>({ m, period:getCurrentPeriod(m) })).filter(x=>x.period);
+            const expiring = withPeriod.filter(x=>x.period.to>=today && x.period.to<=in7);
+            const lapsed = withPeriod.filter(x=>{ if(x.period.to>=today) return false; const diffDays = Math.round((new Date()-new Date(x.period.to))/(1000*60*60*24)); return diffDays<=3; });
             if(!expiring.length && !lapsed.length) return null;
             return (<div style={{ marginBottom:12 }}>
-              {expiring.map(m=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
+              {expiring.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
                 <div key={m.id} style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:14,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                  <div><div style={{ color:T.warn,fontSize:12,fontWeight:800 }}>⚠️ {ba?.name||"Membership"} expiring</div><div style={{ color:T.sub,fontSize:10 }}>Until {formatShortDate(m.validUntil)||m.validUntil}</div></div>
+                  <div><div style={{ color:T.warn,fontSize:12,fontWeight:800 }}>⚠️ {ba?.name||"Membership"} expiring</div><div style={{ color:T.sub,fontSize:10 }}>Until {formatShortDate(period.to)||period.to}</div></div>
                   <button onClick={()=>{ setActiveBillerForAction(ba); }} style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Renew</button>
                 </div>
               ); })}
-              {lapsed.map(m=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
+              {lapsed.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
                 <div key={m.id} style={{ background:T.danger+"16",border:`1px solid ${T.danger}33`,borderRadius:14,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                  <div><div style={{ color:T.danger,fontSize:12,fontWeight:800 }}>🔴 {ba?.name||"Membership"} lapsed</div><div style={{ color:T.sub,fontSize:10 }}>Expired {formatShortDate(m.validUntil)||m.validUntil}</div></div>
+                  <div><div style={{ color:T.danger,fontSize:12,fontWeight:800 }}>🔴 {ba?.name||"Membership"} lapsed</div><div style={{ color:T.sub,fontSize:10 }}>Expired {formatShortDate(period.to)||period.to}</div></div>
                   <button onClick={()=>{ setActiveBillerForAction(ba); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Renew</button>
                 </div>
               ); })}
@@ -12276,41 +12292,55 @@ function AppContent({ onLock }) {
 
   const MembershipDetailModal = ({ membership, onClose }) => {
     const m = membership;
-    const person = people.find(p=>String(p.id)===String(m.personId));
+    const person = m.personId==="self" ? null : people.find(p=>String(p.id)===String(m.personId));
     const acc = accounts.find(a=>a.id===m.accId);
-    const linkedTxn = m.linkedTxnId ? txns.find(t=>t.id===m.linkedTxnId) : null;
+    const ba = billerAccounts.find(b=>b.id===m.billerAccountId);
+    const periods = getMembershipPeriods(m);
+    const today = todayStr();
     return (
       <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:330,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{person?.emoji||"👤"} {person?.name||"Me"}</div>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{person?.emoji||"🧑"} {person?.name||"Me"}</div>
             <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
           </div>
+
           <div style={{ textAlign:"center",marginBottom:16 }}>
             <div style={{ color:T.accent,fontSize:26,fontWeight:900 }}>{sym}{fmt(m.amount)}</div>
-            <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{m.useExactDates?"Exact period":`${m.cycle} × ${m.bulkMonths}`}</div>
+            <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{periods.length>1?`Covers ${periods.length} periods`:(periods[0]?.label||"Payment")}</div>
           </div>
-          <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-            <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Valid From</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{formatShortDate(m.validFrom)||m.validFrom}</span></div>
-            <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Valid Until</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{formatShortDate(m.validUntil)||m.validUntil}</span></div>
+
+          <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>MEMBERSHIP DETAILS</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
+            <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Provider</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{ba?.provider||ba?.name||"—"}</span></div>
+            <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Member</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{person?.name||"Me"}</span></div>
             {m.paidDate&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Payment Date</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{formatShortDate(m.paidDate)||m.paidDate}</span></div>}
-            {m.graceDays>0&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Grace Days</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{m.graceDays}</span></div>}
-            {acc&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Paid From</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{acc.name}</span></div>}
-            {linkedTxn&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Linked Transaction</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{sym}{fmt(linkedTxn.amount)} · {formatShortDate(linkedTxn.date)||linkedTxn.date}</span></div>}
+            {acc&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Payment Account</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{acc.name}</span></div>}
             {m.note&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Note</span><span style={{ color:T.text,fontSize:12 }}>{m.note}</span></div>}
           </div>
-          {m.monthlyDistribution?.length>1&&(
-            <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginTop:14 }}>
-              <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:6 }}>MONTHLY DISTRIBUTION</div>
-              {m.monthlyDistribution.map(md=>(
-                <div key={md.month} style={{ display:"flex",justifyContent:"space-between",padding:"3px 0" }}>
-                  <span style={{ color:T.sub,fontSize:12 }}>{md.month}</span>
-                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(md.amount)}</span>
+
+          <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>PAYMENT ALLOCATION</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
+            {periods.map(p=>{
+              const isCurrent = p.from<=today && today<=p.to;
+              const isPast = p.to<today;
+              return (
+                <div key={p.id} style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{isPast?"✅":isCurrent?"🟢":"⏳"} {p.label}</span>
+                    <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(p.amount)}</span>
+                  </div>
+                  <div style={{ color:T.sub,fontSize:10,marginTop:3 }}>{formatShortDate(p.from)||p.from} → {formatShortDate(p.to)||p.to}</div>
                 </div>
-              ))}
+              );
+            })}
+            <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 4px 0" }}>
+              <span style={{ color:T.sub,fontSize:11 }}>Allocated</span>
+              <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{sym}{fmt(periods.reduce((s,p)=>s+(Number(p.amount)||0),0))} / {sym}{fmt(m.amount)}</span>
             </div>
-          )}
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:16 }}>
+          </div>
+
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:8 }}>
             <button onClick={()=>{ setEditingMembership(m); setShowAddMembership(true); onClose(); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
             <button onClick={onClose} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
           </div>
@@ -12621,70 +12651,53 @@ function AppContent({ onLock }) {
   // -- ADD MEMBERSHIP MODAL --------------------------------------------------
   const AddMembershipModal = ({ billerAccount, existing, onClose }) => {
     const isEdit = !!existing;
-    // No separate "who is this for" picker — the account itself (via its Attribute To, set when the
-    // account was created) already identifies who this membership belongs to. Only fall back to "self"
-    // when the account isn't attributed to a specific person.
     const derivedPersonId = (billerAccount.attributeType==="person" && billerAccount.attributedTo) ? String(billerAccount.attributedTo) : "self";
-    const [memberPersonId] = useState(existing?.personId||derivedPersonId);
-    const [amount, setAmount] = useState(existing?.amount?String(existing.amount):"");
-    const [cycle, setCycle] = useState(existing?.cycle||"monthly");
-    const [validFrom, setValidFrom] = useState(existing?.validFrom||todayStr());
-    const [graceDays, setGraceDays] = useState(existing?.graceDays?String(existing.graceDays):"0");
-    const [bulkMonths, setBulkMonths] = useState("1");
-    const [accId, setAccId] = useState(existing?.accId||accounts.find(a=>a.type!=="cc")?.id||"");
-    // Exact dates — needed for periods that don't fit a whole-month cycle (e.g. a 1-week catch-up),
-    // and for linking multiple membership periods to the same underlying payment transaction.
-    const [useExactDates, setUseExactDates] = useState(Boolean(existing?.useExactDates));
-    const [exactValidUntil, setExactValidUntil] = useState(existing?.validUntil||"");
-    const [linkedTxnId, setLinkedTxnId] = useState(existing?.linkedTxnId||"");
-    const recentTxnsForBiller = txns.filter(t=>t.type==="expense" && t.billerLinkId===billerAccount.id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,15);
+    const memberPersonId = existing?.personId||derivedPersonId;
+    const existingPeriods = existing?.periods || (existing ? [{ id:genId(), label:existing.cycle||"Period", from:existing.validFrom, to:existing.validUntil, amount:existing.amount }] : null);
 
-    const cycleMonths = { monthly:1, quarterly:3, halfyearly:6, annual:12 };
-    const totalMonths = Number(bulkMonths) * (cycleMonths[cycle]||1);
-    const validUntil = useExactDates ? exactValidUntil : (() => {
-      if(!validFrom) return "";
-      const d = new Date(validFrom);
-      d.setMonth(d.getMonth() + totalMonths);
-      d.setDate(d.getDate() + Number(graceDays||0));
-      d.setDate(d.getDate()-1);
-      return d.toISOString().split("T")[0];
-    })();
-    const daysLeft = validUntil ? Math.round((new Date(validUntil)-new Date())/(1000*60*60*24)) : null;
+    const [plan, setPlan] = useState(existing?.cycle||"monthly");
+    const [startsOn, setStartsOn] = useState(existingPeriods?.[0]?.from||todayStr());
+    const [endsOn, setEndsOn] = useState(existingPeriods?.[0]?.to||"");
+    const [amount, setAmount] = useState(existing?.amount?String(existing.amount):"");
+    const [accId, setAccId] = useState(existing?.accId||accounts.find(a=>a.type!=="cc")?.id||"");
+    const [coverageMode, setCoverageMode] = useState((existingPeriods?.length||0)>1 ? "multiple" : "one");
+    const [periods, setPeriods] = useState(existingPeriods?.length>1 ? existingPeriods : []);
     const [note, setNote] = useState(existing?.note||"");
-    // Auto-derived monthly distribution — replaces the separate Add Fee Payment mechanism's manual
-    // monthsFrom/monthCount entry. Any period (cycle-based or exact-dates) now automatically shows
-    // which calendar months it touches and how much of the amount falls in each, split evenly.
-    const monthlyDistribution = (() => {
-      if(!validFrom || !validUntil) return [];
-      const start = new Date(validFrom), end = new Date(validUntil);
-      if(end<start) return [];
-      const months = [];
-      let cur = new Date(start.getFullYear(), start.getMonth(), 1);
-      const last = new Date(end.getFullYear(), end.getMonth(), 1);
-      while(cur<=last){ months.push(`${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,"0")}`); cur.setMonth(cur.getMonth()+1); }
-      const per = months.length ? Math.round((parseFloat(amount)||0)/months.length) : 0;
-      return months.map(m=>({ month:m, amount:per }));
-    })();
+
+    const planMonths = { monthly:1, quarterly:3, annual:12 };
+    // Auto-compute end date from start + plan, unless Custom (user sets it directly) or in exact-dates use.
+    useEffect(()=>{
+      if(plan==="custom" || !startsOn) return;
+      const d = new Date(startsOn);
+      d.setMonth(d.getMonth()+planMonths[plan]);
+      d.setDate(d.getDate()-1);
+      setEndsOn(d.toISOString().split("T")[0]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },[plan,startsOn]);
+
+    const allocatedTotal = periods.reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
+    const totalAmount = parseFloat(amount)||0;
+    const remaining = totalAmount - allocatedTotal;
+    const addPeriod = () => setPeriods(prev=>[...prev,{ id:genId(), label:`Period ${prev.length+1}`, from:"", to:"", amount:remaining>0?String(remaining):"" }]);
+    const updatePeriod = (id,field,val) => setPeriods(prev=>prev.map(p=>p.id===id?{...p,[field]:val}:p));
+    const removePeriod = (id) => setPeriods(prev=>prev.filter(p=>p.id!==id));
+
+    const canSave = totalAmount>0 && accId && (coverageMode==="one" ? (startsOn&&endsOn) : (periods.length>0 && Math.abs(remaining)<0.5 && periods.every(p=>p.from&&p.to)));
 
     const handleSave = () => {
-      if(!amount||!validFrom) return;
-      if(useExactDates && !exactValidUntil) return;
+      if(!canSave) return;
+      const finalPeriods = coverageMode==="one"
+        ? [{ id:genId(), label:plan.charAt(0).toUpperCase()+plan.slice(1), from:startsOn, to:endsOn, amount:totalAmount }]
+        : periods.map(p=>({ ...p, amount:parseFloat(p.amount)||0 }));
       const record = {
         id: existing?.id||genId(),
         billerAccountId: billerAccount.id,
         personId: memberPersonId,
-        amount: parseFloat(amount),
-        cycle,
-        bulkMonths: Number(bulkMonths),
-        graceDays: Number(graceDays||0),
-        validFrom,
-        validUntil,
-        useExactDates,
-        linkedTxnId: linkedTxnId||null,
+        amount: totalAmount,
         accId,
+        periods: finalPeriods,
         note: note.trim(),
-        monthlyDistribution,
-        paidDate: todayStr(),
+        paidDate: existing?.paidDate||todayStr(),
         createdAt: existing?.createdAt||Date.now(),
         status: "active",
       };
@@ -12692,7 +12705,6 @@ function AppContent({ onLock }) {
       onClose();
     };
 
-    const memberPerson = memberPersonId==="self" ? null : people.find(p=>String(p.id)===String(memberPersonId));
     return (
       <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
@@ -12703,78 +12715,69 @@ function AppContent({ onLock }) {
             </div>
             <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
           </div>
-          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+          <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+
             <div>
-              <div style={{ color:T.sub,fontSize:11 }}>For <span style={{ color:T.text,fontWeight:800 }}>{memberPersonId==="self"?"Me":(getPerson(memberPersonId)?.name||billerAccount.name)}</span> — {billerAccount.name}</div>
-            </div>
-            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.input,borderRadius:10,padding:"8px 12px" }}>
-              <div>
-                <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>Use exact dates</div>
-                <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>For periods that don't fit a whole month, like a 1-week catch-up</div>
-              </div>
-              <button onClick={()=>setUseExactDates(v=>!v)} style={{ background:useExactDates?T.accent+"22":"none",border:`1px solid ${useExactDates?T.accent:T.border}`,borderRadius:20,padding:"5px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:useExactDates?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{useExactDates?"On":"Off"}</button>
-            </div>
-            {!useExactDates&&(<div>
-              <span style={lbl}>Billing Cycle</span>
+              <span style={lbl}>Plan</span>
               <div style={{ display:"flex",gap:6 }}>
-                {["monthly","quarterly","halfyearly","annual"].map(c=>(
-                  <button key={c} onClick={()=>setCycle(c)} style={{ flex:1,background:cycle===c?T.accent+"22":"none",border:`1px solid ${cycle===c?T.accent:T.border}`,borderRadius:10,padding:"6px 4px",cursor:"pointer",fontSize:10,fontWeight:700,color:cycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>
+                {["monthly","quarterly","annual","custom"].map(p=>(
+                  <button key={p} onClick={()=>setPlan(p)} style={{ flex:1,background:plan===p?T.accent+"22":"none",border:`1px solid ${plan===p?T.accent:T.border}`,borderRadius:10,padding:"7px 4px",cursor:"pointer",fontSize:11,fontWeight:700,color:plan===p?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.charAt(0).toUpperCase()+p.slice(1)}</button>
                 ))}
               </div>
-            </div>)}
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-              <div><span style={lbl}>Amount{useExactDates?"":" (per cycle)"}</span><input style={inp} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/></div>
-              {!useExactDates&&<div><span style={lbl}>No. of cycles paying</span><input style={inp} type="number" min="1" placeholder="1" value={bulkMonths} onChange={e=>setBulkMonths(e.target.value)}/></div>}
-              {useExactDates&&<div><span style={lbl}>Valid Until</span><input style={inp} type="date" value={exactValidUntil} onChange={e=>setExactValidUntil(e.target.value)}/></div>}
             </div>
+
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-              <div><span style={lbl}>Valid From</span><input style={inp} type="date" value={validFrom} onChange={e=>setValidFrom(e.target.value)}/></div>
-              {!useExactDates&&<div><span style={lbl}>Grace Days</span><input style={inp} type="number" min="0" placeholder="0" value={graceDays} onChange={e=>setGraceDays(e.target.value)}/></div>}
+              <div><span style={lbl}>Starts</span><input style={inp} type="date" value={startsOn} onChange={e=>setStartsOn(e.target.value)}/></div>
+              <div><span style={lbl}>Ends</span><input style={inp} type="date" value={endsOn} onChange={e=>setEndsOn(e.target.value)} disabled={plan!=="custom"} /></div>
             </div>
-            {recentTxnsForBiller.length>0&&(
+
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>Amount Paid</span><input style={{ ...inp,fontWeight:800 }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/></div>
               <div>
-                <span style={lbl}>Link to a specific payment (optional)</span>
-                <select style={inp} value={linkedTxnId} onChange={e=>setLinkedTxnId(e.target.value)}>
-                  <option value="">No specific transaction</option>
-                  {recentTxnsForBiller.map(t=><option key={t.id} value={t.id}>{sym}{fmt(t.amount)} · {formatShortDate(t.date)||t.date}{t.merchant?` · ${t.merchant}`:""}</option>)}
+                <span style={lbl}>Paid From</span>
+                <select style={inp} value={accId} onChange={e=>setAccId(e.target.value)}>
+                  {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
-                <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Link multiple membership periods to the same transaction — e.g. one payment covering a 1-week catch-up plus a new 3-month period.</div>
               </div>
-            )}
-            {validUntil&&(
-              <div style={{ background:daysLeft>=0?T.success+"16":T.danger+"16",border:`1px solid ${daysLeft>=0?T.success:T.danger}33`,borderRadius:12,padding:"10px 14px" }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                  <span style={{ color:T.sub,fontSize:11 }}>Valid Until</span>
-                  <span style={{ color:daysLeft>=0?T.success:T.danger,fontSize:13,fontWeight:800 }}>{formatShortDate(validUntil)||validUntil}</span>
-                </div>
-                <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>
-                  {Number(bulkMonths)>1?`${bulkMonths} cycles paid`:""}{Number(graceDays)>0?` + ${graceDays} grace days`:""}
-                  {daysLeft!==null&&` — ${daysLeft>=0?`${daysLeft} days remaining`:"Expired"}`}
-                </div>
+            </div>
+
+            <div style={{ background:T.input,borderRadius:10,padding:"8px 12px" }}>
+              <div style={{ color:T.sub,fontSize:11,marginBottom:6 }}>Does this payment cover</div>
+              <div style={{ display:"flex",gap:12 }}>
+                <button onClick={()=>setCoverageMode("one")} style={{ display:"flex",alignItems:"center",gap:6,background:"none",border:"none",cursor:"pointer",color:coverageMode==="one"?T.accent:T.sub,fontSize:12,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{coverageMode==="one"?"●":"○"} One period</button>
+                <button onClick={()=>{ setCoverageMode("multiple"); if(periods.length===0) addPeriod(); }} style={{ display:"flex",alignItems:"center",gap:6,background:"none",border:"none",cursor:"pointer",color:coverageMode==="multiple"?T.accent:T.sub,fontSize:12,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{coverageMode==="multiple"?"●":"○"} Multiple periods</button>
               </div>
-            )}
-            {monthlyDistribution.length>1&&(
-              <div style={{ background:T.input,borderRadius:12,padding:"10px 14px" }}>
-                <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:6 }}>MONTHLY DISTRIBUTION</div>
-                {monthlyDistribution.map(m=>(
-                  <div key={m.month} style={{ display:"flex",justifyContent:"space-between",padding:"3px 0" }}>
-                    <span style={{ color:T.sub,fontSize:12 }}>{m.month}</span>
-                    <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(m.amount)}</span>
+            </div>
+
+            {coverageMode==="multiple"&&(
+              <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                {periods.map((p,i)=>(
+                  <div key={p.id} style={{ background:T.input,borderRadius:12,padding:"10px 12px",display:"flex",flexDirection:"column",gap:8 }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                      <input style={{ background:"none",border:"none",color:T.text,fontSize:12,fontWeight:800,outline:"none",fontFamily:"Nunito,sans-serif",flex:1 }} value={p.label} onChange={e=>updatePeriod(p.id,"label",e.target.value)} placeholder={`Period ${i+1}`}/>
+                      <button onClick={()=>removePeriod(p.id)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:14,fontFamily:"Nunito,sans-serif" }}>×</button>
+                    </div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                      <input style={inp} type="date" value={p.from} onChange={e=>updatePeriod(p.id,"from",e.target.value)}/>
+                      <input style={inp} type="date" value={p.to} onChange={e=>updatePeriod(p.id,"to",e.target.value)}/>
+                    </div>
+                    <input style={{ ...inp,textAlign:"right",fontWeight:700 }} type="number" placeholder="0" value={p.amount} onChange={e=>updatePeriod(p.id,"amount",e.target.value)}/>
                   </div>
                 ))}
+                <button onClick={addPeriod} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add Period</button>
+                <div style={{ background:Math.abs(remaining)<0.5?T.success+"16":T.warn+"16",border:`1px solid ${Math.abs(remaining)<0.5?T.success:T.warn}44`,borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}>
+                  <span style={{ color:T.sub,fontSize:11 }}>Allocated</span>
+                  <span style={{ color:Math.abs(remaining)<0.5?T.success:T.warn,fontSize:12,fontWeight:800 }}>{sym}{fmt(allocatedTotal)} / {sym}{fmt(totalAmount)}</span>
+                </div>
               </div>
             )}
+
             <div>
               <span style={lbl}>Note (optional)</span>
               <input style={inp} placeholder="e.g. Paid in cash, or any other detail worth remembering" value={note} onChange={e=>setNote(e.target.value)}/>
             </div>
-            <div>
-              <span style={lbl}>Paid From Account</span>
-              <select style={inp} value={accId} onChange={e=>setAccId(e.target.value)}>
-                {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-            </div>
-            <button onClick={handleSave} disabled={!amount||!validFrom} style={{ background:amount&&validFrom?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:amount&&validFrom?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Membership"}</button>
+
+            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Membership"}</button>
           </div>
         </div>
       </div>
@@ -13389,7 +13392,6 @@ function AppContent({ onLock }) {
           const actionType = getBillerActionType(ba.type);
           const baMemberships = memberships.filter(m=>m.billerAccountId===ba.id);
           const baBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
-          const activeMembership = baMemberships.filter(m=>m.validUntil>=todayStr()).sort((a,b2)=>b2.validUntil.localeCompare(a.validUntil))[0];
           return (
             <div onClick={e=>{ if(e.target===e.currentTarget) setActiveBillerForAction(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
               <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
@@ -13403,38 +13405,6 @@ function AppContent({ onLock }) {
                   </div>
                   <button onClick={()=>setActiveBillerForAction(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
                 </div>
-                {/* Per-person membership status */}
-                {(()=>{
-                  const allPersonIds = ["self",...people.map(p=>String(p.id))];
-                  const personsWithMem = allPersonIds.filter(pid=>baMemberships.some(m=>String(m.personId)===pid));
-                  if(personsWithMem.length===0) return null;
-                  return (<div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
-                    {personsWithMem.map(pid=>{
-                      const personName = pid==="self"?"Me":(people.find(p=>String(p.id)===pid)?.name||"Unknown");
-                      const personMems = baMemberships.filter(m=>String(m.personId)===pid).sort((a,b2)=>b2.validUntil.localeCompare(a.validUntil));
-                      const latest = personMems[0];
-                      const isActive = latest && latest.validUntil >= todayStr();
-                      const daysLeft = latest ? Math.round((new Date(latest.validUntil)-new Date())/(1000*60*60*24)) : 0;
-                      return (
-                        <div key={pid} style={{ background:isActive?T.success+"16":T.danger+"16",border:`1px solid ${isActive?T.success:T.danger}33`,borderRadius:12,padding:"10px 14px" }}>
-                          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                            <span style={{ color:isActive?T.success:T.danger,fontSize:12,fontWeight:800 }}>{isActive?"✅":"⚠️"} {personName}</span>
-                            <span style={{ color:T.sub,fontSize:11 }}>{isActive?`Until ${formatShortDate(latest.validUntil)||latest.validUntil} (${daysLeft}d)`:"Lapsed"}</span>
-                          </div>
-                          {!isActive&&latest&&(
-                            <div style={{ marginTop:8 }}>
-                              <div style={{ color:T.sub,fontSize:10,marginBottom:6 }}>Last: {formatShortDate(latest.validUntil)||latest.validUntil}</div>
-                              <button onClick={()=>{ setActiveBillerForAction(null); setDefaultAddType("expense"); setShowAdd(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>🔄 Renew {personName}</button>
-                            </div>
-                          )}
-                          <div style={{ marginTop:4,display:"flex",flexWrap:"wrap",gap:4 }}>
-                            {personMems.slice(0,3).map(m=>(<span key={m.id} style={{ background:T.pill,borderRadius:20,padding:"1px 8px",fontSize:9,color:T.sub }}>{formatShortDate(m.validFrom)||m.validFrom} → {formatShortDate(m.validUntil)||m.validUntil}</span>))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>);
-                })()}
                 {/* Actions */}
                 <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
                   {(actionType==="membership"||actionType==="hybrid")&&(
@@ -13443,22 +13413,110 @@ function AppContent({ onLock }) {
                   {(actionType==="bill"||actionType==="hybrid")&&(
                     <button onClick={()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); setActiveBillerForAction(null); }} style={{ background:T.info+"22",border:`1px solid ${T.info}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>📄 Add Bill</button>
                   )}
-                  <button onClick={()=>{ setAttachExpensesFor(ba); }} style={{ background:T.purple+"22",border:`1px solid ${T.purple}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.purple,fontFamily:"Nunito,sans-serif" }}>🔗 Attach Past Expenses</button>
+                  {/* Attach Past Expenses is for reconciling bill-style payments already recorded elsewhere —
+                      doesn't apply to pure memberships, which are self-contained payment+allocation records. */}
+                  {actionType!=="membership"&&(
+                    <button onClick={()=>{ setAttachExpensesFor(ba); }} style={{ background:T.purple+"22",border:`1px solid ${T.purple}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.purple,fontFamily:"Nunito,sans-serif" }}>🔗 Attach Past Expenses</button>
+                  )}
                 </div>
-                {/* History */}
-                {baMemberships.length>0&&(
+                {/* Membership: Hero Card, Renewal banner, Timeline, Lifetime Analytics */}
+                {actionType==="membership"&&baMemberships.length>0&&(()=>{
+                  const sorted = [...baMemberships].sort((a,b2)=>b2.createdAt-a.createdAt);
+                  const today = todayStr();
+                  // "Current" = the payment whose active period covers today, or failing that, whichever
+                  // payment's most recent period is closest to today (covers both "mid-membership" and
+                  // "just expired, not yet renewed" states).
+                  const withCurrentPeriod = sorted.map(m=>({ m, period:getCurrentPeriod(m) })).filter(x=>x.period);
+                  const hero = withCurrentPeriod.find(x=>x.period.from<=today&&today<=x.period.to) || withCurrentPeriod[0];
+                  const heroPeriod = hero?.period;
+                  const daysTotal = heroPeriod ? Math.max(1,Math.round((new Date(heroPeriod.to)-new Date(heroPeriod.from))/86400000)+1) : 0;
+                  const daysLeft = heroPeriod ? Math.round((new Date(heroPeriod.to)-new Date())/86400000) : null;
+                  const daysElapsed = heroPeriod ? Math.max(0,daysTotal-(daysLeft||0)) : 0;
+                  const isActive = daysLeft!==null && daysLeft>=0;
+                  const heroColor = daysLeft===null ? T.sub : daysLeft<0 ? T.danger : daysLeft<=15 ? T.warn : T.success;
+                  // Lifetime analytics — across every payment ever recorded for this account.
+                  const allPeriods = sorted.flatMap(m=>getMembershipPeriods(m));
+                  const lifetimeSpend = sorted.reduce((s,m)=>s+Number(m.amount||0),0);
+                  const firstStart = allPeriods.length ? [...allPeriods].sort((a,b2)=>(a.from||"").localeCompare(b2.from||""))[0].from : null;
+                  const totalDaysCovered = allPeriods.reduce((s,p)=>s+Math.max(0,Math.round((new Date(p.to)-new Date(p.from))/86400000)+1),0);
+                  const avgMonthlyCost = totalDaysCovered>0 ? Math.round(lifetimeSpend/(totalDaysCovered/30)) : 0;
+                  return (
+                    <div style={{ marginBottom:16 }}>
+                      {hero&&(
+                        <div style={{ background:`linear-gradient(135deg,${heroColor}12,${T.card})`,border:`1px solid ${heroColor}44`,borderRadius:16,padding:16,marginBottom:12 }}>
+                          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                            <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{getBillerIcon(ba.type)} {ba.provider||ba.name}</div>
+                            <div style={{ background:heroColor+"22",border:`1px solid ${heroColor}44`,borderRadius:20,padding:"3px 10px" }}>
+                              <span style={{ color:heroColor,fontSize:10,fontWeight:800 }}>{isActive?"Active":"Expired"}</span>
+                            </div>
+                          </div>
+                          <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>{formatShortDate(heroPeriod.from)||heroPeriod.from} → {formatShortDate(heroPeriod.to)||heroPeriod.to}</div>
+                          <div style={{ color:heroColor,fontSize:13,fontWeight:800,marginBottom:6 }}>{daysLeft===null?"":daysLeft>=0?`${daysLeft} Days Left`:`Expired ${Math.abs(daysLeft)} days ago`}</div>
+                          <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:8 }}>
+                            <div style={{ height:"100%",width:`${Math.min(100,Math.round(daysElapsed/daysTotal*100))}%`,background:heroColor,borderRadius:3 }}/>
+                          </div>
+                          <div style={{ color:T.sub,fontSize:11 }}>Paid {sym}{fmt(hero.m.amount)}</div>
+                          {daysLeft!==null&&daysLeft>=0&&daysLeft<=15&&(
+                            <button onClick={()=>setShowAddMembership(true)} style={{ marginTop:10,width:"100%",background:heroColor,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>⚠️ Expires in {daysLeft} days — Renew</button>
+                          )}
+                        </div>
+                      )}
+
+                      <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>TIMELINE</div>
+                      <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
+                        {sorted.slice(0,6).map(m=>{
+                          const period = getCurrentPeriod(m);
+                          const isCurrentRow = hero && m.id===hero.m.id;
+                          return (
+                            <div key={m.id} onClick={()=>setViewingMembership(m)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"10px 12px",cursor:"pointer" }}>
+                              <div>
+                                <div style={{ color:isCurrentRow?T.success:T.text,fontSize:11,fontWeight:800 }}>{isCurrentRow?"Current":"Completed"} · {period?.label||"Payment"}</div>
+                                <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(period?.from)||period?.from} → {formatShortDate(period?.to)||period?.to}</div>
+                              </div>
+                              <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(m.amount)}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>LIFETIME</div>
+                      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                        <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+                          <div style={{ color:T.accent,fontSize:15,fontWeight:900 }}>{sym}{fmt(lifetimeSpend)}</div>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>LIFETIME SPEND</div>
+                        </div>
+                        <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+                          <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{firstStart?formatShortDate(firstStart)||firstStart:"—"}</div>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>FIRST JOINED</div>
+                        </div>
+                        <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+                          <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{sorted.length}</div>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>PAYMENTS MADE</div>
+                        </div>
+                        <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+                          <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{sym}{fmt(avgMonthlyCost)}</div>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>AVG MONTHLY COST</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+                {/* Bills/hybrid accounts keep the simple flat history list */}
+                {actionType!=="membership"&&baMemberships.length>0&&(
                   <div style={{ marginBottom:12 }}>
                     <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>MEMBERSHIP HISTORY</div>
-                    {baMemberships.sort((a,b2)=>b2.createdAt-a.createdAt).slice(0,5).map(m=>(
+                    {baMemberships.sort((a,b2)=>b2.createdAt-a.createdAt).slice(0,5).map(m=>{
+                      const period = getCurrentPeriod(m);
+                      return (
                       <div key={m.id} onClick={()=>setViewingMembership(m)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
                         <div>
-                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{people.find(p=>String(p.id)===String(m.personId))?.name||"Me"} · {m.cycle}</div>
-                          <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(m.validFrom)||m.validFrom} to {formatShortDate(m.validUntil)||m.validUntil}{m.graceDays>0?` (+${m.graceDays}d grace)`:""}</div>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{people.find(p=>String(p.id)===String(m.personId))?.name||"Me"}</div>
+                          <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(period?.from)||period?.from} to {formatShortDate(period?.to)||period?.to}</div>
                           {m.paidDate&&<div style={{ color:T.sub,fontSize:10 }}>Paid: {formatShortDate(m.paidDate)||m.paidDate}</div>}
                         </div>
                         <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(m.amount)}</div>
                       </div>
-                    ))}
+                    );})}
                   </div>
                 )}
                 {/* Edit / Delete biller account */}
