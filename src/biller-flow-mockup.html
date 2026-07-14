@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Biller flow — mockup</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800;900&display=swap');
+  :root{
+    --bg:#08080f; --card:#0f0f1a; --border:#1a1a2e; --text:#e8e4dc;
+    --accent:#f0a500; --accentSoft:rgba(240,165,0,0.1); --sub:#5a5a7a;
+    --success:#22c55e; --danger:#ef4444; --input:#0b0b18; --nav:#0a0a16;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:#050508;font-family:'Nunito',sans-serif;color:var(--text);
+    display:flex;gap:24px;justify-content:center;flex-wrap:wrap;padding:24px;}
+  .phone{width:390px;background:var(--bg);border-radius:14px;overflow:hidden;}
+  .screenlabel{color:var(--sub);font-size:12px;font-weight:800;text-align:center;margin-bottom:8px;letter-spacing:1px;text-transform:uppercase;}
+  .col{display:flex;flex-direction:column;align-items:center;}
+  .topbar{background:var(--nav);border-bottom:1px solid var(--border);padding:14px 18px;
+    font-size:16px;font-weight:900;display:flex;align-items:center;gap:10px;}
+  .content{padding:16px;display:flex;flex-direction:column;gap:14px;}
+  .label{color:var(--sub);font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;}
+  .field{background:var(--input);border:1px solid var(--border);border-radius:10px;padding:11px 13px;
+    color:var(--text);font-size:13px;margin-top:6px;}
+  .field.placeholder{color:var(--sub);}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;}
+  .chip{background:none;border:1px solid var(--border);border-radius:20px;padding:6px 13px;
+    font-size:12px;font-weight:700;color:var(--sub);}
+  .chip.sel{background:var(--accentSoft);border:1px solid var(--accent);color:var(--accent);}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .btn{background:var(--accent);border:none;border-radius:12px;padding:13px;text-align:center;
+    color:#000;font-weight:900;font-size:14px;margin-top:6px;}
+  .servicesgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:0 16px;}
+  .service{display:flex;flex-direction:column;align-items:center;gap:4px;}
+  .serviceicon{width:52px;height:52px;border-radius:14px;background:var(--card);border:1px solid var(--border);
+    display:flex;align-items:center;justify-content:center;font-size:22px;}
+  .serviceicon.sel{border:2px solid var(--accent);background:var(--accentSoft);}
+  .servicename{font-size:10px;color:var(--sub);font-weight:700;text-align:center;}
+  .note{color:var(--sub);font-size:11px;text-align:center;margin-top:2px;}
+</style>
+</head>
+<body>
+
+<div class="col">
+  <div class="screenlabel">1 — Select biller (existing screen)</div>
+  <div class="phone">
+    <div class="topbar">All Services</div>
+    <div class="content">
+      <div class="label" style="padding:0 0 4px;">Utilities</div>
+      <div class="servicesgrid">
+        <div class="service"><div class="serviceicon sel">⚡</div><div class="servicename">Electricity</div></div>
+        <div class="service"><div class="serviceicon">💧</div><div class="servicename">Water</div></div>
+        <div class="service"><div class="serviceicon">🔥</div><div class="servicename">Gas</div></div>
+        <div class="service"><div class="serviceicon">📱</div><div class="servicename">Mobile</div></div>
+      </div>
+      <div class="note">Tapping "Electricity" here →</div>
+    </div>
+  </div>
+</div>
+
+<div class="col">
+  <div class="screenlabel">2 — Add Biller Account</div>
+  <div class="phone">
+    <div class="topbar">⚡ Add Electricity Account</div>
+    <div class="content">
+      <div>
+        <div class="label">Provider</div>
+        <div class="field placeholder">e.g. Goa Electricity Department</div>
+      </div>
+      <div>
+        <div class="label">Nickname (this account)</div>
+        <div class="field placeholder">e.g. Flat 201 / UG 2</div>
+      </div>
+      <div>
+        <div class="label">Biller Account Number</div>
+        <div class="field placeholder">e.g. 60007283xxx</div>
+      </div>
+      <div>
+        <div class="label">Attribute To (optional)</div>
+        <div class="chips">
+          <div class="chip">👤 Person</div>
+          <div class="chip sel">🏠 PariNidhi</div>
+          <div class="chip">👥 UG 2</div>
+        </div>
+      </div>
+      <div class="btn">Save Account</div>
+    </div>
+  </div>
+</div>
+
+<div class="col">
+  <div class="screenlabel">3 — Add Bill</div>
+  <div class="phone">
+    <div class="topbar">📄 Add Bill</div>
+    <div class="content">
+      <div>
+        <div class="label">Biller</div>
+        <div class="field">⚡ Electricity</div>
+      </div>
+      <div>
+        <div class="label">Account</div>
+        <div class="field">Flat 201 — Goa Electricity Department</div>
+      </div>
+      <div class="grid2">
+        <div><div class="label">Bill Date</div><div class="field placeholder">DD/MM/YYYY</div></div>
+        <div><div class="label">Due Date</div><div class="field placeholder">DD/MM/YYYY</div></div>
+      </div>
+      <div class="grid2">
+        <div><div class="label">From Date</div><div class="field placeholder">DD/MM/YYYY</div></div>
+        <div><div class="label">To Date</div><div class="field placeholder">DD/MM/YYYY</div></div>
+      </div>
+      <div class="grid2">
+        <div><div class="label">Amount</div><div class="field placeholder">₹0</div></div>
+        <div><div class="label">Bill Number</div><div class="field placeholder">Optional</div></div>
+      </div>
+      <div class="btn">Save Bill</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

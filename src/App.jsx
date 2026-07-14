@@ -2871,6 +2871,12 @@ function AppContent({ onLock }) {
     const [linkMemberPersonId, setLinkMemberPersonId] = useState("self");
     const linkedBA = billerLinkId ? billerAccounts.find(b=>b.id===billerLinkId) : null;
     const linkedBAType = linkedBA ? getBillerActionType(linkedBA.type) : null;
+    useEffect(()=>{
+      // No separate picker shown anymore — auto-derive from whichever account gets linked, since the
+      // account's own Attribute To already identifies who this is for.
+      if(linkedBA?.attributeType==="person" && linkedBA?.attributedTo) setLinkMemberPersonId(String(linkedBA.attributedTo));
+      else setLinkMemberPersonId("self");
+    },[linkedBA?.id]);
     const cycleMonthsMap = { monthly:1, quarterly:3, halfyearly:6, annual:12 };
     const linkValidUntil = linkValidFrom && linkBulkMonths ? (()=>{ const d=new Date(linkValidFrom); d.setMonth(d.getMonth()+Number(linkBulkMonths)*(cycleMonthsMap[linkCycle]||1)); d.setDate(d.getDate()+Number(linkGraceDays||0)-1); return d.toISOString().split("T")[0]; })() : "";
     const [imageBase64, setImageBase64] = useState(sourceTxn?.imageBase64 || null);
@@ -5279,11 +5285,7 @@ function AppContent({ onLock }) {
                 {showMembershipPanel&&linkedBAType==="membership"&&(
                   <div style={{ display:"flex",flexDirection:"column",gap:10,background:T.input,borderRadius:10,padding:"10px" }}>
                     <div>
-                      <span style={lbl}>Member</span>
-                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                        <button onClick={()=>setLinkMemberPersonId("self")} style={{ background:linkMemberPersonId==="self"?T.accent+"22":"none",border:`1px solid ${linkMemberPersonId==="self"?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkMemberPersonId==="self"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>Me</button>
-                        {people.map(p=>(<button key={p.id} onClick={()=>setLinkMemberPersonId(String(p.id))} style={{ background:linkMemberPersonId===String(p.id)?T.accent+"22":"none",border:`1px solid ${linkMemberPersonId===String(p.id)?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkMemberPersonId===String(p.id)?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>))}
-                      </div>
+                      <div style={{ color:T.sub,fontSize:11 }}>For <span style={{ color:T.text,fontWeight:800 }}>{linkMemberPersonId==="self"?"Me":(getPerson(linkMemberPersonId)?.name||linkedBA?.name)}</span> — {linkedBA?.name}</div>
                     </div>
                     <div style={{ display:"flex",gap:6 }}>
                       {["monthly","quarterly","halfyearly","annual"].map(c=>(<button key={c} onClick={()=>setLinkCycle(c)} style={{ flex:1,background:linkCycle===c?T.accent+"22":"none",border:`1px solid ${linkCycle===c?T.accent:T.border}`,borderRadius:10,padding:"5px 2px",cursor:"pointer",fontSize:9,fontWeight:700,color:linkCycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>))}
@@ -12620,7 +12622,11 @@ function AppContent({ onLock }) {
   // -- ADD MEMBERSHIP MODAL --------------------------------------------------
   const AddMembershipModal = ({ billerAccount, existing, onClose }) => {
     const isEdit = !!existing;
-    const [memberPersonId, setMemberPersonId] = useState(existing?.personId||"self");
+    // No separate "who is this for" picker — the account itself (via its Attribute To, set when the
+    // account was created) already identifies who this membership belongs to. Only fall back to "self"
+    // when the account isn't attributed to a specific person.
+    const derivedPersonId = (billerAccount.attributeType==="person" && billerAccount.attributedTo) ? String(billerAccount.attributedTo) : "self";
+    const [memberPersonId] = useState(existing?.personId||derivedPersonId);
     const [amount, setAmount] = useState(existing?.amount?String(existing.amount):"");
     const [cycle, setCycle] = useState(existing?.cycle||"monthly");
     const [validFrom, setValidFrom] = useState(existing?.validFrom||todayStr());
@@ -12700,13 +12706,7 @@ function AppContent({ onLock }) {
           </div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
             <div>
-              <span style={lbl}>Member</span>
-              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                <button onClick={()=>setMemberPersonId("self")} style={{ background:memberPersonId==="self"?T.accent+"22":"none",border:`1px solid ${memberPersonId==="self"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:memberPersonId==="self"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>Me</button>
-                {people.map(p=>(
-                  <button key={p.id} onClick={()=>setMemberPersonId(String(p.id))} style={{ background:memberPersonId===String(p.id)?T.accent+"22":"none",border:`1px solid ${memberPersonId===String(p.id)?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:memberPersonId===String(p.id)?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
-                ))}
-              </div>
+              <div style={{ color:T.sub,fontSize:11 }}>For <span style={{ color:T.text,fontWeight:800 }}>{memberPersonId==="self"?"Me":(getPerson(memberPersonId)?.name||billerAccount.name)}</span> — {billerAccount.name}</div>
             </div>
             <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.input,borderRadius:10,padding:"8px 12px" }}>
               <div>
