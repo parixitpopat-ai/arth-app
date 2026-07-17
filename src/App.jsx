@@ -10674,8 +10674,21 @@ function AppContent({ onLock }) {
           <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
           <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>Categories</div>
         </div>
-        {cats.map(cat=>{
-          const spent=expenses.filter(e=>e.catId===cat.id).reduce((sum,expense)=>sum+getNetExpenseAmount(expense),0);
+        {(()=>{
+          // Split each expense's amount evenly across every category it's tagged with — a
+          // transaction tagged to 2 categories should show half its amount under each, not its
+          // full amount under only one (this screen previously matched on `catId` alone and
+          // ignored `catIds`, so multi-category transactions silently vanished from all but
+          // whichever category happened to be in `catId`).
+          const catSpendTotals = {};
+          expenses.forEach(e=>{
+            const amt = getNetExpenseAmount(e);
+            if(amt<=0) return;
+            const tCats = (e.catIds||[e.catId]).filter(Boolean);
+            tCats.forEach(cid=>{ catSpendTotals[cid] = (catSpendTotals[cid]||0) + amt/tCats.length; });
+          });
+          return cats.map(cat=>{
+          const spent=catSpendTotals[cat.id]||0;
           const pct=cat.budget?Math.min(100,Math.round(spent/cat.budget*100)):0;
           return (
             <div key={cat.id} style={card}>
@@ -10742,7 +10755,7 @@ function AppContent({ onLock }) {
               )}
             </div>
           );
-        })}
+        });})()}
         <div style={{ ...card,border:`1px dashed ${T.border}` }}>
           <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:14 }}>➕ New Category</div>
           <div style={{ display:"flex",gap:10,alignItems:"center",marginBottom:12 }}>
@@ -10909,6 +10922,26 @@ function AppContent({ onLock }) {
     const [budgetSubTab, setBudgetSubTab] = useState("dashboard");
     const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
     const [expandedBudgetCatId, setExpandedBudgetCatId] = useState(null);
+    // Local drafts for the person/group budget inputs below. Typing into these must NOT call
+    // setPeople/setGroups on every keystroke — BudgetPage is a nested component defined inside
+    // the main app body, so any top-level state change (setPeople/setGroups) redefines BudgetPage
+    // as a "new" function each render, forcing React to remount the whole subtree and drop input
+    // focus after one character (the exact bug class flagged in the handoff notes). Committing
+    // only on blur/Enter — same pattern as the Annual Budget input above — avoids that entirely.
+    const [personBudgetDrafts, setPersonBudgetDrafts] = useState({});
+    const [groupBudgetDrafts, setGroupBudgetDrafts] = useState({});
+    const commitPersonBudget = (p) => {
+      if(!(p.id in personBudgetDrafts)) return;
+      const val = parseMoney(personBudgetDrafts[p.id]||"")||0;
+      setPeople(prev=>prev.map(x=>x.id===p.id?{...x,spendBudgetOverrides:{...(x.spendBudgetOverrides||{}),[viewMonth]:val}}:x));
+      setPersonBudgetDrafts(prev=>{ const n={...prev}; delete n[p.id]; return n; });
+    };
+    const commitGroupBudget = (g) => {
+      if(!(g.id in groupBudgetDrafts)) return;
+      const val = parseMoney(groupBudgetDrafts[g.id]||"")||0;
+      setGroups(prev=>prev.map(x=>x.id===g.id?{...x,manualLimitOverrides:{...(x.manualLimitOverrides||{}),[viewMonth]:val}}:x));
+      setGroupBudgetDrafts(prev=>{ const n={...prev}; delete n[g.id]; return n; });
+    };
     const fy = selectedBudgetFY;
     const fyLabel = `FY ${fy}–${fy+1}`;
     const now = new Date();
@@ -11217,13 +11250,17 @@ function AppContent({ onLock }) {
         {budgetSubTab==="insights"&&<div style={{ margin:"0 -16px" }}><StatsPage embedded/></div>}
 
         {budgetSubTab==="budgets"&&(<>
-        {/* Per-person budgets — reads/writes the same spendBudget field as each person's own profile,
-            not a separate object, so the two can never disagree. Dependants only, matching the
-            restriction already enforced when setting this on the person's own profile. */}
+        {/* Per-person budgets — the flat `spendBudget` field (edited on the person's own profile)
+            is the default; `spendBudgetOverrides[monthKey]` lets a specific month deviate from it,
+            the same default+override pattern the Annual Budget already uses via `monthOverrides`.
+            Falls back to the flat field when no override exists for the selected month. */}
         <div style={{ marginTop:20 }}>
-          <div style={{ color:T.text,fontSize:15,fontWeight:900,marginBottom:12 }}>👤 Per-Person Budgets</div>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12 }}>
+            <div style={{ color:"#2563eb",fontSize:15,fontWeight:900 }}>👤 Per-Person Budgets</div>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
+          </div>
           {people.filter(p=>!p.isMe && p.personType==="dependant").map(p=>{
-            const monthBudget = Number(p.spendBudget||0);
+            const monthBudget = Number(p.spendBudgetOverrides?.[viewMonth] ?? p.spendBudget ?? 0);
             const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
             const pct = monthBudget>0 ? Math.min(100,Math.round(monthSpend/monthBudget*100)) : 0;
             const isOver = monthSpend > monthBudget && monthBudget > 0;
@@ -11232,7 +11269,7 @@ function AppContent({ onLock }) {
                 <div onClick={()=>{ setExpandedBudgetPersonId(prev=>prev===p.id?null:p.id); setExpandedBudgetCatId(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,cursor:"pointer" }}>
                   <div style={{ display:"flex",alignItems:"center",gap:8 }}>
                     <span style={{ color:T.sub,fontSize:11 }}>{expandedBudgetPersonId===p.id?"▾":"▸"}</span>
-                    <span style={{ fontSize:18 }}>{p.emoji}</span>
+                    <div style={{ width:30,height:30,borderRadius:"50%",background:"#eff6ff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{p.emoji}</div>
                     <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{p.name}</div>
                   </div>
                   <div style={{ display:"flex",alignItems:"center",gap:6 }} onClick={e=>e.stopPropagation()}>
@@ -11240,20 +11277,22 @@ function AppContent({ onLock }) {
                     <input
                       style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
                       type="text" inputMode="decimal" placeholder="Budget"
-                      value={p.spendBudget?String(p.spendBudget):""}
-                      onChange={e=>{ const val=parseMoney(e.target.value)||0; setPeople(prev=>prev.map(x=>x.id===p.id?{...x,spendBudget:val}:x)); }}
+                      value={p.id in personBudgetDrafts ? personBudgetDrafts[p.id] : (monthBudget?String(monthBudget):"")}
+                      onChange={e=>{ const val=cleanMoneyInput(e.target.value); setPersonBudgetDrafts(prev=>({...prev,[p.id]:val})); }}
+                      onBlur={()=>commitPersonBudget(p)}
+                      onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); commitPersonBudget(p); e.currentTarget.blur(); } }}
                     />
-                    <span style={{ color:T.sub,fontSize:10 }}>/mo</span>
+                    <span style={{ color:T.sub,fontSize:10 }}>this mo.</span>
                   </div>
                 </div>
                 {monthBudget>0&&(
                   <>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4 }}>
                       <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(monthSpend)} of {sym}{fmt(monthBudget)}</span>
-                      <span style={{ color:isOver?T.danger:pct>80?T.warn:T.success,fontSize:13,fontWeight:900 }}>{pct}%</span>
+                      <span style={{ color:isOver?T.danger:"#2563eb",fontSize:13,fontWeight:900 }}>{pct}%</span>
                     </div>
                     <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
-                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:pct>80?T.warn:p.color||T.success,borderRadius:3 }}/>
+                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:"#2563eb",borderRadius:3 }}/>
                     </div>
                     {isOver&&<div style={{ textAlign:"right" }}><span style={{ color:T.danger,fontSize:10,fontWeight:700 }}>Over {sym}{fmtK(monthSpend-monthBudget)}</span></div>}
                   </>
@@ -11306,13 +11345,18 @@ function AppContent({ onLock }) {
               </div>
             );
           })}
+          <button onClick={()=>{ setTab("people"); setShowSettings(false); }} style={{ background:"none",border:"none",color:"#2563eb",fontSize:12,fontWeight:700,cursor:"pointer",padding:"6px 0",display:"flex",alignItems:"center",gap:4 }}>Manage People →</button>
         </div>
 
-        {/* Group budgets — reads/writes the same manualLimit field as each group's own profile */}
+        {/* Group budgets — flat `manualLimit` (edited on the group's own profile) is the default;
+            `manualLimitOverrides[monthKey]` lets a specific month deviate from it. */}
         <div style={{ marginTop:20,paddingBottom:80 }}>
-          <div style={{ color:T.text,fontSize:15,fontWeight:900,marginBottom:12 }}>👥 Group Budgets</div>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12 }}>
+            <div style={{ color:"#2563eb",fontSize:15,fontWeight:900 }}>👥 Group Budgets</div>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
+          </div>
           {groups.map(g=>{
-            const monthBudget = Number(g.manualLimit||0);
+            const monthBudget = Number(g.manualLimitOverrides?.[viewMonth] ?? g.manualLimit ?? 0);
             const oldStyle = thisMonthTxns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id)).reduce((s,t)=>s+Number(t.amount||0),0);
             const allocStyle = thisMonthTxns.filter(t=>t.type==="expense"&&t.groupId!==g.id&&t.tagGroup!==g.id&&t.taggedGroupId!==g.id&&t.groupAllocations?.some(ga=>ga.groupId===g.id)).reduce((s,t)=>s+Number(t.groupAllocations.find(ga=>ga.groupId===g.id)?.amount||0),0);
             const monthSpend = oldStyle + allocStyle;
@@ -11322,7 +11366,7 @@ function AppContent({ onLock }) {
               <div key={g.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,marginBottom:10,padding:"12px 14px" }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
                   <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                    <span style={{ fontSize:18 }}>{g.icon||"👥"}</span>
+                    <div style={{ width:30,height:30,borderRadius:10,background:"#eff6ff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{g.icon||"👥"}</div>
                     <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{g.name}</div>
                   </div>
                   <div style={{ display:"flex",alignItems:"center",gap:6 }}>
@@ -11330,20 +11374,22 @@ function AppContent({ onLock }) {
                     <input
                       style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
                       type="text" inputMode="decimal" placeholder="Budget"
-                      value={g.manualLimit?String(g.manualLimit):""}
-                      onChange={e=>{ const val=parseMoney(e.target.value)||0; setGroups(prev=>prev.map(x=>x.id===g.id?{...x,manualLimit:val}:x)); }}
+                      value={g.id in groupBudgetDrafts ? groupBudgetDrafts[g.id] : (monthBudget?String(monthBudget):"")}
+                      onChange={e=>{ const val=cleanMoneyInput(e.target.value); setGroupBudgetDrafts(prev=>({...prev,[g.id]:val})); }}
+                      onBlur={()=>commitGroupBudget(g)}
+                      onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); commitGroupBudget(g); e.currentTarget.blur(); } }}
                     />
-                    <span style={{ color:T.sub,fontSize:10 }}>/mo</span>
+                    <span style={{ color:T.sub,fontSize:10 }}>this mo.</span>
                   </div>
                 </div>
                 {monthBudget>0&&(
                   <>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4 }}>
                       <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(monthSpend)} of {sym}{fmt(monthBudget)}</span>
-                      <span style={{ color:isOver?T.danger:pct>80?T.warn:T.success,fontSize:13,fontWeight:900 }}>{pct}%</span>
+                      <span style={{ color:isOver?T.danger:"#2563eb",fontSize:13,fontWeight:900 }}>{pct}%</span>
                     </div>
                     <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
-                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:pct>80?T.warn:T.success,borderRadius:3 }}/>
+                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:"#2563eb",borderRadius:3 }}/>
                     </div>
                     {isOver&&<div style={{ textAlign:"right" }}><span style={{ color:T.danger,fontSize:10,fontWeight:700 }}>Over {sym}{fmtK(monthSpend-monthBudget)}</span></div>}
                   </>
@@ -11351,6 +11397,7 @@ function AppContent({ onLock }) {
               </div>
             );
           })}
+          <button onClick={()=>{ setTab("people"); setShowSettings(false); }} style={{ background:"none",border:"none",color:"#2563eb",fontSize:12,fontWeight:700,cursor:"pointer",padding:"6px 0",display:"flex",alignItems:"center",gap:4 }}>Manage Groups →</button>
         </div>
         </>)}
       </div>
@@ -12058,7 +12105,6 @@ function AppContent({ onLock }) {
   const StatsPage = ({ embedded = false } = {}) => {
     const [statsTab, setStatsTab] = useState("overview");
     const [statsPeriod, setStatsPeriod] = useState("30D");
-    const [byPersonId, setByPersonId] = useState(people.find(p=>p.isMe)?.id||"__me__");
     const [expandedCat, setExpandedCat] = useState(null);
     const [overviewSeg, setOverviewSeg] = useState("summary");
     const [expandedMonthKey, setExpandedMonthKey] = useState(null);
@@ -12246,67 +12292,13 @@ function AppContent({ onLock }) {
           {statsTab==="invest"&&<div style={{ margin:"-16px" }}><Investments onClose={null}/></div>}
           {statsTab==="overview"&&(<>
           <div style={{ display:"flex",background:T.input,borderRadius:12,padding:3,marginBottom:4 }}>
-            {[["person","👤 Person"],["month","📅 Month"],["summary","📊 Summary"]].map(([id,label])=>(
+            {[["month","📅 Month"],["summary","📊 Summary"]].map(([id,label])=>(
               <button key={id} onClick={()=>setOverviewSeg(id)} style={{ flex:1,textAlign:"center",padding:"8px 4px",fontSize:12,fontWeight:800,borderRadius:9,border:"none",cursor:"pointer",background:overviewSeg===id?T.accentSoft:"none",color:overviewSeg===id?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
             ))}
           </div>
-          {overviewSeg==="person"&&(
-            <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
-              <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
-                {people.filter(p=>p.isMe||p.personType==="dependant").map(p=>(
-                  <button key={p.id} onClick={()=>{ setByPersonId(p.id); setExpandedCat(null); }} style={{ background:byPersonId===p.id?T.accentSoft:"none",border:`1px solid ${byPersonId===p.id?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:byPersonId===p.id?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
-                ))}
-              </div>
-              {(()=>{
-                const person = getPerson(byPersonId);
-                const catTotals = {};
-                const catTxns = {};
-                thisMonthTxns.filter(t=>t.type==="expense").forEach(t=>{
-                  const amt = getPersonAttributedAmount(t,byPersonId);
-                  if(amt<=0) return;
-                  const tCats = (t.catIds||[t.catId]).filter(Boolean);
-                  tCats.forEach(cid=>{
-                    const share = amt/tCats.length;
-                    catTotals[cid] = (catTotals[cid]||0)+share;
-                    if(!catTxns[cid]) catTxns[cid]=[];
-                    catTxns[cid].push({t,share});
-                  });
-                });
-                const rows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt, txns:catTxns[cid] })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
-                return (
-                  <div style={{ background:T.card,borderRadius:16,padding:16,border:`1px solid ${T.border}` }}>
-                    <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Category Breakdown — {person.name}</div>
-                    <div style={{ color:T.sub,fontSize:12,marginTop:2,marginBottom:14 }}>This month, tap a category to see the transactions</div>
-                    {rows.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"12px 0" }}>No spend recorded yet this month.</div>}
-                    {rows.map(r=>(
-                      <div key={r.cat.id}>
-                        <div onClick={()=>setExpandedCat(prev=>prev===r.cat.id?null:r.cat.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
-                          <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{r.cat.icon} {r.cat.name}</span>
-                          <span style={{ display:"flex",alignItems:"center",gap:6 }}>
-                            <span style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(r.amt)}</span>
-                            <span style={{ color:T.sub,fontSize:10 }}>{expandedCat===r.cat.id?"▾":"▸"}</span>
-                          </span>
-                        </div>
-                        {expandedCat===r.cat.id&&(
-                          <div style={{ background:T.input,borderRadius:10,padding:"6px 12px",marginBottom:6 }}>
-                            {r.txns.map(({t,share},i)=>(
-                              <div key={i} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:i<r.txns.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
-                                <div>
-                                  <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{t.merchant||t.who||t.desc||"Expense"}</div>
-                                  <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(t.date)||t.date}</div>
-                                </div>
-                                <span style={{ color:T.sub,fontSize:12,fontWeight:700 }}>{sym}{fmt(share)}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-          )}
+          {/* Per-person category breakdown moved to Budget → Budgets tab, which now also has an
+              editable per-month budget and the same tap-to-drill-down transaction list — keeping
+              one canonical place for "spend by person" instead of two overlapping ones. */}
           {overviewSeg==="month"&&(()=>{
             const monthsList = [];
             const nowD = new Date();
