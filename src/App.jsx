@@ -1754,6 +1754,35 @@ function AppContent({ onLock }) {
     }
     return [];
   },[]);
+  // Splits one membership payment's total amount evenly across every day it covers, then buckets
+  // those daily slices by calendar month — the "accrual" view of a payment (e.g. a quarterly
+  // payment made in May shows as recognized expense in May/Jun/Jul/Aug, not all in May). Purely
+  // derived from `periods`, no separate ledger to keep in sync.
+  const getMembershipMonthlyRecognition = useCallback((m) => {
+    const periods = getMembershipPeriods(m);
+    const totalAmount = periods.reduce((s,p)=>s+Number(p.amount||0),0) || Number(m.amount||0);
+    const allDays = [];
+    periods.forEach(p=>{
+      if(!p.from||!p.to) return;
+      const d = new Date(p.from);
+      const end = new Date(p.to);
+      while(d<=end){ allDays.push(d.toISOString().split("T")[0]); d.setDate(d.getDate()+1); }
+    });
+    const totalDays = allDays.length || 1;
+    const perDayAmt = totalAmount/totalDays;
+    const todayStrV = todayStr();
+    const monthMap = {};
+    allDays.forEach(dateStr=>{
+      const mk = dateStr.slice(0,7);
+      if(!monthMap[mk]) monthMap[mk] = { recognized:0, total:0 };
+      monthMap[mk].total += perDayAmt;
+      if(dateStr<=todayStrV) monthMap[mk].recognized += perDayAmt;
+    });
+    const months = Object.entries(monthMap).sort(([a],[b])=>a.localeCompare(b)).map(([key,v])=>({ key, label:new Date(key+"-01").toLocaleString("en-IN",{month:"short",year:"2-digit"}), recognized:Math.round(v.recognized), total:Math.round(v.total) }));
+    const recognizedTillDate = Math.min(totalAmount, months.reduce((s,mo)=>s+mo.recognized,0));
+    const remainingAsset = Math.max(0, totalAmount-recognizedTillDate);
+    return { months, totalAmount, recognizedTillDate, remainingAsset, dailyExpense:perDayAmt, totalDays };
+  },[getMembershipPeriods]);
   // The period that's active today, or if none is active, the most recent one (past or future).
   // "Active" accounts for each period's own grace days, not just its nominal `to` date.
   const getCurrentPeriod = useCallback((m) => {
@@ -10877,7 +10906,7 @@ function AppContent({ onLock }) {
 
   // ── BUDGET PAGE ──────────────────────────────────────────────────────────────
   const BudgetPage = ({ embedded = false, onBack }) => {
-    const [budgetSubTab, setBudgetSubTab] = useState("overview");
+    const [budgetSubTab, setBudgetSubTab] = useState("dashboard");
     const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
     const [expandedBudgetCatId, setExpandedBudgetCatId] = useState(null);
     const fy = selectedBudgetFY;
@@ -10914,13 +10943,176 @@ function AppContent({ onLock }) {
           <div style={{ color:T.text,fontSize:20,fontWeight:900,flex:1 }}>💰 Budget</div>
         </div>
 
-        <div style={{ display:"flex",gap:0,borderBottom:`1px solid ${T.border}`,marginBottom:14 }}>
-          {[["overview","Overview"],["insights","Insights"],["budgets","Budgets"]].map(id=>(
-            <button key={id[0]} onClick={()=>setBudgetSubTab(id[0])} style={{ flex:1,textAlign:"center",background:"none",border:"none",padding:"10px 4px",fontSize:13,fontWeight:800,cursor:"pointer",color:budgetSubTab===id[0]?T.accent:T.sub,borderBottom:budgetSubTab===id[0]?`2px solid ${T.accent}`:"2px solid transparent" }}>{id[1]}</button>
+        <div style={{ display:"flex",gap:0,borderBottom:`1px solid ${T.border}`,marginBottom:14,overflowX:"auto" }}>
+          {[["dashboard","Dashboard"],["overview","Annual"],["insights","Insights"],["budgets","Budgets"]].map(id=>(
+            <button key={id[0]} onClick={()=>setBudgetSubTab(id[0])} style={{ flex:1,textAlign:"center",background:"none",border:"none",padding:"10px 4px",fontSize:13,fontWeight:800,cursor:"pointer",color:budgetSubTab===id[0]?T.accent:T.sub,borderBottom:budgetSubTab===id[0]?`2px solid ${T.accent}`:"2px solid transparent",whiteSpace:"nowrap" }}>{id[1]}</button>
           ))}
         </div>
 
+        {budgetSubTab==="dashboard"&&(()=>{
+          const [yy,mm] = viewMonth.split("-").map(Number);
+          const baseMonthly = monthOverrides[viewMonth] || Math.round(Number(annualBudget||0)/12);
+          const prevMonthKey = mm===1 ? `${yy-1}-12` : `${yy}-${String(mm-1).padStart(2,"0")}`;
+          const dashMonthly = (()=>{
+            if(!budgetCarryForward) return baseMonthly;
+            const prevBudget = monthOverrides[prevMonthKey] || Math.round(Number(annualBudget||0)/12);
+            const prevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(prevMonthKey)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
+            return Math.max(0, baseMonthly + (prevBudget-prevSpend));
+          })();
+          const dashSpend = myActual;
+          const dashRemaining = dashMonthly - dashSpend;
+          const dashPct = dashMonthly>0 ? Math.min(100,Math.round(dashSpend/dashMonthly*100)) : (dashSpend>0?100:0);
+          const dashLeftDays = daysLeft(viewMonth);
+          const dashSafePerDay = dashMonthly>0 ? Math.max(0,Math.round(dashRemaining/Math.max(1,dashLeftDays))) : null;
+
+          // Projected month end — extrapolates the current daily average pace across the full month.
+          const daysInMonth = new Date(yy,mm,0).getDate();
+          const nowD = new Date();
+          const isCurrentMonth = viewMonth===`${nowD.getFullYear()}-${String(nowD.getMonth()+1).padStart(2,"0")}`;
+          const daysElapsed = isCurrentMonth ? nowD.getDate() : daysInMonth;
+          const dailyPace = daysElapsed>0 ? dashSpend/daysElapsed : 0;
+          const projectedMonthEnd = Math.round(dailyPace*daysInMonth);
+          const isProjectedOver = dashMonthly>0 && projectedMonthEnd>dashMonthly;
+          const projectedMarginPct = dashMonthly>0 ? Math.round(((dashMonthly-projectedMonthEnd)/dashMonthly)*100) : 0;
+          const healthColor = isProjectedOver ? T.danger : projectedMarginPct<10 ? T.warn : T.success;
+          const healthLabel = isProjectedOver ? "Over Budget" : projectedMarginPct<10 ? "Cutting It Close" : "On Track";
+          const healthNote = isProjectedOver ? `Projected to exceed budget by ${sym}${fmt(projectedMonthEnd-dashMonthly)}` : `${Math.abs(projectedMarginPct)}% ${projectedMarginPct>=0?"under":"over"} budget at this pace`;
+
+          // Where Money Went — spend per category this month vs that category's own budget field.
+          const catSpendMap = {};
+          expenses.forEach(t=>{
+            const amt = getMyExpenseAmount(t);
+            if(amt<=0) return;
+            const tCats = (t.catIds||[t.catId]).filter(Boolean);
+            tCats.forEach(cid=>{ catSpendMap[cid]=(catSpendMap[cid]||0)+amt/tCats.length; });
+          });
+          const catRows = cats.map(c=>({ cat:c, spend:catSpendMap[c.id]||0, budget:Number(c.budget||0) }))
+            .filter(r=>r.spend>0||r.budget>0)
+            .sort((a,b)=>b.spend-a.spend);
+
+          // Upcoming (next 10 days) — unpaid bills + membership renewals due in the window.
+          const todayStrV = todayStr();
+          const in10 = addDaysToDateStr(todayStrV,10);
+          const upcomingBills = bills.filter(b=>b.status==="unpaid"&&b.dueDate&&b.dueDate>=todayStrV&&b.dueDate<=in10)
+            .map(b=>({ id:`bill-${b.id}`, name:b.name||b.merchant||"Bill", amount:Number(b.amount||0), date:b.dueDate, icon:"📄" }));
+          const upcomingMemberships = memberships.map(m=>({ m, period:getCurrentPeriod(m) })).filter(x=>x.period)
+            .map(x=>({ ...x, effEnd:getPeriodEffectiveEnd(x.period) }))
+            .filter(x=>x.effEnd>=todayStrV&&x.effEnd<=in10)
+            .map(x=>{ const ba=billerAccounts.find(b=>b.id===x.m.billerAccountId); return { id:`mem-${x.m.id}`, name:`${ba?.name||"Membership"} Renewal`, amount:Number(x.m.amount||0), date:x.effEnd, icon:"💪" }; });
+          const upcomingAll = [...upcomingBills,...upcomingMemberships].sort((a,b)=>a.date.localeCompare(b.date));
+          const upcomingTotal = upcomingAll.reduce((s,u)=>s+u.amount,0);
+
+          // Budget Insights — deterministic rule-based comparisons, no AI involved.
+          const prevMonthCatSpend = {};
+          txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(prevMonthKey)).forEach(t=>{
+            const amt = getMyExpenseAmount(t);
+            if(amt<=0) return;
+            const tCats=(t.catIds||[t.catId]).filter(Boolean);
+            tCats.forEach(cid=>{ prevMonthCatSpend[cid]=(prevMonthCatSpend[cid]||0)+amt/tCats.length; });
+          });
+          const insights = [];
+          catRows.forEach(r=>{
+            const prevAmt = prevMonthCatSpend[r.cat.id]||0;
+            if(prevAmt>50 && r.spend>0){
+              const pctChange = Math.round(((r.spend-prevAmt)/prevAmt)*100);
+              if(Math.abs(pctChange)>=15) insights.push({ ok:pctChange<0, text:`${r.cat.name} spending is ${Math.abs(pctChange)}% ${pctChange<0?"lower":"higher"} than last month.` });
+            }
+            if(r.budget>0&&r.spend>r.budget) insights.push({ ok:false, text:`${r.cat.name} exceeded budget by ${sym}${fmt(r.spend-r.budget)}.` });
+          });
+          if(isProjectedOver) insights.push({ ok:false, text:`Bills and current pace project you'll exceed this month's budget by ${sym}${fmt(projectedMonthEnd-dashMonthly)}.` });
+
+          return (
+            <>
+              <div style={{ ...card,padding:"10px 12px",marginBottom:12 }}>
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:8 }}>
+                  <button onClick={()=>setViewMonth(m=>{ const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })} style={{ background:"none",border:"none",color:T.accent,fontSize:20,cursor:"pointer",padding:"0 6px" }}>‹</button>
+                  <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
+                  <button onClick={()=>setViewMonth(m=>{ const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })} style={{ background:"none",border:"none",color:T.accent,fontSize:20,cursor:"pointer",padding:"0 6px" }}>›</button>
+                </div>
+              </div>
+
+              <div style={{ ...card }}>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Monthly Budget</div>
+                <div style={{ color:T.text,fontSize:26,fontWeight:900,marginTop:6,marginBottom:10 }}>{sym}{fmt(dashMonthly)}</div>
+                <div style={{ height:8,background:T.border,borderRadius:4,marginBottom:6 }}>
+                  <div style={{ height:"100%",width:`${dashPct}%`,background:dashPct>=100?T.danger:dashPct>80?T.warn:T.success,borderRadius:4 }}/>
+                </div>
+                <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:12 }}><span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{dashPct}%</span></div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
+                  <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Spent</div><div style={{ color:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(dashSpend)}</div></div>
+                  <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Remaining</div><div style={{ color:dashRemaining>=0?T.success:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(Math.abs(dashRemaining))}</div></div>
+                  <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Safe to Spend</div><div style={{ color:T.info,fontSize:15,fontWeight:900,marginTop:2 }}>{dashSafePerDay===null?"—":`${sym}${fmt(dashSafePerDay)}/day`}</div></div>
+                </div>
+              </div>
+
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12 }}>
+                <div style={{ background:`linear-gradient(135deg,${healthColor}12,${T.card})`,border:`1px solid ${healthColor}44`,borderRadius:16,padding:14 }}>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Budget Health</div>
+                  <div style={{ color:healthColor,fontSize:13,fontWeight:800,marginBottom:8 }}>{healthNote}</div>
+                  <div style={{ display:"inline-block",background:healthColor+"22",border:`1px solid ${healthColor}44`,borderRadius:20,padding:"3px 10px" }}><span style={{ color:healthColor,fontSize:10,fontWeight:800 }}>{healthLabel.toUpperCase()}</span></div>
+                </div>
+                <div style={{ ...card,marginBottom:0 }}>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Projected Month End</div>
+                  <div style={{ color:isProjectedOver?T.danger:T.text,fontSize:18,fontWeight:900,marginBottom:4 }}>{sym}{fmt(projectedMonthEnd)}</div>
+                  <div style={{ color:isProjectedOver?T.danger:T.success,fontSize:11,fontWeight:700 }}>{isProjectedOver?"⚠️":"✓"} {Math.abs(projectedMarginPct)}% {projectedMarginPct>=0?"under":"over"} budget</div>
+                </div>
+              </div>
+
+              {catRows.length>0&&(
+                <div style={{ ...card }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+                    <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>Where Money Went</div>
+                    <button onClick={()=>{ setTab("home"); setShowSettings(false); }} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>View All</button>
+                  </div>
+                  <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                    {catRows.slice(0,8).map(r=>{
+                      const pct = r.budget>0 ? Math.round(r.spend/r.budget*100) : null;
+                      const isOverBudget = pct!==null && pct>100;
+                      const barColor = isOverBudget?T.danger:pct!==null&&pct>80?T.warn:T.success;
+                      return (
+                        <div key={r.cat.id}>
+                          <div style={{ display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3 }}>
+                            <span style={{ color:T.text,fontWeight:700 }}>{r.cat.icon} {r.cat.name}</span>
+                            <span style={{ color:T.sub }}>{sym}{fmt(r.spend)}{r.budget>0?` / ${sym}${fmt(r.budget)}`:""} {pct!==null&&<span style={{ color:isOverBudget?T.danger:T.sub,fontWeight:800 }}>{pct}%</span>}</span>
+                          </div>
+                          <div style={{ height:6,background:T.input,borderRadius:4,overflow:"hidden" }}>
+                            <div style={{ width:`${Math.min(100,pct===null?(r.spend>0?100:0):pct)}%`,height:"100%",background:barColor }}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12 }}>
+                <div style={{ ...card,marginBottom:0 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:900,marginBottom:8 }}>Upcoming (Next 10 Days)</div>
+                  {upcomingAll.length===0&&<div style={{ color:T.sub,fontSize:11 }}>Nothing due soon.</div>}
+                  {upcomingAll.slice(0,6).map(u=>(
+                    <div key={u.id} style={{ display:"flex",justifyContent:"space-between",fontSize:11,padding:"5px 0",borderBottom:`1px solid ${T.border}` }}>
+                      <span style={{ color:T.text }}>{u.icon} {u.name}<div style={{ color:T.sub,fontSize:9 }}>{formatShortDate(u.date)||u.date}</div></span>
+                      <span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(u.amount)}</span>
+                    </div>
+                  ))}
+                  {upcomingAll.length>0&&<div style={{ display:"flex",justifyContent:"space-between",fontSize:11,paddingTop:8,fontWeight:800 }}><span style={{ color:T.sub }}>Expected Outflow</span><span style={{ color:T.accent }}>{sym}{fmt(upcomingTotal)}</span></div>}
+                </div>
+                <div style={{ ...card,marginBottom:0 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:900,marginBottom:8 }}>Budget Insights</div>
+                  {insights.length===0&&<div style={{ color:T.sub,fontSize:11 }}>No notable changes this month yet.</div>}
+                  {insights.slice(0,5).map((ins,i)=>(
+                    <div key={i} style={{ display:"flex",gap:6,fontSize:11,color:T.text,marginBottom:6,alignItems:"flex-start" }}>
+                      <span>{ins.ok?"✓":"⚠️"}</span><span>{ins.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          );
+        })()}
+
         {budgetSubTab==="overview"&&(<>
+        <div style={{ color:T.text,fontSize:15,fontWeight:900,marginBottom:2 }}>Annual Budget</div>
         <div style={{ ...card,padding:"10px 12px",marginBottom:12 }}>
           <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:8 }}>
             <button onClick={()=>setSelectedBudgetFY(prev=>Math.max(currentFYStartYear-1, prev-1))} disabled={fy<=currentFYStartYear-1} style={{ background:T.pill,border:`1px solid ${T.border}`,color:fy<=currentFYStartYear-1?T.sub:T.text,borderRadius:8,padding:"6px 10px",cursor:fy<=currentFYStartYear-1?"not-allowed":"pointer",fontSize:11,fontWeight:800,fontFamily:"Nunito,sans-serif",opacity:fy<=currentFYStartYear-1?0.6:1 }}>← Last FY</button>
@@ -11056,13 +11248,14 @@ function AppContent({ onLock }) {
                 </div>
                 {monthBudget>0&&(
                   <>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4 }}>
+                      <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(monthSpend)} of {sym}{fmt(monthBudget)}</span>
+                      <span style={{ color:isOver?T.danger:pct>80?T.warn:T.success,fontSize:13,fontWeight:900 }}>{pct}%</span>
+                    </div>
                     <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
                       <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:pct>80?T.warn:p.color||T.success,borderRadius:3 }}/>
                     </div>
-                    <div style={{ display:"flex",justifyContent:"space-between" }}>
-                      <span style={{ color:T.sub,fontSize:10 }}>Spent: {sym}{fmtK(monthSpend)}</span>
-                      <span style={{ color:isOver?T.danger:T.success,fontSize:10,fontWeight:700 }}>{isOver?`Over ${sym}${fmtK(monthSpend-monthBudget)}`:`Left ${sym}${fmtK(monthBudget-monthSpend)}`}</span>
-                    </div>
+                    {isOver&&<div style={{ textAlign:"right" }}><span style={{ color:T.danger,fontSize:10,fontWeight:700 }}>Over {sym}{fmtK(monthSpend-monthBudget)}</span></div>}
                   </>
                 )}
                 {expandedBudgetPersonId===p.id&&(()=>{
@@ -11145,13 +11338,14 @@ function AppContent({ onLock }) {
                 </div>
                 {monthBudget>0&&(
                   <>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4 }}>
+                      <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(monthSpend)} of {sym}{fmt(monthBudget)}</span>
+                      <span style={{ color:isOver?T.danger:pct>80?T.warn:T.success,fontSize:13,fontWeight:900 }}>{pct}%</span>
+                    </div>
                     <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
                       <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:pct>80?T.warn:T.success,borderRadius:3 }}/>
                     </div>
-                    <div style={{ display:"flex",justifyContent:"space-between" }}>
-                      <span style={{ color:T.sub,fontSize:10 }}>Spent: {sym}{fmtK(monthSpend)}</span>
-                      <span style={{ color:isOver?T.danger:T.success,fontSize:10,fontWeight:700 }}>{isOver?`Over ${sym}${fmtK(monthSpend-monthBudget)}`:`Left ${sym}${fmtK(monthBudget-monthSpend)}`}</span>
-                    </div>
+                    {isOver&&<div style={{ textAlign:"right" }}><span style={{ color:T.danger,fontSize:10,fontWeight:700 }}>Over {sym}{fmtK(monthSpend-monthBudget)}</span></div>}
                   </>
                 )}
               </div>
@@ -13561,6 +13755,39 @@ function AppContent({ onLock }) {
                           <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>AVG MONTHLY COST</div>
                         </div>
                       </div>
+
+                      {hero&&(()=>{
+                        const rec = getMembershipMonthlyRecognition(hero.m);
+                        if(rec.months.length<2) return null; // nothing to amortize for a single-month payment
+                        return (
+                          <div style={{ marginTop:16 }}>
+                            <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>EXPENSE RECOGNITION (AMORTIZATION)</div>
+                            <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:16 }}>
+                              <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>Payment {sym}{fmt(rec.totalAmount)} spread across the months it covers</div>
+                              <ResponsiveContainer width="100%" height={150}>
+                                <BarChart data={rec.months}>
+                                  <XAxis dataKey="label" tick={{ fontSize:10,fill:T.sub }}/>
+                                  <YAxis tick={{ fontSize:9,fill:T.sub }}/>
+                                  <Tooltip formatter={v=>`${sym}${fmt(v)}`}/>
+                                  <Bar dataKey="recognized" radius={[4,4,0,0]}>
+                                    {rec.months.map((mo,i)=><Cell key={i} fill={mo.recognized>=mo.total?T.accent:T.border}/>)}
+                                  </Bar>
+                                </BarChart>
+                              </ResponsiveContainer>
+                              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12 }}>
+                                <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Total Paid</div><div style={{ color:T.text,fontSize:14,fontWeight:800,marginTop:2 }}>{sym}{fmt(rec.totalAmount)}</div></div>
+                                <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Recognized Till Date</div><div style={{ color:T.accent,fontSize:14,fontWeight:800,marginTop:2 }}>{sym}{fmt(rec.recognizedTillDate)}</div></div>
+                                <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Remaining (Asset)</div><div style={{ color:T.warn,fontSize:14,fontWeight:800,marginTop:2 }}>{sym}{fmt(rec.remainingAsset)}</div></div>
+                                <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Daily Expense</div><div style={{ color:T.text,fontSize:14,fontWeight:800,marginTop:2 }}>{sym}{fmt(Math.round(rec.dailyExpense))}/day</div></div>
+                              </div>
+                              <div style={{ marginTop:8,paddingTop:8,borderTop:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between" }}>
+                                <span style={{ color:T.sub,fontSize:10 }}>Duration</span>
+                                <span style={{ color:T.text,fontSize:11,fontWeight:700 }}>{rec.totalDays} Days</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })()}
