@@ -1014,6 +1014,7 @@ function AppContent({ onLock }) {
   const [showAddBillerModal, setShowAddBillerModal] = useState(false);
   const [addBillerPresetType, setAddBillerPresetType] = useState("");
   const [activeBillerShell, setActiveBillerShell] = useState(null);
+  const [editingBillerShell, setEditingBillerShell] = useState(null);
   const [showAddYouOwe, setShowAddYouOwe] = useState(null); // holds personId when open
   const [viewingMembership, setViewingMembership] = useState(null); // holds the membership record for the detail view
   const [showAddEvent, setShowAddEvent] = useState(false);
@@ -1064,22 +1065,85 @@ function AppContent({ onLock }) {
   useEffect(()=>{
     const unmigrated = billerAccounts.filter(ba=>!ba.billerId);
     if(unmigrated.length===0) return;
-    const groups = [];
+    const groupsList = [];
     unmigrated.forEach(ba=>{
       const key = `${ba.type}||${(ba.provider||"").trim().toLowerCase()}`;
-      let g = groups.find(x=>x.key===key);
-      if(!g){ g = { key, type:ba.type, provider:(ba.provider||"").trim(), ids:[] }; groups.push(g); }
+      let g = groupsList.find(x=>x.key===key);
+      if(!g){ g = { key, type:ba.type, provider:(ba.provider||"").trim(), ids:[] }; groupsList.push(g); }
       g.ids.push(ba.id);
     });
-    const newBillers = groups.map(g=>({ id:genId(), name:g.provider||g.type, type:g.type, provider:g.provider, createdAt:Date.now() }));
-    setBillers(prev=>[...prev, ...newBillers]);
+    // Reuse an existing shell for this type+provider if one already exists, instead of always
+    // creating a new one. This effect can run again on a fresh page load if it catches accounts
+    // mid-sync (cloud pull racing the previous run's push) — without this check, every such
+    // re-run created ANOTHER duplicate shell instead of linking back to the one already there.
+    // This was the actual root cause of the biller duplication.
+    const findExistingShell = (type, provider) => billers.find(b=>b.type===type && (b.provider||"").trim().toLowerCase()===provider.toLowerCase());
+    const newBillers = [];
+    const resolvedShellFor = {};
+    groupsList.forEach(g=>{
+      const existing = findExistingShell(g.type, g.provider);
+      if(existing){ resolvedShellFor[g.key] = existing.id; }
+      else {
+        const nb = { id:genId(), name:g.provider||g.type, type:g.type, provider:g.provider, createdAt:Date.now() };
+        newBillers.push(nb);
+        resolvedShellFor[g.key] = nb.id;
+      }
+    });
+    if(newBillers.length>0) setBillers(prev=>[...prev, ...newBillers]);
     setBillerAccounts(prev=>prev.map(ba=>{
       if(ba.billerId) return ba;
       const key = `${ba.type}||${(ba.provider||"").trim().toLowerCase()}`;
-      const g = groups.find(x=>x.key===key);
-      const nb = newBillers[groups.indexOf(g)];
-      return nb ? {...ba, billerId:nb.id} : ba;
+      const shellId = resolvedShellFor[key];
+      return shellId ? {...ba, billerId:shellId} : ba;
     }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+  // One-time cleanup: merge any duplicate shells the bug above already created (same type+provider)
+  // into a single shell, reassigning every account that pointed to a duplicate over to the keeper.
+  // Keeper = whichever duplicate actually has accounts linked to it (or the oldest, if none do).
+  // Naturally idempotent — once there's nothing left to merge, this is a no-op on every later load.
+  useEffect(()=>{
+    const groupsMap = {};
+    billers.forEach(b=>{
+      const key = `${b.type}||${(b.provider||"").trim().toLowerCase()}`;
+      if(!groupsMap[key]) groupsMap[key] = [];
+      groupsMap[key].push(b);
+    });
+    const dupeGroups = Object.values(groupsMap).filter(g=>g.length>1);
+    if(dupeGroups.length===0) return;
+    const idsToRemove = new Set();
+    const remap = {};
+    dupeGroups.forEach(dupes=>{
+      const withAccounts = dupes.filter(b=>billerAccounts.some(ba=>ba.billerId===b.id));
+      const keeper = withAccounts[0] || [...dupes].sort((a,b2)=>(a.createdAt||0)-(b2.createdAt||0))[0];
+      dupes.forEach(b=>{ if(b.id!==keeper.id){ idsToRemove.add(b.id); remap[b.id]=keeper.id; } });
+    });
+    if(idsToRemove.size===0) return;
+    setBillerAccounts(prev=>prev.map(ba=>ba.billerId && remap[ba.billerId] ? {...ba,billerId:remap[ba.billerId]} : ba));
+    setBillers(prev=>prev.filter(b=>!idsToRemove.has(b.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+  // One-time migration: fold Credit Card accounts into the same Biller hierarchy every other
+  // recurring service uses, so they show up in Bills Home, Due Soon, and category browse instead
+  // of living in a separate parallel system. Arth doesn't track a bank name separate from the
+  // card's own name (e.g. "HDFC Regalia" is one string, not Bank="HDFC"+Card="Regalia") — so each
+  // card gets its own shell for now rather than guessing at a Provider grouping that isn't real
+  // data. Idempotent: only touches cc accounts that don't already have a linked billerAccount.
+  useEffect(()=>{
+    const ccAccounts = accounts.filter(a=>a.type==="cc");
+    if(ccAccounts.length===0) return;
+    const alreadyLinked = new Set(billerAccounts.filter(ba=>ba.accId).map(ba=>ba.accId));
+    const unlinked = ccAccounts.filter(a=>!alreadyLinked.has(a.id));
+    if(unlinked.length===0) return;
+    const newShells = [];
+    const newAccounts = [];
+    unlinked.forEach(acc=>{
+      const shell = { id:genId(), name:acc.name, type:"Credit Card", provider:acc.name, createdAt:Date.now() };
+      newShells.push(shell);
+      newAccounts.push({ id:genId(), billerId:shell.id, accId:acc.id, name:acc.name, type:"Credit Card", consumerNo:null, createdAt:Date.now() });
+    });
+    setBillers(prev=>[...prev, ...newShells]);
+    setBillerAccounts(prev=>[...prev, ...newAccounts]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
   useEffect(()=>safeSetLocalStorage("arth_memberships",JSON.stringify(memberships)),[memberships]);
@@ -9112,9 +9176,9 @@ function AppContent({ onLock }) {
                   </div>
                 )}
                 {effectiveNewModules.includes("budget")&&(
-                  <div style={{ marginBottom:14 }}>
-                    <span style={lbl}>Monthly spend awareness budget</span>
-                    <input style={inp} type="number" placeholder="e.g. 3000 (0 = no limit)" value={newSpendBudget} onChange={e=>setNewSpendBudget(e.target.value)}/>
+                  <div style={{ marginBottom:14,background:T.input,borderRadius:10,padding:"10px 12px" }}>
+                    <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>📊 Budget enabled</div>
+                    <div style={{ color:T.sub,fontSize:11,marginTop:3 }}>Set the actual monthly amount afterward in Budget → Budgets — that's the one place it's edited, so it can't drift out of sync per month.</div>
                   </div>
                 )}
                 <span style={lbl}>Colour</span>
@@ -11546,7 +11610,7 @@ function AppContent({ onLock }) {
             <div style={{ color:"#2563eb",fontSize:15,fontWeight:900 }}>👤 Per-Person Budgets</div>
             <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
           </div>
-          {people.filter(p=>!p.isMe && getPersonModules(p).includes("budget")).map(p=>{
+          {people.filter(p=>getPersonModules(p).includes("budget")).map(p=>{
             const monthBudget = Number(p.spendBudgetOverrides?.[viewMonth] ?? p.spendBudget ?? 0);
             const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
             const pct = monthBudget>0 ? Math.min(100,Math.round(monthSpend/monthBudget*100)) : 0;
@@ -11786,6 +11850,8 @@ function AppContent({ onLock }) {
     const [autoGenerate,setAutoGenerate]=useState(b.autoGenerate!==false);
     const [billPeriodFrom,setBillPeriodFrom]=useState(b.billPeriodFrom||"");
     const [billPeriodTo,setBillPeriodTo]=useState(b.billPeriodTo||"");
+    const [unitsConsumed,setUnitsConsumed]=useState(b.unitsConsumed!=null?String(b.unitsConsumed):"");
+    const [meterReading,setMeterReading]=useState(b.meterReading!=null?String(b.meterReading):"");
     const [editPhoto,setEditPhoto]=useState(b.imageBase64||null);
     const [editSplitPeople,setEditSplitPeople]=useState(()=>{ const m={}; Object.entries(b.splitPeople||{}).forEach(([pid])=>m[pid]=true); return m; });
     const [editSplitCalc,setEditSplitCalc]=useState("equally");
@@ -11820,7 +11886,7 @@ function AppContent({ onLock }) {
       const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
       const myShare=editIncludeMe ? Math.max(0, editAmt-owedByOthers) : 0;
       const groupCollectiveAmount = editGroup ? Math.max(0, editAmt-owedByOthers-myShare) : 0;
-      setBills(prev=>prev.map(x=>x.id===b.id?{...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null}:x));
+      setBills(prev=>prev.map(x=>x.id===b.id?{...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null}:x));
       onClose();
     };
 
@@ -11859,6 +11925,8 @@ function AppContent({ onLock }) {
               <div><span style={lbl}>Due Date (pay by)</span><input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
               <div><span style={lbl}>Period From (optional)</span><input style={inp} type="date" value={billPeriodFrom} onChange={e=>setBillPeriodFrom(e.target.value)}/></div>
               <div><span style={lbl}>Period To (optional)</span><input style={inp} type="date" value={billPeriodTo} onChange={e=>setBillPeriodTo(e.target.value)}/></div>
+              <div><span style={lbl}>Units Consumed (optional)</span><input style={inp} type="number" placeholder="e.g. 412" value={unitsConsumed} onChange={e=>setUnitsConsumed(e.target.value)}/></div>
+              <div><span style={lbl}>Meter Reading (optional)</span><input style={inp} type="number" placeholder="e.g. 25890" value={meterReading} onChange={e=>setMeterReading(e.target.value)}/></div>
             </div>
             <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
               <div>
@@ -12062,11 +12130,11 @@ function AppContent({ onLock }) {
               </div>
             </div>
 
-            {/* Active biller accounts - compact horizontal scroll */}
+            {/* Bills Home — Due Soon (list, with amounts) → Quick Summary → Favourite Billers
+                (list, with connection counts) → Browse Categories below. Non-favourited billers
+                not due soon are reached via category browse (tapping a type already shows its
+                existing billers), not dumped in an exhaustive list here. */}
             {billerAccounts.length>0&&(()=>{
-              // Group by shell (billerId) so each biller shows ONE tile regardless of how many
-              // accounts (nicknames) it has — tapping it reveals the individual accounts inside.
-              // Accounts without a billerId (legacy/unlinked) still show individually as a fallback.
               const filtered = billerAccounts.filter(ba=>!billSearch||(ba.name+ba.type+ba.consumerNo+(ba.provider||"")).toLowerCase().includes(billSearch.toLowerCase()));
               const shelled = filtered.filter(ba=>ba.billerId);
               const unshelled = filtered.filter(ba=>!ba.billerId);
@@ -12074,57 +12142,95 @@ function AppContent({ onLock }) {
               shelled.forEach(ba=>{ if(!shellGroups[ba.billerId]) shellGroups[ba.billerId]=[]; shellGroups[ba.billerId].push(ba); });
               const in7 = new Date(Date.now()+7*24*60*60*1000).toISOString().split("T")[0];
               const todayStrV = todayStr();
-              const shellNeedsAttention = (billerId, accs) => {
-                const allBillsForShell = bills.filter(b=>accs.some(a=>String(a.id)===String(b.billerAccountId)));
-                if(allBillsForShell.some(b=>b.status==="unpaid"&&b.dueDate&&b.dueDate<=in7)) return true;
-                const memsForShell = memberships.filter(m=>accs.some(a=>String(a.id)===String(m.billerAccountId)));
-                return memsForShell.some(m=>{ const period=getCurrentPeriod(m); if(!period) return false; const eff=getPeriodEffectiveEnd(period); return eff>=todayStrV && eff<=in7; });
+              const dueSoonText = (dueDate) => {
+                if(!dueDate) return "";
+                if(dueDate===todayStrV) return "Due Today";
+                if(dueDate===new Date(Date.now()+86400000).toISOString().split("T")[0]) return "Due Tomorrow";
+                if(dueDate<todayStrV) return "Overdue";
+                return `Due ${formatShortDate(dueDate)||dueDate}`;
               };
-              const tiles = [
+              const items = [
                 ...Object.entries(shellGroups).map(([billerId,accs])=>{
                   const shell = billers.find(b=>b.id===billerId);
                   if(!shell) return null;
+                  // CC-linked connection — due amount/date comes from the account's own statement
+                  // cycle (getCardSummary), not the bills array, since card statements aren't
+                  // stored as Bill records.
+                  const ccAcc = accs.find(a=>a.accId) ? accounts.find(a=>a.id===accs.find(x=>x.accId).accId) : null;
+                  if(ccAcc){
+                    const summary = getCardSummary(ccAcc);
+                    const hasDue = summary?.currentDue>0;
+                    const needsAttention = Boolean(hasDue && summary.daysToDue!=null && summary.daysToDue<=7);
+                    return { key:"shell-"+billerId, billerId, icon:getBillerIcon(shell.type), name:shell.name, connLabel:shell.type, unpaidCount:hasDue?1:0, pinned:Boolean(shell.pinned), needsAttention, amount:hasDue?Number(summary.currentDue):0, dueText:hasDue?dueSoonText(ccAcc.dueDate||summary.dueOn):"", onClick:()=>setActiveBillerForAction(accs[0]) };
+                  }
                   const allBills = bills.filter(b=>accs.some(a=>String(a.id)===String(b.billerAccountId)));
                   const unpaidCount = allBills.filter(b=>b.status==="unpaid").length;
-                  const lastBill = [...allBills].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
-                  return { key:"shell-"+billerId, billerId, icon:getBillerIcon(shell.type), name:shell.name, sub:accs.length>1?`${accs.length} accounts`:(lastBill?`${sym}${fmt(lastBill.amount)}`:"No bills"), unpaidCount, pinned:Boolean(shell.pinned), needsAttention:shellNeedsAttention(billerId,accs), onClick:()=>setActiveBillerShell(shell) };
+                  const nextUnpaid = allBills.filter(b=>b.status==="unpaid"&&b.dueDate).sort((a,b2)=>a.dueDate.localeCompare(b2.dueDate))[0];
+                  const memsForShell = memberships.filter(m=>accs.some(a=>String(a.id)===String(m.billerAccountId)));
+                  const memRenewing = memsForShell.map(m=>({m,period:getCurrentPeriod(m)})).filter(x=>x.period).map(x=>({...x,eff:getPeriodEffectiveEnd(x.period)})).filter(x=>x.eff>=todayStrV&&x.eff<=in7).sort((a,b2)=>a.eff.localeCompare(b2.eff))[0];
+                  const needsAttention = Boolean((nextUnpaid&&nextUnpaid.dueDate<=in7) || memRenewing);
+                  const amount = nextUnpaid ? Number(nextUnpaid.amount||0) : (memRenewing ? Number(memRenewing.m.amount||0) : 0);
+                  const dueText = nextUnpaid ? dueSoonText(nextUnpaid.dueDate) : (memRenewing ? `Renewal in ${Math.max(0,Math.round((new Date(memRenewing.eff)-new Date())/86400000))} days` : "");
+                  return { key:"shell-"+billerId, billerId, icon:getBillerIcon(shell.type), name:shell.name, connLabel:accs.length>1?`${accs.length} Connections`:shell.type, unpaidCount, pinned:Boolean(shell.pinned), needsAttention, amount, dueText, onClick:()=>setActiveBillerShell(shell) };
                 }).filter(Boolean),
                 ...unshelled.map(ba=>{
                   const billsForAcc = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
-                  const unpaidCount = billsForAcc.filter(b=>b.status==="unpaid").length;
-                  const lastBill = [...billsForAcc].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
-                  return { key:"acc-"+ba.id, billerId:null, icon:getBillerIcon(ba.type), name:ba.name, sub:lastBill?`${sym}${fmt(lastBill.amount)}`:"No bills", unpaidCount, pinned:false, needsAttention:billsForAcc.some(b=>b.status==="unpaid"&&b.dueDate&&b.dueDate<=in7), onClick:()=>setActiveBillerForAction(ba) };
+                  const nextUnpaid = billsForAcc.filter(b=>b.status==="unpaid"&&b.dueDate).sort((a,b2)=>a.dueDate.localeCompare(b2.dueDate))[0];
+                  const needsAttention = Boolean(nextUnpaid&&nextUnpaid.dueDate<=in7);
+                  return { key:"acc-"+ba.id, billerId:null, icon:getBillerIcon(ba.type), name:ba.name, connLabel:ba.type, unpaidCount:billsForAcc.filter(b=>b.status==="unpaid").length, pinned:false, needsAttention, amount:nextUnpaid?Number(nextUnpaid.amount||0):0, dueText:nextUnpaid?dueSoonText(nextUnpaid.dueDate):"", onClick:()=>setActiveBillerForAction(ba) };
                 }),
               ];
-              const attentionTiles = tiles.filter(t=>t.needsAttention);
-              const pinnedTiles = tiles.filter(t=>t.pinned && !t.needsAttention);
-              const renderTileRow = (rowTiles, label) => (
-                <div style={{ padding:"8px 16px" }}>
-                  <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>{label}</div>
-                  <div style={{ display:"flex",gap:10,overflowX:"auto",paddingBottom:8 }}>
-                    {rowTiles.map(tile=>(
-                      <div key={tile.key} style={{ minWidth:120,background:T.card,borderRadius:16,padding:"12px",cursor:"pointer",border:`1px solid ${tile.unpaidCount>0?T.danger+"44":T.border}`,position:"relative",flexShrink:0 }}>
-                        {tile.unpaidCount>0&&<div style={{ position:"absolute",top:8,right:8,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>{tile.unpaidCount}</div>}
-                        {tile.billerId&&<button onClick={e=>{ e.stopPropagation(); setBillers(prev=>prev.map(b=>b.id===tile.billerId?{...b,pinned:!b.pinned}:b)); }} style={{ position:"absolute",top:8,left:8,background:"none",border:"none",cursor:"pointer",fontSize:13,color:tile.pinned?T.accent:T.border,padding:0 }}>{tile.pinned?"★":"☆"}</button>}
-                        <div onClick={tile.onClick} style={{ marginTop:tile.billerId?10:0 }}>
-                          <div style={{ fontSize:28,marginBottom:6 }}>{tile.icon}</div>
-                          <div style={{ color:T.text,fontSize:11,fontWeight:800,lineHeight:1.2 }}>{tile.name}</div>
-                          <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>{tile.sub}</div>
-                        </div>
-                      </div>
-                    ))}
-                    {label==="ALL BILLERS"&&<div onClick={()=>setShowAddBillerModal(true)} style={{ minWidth:80,background:"none",borderRadius:16,padding:"12px",cursor:"pointer",border:`2px dashed ${T.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
-                      <div style={{ fontSize:24,color:T.sub }}>+</div>
-                      <div style={{ color:T.sub,fontSize:9,marginTop:4 }}>Add Biller</div>
-                    </div>}
+              const dueSoon = items.filter(i=>i.needsAttention);
+              const favourites = items.filter(i=>i.pinned && !i.needsAttention);
+              const totalBills = bills.length;
+              const paidCount = bills.filter(b=>b.status==="paid").length;
+              const upcomingCount = bills.filter(b=>b.status==="unpaid"&&(!b.dueDate||b.dueDate>=todayStrV)).length;
+              const overdueCount = bills.filter(b=>b.status==="unpaid"&&b.dueDate&&b.dueDate<todayStrV).length;
+              const renderListRow = (item) => (
+                <div key={item.key} onClick={item.onClick} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",cursor:"pointer",borderBottom:`1px solid ${T.border}` }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:12,flex:1,minWidth:0 }}>
+                    {item.billerId&&<button onClick={e=>{ e.stopPropagation(); setBillers(prev=>prev.map(b=>b.id===item.billerId?{...b,pinned:!b.pinned}:b)); }} style={{ background:"none",border:"none",cursor:"pointer",fontSize:14,color:item.pinned?T.accent:T.border,padding:0,flexShrink:0 }}>{item.pinned?"★":"☆"}</button>}
+                    <span style={{ fontSize:22,flexShrink:0 }}>{item.icon}</span>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ color:T.text,fontSize:13,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{item.name}</div>
+                      <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{item.dueText || item.connLabel}</div>
+                    </div>
                   </div>
+                  {item.amount>0&&<div style={{ color:item.dueText==="Overdue"?T.danger:T.text,fontSize:13,fontWeight:800,flexShrink:0,marginLeft:8 }}>{sym}{fmt(item.amount)}</div>}
                 </div>
               );
               return (
                 <>
-                  {attentionTiles.length>0&&renderTileRow(attentionTiles,"⚠️ NEEDS ATTENTION")}
-                  {pinnedTiles.length>0&&renderTileRow(pinnedTiles,"⭐ PINNED")}
-                  {renderTileRow(tiles,"ALL BILLERS")}
+                  {dueSoon.length>0&&(
+                    <div style={{ margin:"8px 16px",background:T.danger+"0c",border:`1px solid ${T.danger}33`,borderRadius:16,overflow:"hidden" }}>
+                      <div style={{ color:T.danger,fontSize:12,fontWeight:900,padding:"12px 16px 4px" }}>⚠ Due Soon ({dueSoon.length})</div>
+                      {dueSoon.map(renderListRow)}
+                    </div>
+                  )}
+
+                  <div style={{ margin:"16px 16px 8px" }}>
+                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>QUICK SUMMARY</div>
+                    <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8 }}>
+                      {[["Bills",totalBills,T.text],["Paid",paidCount,T.success],["Upcoming",upcomingCount,T.warn],["Overdue",overdueCount,T.danger]].map(([label,count,color])=>(
+                        <div key={label} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"10px 6px",textAlign:"center" }}>
+                          <div style={{ color, fontSize:18,fontWeight:900 }}>{count}</div>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {favourites.length>0&&(
+                    <div style={{ margin:"8px 16px",background:T.card,border:`1px solid ${T.border}`,borderRadius:16,overflow:"hidden" }}>
+                      <div style={{ color:T.text,fontSize:12,fontWeight:900,padding:"12px 16px 4px" }}>★ Favourite Billers</div>
+                      {favourites.map(renderListRow)}
+                    </div>
+                  )}
+
+                  {!billerAccounts.length&&null}
+                  <div style={{ padding:"4px 16px 8px",textAlign:"right" }}>
+                    <button onClick={()=>setShowAddBillerModal(true)} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>+ Add Biller</button>
+                  </div>
                 </>
               );
             })()}
@@ -13091,13 +13197,19 @@ function AppContent({ onLock }) {
   };
 
   // -- ADD BILLER MODAL (parent shell — just name + type, details added per person later) ----
-  const AddBillerModal = ({ presetType, onClose, onCreated }) => {
-    const [name, setName] = useState("");
-    const [type, setType] = useState(presetType||"");
-    const [showTypePicker, setShowTypePicker] = useState(!presetType);
+  const AddBillerModal = ({ presetType, existing, onClose, onCreated }) => {
+    const [name, setName] = useState(existing?.name||"");
+    const [type, setType] = useState(existing?.type||presetType||"");
+    const [showTypePicker, setShowTypePicker] = useState(!presetType&&!existing);
     const canSave = name.trim() && type;
     const handleSave = () => {
       if(!canSave) return;
+      if(existing){
+        setBillers(prev=>prev.map(b=>b.id===existing.id?{...b,name:name.trim(),type,provider:name.trim()}:b));
+        onCreated?.({...existing,name:name.trim(),type});
+        onClose();
+        return;
+      }
       const record = { id:genId(), name:name.trim(), type, provider:name.trim(), createdAt:Date.now() };
       setBillers(prev=>[...prev, record]);
       onCreated?.(record);
@@ -13107,10 +13219,10 @@ function AppContent({ onLock }) {
       <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:310,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
-            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Add Biller</div>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{existing?"Edit Provider":"Add Biller"}</div>
             <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
           </div>
-          <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Create the biller first — you can add Self, family members, or anyone else under it one at a time, whenever you're ready.</div>
+          <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>{existing?"Rename or fix the type for this provider.":"Create the biller first — you can add Self, family members, or anyone else under it one at a time, whenever you're ready."}</div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
             <div>
               <span style={lbl}>Biller Name *</span>
@@ -13136,7 +13248,7 @@ function AppContent({ onLock }) {
                 </div>
               )}
             </div>
-            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>Add Biller</button>
+            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{existing?"Save Changes":"Add Biller"}</button>
           </div>
         </div>
       </div>
@@ -13534,6 +13646,8 @@ function AppContent({ onLock }) {
     const [autoGenerate,setAutoGenerate]=useState(true);
     const [billPeriodFrom,setBillPeriodFrom]=useState("");
     const [billPeriodTo,setBillPeriodTo]=useState("");
+    const [unitsConsumed,setUnitsConsumed]=useState("");
+    const [meterReading,setMeterReading]=useState("");
     // Prepaid recharge fields
     const isRecharge = ["Mobile Prepaid","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","DTH"].includes(billerCategory);
     const [validityDays,setValidityDays]=useState("");
@@ -13578,7 +13692,7 @@ function AppContent({ onLock }) {
       const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
       const myShare = billIncludeMe ? Math.max(0, amt-owedByOthers) : 0;
       const groupCollectiveAmount = billGroup ? Math.max(0, amt-owedByOthers-myShare) : 0;
-      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),amount:amt,dueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring,frequency,status:"unpaid",paidDate:null,billDate:billDate||todayStr(),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto,billerAccountId:billerAccountId||null,billerCategory:billerCategory||null,consumerNumber:consumerNumber.trim()||null,lastPaidAmount:lastPaidAmount?parseFloat(lastPaidAmount):null,autoGenerate,isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0,validityDays:validityDays?Number(validityDays):null,planType:planType||null,planDesc:planDesc.trim()||null,validFrom:validFrom2||null,validUntil:validUntilCalc||null,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null};
+      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),amount:amt,dueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring,frequency,status:"unpaid",paidDate:null,billDate:billDate||todayStr(),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto,billerAccountId:billerAccountId||null,billerCategory:billerCategory||null,consumerNumber:consumerNumber.trim()||null,lastPaidAmount:lastPaidAmount?parseFloat(lastPaidAmount):null,autoGenerate,isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0,validityDays:validityDays?Number(validityDays):null,planType:planType||null,planDesc:planDesc.trim()||null,validFrom:validFrom2||null,validUntil:validUntilCalc||null,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null};
       setBills(p=>[newBill,...p]);
 
       const matchingTxn = txns.find(t=>t.type==="expense" && !t.isBillPayment && !t.paidBillId && Number(t.amount)===amt && (billCatIds[0]? t.catId===billCatIds[0] : true));
@@ -13628,6 +13742,8 @@ function AppContent({ onLock }) {
               <div><span style={lbl}>Due Date (pay by)</span><input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
               <div><span style={lbl}>Period From (optional)</span><input style={inp} type="date" value={billPeriodFrom} onChange={e=>setBillPeriodFrom(e.target.value)}/></div>
               <div><span style={lbl}>Period To (optional)</span><input style={inp} type="date" value={billPeriodTo} onChange={e=>setBillPeriodTo(e.target.value)}/></div>
+              <div><span style={lbl}>Units Consumed (optional)</span><input style={inp} type="number" placeholder="e.g. 412" value={unitsConsumed} onChange={e=>setUnitsConsumed(e.target.value)}/></div>
+              <div><span style={lbl}>Meter Reading (optional)</span><input style={inp} type="number" placeholder="e.g. 25890" value={meterReading} onChange={e=>setMeterReading(e.target.value)}/></div>
             </div>
 
             <div>
@@ -13727,9 +13843,11 @@ function AppContent({ onLock }) {
     const [creditLimit,setCreditLimit]=useState(String(p.creditLimit||""));
     const [spendBudget,setSpendBudget]=useState(String(p.spendBudget||""));
     const [favorite,setFavorite]=useState(Boolean(p.favorite));
+    const [modules,setModules]=useState(getPersonModules(p));
+    const toggleModule = (id) => setModules(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
     const save=()=>{
-      setPeople(prev=>prev.map(x=>x.id===p.id?{...x,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite}:x));
-      setSelectedPerson(prev=>prev?{...prev,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite}:null);
+      setPeople(prev=>prev.map(x=>x.id===p.id?{...x,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules}:x));
+      setSelectedPerson(prev=>prev?{...prev,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules}:null);
       onClose();
     };
     return (
@@ -13753,22 +13871,36 @@ function AppContent({ onLock }) {
             <div style={{ display:"flex",gap:8 }}>
               {["👤","👨","👩","👶","👴","👵","🐕"].map(em=><button key={em} onClick={()=>setEmoji(em)} style={{ background:emoji===em?T.accentSoft:"none",border:`1px solid ${emoji===em?T.accent:T.border}`,borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:18 }}>{em}</button>)}
             </div>
-            <div style={{ display:"flex",gap:8 }}>
-              {[["contact","🤝 Contact","They may owe you"],["dependant","♥ Dependant","Family, you cover them"]].map(([v,l,sub])=>(
-                <button key={v} onClick={()=>setPersonType(v)} style={{ flex:1,background:personType===v?T.accentSoft:"none",border:`1px solid ${personType===v?T.accent:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+              {[["contact","Contact","They may owe you"],["dependant","Dependant","Family, you cover them"],["vendor","Vendor","You pay them for goods/services"],["employee","Employee","Reimbursements, payroll"],["tenant","Tenant","Rent, deposits"],["other","Other",""]].map(([v,l,sub])=>(
+                <button key={v} onClick={()=>setPersonType(v)} style={{ background:personType===v?T.accentSoft:"none",border:`1px solid ${personType===v?T.accent:T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                   <div style={{ fontSize:12,fontWeight:700,color:personType===v?T.accent:T.text }}>{l}</div>
-                  <div style={{ fontSize:10,color:T.sub,marginTop:2 }}>{sub}</div>
+                  {sub&&<div style={{ fontSize:10,color:T.sub,marginTop:2 }}>{sub}</div>}
                 </button>
               ))}
             </div>
-            {getPersonModules({personType,isMe:p.isMe}).includes("borrowMoney")&&<div>
+            <div>
+              <span style={lbl}>Capabilities</span>
+              <div style={{ display:"flex",flexDirection:"column",gap:6,marginTop:6 }}>
+                {PERSON_MODULES.map(mod=>(
+                  <label key={mod.id} style={{ display:"flex",alignItems:"center",gap:10,background:modules.includes(mod.id)?"#2563eb14":T.input,border:`1px solid ${modules.includes(mod.id)?"#2563eb":T.border}`,borderRadius:10,padding:"8px 12px",cursor:"pointer" }}>
+                    <input type="checkbox" checked={modules.includes(mod.id)} onChange={()=>toggleModule(mod.id)} style={{ width:16,height:16,accentColor:"#2563eb",cursor:"pointer" }}/>
+                    <span style={{ fontSize:14 }}>{mod.icon}</span>
+                    <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{mod.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            {modules.includes("borrowMoney")&&<div>
               <span style={lbl}>Credit limit (max they can owe you)</span>
               <input style={inp} type="number" placeholder="0 = unlimited" value={creditLimit} onChange={e=>setCreditLimit(e.target.value)}/>
             </div>}
-            {getPersonModules({personType,isMe:p.isMe}).includes("budget")&&<div>
-              <span style={lbl}>{p.isMe ? "Monthly self budget" : "Monthly spend awareness budget"}</span>
-              <input style={inp} type="number" placeholder={p.isMe ? "e.g. 15000 for your own spends" : "0 = no limit"} value={spendBudget} onChange={e=>setSpendBudget(e.target.value)}/>
-            </div>}
+            {modules.includes("budget")&&(
+              <button onClick={()=>{ onClose(); if(!p.isMe) setBudgetFocusPersonId(p.id); setTab("budget"); setShowSettings(false); }} style={{ width:"100%",background:"#eff6ff",border:"1px solid #2563eb44",borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}>
+                <span style={{ color:"#2563eb",fontSize:12,fontWeight:800 }}>📊 Set monthly budget in Budget tab</span>
+                <span style={{ color:"#2563eb",fontSize:15 }}>→</span>
+              </button>
+            )}
             <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
               {PALETTE.map(c=><div key={c} onClick={()=>setColor(c)} style={{ width:26,height:26,borderRadius:7,background:c,cursor:"pointer",border:color===c?"3px solid #fff":"3px solid transparent" }}/>)}
             </div>
@@ -14003,6 +14135,7 @@ function AppContent({ onLock }) {
           );
         })()}
         {showAddBillerModal&&<AddBillerModal presetType={addBillerPresetType} onClose={()=>{ setShowAddBillerModal(false); setAddBillerPresetType(""); }} onCreated={shell=>setActiveBillerShell(shell)}/>}
+        {editingBillerShell&&<AddBillerModal existing={editingBillerShell} onClose={()=>setEditingBillerShell(null)} onCreated={shell=>setActiveBillerShell(shell)}/>}
         {activeBillerShell&&(()=>{
           const shell = activeBillerShell;
           const accs = billerAccounts.filter(ba=>ba.billerId===shell.id);
@@ -14017,7 +14150,10 @@ function AppContent({ onLock }) {
                       <div style={{ color:T.sub,fontSize:11 }}>{shell.type}</div>
                     </div>
                   </div>
-                  <button onClick={()=>setActiveBillerShell(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+                  <div style={{ display:"flex",alignItems:"center" }}>
+                    <button onClick={()=>{ setEditingBillerShell(shell); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"Nunito,sans-serif",marginRight:8 }}>✏️ Edit</button>
+                    <button onClick={()=>setActiveBillerShell(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+                  </div>
                 </div>
                 <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:2 }}>PROVIDER: {(shell.provider||shell.name).toUpperCase()}</div>
                 <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>ACCOUNTS ({accs.length})</div>
@@ -14059,12 +14195,68 @@ function AppContent({ onLock }) {
                     <span style={{ fontSize:28 }}>{getBillerIcon(ba.type)}</span>
                     <div>
                       <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{ba.name}</div>
-                      <div style={{ color:T.sub,fontSize:11 }}>{ba.type}{ba.consumerNo?` · #${ba.consumerNo}`:""}</div>
+                      <div style={{ color:T.sub,fontSize:11 }}>{ba.billerId&&billers.find(b=>b.id===ba.billerId)?.name || ba.type}{ba.consumerNo?` · #${ba.consumerNo}`:""}</div>
                     </div>
                   </div>
                   <button onClick={()=>setActiveBillerForAction(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
                 </div>
-                {/* Actions */}
+                {/* Current Bill / Last Bill / Average — the at-a-glance summary from the Connection
+                    Dashboard spec. Bill-type accounts only; memberships have their own Hero Card
+                    below which already covers this ground (current period, renewal, lifetime cost).
+                    CC-linked connections get their own branch — statement data comes from the
+                    account's real billing cycle (getCardSummary), not the bills array, since card
+                    statements were never stored as Bill records. */}
+                {ba.accId&&(()=>{
+                  const ccAcc = accounts.find(a=>a.id===ba.accId);
+                  if(!ccAcc) return null;
+                  const summary = getCardSummary(ccAcc);
+                  return (
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16 }}>
+                      <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
+                        <div style={{ color:summary.currentDue>0?T.warn:T.sub,fontSize:14,fontWeight:900 }}>{summary.currentDue>0?`${sym}${fmt(summary.currentDue)}`:"—"}</div>
+                        <div style={{ color:T.sub,fontSize:8,marginTop:2 }}>STATEMENT DUE</div>
+                        {summary.dueOn&&<div style={{ color:T.sub,fontSize:8 }}>{formatShortDate(summary.dueOn)||summary.dueOn}</div>}
+                      </div>
+                      <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
+                        <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{sym}{fmt(summary.currentCycleSpend||0)}</div>
+                        <div style={{ color:T.sub,fontSize:8,marginTop:2 }}>THIS CYCLE (UNBILLED)</div>
+                      </div>
+                      <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
+                        <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{summary.daysToDue!=null?summary.daysToDue:"—"}</div>
+                        <div style={{ color:T.sub,fontSize:8,marginTop:2 }}>DAYS TO DUE</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+                {!ba.accId&&actionType!=="membership"&&(()=>{
+                  const nextUnpaid = baBills.filter(b=>b.status==="unpaid"&&b.dueDate).sort((a,b2)=>a.dueDate.localeCompare(b2.dueDate))[0];
+                  const paidSorted = baBills.filter(b=>b.status==="paid").sort((a,b2)=>(b2.paidDate||b2.billDate||"").localeCompare(a.paidDate||a.billDate||""));
+                  const lastPaid = paidSorted[0];
+                  const avgAmt = paidSorted.length ? Math.round(paidSorted.reduce((s,b)=>s+Number(b.amount||0),0)/paidSorted.length) : 0;
+                  if(!nextUnpaid && !lastPaid) return null;
+                  return (
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16 }}>
+                      <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
+                        <div style={{ color:nextUnpaid?T.warn:T.sub,fontSize:14,fontWeight:900 }}>{nextUnpaid?`${sym}${fmt(nextUnpaid.amount)}`:"—"}</div>
+                        <div style={{ color:T.sub,fontSize:8,marginTop:2 }}>CURRENT BILL</div>
+                        {nextUnpaid&&<div style={{ color:T.sub,fontSize:8 }}>{formatShortDate(nextUnpaid.dueDate)||nextUnpaid.dueDate}</div>}
+                      </div>
+                      <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
+                        <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{lastPaid?`${sym}${fmt(lastPaid.amount)}`:"—"}</div>
+                        <div style={{ color:T.sub,fontSize:8,marginTop:2 }}>LAST BILL</div>
+                        {lastPaid&&<div style={{ color:T.success,fontSize:8 }}>Paid</div>}
+                      </div>
+                      <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
+                        <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{avgAmt?`${sym}${fmt(avgAmt)}`:"—"}</div>
+                        <div style={{ color:T.sub,fontSize:8,marginTop:2 }}>AVERAGE</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+                {/* Actions — CC-linked connections skip Add Bill/Attach Past Expenses since those
+                    operate on the bills array, which CC statements don't use. The real transaction
+                    history for the card already lives on the account itself in Wealth. */}
+                {!ba.accId&&(
                 <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
                   {(actionType==="membership"||actionType==="hybrid")&&(
                     <button onClick={()=>setShowAddMembership(true)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>💪 Add Membership / Renew</button>
@@ -14078,6 +14270,73 @@ function AppContent({ onLock }) {
                     <button onClick={()=>{ setAttachExpensesFor(ba); }} style={{ background:T.purple+"22",border:`1px solid ${T.purple}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.purple,fontFamily:"Nunito,sans-serif" }}>🔗 Attach Past Expenses</button>
                   )}
                 </div>
+                )}
+                {ba.accId&&(
+                  <div style={{ background:T.input,borderRadius:14,padding:"13px",marginBottom:16,textAlign:"center" }}>
+                    <div style={{ color:T.sub,fontSize:11 }}>Transactions and payments for this card are managed from Wealth → Accounts, same as before — this view is a read-only summary.</div>
+                  </div>
+                )}
+                {/* Quick Actions grid — toggles the sections below instead of navigating to a
+                    separate screen, so nothing that's already built (Analytics, bill list) gets
+                    duplicated into a new page. Reminder isn't included: there's no reminder system
+                    in Arth yet, and a button that does nothing is worse than no button. CC-linked
+                    connections skip this entirely — Analytics/History/Documents all read the bills
+                    array, which has nothing for a card (statements aren't Bill records). */}
+                {!ba.accId&&
+                <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16 }}>
+                  {[
+                    { id:"analytics", icon:"📈", label:"Analytics" },
+                    { id:"history", icon:"🧾", label:"History" },
+                    { id:"documents", icon:"📂", label:"Documents" },
+                    { id:"edit", icon:"✏️", label:"Edit", onClick:()=>{ setEditingBillerAccount(ba); setActiveBillerForAction(null); } },
+                  ].map(qa=>{
+                    const key = `ba_${qa.id}_${ba.id}`;
+                    const active = expandedSection===key;
+                    return (
+                      <button key={qa.id} onClick={qa.onClick||(()=>setExpandedSection(prev=>prev===key?null:key))} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:4,background:active?T.accentSoft:T.input,border:`1px solid ${active?T.accent:T.border}`,borderRadius:12,padding:"10px 4px",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                        <span style={{ fontSize:16 }}>{qa.icon}</span>
+                        <span style={{ color:active?T.accent:T.sub,fontSize:9,fontWeight:700 }}>{qa.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                }
+                {expandedSection===`ba_history_${ba.id}`&&(
+                  <div style={{ marginBottom:16 }}>
+                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>HISTORY</div>
+                    {baBills.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"12px 0" }}>No bills recorded yet.</div>}
+                    {[...baBills].sort((a,b2)=>(b2.billDate||b2.createdDate||"").localeCompare(a.billDate||a.createdDate||"")).map(b=>(
+                      <div key={b.id} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                        <div>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{formatShortDate(b.billDate)||b.billDate||"—"}</div>
+                          {(b.billPeriodFrom||b.billPeriodTo)&&<div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(b.billPeriodFrom)||b.billPeriodFrom||"?"} → {formatShortDate(b.billPeriodTo)||b.billPeriodTo||"?"}</div>}
+                          <div style={{ color:T.sub,fontSize:10 }}>{b.status==="paid"?`Paid ${formatShortDate(b.paidDate)||b.paidDate||""}`:`Due ${formatShortDate(b.dueDate)||b.dueDate||""}`}</div>
+                        </div>
+                        <div style={{ textAlign:"right" }}>
+                          <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(b.amount)}</div>
+                          <div style={{ color:b.status==="paid"?T.success:T.warn,fontSize:10,fontWeight:700 }}>{b.status==="paid"?"Paid":"Upcoming"}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {expandedSection===`ba_documents_${ba.id}`&&(()=>{
+                  const withDocs = baBills.filter(b=>b.imageBase64);
+                  return (
+                    <div style={{ marginBottom:16 }}>
+                      <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>DOCUMENTS</div>
+                      {withDocs.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"12px 0" }}>No bills with an attached PDF or photo yet.</div>}
+                      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
+                        {withDocs.map(b=>(
+                          <div key={b.id} onClick={()=>window.open(b.imageBase64,"_blank")} style={{ cursor:"pointer" }}>
+                            <img src={b.imageBase64} style={{ width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:10,border:`1px solid ${T.border}` }}/>
+                            <div style={{ color:T.sub,fontSize:9,marginTop:3,textAlign:"center" }}>{formatShortDate(b.billDate)||b.billDate}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {/* Membership: Hero Card, Renewal banner, Timeline, Lifetime Analytics */}
                 {actionType==="membership"&&baMemberships.length>0&&(()=>{
                   const sorted = [...baMemberships].sort((a,b2)=>b2.createdAt-a.createdAt);
@@ -14218,7 +14477,7 @@ function AppContent({ onLock }) {
                 {/* Bill Analytics — average/highest/lowest + trend, computed from this account's
                     paid bills. Doesn't apply to memberships, which have their own Lifetime stats
                     above (spend/duration is a different shape of number for a subscription). */}
-                {actionType!=="membership"&&(()=>{
+                {actionType!=="membership"&&expandedSection===`ba_analytics_${ba.id}`&&(()=>{
                   const paidBills = baBills.filter(b=>b.status==="paid"&&Number(b.amount||0)>0);
                   if(paidBills.length===0) return null;
                   const amounts = paidBills.map(b=>Number(b.amount||0));
@@ -14233,10 +14492,13 @@ function AppContent({ onLock }) {
                     monthMap[mk] = (monthMap[mk]||0) + Number(b.amount||0);
                   });
                   const trend = Object.entries(monthMap).sort(([a],[b2])=>a.localeCompare(b2)).slice(-12).map(([key,amt])=>({ key, label:new Date(key+"-01").toLocaleString("en-IN",{month:"short",year:"2-digit"}), amount:Math.round(amt) }));
+                  const totalPaid = amounts.reduce((s,a)=>s+a,0);
+                  const unitsList = paidBills.filter(b=>b.unitsConsumed!=null).map(b=>Number(b.unitsConsumed));
+                  const avgUnits = unitsList.length ? Math.round(unitsList.reduce((s,u)=>s+u,0)/unitsList.length) : null;
                   return (
                     <div style={{ marginBottom:16 }}>
                       <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>ANALYTICS</div>
-                      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12 }}>
+                      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8 }}>
                         <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
                           <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{sym}{fmt(average)}</div>
                           <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>AVERAGE</div>
@@ -14249,6 +14511,18 @@ function AppContent({ onLock }) {
                           <div style={{ color:T.success,fontSize:14,fontWeight:900 }}>{sym}{fmt(lowest)}</div>
                           <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>LOWEST</div>
                         </div>
+                      </div>
+                      <div style={{ display:"grid",gridTemplateColumns:avgUnits?"1fr 1fr":"1fr",gap:8,marginBottom:12 }}>
+                        <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
+                          <div style={{ color:T.accent,fontSize:14,fontWeight:900 }}>{sym}{fmt(totalPaid)}</div>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>TOTAL PAID</div>
+                        </div>
+                        {avgUnits!=null&&(
+                          <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
+                            <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{avgUnits}</div>
+                            <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>AVERAGE UNITS</div>
+                          </div>
+                        )}
                       </div>
                       {trend.length>=2&&(
                         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:16 }}>
