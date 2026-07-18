@@ -6823,6 +6823,7 @@ function AppContent({ onLock }) {
     events,
     perPersonBudgets,
     gifts,
+    dismissedAlerts,
     liabilities,
     trackedAssets,
     loans,
@@ -6830,7 +6831,7 @@ function AppContent({ onLock }) {
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -6866,6 +6867,7 @@ function AppContent({ onLock }) {
     if(snapshot.perPersonBudgets) setPerPersonBudgets(snapshot.perPersonBudgets);
     if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
     if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
+    if(Array.isArray(snapshot.dismissedAlerts)) setDismissedAlerts(snapshot.dismissedAlerts);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
@@ -7134,13 +7136,26 @@ function AppContent({ onLock }) {
     pullCloudSnapshot();
   }, [cloudUser?.id, pullCloudSnapshot]);
 
+  // A tab left open for days never otherwise re-checks the cloud — it would keep operating on
+  // whatever it loaded at sign-in, and its own auto-push could then overwrite newer changes made
+  // elsewhere (e.g. on phone) with its stale local state. Pulling fresh whenever the tab becomes
+  // visible again closes that gap without changing the push behavior at all.
+  useEffect(() => {
+    if(!cloudUser?.id || !isCloudSyncConfigured) return;
+    const handle = () => {
+      if(document.visibilityState==="visible") pullCloudSnapshot();
+    };
+    document.addEventListener("visibilitychange", handle);
+    return () => document.removeEventListener("visibilitychange", handle);
+  }, [cloudUser?.id, pullCloudSnapshot]);
+
   useEffect(() => {
     if(!cloudUser?.id || !isCloudSyncConfigured || !cloudHydrated || applyingCloudSnapshotRef.current) return;
     const timer = window.setTimeout(() => {
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (idx, dir) => {
     const arr = cardOrder.map(x=>x); // fully mutable copy
