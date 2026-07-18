@@ -1845,11 +1845,19 @@ function AppContent({ onLock }) {
   const getPersonAttributedAmount = useCallback((t, pid) => {
     if(t.type!=="expense") return 0;
     let total = 0;
-    if(t.forPerson===pid) total += Number(t.tagPersonAmount||t.amount||0);
+    // The "tag → attribute" flow writes the same amount to BOTH t.forPerson and
+    // t.people[pid].mode==="spent_on" for the same person — two fields stating one fact, not two
+    // separate amounts. Summing both double-counted every attribute-tagged expense. The people
+    // map is the current (F8) system, so it takes priority; forPerson only counts when there's no
+    // people-map entry for this person (older transactions that predate the people map).
+    if(t.people?.[pid]?.mode==="spent_on"){
+      total += Number(t.people[pid].amount||0);
+    } else if(t.forPerson===pid){
+      total += Number(t.tagPersonAmount||t.amount||0);
+    }
     if(t.tagItems?.length){
       t.tagItems.forEach(item=>{ if(item.targetType==="person"&&item.targetId===pid) total += Number(item.amount||0); });
     }
-    if(t.people?.[pid]?.mode==="spent_on") total += Number(t.people[pid].amount||0);
     if(t.allocations?.length){
       t.allocations.forEach(alloc=>{ if(alloc.targetType==="person"&&alloc.targetId===pid&&alloc.mode==="spent_on") total += Number(alloc.amount||0); });
     }
@@ -1859,8 +1867,12 @@ function AppContent({ onLock }) {
     const map={};
     thisMonthTxns.forEach(t=>{
       if(t.type!=="expense") return;
-      // forPerson tag (old-style)
-      if(t.forPerson){
+      // people map (spent_on) is the current system and takes priority — forPerson gets set to
+      // the same person by the same "tag → attribute" flow, so only count it as a fallback for
+      // older transactions that predate the people map (see getPersonAttributedAmount above).
+      if(t.people?.[t.forPerson]?.mode==="spent_on"){
+        // already covered by the people-map branch below; skip forPerson entirely
+      } else if(t.forPerson){
         if(!map[t.forPerson]) map[t.forPerson]=0;
         map[t.forPerson]+=(t.tagPersonAmount||t.amount);
       }
@@ -7859,6 +7871,22 @@ function AppContent({ onLock }) {
     const [newPersonType,setNewPersonType]=useState("contact");
     const [newCreditLimit,setNewCreditLimit]=useState("");
     const [newSpendBudget,setNewSpendBudget]=useState("");
+    // 3-step Add Person wizard: Identity → Capabilities → Details
+    const [addPersonStep,setAddPersonStep]=useState(1);
+    const [newModules,setNewModules]=useState(null); // null = not yet touched, use type default
+    const [newUnlimitedCredit,setNewUnlimitedCredit]=useState(false);
+    const [newFavorite,setNewFavorite]=useState(false);
+    const [newDefaultSettlement,setNewDefaultSettlement]=useState("UPI");
+    const effectiveNewModules = newModules ?? getPersonModules({personType:newPersonType,isMe:false});
+    const toggleNewModule = (id) => setNewModules(prev=>{
+      const cur = prev ?? getPersonModules({personType:newPersonType,isMe:false});
+      return cur.includes(id) ? cur.filter(x=>x!==id) : [...cur,id];
+    });
+    const resetAddPersonWizard = () => {
+      setAddPersonStep(1); setNewName(""); setNewEmoji("👤"); setNewRelation(""); setNewPersonType("contact");
+      setNewModules(null); setNewCreditLimit(""); setNewUnlimitedCredit(false); setNewSpendBudget("");
+      setNewFavorite(false); setNewDefaultSettlement("UPI"); setNewColor(PALETTE[1]);
+    };
     const [newGroupName,setNewGroupName]=useState("");
     const [newGroupType,setNewGroupType]=useState("");
     const [newGroupTypeId,setNewGroupTypeId]=useState("");
@@ -7866,6 +7894,12 @@ function AppContent({ onLock }) {
     const [newGroupMembers,setNewGroupMembers]=useState([]);
     const [newGroupIncludeMe,setNewGroupIncludeMe]=useState(true);
     const [newGroupManualLimit,setNewGroupManualLimit]=useState("");
+    const [addGroupStep,setAddGroupStep]=useState(1);
+    const [newGroupEnableBudget,setNewGroupEnableBudget]=useState(false);
+    const resetAddGroupWizard = () => {
+      setAddGroupStep(1); setNewGroupName(""); setNewGroupTypeId(""); setNewGroupMembers([]);
+      setNewGroupIncludeMe(true); setNewGroupManualLimit(""); setNewGroupEnableBudget(false); setNewGroupColor(PALETTE[5]);
+    };
     const [subView,setSubView]=useState("people");
     const [shareMonth,setShareMonth]=useState(()=>{ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
     const [showUpiPicker,setShowUpiPicker]=useState(false);
@@ -7924,8 +7958,8 @@ function AppContent({ onLock }) {
 
     const addPerson=()=>{
       if(!newName.trim()) return;
-      setPeople(p=>[...p,{ id:genId(), name:newName.trim(), emoji:newEmoji, relation:newRelation, color:newColor, personType:newPersonType, creditLimit:parseFloat(newCreditLimit)||0, spendBudget:parseFloat(newSpendBudget)||0, favorite:false, modules:getPersonModules({personType:newPersonType,isMe:false}) }]);
-      setNewName(""); setNewRelation(""); setNewCreditLimit(""); setNewSpendBudget("");
+      setPeople(p=>[...p,{ id:genId(), name:newName.trim(), emoji:newEmoji, relation:newRelation, color:newColor, personType:newPersonType, creditLimit:newUnlimitedCredit?0:(parseFloat(newCreditLimit)||0), spendBudget:parseFloat(newSpendBudget)||0, favorite:newFavorite, defaultSettlement:newDefaultSettlement, modules:effectiveNewModules }]);
+      resetAddPersonWizard();
     };
 
     const addGroup=()=>{
@@ -7933,9 +7967,8 @@ function AppContent({ onLock }) {
       const gtlow=(newGroupType||"group").toLowerCase();
       const gicon=gtlow.includes("house")||gtlow.includes("flat")||gtlow.includes("property")?"🏠":gtlow.includes("trip")||gtlow.includes("travel")?"✈️":gtlow.includes("office")||gtlow.includes("work")?"💼":gtlow.includes("family")?"👨‍👩‍👧":gtlow.includes("friend")?"👫":gtlow.includes("society")||gtlow.includes("building")?"🏢":"👥";
       const gtMeta = GROUP_TYPES.find(t=>t.id===newGroupTypeId);
-      setGroups(p=>[...p,{ id:genId(), type:gtMeta?.label||newGroupType||"Group", typeId:newGroupTypeId||"other", name:newGroupName.trim(), icon:gtMeta?.icon||gicon, color:newGroupColor, members:newGroupMembers, includeMe:newGroupIncludeMe, manualLimit:parseFloat(newGroupManualLimit)||0, defaultIntent:gtMeta?.default||"split", modules:GROUP_TYPE_DEFAULT_MODULES[newGroupTypeId||"other"]||GROUP_TYPE_DEFAULT_MODULES.other }]);
-      setNewGroupName(""); setNewGroupMembers([]); setNewGroupManualLimit(""); setNewGroupIncludeMe(true); setNewGroupTypeId("");
-      setNewGroupName(""); setNewGroupMembers([]); setNewGroupManualLimit(""); setNewGroupIncludeMe(true);
+      setGroups(p=>[...p,{ id:genId(), type:gtMeta?.label||newGroupType||"Group", typeId:newGroupTypeId||"other", name:newGroupName.trim(), icon:gtMeta?.icon||gicon, color:newGroupColor, members:newGroupMembers, includeMe:newGroupIncludeMe, manualLimit:newGroupEnableBudget?(parseFloat(newGroupManualLimit)||0):0, defaultIntent:gtMeta?.default||"split", modules:GROUP_TYPE_DEFAULT_MODULES[newGroupTypeId||"other"]||GROUP_TYPE_DEFAULT_MODULES.other }]);
+      resetAddGroupWizard();
     };
 
     if(selectedPerson){
@@ -8948,54 +8981,109 @@ function AppContent({ onLock }) {
             <div style={{ fontSize:32 }}>💰</div>
           </div>}
 
-          <div style={{ ...card,border:`1px dashed ${T.border}` }}>
-            <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:12 }}>➕ Add Person</div>
-            <div style={{ display:"flex",gap:8,marginBottom:10 }}>
-              {[["contact","🤝 Contact","They may owe you"],["dependant","♥ Dependant","Family, you cover them"]].map(([v,l,sub])=>(
-                <button key={v} onClick={()=>setNewPersonType(v)} style={{ flex:1,background:newPersonType===v?T.accentSoft:"none",border:`1px solid ${newPersonType===v?T.accent:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
-                  <div style={{ fontSize:12,fontWeight:700,color:newPersonType===v?T.accent:T.text }}>{l}</div>
-                  <div style={{ fontSize:10,color:T.sub,marginTop:2 }}>{sub}</div>
-                </button>
-              ))}
+          <div style={{ ...card,border:`1px solid #2563eb33`,background:"#eff6ff08" }}>
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
+              <div style={{ color:"#2563eb",fontSize:14,fontWeight:900 }}>➕ Add Person</div>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Step {addPersonStep} of 3</div>
             </div>
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10 }}>
-              <input style={inp} placeholder="Name *" value={newName} onChange={e=>setNewName(e.target.value)}/>
-              <select style={inp} value={newRelation} onChange={e=>setNewRelation(e.target.value)}>
-                <option value="">Select Relation</option>
-                <option value="Spouse">Spouse</option>
-                <option value="Child">Child</option>
-                <option value="Parent">Parent</option>
-                <option value="Uncle">Uncle</option>
-                <option value="Aunt">Aunt</option>
-                <option value="Cousin">Cousin</option>
-                <option value="Friend">Friend</option>
-                <option value="Colleague">Colleague</option>
-                <option value="Sibling">Sibling</option>
-                <option value="Grandparent">Grandparent</option>
-                <option value="Grandchild">Grandchild</option>
-                <option value="In-law">In-law</option>
-                <option value="Other">Other</option>
-              </select>
+            <div style={{ display:"flex",gap:4,marginBottom:16 }}>
+              {[1,2,3].map(s=><div key={s} style={{ flex:1,height:4,borderRadius:2,background:s<=addPersonStep?"#2563eb":T.border }}/>)}
             </div>
-            <div style={{ display:"flex",gap:8,marginBottom:10 }}>
-              {["👤","👨","👩","👶","👴","👵","🐕"].map(em=><button key={em} onClick={()=>setNewEmoji(em)} style={{ background:newEmoji===em?T.accentSoft:"none",border:`1px solid ${newEmoji===em?T.accent:T.border}`,borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:18 }}>{em}</button>)}
-            </div>
-            {newPersonType==="contact"&&(
-              <div style={{ marginBottom:10 }}>
-                <span style={lbl}>Credit limit (how much they can owe you)</span>
-                <input style={inp} type="number" placeholder={`e.g. 5000 (0 = unlimited)`} value={newCreditLimit} onChange={e=>setNewCreditLimit(e.target.value)}/>
+
+            {addPersonStep===1&&(
+              <div>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:8 }}>IDENTITY</div>
+                <div style={{ display:"flex",gap:8,marginBottom:12 }}>
+                  {["👤","👨","👩","👶","👴","👵","🐕"].map(em=><button key={em} onClick={()=>setNewEmoji(em)} style={{ background:newEmoji===em?"#2563eb22":"none",border:`1px solid ${newEmoji===em?"#2563eb":T.border}`,borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:18 }}>{em}</button>)}
+                </div>
+                <div style={{ marginBottom:10 }}>
+                  <span style={lbl}>Name *</span>
+                  <input style={inp} placeholder="Name" value={newName} onChange={e=>setNewName(e.target.value)}/>
+                </div>
+                <div style={{ marginBottom:14 }}>
+                  <span style={lbl}>Relationship *</span>
+                  <select style={inp} value={newRelation} onChange={e=>setNewRelation(e.target.value)}>
+                    <option value="">Select Relation</option>
+                    {["Spouse","Child","Parent","Uncle","Aunt","Cousin","Friend","Colleague","Sibling","Grandparent","Grandchild","In-law","Other"].map(r=><option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <span style={lbl}>Person Type</span>
+                <div style={{ display:"flex",flexDirection:"column",gap:6,marginBottom:16 }}>
+                  {[["contact","Contact","They may owe you"],["dependant","Dependant","Family, you cover them"],["vendor","Vendor","You pay them for goods/services"],["employee","Employee","Reimbursements, payroll"],["tenant","Tenant","Rent, deposits"],["other","Other",""]].map(([v,l,sub])=>(
+                    <button key={v} onClick={()=>{ setNewPersonType(v); setNewModules(null); }} style={{ background:newPersonType===v?"#2563eb18":"none",border:`1px solid ${newPersonType===v?"#2563eb":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                      <div style={{ fontSize:12,fontWeight:700,color:newPersonType===v?"#2563eb":T.text }}>{l}</div>
+                      {sub&&<div style={{ fontSize:10,color:T.sub,marginTop:2 }}>{sub}</div>}
+                    </button>
+                  ))}
+                </div>
+                <button disabled={!newName.trim()||!newRelation} onClick={()=>setAddPersonStep(2)} style={{ ...btnP,background:"#2563eb",opacity:(!newName.trim()||!newRelation)?0.5:1,cursor:(!newName.trim()||!newRelation)?"not-allowed":"pointer" }}>Continue →</button>
               </div>
             )}
-            {newPersonType==="dependant"&&(
-              <div style={{ marginBottom:10 }}>
-                <span style={lbl}>Monthly spend awareness budget</span>
-                <input style={inp} type="number" placeholder={`e.g. 3000 (0 = no limit)`} value={newSpendBudget} onChange={e=>setNewSpendBudget(e.target.value)}/>
+
+            {addPersonStep===2&&(
+              <div>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:4 }}>CAPABILITIES</div>
+                <div style={{ color:T.sub,fontSize:11,marginBottom:12 }}>Only enabled features appear later — no forms for things you don't need.</div>
+                <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
+                  {PERSON_MODULES.map(mod=>(
+                    <label key={mod.id} style={{ display:"flex",alignItems:"center",gap:10,background:effectiveNewModules.includes(mod.id)?"#2563eb14":T.input,border:`1px solid ${effectiveNewModules.includes(mod.id)?"#2563eb":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer" }}>
+                      <input type="checkbox" checked={effectiveNewModules.includes(mod.id)} onChange={()=>toggleNewModule(mod.id)} style={{ width:18,height:18,accentColor:"#2563eb",cursor:"pointer" }}/>
+                      <span style={{ fontSize:16 }}>{mod.icon}</span>
+                      <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{mod.label}</span>
+                    </label>
+                  ))}
+                  <label style={{ display:"flex",alignItems:"center",gap:10,background:newFavorite?"#2563eb14":T.input,border:`1px solid ${newFavorite?"#2563eb":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer" }}>
+                    <input type="checkbox" checked={newFavorite} onChange={e=>setNewFavorite(e.target.checked)} style={{ width:18,height:18,accentColor:"#2563eb",cursor:"pointer" }}/>
+                    <span style={{ fontSize:16 }}>★</span>
+                    <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>Favourite</span>
+                  </label>
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+                  <button onClick={()=>setAddPersonStep(1)} style={btnG}>← Back</button>
+                  <button onClick={()=>setAddPersonStep(3)} style={{ ...btnP,background:"#2563eb" }}>Continue →</button>
+                </div>
               </div>
             )}
-            <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
-              {PALETTE.map(c=><div key={c} onClick={()=>setNewColor(c)} style={{ width:24,height:24,borderRadius:6,background:c,cursor:"pointer",border:newColor===c?"3px solid #fff":"3px solid transparent" }}/>) }
-            </div>
-            <button onClick={addPerson} style={btnP}>Add Person</button>
+
+            {addPersonStep===3&&(
+              <div>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:4 }}>FEATURE DETAILS</div>
+                <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Only asks what you enabled in the last step.</div>
+
+                {effectiveNewModules.includes("borrowMoney")&&(
+                  <div style={{ marginBottom:14 }}>
+                    <span style={lbl}>Credit limit (max they can owe you)</span>
+                    <input style={{ ...inp,marginBottom:8 }} type="number" placeholder="e.g. 2500" value={newCreditLimit} onChange={e=>setNewCreditLimit(e.target.value)} disabled={newUnlimitedCredit}/>
+                    <label style={{ display:"flex",alignItems:"center",gap:8,cursor:"pointer" }}>
+                      <input type="checkbox" checked={newUnlimitedCredit} onChange={e=>setNewUnlimitedCredit(e.target.checked)} style={{ width:16,height:16,accentColor:"#2563eb",cursor:"pointer" }}/>
+                      <span style={{ color:T.sub,fontSize:12 }}>Unlimited limit</span>
+                    </label>
+                    <div style={{ marginTop:10 }}>
+                      <span style={lbl}>Default Settlement Method</span>
+                      <div style={{ display:"flex",gap:6 }}>
+                        {["UPI","Cash","Bank"].map(m=>(
+                          <button key={m} onClick={()=>setNewDefaultSettlement(m)} style={{ flex:1,background:newDefaultSettlement===m?"#2563eb18":"none",border:`1px solid ${newDefaultSettlement===m?"#2563eb":T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:700,color:newDefaultSettlement===m?"#2563eb":T.text,fontFamily:"Nunito,sans-serif" }}>{m}</button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {effectiveNewModules.includes("budget")&&(
+                  <div style={{ marginBottom:14 }}>
+                    <span style={lbl}>Monthly spend awareness budget</span>
+                    <input style={inp} type="number" placeholder="e.g. 3000 (0 = no limit)" value={newSpendBudget} onChange={e=>setNewSpendBudget(e.target.value)}/>
+                  </div>
+                )}
+                <span style={lbl}>Colour</span>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:16 }}>
+                  {PALETTE.map(c=><div key={c} onClick={()=>setNewColor(c)} style={{ width:24,height:24,borderRadius:6,background:c,cursor:"pointer",border:newColor===c?"3px solid #fff":"3px solid transparent" }}/>) }
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+                  <button onClick={()=>setAddPersonStep(2)} style={btnG}>← Back</button>
+                  <button onClick={addPerson} style={{ ...btnP,background:"#2563eb" }}>Done ✓</button>
+                </div>
+              </div>
+            )}
           </div>
 
           {listedPeople.map(p=>{
@@ -9050,35 +9138,76 @@ function AppContent({ onLock }) {
         </>}
 
         {subView==="groups"&&<>
-          <div style={{ ...card,border:`1px dashed ${T.border}` }}>
-            <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:12 }}>➕ New Group</div>
-            <input style={{ ...inp,marginBottom:10 }} placeholder="Group name *" value={newGroupName} onChange={e=>setNewGroupName(e.target.value)}/>
-            <div style={{ marginBottom:10 }}>
-              <span style={lbl}>Group type</span>
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:6 }}>
-                {GROUP_TYPES.map(gt=>(
-                  <button key={gt.id} onClick={()=>setNewGroupTypeId(newGroupTypeId===gt.id?"":gt.id)} style={{ background:newGroupTypeId===gt.id?T.accent+"22":"none",border:`1px solid ${newGroupTypeId===gt.id?T.accent:T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
-                    <div style={{ fontSize:12,fontWeight:700,color:newGroupTypeId===gt.id?T.accent:T.text }}>{gt.icon} {gt.label}</div>
-                    <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>{gt.desc}</div>
-                  </button>
-                ))}
+          <div style={{ ...card,border:`1px solid #2563eb33`,background:"#eff6ff08" }}>
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
+              <div style={{ color:"#2563eb",fontSize:14,fontWeight:900 }}>➕ New Group</div>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Step {addGroupStep} of 3</div>
+            </div>
+            <div style={{ display:"flex",gap:4,marginBottom:16 }}>
+              {[1,2,3].map(s=><div key={s} style={{ flex:1,height:4,borderRadius:2,background:s<=addGroupStep?"#2563eb":T.border }}/>)}
+            </div>
+
+            {addGroupStep===1&&(
+              <div>
+                <span style={lbl}>Group Name *</span>
+                <input style={{ ...inp,marginBottom:14 }} placeholder="e.g. Goa Trip" value={newGroupName} onChange={e=>setNewGroupName(e.target.value)}/>
+                <span style={lbl}>Group Type</span>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:6,marginBottom:16 }}>
+                  {GROUP_TYPES.map(gt=>(
+                    <button key={gt.id} onClick={()=>setNewGroupTypeId(newGroupTypeId===gt.id?"":gt.id)} style={{ background:newGroupTypeId===gt.id?"#2563eb18":"none",border:`1px solid ${newGroupTypeId===gt.id?"#2563eb":T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
+                      <div style={{ fontSize:12,fontWeight:700,color:newGroupTypeId===gt.id?"#2563eb":T.text }}>{gt.icon} {gt.label}</div>
+                      <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>{gt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+                <button disabled={!newGroupName.trim()} onClick={()=>setAddGroupStep(2)} style={{ ...btnP,background:"#2563eb",opacity:!newGroupName.trim()?0.5:1,cursor:!newGroupName.trim()?"not-allowed":"pointer" }}>Continue →</button>
               </div>
-            </div>
-            <div style={{ marginBottom:10 }}>
-              <span style={lbl}>Members</span>
-              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6 }}>
-                <button onClick={()=>setNewGroupIncludeMe(v=>!v)} style={{ background:newGroupIncludeMe?T.accentSoft:"none",border:`1px solid ${newGroupIncludeMe?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupIncludeMe?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🧑 Me {newGroupIncludeMe?"✓":"+"}</button>
-                {people.filter(p=>!p.isMe).map(p=><button key={p.id} onClick={()=>setNewGroupMembers(prev=>prev.includes(p.id)?prev.filter(x=>x!==p.id):[...prev,p.id])} style={{ background:newGroupMembers.includes(p.id)?p.color+"22":"none",border:`1px solid ${newGroupMembers.includes(p.id)?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupMembers.includes(p.id)?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+            )}
+
+            {addGroupStep===2&&(
+              <div>
+                <span style={lbl}>Members</span>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6,marginBottom:16 }}>
+                  <button onClick={()=>setNewGroupIncludeMe(v=>!v)} style={{ background:newGroupIncludeMe?"#2563eb18":"none",border:`1px solid ${newGroupIncludeMe?"#2563eb":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupIncludeMe?"#2563eb":T.sub,fontFamily:"Nunito,sans-serif" }}>🧑 Me {newGroupIncludeMe?"✓":"+"}</button>
+                  {people.filter(p=>!p.isMe).map(p=><button key={p.id} onClick={()=>setNewGroupMembers(prev=>prev.includes(p.id)?prev.filter(x=>x!==p.id):[...prev,p.id])} style={{ background:newGroupMembers.includes(p.id)?"#2563eb18":"none",border:`1px solid ${newGroupMembers.includes(p.id)?"#2563eb":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupMembers.includes(p.id)?"#2563eb":T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+                  <button onClick={()=>setAddGroupStep(1)} style={btnG}>← Back</button>
+                  <button disabled={!newGroupIncludeMe&&newGroupMembers.length===0} onClick={()=>setAddGroupStep(3)} style={{ ...btnP,background:"#2563eb",opacity:(!newGroupIncludeMe&&newGroupMembers.length===0)?0.5:1 }}>Continue →</button>
+                </div>
               </div>
-            </div>
-            <div style={{ marginBottom:10 }}>
-              <span style={lbl}>Optional group budget</span>
-              <input style={inp} type="number" placeholder={`e.g. 10000`} value={newGroupManualLimit} onChange={e=>setNewGroupManualLimit(e.target.value)}/>
-            </div>
-            <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:2,marginBottom:12 }}>
-              {PALETTE.map(c=><div key={c} onClick={()=>setNewGroupColor(c)} style={{ width:24,height:24,borderRadius:6,background:c,cursor:"pointer",border:newGroupColor===c?"3px solid #fff":"3px solid transparent" }}/>) }
-            </div>
-            <button onClick={addGroup} style={btnP}>Create Group</button>
+            )}
+
+            {addGroupStep===3&&(()=>{
+              const typeModules = GROUP_TYPE_DEFAULT_MODULES[newGroupTypeId||"other"]||GROUP_TYPE_DEFAULT_MODULES.other;
+              const budgetApplies = typeModules.includes("budget");
+              return (
+                <div>
+                  <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:4 }}>SETTINGS</div>
+                  <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Based on {GROUP_TYPES.find(t=>t.id===newGroupTypeId)?.label||"this"} group's defaults — {typeModules.map(m=>GROUP_MODULES.find(x=>x.id===m)?.label).filter(Boolean).join(", ")||"no extras"}.</div>
+
+                  {budgetApplies&&(
+                    <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:14 }}>
+                      <label style={{ display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",marginBottom:newGroupEnableBudget?10:0 }}>
+                        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>📊 Enable group budget?</span>
+                        <input type="checkbox" checked={newGroupEnableBudget} onChange={e=>setNewGroupEnableBudget(e.target.checked)} style={{ width:18,height:18,accentColor:"#2563eb",cursor:"pointer" }}/>
+                      </label>
+                      {newGroupEnableBudget&&(
+                        <input style={inp} type="number" placeholder="Monthly budget, e.g. 10000" value={newGroupManualLimit} onChange={e=>setNewGroupManualLimit(e.target.value)}/>
+                      )}
+                    </div>
+                  )}
+                  <span style={lbl}>Colour</span>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6,marginBottom:16 }}>
+                    {PALETTE.map(c=><div key={c} onClick={()=>setNewGroupColor(c)} style={{ width:24,height:24,borderRadius:6,background:c,cursor:"pointer",border:newGroupColor===c?"3px solid #fff":"3px solid transparent" }}/>) }
+                  </div>
+                  <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+                    <button onClick={()=>setAddGroupStep(2)} style={btnG}>← Back</button>
+                    <button onClick={addGroup} style={{ ...btnP,background:"#2563eb" }}>Done ✓</button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {[...new Set(groups.map(g=>g.type||"Group"))].map(gtype=>{
