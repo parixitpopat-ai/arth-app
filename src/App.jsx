@@ -981,7 +981,12 @@ function AppContent({ onLock }) {
   const [recurringSchedules, setRecurringSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_recurring")||"[]"));
   const [skippedInvestmentMonths, setSkippedInvestmentMonths] = useState(()=>JSON.parse(localStorage.getItem("arth_skipped_investments")||"[]"));
   const [gifts, setGifts] = useState(()=>JSON.parse(localStorage.getItem("arth_gifts")||"[]"));
+  // Archived notification ids — once a notification is read/archived it won't resurface unless
+  // the underlying condition changes (e.g. a budget alert re-appears if spend crosses a new
+  // threshold, using a threshold-specific id, even though the earlier threshold stays archived).
+  const [dismissedAlerts, setDismissedAlerts] = useState(()=>JSON.parse(localStorage.getItem("arth_dismissed_alerts")||"[]"));
   const [showAddGift, setShowAddGift] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [giftForPersonId, setGiftForPersonId] = useState(null);
   const [giftFilter, setGiftFilter] = useState(null);
   const [expandedSection, setExpandedSection] = useState(null);
@@ -1047,6 +1052,7 @@ function AppContent({ onLock }) {
   useEffect(()=>safeSetLocalStorage("arth_recurring",JSON.stringify(recurringSchedules)),[recurringSchedules]);
   useEffect(()=>safeSetLocalStorage("arth_skipped_investments",JSON.stringify(skippedInvestmentMonths)),[skippedInvestmentMonths]);
   useEffect(()=>safeSetLocalStorage("arth_gifts",JSON.stringify(gifts)),[gifts]);
+  useEffect(()=>safeSetLocalStorage("arth_dismissed_alerts",JSON.stringify(dismissedAlerts)),[dismissedAlerts]);
   useEffect(()=>safeSetLocalStorage("arth_budget",monthBudget),[monthBudget]);
   useEffect(()=>safeSetLocalStorage("arth_bills",JSON.stringify(bills)),[bills]);
   useEffect(()=>safeSetLocalStorage("arth_biller_accounts",JSON.stringify(billerAccounts)),[billerAccounts]);
@@ -1907,6 +1913,24 @@ function AppContent({ onLock }) {
     });
     return map;
   },[thisMonthTxns]);
+
+  // Personal budget alerts — same 80%/over-budget thresholds as the Monthly Dashboard's Budget
+  // Insights, surfaced as notifications instead of a permanent Home card. Each alert's id is
+  // threshold-specific (80 vs over), so archiving the 80% alert doesn't hide a later escalation
+  // to over-budget — that's a materially worse state and gets its own notification.
+  const budgetAlerts = useMemo(()=>{
+    const budgeted = people.filter(p=>!p.isMe && getPersonModules(p).includes("budget"));
+    return budgeted.map(p=>{
+      const monthBudget = Number(p.spendBudgetOverrides?.[viewMonth] ?? p.spendBudget ?? 0);
+      if(monthBudget<=0) return null;
+      const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
+      const pct = Math.round(monthSpend/monthBudget*100);
+      if(pct<80) return null;
+      const over = pct>100;
+      return { id:`budget_${p.id}_${viewMonth}_${over?"over":"80"}`, p, pct, over, monthSpend, monthBudget };
+    }).filter(Boolean).sort((a,b)=>b.pct-a.pct);
+  },[people, viewMonth, thisMonthTxns, getPersonAttributedAmount]);
+  const activeBudgetAlerts = useMemo(()=>budgetAlerts.filter(a=>!dismissedAlerts.includes(a.id)),[budgetAlerts,dismissedAlerts]);
 
   const directOwedToMe = useMemo(()=>Object.values(settlements).reduce((s,p)=>s+(p.owesMe||0),0),[settlements]);
   const receivablePeopleList = useMemo(()=>Object.entries(settlements)
@@ -7426,29 +7450,9 @@ function AppContent({ onLock }) {
               ); })}
             </div>);
           })()}
-          {/* Personal budget alerts — same 80%/over-budget thresholds as the Monthly Dashboard's
-              Budget Insights, but surfaced per-person right on Home. Only people with the budget
-              module enabled and a budget actually set are checked. */}
-          {(()=>{
-            const budgeted = people.filter(p=>!p.isMe && getPersonModules(p).includes("budget"));
-            const alerts = budgeted.map(p=>{
-              const monthBudget = Number(p.spendBudgetOverrides?.[viewMonth] ?? p.spendBudget ?? 0);
-              if(monthBudget<=0) return null;
-              const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
-              const pct = Math.round(monthSpend/monthBudget*100);
-              if(pct<80) return null;
-              return { p, pct, over:pct>100, monthSpend, monthBudget };
-            }).filter(Boolean).sort((a,b)=>b.pct-a.pct);
-            if(!alerts.length) return null;
-            return (<div style={{ marginBottom:12 }}>
-              {alerts.map(a=>(
-                <div key={a.p.id} onClick={()=>{ setBudgetFocusPersonId(a.p.id); setTab("budget"); setShowSettings(false); }} style={{ background:(a.over?T.danger:T.warn)+"16",border:`1px solid ${(a.over?T.danger:T.warn)}33`,borderRadius:14,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}>
-                  <div><div style={{ color:a.over?T.danger:T.warn,fontSize:12,fontWeight:800 }}>{a.over?"🔴":"⚠️"} {a.p.name} {a.over?"over budget":"at "+a.pct+"% of budget"}</div><div style={{ color:T.sub,fontSize:10 }}>{sym}{fmt(a.monthSpend)} of {sym}{fmt(a.monthBudget)}</div></div>
-                  <span style={{ color:a.over?T.danger:T.warn,fontSize:16,fontWeight:900 }}>{a.pct}%</span>
-                </div>
-              ))}
-            </div>);
-          })()}
+          {/* Personal budget alerts moved to Drawer → Notifications (see budgetAlerts/
+              activeBudgetAlerts memo + NotificationsModal) so they can be read and archived
+              instead of sitting permanently on Home. */}
           <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:8 }}>
             <button onClick={()=>setEditingCards(e=>!e)} style={{ background:editingCards?T.accent+"22":"none",border:`1px solid ${editingCards?T.accent:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:editingCards?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{editingCards?"✓ Done":"⠿ Arrange"}</button>
           </div>
@@ -12780,16 +12784,44 @@ function AppContent({ onLock }) {
           <div style={{ padding:"10px 8px",display:"flex",flexDirection:"column",gap:2 }}>
             {[
               { icon:"👤", label:"User Profile", onClick:()=>{ setTab("home"); setShowSettings(false); onClose(); } },
+              { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"💰", label:"Budget", onClick:()=>goToTab("budget") },
               { icon:"🎯", label:"Goals", onClick:()=>{ alert("Goals — coming soon"); onClose(); } },
               { icon:"✈️", label:"Trips & Outings", onClick:()=>{ setShowEventsList(true); onClose(); } },
             ].map(item=>(
               <button key={item.label} onClick={item.onClick} style={{ display:"flex",alignItems:"center",gap:14,background:"none",border:"none",padding:"13px 14px",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:700,color:T.text,fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                 <span style={{ fontSize:18 }}>{item.icon}</span>{item.label}
+                {item.badge>0&&<span style={{ marginLeft:"auto",background:T.danger,color:"#fff",borderRadius:20,padding:"1px 8px",fontSize:11,fontWeight:800 }}>{item.badge}</span>}
               </button>
             ))}
             <div style={{ color:T.sub,fontSize:10,padding:"10px 14px 4px" }}>More options coming soon</div>
           </div>
+        </div>
+      </div>
+    );
+  };
+
+  const NotificationsModal = ({ onClose }) => {
+    const archive = (id) => setDismissedAlerts(prev=>prev.includes(id)?prev:[...prev,id]);
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:335,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.bg,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto",borderRadius:"20px 20px 0 0",padding:"20px 16px" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🔔 Notifications</div>
+            <button onClick={onClose} style={{ background:"none",border:"none",color:T.sub,fontSize:18,cursor:"pointer" }}>✕</button>
+          </div>
+          {activeBudgetAlerts.length===0&&(
+            <div style={{ textAlign:"center",padding:"40px 20px",color:T.sub,fontSize:13 }}>You're all caught up.</div>
+          )}
+          {activeBudgetAlerts.map(a=>(
+            <div key={a.id} style={{ background:(a.over?T.danger:T.warn)+"16",border:`1px solid ${(a.over?T.danger:T.warn)}33`,borderRadius:14,padding:"12px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10 }}>
+              <div onClick={()=>{ setBudgetFocusPersonId(a.p.id); setTab("budget"); setShowSettings(false); onClose(); }} style={{ flex:1,cursor:"pointer" }}>
+                <div style={{ color:a.over?T.danger:T.warn,fontSize:12,fontWeight:800 }}>{a.over?"🔴":"⚠️"} {a.p.name} {a.over?"over budget":"at "+a.pct+"% of budget"}</div>
+                <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{sym}{fmt(a.monthSpend)} of {sym}{fmt(a.monthBudget)} · {a.pct}%</div>
+              </div>
+              <button onClick={()=>archive(a.id)} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>✓ Archive</button>
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -13862,6 +13894,7 @@ function AppContent({ onLock }) {
         {viewingMembership&&<MembershipDetailModal membership={viewingMembership} onClose={()=>setViewingMembership(null)}/>}
         {showAddEvent&&<AddEventModal existing={editingEvent} onClose={()=>{ setShowAddEvent(false); setEditingEvent(null); }}/>}
         {showEventsList&&<EventsListModal onClose={()=>setShowEventsList(false)}/>}
+        {showNotifications&&<NotificationsModal onClose={()=>setShowNotifications(false)}/>}
         {viewingEvent&&<EventDetailModal event={viewingEvent} onClose={()=>setViewingEvent(null)}/>}
         {showNavDrawer&&<NavDrawer onClose={()=>setShowNavDrawer(false)}/>}
         {confirmDialog&&(
