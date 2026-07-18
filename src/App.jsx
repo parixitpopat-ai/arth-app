@@ -7032,6 +7032,30 @@ function AppContent({ onLock }) {
     try{
       const record = await loadCloudSnapshot(cloudUser.id);
       if(record?.snapshot){
+        // Before overwriting local state with the cloud version, ALWAYS save what's about to be
+        // discarded into the local auto-backup list first (a separate localStorage key that pull
+        // never touches). This is the safety net for the exact failure mode that just happened:
+        // local data accumulated while signed out getting silently replaced by an older cloud
+        // snapshot with no way back. Never discard local state without a path to recover it.
+        const localBeforePull = cloudSnapshotRef.current;
+        const localSavedAt = localBeforePull?.savedAt ? new Date(localBeforePull.savedAt).getTime() : 0;
+        const cloudSavedAt = record.snapshot?.savedAt ? new Date(record.snapshot.savedAt).getTime() : 0;
+        if(localBeforePull){
+          const exportedAt = new Date().toISOString();
+          setAutoBackups(prev=>{
+            const list = Array.isArray(prev) ? prev : [];
+            return [{ id:`presync_${Date.now()}`, backupType:"pre-sync", exportedAt, snapshot:{ ...localBeforePull, savedAt:localBeforePull.savedAt||exportedAt } }, ...list].slice(0,3);
+          });
+        }
+        // Local data looks newer than what's in the cloud (e.g. changes made while signed out) —
+        // don't silently overwrite it. The backup above is already saved either way, so nothing
+        // is at risk while the person decides.
+        if(localSavedAt && cloudSavedAt && localSavedAt>cloudSavedAt+60000){
+          setCloudStatus("Your device has newer local data than the cloud. It's been saved to Backup & Restore — review before syncing to avoid losing it. Tap Sync Now again to pull the cloud version anyway.");
+          setCloudBusy(false);
+          setCloudHydrated(true);
+          return;
+        }
         applyCloudSnapshot(record.snapshot);
         setLastSyncedAt(record.updated_at || record.snapshot?.savedAt || new Date().toISOString());
         setCloudStatus("Cloud data loaded for this account.");
