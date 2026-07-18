@@ -10,8 +10,8 @@ const readCopiedSms = async () => ({ text: "", error: "Not supported" });
 const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
-const DARK  = { bg:"#08080f", card:"#0f0f1a", border:"#1a1a2e", text:"#e8e4dc", accent:"#f0a500", accentSoft:"rgba(240,165,0,0.1)", success:"#22c55e", danger:"#ef4444", input:"#0b0b18", nav:"#0a0a16", sub:"#5a5a7a", pill:"#14142a", sh:"rgba(0,0,0,0.6)", info:"#06b6d4", purple:"#8b5cf6", warn:"#f97316" };
-const LIGHT = { bg:"#f4f3ef", card:"#ffffff", border:"#e5e1d8", text:"#1a1a2e", accent:"#d4920a", accentSoft:"rgba(212,146,10,0.08)", success:"#16a34a", danger:"#dc2626", input:"#ede9e3", nav:"#ffffff", sub:"#7a7890", pill:"#eeecea", sh:"rgba(0,0,0,0.06)", info:"#0891b2", purple:"#7c3aed", warn:"#ea6c00" };
+const DARK  = { bg:"#08080f", card:"#0f0f1a", border:"#1a1a2e", text:"#e8e4dc", accent:"#22c55e", accentSoft:"rgba(34,197,94,0.12)", success:"#22c55e", danger:"#ef4444", input:"#0b0b18", nav:"#0a0a16", sub:"#5a5a7a", pill:"#14142a", sh:"rgba(0,0,0,0.6)", info:"#06b6d4", purple:"#8b5cf6", warn:"#f97316", gold:"#f0a500" };
+const LIGHT = { bg:"#f4f3ef", card:"#ffffff", border:"#e5e1d8", text:"#1a1a2e", accent:"#16a34a", accentSoft:"rgba(22,163,74,0.1)", success:"#16a34a", danger:"#dc2626", input:"#ede9e3", nav:"#ffffff", sub:"#7a7890", pill:"#eeecea", sh:"rgba(0,0,0,0.06)", info:"#0891b2", purple:"#7c3aed", warn:"#ea6c00", gold:"#d4920a" };
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const PALETTE = ["#f0a500","#22c55e","#3b82f6","#ef4444","#a855f7","#06b6d4","#f97316","#ec4899","#84cc16","#14b8a6","#8b5cf6","#f43f5e","#0ea5e9","#10b981","#f59e0b"];
@@ -802,11 +802,11 @@ function PinScreen({ onUnlock, isSetup, onCancel }) {
     <div style={{minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Nunito,sans-serif"}}>
       {/* B15: Hidden input keeps mobile keyboard context */}
       <input ref={hiddenInputRef} type="tel" inputMode="numeric" pattern="[0-9]*" style={{position:"absolute",opacity:0,width:1,height:1,pointerEvents:"none"}} onChange={e=>{ const v=e.target.value.replace(/\D/g,""); if(v) { handleKey(v[v.length-1]); e.target.value=""; } }} onKeyDown={e=>{ if(e.key==="Backspace") handleKey("del"); }}/>
-      <div style={{fontSize:52,marginBottom:12,color:"#f0a500",fontWeight:900,fontFamily:"Nunito,sans-serif"}}>₹</div>
-      <div style={{color:"#f0a500",fontSize:30,fontWeight:900,marginBottom:6}}>Arth</div>
+      <div style={{fontSize:52,marginBottom:12,color:"#22c55e",fontWeight:900,fontFamily:"Nunito,sans-serif"}}>₹</div>
+      <div style={{color:"#22c55e",fontSize:30,fontWeight:900,marginBottom:6}}>Arth</div>
       <div style={{color:"#5a5a7a",fontSize:13,marginBottom:40,textAlign:"center"}}>{isSetup?step==="enter"?"Set your 4-digit PIN":"Confirm your PIN":"Enter your PIN"}</div>
       <div style={{display:"flex",gap:18,marginBottom:14}}>
-        {[0,1,2,3].map(i=><div key={i} style={{width:18,height:18,borderRadius:"50%",background:cur.length>i?"#f0a500":"transparent",border:"2px solid",borderColor:cur.length>i?"#f0a500":"#2a2a3a",transition:"all 0.15s"}}/>)}
+        {[0,1,2,3].map(i=><div key={i} style={{width:18,height:18,borderRadius:"50%",background:cur.length>i?"#22c55e":"transparent",border:"2px solid",borderColor:cur.length>i?"#22c55e":"#2a2a3a",transition:"all 0.15s"}}/>)}
       </div>
       {error&&<div style={{color:"#ef4444",fontSize:12,marginBottom:14,textAlign:"center"}}>{error}</div>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,width:252,marginTop:12}}>
@@ -828,9 +828,9 @@ class ErrorBoundary extends React.Component {
     if(this.state.hasError) return (
       <div style={{minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Nunito,sans-serif"}}>
         <div style={{fontSize:48,marginBottom:16}}>⚠️</div>
-        <div style={{color:"#f0a500",fontSize:20,fontWeight:900,marginBottom:8}}>Something went wrong</div>
+        <div style={{color:"#22c55e",fontSize:20,fontWeight:900,marginBottom:8}}>Something went wrong</div>
         <div style={{color:"#5a5a7a",fontSize:12,marginBottom:24,textAlign:"center",maxWidth:300}}>{this.state.error}</div>
-        <button onClick={()=>this.setState({hasError:false,error:""})} style={{background:"#f0a500",color:"#000",border:"none",borderRadius:12,padding:"12px 24px",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"Nunito,sans-serif"}}>Try Again</button>
+        <button onClick={()=>this.setState({hasError:false,error:""})} style={{background:"#22c55e",color:"#000",border:"none",borderRadius:12,padding:"12px 24px",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"Nunito,sans-serif"}}>Try Again</button>
       </div>
     );
     return this.props.children;
@@ -981,12 +981,17 @@ function AppContent({ onLock }) {
   const [recurringSchedules, setRecurringSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_recurring")||"[]"));
   const [skippedInvestmentMonths, setSkippedInvestmentMonths] = useState(()=>JSON.parse(localStorage.getItem("arth_skipped_investments")||"[]"));
   const [gifts, setGifts] = useState(()=>JSON.parse(localStorage.getItem("arth_gifts")||"[]"));
+  // Daily wealth/budget snapshot history — recorded silently every day even with no UI to view it
+  // yet. Net Worth Trend, Wealth Timeline, and the Financial Health chapters all depend on history
+  // that can never be reconstructed retroactively — every day this doesn't run is data lost for good.
+  const [wealthSnapshots, setWealthSnapshots] = useState(()=>JSON.parse(localStorage.getItem("arth_wealth_snapshots")||"[]"));
   // Archived notification ids — once a notification is read/archived it won't resurface unless
   // the underlying condition changes (e.g. a budget alert re-appears if spend crosses a new
   // threshold, using a threshold-specific id, even though the earlier threshold stays archived).
   const [dismissedAlerts, setDismissedAlerts] = useState(()=>JSON.parse(localStorage.getItem("arth_dismissed_alerts")||"[]"));
   const [showAddGift, setShowAddGift] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showHealthScoreDetail, setShowHealthScoreDetail] = useState(false);
   const [giftForPersonId, setGiftForPersonId] = useState(null);
   const [giftFilter, setGiftFilter] = useState(null);
   const [expandedSection, setExpandedSection] = useState(null);
@@ -1053,6 +1058,7 @@ function AppContent({ onLock }) {
   useEffect(()=>safeSetLocalStorage("arth_recurring",JSON.stringify(recurringSchedules)),[recurringSchedules]);
   useEffect(()=>safeSetLocalStorage("arth_skipped_investments",JSON.stringify(skippedInvestmentMonths)),[skippedInvestmentMonths]);
   useEffect(()=>safeSetLocalStorage("arth_gifts",JSON.stringify(gifts)),[gifts]);
+  useEffect(()=>safeSetLocalStorage("arth_wealth_snapshots",JSON.stringify(wealthSnapshots)),[wealthSnapshots]);
   useEffect(()=>safeSetLocalStorage("arth_dismissed_alerts",JSON.stringify(dismissedAlerts)),[dismissedAlerts]);
   useEffect(()=>safeSetLocalStorage("arth_budget",monthBudget),[monthBudget]);
   useEffect(()=>safeSetLocalStorage("arth_bills",JSON.stringify(bills)),[bills]);
@@ -2646,6 +2652,103 @@ function AppContent({ onLock }) {
   // loanTakenTotal excludes CC-backed loans via isCreditCardBackedLoan to prevent double-counting.
   const totalLiabilitiesValue = creditCardLiabilityTotal + otherLiabilityTotal + loanTakenTotal;
   const netWorthValue = totalAssetsValue - totalLiabilitiesValue;
+
+  // Records one snapshot per real calendar day (not whatever month the user happens to be
+  // viewing — using todayStr() directly avoids mislabeling history if someone's browsing a past
+  // month when this fires). Guarded so it only ever writes once per day; cheap to re-check on
+  // every dependency change since the write is skipped once today's entry already exists.
+  useEffect(()=>{
+    const today = todayStr();
+    if(wealthSnapshots.some(s=>s.date===today)) return;
+    const realMonth = today.slice(0,7);
+    const realMonthTxns = txns.filter(t=>t.date&&t.date.startsWith(realMonth));
+    const monthSpend = realMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
+    const monthIncome = realMonthTxns.filter(t=>t.type==="income").reduce((s,t)=>s+Number(t.amount||0),0);
+    const monthBudget = monthOverrides[realMonth] || Math.round(Number(annualBudget||0)/12);
+    setWealthSnapshots(prev=>{
+      if(prev.some(s=>s.date===today)) return prev;
+      const snapshot = {
+        date: today,
+        netWorth: Math.round(netWorthValue),
+        cash: Math.round(cashBankTotal+cashWalletTotal+upiTotal),
+        investments: Math.round(investmentAssetsTotal),
+        assets: Math.round(trackedAssetsTotal),
+        liabilities: Math.round(totalLiabilitiesValue),
+        owedToMe: Math.round(totalOwedToMe),
+        monthSpend: Math.round(monthSpend),
+        monthBudget: Math.round(monthBudget),
+        savingsRate: monthIncome>0 ? Math.round(((monthIncome-monthSpend)/monthIncome)*100) : null,
+      };
+      return [...prev, snapshot].slice(-730); // ~2 years of daily history
+    });
+  },[netWorthValue, cashBankTotal, cashWalletTotal, upiTotal, investmentAssetsTotal, trackedAssetsTotal, totalLiabilitiesValue, totalOwedToMe, txns, monthOverrides, annualBudget, wealthSnapshots, getMyExpenseAmount]);
+
+  // Financial Health Score — locked formula (100 pts): Savings Rate 25, Bills Paid On Time 20,
+  // Budget Adherence 15, Emergency Fund Progress 15, Debt Ratio 10, Net Worth Growth 10,
+  // Transaction Consistency 5. Each component degrades gracefully to a neutral mid-score when
+  // there isn't enough data yet (e.g. no wealth snapshot from 30 days ago), rather than crashing
+  // the score to 0 for something that just hasn't had time to accumulate.
+  const financialHealthScore = useMemo(() => {
+    const today = todayStr();
+    const thisMonthKey = today.slice(0,7);
+    const realMonthTxns = txns.filter(t=>t.date&&t.date.startsWith(thisMonthKey));
+
+    // Savings Rate — 25 pts. 0% savings = 0, 30%+ savings = full marks.
+    const monthIncome = realMonthTxns.filter(t=>t.type==="income").reduce((s,t)=>s+Number(t.amount||0),0);
+    const monthSpend = realMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
+    const savingsRate = monthIncome>0 ? (monthIncome-monthSpend)/monthIncome : null;
+    const savingsScore = savingsRate===null ? 12.5 : Math.max(0,Math.min(25, (savingsRate/0.30)*25));
+
+    // Bills Paid On Time — 20 pts. Looks at bills paid in the last 90 days.
+    const in90 = new Date(Date.now()-90*24*60*60*1000).toISOString().split("T")[0];
+    const recentPaidBills = bills.filter(b=>b.status==="paid"&&b.paidDate&&b.paidDate>=in90);
+    const onTimeCount = recentPaidBills.filter(b=>!b.dueDate || b.paidDate<=b.dueDate).length;
+    const billsScore = recentPaidBills.length===0 ? 20 : (onTimeCount/recentPaidBills.length)*20;
+
+    // Budget Adherence — 15 pts. Full marks at or under budget, tapers to 0 by 150% of budget.
+    const monthBudget = monthOverrides[thisMonthKey] || Math.round(Number(annualBudget||0)/12);
+    const budgetRatio = monthBudget>0 ? monthSpend/monthBudget : null;
+    const budgetScore = budgetRatio===null ? 7.5 : budgetRatio<=1 ? 15 : Math.max(0, 15*(1-((budgetRatio-1)/0.5)));
+
+    // Emergency Fund Progress — 15 pts. Liquid cash vs. average monthly expense, target 6 months.
+    const liquidCash = cashBankTotal+cashWalletTotal+upiTotal;
+    const last3MonthsSpend = [0,1,2].map(i=>{
+      const d = new Date(); d.setMonth(d.getMonth()-i);
+      const mk = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+      return txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(mk)).reduce((s,t)=>s+getMyExpenseAmount(t),0);
+    });
+    const avgMonthlySpend = last3MonthsSpend.reduce((s,v)=>s+v,0)/3;
+    const monthsCovered = avgMonthlySpend>0 ? liquidCash/avgMonthlySpend : null;
+    const emergencyScore = monthsCovered===null ? 7.5 : Math.max(0,Math.min(15,(monthsCovered/6)*15));
+
+    // Debt Ratio — 10 pts. Liabilities as a share of total assets; 0% debt = full marks, 60%+ = 0.
+    const debtRatio = totalAssetsValue>0 ? totalLiabilitiesValue/totalAssetsValue : null;
+    const debtScore = debtRatio===null ? 10 : Math.max(0, 10*(1-(debtRatio/0.6)));
+
+    // Net Worth Growth — 10 pts. Compares today's net worth to the snapshot closest to 30 days
+    // ago. Neutral score until enough snapshot history has accumulated (this only started
+    // recording recently, so early users won't have 30 days of history yet).
+    const target30 = new Date(Date.now()-30*24*60*60*1000).toISOString().split("T")[0];
+    const past = [...wealthSnapshots].filter(s=>s.date<=target30).sort((a,b)=>b.date.localeCompare(a.date))[0];
+    const growthScore = (!past || !past.netWorth) ? 5 : (()=>{
+      const base = Math.abs(past.netWorth)||1;
+      const growthPct = (netWorthValue-past.netWorth)/base;
+      return Math.max(0,Math.min(10, 5+(growthPct*100*0.5)));
+    })();
+
+    // Transaction Consistency — 5 pts. Share of the last 30 days with at least one transaction logged.
+    const last30Dates = new Set();
+    for(let i=0;i<30;i++){ const d=new Date(); d.setDate(d.getDate()-i); last30Dates.add(d.toISOString().split("T")[0]); }
+    const daysWithTxn = new Set(txns.filter(t=>last30Dates.has(t.date)).map(t=>t.date)).size;
+    const consistencyScore = Math.max(0,Math.min(5,(daysWithTxn/30)*5));
+
+    const total = Math.round(savingsScore+billsScore+budgetScore+emergencyScore+debtScore+growthScore+consistencyScore);
+    return { total, breakdown: {
+      savings: Math.round(savingsScore), bills: Math.round(billsScore), budget: Math.round(budgetScore),
+      emergency: Math.round(emergencyScore), debt: Math.round(debtScore), growth: Math.round(growthScore),
+      consistency: Math.round(consistencyScore),
+    } };
+  }, [txns, bills, monthOverrides, annualBudget, cashBankTotal, cashWalletTotal, upiTotal, totalAssetsValue, totalLiabilitiesValue, wealthSnapshots, netWorthValue, getMyExpenseAmount]);
 
   // ── STYLES ─────────────────────────────────────────────────────────────────
   const card = { background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:16, marginBottom:12 };
@@ -6806,7 +6909,7 @@ function AppContent({ onLock }) {
 
   // ── HOME ───────────────────────────────────────────────────────────────────
 
-  const DEFAULT_CARD_ORDER = ["stats","categories","cc","bills","recent"];
+  const DEFAULT_CARD_ORDER = ["healthScore","stats","categories","cc","bills","recent"];
   const KNOWN_CARD_KEYS = new Set(DEFAULT_CARD_ORDER);
   // Filters out invalid saved keys AND backfills any card added to the app after this user's
   // order was last saved. Must be applied every time cardOrder is set from a saved source
@@ -6816,7 +6919,11 @@ function AppContent({ onLock }) {
   const backfillCardOrder = (saved) => {
     const filtered = Array.isArray(saved) ? saved.filter(k=>KNOWN_CARD_KEYS.has(k)) : [];
     const missing = DEFAULT_CARD_ORDER.filter(k=>!filtered.includes(k));
-    const merged = [...filtered, ...missing];
+    // healthScore is the headline metric — insert it at the front rather than appending like
+    // other newly-added cards, so it doesn't get silently buried below whatever was already there.
+    const merged = missing.includes("healthScore")
+      ? ["healthScore", ...filtered, ...missing.filter(k=>k!=="healthScore")]
+      : [...filtered, ...missing];
     return merged.length ? merged : DEFAULT_CARD_ORDER;
   };
   const [cardOrder, setCardOrder] = useState(()=>backfillCardOrder(JSON.parse(localStorage.getItem("arth_card_order")||"null")));
@@ -6888,6 +6995,7 @@ function AppContent({ onLock }) {
     perPersonBudgets,
     gifts,
     dismissedAlerts,
+    wealthSnapshots,
     liabilities,
     trackedAssets,
     loans,
@@ -6895,7 +7003,7 @@ function AppContent({ onLock }) {
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -6932,6 +7040,7 @@ function AppContent({ onLock }) {
     if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
     if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
     if(Array.isArray(snapshot.dismissedAlerts)) setDismissedAlerts(snapshot.dismissedAlerts);
+    if(Array.isArray(snapshot.wealthSnapshots)) setWealthSnapshots(snapshot.wealthSnapshots);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
@@ -7243,7 +7352,7 @@ function AppContent({ onLock }) {
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (idx, dir) => {
     const arr = cardOrder.map(x=>x); // fully mutable copy
@@ -7303,6 +7412,20 @@ function AppContent({ onLock }) {
       .filter(g=>!recordedFoliosThisMonth.has(g.key) && !dueRecurring.some(r=>r.name===g.name) && !skippedInvestmentMonths.includes(`${g.key}_${thisMonthKey}`))
       .sort((a,b)=>a.name.localeCompare(b.name));
     const CARDS = {
+      healthScore: (
+        <div key="healthScore" onClick={()=>setShowHealthScoreDetail(true)} style={{ ...card,cursor:"pointer",background:`linear-gradient(135deg,${T.accent}12,${T.card})`,border:`1px solid ${T.accent}33` }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <div>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Financial Health</div>
+              <div style={{ color:financialHealthScore.total>=70?T.success:financialHealthScore.total>=45?T.warn:T.danger,fontSize:32,fontWeight:900,marginTop:4 }}>{financialHealthScore.total}<span style={{ fontSize:16,color:T.sub,fontWeight:700 }}>/100</span></div>
+            </div>
+            <div style={{ width:56,height:56,borderRadius:"50%",background:`conic-gradient(${financialHealthScore.total>=70?T.success:financialHealthScore.total>=45?T.warn:T.danger} ${financialHealthScore.total*3.6}deg,${T.border} 0deg)`,display:"flex",alignItems:"center",justifyContent:"center" }}>
+              <div style={{ width:44,height:44,borderRadius:"50%",background:T.card,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{financialHealthScore.total>=70?"🟢":financialHealthScore.total>=45?"🟡":"🔴"}</div>
+            </div>
+          </div>
+          <div style={{ color:T.sub,fontSize:11,marginTop:8 }}>Tap to see what's driving your score</div>
+        </div>
+      ),
       stats: (
         <div key="stats" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
           {[
@@ -8188,10 +8311,10 @@ function AppContent({ onLock }) {
                   if(p.isMe){ setTab("budget"); setShowSettings(false); }
                   else { setBudgetFocusPersonId(p.id); setTab("budget"); setShowSettings(false); }
                 }}
-                style={{ width:"100%",background:"#eff6ff",border:"1px solid #2563eb44",borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}
+                style={{ width:"100%",background:"#f0fdf4",border:"1px solid #16a34a44",borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}
               >
-                <span style={{ color:"#2563eb",fontSize:13,fontWeight:800 }}>📊 View Budget & Spend</span>
-                <span style={{ color:"#2563eb",fontSize:16 }}>→</span>
+                <span style={{ color:"#16a34a",fontSize:13,fontWeight:800 }}>📊 View Budget & Spend</span>
+                <span style={{ color:"#16a34a",fontSize:16 }}>→</span>
               </button>
             )}
           </div>
@@ -9088,20 +9211,20 @@ function AppContent({ onLock }) {
             <div style={{ fontSize:32 }}>💰</div>
           </div>}
 
-          <div style={{ ...card,border:`1px solid #2563eb33`,background:"#eff6ff08" }}>
+          <div style={{ ...card,border:`1px solid #16a34a33`,background:"#f0fdf408" }}>
             <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
-              <div style={{ color:"#2563eb",fontSize:14,fontWeight:900 }}>➕ Add Person</div>
+              <div style={{ color:"#16a34a",fontSize:14,fontWeight:900 }}>➕ Add Person</div>
               <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Step {addPersonStep} of 3</div>
             </div>
             <div style={{ display:"flex",gap:4,marginBottom:16 }}>
-              {[1,2,3].map(s=><div key={s} style={{ flex:1,height:4,borderRadius:2,background:s<=addPersonStep?"#2563eb":T.border }}/>)}
+              {[1,2,3].map(s=><div key={s} style={{ flex:1,height:4,borderRadius:2,background:s<=addPersonStep?"#16a34a":T.border }}/>)}
             </div>
 
             {addPersonStep===1&&(
               <div>
                 <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:8 }}>IDENTITY</div>
                 <div style={{ display:"flex",gap:8,marginBottom:12 }}>
-                  {["👤","👨","👩","👶","👴","👵","🐕"].map(em=><button key={em} onClick={()=>setNewEmoji(em)} style={{ background:newEmoji===em?"#2563eb22":"none",border:`1px solid ${newEmoji===em?"#2563eb":T.border}`,borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:18 }}>{em}</button>)}
+                  {["👤","👨","👩","👶","👴","👵","🐕"].map(em=><button key={em} onClick={()=>setNewEmoji(em)} style={{ background:newEmoji===em?"#16a34a22":"none",border:`1px solid ${newEmoji===em?"#16a34a":T.border}`,borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:18 }}>{em}</button>)}
                 </div>
                 <div style={{ marginBottom:10 }}>
                   <span style={lbl}>Name *</span>
@@ -9117,13 +9240,13 @@ function AppContent({ onLock }) {
                 <span style={lbl}>Person Type</span>
                 <div style={{ display:"flex",flexDirection:"column",gap:6,marginBottom:16 }}>
                   {[["contact","Contact","They may owe you"],["dependant","Dependant","Family, you cover them"],["vendor","Vendor","You pay them for goods/services"],["employee","Employee","Reimbursements, payroll"],["tenant","Tenant","Rent, deposits"],["other","Other",""]].map(([v,l,sub])=>(
-                    <button key={v} onClick={()=>{ setNewPersonType(v); setNewModules(null); }} style={{ background:newPersonType===v?"#2563eb18":"none",border:`1px solid ${newPersonType===v?"#2563eb":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
-                      <div style={{ fontSize:12,fontWeight:700,color:newPersonType===v?"#2563eb":T.text }}>{l}</div>
+                    <button key={v} onClick={()=>{ setNewPersonType(v); setNewModules(null); }} style={{ background:newPersonType===v?"#16a34a18":"none",border:`1px solid ${newPersonType===v?"#16a34a":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                      <div style={{ fontSize:12,fontWeight:700,color:newPersonType===v?"#16a34a":T.text }}>{l}</div>
                       {sub&&<div style={{ fontSize:10,color:T.sub,marginTop:2 }}>{sub}</div>}
                     </button>
                   ))}
                 </div>
-                <button disabled={!newName.trim()||!newRelation} onClick={()=>setAddPersonStep(2)} style={{ ...btnP,background:"#2563eb",opacity:(!newName.trim()||!newRelation)?0.5:1,cursor:(!newName.trim()||!newRelation)?"not-allowed":"pointer" }}>Continue →</button>
+                <button disabled={!newName.trim()||!newRelation} onClick={()=>setAddPersonStep(2)} style={{ ...btnP,background:"#16a34a",opacity:(!newName.trim()||!newRelation)?0.5:1,cursor:(!newName.trim()||!newRelation)?"not-allowed":"pointer" }}>Continue →</button>
               </div>
             )}
 
@@ -9133,21 +9256,21 @@ function AppContent({ onLock }) {
                 <div style={{ color:T.sub,fontSize:11,marginBottom:12 }}>Only enabled features appear later — no forms for things you don't need.</div>
                 <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
                   {PERSON_MODULES.map(mod=>(
-                    <label key={mod.id} style={{ display:"flex",alignItems:"center",gap:10,background:effectiveNewModules.includes(mod.id)?"#2563eb14":T.input,border:`1px solid ${effectiveNewModules.includes(mod.id)?"#2563eb":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer" }}>
-                      <input type="checkbox" checked={effectiveNewModules.includes(mod.id)} onChange={()=>toggleNewModule(mod.id)} style={{ width:18,height:18,accentColor:"#2563eb",cursor:"pointer" }}/>
+                    <label key={mod.id} style={{ display:"flex",alignItems:"center",gap:10,background:effectiveNewModules.includes(mod.id)?"#16a34a14":T.input,border:`1px solid ${effectiveNewModules.includes(mod.id)?"#16a34a":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer" }}>
+                      <input type="checkbox" checked={effectiveNewModules.includes(mod.id)} onChange={()=>toggleNewModule(mod.id)} style={{ width:18,height:18,accentColor:"#16a34a",cursor:"pointer" }}/>
                       <span style={{ fontSize:16 }}>{mod.icon}</span>
                       <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{mod.label}</span>
                     </label>
                   ))}
-                  <label style={{ display:"flex",alignItems:"center",gap:10,background:newFavorite?"#2563eb14":T.input,border:`1px solid ${newFavorite?"#2563eb":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer" }}>
-                    <input type="checkbox" checked={newFavorite} onChange={e=>setNewFavorite(e.target.checked)} style={{ width:18,height:18,accentColor:"#2563eb",cursor:"pointer" }}/>
+                  <label style={{ display:"flex",alignItems:"center",gap:10,background:newFavorite?"#16a34a14":T.input,border:`1px solid ${newFavorite?"#16a34a":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer" }}>
+                    <input type="checkbox" checked={newFavorite} onChange={e=>setNewFavorite(e.target.checked)} style={{ width:18,height:18,accentColor:"#16a34a",cursor:"pointer" }}/>
                     <span style={{ fontSize:16 }}>★</span>
                     <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>Favourite</span>
                   </label>
                 </div>
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
                   <button onClick={()=>setAddPersonStep(1)} style={btnG}>← Back</button>
-                  <button onClick={()=>setAddPersonStep(3)} style={{ ...btnP,background:"#2563eb" }}>Continue →</button>
+                  <button onClick={()=>setAddPersonStep(3)} style={{ ...btnP,background:"#16a34a" }}>Continue →</button>
                 </div>
               </div>
             )}
@@ -9162,14 +9285,14 @@ function AppContent({ onLock }) {
                     <span style={lbl}>Credit limit (max they can owe you)</span>
                     <input style={{ ...inp,marginBottom:8 }} type="number" placeholder="e.g. 2500" value={newCreditLimit} onChange={e=>setNewCreditLimit(e.target.value)} disabled={newUnlimitedCredit}/>
                     <label style={{ display:"flex",alignItems:"center",gap:8,cursor:"pointer" }}>
-                      <input type="checkbox" checked={newUnlimitedCredit} onChange={e=>setNewUnlimitedCredit(e.target.checked)} style={{ width:16,height:16,accentColor:"#2563eb",cursor:"pointer" }}/>
+                      <input type="checkbox" checked={newUnlimitedCredit} onChange={e=>setNewUnlimitedCredit(e.target.checked)} style={{ width:16,height:16,accentColor:"#16a34a",cursor:"pointer" }}/>
                       <span style={{ color:T.sub,fontSize:12 }}>Unlimited limit</span>
                     </label>
                     <div style={{ marginTop:10 }}>
                       <span style={lbl}>Default Settlement Method</span>
                       <div style={{ display:"flex",gap:6 }}>
                         {["UPI","Cash","Bank"].map(m=>(
-                          <button key={m} onClick={()=>setNewDefaultSettlement(m)} style={{ flex:1,background:newDefaultSettlement===m?"#2563eb18":"none",border:`1px solid ${newDefaultSettlement===m?"#2563eb":T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:700,color:newDefaultSettlement===m?"#2563eb":T.text,fontFamily:"Nunito,sans-serif" }}>{m}</button>
+                          <button key={m} onClick={()=>setNewDefaultSettlement(m)} style={{ flex:1,background:newDefaultSettlement===m?"#16a34a18":"none",border:`1px solid ${newDefaultSettlement===m?"#16a34a":T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:700,color:newDefaultSettlement===m?"#16a34a":T.text,fontFamily:"Nunito,sans-serif" }}>{m}</button>
                         ))}
                       </div>
                     </div>
@@ -9187,7 +9310,7 @@ function AppContent({ onLock }) {
                 </div>
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
                   <button onClick={()=>setAddPersonStep(2)} style={btnG}>← Back</button>
-                  <button onClick={addPerson} style={{ ...btnP,background:"#2563eb" }}>Done ✓</button>
+                  <button onClick={addPerson} style={{ ...btnP,background:"#16a34a" }}>Done ✓</button>
                 </div>
               </div>
             )}
@@ -9245,13 +9368,13 @@ function AppContent({ onLock }) {
         </>}
 
         {subView==="groups"&&<>
-          <div style={{ ...card,border:`1px solid #2563eb33`,background:"#eff6ff08" }}>
+          <div style={{ ...card,border:`1px solid #16a34a33`,background:"#f0fdf408" }}>
             <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
-              <div style={{ color:"#2563eb",fontSize:14,fontWeight:900 }}>➕ New Group</div>
+              <div style={{ color:"#16a34a",fontSize:14,fontWeight:900 }}>➕ New Group</div>
               <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Step {addGroupStep} of 3</div>
             </div>
             <div style={{ display:"flex",gap:4,marginBottom:16 }}>
-              {[1,2,3].map(s=><div key={s} style={{ flex:1,height:4,borderRadius:2,background:s<=addGroupStep?"#2563eb":T.border }}/>)}
+              {[1,2,3].map(s=><div key={s} style={{ flex:1,height:4,borderRadius:2,background:s<=addGroupStep?"#16a34a":T.border }}/>)}
             </div>
 
             {addGroupStep===1&&(
@@ -9261,13 +9384,13 @@ function AppContent({ onLock }) {
                 <span style={lbl}>Group Type</span>
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:6,marginBottom:16 }}>
                   {GROUP_TYPES.map(gt=>(
-                    <button key={gt.id} onClick={()=>setNewGroupTypeId(newGroupTypeId===gt.id?"":gt.id)} style={{ background:newGroupTypeId===gt.id?"#2563eb18":"none",border:`1px solid ${newGroupTypeId===gt.id?"#2563eb":T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
-                      <div style={{ fontSize:12,fontWeight:700,color:newGroupTypeId===gt.id?"#2563eb":T.text }}>{gt.icon} {gt.label}</div>
+                    <button key={gt.id} onClick={()=>setNewGroupTypeId(newGroupTypeId===gt.id?"":gt.id)} style={{ background:newGroupTypeId===gt.id?"#16a34a18":"none",border:`1px solid ${newGroupTypeId===gt.id?"#16a34a":T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
+                      <div style={{ fontSize:12,fontWeight:700,color:newGroupTypeId===gt.id?"#16a34a":T.text }}>{gt.icon} {gt.label}</div>
                       <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>{gt.desc}</div>
                     </button>
                   ))}
                 </div>
-                <button disabled={!newGroupName.trim()} onClick={()=>setAddGroupStep(2)} style={{ ...btnP,background:"#2563eb",opacity:!newGroupName.trim()?0.5:1,cursor:!newGroupName.trim()?"not-allowed":"pointer" }}>Continue →</button>
+                <button disabled={!newGroupName.trim()} onClick={()=>setAddGroupStep(2)} style={{ ...btnP,background:"#16a34a",opacity:!newGroupName.trim()?0.5:1,cursor:!newGroupName.trim()?"not-allowed":"pointer" }}>Continue →</button>
               </div>
             )}
 
@@ -9275,12 +9398,12 @@ function AppContent({ onLock }) {
               <div>
                 <span style={lbl}>Members</span>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6,marginBottom:16 }}>
-                  <button onClick={()=>setNewGroupIncludeMe(v=>!v)} style={{ background:newGroupIncludeMe?"#2563eb18":"none",border:`1px solid ${newGroupIncludeMe?"#2563eb":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupIncludeMe?"#2563eb":T.sub,fontFamily:"Nunito,sans-serif" }}>🧑 Me {newGroupIncludeMe?"✓":"+"}</button>
-                  {people.filter(p=>!p.isMe).map(p=><button key={p.id} onClick={()=>setNewGroupMembers(prev=>prev.includes(p.id)?prev.filter(x=>x!==p.id):[...prev,p.id])} style={{ background:newGroupMembers.includes(p.id)?"#2563eb18":"none",border:`1px solid ${newGroupMembers.includes(p.id)?"#2563eb":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupMembers.includes(p.id)?"#2563eb":T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+                  <button onClick={()=>setNewGroupIncludeMe(v=>!v)} style={{ background:newGroupIncludeMe?"#16a34a18":"none",border:`1px solid ${newGroupIncludeMe?"#16a34a":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupIncludeMe?"#16a34a":T.sub,fontFamily:"Nunito,sans-serif" }}>🧑 Me {newGroupIncludeMe?"✓":"+"}</button>
+                  {people.filter(p=>!p.isMe).map(p=><button key={p.id} onClick={()=>setNewGroupMembers(prev=>prev.includes(p.id)?prev.filter(x=>x!==p.id):[...prev,p.id])} style={{ background:newGroupMembers.includes(p.id)?"#16a34a18":"none",border:`1px solid ${newGroupMembers.includes(p.id)?"#16a34a":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupMembers.includes(p.id)?"#16a34a":T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
                 </div>
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
                   <button onClick={()=>setAddGroupStep(1)} style={btnG}>← Back</button>
-                  <button disabled={!newGroupIncludeMe&&newGroupMembers.length===0} onClick={()=>setAddGroupStep(3)} style={{ ...btnP,background:"#2563eb",opacity:(!newGroupIncludeMe&&newGroupMembers.length===0)?0.5:1 }}>Continue →</button>
+                  <button disabled={!newGroupIncludeMe&&newGroupMembers.length===0} onClick={()=>setAddGroupStep(3)} style={{ ...btnP,background:"#16a34a",opacity:(!newGroupIncludeMe&&newGroupMembers.length===0)?0.5:1 }}>Continue →</button>
                 </div>
               </div>
             )}
@@ -9297,7 +9420,7 @@ function AppContent({ onLock }) {
                     <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:14 }}>
                       <label style={{ display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",marginBottom:newGroupEnableBudget?10:0 }}>
                         <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>📊 Enable group budget?</span>
-                        <input type="checkbox" checked={newGroupEnableBudget} onChange={e=>setNewGroupEnableBudget(e.target.checked)} style={{ width:18,height:18,accentColor:"#2563eb",cursor:"pointer" }}/>
+                        <input type="checkbox" checked={newGroupEnableBudget} onChange={e=>setNewGroupEnableBudget(e.target.checked)} style={{ width:18,height:18,accentColor:"#16a34a",cursor:"pointer" }}/>
                       </label>
                       {newGroupEnableBudget&&(
                         <input style={inp} type="number" placeholder="Monthly budget, e.g. 10000" value={newGroupManualLimit} onChange={e=>setNewGroupManualLimit(e.target.value)}/>
@@ -9310,7 +9433,7 @@ function AppContent({ onLock }) {
                   </div>
                   <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
                     <button onClick={()=>setAddGroupStep(2)} style={btnG}>← Back</button>
-                    <button onClick={addGroup} style={{ ...btnP,background:"#2563eb" }}>Done ✓</button>
+                    <button onClick={addGroup} style={{ ...btnP,background:"#16a34a" }}>Done ✓</button>
                   </div>
                 </div>
               );
@@ -11607,7 +11730,7 @@ function AppContent({ onLock }) {
             Falls back to the flat field when no override exists for the selected month. */}
         <div style={{ marginTop:20 }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12 }}>
-            <div style={{ color:"#2563eb",fontSize:15,fontWeight:900 }}>👤 Per-Person Budgets</div>
+            <div style={{ color:"#16a34a",fontSize:15,fontWeight:900 }}>👤 Per-Person Budgets</div>
             <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
           </div>
           {people.filter(p=>getPersonModules(p).includes("budget")).map(p=>{
@@ -11620,7 +11743,7 @@ function AppContent({ onLock }) {
                 <div onClick={()=>{ setExpandedBudgetPersonId(prev=>prev===p.id?null:p.id); setExpandedBudgetCatId(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,cursor:"pointer" }}>
                   <div style={{ display:"flex",alignItems:"center",gap:8 }}>
                     <span style={{ color:T.sub,fontSize:11 }}>{expandedBudgetPersonId===p.id?"▾":"▸"}</span>
-                    <div style={{ width:30,height:30,borderRadius:"50%",background:"#eff6ff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{p.emoji}</div>
+                    <div style={{ width:30,height:30,borderRadius:"50%",background:"#f0fdf4",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{p.emoji}</div>
                     <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{p.name}</div>
                   </div>
                   <div style={{ display:"flex",alignItems:"center",gap:6 }} onClick={e=>e.stopPropagation()}>
@@ -11640,10 +11763,10 @@ function AppContent({ onLock }) {
                   <>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4 }}>
                       <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(monthSpend)} of {sym}{fmt(monthBudget)}</span>
-                      <span style={{ color:isOver?T.danger:"#2563eb",fontSize:13,fontWeight:900 }}>{pct}%</span>
+                      <span style={{ color:isOver?T.danger:"#16a34a",fontSize:13,fontWeight:900 }}>{pct}%</span>
                     </div>
                     <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
-                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:"#2563eb",borderRadius:3 }}/>
+                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:"#16a34a",borderRadius:3 }}/>
                     </div>
                     {isOver&&<div style={{ textAlign:"right" }}><span style={{ color:T.danger,fontSize:10,fontWeight:700 }}>Over {sym}{fmtK(monthSpend-monthBudget)}</span></div>}
                   </>
@@ -11652,7 +11775,7 @@ function AppContent({ onLock }) {
                   <div style={{ marginTop:10,borderTop:`1px solid ${T.border}`,paddingTop:10 }}>
                     <div style={{ display:"flex",background:T.input,borderRadius:10,padding:2,marginBottom:10 }}>
                       {[["month","This Month"],["year",fyLabel]].map(([id,label])=>(
-                        <button key={id} onClick={()=>setBudgetPersonViewMode(id)} style={{ flex:1,textAlign:"center",padding:"6px 4px",fontSize:11,fontWeight:800,borderRadius:8,border:"none",cursor:"pointer",background:budgetPersonViewMode===id?"#2563eb22":"none",color:budgetPersonViewMode===id?"#2563eb":T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
+                        <button key={id} onClick={()=>setBudgetPersonViewMode(id)} style={{ flex:1,textAlign:"center",padding:"6px 4px",fontSize:11,fontWeight:800,borderRadius:8,border:"none",cursor:"pointer",background:budgetPersonViewMode===id?"#16a34a22":"none",color:budgetPersonViewMode===id?"#16a34a":T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
                       ))}
                     </div>
 
@@ -11733,11 +11856,11 @@ function AppContent({ onLock }) {
                           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12 }}>
                             <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Annual Budget</div><div style={{ color:T.text,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(personAnnualBudget)}</div></div>
                             <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Spent (YTD)</div><div style={{ color:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(ytdSpend)}</div></div>
-                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Remaining</div><div style={{ color:ytdRemaining>=0?"#2563eb":T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(Math.abs(ytdRemaining))}</div></div>
-                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Used</div><div style={{ color:ytdPct>100?T.danger:"#2563eb",fontSize:15,fontWeight:900,marginTop:2 }}>{ytdPct}%</div></div>
+                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Remaining</div><div style={{ color:ytdRemaining>=0?"#16a34a":T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(Math.abs(ytdRemaining))}</div></div>
+                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Used</div><div style={{ color:ytdPct>100?T.danger:"#16a34a",fontSize:15,fontWeight:900,marginTop:2 }}>{ytdPct}%</div></div>
                           </div>
                           <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:14 }}>
-                            <div style={{ height:"100%",width:`${Math.min(100,ytdPct)}%`,background:ytdPct>100?T.danger:"#2563eb",borderRadius:3 }}/>
+                            <div style={{ height:"100%",width:`${Math.min(100,ytdPct)}%`,background:ytdPct>100?T.danger:"#16a34a",borderRadius:3 }}/>
                           </div>
 
                           {catRows.length>0&&(
@@ -11774,14 +11897,14 @@ function AppContent({ onLock }) {
               </div>
             );
           })}
-          <button onClick={()=>{ setTab("people"); setShowSettings(false); }} style={{ background:"none",border:"none",color:"#2563eb",fontSize:12,fontWeight:700,cursor:"pointer",padding:"6px 0",display:"flex",alignItems:"center",gap:4 }}>Manage People →</button>
+          <button onClick={()=>{ setTab("people"); setShowSettings(false); }} style={{ background:"none",border:"none",color:"#16a34a",fontSize:12,fontWeight:700,cursor:"pointer",padding:"6px 0",display:"flex",alignItems:"center",gap:4 }}>Manage People →</button>
         </div>
 
         {/* Group budgets — flat `manualLimit` (edited on the group's own profile) is the default;
             `manualLimitOverrides[monthKey]` lets a specific month deviate from it. */}
         <div style={{ marginTop:20,paddingBottom:80 }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12 }}>
-            <div style={{ color:"#2563eb",fontSize:15,fontWeight:900 }}>👥 Group Budgets</div>
+            <div style={{ color:"#16a34a",fontSize:15,fontWeight:900 }}>👥 Group Budgets</div>
             <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
           </div>
           {groups.map(g=>{
@@ -11795,7 +11918,7 @@ function AppContent({ onLock }) {
               <div key={g.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,marginBottom:10,padding:"12px 14px" }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
                   <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                    <div style={{ width:30,height:30,borderRadius:10,background:"#eff6ff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{g.icon||"👥"}</div>
+                    <div style={{ width:30,height:30,borderRadius:10,background:"#f0fdf4",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{g.icon||"👥"}</div>
                     <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{g.name}</div>
                   </div>
                   <div style={{ display:"flex",alignItems:"center",gap:6 }}>
@@ -11815,10 +11938,10 @@ function AppContent({ onLock }) {
                   <>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4 }}>
                       <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(monthSpend)} of {sym}{fmt(monthBudget)}</span>
-                      <span style={{ color:isOver?T.danger:"#2563eb",fontSize:13,fontWeight:900 }}>{pct}%</span>
+                      <span style={{ color:isOver?T.danger:"#16a34a",fontSize:13,fontWeight:900 }}>{pct}%</span>
                     </div>
                     <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
-                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:"#2563eb",borderRadius:3 }}/>
+                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:"#16a34a",borderRadius:3 }}/>
                     </div>
                     {isOver&&<div style={{ textAlign:"right" }}><span style={{ color:T.danger,fontSize:10,fontWeight:700 }}>Over {sym}{fmtK(monthSpend-monthBudget)}</span></div>}
                   </>
@@ -11826,7 +11949,7 @@ function AppContent({ onLock }) {
               </div>
             );
           })}
-          <button onClick={()=>{ setTab("people"); setShowSettings(false); }} style={{ background:"none",border:"none",color:"#2563eb",fontSize:12,fontWeight:700,cursor:"pointer",padding:"6px 0",display:"flex",alignItems:"center",gap:4 }}>Manage Groups →</button>
+          <button onClick={()=>{ setTab("people"); setShowSettings(false); }} style={{ background:"none",border:"none",color:"#16a34a",fontSize:12,fontWeight:700,cursor:"pointer",padding:"6px 0",display:"flex",alignItems:"center",gap:4 }}>Manage Groups →</button>
         </div>
         </>)}
       </div>
@@ -12950,6 +13073,7 @@ function AppContent({ onLock }) {
             {[
               { icon:"👤", label:"User Profile", onClick:()=>{ setTab("home"); setShowSettings(false); onClose(); } },
               { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
+              { icon:"📅", label:"Bills", onClick:()=>goToTab("bills") },
               { icon:"💰", label:"Budget", onClick:()=>goToTab("budget") },
               { icon:"🎯", label:"Goals", onClick:()=>{ alert("Goals — coming soon"); onClose(); } },
               { icon:"✈️", label:"Trips & Outings", onClick:()=>{ setShowEventsList(true); onClose(); } },
@@ -13883,8 +14007,8 @@ function AppContent({ onLock }) {
               <span style={lbl}>Capabilities</span>
               <div style={{ display:"flex",flexDirection:"column",gap:6,marginTop:6 }}>
                 {PERSON_MODULES.map(mod=>(
-                  <label key={mod.id} style={{ display:"flex",alignItems:"center",gap:10,background:modules.includes(mod.id)?"#2563eb14":T.input,border:`1px solid ${modules.includes(mod.id)?"#2563eb":T.border}`,borderRadius:10,padding:"8px 12px",cursor:"pointer" }}>
-                    <input type="checkbox" checked={modules.includes(mod.id)} onChange={()=>toggleModule(mod.id)} style={{ width:16,height:16,accentColor:"#2563eb",cursor:"pointer" }}/>
+                  <label key={mod.id} style={{ display:"flex",alignItems:"center",gap:10,background:modules.includes(mod.id)?"#16a34a14":T.input,border:`1px solid ${modules.includes(mod.id)?"#16a34a":T.border}`,borderRadius:10,padding:"8px 12px",cursor:"pointer" }}>
+                    <input type="checkbox" checked={modules.includes(mod.id)} onChange={()=>toggleModule(mod.id)} style={{ width:16,height:16,accentColor:"#16a34a",cursor:"pointer" }}/>
                     <span style={{ fontSize:14 }}>{mod.icon}</span>
                     <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{mod.label}</span>
                   </label>
@@ -13896,9 +14020,9 @@ function AppContent({ onLock }) {
               <input style={inp} type="number" placeholder="0 = unlimited" value={creditLimit} onChange={e=>setCreditLimit(e.target.value)}/>
             </div>}
             {modules.includes("budget")&&(
-              <button onClick={()=>{ onClose(); if(!p.isMe) setBudgetFocusPersonId(p.id); setTab("budget"); setShowSettings(false); }} style={{ width:"100%",background:"#eff6ff",border:"1px solid #2563eb44",borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}>
-                <span style={{ color:"#2563eb",fontSize:12,fontWeight:800 }}>📊 Set monthly budget in Budget tab</span>
-                <span style={{ color:"#2563eb",fontSize:15 }}>→</span>
+              <button onClick={()=>{ onClose(); if(!p.isMe) setBudgetFocusPersonId(p.id); setTab("budget"); setShowSettings(false); }} style={{ width:"100%",background:"#f0fdf4",border:"1px solid #16a34a44",borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}>
+                <span style={{ color:"#16a34a",fontSize:12,fontWeight:800 }}>📊 Set monthly budget in Budget tab</span>
+                <span style={{ color:"#16a34a",fontSize:15 }}>→</span>
               </button>
             )}
             <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -13916,10 +14040,10 @@ function AppContent({ onLock }) {
 
   const TABS=[
     {id:"home",icon:"🏠",label:"Home"},
-    {id:"transactions",icon:"📋",label:"Txns"},
-    {id:"bills",icon:"📅",label:"Bills"},
-    {id:"wealth",icon:"📈",label:"Wealth"},
-    {id:"settings_tab",icon:"⚙️",label:"Settings"}
+    {id:"transactions",icon:"📖",label:"Timeline"},
+    {id:"__fab__",icon:"➕",label:""},
+    {id:"wealth",icon:"💰",label:"Money"},
+    {id:"settings_tab",icon:"👤",label:"Me"}
   ];
 
   const [wealthUnlocked, setWealthUnlocked] = useState(false);
@@ -13927,6 +14051,7 @@ function AppContent({ onLock }) {
   const hasAppPin = Boolean(localStorage.getItem("arth_pin")||"");
 
   const handleTab=t=>{
+    if(t==="__fab__"){ setDefaultAddType("expense"); setDefaultBillerAccountId(""); setShowAdd(true); return; }
     if(t==="settings_tab"){ setShowWealthPin(false); setShowSettings(true); setSettingsSection(null); return; }
     if(t==="wealth"){
       if(!hasAppPin){ setShowWealthPin(false); setShowSettings(true); setSettingsSection("security_pin_change"); return; }
@@ -14039,8 +14164,15 @@ function AppContent({ onLock }) {
         )}
 
         {/* Bottom Nav */}
-        <div style={{ position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:T.nav,borderTop:`1px solid ${T.border}`,display:"flex",justifyContent:"space-around",padding:"10px 0 16px",zIndex:100 }}>
+        <div style={{ position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:T.nav,borderTop:`1px solid ${T.border}`,display:"flex",justifyContent:"space-around",alignItems:"flex-end",padding:"10px 0 16px",zIndex:100 }}>
           {TABS.map(t=>{
+            if(t.id==="__fab__"){
+              return (
+                <button key={t.id} onClick={()=>handleTab(t.id)} style={{ background:T.accent,border:`4px solid ${T.nav}`,borderRadius:"50%",width:52,height:52,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginTop:-22,boxShadow:"0 4px 12px rgba(0,0,0,0.25)",flexShrink:0 }}>
+                  <span style={{ fontSize:22,color:"#000",lineHeight:1 }}>+</span>
+                </button>
+              );
+            }
             const active=isTabActive(t.id);
             return (
               <button key={t.id} onClick={()=>handleTab(t.id)} style={{ background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"2px 6px" }}>
@@ -14086,6 +14218,40 @@ function AppContent({ onLock }) {
         {showAddEvent&&<AddEventModal existing={editingEvent} onClose={()=>{ setShowAddEvent(false); setEditingEvent(null); }}/>}
         {showEventsList&&<EventsListModal onClose={()=>setShowEventsList(false)}/>}
         {showNotifications&&<NotificationsModal onClose={()=>setShowNotifications(false)}/>}
+        {showHealthScoreDetail&&(
+          <div onClick={e=>{ if(e.target===e.currentTarget) setShowHealthScoreDetail(false); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:335,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+            <div style={{ background:T.bg,width:"100%",maxWidth:480,maxHeight:"85vh",overflowY:"auto",borderRadius:"20px 20px 0 0",padding:"20px 16px" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+                <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Financial Health — {financialHealthScore.total}/100</div>
+                <button onClick={()=>setShowHealthScoreDetail(false)} style={{ background:"none",border:"none",color:T.sub,fontSize:18,cursor:"pointer" }}>✕</button>
+              </div>
+              {[
+                ["Savings Rate","savings",25,"How much of your income you're keeping, not spending."],
+                ["Bills Paid On Time","bills",20,"Share of the last 90 days' bills paid by their due date."],
+                ["Budget Adherence","budget",15,"How close this month's spend is to your set budget."],
+                ["Emergency Fund","emergency",15,"Months of expenses your liquid cash could cover."],
+                ["Debt Ratio","debt",10,"How much of your assets are offset by liabilities."],
+                ["Net Worth Growth","growth",10,"Change in net worth vs. roughly 30 days ago."],
+                ["Consistency","consistency",5,"Share of the last 30 days with at least one transaction logged."],
+              ].map(([label,key,max,desc])=>{
+                const val = financialHealthScore.breakdown[key];
+                const pct = Math.round((val/max)*100);
+                return (
+                  <div key={key} style={{ marginBottom:14 }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",marginBottom:3 }}>
+                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{label}</span>
+                      <span style={{ color:T.sub,fontSize:12,fontWeight:800 }}>{val}/{max}</span>
+                    </div>
+                    <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
+                      <div style={{ height:"100%",width:`${pct}%`,background:pct>=70?T.success:pct>=40?T.warn:T.danger,borderRadius:3 }}/>
+                    </div>
+                    <div style={{ color:T.sub,fontSize:10 }}>{desc}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {viewingEvent&&<EventDetailModal event={viewingEvent} onClose={()=>setViewingEvent(null)}/>}
         {showNavDrawer&&<NavDrawer onClose={()=>setShowNavDrawer(false)}/>}
         {confirmDialog&&(
