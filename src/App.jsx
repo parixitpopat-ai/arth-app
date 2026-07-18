@@ -38,6 +38,31 @@ const getPersonModules = (p) => {
   else base.push("borrowMoney");
   return base;
 };
+// Same idea for groups. Unlike people, no group feature is currently type-restricted at all —
+// every group already has full settlement + budget access regardless of type. So the fallback
+// here preserves that exactly for existing groups (nothing hides retroactively). The behavior-
+// template matrix below only supplies defaults for NEW groups going forward, via Add Group.
+const GROUP_MODULES = [
+  { id:"settlement", label:"Settlements", icon:"🤝" },
+  { id:"budget", label:"Budget", icon:"📊" },
+  { id:"bills", label:"Bills", icon:"🧾" },
+  { id:"vendors", label:"Vendors", icon:"🏪" },
+];
+const GROUP_TYPE_DEFAULT_MODULES = {
+  family:    ["budget","bills","vendors"],
+  friends:   ["settlement"],
+  relatives: ["settlement"],
+  trip:      ["settlement"],
+  office:    ["settlement","bills","vendors"],
+  building:  ["settlement","bills","vendors"],
+  society:   ["budget","bills"],
+  business:  ["budget","bills","vendors"],
+  other:     ["settlement","budget","bills","vendors"],
+};
+const getGroupModules = (g) => {
+  if(Array.isArray(g?.modules)) return g.modules;
+  return ["settlement","budget","bills","vendors"];
+};
 const CAT_ICONS = ["🍽️","🍕","🍔","🍜","🥗","🍣","☕","🍺","🛒","🥩","🚗","🏍️","✈️","🚕","⛽","🅿️","🛍️","👗","👟","💄","💍","🧴","⚡","💧","📶","🔌","💊","🏥","🩺","🧘","🏋️","🎬","🎵","🎮","🎨","📚","🏠","🔧","🪴","🛋️","👶","🧒","🎒","✏️","🧸","💰","💳","📈","🏦","🪙","👤","🐕","🐈","🌿","🌍","☀️","🎁","🎂","💼","🖥️","📱","🔭","🪒","💇","💆","💅","🧖","🏊","🚴","⛳","🎯","🎪","🏟️","🚑","🔑","🛁","🧺","🪑","🖼️","⛵","🌊","⛰️","🎓","📖","🏛️"];
 const INVEST_TYPES = [{ id:"mf", name:"Mutual Funds / SIP", icon:"📈", color:"#3b82f6" },{ id:"stocks", name:"Stocks", icon:"📊", color:"#22c55e" },{ id:"fd", name:"Fixed Deposit", icon:"🏦", color:"#f0a500" },{ id:"gold", name:"Gold", icon:"🥇", color:"#f59e0b" },{ id:"ppf", name:"PPF / NPS", icon:"🏛️", color:"#8b5cf6" },{ id:"crypto", name:"Crypto", icon:"₿", color:"#f97316" },{ id:"realestate", name:"Real Estate", icon:"🏘️", color:"#06b6d4" },{ id:"custom", name:"Custom", icon:"💼", color:"#ec4899" }];
 const ACC_TYPES = [{ id:"bank", label:"Bank Account", icon:"🏦" },{ id:"cc", label:"Credit Card", icon:"💳" },{ id:"debit", label:"Debit Card", icon:"🏧" },{ id:"upi", label:"UPI", icon:"📱" },{ id:"cash", label:"Cash", icon:"💵" }];
@@ -7389,7 +7414,29 @@ function AppContent({ onLock }) {
               ); })}
             </div>);
           })()}
-          {/* Edit cards toggle */}
+          {/* Personal budget alerts — same 80%/over-budget thresholds as the Monthly Dashboard's
+              Budget Insights, but surfaced per-person right on Home. Only people with the budget
+              module enabled and a budget actually set are checked. */}
+          {(()=>{
+            const budgeted = people.filter(p=>!p.isMe && getPersonModules(p).includes("budget"));
+            const alerts = budgeted.map(p=>{
+              const monthBudget = Number(p.spendBudgetOverrides?.[viewMonth] ?? p.spendBudget ?? 0);
+              if(monthBudget<=0) return null;
+              const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
+              const pct = Math.round(monthSpend/monthBudget*100);
+              if(pct<80) return null;
+              return { p, pct, over:pct>100, monthSpend, monthBudget };
+            }).filter(Boolean).sort((a,b)=>b.pct-a.pct);
+            if(!alerts.length) return null;
+            return (<div style={{ marginBottom:12 }}>
+              {alerts.map(a=>(
+                <div key={a.p.id} onClick={()=>{ setBudgetFocusPersonId(a.p.id); setTab("budget"); setShowSettings(false); }} style={{ background:(a.over?T.danger:T.warn)+"16",border:`1px solid ${(a.over?T.danger:T.warn)}33`,borderRadius:14,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}>
+                  <div><div style={{ color:a.over?T.danger:T.warn,fontSize:12,fontWeight:800 }}>{a.over?"🔴":"⚠️"} {a.p.name} {a.over?"over budget":"at "+a.pct+"% of budget"}</div><div style={{ color:T.sub,fontSize:10 }}>{sym}{fmt(a.monthSpend)} of {sym}{fmt(a.monthBudget)}</div></div>
+                  <span style={{ color:a.over?T.danger:T.warn,fontSize:16,fontWeight:900 }}>{a.pct}%</span>
+                </div>
+              ))}
+            </div>);
+          })()}
           <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:8 }}>
             <button onClick={()=>setEditingCards(e=>!e)} style={{ background:editingCards?T.accent+"22":"none",border:`1px solid ${editingCards?T.accent:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:editingCards?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{editingCards?"✓ Done":"⠿ Arrange"}</button>
           </div>
@@ -7886,7 +7933,7 @@ function AppContent({ onLock }) {
       const gtlow=(newGroupType||"group").toLowerCase();
       const gicon=gtlow.includes("house")||gtlow.includes("flat")||gtlow.includes("property")?"🏠":gtlow.includes("trip")||gtlow.includes("travel")?"✈️":gtlow.includes("office")||gtlow.includes("work")?"💼":gtlow.includes("family")?"👨‍👩‍👧":gtlow.includes("friend")?"👫":gtlow.includes("society")||gtlow.includes("building")?"🏢":"👥";
       const gtMeta = GROUP_TYPES.find(t=>t.id===newGroupTypeId);
-      setGroups(p=>[...p,{ id:genId(), type:gtMeta?.label||newGroupType||"Group", typeId:newGroupTypeId||"other", name:newGroupName.trim(), icon:gtMeta?.icon||gicon, color:newGroupColor, members:newGroupMembers, includeMe:newGroupIncludeMe, manualLimit:parseFloat(newGroupManualLimit)||0, defaultIntent:gtMeta?.default||"split" }]);
+      setGroups(p=>[...p,{ id:genId(), type:gtMeta?.label||newGroupType||"Group", typeId:newGroupTypeId||"other", name:newGroupName.trim(), icon:gtMeta?.icon||gicon, color:newGroupColor, members:newGroupMembers, includeMe:newGroupIncludeMe, manualLimit:parseFloat(newGroupManualLimit)||0, defaultIntent:gtMeta?.default||"split", modules:GROUP_TYPE_DEFAULT_MODULES[newGroupTypeId||"other"]||GROUP_TYPE_DEFAULT_MODULES.other }]);
       setNewGroupName(""); setNewGroupMembers([]); setNewGroupManualLimit(""); setNewGroupIncludeMe(true); setNewGroupTypeId("");
       setNewGroupName(""); setNewGroupMembers([]); setNewGroupManualLimit(""); setNewGroupIncludeMe(true);
     };
@@ -10944,6 +10991,8 @@ function AppContent({ onLock }) {
     const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
     const [expandedBudgetCatId, setExpandedBudgetCatId] = useState(null);
     const [budgetPersonViewMode, setBudgetPersonViewMode] = useState("month");
+    const [showAffordModal, setShowAffordModal] = useState(false);
+    const [affordAmount, setAffordAmount] = useState("");
     useEffect(()=>{
       if(budgetFocusPersonId){
         setBudgetSubTab("budgets");
@@ -11169,6 +11218,43 @@ function AppContent({ onLock }) {
                   ))}
                 </div>
               </div>
+
+              <button onClick={()=>{ setAffordAmount(""); setShowAffordModal(true); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"14px",cursor:"pointer",color:T.accent,fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif",marginBottom:12 }}>🧮 Can I Afford This?</button>
+
+              {showAffordModal&&(()=>{
+                const purchaseAmt = parseMoney(affordAmount)||0;
+                const afterPurchase = dashRemaining - purchaseAmt;
+                const newProjected = projectedMonthEnd + purchaseAmt;
+                const wouldBeOver = dashMonthly>0 && newProjected>dashMonthly;
+                return (
+                  <div onClick={()=>setShowAffordModal(false)} style={{ position:"fixed",inset:0,background:"#000000cc",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+                    <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"20px 20px 0 0",padding:"20px",width:"100%",maxWidth:480 }}>
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+                        <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>New Purchase</div>
+                        <button onClick={()=>setShowAffordModal(false)} style={{ background:"none",border:"none",color:T.sub,fontSize:18,cursor:"pointer" }}>✕</button>
+                      </div>
+                      <input autoFocus style={{ ...inp,fontSize:22,fontWeight:800,marginBottom:14 }} type="text" inputMode="decimal" placeholder={`${sym}0`} value={affordAmount} onChange={e=>setAffordAmount(cleanMoneyInput(e.target.value))}/>
+                      {purchaseAmt>0&&(
+                        <>
+                          <div style={{ background:T.input,borderRadius:12,padding:"12px 14px",marginBottom:12 }}>
+                            <div style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}><span style={{ color:T.sub,fontSize:12 }}>Current Remaining</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(dashRemaining)}</span></div>
+                            <div style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}><span style={{ color:T.sub,fontSize:12 }}>After Purchase</span><span style={{ color:afterPurchase>=0?T.text:T.danger,fontSize:12,fontWeight:700 }}>{sym}{fmt(afterPurchase)}</span></div>
+                            <div style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}><span style={{ color:T.sub,fontSize:12 }}>Projected Month End</span><span style={{ color:wouldBeOver?T.danger:T.success,fontSize:12,fontWeight:800 }}>{sym}{fmt(newProjected)}</span></div>
+                          </div>
+                          <div style={{ background:(wouldBeOver?T.danger:T.success)+"18",border:`1px solid ${(wouldBeOver?T.danger:T.success)}44`,borderRadius:12,padding:"12px 14px",marginBottom:14,textAlign:"center" }}>
+                            <span style={{ color:wouldBeOver?T.danger:T.success,fontSize:13,fontWeight:800 }}>{wouldBeOver?`⚠️ Over Budget by ${sym}${fmt(newProjected-dashMonthly)}`:"✓ Fits within budget"}</span>
+                          </div>
+                          <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                            <button onClick={()=>setShowAffordModal(false)} style={{ ...btnP,background:wouldBeOver?T.danger:T.success,color:"#000" }}>Proceed Anyway</button>
+                            {wouldBeOver&&<button onClick={()=>setShowAffordModal(false)} style={btnG}>Move to Next Month</button>}
+                            <button onClick={()=>{ setShowAffordModal(false); setShowAddLoan(true); }} style={btnG}>Convert to EMI</button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </>
           );
         })()}
