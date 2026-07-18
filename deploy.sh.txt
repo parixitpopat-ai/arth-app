@@ -1,0 +1,29 @@
+#!/bin/bash
+set -e
+cd D:/arth-app
+
+VERSION=$(date +"%d%m%y-%H%M")   # DDMMYY-HHMM
+
+# -A catches EVERYTHING, including anything left uncommitted from earlier sessions —
+# not just changes in the current directory.
+git add -A
+
+if ! git diff --cached --quiet; then
+  git commit -m "v$VERSION — ${1:-force deploy}"
+  git push
+else
+  echo "No local changes to commit — nothing was missing, redeploying current HEAD as-is."
+fi
+
+# --force bypasses Vercel's build cache, guaranteeing a completely fresh build
+# from source rather than reusing a stale cached layer.
+vercel --prod --force
+
+echo ""
+echo "Deployed as v$VERSION"
+echo ""
+echo "If the app STILL shows old behavior after this finishes: that's your phone's"
+echo "browser/PWA cache, not a missed deploy. On the phone: open the site, then"
+echo "hard-refresh, or Chrome > Settings > Site settings > arth-app.vercel.app >"
+echo "Clear & reset. Check Settings > Release Notes in the app — if the version"
+echo "shown there doesn't match v$VERSION above, the phone is still on cached code."
