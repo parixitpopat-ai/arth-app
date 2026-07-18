@@ -12072,6 +12072,14 @@ function AppContent({ onLock }) {
               const unshelled = filtered.filter(ba=>!ba.billerId);
               const shellGroups = {};
               shelled.forEach(ba=>{ if(!shellGroups[ba.billerId]) shellGroups[ba.billerId]=[]; shellGroups[ba.billerId].push(ba); });
+              const in7 = new Date(Date.now()+7*24*60*60*1000).toISOString().split("T")[0];
+              const todayStrV = todayStr();
+              const shellNeedsAttention = (billerId, accs) => {
+                const allBillsForShell = bills.filter(b=>accs.some(a=>String(a.id)===String(b.billerAccountId)));
+                if(allBillsForShell.some(b=>b.status==="unpaid"&&b.dueDate&&b.dueDate<=in7)) return true;
+                const memsForShell = memberships.filter(m=>accs.some(a=>String(a.id)===String(m.billerAccountId)));
+                return memsForShell.some(m=>{ const period=getCurrentPeriod(m); if(!period) return false; const eff=getPeriodEffectiveEnd(period); return eff>=todayStrV && eff<=in7; });
+              };
               const tiles = [
                 ...Object.entries(shellGroups).map(([billerId,accs])=>{
                   const shell = billers.find(b=>b.id===billerId);
@@ -12079,33 +12087,45 @@ function AppContent({ onLock }) {
                   const allBills = bills.filter(b=>accs.some(a=>String(a.id)===String(b.billerAccountId)));
                   const unpaidCount = allBills.filter(b=>b.status==="unpaid").length;
                   const lastBill = [...allBills].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
-                  return { key:"shell-"+billerId, icon:getBillerIcon(shell.type), name:shell.name, sub:accs.length>1?`${accs.length} accounts`:(lastBill?`${sym}${fmt(lastBill.amount)}`:"No bills"), unpaidCount, onClick:()=>setActiveBillerShell(shell) };
+                  return { key:"shell-"+billerId, billerId, icon:getBillerIcon(shell.type), name:shell.name, sub:accs.length>1?`${accs.length} accounts`:(lastBill?`${sym}${fmt(lastBill.amount)}`:"No bills"), unpaidCount, pinned:Boolean(shell.pinned), needsAttention:shellNeedsAttention(billerId,accs), onClick:()=>setActiveBillerShell(shell) };
                 }).filter(Boolean),
                 ...unshelled.map(ba=>{
                   const billsForAcc = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
                   const unpaidCount = billsForAcc.filter(b=>b.status==="unpaid").length;
                   const lastBill = [...billsForAcc].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
-                  return { key:"acc-"+ba.id, icon:getBillerIcon(ba.type), name:ba.name, sub:lastBill?`${sym}${fmt(lastBill.amount)}`:"No bills", unpaidCount, onClick:()=>setActiveBillerForAction(ba) };
+                  return { key:"acc-"+ba.id, billerId:null, icon:getBillerIcon(ba.type), name:ba.name, sub:lastBill?`${sym}${fmt(lastBill.amount)}`:"No bills", unpaidCount, pinned:false, needsAttention:billsForAcc.some(b=>b.status==="unpaid"&&b.dueDate&&b.dueDate<=in7), onClick:()=>setActiveBillerForAction(ba) };
                 }),
               ];
-              return (
+              const attentionTiles = tiles.filter(t=>t.needsAttention);
+              const pinnedTiles = tiles.filter(t=>t.pinned && !t.needsAttention);
+              const renderTileRow = (rowTiles, label) => (
                 <div style={{ padding:"8px 16px" }}>
-                  <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>MY ACCOUNTS</div>
+                  <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>{label}</div>
                   <div style={{ display:"flex",gap:10,overflowX:"auto",paddingBottom:8 }}>
-                    {tiles.map(tile=>(
-                      <div key={tile.key} onClick={tile.onClick} style={{ minWidth:120,background:T.card,borderRadius:16,padding:"12px",cursor:"pointer",border:`1px solid ${tile.unpaidCount>0?T.danger+"44":T.border}`,position:"relative",flexShrink:0 }}>
+                    {rowTiles.map(tile=>(
+                      <div key={tile.key} style={{ minWidth:120,background:T.card,borderRadius:16,padding:"12px",cursor:"pointer",border:`1px solid ${tile.unpaidCount>0?T.danger+"44":T.border}`,position:"relative",flexShrink:0 }}>
                         {tile.unpaidCount>0&&<div style={{ position:"absolute",top:8,right:8,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 6px",fontSize:9,fontWeight:800 }}>{tile.unpaidCount}</div>}
-                        <div style={{ fontSize:28,marginBottom:6 }}>{tile.icon}</div>
-                        <div style={{ color:T.text,fontSize:11,fontWeight:800,lineHeight:1.2 }}>{tile.name}</div>
-                        <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>{tile.sub}</div>
+                        {tile.billerId&&<button onClick={e=>{ e.stopPropagation(); setBillers(prev=>prev.map(b=>b.id===tile.billerId?{...b,pinned:!b.pinned}:b)); }} style={{ position:"absolute",top:8,left:8,background:"none",border:"none",cursor:"pointer",fontSize:13,color:tile.pinned?T.accent:T.border,padding:0 }}>{tile.pinned?"★":"☆"}</button>}
+                        <div onClick={tile.onClick} style={{ marginTop:tile.billerId?10:0 }}>
+                          <div style={{ fontSize:28,marginBottom:6 }}>{tile.icon}</div>
+                          <div style={{ color:T.text,fontSize:11,fontWeight:800,lineHeight:1.2 }}>{tile.name}</div>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>{tile.sub}</div>
+                        </div>
                       </div>
                     ))}
-                    <div onClick={()=>setShowAddBillerModal(true)} style={{ minWidth:80,background:"none",borderRadius:16,padding:"12px",cursor:"pointer",border:`2px dashed ${T.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+                    {label==="ALL BILLERS"&&<div onClick={()=>setShowAddBillerModal(true)} style={{ minWidth:80,background:"none",borderRadius:16,padding:"12px",cursor:"pointer",border:`2px dashed ${T.border}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
                       <div style={{ fontSize:24,color:T.sub }}>+</div>
                       <div style={{ color:T.sub,fontSize:9,marginTop:4 }}>Add Biller</div>
-                    </div>
+                    </div>}
                   </div>
                 </div>
+              );
+              return (
+                <>
+                  {attentionTiles.length>0&&renderTileRow(attentionTiles,"⚠️ NEEDS ATTENTION")}
+                  {pinnedTiles.length>0&&renderTileRow(pinnedTiles,"⭐ PINNED")}
+                  {renderTileRow(tiles,"ALL BILLERS")}
+                </>
               );
             })()}
 
@@ -14195,6 +14215,57 @@ function AppContent({ onLock }) {
                     );})}
                   </div>
                 )}
+                {/* Bill Analytics — average/highest/lowest + trend, computed from this account's
+                    paid bills. Doesn't apply to memberships, which have their own Lifetime stats
+                    above (spend/duration is a different shape of number for a subscription). */}
+                {actionType!=="membership"&&(()=>{
+                  const paidBills = baBills.filter(b=>b.status==="paid"&&Number(b.amount||0)>0);
+                  if(paidBills.length===0) return null;
+                  const amounts = paidBills.map(b=>Number(b.amount||0));
+                  const average = Math.round(amounts.reduce((s,a)=>s+a,0)/amounts.length);
+                  const highest = Math.max(...amounts);
+                  const lowest = Math.min(...amounts);
+                  const monthMap = {};
+                  paidBills.forEach(b=>{
+                    const d = b.billDate || b.paidDate || b.createdDate;
+                    if(!d) return;
+                    const mk = String(d).slice(0,7);
+                    monthMap[mk] = (monthMap[mk]||0) + Number(b.amount||0);
+                  });
+                  const trend = Object.entries(monthMap).sort(([a],[b2])=>a.localeCompare(b2)).slice(-12).map(([key,amt])=>({ key, label:new Date(key+"-01").toLocaleString("en-IN",{month:"short",year:"2-digit"}), amount:Math.round(amt) }));
+                  return (
+                    <div style={{ marginBottom:16 }}>
+                      <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>ANALYTICS</div>
+                      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12 }}>
+                        <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
+                          <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{sym}{fmt(average)}</div>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>AVERAGE</div>
+                        </div>
+                        <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
+                          <div style={{ color:T.danger,fontSize:14,fontWeight:900 }}>{sym}{fmt(highest)}</div>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>HIGHEST</div>
+                        </div>
+                        <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
+                          <div style={{ color:T.success,fontSize:14,fontWeight:900 }}>{sym}{fmt(lowest)}</div>
+                          <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>LOWEST</div>
+                        </div>
+                      </div>
+                      {trend.length>=2&&(
+                        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:16 }}>
+                          <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>{trend.length}-Month Trend</div>
+                          <ResponsiveContainer width="100%" height={140}>
+                            <BarChart data={trend}>
+                              <XAxis dataKey="label" tick={{ fontSize:9,fill:T.sub }}/>
+                              <YAxis tick={{ fontSize:9,fill:T.sub }}/>
+                              <Tooltip formatter={v=>`${sym}${fmt(v)}`}/>
+                              <Bar dataKey="amount" radius={[4,4,0,0]} fill={T.accent}/>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {/* Edit / Delete biller account */}
                 <div style={{ display:"flex",gap:8,marginTop:8 }}>
                   <button onClick={()=>{ setEditingBillerAccount(ba); setActiveBillerForAction(null); }} style={{ flex:1,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit Account</button>
