@@ -15,6 +15,29 @@ const LIGHT = { bg:"#f4f3ef", card:"#ffffff", border:"#e5e1d8", text:"#1a1a2e", 
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const PALETTE = ["#f0a500","#22c55e","#3b82f6","#ef4444","#a855f7","#06b6d4","#f97316","#ec4899","#84cc16","#14b8a6","#8b5cf6","#f43f5e","#0ea5e9","#10b981","#f59e0b"];
+// Capabilities a person can have — replaces the old hardcoded personType==="dependant"/"contact"
+// checks scattered across the app. `personType` (Contact/Dependant/Vendor/...) stays as an
+// identity classification, but no longer controls which features are available; `modules` does.
+const PERSON_MODULES = [
+  { id:"sharedExpenses", label:"Shared Expenses", icon:"🤝" },
+  { id:"borrowMoney", label:"Can Borrow Money", icon:"💳" },
+  { id:"budget", label:"Monthly Budget", icon:"📊" },
+  { id:"gifts", label:"Gifts", icon:"🎁" },
+  { id:"notes", label:"Notes", icon:"📝" },
+  { id:"reminders", label:"Reminders", icon:"🔔" },
+];
+// A person's enabled modules. New people (created after this change) store `modules` explicitly.
+// Existing people don't have it yet, so this derives sensible defaults from their current
+// personType that reproduce exactly what was visible before — budget only for dependants/isMe
+// (the only feature that was actually type-restricted), everything else on for everyone (matches
+// today's unrestricted behavior for shared expenses, lending, gifts).
+const getPersonModules = (p) => {
+  if(Array.isArray(p?.modules)) return p.modules;
+  const base = ["sharedExpenses","gifts","notes","reminders"];
+  if(p?.isMe || p?.personType==="dependant") base.push("budget");
+  else base.push("borrowMoney");
+  return base;
+};
 const CAT_ICONS = ["🍽️","🍕","🍔","🍜","🥗","🍣","☕","🍺","🛒","🥩","🚗","🏍️","✈️","🚕","⛽","🅿️","🛍️","👗","👟","💄","💍","🧴","⚡","💧","📶","🔌","💊","🏥","🩺","🧘","🏋️","🎬","🎵","🎮","🎨","📚","🏠","🔧","🪴","🛋️","👶","🧒","🎒","✏️","🧸","💰","💳","📈","🏦","🪙","👤","🐕","🐈","🌿","🌍","☀️","🎁","🎂","💼","🖥️","📱","🔭","🪒","💇","💆","💅","🧖","🏊","🚴","⛳","🎯","🎪","🏟️","🚑","🔑","🛁","🧺","🪑","🖼️","⛵","🌊","⛰️","🎓","📖","🏛️"];
 const INVEST_TYPES = [{ id:"mf", name:"Mutual Funds / SIP", icon:"📈", color:"#3b82f6" },{ id:"stocks", name:"Stocks", icon:"📊", color:"#22c55e" },{ id:"fd", name:"Fixed Deposit", icon:"🏦", color:"#f0a500" },{ id:"gold", name:"Gold", icon:"🥇", color:"#f59e0b" },{ id:"ppf", name:"PPF / NPS", icon:"🏛️", color:"#8b5cf6" },{ id:"crypto", name:"Crypto", icon:"₿", color:"#f97316" },{ id:"realestate", name:"Real Estate", icon:"🏘️", color:"#06b6d4" },{ id:"custom", name:"Custom", icon:"💼", color:"#ec4899" }];
 const ACC_TYPES = [{ id:"bank", label:"Bank Account", icon:"🏦" },{ id:"cc", label:"Credit Card", icon:"💳" },{ id:"debit", label:"Debit Card", icon:"🏧" },{ id:"upi", label:"UPI", icon:"📱" },{ id:"cash", label:"Cash", icon:"💵" }];
@@ -1125,6 +1148,9 @@ function AppContent({ onLock }) {
   const [budgetOverrideMonth, setBudgetOverrideMonth] = useState(null);
   const [budgetOverrideVal, setBudgetOverrideVal] = useState("");
   const [selectedPerson, setSelectedPerson] = useState(null);
+  // Set by the People tab's "View Budget & Spend" link; BudgetPage reads and clears this on mount
+  // to auto-expand that person's row, instead of duplicating spend/budget/category cards locally.
+  const [budgetFocusPersonId, setBudgetFocusPersonId] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [groupViewMode, setGroupViewMode] = useState("overall");
   const [showGroupOwesBreakdown, setShowGroupOwesBreakdown] = useState(false);
@@ -7851,7 +7877,7 @@ function AppContent({ onLock }) {
 
     const addPerson=()=>{
       if(!newName.trim()) return;
-      setPeople(p=>[...p,{ id:genId(), name:newName.trim(), emoji:newEmoji, relation:newRelation, color:newColor, personType:newPersonType, creditLimit:parseFloat(newCreditLimit)||0, spendBudget:parseFloat(newSpendBudget)||0, favorite:false }]);
+      setPeople(p=>[...p,{ id:genId(), name:newName.trim(), emoji:newEmoji, relation:newRelation, color:newColor, personType:newPersonType, creditLimit:parseFloat(newCreditLimit)||0, spendBudget:parseFloat(newSpendBudget)||0, favorite:false, modules:getPersonModules({personType:newPersonType,isMe:false}) }]);
       setNewName(""); setNewRelation(""); setNewCreditLimit(""); setNewSpendBudget("");
     };
 
@@ -7899,6 +7925,164 @@ function AppContent({ onLock }) {
       return (
         <div style={{ padding:"14px 16px 0" }}>
           <button onClick={()=>setSelectedPerson(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:13,fontWeight:700,marginBottom:16,fontFamily:"Nunito,sans-serif" }}>← People</button>
+
+          {/* Identity */}
+          <div style={{ ...card,background:`linear-gradient(135deg,${p.color}14,${T.card})` }}>
+            <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:16 }}>
+              <div style={{ width:52,height:52,borderRadius:"50%",background:p.color+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26 }}>{p.emoji}</div>
+              <div style={{ flex:1 }}>
+                <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>{p.name}{p.favorite?<span style={{ color:T.accent,fontSize:15,marginLeft:6 }}>★</span>:""}</div>
+                <div style={{ color:T.sub,fontSize:12,marginTop:1 }}>{p.relation} · <span style={{ color:p.personType==="dependant"?T.info:T.accent,fontWeight:700 }}>{p.personType==="dependant"?"Dependant":"Contact"}</span></div>
+              </div>
+              {!p.isMe&&<button onClick={e=>{ e.stopPropagation(); toggleFavorite(p); }} style={{ background:p.favorite?T.accentSoft:"none",border:`1px solid ${p.favorite?T.accent:T.border}`,borderRadius:10,padding:"7px 10px",cursor:"pointer",fontSize:13,fontWeight:800,color:p.favorite?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.favorite?"★ Fav":"☆ Fav"}</button>}
+            </div>
+
+            {/* Relationship module — settlement figures apply regardless of borrowMoney module (that
+                module only gates whether a credit LIMIT can be set, not whether money can be owed) */}
+            {!p.isMe&&(
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
+                <div onClick={()=>{ if(totalOwesMe>0) setExpandedSection(expandedSection==="unsettled_"+p.id?null:"unsettled_"+p.id); }} style={{ background:T.input,borderRadius:10,padding:"10px 12px",textAlign:"center",cursor:totalOwesMe>0?"pointer":"default" }}>
+                  <div style={{ color:T.success,fontSize:18,fontWeight:800 }}>{sym}{fmt(totalOwesMe)}</div>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Owes You{personLoanOutstanding>0?` (incl. loan)`:""}{totalOwesMe>0?" ▾":""}</div>
+                  {creditLimit>0&&<><div style={{ height:3,background:T.border,borderRadius:2,marginTop:6,marginBottom:2 }}>
+                    <div style={{ height:"100%",width:`${creditPct}%`,background:creditPct>80?T.danger:T.success,borderRadius:2 }}/>
+                  </div><div style={{ color:T.sub,fontSize:9 }}>Credit limit: {sym}{fmt(creditLimit)}</div></>}
+                </div>
+                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",textAlign:"center",position:"relative" }}>
+                  <div style={{ color:T.danger,fontSize:18,fontWeight:800 }}>{sym}{fmt(s.iOwe)}</div>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>You Owe</div>
+                  <button onClick={()=>setShowAddYouOwe(p.id)} style={{ position:"absolute",top:4,right:4,background:"none",border:`1px solid ${T.border}`,borderRadius:8,width:20,height:20,cursor:"pointer",fontSize:13,color:T.sub,lineHeight:1,fontFamily:"Nunito,sans-serif" }}>+</button>
+                </div>
+              </div>
+            )}
+            {/* Unsettled txn drill-down */}
+            {expandedSection==="unsettled_"+p.id&&(()=>{
+              const unsettled = txns.filter(t=>{
+                if(t.type!=="expense") return false;
+                const info = t.people?.[p.id] || t.splitPeople?.[p.id];
+                return info?.mode==="owes" && !info?.settled && remainingShare(info)>0;
+              }).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+              if(!unsettled.length) return null;
+              return (
+                <div style={{ background:T.input,borderRadius:12,padding:"12px 14px",marginBottom:12 }}>
+                  <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>Unsettled transactions ({unsettled.length})</div>
+                  {unsettled.map(t=>{
+                    const info = t.people?.[p.id] || t.splitPeople?.[p.id];
+                    const remaining = remainingShare(info);
+                    return (
+                      <div key={t.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                        <div style={{ flex:1 }}>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{t.merchant||t.who||t.desc||"Expense"}</div>
+                          <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(t.date)||t.date}</div>
+                        </div>
+                        <div style={{ textAlign:"right" }}>
+                          <div style={{ color:T.success,fontSize:13,fontWeight:800 }}>{sym}{fmt(remaining)}</div>
+                          <button onClick={()=>{
+                            setTxns(prev=>prev.map(x=>{
+                              if(x.id!==t.id) return x;
+                              const info2 = x.people?.[p.id] || x.splitPeople?.[p.id];
+                              if(!info2) return x;
+                              const settled = {...info2,settled:true,settledAmt:Number(info2.amount||0),remainingAmt:0};
+                              if(x.people?.[p.id]) return {...x,people:{...x.people,[p.id]:settled}};
+                              return {...x,splitPeople:{...x.splitPeople,[p.id]:settled}};
+                            }));
+                          }} style={{ background:T.success+"22",border:`1px solid ${T.success}44`,borderRadius:20,padding:"2px 8px",cursor:"pointer",fontSize:9,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif",marginTop:2 }}>✓ Settle</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {(p.isMe || getPersonModules(p).includes("budget"))&&(
+              <button
+                onClick={()=>{
+                  if(p.isMe){ setTab("budget"); setShowSettings(false); }
+                  else { setBudgetFocusPersonId(p.id); setTab("budget"); setShowSettings(false); }
+                }}
+                style={{ width:"100%",background:"#eff6ff",border:"1px solid #2563eb44",borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}
+              >
+                <span style={{ color:"#2563eb",fontSize:13,fontWeight:800 }}>📊 View Budget & Spend</span>
+                <span style={{ color:"#2563eb",fontSize:16 }}>→</span>
+              </button>
+            )}
+          </div>
+
+          {/* Quick Actions — one row, not giant buttons. Module-gated: Gift only shows if the
+              gifts module is enabled for this person. */}
+          <div style={{ display:"flex",gap:6,marginBottom:16,overflowX:"auto",paddingBottom:2 }}>
+            <button onClick={()=>{ setShowAdd(true); }} style={{ flex:"1 0 auto",display:"flex",flexDirection:"column",alignItems:"center",gap:4,background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+              <span style={{ fontSize:16 }}>➕</span><span style={{ color:T.text,fontSize:10,fontWeight:700 }}>Expense</span>
+            </button>
+            {!p.isMe&&s.owesMe>0&&(
+              <button onClick={()=>{
+                const totalItems = relTxns.filter(t=>{ const info=t.people?.[p.id]||t.splitPeople?.[p.id]; return info?.mode==="owes"&&!info?.settled; }).length;
+                if(totalItems<=1){ sharePaymentRequest(p.name,s.owesMe,"pending expenses"); return; }
+                sharePaymentRequest(p.name,s.owesMe,"pending expenses");
+              }} style={{ flex:"1 0 auto",display:"flex",flexDirection:"column",alignItems:"center",gap:4,background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                <span style={{ fontSize:16 }}>📤</span><span style={{ color:T.text,fontSize:10,fontWeight:700 }}>Request</span>
+              </button>
+            )}
+            {!p.isMe&&(
+              <button onClick={()=>setShowAddYouOwe(p.id)} style={{ flex:"1 0 auto",display:"flex",flexDirection:"column",alignItems:"center",gap:4,background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                <span style={{ fontSize:16 }}>💸</span><span style={{ color:T.text,fontSize:10,fontWeight:700 }}>You Owe</span>
+              </button>
+            )}
+            {!p.isMe&&getPersonModules(p).includes("gifts")&&(
+              <button onClick={()=>{ setGiftForPersonId(p.id); setShowAddGift(true); }} style={{ flex:"1 0 auto",display:"flex",flexDirection:"column",alignItems:"center",gap:4,background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                <span style={{ fontSize:16 }}>🎁</span><span style={{ color:T.text,fontSize:10,fontWeight:700 }}>Gift</span>
+              </button>
+            )}
+          </div>
+
+          {/* Activity Feed — everything chronological in one place, instead of separate
+              expense/settlement/gift sections scattered down the page. */}
+          {(()=>{
+            const feedGifts = getPersonModules(p).includes("gifts") ? gifts.filter(g=>String(g.personId)===String(p.id)) : [];
+            const feed = [
+              ...relTxns.map(t=>({ kind:"expense", date:t.date, sortVal:getRecordedSortValue(t), data:t })),
+              ...taggedTxns.filter(t=>!relTxns.some(r=>r.id===t.id)).map(t=>({ kind:"expense", date:t.date, sortVal:getRecordedSortValue(t), data:t })),
+              ...settlementTxns.map(t=>({ kind:"settlement", date:t.date, sortVal:getRecordedSortValue(t), data:t })),
+              ...feedGifts.map(g=>({ kind:"gift", date:g.date, sortVal:g.createdAt||0, data:g })),
+            ].sort((a,b)=>(b.date||"").localeCompare(a.date||"") || b.sortVal-a.sortVal).slice(0,25);
+            if(!feed.length) return null;
+            return (
+              <div style={{ ...card }}>
+                <div style={{ color:T.text,fontSize:14,fontWeight:900,marginBottom:10 }}>Activity</div>
+                {feed.map((item,i)=>{
+                  if(item.kind==="gift"){
+                    const g = item.data;
+                    return (
+                      <div key={`g-${g.id}`} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:i<feed.length-1?`1px solid ${T.border}`:"none" }}>
+                        <div><div style={{ color:T.text,fontSize:12,fontWeight:700 }}>🎁 Gift from {g.fromWhom}</div><div style={{ color:T.sub,fontSize:10 }}>{g.occasion} · {formatShortDate(g.date)||g.date}</div></div>
+                        <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{sym}{fmt(g.amount)}</span>
+                      </div>
+                    );
+                  }
+                  if(item.kind==="settlement"){
+                    const t = item.data;
+                    return (
+                      <div key={`s-${t.id}`} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:i<feed.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
+                        <div><div style={{ color:T.text,fontSize:12,fontWeight:700 }}>✅ Settlement received</div><div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(t.date)||t.date}</div></div>
+                        <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>+{sym}{fmt(t.amount)}</span>
+                      </div>
+                    );
+                  }
+                  const t = item.data;
+                  const info = t.people?.[p.id] || t.splitPeople?.[p.id];
+                  const shareAmt = info ? remainingShare(info)||Number(info.amount||0) : (p.isMe ? getPersonAttributedAmount(t,"__me__") : getPersonAttributedAmount(t,p.id));
+                  return (
+                    <div key={`t-${t.id}`} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:i<feed.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
+                      <div><div style={{ color:T.text,fontSize:12,fontWeight:700 }}>💰 {t.merchant||t.who||t.desc||"Expense"}</div><div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(t.date)||t.date}{info?.settled?" · Settled":""}</div></div>
+                      <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(shareAmt)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
           {/* Debt Transfer */}
           {totalOwesMe>0&&(
             <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:12 }}>
@@ -7934,34 +8118,6 @@ function AppContent({ onLock }) {
               </select>
             </div>
           )}
-          {/* Gift button */}
-          <button onClick={()=>{ setGiftForPersonId(p.id); setShowAddGift(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",marginBottom:12,width:"100%",textAlign:"left" }}>🎁 Record Gift for {p.name}</button>
-          {/* Gift history */}
-          {(()=>{
-            const personGifts = gifts.filter(g=>String(g.personId)===String(p.id)).sort((a,b)=>b.createdAt-a.createdAt);
-            if(!personGifts.length) return null;
-            const totalGifts = personGifts.reduce((s,g)=>s+Number(g.amount||0),0);
-            return (
-              <div style={{ ...card,marginBottom:12 }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-                  <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>🎁 Gifts Received</div>
-                  <div style={{ color:T.success,fontSize:13,fontWeight:900 }}>{sym}{fmt(totalGifts)} total</div>
-                </div>
-                <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-                  {personGifts.slice(0,10).map(g=>(
-                    <div key={g.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${T.border}` }}>
-                      <div>
-                        <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{g.fromWhom} · {g.occasion}</div>
-                        <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(g.date)||g.date}{g.note?` · ${g.note}`:""}</div>
-                      </div>
-                      <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(g.amount)}</div>
-                    </div>
-                  ))}
-                  {personGifts.length>10&&<div style={{ color:T.sub,fontSize:10,textAlign:"center" }}>+{personGifts.length-10} more</div>}
-                </div>
-              </div>
-            );
-          })()}
           {/* Tagged accounts */}
           {(()=>{ const tagged=accounts.filter(a=>String(a.attributedTo)===String(p.id)); if(!tagged.length) return null; return (
             <div style={{ ...card,marginBottom:12 }}>
@@ -8019,143 +8175,8 @@ function AppContent({ onLock }) {
               </div>
             );
           })()}
-          <div style={{ ...card,background:`linear-gradient(135deg,${p.color}14,${T.card})` }}>
-            <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:16 }}>
-              <div style={{ width:52,height:52,borderRadius:"50%",background:p.color+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26 }}>{p.emoji}</div>
-              <div style={{ flex:1 }}>
-                <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>{p.name}{p.favorite?<span style={{ color:T.accent,fontSize:15,marginLeft:6 }}>★</span>:""}</div>
-                <div style={{ color:T.sub,fontSize:12,marginTop:1 }}>{p.relation} · <span style={{ color:p.personType==="dependant"?T.info:T.accent,fontWeight:700 }}>{p.personType==="dependant"?"Dependant":"Contact"}</span></div>
-              </div>
-              {!p.isMe&&<button onClick={e=>{ e.stopPropagation(); toggleFavorite(p); }} style={{ background:p.favorite?T.accentSoft:"none",border:`1px solid ${p.favorite?T.accent:T.border}`,borderRadius:10,padding:"7px 10px",cursor:"pointer",fontSize:13,fontWeight:800,color:p.favorite?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.favorite?"★ Fav":"☆ Fav"}</button>}
-            </div>
-
-            {!p.isMe&&(
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
-                <div onClick={()=>{ if(totalOwesMe>0) setExpandedSection(expandedSection==="unsettled_"+p.id?null:"unsettled_"+p.id); }} style={{ background:T.input,borderRadius:10,padding:"10px 12px",textAlign:"center",cursor:totalOwesMe>0?"pointer":"default" }}>
-                  <div style={{ color:T.success,fontSize:18,fontWeight:800 }}>{sym}{fmt(totalOwesMe)}</div>
-                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Owes You{personLoanOutstanding>0?` (incl. loan)`:""}{totalOwesMe>0?" ▾":""}</div>
-                  {creditLimit>0&&<><div style={{ height:3,background:T.border,borderRadius:2,marginTop:6,marginBottom:2 }}>
-                    <div style={{ height:"100%",width:`${creditPct}%`,background:creditPct>80?T.danger:T.success,borderRadius:2 }}/>
-                  </div><div style={{ color:T.sub,fontSize:9 }}>Credit limit: {sym}{fmt(creditLimit)}</div></>}
-                </div>
-                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",textAlign:"center",position:"relative" }}>
-                  <div style={{ color:T.danger,fontSize:18,fontWeight:800 }}>{sym}{fmt(s.iOwe)}</div>
-                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>You Owe</div>
-                  <button onClick={()=>setShowAddYouOwe(p.id)} style={{ position:"absolute",top:4,right:4,background:"none",border:`1px solid ${T.border}`,borderRadius:8,width:20,height:20,cursor:"pointer",fontSize:13,color:T.sub,lineHeight:1,fontFamily:"Nunito,sans-serif" }}>+</button>
-                </div>
-              </div>
-            )}
-            {/* Unsettled txn drill-down */}
-            {expandedSection==="unsettled_"+p.id&&(()=>{
-              const unsettled = txns.filter(t=>{
-                if(t.type!=="expense") return false;
-                const info = t.people?.[p.id] || t.splitPeople?.[p.id];
-                return info?.mode==="owes" && !info?.settled && remainingShare(info)>0;
-              }).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
-              if(!unsettled.length) return null;
-              return (
-                <div style={{ background:T.input,borderRadius:12,padding:"12px 14px",marginBottom:12 }}>
-                  <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>Unsettled transactions ({unsettled.length})</div>
-                  {unsettled.map(t=>{
-                    const info = t.people?.[p.id] || t.splitPeople?.[p.id];
-                    const remaining = remainingShare(info);
-                    return (
-                      <div key={t.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                        <div style={{ flex:1 }}>
-                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{t.merchant||t.who||t.desc||"Expense"}</div>
-                          <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(t.date)||t.date}</div>
-                        </div>
-                        <div style={{ textAlign:"right" }}>
-                          <div style={{ color:T.success,fontSize:13,fontWeight:800 }}>{sym}{fmt(remaining)}</div>
-                          <button onClick={()=>{
-                            setTxns(prev=>prev.map(x=>{
-                              if(x.id!==t.id) return x;
-                              const info2 = x.people?.[p.id] || x.splitPeople?.[p.id];
-                              if(!info2) return x;
-                              const settled = {...info2,settled:true,settledAmt:Number(info2.amount||0),remainingAmt:0};
-                              if(x.people?.[p.id]) return {...x,people:{...x.people,[p.id]:settled}};
-                              return {...x,splitPeople:{...x.splitPeople,[p.id]:settled}};
-                            }));
-                          }} style={{ background:T.success+"22",border:`1px solid ${T.success}44`,borderRadius:20,padding:"2px 8px",cursor:"pointer",fontSize:9,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif",marginTop:2 }}>✓ Settle</button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-
-            {(spent>0 || spendBudget>0)&&(
-              <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:14, border:`1px solid ${spendBudget>0 && spent>spendBudget ? T.danger : T.border}` }}>
-                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginBottom:4 }}>{p.isMe ? "Your personal budget spend this month" : `Spent on ${p.name} this month`}</div>
-                <div style={{ color:spent>spendBudget && spendBudget>0 ? T.danger : p.color,fontSize:20,fontWeight:900 }}>{sym}{fmt(spent)}</div>
-                {p.isMe && <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Overall spent this month: {sym}{fmt(overallSpentByMe)}</div>}
-                {spendBudget>0&&(p.personType==="dependant"||p.isMe)&&<><div style={{ height:3,background:T.border,borderRadius:2,marginTop:6,marginBottom:2 }}>
-                  <div style={{ height:"100%",width:`${spentPct}%`,background:spentPct>90?T.danger:p.color,borderRadius:2 }}/>
-                </div><div style={{ color:T.sub,fontSize:9 }}>{spendBudget>0?`Budget: ${sym}${fmt(spendBudget)} · ${sym}${fmt(Math.max(0,spendBudget-spent))} remaining`:""}</div>
-                {spent>spendBudget && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:4 }}>⚠️ Over budget by {sym}{fmt(spent-spendBudget)}</div>}</>}
-              </div>
-            )}
-
-            {(()=>{
-              // Category breakdown of this person's attributed spend, this month
-              const catTotals = {};
-              thisMonthTxns.forEach(t=>{
-                const amt = getPersonAttributedAmount(t, p.id);
-                if(amt<=0) return;
-                (t.catIds||[t.catId]).filter(Boolean).forEach(cid=>{
-                  catTotals[cid] = (catTotals[cid]||0) + amt/((t.catIds||[t.catId]).filter(Boolean).length||1);
-                });
-              });
-              const rows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
-              if(rows.length===0) return null;
-              return (
-                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:14 }}>
-                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginBottom:8 }}>Category breakdown — this month</div>
-                  <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-                    {rows.slice(0,6).map(r=>(
-                      <div key={r.cat.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                        <span style={{ color:T.text,fontSize:12 }}>{r.cat.icon} {r.cat.name}</span>
-                        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(r.amt)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {(()=>{
-              // Monthly history — last 6 months of this person's attributed spend vs their budget
-              const months = [];
-              const now = new Date();
-              for(let i=0;i<6;i++){
-                const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
-                const monthKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-                const monthTxns = txns.filter(t=>t.date&&t.date.startsWith(monthKey));
-                const monthSpend = p.isMe
-                  ? monthTxns.reduce((s,t)=>s+getPersonAttributedAmount(t,"__me__"),0)
-                  : monthTxns.reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
-                months.push({ label:d.toLocaleDateString("en-IN",{month:"short",year:"2-digit"}), spend:monthSpend });
-              }
-              if(months.every(m=>m.spend===0)) return null;
-              return (
-                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:14 }}>
-                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginBottom:8 }}>Monthly history</div>
-                  <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-                    {months.map((m,i)=>{
-                      const over = spendBudget>0 && (p.personType==="dependant"||p.isMe) && m.spend>spendBudget;
-                      return (
-                        <div key={i} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                          <span style={{ color:T.sub,fontSize:11 }}>{m.label}</span>
-                          <span style={{ color:over?T.danger:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(m.spend)}{over?" ⚠️":""}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
+          {/* Actions — settle in full, request payment, edit profile */}
+          <div style={{ ...card }}>
             {!p.isMe&&s.owesMe>0&&<button onClick={()=>{
               const pendingTxns=txns.filter(x=>{
                 if(x.type!=="expense") return false;
@@ -10922,6 +10943,14 @@ function AppContent({ onLock }) {
     const [budgetSubTab, setBudgetSubTab] = useState("dashboard");
     const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
     const [expandedBudgetCatId, setExpandedBudgetCatId] = useState(null);
+    const [budgetPersonViewMode, setBudgetPersonViewMode] = useState("month");
+    useEffect(()=>{
+      if(budgetFocusPersonId){
+        setBudgetSubTab("budgets");
+        setExpandedBudgetPersonId(budgetFocusPersonId);
+        setBudgetFocusPersonId(null);
+      }
+    },[budgetFocusPersonId]);
     // Local drafts for the person/group budget inputs below. Typing into these must NOT call
     // setPeople/setGroups on every keystroke — BudgetPage is a nested component defined inside
     // the main app body, so any top-level state change (setPeople/setGroups) redefines BudgetPage
@@ -11259,7 +11288,7 @@ function AppContent({ onLock }) {
             <div style={{ color:"#2563eb",fontSize:15,fontWeight:900 }}>👤 Per-Person Budgets</div>
             <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
           </div>
-          {people.filter(p=>!p.isMe && p.personType==="dependant").map(p=>{
+          {people.filter(p=>!p.isMe && getPersonModules(p).includes("budget")).map(p=>{
             const monthBudget = Number(p.spendBudgetOverrides?.[viewMonth] ?? p.spendBudget ?? 0);
             const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
             const pct = monthBudget>0 ? Math.min(100,Math.round(monthSpend/monthBudget*100)) : 0;
@@ -11297,51 +11326,129 @@ function AppContent({ onLock }) {
                     {isOver&&<div style={{ textAlign:"right" }}><span style={{ color:T.danger,fontSize:10,fontWeight:700 }}>Over {sym}{fmtK(monthSpend-monthBudget)}</span></div>}
                   </>
                 )}
-                {expandedBudgetPersonId===p.id&&(()=>{
-                  const catTotals = {};
-                  const catTxns = {};
-                  thisMonthTxns.filter(t=>t.type==="expense").forEach(t=>{
-                    const amt = getPersonAttributedAmount(t,p.id);
-                    if(amt<=0) return;
-                    const tCats = (t.catIds||[t.catId]).filter(Boolean);
-                    tCats.forEach(cid=>{
-                      const share = amt/tCats.length;
-                      catTotals[cid] = (catTotals[cid]||0)+share;
-                      if(!catTxns[cid]) catTxns[cid]=[];
-                      catTxns[cid].push({t,share});
-                    });
-                  });
-                  const rows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt, txns:catTxns[cid] })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
-                  if(!rows.length) return <div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"12px 0" }}>No spend recorded for {p.name} this month yet.</div>;
-                  return (
-                    <div style={{ marginTop:10,borderTop:`1px solid ${T.border}`,paddingTop:10 }}>
-                      {rows.map(r=>(
-                        <div key={r.cat.id}>
-                          <div onClick={()=>setExpandedBudgetCatId(prev=>prev===r.cat.id?null:r.cat.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",cursor:"pointer" }}>
-                            <span style={{ color:T.text,fontSize:12 }}>{r.cat.icon} {r.cat.name}</span>
-                            <span style={{ display:"flex",alignItems:"center",gap:6 }}>
-                              <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(r.amt)}</span>
-                              <span style={{ color:T.sub,fontSize:10 }}>{expandedBudgetCatId===r.cat.id?"▾":"▸"}</span>
-                            </span>
+                {expandedBudgetPersonId===p.id&&(
+                  <div style={{ marginTop:10,borderTop:`1px solid ${T.border}`,paddingTop:10 }}>
+                    <div style={{ display:"flex",background:T.input,borderRadius:10,padding:2,marginBottom:10 }}>
+                      {[["month","This Month"],["year",fyLabel]].map(([id,label])=>(
+                        <button key={id} onClick={()=>setBudgetPersonViewMode(id)} style={{ flex:1,textAlign:"center",padding:"6px 4px",fontSize:11,fontWeight:800,borderRadius:8,border:"none",cursor:"pointer",background:budgetPersonViewMode===id?"#2563eb22":"none",color:budgetPersonViewMode===id?"#2563eb":T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
+                      ))}
+                    </div>
+
+                    {budgetPersonViewMode==="month"&&(()=>{
+                      const catTotals = {};
+                      const catTxns = {};
+                      thisMonthTxns.filter(t=>t.type==="expense").forEach(t=>{
+                        const amt = getPersonAttributedAmount(t,p.id);
+                        if(amt<=0) return;
+                        const tCats = (t.catIds||[t.catId]).filter(Boolean);
+                        tCats.forEach(cid=>{
+                          const share = amt/tCats.length;
+                          catTotals[cid] = (catTotals[cid]||0)+share;
+                          if(!catTxns[cid]) catTxns[cid]=[];
+                          catTxns[cid].push({t,share});
+                        });
+                      });
+                      const rows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt, txns:catTxns[cid] })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
+                      if(!rows.length) return <div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"12px 0" }}>No spend recorded for {p.name} this month yet.</div>;
+                      return (
+                        <div>
+                          {rows.map(r=>(
+                            <div key={r.cat.id}>
+                              <div onClick={()=>setExpandedBudgetCatId(prev=>prev===r.cat.id?null:r.cat.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",cursor:"pointer" }}>
+                                <span style={{ color:T.text,fontSize:12 }}>{r.cat.icon} {r.cat.name}</span>
+                                <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(r.amt)}</span>
+                                  <span style={{ color:T.sub,fontSize:10 }}>{expandedBudgetCatId===r.cat.id?"▾":"▸"}</span>
+                                </span>
+                              </div>
+                              {expandedBudgetCatId===r.cat.id&&(
+                                <div style={{ background:T.input,borderRadius:10,padding:"6px 12px",marginBottom:6 }}>
+                                  {r.txns.map(({t,share},i)=>(
+                                    <div key={i} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:i<r.txns.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
+                                      <div>
+                                        <div style={{ color:T.text,fontSize:11,fontWeight:700 }}>{t.merchant||t.who||t.desc||"Expense"}</div>
+                                        <div style={{ color:T.sub,fontSize:9 }}>{formatShortDate(t.date)||t.date}</div>
+                                      </div>
+                                      <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{sym}{fmt(share)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    {budgetPersonViewMode==="year"&&(()=>{
+                      // Annual budget for this person = sum of their 12 monthly budgets for the FY,
+                      // using each month's override where set and falling back to the flat default
+                      // (same default+override pattern as the household Annual Budget).
+                      const personAnnualBudget = months.reduce((s,m)=>s+Number(p.spendBudgetOverrides?.[m.key] ?? p.spendBudget ?? 0),0);
+                      const monthSpends = months.map(m=>{
+                        const mTxns = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(m.key));
+                        const spend = mTxns.reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
+                        const budget = Number(p.spendBudgetOverrides?.[m.key] ?? p.spendBudget ?? 0);
+                        return { ...m, spend, budget };
+                      });
+                      const ytdSpend = monthSpends.reduce((s,m)=>s+m.spend,0);
+                      const ytdRemaining = personAnnualBudget - ytdSpend;
+                      const ytdPct = personAnnualBudget>0 ? Math.min(100,Math.round(ytdSpend/personAnnualBudget*100)) : (ytdSpend>0?100:0);
+
+                      const catTotals = {};
+                      months.forEach(m=>{
+                        txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(m.key)).forEach(t=>{
+                          const amt = getPersonAttributedAmount(t,p.id);
+                          if(amt<=0) return;
+                          const tCats = (t.catIds||[t.catId]).filter(Boolean);
+                          tCats.forEach(cid=>{ catTotals[cid]=(catTotals[cid]||0)+amt/tCats.length; });
+                        });
+                      });
+                      const catRows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
+
+                      return (
+                        <div>
+                          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12 }}>
+                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Annual Budget</div><div style={{ color:T.text,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(personAnnualBudget)}</div></div>
+                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Spent (YTD)</div><div style={{ color:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(ytdSpend)}</div></div>
+                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Remaining</div><div style={{ color:ytdRemaining>=0?"#2563eb":T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(Math.abs(ytdRemaining))}</div></div>
+                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Used</div><div style={{ color:ytdPct>100?T.danger:"#2563eb",fontSize:15,fontWeight:900,marginTop:2 }}>{ytdPct}%</div></div>
                           </div>
-                          {expandedBudgetCatId===r.cat.id&&(
-                            <div style={{ background:T.input,borderRadius:10,padding:"6px 12px",marginBottom:6 }}>
-                              {r.txns.map(({t,share},i)=>(
-                                <div key={i} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:i<r.txns.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
-                                  <div>
-                                    <div style={{ color:T.text,fontSize:11,fontWeight:700 }}>{t.merchant||t.who||t.desc||"Expense"}</div>
-                                    <div style={{ color:T.sub,fontSize:9 }}>{formatShortDate(t.date)||t.date}</div>
-                                  </div>
-                                  <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{sym}{fmt(share)}</span>
+                          <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:14 }}>
+                            <div style={{ height:"100%",width:`${Math.min(100,ytdPct)}%`,background:ytdPct>100?T.danger:"#2563eb",borderRadius:3 }}/>
+                          </div>
+
+                          {catRows.length>0&&(
+                            <div style={{ marginBottom:14 }}>
+                              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Category Breakdown · {fyLabel}</div>
+                              {catRows.slice(0,8).map(r=>(
+                                <div key={r.cat.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                                  <span style={{ color:T.text,fontSize:12 }}>{r.cat.icon} {r.cat.name}</span>
+                                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(r.amt)}</span>
                                 </div>
                               ))}
                             </div>
                           )}
+
+                          <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Month by Month <span style={{ textTransform:"none",fontWeight:600 }}>· tap to edit that month's budget</span></div>
+                          {monthSpends.map(m=>{
+                            const mOver = m.budget>0 && m.spend>m.budget;
+                            return (
+                              <div key={m.key} onClick={()=>{ setViewMonth(m.key); setBudgetPersonViewMode("month"); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
+                                <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{m.label}</span>
+                                <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                                  <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(m.spend)}{m.budget>0?` / ${sym}${fmt(m.budget)}`:""}</span>
+                                  {mOver&&<span style={{ color:T.danger,fontSize:10 }}>⚠️</span>}
+                                  <span style={{ color:T.sub,fontSize:10 }}>›</span>
+                                </span>
+                              </div>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
-                  );
-                })()}
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -13348,11 +13455,11 @@ function AppContent({ onLock }) {
                 </button>
               ))}
             </div>
-            {personType==="contact"&&<div>
+            {getPersonModules({personType,isMe:p.isMe}).includes("borrowMoney")&&<div>
               <span style={lbl}>Credit limit (max they can owe you)</span>
               <input style={inp} type="number" placeholder="0 = unlimited" value={creditLimit} onChange={e=>setCreditLimit(e.target.value)}/>
             </div>}
-            {(personType==="dependant" || p.isMe)&&<div>
+            {getPersonModules({personType,isMe:p.isMe}).includes("budget")&&<div>
               <span style={lbl}>{p.isMe ? "Monthly self budget" : "Monthly spend awareness budget"}</span>
               <input style={inp} type="number" placeholder={p.isMe ? "e.g. 15000 for your own spends" : "0 = no limit"} value={spendBudget} onChange={e=>setSpendBudget(e.target.value)}/>
             </div>}
