@@ -10,143 +10,23 @@ const readCopiedSms = async () => ({ text: "", error: "Not supported" });
 const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
-const DARK  = { bg:"#08080f", card:"#0f0f1a", border:"#1a1a2e", text:"#e8e4dc", accent:"#22c55e", accentSoft:"rgba(34,197,94,0.12)", success:"#22c55e", danger:"#ef4444", input:"#0b0b18", nav:"#0a0a16", sub:"#5a5a7a", pill:"#14142a", sh:"rgba(0,0,0,0.6)", info:"#06b6d4", purple:"#8b5cf6", warn:"#f97316", gold:"#f0a500" };
-const LIGHT = { bg:"#f4f3ef", card:"#ffffff", border:"#e5e1d8", text:"#1a1a2e", accent:"#16a34a", accentSoft:"rgba(22,163,74,0.1)", success:"#16a34a", danger:"#dc2626", input:"#ede9e3", nav:"#ffffff", sub:"#7a7890", pill:"#eeecea", sh:"rgba(0,0,0,0.06)", info:"#0891b2", purple:"#7c3aed", warn:"#ea6c00", gold:"#d4920a" };
-
-// ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const PALETTE = ["#f0a500","#22c55e","#3b82f6","#ef4444","#a855f7","#06b6d4","#f97316","#ec4899","#84cc16","#14b8a6","#8b5cf6","#f43f5e","#0ea5e9","#10b981","#f59e0b"];
-// Capabilities a person can have — replaces the old hardcoded personType==="dependant"/"contact"
-// checks scattered across the app. `personType` (Contact/Dependant/Vendor/...) stays as an
-// identity classification, but no longer controls which features are available; `modules` does.
-const PERSON_MODULES = [
-  { id:"sharedExpenses", label:"Shared Expenses", icon:"🤝" },
-  { id:"borrowMoney", label:"Can Borrow Money", icon:"💳" },
-  { id:"budget", label:"Monthly Budget", icon:"📊" },
-  { id:"gifts", label:"Gifts", icon:"🎁" },
-  { id:"notes", label:"Notes", icon:"📝" },
-  { id:"reminders", label:"Reminders", icon:"🔔" },
-];
-// A person's enabled modules. New people (created after this change) store `modules` explicitly.
-// Existing people don't have it yet, so this derives sensible defaults from their current
-// personType that reproduce exactly what was visible before — budget only for dependants/isMe
-// (the only feature that was actually type-restricted), everything else on for everyone (matches
-// today's unrestricted behavior for shared expenses, lending, gifts).
-const getPersonModules = (p) => {
-  if(Array.isArray(p?.modules)) return p.modules;
-  const base = ["sharedExpenses","gifts","notes","reminders"];
-  if(p?.isMe || p?.personType==="dependant") base.push("budget");
-  else base.push("borrowMoney");
-  return base;
-};
-// Same idea for groups. Unlike people, no group feature is currently type-restricted at all —
-// every group already has full settlement + budget access regardless of type. So the fallback
-// here preserves that exactly for existing groups (nothing hides retroactively). The behavior-
-// template matrix below only supplies defaults for NEW groups going forward, via Add Group.
-const GROUP_MODULES = [
-  { id:"settlement", label:"Settlements", icon:"🤝" },
-  { id:"budget", label:"Budget", icon:"📊" },
-  { id:"bills", label:"Bills", icon:"🧾" },
-  { id:"vendors", label:"Vendors", icon:"🏪" },
-];
-const GROUP_TYPE_DEFAULT_MODULES = {
-  family:    ["budget","bills","vendors"],
-  friends:   ["settlement"],
-  relatives: ["settlement"],
-  trip:      ["settlement"],
-  office:    ["settlement","bills","vendors"],
-  building:  ["settlement","bills","vendors"],
-  society:   ["budget","bills"],
-  business:  ["budget","bills","vendors"],
-  other:     ["settlement","budget","bills","vendors"],
-};
-const getGroupModules = (g) => {
-  if(Array.isArray(g?.modules)) return g.modules;
-  return ["settlement","budget","bills","vendors"];
-};
-const CAT_ICONS = ["🍽️","🍕","🍔","🍜","🥗","🍣","☕","🍺","🛒","🥩","🚗","🏍️","✈️","🚕","⛽","🅿️","🛍️","👗","👟","💄","💍","🧴","⚡","💧","📶","🔌","💊","🏥","🩺","🧘","🏋️","🎬","🎵","🎮","🎨","📚","🏠","🔧","🪴","🛋️","👶","🧒","🎒","✏️","🧸","💰","💳","📈","🏦","🪙","👤","🐕","🐈","🌿","🌍","☀️","🎁","🎂","💼","🖥️","📱","🔭","🪒","💇","💆","💅","🧖","🏊","🚴","⛳","🎯","🎪","🏟️","🚑","🔑","🛁","🧺","🪑","🖼️","⛵","🌊","⛰️","🎓","📖","🏛️"];
-const INVEST_TYPES = [{ id:"mf", name:"Mutual Funds / SIP", icon:"📈", color:"#3b82f6" },{ id:"stocks", name:"Stocks", icon:"📊", color:"#22c55e" },{ id:"fd", name:"Fixed Deposit", icon:"🏦", color:"#f0a500" },{ id:"gold", name:"Gold", icon:"🥇", color:"#f59e0b" },{ id:"ppf", name:"PPF / NPS", icon:"🏛️", color:"#8b5cf6" },{ id:"crypto", name:"Crypto", icon:"₿", color:"#f97316" },{ id:"realestate", name:"Real Estate", icon:"🏘️", color:"#06b6d4" },{ id:"custom", name:"Custom", icon:"💼", color:"#ec4899" }];
-const ACC_TYPES = [{ id:"bank", label:"Bank Account", icon:"🏦" },{ id:"cc", label:"Credit Card", icon:"💳" },{ id:"debit", label:"Debit Card", icon:"🏧" },{ id:"upi", label:"UPI", icon:"📱" },{ id:"cash", label:"Cash", icon:"💵" }];
-const LIABILITY_TYPES = [{ id:"mortgage", name:"Mortgage / Home Loan", icon:"🏠", color:"#f97316" },{ id:"student", name:"Student Loan", icon:"🎓", color:"#8b5cf6" },{ id:"car", name:"Car Loan", icon:"🚗", color:"#3b82f6" },{ id:"tax", name:"Tax Liability", icon:"🏛️", color:"#ef4444" },{ id:"personal", name:"Personal Loan", icon:"🏦", color:"#ec4899" },{ id:"other", name:"Other Liability", icon:"📦", color:"#78716c" }];
-const ASSET_TYPES = [{ id:"realestate", name:"Real Estate", icon:"🏠", color:"#06b6d4" },{ id:"vehicle", name:"Vehicle", icon:"🚗", color:"#3b82f6" },{ id:"valuable", name:"Valuable", icon:"💎", color:"#a855f7" },{ id:"gold", name:"Gold / Jewelry", icon:"🥇", color:"#f59e0b" },{ id:"other", name:"Other Asset", icon:"📦", color:"#22c55e" }];
-const DEFAULT_INCOME_TYPES = ["salary","interest","freelance","rental","royalty","dividend","capital_gains"];
-const INVESTMENT_FREQUENCY_OPTIONS = [
-  { value:"daily", label:"Daily" },
-  { value:"weekly", label:"Weekly" },
-  { value:"monthly", label:"Monthly" },
-  { value:"quarterly", label:"Quarterly" },
-  { value:"halfyearly", label:"Half-yearly" },
-  { value:"yearly", label:"Yearly" },
-];
-
-const ME = { id:"__me__", name:"Me", emoji:"🧑", relation:"Self", color:"#f0a500", personType:"dependant", isMe:true };
-
-const DEFAULT_CATS = [
-  { id:"housing", name:"Housing", icon:"🏠", color:"#06b6d4", budget:15000, fixed:true, subs:[{id:"h1",name:"Rent / EMI"},{id:"h2",name:"Maintenance"},{id:"h3",name:"Repairs"},{id:"h4",name:"Furniture & Appliances"},{id:"h5",name:"Renovation / Interiors"},{id:"h6",name:"Property Tax"}] },
-  { id:"utilities", name:"Utilities", icon:"⚡", color:"#f59e0b", budget:5000, fixed:true, subs:[{id:"u1",name:"Electricity"},{id:"u2",name:"Water"},{id:"u3",name:"Gas"},{id:"u4",name:"Internet / WiFi"},{id:"u5",name:"Mobile Bills"},{id:"u6",name:"Software Subscriptions"},{id:"u7",name:"Cloud Storage"}] },
-  { id:"groceries", name:"Groceries", icon:"🛒", color:"#22c55e", budget:10000, fixed:true, subs:[{id:"g1",name:"Staples"},{id:"g2",name:"Vegetables"},{id:"g3",name:"Fruits"},{id:"g4",name:"Dairy"},{id:"g5",name:"Snacks & Packaged Food"}] },
-  { id:"food", name:"Food & Dining", icon:"🍽️", color:"#f97316", budget:8000, fixed:false, subs:[{id:"f1",name:"Swiggy / Zomato"},{id:"f2",name:"Restaurants"},{id:"f3",name:"Cafes"},{id:"f4",name:"Treating Others"}] },
-  { id:"transport", name:"Transport", icon:"🚗", color:"#3b82f6", budget:5000, fixed:false, subs:[{id:"t1",name:"Fuel"},{id:"t2",name:"Uber / Ola"},{id:"t3",name:"Public Transport"},{id:"t4",name:"EMI"},{id:"t5",name:"Insurance"},{id:"t6",name:"Servicing & Repairs"},{id:"t7",name:"Parking & Tolls"},{id:"t8",name:"PUC"},{id:"t9",name:"Challan / Fine"}] },
-  { id:"financial", name:"Financial", icon:"💳", color:"#8b5cf6", budget:30000, fixed:true, subs:[{id:"fi1",name:"SIP / Mutual Funds"},{id:"fi2",name:"Stocks"},{id:"fi3",name:"PPF / NPS"},{id:"fi4",name:"Term Insurance"},{id:"fi5",name:"Health Insurance"},{id:"fi6",name:"Credit Card Bills"},{id:"fi7",name:"Loan EMI"},{id:"fi8",name:"Bank Charges"}] },
-  { id:"health", name:"Health", icon:"💊", color:"#ec4899", budget:3000, fixed:true, subs:[{id:"he1",name:"Doctor Consultation"},{id:"he2",name:"Medicines"},{id:"he3",name:"Diagnostics / Tests"},{id:"he4",name:"Health Checkups"},{id:"he5",name:"Supplements"}] },
-  { id:"fitness", name:"Fitness", icon:"🏋️", color:"#14b8a6", budget:2000, fixed:false, subs:[{id:"fit1",name:"Gym"},{id:"fit2",name:"Sports"},{id:"fit3",name:"Yoga / Trainer"},{id:"fit4",name:"Fitness Apps"}] },
-  { id:"personaldev", name:"Personal Development", icon:"📚", color:"#0ea5e9", budget:2000, fixed:false, subs:[{id:"pd1",name:"Courses"},{id:"pd2",name:"Books"},{id:"pd3",name:"Workshops"},{id:"pd4",name:"Coaching / Mentorship"}] },
-  { id:"lifestyle", name:"Lifestyle", icon:"👗", color:"#a855f7", budget:5000, fixed:false, subs:[{id:"l1",name:"Clothes"},{id:"l2",name:"Shoes"},{id:"l3",name:"Grooming / Salon"},{id:"l4",name:"Skincare / Cosmetics"},{id:"l5",name:"Accessories / Gadgets"}] },
-  { id:"entertainment", name:"Entertainment", icon:"🎬", color:"#f43f5e", budget:2000, fixed:false, subs:[{id:"e1",name:"OTT Subscriptions"},{id:"e2",name:"Movies"},{id:"e3",name:"Events / Shows"}] },
-  { id:"travel", name:"Travel", icon:"✈️", color:"#06b6d4", budget:5000, fixed:false, subs:[{id:"tr1",name:"Flights"},{id:"tr2",name:"Trains / Buses"},{id:"tr3",name:"Hotels"},{id:"tr4",name:"Local Transport"},{id:"tr5",name:"Activities"},{id:"tr6",name:"Shopping"}] },
-  { id:"family", name:"Groups & Social", icon:"👥", color:"#f0a500", budget:5000, fixed:false, subs:[{id:"fa1",name:"Gifts"},{id:"fa2",name:"Family Support"},{id:"fa3",name:"Festivals"},{id:"fa4",name:"Weddings / Functions"}] },
-  { id:"donations", name:"Donations", icon:"🙏", color:"#84cc16", budget:1000, fixed:false, subs:[{id:"d1",name:"Charity"},{id:"d2",name:"Religious Contributions"}] },
-  { id:"professional", name:"Professional", icon:"💼", color:"#475569", budget:2000, fixed:false, subs:[{id:"pr1",name:"Work Travel"},{id:"pr2",name:"Networking"},{id:"pr3",name:"Tools / Software"},{id:"pr4",name:"Office Setup"}] },
-  { id:"taxes", name:"Taxes", icon:"🏛️", color:"#dc2626", budget:5000, fixed:true, subs:[{id:"tx1",name:"Income Tax"},{id:"tx2",name:"CA / Filing Fees"}] },
-  { id:"emergency", name:"Emergency", icon:"🚑", color:"#ef4444", budget:5000, fixed:true, subs:[{id:"em1",name:"Medical Emergency"},{id:"em2",name:"Urgent Repairs"},{id:"em3",name:"Contingency"}] },
-  { id:"misc", name:"Miscellaneous", icon:"📦", color:"#78716c", budget:2000, fixed:false, subs:[{id:"m1",name:"Cash Expenses"},{id:"m2",name:"Tips"},{id:"m3",name:"Unplanned Purchases"}] },
-];
-
-const DEFAULT_ACCOUNTS = [
-  { id:"bank1", type:"bank", name:"ICICI Savings", last4:"3310", color:"#22c55e", openingBalance:0 },
-  { id:"cc1", type:"cc", name:"HDFC Sapphire", last4:"4242", color:"#3b82f6", limit:300000, outstanding:0, statementDate:15, dueDate:5, billingCycle:"15th–14th", alertPct:30 },
-  { id:"upi1", type:"upi", name:"GPay", handle:"", color:"#a855f7" },
-  { id:"cash1", type:"cash", name:"Cash Wallet", color:"#f0a500", openingBalance:0 },
-];
-const DEFAULT_MEASURE_UNITS = ["kg","g","ltr","ml","nos","pkt","dozen","box"];
+import { DARK, LIGHT, PALETTE } from "./constants/theme";
+import { todayStr, addDaysToDateStr, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
+import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
+import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
+import { normalizeVendorText } from "./helpers/textHelpers";
+import { sym, fmt, fmtK, accountBucketLabel, accIcon, accLabel, txnColor, txnLabel, txnEmoji, formatInvestmentMetric } from "./helpers/formatters";
+import { genId } from "./helpers/idGenerator";
+import { parseMoney, cleanMoneyInput, nearlyEqualMoney } from "./helpers/currency";
+import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
-const genId = () => Math.random().toString(36).slice(2,9);
-const todayStr = () => new Date().toISOString().split("T")[0];
-const addDaysToDateStr = (dateStr, days) => {
-  if(!dateStr) return dateStr;
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + Number(days||0));
-  return d.toISOString().split("T")[0];
-};
-// A membership period's real coverage end, accounting for any grace days attached to it. Grace
-// extends how long a period is treated as "active" before it's lapsed, but is never baked into
-// the stored `to` date itself — keeping `to` as the clean plan-end and `graceDays` as separate
-// metadata is what lets the UI show e.g. "Quarterly (+15d grace)" instead of silently stretching
-// the date. Every active/lapsed/expiring check should use this instead of comparing `to` directly.
-const getPeriodEffectiveEnd = (period) => addDaysToDateStr(period?.to, period?.graceDays||0);
-const sym = "₹";
-const fmt = n => { const num = Number(n||0); return num.toLocaleString("en-IN", { minimumFractionDigits: num % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 }); };
-const fmtK = n => { const num = Number(n||0); if(num >= 100000) return (num/100000).toFixed(1).replace(/\.0$/,"")+"L"; if(num >= 1000) return (num/1000).toFixed(1).replace(/\.0$/,"")+"K"; return fmt(num); };
 // Wraps localStorage.setItem so a QuotaExceededError (or any other storage failure) never crashes
 // the whole app via an uncaught exception inside a useEffect — it fails that one save silently
 // instead, logging to console for debugging. Does not attempt to free space or retry.
 const safeSetLocalStorage = (key, value) => {
   try { localStorage.setItem(key, value); }
   catch(e) { console.error(`localStorage save failed for "${key}":`, e); }
-};
-const parseMoney = v => {
-  const cleaned = String(v ?? "").replace(/[₹,\s]/g,"");
-  const num = parseFloat(cleaned);
-  return Number.isFinite(num) ? num : 0;
-};
-const cleanMoneyInput = v => {
-  const stripped = String(v ?? "").replace(/[₹,\s]/g, "");
-  const cleaned = stripped.replace(/[^\d.]/g, "");
-  const dotIndex = cleaned.indexOf(".");
-  if(dotIndex === -1) return cleaned;
-  const whole = cleaned.slice(0, dotIndex);
-  const decimal = cleaned.slice(dotIndex + 1).replace(/\./g, "");
-  return `${whole}.${decimal}`;
 };
 const extractTxnReference = txt => {
   const s = String(txt ?? "");
@@ -259,7 +139,6 @@ const inferAccountBucket = (value, fallback = "cash") => {
   if(/ppf|nps|pf\b|provident|retirement|fd\b|fixed deposit|term deposit|demat|broker|investment|mutual fund|sip\b|stocks?|equity|gold|crypto|real estate|property/.test(text)) return "investment";
   return fallback;
 };
-const accountBucketLabel = bucket => bucket==="investment" ? "Investment / Wealth" : bucket==="liability" ? "Liability" : "Cash / Spending";
 const normalizeAccountTypes = (stored, extraBehaviors=[]) => {
   const allBaseBehaviors = [...ACC_TYPES, ...(Array.isArray(extraBehaviors) ? extraBehaviors : [])];
   const rawList = Array.isArray(stored) ? stored : [];
@@ -303,76 +182,6 @@ const normalizeAccountTypes = (stored, extraBehaviors=[]) => {
   });
   return [...defaults, ...extras];
 };
-const normalizeVendorText = value => String(value ?? "")
-  .toLowerCase()
-  .replace(/[^a-z0-9\s]/g, " ")
-  .replace(/\s+/g, " ")
-  .trim();
-const VENDOR_CATEGORY_RULES = [
-  { pattern: /swiggy|zomato|dominos|pizza|burger|starbucks|kfc|mcd|restaurant|cafe/, catId: "food", label: "food delivery / dining vendor" },
-  { pattern: /uber|ola|rapido|petrol|fuel|shell|hpcl|iocl|parking|toll/, catId: "transport", label: "transport vendor" },
-  { pattern: /amazon|flipkart|myntra|ajio|nykaa|meesho/, catId: "lifestyle", label: "shopping vendor" },
-  { pattern: /apollo|pharmacy|medplus|hospital|clinic|diagnostic/, catId: "health", label: "health vendor" },
-  { pattern: /airtel|jio|bsnl|wifi|broadband|electricity|water|gas/, catId: "utilities", label: "utility bill vendor" },
-  { pattern: /netflix|spotify|hotstar|prime video|bookmyshow/, catId: "entertainment", label: "entertainment vendor" },
-  { pattern: /blinkit|zepto|bigbasket|instamart|grofers/, catId: "groceries", label: "grocery vendor" },
-];
-const investmentFreqLabel = freq => {
-  if(freq==="daily") return "Daily";
-  if(freq==="weekly") return "Weekly";
-  if(freq==="monthly") return "Monthly";
-  if(freq==="halfyearly") return "Half-yearly";
-  if(freq==="quarterly") return "Quarterly";
-  if(freq==="yearly") return "Yearly";
-  if(freq==="one-time") return "One-time";
-  return "";
-};
-const getInvestmentBudgetMeta = type => {
-  if(type==="mf") return { catId:"financial", subId:"fi1" };
-  if(type==="stocks" || type==="crypto" || type==="gold") return { catId:"financial", subId:"fi2" };
-  if(type==="ppf" || type==="fd" || type==="realestate") return { catId:"financial", subId:"fi3" };
-  return { catId:"financial", subId:null };
-};
-const getInvestmentMetricConfig = type => {
-  if(type==="mf") return { show:true, label:"NAV", placeholder:"e.g. 23.45", hint:"Track the latest NAV per unit for this fund.", shortLabel:"NAV" };
-  if(type==="stocks") return { show:true, label:"Units", placeholder:"e.g. 10", hint:"Track how many shares or units were bought.", shortLabel:"Units" };
-  if(type==="gold") return { show:true, label:"Weight (grams)", placeholder:"e.g. 12.5", hint:"Track gold weight in grams.", shortLabel:"Gold" };
-  if(type==="crypto") return { show:true, label:"Units", placeholder:"e.g. 0.015", hint:"Track the number of coins or tokens.", shortLabel:"Units" };
-  if(type==="ppf") return { show:false, label:"", placeholder:"", hint:"PPF / NPS is tracked by contribution amount; no NAV is required. If you created a PPF account, record the money movement as a Transfer into that account.", shortLabel:"" };
-  if(type==="fd") return { show:false, label:"", placeholder:"", hint:"FD is tracked by deposit value; no NAV is required.", shortLabel:"" };
-  if(type==="realestate") return { show:false, label:"", placeholder:"", hint:"Real estate is tracked by current value; no NAV is required.", shortLabel:"" };
-  return { show:false, label:"", placeholder:"", hint:"This holding is tracked by amount or current value.", shortLabel:"" };
-};
-const formatInvestmentMetric = (type, rawValue) => {
-  const value = Number(rawValue || 0);
-  if(!value) return "";
-  if(type==="mf") return `NAV ${fmt(value)}`;
-  if(type==="gold") return `${fmt(value)} g`;
-  if(type==="stocks" || type==="crypto") return `${fmt(value)} units`;
-  const config = getInvestmentMetricConfig(type);
-  return config.show && config.shortLabel ? `${config.shortLabel} ${fmt(value)}` : "";
-};
-const getInvestmentGroupMeta = inv => {
-  const type = String(inv?.type || "custom");
-  const folioNo = String(inv?.folioNo || "").trim();
-  const name = String(inv?.name || "Investment").trim() || "Investment";
-  if(type === "mf" && folioNo) return { key:`${type}|folio|${folioNo.toLowerCase()}`, folioNo, primaryName:name };
-  const normalizedName = normalizeVendorText(name);
-  if(normalizedName) return { key:`${type}|name|${normalizedName}`, folioNo:"", primaryName:name };
-  return { key:`${type}|single|${String(inv?.linkedInvestmentId || inv?.id || name)}`, folioNo:"", primaryName:name };
-};
-const inferInvestmentTypeId = value => {
-  const text = normalizeVendorText(value);
-  if(!text) return "custom";
-  if(/mutual fund|sip\b|mf\b/.test(text)) return "mf";
-  if(/stocks?|share|equity|demat/.test(text)) return "stocks";
-  if(/ppf|nps|pf\b|provident|retirement/.test(text)) return "ppf";
-  if(/fd\b|fixed deposit|term deposit/.test(text)) return "fd";
-  if(/gold|sovereign/.test(text)) return "gold";
-  if(/crypto|bitcoin|btc|eth/.test(text)) return "crypto";
-  if(/real estate|property|house|flat|plot/.test(text)) return "realestate";
-  return "custom";
-};
 const getTxnCategoryIds = txn => {
   if(txn?.type==="investment") return [];
   if(Array.isArray(txn?.catIds) && txn.catIds.length) return txn.catIds.filter(Boolean);
@@ -384,37 +193,6 @@ const getTxnSubIds = txn => {
   if(Array.isArray(txn?.subIds) && txn.subIds.length) return txn.subIds.filter(Boolean);
   if(txn?.subId) return [txn.subId];
   return [];
-};
-const daysInMonth = (monthKey) => {
-  if(monthKey){
-    const [y,m] = monthKey.split("-").map(Number);
-    if(!y||!m) return 31;
-    return new Date(y, m, 0).getDate();
-  }
-  const n = new Date();
-  return new Date(n.getFullYear(), n.getMonth()+1, 0).getDate();
-};
-const daysLeft = (monthKey) => {
-  const today = new Date();
-  const nowKey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
-  if(!monthKey || monthKey === nowKey){
-    return Math.max(0, daysInMonth(nowKey) - today.getDate());
-  }
-  if(monthKey < nowKey) return 0;
-  return daysInMonth(monthKey);
-};
-const getMonthBounds = (monthKey = todayStr().slice(0,7)) => {
-  const [year, month] = String(monthKey || todayStr().slice(0,7)).split("-").map(Number);
-  const safeYear = year || new Date().getFullYear();
-  const safeMonth = month || (new Date().getMonth() + 1);
-  const start = `${safeYear}-${String(safeMonth).padStart(2,"0")}-01`;
-  const end = `${safeYear}-${String(safeMonth).padStart(2,"0")}-${String(new Date(safeYear, safeMonth, 0).getDate()).padStart(2,"0")}`;
-  return { start, end };
-};
-const getPreviousMonthKey = (monthKey = todayStr().slice(0,7)) => {
-  const [year, month] = String(monthKey || todayStr().slice(0,7)).split("-").map(Number);
-  const ref = new Date((year || new Date().getFullYear()), (month || 1) - 2, 1);
-  return `${ref.getFullYear()}-${String(ref.getMonth()+1).padStart(2,"0")}`;
 };
 const MONTH_NAME_MAP = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, sept:9, oct:10, nov:11, dec:12 };
 const toFourDigitYear = year => {
@@ -535,7 +313,6 @@ const txnHasPerson = (txn, personId) => {
   if(String(txn.toPersonId||"")===String(personId)) return true;
   return Object.keys(txn.people||{}).some(pid=>String(pid)===String(personId));
 };
-const nearlyEqualMoney = (a,b) => Math.abs(Number(a||0) - Number(b||0)) < 0.01;
 const dateAtDay = (year, monthIndex, day) => {
   const safeDay = Math.max(1, Number(day)||1);
   const lastDay = new Date(year, monthIndex + 1, 0).getDate();
@@ -564,46 +341,11 @@ const getCardCycleDates = (card, refDate = new Date()) => {
 
   return { prevStatementDate, lastStatementDate, nextStatementDate, dueOn };
 };
-const accIcon = value => {
-  if(value && typeof value === "object" && value.typeIcon) return value.typeIcon;
-  const t = typeof value === "object" ? value?.type : value;
-  return t==="bank"?"🏦":t==="cc"?"💳":t==="debit"?"🏧":t==="upi"?"📱":"💵";
-};
-const accLabel = value => {
-  if(value && typeof value === "object" && value.typeLabel) return value.typeLabel;
-  const t = typeof value === "object" ? value?.type : value;
-  return t==="bank"?"Bank Account":t==="cc"?"Credit Card":t==="debit"?"Debit Card":t==="upi"?"UPI":"Cash";
-};
 const isInvestmentAccount = account => {
   if(!account || account.type==="cc") return false;
   if(account.typeBucket==="investment" || account.bucket==="investment" || account.accountTypeBucket==="investment") return true;
   const fallback = defaultAccountTypeBucket(account.type || account.baseType || "bank");
   return inferAccountBucket(`${account.typeLabel||account.label||""} ${account.name||""} ${account.accountTypeId||account.baseType||""}`, fallback) === "investment";
-};
-const txnColor = (txnOrType,T) => {
-  const type = typeof txnOrType === "string" ? txnOrType : txnOrType?.type;
-  const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
-  if(isRefund) return T.text;
-  if(type==="income") return T.success;
-  if(type==="expense") return T.danger;
-  if(type==="transfer" || type==="settlement_in" || type==="settlement_out") return T.info;
-  if(type==="cc_payment" || type==="cc_emi") return T.purple;
-  if(type==="investment") return T.info;
-  return T.sub;
-};
-const txnLabel = txnOrType => {
-  const type = typeof txnOrType === "string" ? txnOrType : txnOrType?.type;
-  const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
-  if(isRefund) return "Refund";
-  const hasSettlementLinks = typeof txnOrType === "object" && (txnOrType?.settlementLinks?.length||0)>0;
-  if(type==="settlement_in") return hasSettlementLinks ? "Repayment" : "Reimbursement";
-  return type==="income"?"Income":type==="transfer"?"Transfer":type==="cc_payment"?"CC Payment":type==="cc_emi"?"CC EMI":type==="settlement_out"?"Settlement Out":type==="investment"?"Investment":"Expense";
-};
-const txnEmoji = txnOrType => {
-  const type = typeof txnOrType === "string" ? txnOrType : txnOrType?.type;
-  const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
-  if(isRefund) return "↩️";
-  return type==="income"?"💚":type==="transfer"?"🔄":type==="cc_payment"?"💳":type==="cc_emi"?"💳":type==="settlement_in"?"💼":type==="settlement_out"?"📤":type==="investment"?"💹":"💸";
 };
 const getTxnDisplayTitle = txn => {
   if(!txn) return "—";
@@ -683,7 +425,6 @@ const dedupeSettlementTxns = txns => {
     return true;
   });
 };
-const CLOUD_SCHEMA_VERSION = 1;
 const CAT_MAP = {"food":"food","grocery":"groceries","groceries":"groceries","transport":"transport","bills":"utilities","utilities":"utilities","health":"health","shopping":"lifestyle","household":"housing","selfcare":"lifestyle","baby":"family","entertainment":"entertainment","financial":"financial","fitness":"fitness","travel":"travel","misc":"misc","donations":"donations","professional":"professional","taxes":"taxes","emergency":"emergency","personaldev":"personaldev","family":"family","lifestyle":"lifestyle","housing":"housing"};
 const normalizeCats = stored => {
   const list = Array.isArray(stored) ? stored : null;
@@ -985,6 +726,7 @@ function AppContent({ onLock }) {
   // yet. Net Worth Trend, Wealth Timeline, and the Financial Health chapters all depend on history
   // that can never be reconstructed retroactively — every day this doesn't run is data lost for good.
   const [wealthSnapshots, setWealthSnapshots] = useState(()=>JSON.parse(localStorage.getItem("arth_wealth_snapshots")||"[]"));
+  const [goals, setGoals] = useState(()=>JSON.parse(localStorage.getItem("arth_goals")||"[]"));
   // Archived notification ids — once a notification is read/archived it won't resurface unless
   // the underlying condition changes (e.g. a budget alert re-appears if spend crosses a new
   // threshold, using a threshold-specific id, even though the earlier threshold stays archived).
@@ -1026,6 +768,11 @@ function AppContent({ onLock }) {
   const [editingEvent, setEditingEvent] = useState(null);
   const [showEventsList, setShowEventsList] = useState(false);
   const [viewingEvent, setViewingEvent] = useState(null);
+  const [showGoalsList, setShowGoalsList] = useState(false);
+  const [showAddGoal, setShowAddGoal] = useState(false);
+  const [editingGoal, setEditingGoal] = useState(null);
+  const [viewingGoal, setViewingGoal] = useState(null);
+  const [showAddContribution, setShowAddContribution] = useState(null);
   const [showNavDrawer, setShowNavDrawer] = useState(false);
   const [liabilities, setLiabilities] = useState(()=>JSON.parse(localStorage.getItem("arth_liabilities")||"[]"));
   const [trackedAssets, setTrackedAssets] = useState(()=>JSON.parse(localStorage.getItem("arth_assets")||"[]"));
@@ -1059,6 +806,7 @@ function AppContent({ onLock }) {
   useEffect(()=>safeSetLocalStorage("arth_skipped_investments",JSON.stringify(skippedInvestmentMonths)),[skippedInvestmentMonths]);
   useEffect(()=>safeSetLocalStorage("arth_gifts",JSON.stringify(gifts)),[gifts]);
   useEffect(()=>safeSetLocalStorage("arth_wealth_snapshots",JSON.stringify(wealthSnapshots)),[wealthSnapshots]);
+  useEffect(()=>safeSetLocalStorage("arth_goals",JSON.stringify(goals)),[goals]);
   useEffect(()=>safeSetLocalStorage("arth_dismissed_alerts",JSON.stringify(dismissedAlerts)),[dismissedAlerts]);
   useEffect(()=>safeSetLocalStorage("arth_budget",monthBudget),[monthBudget]);
   useEffect(()=>safeSetLocalStorage("arth_bills",JSON.stringify(bills)),[bills]);
@@ -1209,6 +957,7 @@ function AppContent({ onLock }) {
 
   // ── MODAL STATE ────────────────────────────────────────────────────────────
   const [showAdd, setShowAdd] = useState(false);
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [defaultAddType, setDefaultAddType] = useState("expense");
   const [addPrefill, setAddPrefill] = useState(null);
   const [showInvestments, setShowInvestments] = useState(false);
@@ -1926,8 +1675,14 @@ function AppContent({ onLock }) {
     // separate amounts. Summing both double-counted every attribute-tagged expense. The people
     // map is the current (F8) system, so it takes priority; forPerson only counts when there's no
     // people-map entry for this person (older transactions that predate the people map).
+    // A transaction can ALSO carry a groupId alongside individual people entries (a group split
+    // that names who owes what). When that happens, the group's own total (matched on t.groupId
+    // elsewhere) already accounts for this money — counting it again here for the individual
+    // would double it against the group total. Only "spent_on" (attribution, no repayment) is
+    // affected; "owes" (a genuine receivable) is left untouched since that's real debt tracking,
+    // not spend aggregation, and doesn't overlap with a group spend total.
     if(t.people?.[pid]?.mode==="spent_on"){
-      total += Number(t.people[pid].amount||0);
+      if(!t.groupId) total += Number(t.people[pid].amount||0);
     } else if(t.forPerson===pid){
       total += Number(t.tagPersonAmount||t.amount||0);
     }
@@ -1961,8 +1716,11 @@ function AppContent({ onLock }) {
           }
         });
       }
-      // Txn breakup / allocate: mode="spent_on" (A=Attribute) counts as spend on person
-      if(t.people){
+      // Txn breakup / allocate: mode="spent_on" (A=Attribute) counts as spend on person.
+      // Skip when the transaction also has a groupId — that money is already counted in the
+      // group's own total elsewhere, so counting it again per-member would double it (same fix
+      // as getPersonAttributedAmount above).
+      if(t.people&&!t.groupId){
         Object.entries(t.people).forEach(([pid,info])=>{
           if(pid==="__me__") return;
           if(info.mode==="spent_on"&&Number(info.amount||0)>0){
@@ -3097,6 +2855,140 @@ function AppContent({ onLock }) {
   );
 
   // ── ADD TRANSACTION MODAL (new flow) ───────────────────────────────────────
+  // Quick Add — the "amount first" progressive entry flow. Handles the common case (a simple
+  // expense) in three focused taps, then hands off to the existing, fully-tested AddModal
+  // (pre-filled, one tap from done) rather than duplicating its 2,600+ lines of save logic. Any
+  // exit point ("More options", income/transfer) also routes to AddModal — Quick Add never saves
+  // a transaction itself, it only prepares one.
+  const QuickAddModal = ({ onClose }) => {
+    const [step, setStep] = useState(1);
+    const [qaAmount, setQaAmount] = useState("");
+    const [qaWho, setQaWho] = useState("");
+
+    const recentTxnSort = (a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a);
+    const defaultAccId = [...txns].filter(t=>t.type==="expense"&&t.accId).sort(recentTxnSort)[0]?.accId
+      || (accounts.find(a=>a.type==="bank")||accounts.find(a=>a.type==="upi")||accounts.find(a=>a.type==="cash")||accounts[0])?.id || "";
+
+    // Same ranked-match approach AddModal uses for its own suggestion (history match, then
+    // keyword rules) — kept independent so this never has to reach into AddModal's internals.
+    const detected = useMemo(() => {
+      const vendorText = normalizeVendorText(qaWho);
+      if(!vendorText) return null;
+      const ranked = new Map();
+      txns.forEach(t=>{
+        if(t.type!=="expense"||!t.catId) return;
+        const merchantText = normalizeVendorText(t.merchant||t.desc);
+        if(!merchantText) return;
+        let score = 0;
+        if(merchantText===vendorText) score=10;
+        else if(merchantText.startsWith(vendorText)||vendorText.startsWith(merchantText)) score=6;
+        else if(merchantText.includes(vendorText)||vendorText.includes(merchantText)) score=3;
+        if(!score) return;
+        const existing = ranked.get(t.catId)||{ catId:t.catId, score:0 };
+        existing.score += score;
+        ranked.set(t.catId, existing);
+      });
+      const top = [...ranked.values()].filter(x=>cats.some(c=>c.id===x.catId)).sort((a,b)=>b.score-a.score)[0];
+      if(top) return cats.find(c=>c.id===top.catId);
+      const rule = VENDOR_CATEGORY_RULES.find(r=>r.pattern.test(vendorText));
+      return rule ? cats.find(c=>c.id===rule.catId) : null;
+    }, [qaWho]);
+
+    const account = accounts.find(a=>a.id===defaultAccId);
+    const [saving, setSaving] = useState(false);
+    // Directly saves a simple expense — no split, no person/group tagging, no items. Anything
+    // needing those goes through "More options" instead. Constructing a minimal-but-valid
+    // transaction here (rather than reaching into AddModal's save logic) keeps this bounded and
+    // independently reviewable, instead of duplicating 2,600 lines of unrelated split/investment
+    // handling just to save a plain expense.
+    const saveDirect = () => {
+      if(saving) return;
+      setSaving(true);
+      const record = {
+        id: genId(), type:"expense", amount: parseFloat(qaAmount)||0, date: todayStr(),
+        merchant: qaWho.trim(), desc: qaWho.trim(),
+        catId: detected?.id||null, catIds: detected?[detected.id]:[], subId:null, subIds:[],
+        accId: defaultAccId, people:{}, forPerson:"", groupId:null,
+        splitMode:"none", trackingMode:"none", tagMode:null, note:"",
+        createdAt: Date.now(), createdDate: todayStr(),
+      };
+      setTxns(prev=>[record, ...prev]);
+      setSaving(false);
+      onClose();
+    };
+    const goToFullForm = () => {
+      setAddPrefill({ amount:qaAmount, who:qaWho.trim(), accId:defaultAccId, catId:detected?.id||"", date:todayStr() });
+      setDefaultAddType("expense");
+      setShowQuickAdd(false);
+      setShowAdd(true);
+    };
+
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:350,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 40px",width:"100%",maxWidth:430,minHeight:"55vh" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+            <button onClick={()=>step>1?setStep(step-1):onClose()} style={{ background:"none",border:"none",color:T.sub,fontSize:14,cursor:"pointer",padding:"4px 0" }}>{step>1?"← Back":"Cancel"}</button>
+            <button onClick={()=>{ setShowQuickAdd(false); setDefaultAddType("expense"); setShowAdd(true); }} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>More options →</button>
+          </div>
+          <div style={{ display:"flex",gap:4,marginBottom:28 }}>
+            {[1,2,3].map(s=><div key={s} style={{ flex:1,height:3,borderRadius:2,background:s<=step?T.accent:T.border }}/>)}
+          </div>
+
+          {step===1&&(
+            <div style={{ display:"flex",flexDirection:"column",alignItems:"center",paddingTop:20 }}>
+              <div style={{ color:T.sub,fontSize:13,fontWeight:700,marginBottom:16 }}>How much?</div>
+              <div style={{ display:"flex",alignItems:"center",gap:4 }}>
+                <span style={{ color:T.sub,fontSize:32,fontWeight:700 }}>{sym}</span>
+                <input autoFocus type="number" inputMode="decimal" placeholder="0" value={qaAmount} onChange={e=>setQaAmount(e.target.value)}
+                  style={{ background:"none",border:"none",outline:"none",color:T.text,fontSize:48,fontWeight:900,width:180,fontFamily:"Nunito,sans-serif" }}/>
+              </div>
+              <button onClick={()=>parseFloat(qaAmount)>0&&setStep(2)} disabled={!(parseFloat(qaAmount)>0)} style={{ ...btnP,marginTop:40,opacity:parseFloat(qaAmount)>0?1:0.4 }}>Next</button>
+            </div>
+          )}
+
+          {step===2&&(
+            <div>
+              <div style={{ color:T.sub,fontSize:13,fontWeight:700,marginBottom:12 }}>What was it?</div>
+              <input autoFocus style={{ ...inp,fontSize:18,fontWeight:700,marginBottom:14 }} placeholder="e.g. Petrol, Swiggy, Netflix" value={qaWho} onChange={e=>setQaWho(e.target.value)}
+                onKeyDown={e=>{ if(e.key==="Enter"&&qaWho.trim()) setStep(3); }}/>
+              {detected&&(
+                <div style={{ display:"inline-flex",alignItems:"center",gap:6,background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:20,padding:"6px 12px",marginBottom:8 }}>
+                  <span style={{ fontSize:14 }}>{detected.icon}</span>
+                  <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{detected.name}</span>
+                </div>
+              )}
+              <button onClick={()=>setStep(3)} disabled={!qaWho.trim()} style={{ ...btnP,marginTop:24,opacity:qaWho.trim()?1:0.4 }}>Next</button>
+            </div>
+          )}
+
+          {step===3&&(
+            <div>
+              <div style={{ color:T.sub,fontSize:13,fontWeight:700,marginBottom:14 }}>Confirm</div>
+              <div style={{ background:T.input,borderRadius:16,padding:18,marginBottom:20 }}>
+                <div style={{ color:T.danger,fontSize:30,fontWeight:900,marginBottom:4 }}>{sym}{fmt(parseFloat(qaAmount)||0)}</div>
+                <div style={{ color:T.text,fontSize:14,fontWeight:700,marginBottom:12 }}>{qaWho.trim()}</div>
+                <div style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:`1px solid ${T.border}` }}>
+                  <span style={{ color:T.sub,fontSize:12 }}>Category</span>
+                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{detected?`${detected.icon} ${detected.name}`:"Uncategorized"}</span>
+                </div>
+                <div style={{ display:"flex",justifyContent:"space-between",padding:"6px 0" }}>
+                  <span style={{ color:T.sub,fontSize:12 }}>Paid via</span>
+                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{account?.name||"—"}</span>
+                </div>
+                <div style={{ display:"flex",justifyContent:"space-between",padding:"6px 0" }}>
+                  <span style={{ color:T.sub,fontSize:12 }}>Date</span>
+                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>Today</span>
+                </div>
+              </div>
+              <button onClick={saveDirect} disabled={saving} style={{ ...btnP,opacity:saving?0.6:1 }}>{saving?"Saving…":"✓ Save Expense"}</button>
+              <button onClick={goToFullForm} style={{ ...btnG,marginTop:8 }}>Need to split, tag a person, or add details?</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const AddModal = ({ defaultType="expense", prefillTxn=null, prefill=null, editTxn=null, onClose=null }) => {
     const sourceTxn = editTxn || null;
     const linkedInvestment = sourceTxn?.linkedInvestmentId
@@ -6909,7 +6801,7 @@ function AppContent({ onLock }) {
 
   // ── HOME ───────────────────────────────────────────────────────────────────
 
-  const DEFAULT_CARD_ORDER = ["healthScore","stats","categories","cc","bills","recent"];
+  const DEFAULT_CARD_ORDER = ["healthScore","quickActions","goalsHome","eventsHome","stats","categories","cc","bills","recent","aiInsight"];
   const KNOWN_CARD_KEYS = new Set(DEFAULT_CARD_ORDER);
   // Filters out invalid saved keys AND backfills any card added to the app after this user's
   // order was last saved. Must be applied every time cardOrder is set from a saved source
@@ -6919,10 +6811,13 @@ function AppContent({ onLock }) {
   const backfillCardOrder = (saved) => {
     const filtered = Array.isArray(saved) ? saved.filter(k=>KNOWN_CARD_KEYS.has(k)) : [];
     const missing = DEFAULT_CARD_ORDER.filter(k=>!filtered.includes(k));
-    // healthScore is the headline metric — insert it at the front rather than appending like
-    // other newly-added cards, so it doesn't get silently buried below whatever was already there.
-    const merged = missing.includes("healthScore")
-      ? ["healthScore", ...filtered, ...missing.filter(k=>k!=="healthScore")]
+    // healthScore and quickActions are headline elements — insert them at the front (in that
+    // order) rather than appending like other newly-added cards, so they don't get silently
+    // buried below whatever was already there. Everything else new still just appends.
+    const frontInserts = ["healthScore","quickActions"].filter(k=>missing.includes(k));
+    const rest = missing.filter(k=>!frontInserts.includes(k));
+    const merged = frontInserts.length
+      ? [...frontInserts, ...filtered, ...rest]
       : [...filtered, ...missing];
     return merged.length ? merged : DEFAULT_CARD_ORDER;
   };
@@ -6996,6 +6891,7 @@ function AppContent({ onLock }) {
     gifts,
     dismissedAlerts,
     wealthSnapshots,
+    goals,
     liabilities,
     trackedAssets,
     loans,
@@ -7003,7 +6899,7 @@ function AppContent({ onLock }) {
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -7041,6 +6937,7 @@ function AppContent({ onLock }) {
     if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
     if(Array.isArray(snapshot.dismissedAlerts)) setDismissedAlerts(snapshot.dismissedAlerts);
     if(Array.isArray(snapshot.wealthSnapshots)) setWealthSnapshots(snapshot.wealthSnapshots);
+    if(Array.isArray(snapshot.goals)) setGoals(snapshot.goals);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
@@ -7352,7 +7249,7 @@ function AppContent({ onLock }) {
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (idx, dir) => {
     const arr = cardOrder.map(x=>x); // fully mutable copy
@@ -7426,6 +7323,77 @@ function AppContent({ onLock }) {
           <div style={{ color:T.sub,fontSize:11,marginTop:8 }}>Tap to see what's driving your score</div>
         </div>
       ),
+      quickActions: (
+        <div key="quickActions" style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8 }}>
+          {[
+            { icon:"➖", label:"Expense", color:T.danger, onClick:()=>setShowQuickAdd(true) },
+            { icon:"➕", label:"Income", color:T.success, onClick:()=>{ setDefaultAddType("income"); setShowAdd(true); } },
+            { icon:"🔄", label:"Transfer", color:T.info, onClick:()=>{ setDefaultAddType("transfer"); setShowAdd(true); } },
+            { icon:"📄", label:"Bill", color:T.warn, onClick:()=>{ setDefaultBillerAccountId(""); setShowAddBill(true); } },
+          ].map(qa=>(
+            <button key={qa.label} onClick={qa.onClick} style={{ ...card,margin:0,padding:"14px 6px",display:"flex",flexDirection:"column",alignItems:"center",gap:6,cursor:"pointer",border:`1px solid ${T.border}` }}>
+              <div style={{ width:36,height:36,borderRadius:"50%",background:qa.color+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{qa.icon}</div>
+              <span style={{ color:T.text,fontSize:10,fontWeight:700 }}>{qa.label}</span>
+            </button>
+          ))}
+        </div>
+      ),
+      goalsHome: (()=>{
+        const topGoals = goals.filter(g=>g.status!=="completed").slice(0,3);
+        if(topGoals.length===0) return null;
+        return (
+          <div key="goalsHome" style={{ ...card }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+              <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>🎯 Goals</span>
+              <button onClick={()=>setShowGoalsList(true)} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer" }}>See all →</button>
+            </div>
+            <div style={{ display:"flex",gap:10,overflowX:"auto",paddingBottom:2 }}>
+              {topGoals.map(g=>{
+                const { pct } = getGoalProgress(g);
+                return (
+                  <div key={g.id} onClick={()=>setShowGoalsList(true)} style={{ minWidth:120,background:T.input,borderRadius:14,padding:"12px",cursor:"pointer",flexShrink:0 }}>
+                    <div style={{ fontSize:20,marginBottom:6 }}>{g.icon}</div>
+                    <div style={{ color:T.text,fontSize:11,fontWeight:800,marginBottom:6,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{g.name}</div>
+                    <div style={{ height:4,background:T.border,borderRadius:2,marginBottom:4 }}>
+                      <div style={{ height:"100%",width:`${pct}%`,background:T.accent,borderRadius:2 }}/>
+                    </div>
+                    <div style={{ color:T.accent,fontSize:11,fontWeight:800 }}>{pct}%</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })(),
+      eventsHome: (()=>{
+        const todayStrV = todayStr();
+        const activeEvents = events.filter(ev=>ev.budget>0).slice(0,3);
+        if(activeEvents.length===0) return null;
+        return (
+          <div key="eventsHome" style={{ ...card }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+              <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>🧳 Events</span>
+              <button onClick={()=>setShowEventsList(true)} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer" }}>See all →</button>
+            </div>
+            {activeEvents.map(ev=>{
+              const total = txns.filter(t=>t.eventId===ev.id&&t.type==="expense").reduce((s,t)=>s+Number(t.amount||0),0);
+              const pct = Math.min(100,Math.round(total/ev.budget*100));
+              const et = EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1];
+              return (
+                <div key={ev.id} onClick={()=>{ setViewingEvent(ev); }} style={{ cursor:"pointer",marginBottom:10 }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
+                    <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{et.icon} {ev.name}</span>
+                    <span style={{ color:total>ev.budget?T.danger:T.accent,fontSize:12,fontWeight:800 }}>{sym}{fmt(total)} / {sym}{fmt(ev.budget)}</span>
+                  </div>
+                  <div style={{ height:4,background:T.border,borderRadius:2 }}>
+                    <div style={{ height:"100%",width:`${pct}%`,background:total>ev.budget?T.danger:T.accent,borderRadius:2 }}/>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })(),
       stats: (
         <div key="stats" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
           {[
@@ -7567,9 +7535,65 @@ function AppContent({ onLock }) {
         </div>
       ),
     };
+    // AI Insight — exactly ONE card, never a list. Deterministic rules, not a model: compares this
+    // month's category spend to last month's and picks the single largest swing. No insight shown
+    // at all if nothing crosses the threshold, rather than manufacturing one to fill the slot.
+    const insightCandidate = (()=>{
+      const now = new Date();
+      const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+      const prevD = new Date(now.getFullYear(),now.getMonth()-1,1);
+      const prevMonthKey = `${prevD.getFullYear()}-${String(prevD.getMonth()+1).padStart(2,"0")}`;
+      const sumByCat = (monthKey) => {
+        const map = {};
+        txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(monthKey)).forEach(t=>{
+          const amt = getMyExpenseAmount(t);
+          if(amt<=0) return;
+          const tCats = (t.catIds||[t.catId]).filter(Boolean);
+          tCats.forEach(cid=>{ map[cid]=(map[cid]||0)+amt/tCats.length; });
+        });
+        return map;
+      };
+      const thisMap = sumByCat(thisMonthKey), prevMap = sumByCat(prevMonthKey);
+      let best = null;
+      Object.entries(thisMap).forEach(([cid,amt])=>{
+        const prevAmt = prevMap[cid]||0;
+        if(prevAmt<100) return;
+        const pctChange = Math.round(((amt-prevAmt)/prevAmt)*100);
+        if(Math.abs(pctChange)<15) return;
+        if(!best || Math.abs(pctChange)>Math.abs(best.pctChange)) best = { cid, pctChange, amt, prevAmt };
+      });
+      if(!best) return null;
+      const cat = cats.find(c=>c.id===best.cid);
+      if(!cat) return null;
+      return { text:`${cat.name} spending is ${Math.abs(best.pctChange)}% ${best.pctChange<0?"lower":"higher"} than last month.`, ok:best.pctChange<0 };
+    })();
+    if(insightCandidate){
+      CARDS.aiInsight = (
+        <div key="aiInsight" style={{ ...card,background:`linear-gradient(135deg,${T.accent}0c,${T.card})` }}>
+          <div style={{ display:"flex",gap:10,alignItems:"flex-start" }}>
+            <span style={{ fontSize:20 }}>{insightCandidate.ok?"✨":"📈"}</span>
+            <div>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:4 }}>Insight</div>
+              <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{insightCandidate.text}</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
+    const hourNow = new Date().getHours();
+    const greeting = hourNow<12?"Good morning":hourNow<17?"Good afternoon":"Good evening";
+    const meName = people.find(p=>p.isMe)?.name || "there";
     return (
       <div>
+        <div style={{ padding:"16px 18px 4px" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <div>
+              <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{greeting}, {meName} 👋</div>
+              <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>Here's what's happening today.</div>
+            </div>
+          </div>
+        </div>
         {/* Hero — sticky spend+budget+month nav */}
         <div style={{ position:"sticky",top:56,zIndex:40,background:dark?"#0d0a05":"#fffbf0",borderBottom:`1px solid ${T.border}`,padding:"14px 18px 16px" }}>
           {/* Month nav */}
@@ -7601,6 +7625,11 @@ function AppContent({ onLock }) {
         </div>
 
         <div style={{ padding:"14px 16px 0" }}>
+          {dueRecurring.length>0 && (
+            <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>⚠ ACTION CENTRE</div>
+          )}
+          {/* Personal budget alerts live in Notifications only — not duplicated here, so there's
+              one place to read and archive them, not two to keep in sync mentally. */}
           {/* Recurring investment reminders */}
           {dueRecurring.length>0&&(
             <div style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
@@ -7706,9 +7735,80 @@ function AppContent({ onLock }) {
   };
 
   // ── TRANSACTIONS ───────────────────────────────────────────────────────────
+  // Wraps TxnRow with swipe actions, used only in Timeline — Home's Recent card and Account
+  // Detail keep using plain TxnRow untouched, so this doesn't change behavior anywhere else.
+  const SwipeableTxnRow = ({ t, last, onEditTxn, bulkMode, selected, onToggleSelect }) => {
+    const [dragX, setDragX] = useState(0);
+    const draggingRef = useRef(false);
+    const startXRef = useRef(0);
+    const REVEAL = 140;
+    const onDown = e => { if(bulkMode) return; draggingRef.current = true; startXRef.current = (e.touches?.[0]?.clientX ?? e.clientX) - dragX; };
+    const onMove = e => {
+      if(!draggingRef.current || bulkMode) return;
+      const clientX = e.touches?.[0]?.clientX ?? e.clientX;
+      setDragX(Math.max(-REVEAL, Math.min(REVEAL, clientX - startXRef.current)));
+    };
+    const onUp = () => {
+      draggingRef.current = false;
+      setDragX(prev => prev > REVEAL*0.4 ? REVEAL : prev < -REVEAL*0.4 ? -REVEAL : 0);
+    };
+    const close = () => setDragX(0);
+    const repeatTxn = () => {
+      const clone = { ...t, id:genId(), date:todayStr(), createdAt:Date.now() };
+      delete clone.settlementLinks; delete clone.againstTxnId; delete clone.isRefund; delete clone.favorite;
+      setTxns(prev=>[clone, ...prev]);
+      close();
+    };
+    const toggleFavorite = () => { setTxns(prev=>prev.map(x=>x.id===t.id?{...x,favorite:!x.favorite}:x)); close(); };
+    const shareTxn = () => {
+      const text = `${t.merchant||t.desc||"Transaction"} — ${sym}${fmt(t.amount)} on ${formatShortDate(t.date)||t.date}`;
+      if(navigator.share) navigator.share({ text }).catch(()=>{});
+      else navigator.clipboard?.writeText(text);
+      close();
+    };
+    const actionBtn = (onClick, bg, fg, icon, label) => (
+      <button onClick={onClick} style={{ width:70,background:bg,color:fg,border:"none",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+        <span style={{ fontSize:16 }}>{icon}</span>{label}
+      </button>
+    );
+    if(bulkMode){
+      return (
+        <div onClick={()=>onToggleSelect(t.id)} style={{ display:"flex",alignItems:"center",gap:10,cursor:"pointer",background:selected?T.accentSoft:"transparent",borderRadius:10 }}>
+          <div style={{ paddingLeft:10 }}>
+            <div style={{ width:20,height:20,borderRadius:6,border:`2px solid ${selected?T.accent:T.border}`,background:selected?T.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"#fff" }}>{selected?"✓":""}</div>
+          </div>
+          <div style={{ flex:1,pointerEvents:"none" }}><TxnRow t={t} last={last} onEditTxn={onEditTxn}/></div>
+        </div>
+      );
+    }
+    return (
+      <div style={{ position:"relative",overflow:"hidden" }}>
+        <div style={{ position:"absolute",left:0,top:0,bottom:0,display:"flex" }}>
+          {actionBtn(toggleFavorite, T.warn, "#fff", t.favorite?"⭐":"☆", "Fav")}
+          {actionBtn(repeatTxn, T.accent, "#000", "🔁", "Repeat")}
+        </div>
+        <div style={{ position:"absolute",right:0,top:0,bottom:0,display:"flex" }}>
+          {actionBtn(shareTxn, T.info, "#fff", "📤", "Share")}
+          {actionBtn(e=>{ e?.stopPropagation?.(); setConfirmDeleteTxn(t); close(); }, T.danger, "#fff", "🗑️", "Delete")}
+        </div>
+        <div
+          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+          style={{ transform:`translateX(${dragX}px)`, transition:draggingRef.current?"none":"transform 0.2s", background:T.card, position:"relative", touchAction:"pan-y" }}
+        >
+          <TxnRow t={t} last={last} onEditTxn={onEditTxn}/>
+        </div>
+      </div>
+    );
+  };
+
   const Transactions = () => {
     const [showTxnFilters, setShowTxnFilters] = useState(false);
     const [showTxnSort, setShowTxnSort] = useState(false);
+    const [bulkMode, setBulkMode] = useState(false);
+    const [bulkSelected, setBulkSelected] = useState([]);
+    const [showBulkCategory, setShowBulkCategory] = useState(false);
+    const toggleSelect = id => setBulkSelected(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
+    const exitBulk = () => { setBulkMode(false); setBulkSelected([]); };
     const txnSortOptions = [
       { id:"recorded_desc", label:"Latest", title:"Latest" },
       { id:"date_desc", label:"By date ↓", title:"By date ↓" },
@@ -7821,9 +7921,57 @@ function AppContent({ onLock }) {
               </svg>
               {hasActiveFilters&&<span style={{ position:"absolute",top:-5,right:-5,minWidth:18,height:18,borderRadius:999,background:T.accent,color:"#000",fontSize:10,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px" }}>{activeFilterCount}</span>}
             </button>
+            <button onClick={()=>{ if(bulkMode) exitBulk(); else setBulkMode(true); }} style={{ height:38,borderRadius:12,border:`1px solid ${bulkMode?T.accent:T.border}`,background:bulkMode?T.accentSoft:T.card,color:bulkMode?T.accent:T.sub,cursor:"pointer",padding:"0 12px",fontSize:11,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>{bulkMode?"Cancel":"Select"}</button>
           </div>
         </div>
 
+        {bulkMode&&bulkSelected.length>0&&(
+          <div style={{ position:"sticky",top:0,zIndex:20,background:T.accent,borderRadius:14,padding:"10px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <span style={{ color:"#000",fontSize:12,fontWeight:800 }}>{bulkSelected.length} selected</span>
+            <div style={{ display:"flex",gap:8 }}>
+              <button onClick={()=>setShowBulkCategory(true)} style={{ background:"#00000022",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>🏷️ Category</button>
+              <button onClick={()=>{
+                // Column definition and the transaction→row mapping stay here — that's business
+                // logic (it knows what a transaction looks like), not something csv.js should know.
+                const rows = [["Date","Merchant","Category","Amount","Type"]];
+                bulkSelected.forEach(id=>{
+                  const t = txns.find(x=>x.id===id);
+                  if(!t) return;
+                  rows.push([t.date||"",t.merchant||t.desc||"",getCat(t.catId)?.name||"",t.amount,t.type]);
+                });
+                downloadCsvFile(`arth-transactions-${todayStr()}.csv`, rowsToCsvString(rows));
+              }} style={{ background:"#00000022",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>⬇️ Export</button>
+              <button onClick={()=>{
+                askConfirm(`Delete ${bulkSelected.length} transaction${bulkSelected.length>1?"s":""}? This can't be undone.`, ()=>{
+                  setTxns(prev=>prev.filter(x=>!bulkSelected.includes(x.id)));
+                  exitBulk();
+                });
+              }} style={{ background:"#00000022",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>🗑️ Delete</button>
+            </div>
+          </div>
+        )}
+        {showBulkCategory&&(
+          <div onClick={e=>{ if(e.target===e.currentTarget) setShowBulkCategory(false); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:220,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+            <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 40px",width:"100%",maxWidth:430,maxHeight:"70vh",overflowY:"auto" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+                <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>Set category for {bulkSelected.length} transactions</div>
+                <button onClick={()=>setShowBulkCategory(false)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+              </div>
+              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                {cats.map(c=>(
+                  <button key={c.id} onClick={()=>{
+                    setTxns(prev=>prev.map(x=>bulkSelected.includes(x.id)?{...x,catId:c.id,catIds:[c.id]}:x));
+                    setShowBulkCategory(false);
+                    exitBulk();
+                  }} style={{ display:"flex",alignItems:"center",gap:10,background:T.input,border:"none",borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                    <span style={{ fontSize:16 }}>{c.icon}</span>
+                    <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{c.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         {showTxnSort&&(
           <div onClick={e=>e.target===e.currentTarget&&setShowTxnSort(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:210 }}>
             <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 28px",width:"100%",maxWidth:430 }}>
@@ -8080,7 +8228,41 @@ function AppContent({ onLock }) {
 
         <div style={card}>
           {filteredTxns.length===0?<div style={{ textAlign:"center",padding:40,color:T.sub }}>No transactions match the selected filters</div>
-            :filteredTxns.map((t,i)=><TxnRow key={t.id} t={t} last={i===filteredTxns.length-1}/>)}
+            :(()=>{
+              const todayStrV = todayStr();
+              const yestStr = addDaysToDateStr(todayStrV,-1);
+              const weekAgoStr = addDaysToDateStr(todayStrV,-7);
+              const monthAgoStr = addDaysToDateStr(todayStrV,-30);
+              const bucketFor = d => {
+                if(!d) return "Older";
+                if(d===todayStrV) return "Today";
+                if(d===yestStr) return "Yesterday";
+                if(d>weekAgoStr) return "Earlier This Week";
+                if(d>monthAgoStr) return "This Month";
+                return "Older";
+              };
+              const order = ["Today","Yesterday","Earlier This Week","This Month","Older"];
+              const groups = [];
+              filteredTxns.forEach(t=>{
+                const bucket = bucketFor(t.date);
+                let g = groups.find(x=>x.bucket===bucket);
+                if(!g){ g={bucket,items:[]}; groups.push(g); }
+                g.items.push(t);
+              });
+              groups.sort((a,b)=>order.indexOf(a.bucket)-order.indexOf(b.bucket));
+              return groups.map(g=>{
+                const spent = g.items.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
+                return (
+                  <div key={g.bucket}>
+                    <div style={{ position:"sticky",top:0,zIndex:5,background:T.card,padding:"10px 0 6px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`1px solid ${T.border}`,marginBottom:4 }}>
+                      <span style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>{g.bucket}</span>
+                      {spent>0&&<span style={{ color:T.danger,fontSize:11,fontWeight:700 }}>-{sym}{fmt(spent)}</span>}
+                    </div>
+                    {g.items.map((t,i)=><SwipeableTxnRow key={t.id} t={t} last={i===g.items.length-1} bulkMode={bulkMode} selected={bulkSelected.includes(t.id)} onToggleSelect={toggleSelect}/>)}
+                  </div>
+                );
+              });
+            })()}
         </div>
       </div>
     );
@@ -9156,7 +9338,7 @@ function AppContent({ onLock }) {
                   <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>Expenses — {groupViewMode==="overall"?"All time":smLabel}{spendFilterLabel}</div>
                   {displayTxns.length===0
                     ?<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:20 }}>No expenses{groupViewMode==="monthly"?` for ${smLabel}`:""}{spendFilterLabel?` for${spendFilterLabel}`:""}</div>
-                    :displayTxns.map((t,idx,arr)=><TxnRow key={t.id} t={t} last={idx===arr.length-1}/>)}
+                    :displayTxns.map((t,idx,arr)=><SwipeableTxnRow key={t.id} t={t} last={idx===arr.length-1}/>)}
                 </>;
               })()}
               {/* Settlements related to group members */}
@@ -12608,16 +12790,94 @@ function AppContent({ onLock }) {
     { id:"celebration", label:"Celebration", icon:"🎉" },
     { id:"other", label:"Other", icon:"📌" },
   ];
+  const GOAL_ICONS = ["🏠","🚗","💍","👶","🎓","✈️","🏖️","💰","🎯","🏥","📱","🛡️"];
+  const AddGoalModal = ({ existing, onClose }) => {
+    const isEdit = Boolean(existing);
+    const [name, setName] = useState(existing?.name||"");
+    const [icon, setIcon] = useState(existing?.icon||"🎯");
+    const [targetAmount, setTargetAmount] = useState(existing?.targetAmount?String(existing.targetAmount):"");
+    const [currentAmount, setCurrentAmount] = useState(existing?.currentAmount?String(existing.currentAmount):"");
+    const [targetDate, setTargetDate] = useState(existing?.targetDate||"");
+    const [linkedAccountId, setLinkedAccountId] = useState(existing?.linkedAccountId||"");
+    const canSave = name.trim() && parseFloat(targetAmount)>0;
+    const handleSave = () => {
+      if(!canSave) return;
+      const record = {
+        id: existing?.id||genId(), name:name.trim(), icon, targetAmount:parseFloat(targetAmount)||0,
+        currentAmount: linkedAccountId ? 0 : (parseFloat(currentAmount)||0), // auto-tracked goals derive progress live from the account, not a stored number
+        targetDate:targetDate||null, linkedAccountId:linkedAccountId||null,
+        status: existing?.status||"active", createdAt: existing?.createdAt||Date.now(),
+      };
+      setGoals(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[record,...prev]);
+      onClose();
+    };
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:340,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit":"New"} Goal</div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Icon</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {GOAL_ICONS.map(ic=><button key={ic} onClick={()=>setIcon(ic)} style={{ background:icon===ic?T.accent+"22":T.input,border:`1px solid ${icon===ic?T.accent:T.border}`,borderRadius:10,padding:"7px 10px",cursor:"pointer",fontSize:18 }}>{ic}</button>)}
+              </div>
+            </div>
+            <div>
+              <span style={lbl}>Name *</span>
+              <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. House Down Payment" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
+            </div>
+            <div>
+              <span style={lbl}>Target Amount *</span>
+              <input style={inp} type="number" placeholder="e.g. 2000000" value={targetAmount} onChange={e=>setTargetAmount(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>Target Date (optional)</span>
+              <input style={inp} type="date" value={targetDate} onChange={e=>setTargetDate(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>Track progress from an account (optional)</span>
+              <select style={inp} value={linkedAccountId} onChange={e=>setLinkedAccountId(e.target.value)}>
+                <option value="">Manual — I'll log contributions myself</option>
+                {accounts.filter(a=>a.type!=="cc").map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>{linkedAccountId?"Progress will always match this account's live balance.":"You'll add contributions manually as you save toward this."}</div>
+            </div>
+            {!linkedAccountId&&(
+              <div>
+                <span style={lbl}>Already saved (optional)</span>
+                <input style={inp} type="number" placeholder="0" value={currentAmount} onChange={e=>setCurrentAmount(e.target.value)}/>
+              </div>
+            )}
+            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Goal"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // A goal's current amount is either its own manually-tracked number, or — if linked to an
+  // account — that account's live balance, always kept in sync automatically rather than needing
+  // a manual update every time the account changes.
+  const getGoalProgress = useCallback((g) => {
+    const current = g.linkedAccountId ? Math.max(0,accountBalance(g.linkedAccountId)) : Number(g.currentAmount||0);
+    const pct = g.targetAmount>0 ? Math.min(100,Math.round(current/g.targetAmount*100)) : 0;
+    return { current, pct, complete: current>=g.targetAmount && g.targetAmount>0 };
+  },[accountBalance]);
+
   const AddEventModal = ({ existing, onClose }) => {
     const isEdit = Boolean(existing);
     const [name, setName] = useState(existing?.name||"");
     const [occasionType, setOccasionType] = useState(existing?.occasionType||"trip");
     const [date, setDate] = useState(existing?.date||todayStr());
     const [selectedPeople, setSelectedPeople] = useState(existing?.peopleIds||[]);
+    const [budget, setBudget] = useState(existing?.budget?String(existing.budget):"");
     const canSave = name.trim();
     const handleSave = () => {
       if(!canSave) return;
-      const record = { id: existing?.id||genId(), name:name.trim(), occasionType, date, peopleIds:selectedPeople, createdAt:existing?.createdAt||Date.now() };
+      const record = { id: existing?.id||genId(), name:name.trim(), occasionType, date, peopleIds:selectedPeople, budget:parseFloat(budget)||0, createdAt:existing?.createdAt||Date.now() };
       setEvents(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[record, ...prev]);
       onClose();
     };
@@ -12644,6 +12904,10 @@ function AppContent({ onLock }) {
             <div>
               <span style={lbl}>Date</span>
               <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>Budget (optional)</span>
+              <input style={inp} type="number" placeholder="e.g. 60000" value={budget} onChange={e=>setBudget(e.target.value)}/>
             </div>
             <div>
               <span style={lbl}>People (optional)</span>
@@ -12693,6 +12957,18 @@ function AppContent({ onLock }) {
               <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>MY SHARE</div>
             </div>
           </div>
+          {event.budget>0&&(
+            <div style={{ background:T.input,borderRadius:14,padding:"14px",marginBottom:14 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
+                <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(total)} of {sym}{fmt(event.budget)} budget</span>
+                <span style={{ color:total>event.budget?T.danger:T.accent,fontSize:12,fontWeight:900 }}>{Math.round(total/event.budget*100)}%</span>
+              </div>
+              <div style={{ height:6,background:T.border,borderRadius:3 }}>
+                <div style={{ height:"100%",width:`${Math.min(100,Math.round(total/event.budget*100))}%`,background:total>event.budget?T.danger:T.accent,borderRadius:3 }}/>
+              </div>
+              {total>event.budget&&<div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:6 }}>⚠️ Over budget by {sym}{fmt(total-event.budget)}</div>}
+            </div>
+          )}
           <div style={{ color:T.sub,fontSize:10,textAlign:"center",marginBottom:14 }}>{linkedTxns.length} expense{linkedTxns.length!==1?"s":""} · amounts below show what actually happened, full card charges included</div>
           <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
             {linkedTxns.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No expenses linked yet. Tag an expense to this trip from the transaction form.</div>}
@@ -13075,7 +13351,7 @@ function AppContent({ onLock }) {
               { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"📅", label:"Bills", onClick:()=>goToTab("bills") },
               { icon:"💰", label:"Budget", onClick:()=>goToTab("budget") },
-              { icon:"🎯", label:"Goals", onClick:()=>{ alert("Goals — coming soon"); onClose(); } },
+              { icon:"🎯", label:"Goals", onClick:()=>{ setShowGoalsList(true); onClose(); } },
               { icon:"✈️", label:"Trips & Outings", onClick:()=>{ setShowEventsList(true); onClose(); } },
             ].map(item=>(
               <button key={item.label} onClick={item.onClick} style={{ display:"flex",alignItems:"center",gap:14,background:"none",border:"none",padding:"13px 14px",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:700,color:T.text,fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
@@ -13130,17 +13406,98 @@ function AppContent({ onLock }) {
               const et = EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1];
               const total = txns.filter(t=>t.eventId===ev.id&&t.type==="expense").reduce((s,t)=>s+Number(t.amount||0),0);
               return (
-                <div key={ev.id} onClick={()=>{ setViewingEvent(ev); onClose(); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer" }}>
-                  <div>
-                    <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{et.icon} {ev.name}</div>
-                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(ev.date)||ev.date}</div>
+                <div key={ev.id} onClick={()=>{ setViewingEvent(ev); onClose(); }} style={{ background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer" }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <div>
+                      <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{et.icon} {ev.name}</div>
+                      <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(ev.date)||ev.date}</div>
+                    </div>
+                    <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(total)}</div>
                   </div>
-                  <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(total)}</div>
+                  {ev.budget>0&&(
+                    <div style={{ marginTop:8 }}>
+                      <div style={{ height:4,background:T.border,borderRadius:2 }}>
+                        <div style={{ height:"100%",width:`${Math.min(100,Math.round(total/ev.budget*100))}%`,background:total>ev.budget?T.danger:T.accent,borderRadius:2 }}/>
+                      </div>
+                      <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>{Math.round(total/ev.budget*100)}% of {sym}{fmt(ev.budget)}</div>
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
           <button onClick={()=>{ setEditingEvent(null); setShowAddEvent(true); onClose(); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>+ Add Trip / Outing</button>
+        </div>
+      </div>
+    );
+  };
+
+  const AddContributionModal = ({ goal, onClose }) => {
+    const [amount, setAmount] = useState("");
+    const save = () => {
+      const amt = parseFloat(amount)||0;
+      if(amt<=0) return;
+      setGoals(prev=>prev.map(x=>x.id===goal.id?{...x,currentAmount:Number(x.currentAmount||0)+amt}:x));
+      onClose();
+    };
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:345,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 40px",width:"100%",maxWidth:430 }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>Add to {goal.icon} {goal.name}</div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <input autoFocus style={{ ...inp,fontSize:22,fontWeight:800,marginBottom:14 }} type="number" placeholder={`${sym}0`} value={amount} onChange={e=>setAmount(e.target.value)}/>
+          <button onClick={save} disabled={!(parseFloat(amount)>0)} style={{ ...btnP,opacity:parseFloat(amount)>0?1:0.5 }}>Add Contribution</button>
+        </div>
+      </div>
+    );
+  };
+
+  const GoalsListModal = ({ onClose }) => {
+    const activeGoals = goals.filter(g=>g.status!=="completed");
+    const completedGoals = goals.filter(g=>g.status==="completed");
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:335,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🎯 Goals</div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
+            {activeGoals.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No goals yet. Give a rupee a purpose.</div>}
+            {activeGoals.map(g=>{
+              const { current, pct, complete } = getGoalProgress(g);
+              return (
+                <div key={g.id} style={{ background:T.input,borderRadius:14,padding:"12px 14px" }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
+                    <div onClick={()=>{ setEditingGoal(g); setShowAddGoal(true); }} style={{ cursor:"pointer" }}>
+                      <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{g.icon} {g.name}</div>
+                      <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{sym}{fmt(current)} of {sym}{fmt(g.targetAmount)}{g.targetDate?` · by ${formatShortDate(g.targetDate)||g.targetDate}`:""}{g.linkedAccountId?" · auto-tracked":""}</div>
+                    </div>
+                    <span style={{ color:complete?T.success:T.accent,fontSize:14,fontWeight:900 }}>{pct}%</span>
+                  </div>
+                  <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:complete||g.linkedAccountId?0:8 }}>
+                    <div style={{ height:"100%",width:`${pct}%`,background:complete?T.success:T.accent,borderRadius:3 }}/>
+                  </div>
+                  {complete&&<button onClick={()=>setGoals(prev=>prev.map(x=>x.id===g.id?{...x,status:"completed"}:x))} style={{ marginTop:8,background:T.success+"22",border:`1px solid ${T.success}44`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif" }}>✓ Mark Complete</button>}
+                  {!complete&&!g.linkedAccountId&&<button onClick={()=>setShowAddContribution(g)} style={{ marginTop:8,background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Add Contribution</button>}
+                </div>
+              );
+            })}
+          </div>
+          {completedGoals.length>0&&(
+            <div style={{ marginBottom:16 }}>
+              <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>COMPLETED</div>
+              {completedGoals.map(g=>(
+                <div key={g.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{g.icon} {g.name}</span>
+                  <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>✓ {sym}{fmt(g.targetAmount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <button onClick={()=>{ setEditingGoal(null); setShowAddGoal(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>+ New Goal</button>
         </div>
       </div>
     );
@@ -14051,7 +14408,7 @@ function AppContent({ onLock }) {
   const hasAppPin = Boolean(localStorage.getItem("arth_pin")||"");
 
   const handleTab=t=>{
-    if(t==="__fab__"){ setDefaultAddType("expense"); setDefaultBillerAccountId(""); setShowAdd(true); return; }
+    if(t==="__fab__"){ setShowQuickAdd(true); return; }
     if(t==="settings_tab"){ setShowWealthPin(false); setShowSettings(true); setSettingsSection(null); return; }
     if(t==="wealth"){
       if(!hasAppPin){ setShowWealthPin(false); setShowSettings(true); setSettingsSection("security_pin_change"); return; }
@@ -14201,6 +14558,7 @@ function AppContent({ onLock }) {
             </div>
           </div>
         )}
+        {showQuickAdd&&<QuickAddModal onClose={()=>setShowQuickAdd(false)}/>}
         {showAdd&&<AddModal defaultType={editTxn?editTxn.type||"expense":defaultAddType} prefillTxn={refundSourceTxn} prefill={addPrefill} editTxn={editTxn} onClose={()=>{ setShowAdd(false); setEditTxn(null); setAddPrefill(null); setRefundSourceTxn(null); }}/>}
         {showInvestments&&(
           <div onClick={e=>{ if(e.target===e.currentTarget){ setShowInvestments(false); setSelectedInvestmentTypeView("all"); } }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
@@ -14217,6 +14575,9 @@ function AppContent({ onLock }) {
         {viewingMembership&&<MembershipDetailModal membership={viewingMembership} onClose={()=>setViewingMembership(null)}/>}
         {showAddEvent&&<AddEventModal existing={editingEvent} onClose={()=>{ setShowAddEvent(false); setEditingEvent(null); }}/>}
         {showEventsList&&<EventsListModal onClose={()=>setShowEventsList(false)}/>}
+        {showAddGoal&&<AddGoalModal existing={editingGoal} onClose={()=>{ setShowAddGoal(false); setEditingGoal(null); }}/>}
+        {showGoalsList&&<GoalsListModal onClose={()=>setShowGoalsList(false)}/>}
+        {showAddContribution&&<AddContributionModal goal={showAddContribution} onClose={()=>setShowAddContribution(null)}/>}
         {showNotifications&&<NotificationsModal onClose={()=>setShowNotifications(false)}/>}
         {showHealthScoreDetail&&(
           <div onClick={e=>{ if(e.target===e.currentTarget) setShowHealthScoreDetail(false); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:335,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
