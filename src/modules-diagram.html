@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Arth — Person Modules Architecture</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Nunito:wght@400;600;700;800;900&display=swap');
+
+  :root{
+    --bg:#0d0a05;
+    --card:#171208;
+    --border:#2a2115;
+    --gold:#f0a500;
+    --gold-soft:#f0a50022;
+    --text:#f5f0e6;
+    --sub:#a89a80;
+    --danger:#ef4444;
+    --success:#22c55e;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    background-image:radial-gradient(circle at 15% 0%, #f0a50011, transparent 45%);
+    color:var(--text);
+    font-family:'Nunito',sans-serif;
+    padding:40px 20px 80px;
+  }
+  .wrap{max-width:960px;margin:0 auto;}
+  h1{
+    font-family:'Fraunces',serif;
+    font-weight:700;
+    font-size:clamp(28px,5vw,42px);
+    margin:0 0 6px;
+    letter-spacing:-0.5px;
+  }
+  .kicker{
+    color:var(--gold);
+    font-size:12px;
+    font-weight:800;
+    letter-spacing:2px;
+    text-transform:uppercase;
+    margin-bottom:10px;
+  }
+  .lede{color:var(--sub);font-size:15px;line-height:1.6;max-width:640px;margin-bottom:44px;}
+
+  .section-title{
+    font-family:'Fraunces',serif;
+    font-size:20px;
+    font-weight:700;
+    margin:48px 0 16px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .section-title .n{
+    color:var(--gold);
+    font-size:13px;
+    background:var(--gold-soft);
+    border:1px solid var(--gold);
+    border-radius:20px;
+    padding:2px 10px;
+    font-weight:800;
+  }
+
+  .modules-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+    gap:10px;
+  }
+  .module-card{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:16px 14px;
+  }
+  .module-card .icon{font-size:22px;}
+  .module-card .name{font-weight:800;font-size:13px;margin-top:8px;}
+
+  .flow{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:18px;
+    padding:24px;
+    display:flex;
+    flex-direction:column;
+    gap:0;
+  }
+  .flow-step{
+    display:flex;
+    gap:14px;
+    align-items:flex-start;
+    padding:14px 0;
+  }
+  .flow-step + .flow-step{border-top:1px dashed var(--border);}
+  .flow-dot{
+    width:28px;height:28px;border-radius:50%;
+    background:var(--gold-soft);border:1px solid var(--gold);
+    display:flex;align-items:center;justify-content:center;
+    font-size:13px;font-weight:900;color:var(--gold);
+    flex-shrink:0;
+  }
+  .flow-step .body .label{font-weight:800;font-size:13px;}
+  .flow-step .body .desc{color:var(--sub);font-size:12px;margin-top:3px;line-height:1.5;}
+  code{
+    background:#000;
+    border:1px solid var(--border);
+    border-radius:6px;
+    padding:1px 6px;
+    font-size:11.5px;
+    color:#ffd580;
+  }
+
+  .gate-list{display:flex;flex-direction:column;gap:10px;}
+  .gate{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-left:3px solid var(--gold);
+    border-radius:10px;
+    padding:14px 16px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:14px;
+    flex-wrap:wrap;
+  }
+  .gate .where{font-weight:800;font-size:13px;}
+  .gate .file{color:var(--sub);font-size:11px;margin-top:3px;}
+  .before-after{
+    display:flex;gap:8px;align-items:center;font-size:11.5px;flex-wrap:wrap;
+  }
+  .tag{
+    border-radius:6px;
+    padding:3px 8px;
+    font-weight:700;
+    white-space:nowrap;
+  }
+  .tag.old{background:#ef444422;color:#ff8b8b;text-decoration:line-through;}
+  .tag.new{background:#22c55e22;color:#7be3a0;}
+  .arrow{color:var(--sub);}
+
+  .safety{
+    margin-top:44px;
+    background:linear-gradient(135deg,#22c55e14,var(--card));
+    border:1px solid #22c55e44;
+    border-radius:16px;
+    padding:20px 22px;
+  }
+  .safety .h{font-weight:800;color:#7be3a0;font-size:14px;margin-bottom:8px;}
+  .safety p{color:var(--sub);font-size:13px;line-height:1.6;margin:0;}
+
+  footer{margin-top:56px;color:var(--sub);font-size:11px;text-align:center;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">Arth · Data Model</div>
+  <h1>Person Modules</h1>
+  <p class="lede">Six capabilities replace the old hardcoded <code>personType==="dependant"</code> checks scattered across the app. Type stays as identity; modules now control what a person can actually do.</p>
+
+  <div class="section-title"><span class="n">1</span> The six capabilities</div>
+  <div class="modules-grid">
+    <div class="module-card"><div class="icon">🤝</div><div class="name">Shared Expenses</div></div>
+    <div class="module-card"><div class="icon">💳</div><div class="name">Can Borrow Money</div></div>
+    <div class="module-card"><div class="icon">📊</div><div class="name">Monthly Budget</div></div>
+    <div class="module-card"><div class="icon">🎁</div><div class="name">Gifts</div></div>
+    <div class="module-card"><div class="icon">📝</div><div class="name">Notes</div></div>
+    <div class="module-card"><div class="icon">🔔</div><div class="name">Reminders</div></div>
+  </div>
+
+  <div class="section-title"><span class="n">2</span> How a person's modules are resolved</div>
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-dot">?</div>
+      <div class="body">
+        <div class="label">Does <code>p.modules</code> exist?</div>
+        <div class="desc">True only for people created after this change — Add Person will eventually let you tick these directly.</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot">✓</div>
+      <div class="body">
+        <div class="label">Yes → use it as-is</div>
+        <div class="desc">Whatever was explicitly saved on the person.</div>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-dot">↺</div>
+      <div class="body">
+        <div class="label">No → derive defaults from <code>personType</code></div>
+        <div class="desc">Everyone gets Shared Expenses, Gifts, Notes, Reminders. Dependants + you get Budget. Everyone else gets Can Borrow Money. This exactly reproduces what was already visible — nothing changes for your existing people.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title"><span class="n">3</span> Where the old checks got replaced</div>
+  <div class="gate-list">
+    <div class="gate">
+      <div>
+        <div class="where">Budget tab → Per-Person list</div>
+        <div class="file">Who shows up as a budgetable person</div>
+      </div>
+      <div class="before-after">
+        <span class="tag old">personType==="dependant"</span>
+        <span class="arrow">→</span>
+        <span class="tag new">modules.includes("budget")</span>
+      </div>
+    </div>
+    <div class="gate">
+      <div>
+        <div class="where">People tab → "View Budget & Spend" link</div>
+        <div class="file">Whether the link appears on a person's page</div>
+      </div>
+      <div class="before-after">
+        <span class="tag old">personType==="dependant"</span>
+        <span class="arrow">→</span>
+        <span class="tag new">modules.includes("budget")</span>
+      </div>
+    </div>
+    <div class="gate">
+      <div>
+        <div class="where">Edit Person form</div>
+        <div class="file">Credit Limit field vs. Budget field</div>
+      </div>
+      <div class="before-after">
+        <span class="tag old">personType==="contact"</span>
+        <span class="arrow">→</span>
+        <span class="tag new">modules.includes("borrowMoney")</span>
+      </div>
+    </div>
+    <div class="gate">
+      <div>
+        <div class="where">Add Person</div>
+        <div class="file">New people now save an explicit <code>modules</code> array at creation</div>
+      </div>
+      <div class="before-after">
+        <span class="tag new">modules: [...]</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="safety">
+    <div class="h">✓ Nothing rewritten, nothing broken</div>
+    <p>No migration script touched your saved data. Existing people simply don't have a <code>modules</code> field yet — the fallback computes it fresh every time from their current type, landing on the exact same behavior they had before this change. The only thing that moved is <em>which field the app reads</em> to decide.</p>
+  </div>
+
+  <footer>Not built yet: an actual checklist UI to toggle these per person — that's the Add Person redesign, next up.</footer>
+</div>
+</body>
+</html>

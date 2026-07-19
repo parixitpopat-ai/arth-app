@@ -10,15 +10,15 @@ const readCopiedSms = async () => ({ text: "", error: "Not supported" });
 const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
-import { DARK, LIGHT, PALETTE } from "./theme";
-import { todayStr, addDaysToDateStr, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./dateHelpers";
-import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./appConstants";
-import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./investmentConfig";
-import { normalizeVendorText } from "./textHelpers";
-import { sym, fmt, fmtK, accountBucketLabel, accIcon, accLabel, txnColor, txnLabel, txnEmoji, formatInvestmentMetric } from "./formatters";
-import { genId } from "./idGenerator";
-import { parseMoney, cleanMoneyInput, nearlyEqualMoney } from "./currency";
-import { rowsToCsvString, downloadCsvFile } from "./csv";
+import { DARK, LIGHT, PALETTE } from "./constants/theme";
+import { todayStr, addDaysToDateStr, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
+import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
+import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
+import { normalizeVendorText } from "./helpers/textHelpers";
+import { sym, fmt, fmtK, accountBucketLabel, accIcon, accLabel, txnColor, txnLabel, txnEmoji, formatInvestmentMetric } from "./helpers/formatters";
+import { genId } from "./helpers/idGenerator";
+import { parseMoney, cleanMoneyInput, nearlyEqualMoney } from "./helpers/currency";
+import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 // Wraps localStorage.setItem so a QuotaExceededError (or any other storage failure) never crashes
