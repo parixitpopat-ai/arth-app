@@ -10,15 +10,16 @@ const readCopiedSms = async () => ({ text: "", error: "Not supported" });
 const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
-import { DARK, LIGHT, PALETTE } from "./theme";
-import { todayStr, addDaysToDateStr, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./dateHelpers";
-import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./appConstants";
-import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./investmentConfig";
-import { normalizeVendorText } from "./textHelpers";
-import { sym, fmt, fmtK, accountBucketLabel, accIcon, accLabel, txnColor, txnLabel, txnEmoji, formatInvestmentMetric } from "./formatters";
-import { genId } from "./idGenerator";
-import { parseMoney, cleanMoneyInput, nearlyEqualMoney } from "./currency";
-import { rowsToCsvString, downloadCsvFile } from "./csv";
+import { DARK, LIGHT, PALETTE } from "./constants/theme";
+import { todayStr, addDaysToDateStr, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
+import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
+import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
+import { normalizeVendorText } from "./helpers/textHelpers";
+import { sym, fmt, fmtK, accountBucketLabel, accIcon, accLabel, txnColor, txnLabel, txnEmoji, formatInvestmentMetric } from "./helpers/formatters";
+import { genId } from "./helpers/idGenerator";
+import { parseMoney, cleanMoneyInput, nearlyEqualMoney } from "./helpers/currency";
+import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
+import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/GoalsScreen";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 // Wraps localStorage.setItem so a QuotaExceededError (or any other storage failure) never crashes
@@ -958,6 +959,8 @@ function AppContent({ onLock }) {
   // ── MODAL STATE ────────────────────────────────────────────────────────────
   const [showAdd, setShowAdd] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [showFabSpeedMenu, setShowFabSpeedMenu] = useState(false);
+  const [showDuplicateFinder, setShowDuplicateFinder] = useState(false);
   const [defaultAddType, setDefaultAddType] = useState("expense");
   const [addPrefill, setAddPrefill] = useState(null);
   const [showInvestments, setShowInvestments] = useState(false);
@@ -1254,6 +1257,7 @@ function AppContent({ onLock }) {
     return hasIndividualReceivable ? 0 : Math.max(0, Number(expense.amount||0));
   },[]);
   const getMyExpenseAmount = useCallback(expense=>{
+    if(expense?.excludeFromSpend) return 0;
     const netAmount = getNetExpenseAmount(expense);
     if(!(netAmount>0)) return 0;
 
@@ -2861,17 +2865,36 @@ function AppContent({ onLock }) {
   // exit point ("More options", income/transfer) also routes to AddModal — Quick Add never saves
   // a transaction itself, it only prepares one.
   const QuickAddModal = ({ onClose }) => {
-    const [step, setStep] = useState(1);
+    const [qaType, setQaType] = useState("expense"); // expense | income
     const [qaAmount, setQaAmount] = useState("");
     const [qaWho, setQaWho] = useState("");
+    const [qaCatId, setQaCatId] = useState(""); // "" = auto-detected, else manual override
+    const [qaNote, setQaNote] = useState("");
+    const [showCatPicker, setShowCatPicker] = useState(false);
+    const [qaSplitWith, setQaSplitWith] = useState([]); // person ids, equal-split only — anything
+    // more (unequal, groups) still goes through "More options", but splitting with 1-2 people is
+    // common enough that making it a whole extra screen would slow down the common case instead
+    // of speeding it up.
+    const [showSplitPicker, setShowSplitPicker] = useState(false);
+    const [qaVehicleId, setQaVehicleId] = useState(""); // only surfaces for Transport-category
+    // expenses — without this, every fuel/service cost for every vehicle gets lumped into one
+    // generic "Transport" total, losing the per-vehicle cost tracking Vehicles exists to provide.
+    const [qaExcludeFromSpend, setQaExcludeFromSpend] = useState(false); // records the expense
+    // (categorized, searchable, shows in Timeline) without counting it as anyone's personal
+    // spend — distinct from splitting, which still counts your own share. For costs that are
+    // real and worth logging but genuinely aren't "your money" or anyone else's to track.
 
     const recentTxnSort = (a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a);
-    const defaultAccId = [...txns].filter(t=>t.type==="expense"&&t.accId).sort(recentTxnSort)[0]?.accId
-      || (accounts.find(a=>a.type==="bank")||accounts.find(a=>a.type==="upi")||accounts.find(a=>a.type==="cash")||accounts[0])?.id || "";
+    const [qaAccId, setQaAccId] = useState(()=>{
+      const last = [...txns].filter(t=>t.type==="expense"&&t.accId).sort(recentTxnSort)[0]?.accId;
+      return last || (accounts.find(a=>a.type==="bank")||accounts.find(a=>a.type==="upi")||accounts.find(a=>a.type==="cash")||accounts[0])?.id || "";
+    });
 
     // Same ranked-match approach AddModal uses for its own suggestion (history match, then
     // keyword rules) — kept independent so this never has to reach into AddModal's internals.
+    // Only runs for expenses — income categories aren't merchant-driven the same way.
     const detected = useMemo(() => {
+      if(qaType!=="expense") return null;
       const vendorText = normalizeVendorText(qaWho);
       if(!vendorText) return null;
       const ranked = new Map();
@@ -2892,104 +2915,207 @@ function AppContent({ onLock }) {
       if(top) return cats.find(c=>c.id===top.catId);
       const rule = VENDOR_CATEGORY_RULES.find(r=>r.pattern.test(vendorText));
       return rule ? cats.find(c=>c.id===rule.catId) : null;
-    }, [qaWho]);
+    }, [qaWho, qaType]);
 
-    const account = accounts.find(a=>a.id===defaultAccId);
+    const effectiveCat = qaCatId ? cats.find(c=>c.id===qaCatId) : detected;
+    const canSave = parseFloat(qaAmount)>0 && qaWho.trim();
+    const savingRef = useRef(false);
     const [saving, setSaving] = useState(false);
-    // Directly saves a simple expense — no split, no person/group tagging, no items. Anything
-    // needing those goes through "More options" instead. Constructing a minimal-but-valid
-    // transaction here (rather than reaching into AddModal's save logic) keeps this bounded and
-    // independently reviewable, instead of duplicating 2,600 lines of unrelated split/investment
-    // handling just to save a plain expense.
+    // Directly saves — no split, no person/group tagging, no items. Anything needing those goes
+    // through "More options" instead. A ref guard (not state) blocks a fast double-tap: setState
+    // doesn't take effect until next render, too slow to close that gap.
     const saveDirect = () => {
-      if(saving) return;
+      if(savingRef.current || !canSave) return;
+      savingRef.current = true;
       setSaving(true);
+      const shareCount = 1 + qaSplitWith.length;
+      const perShare = shareCount>1 ? Math.round((parseFloat(qaAmount)/shareCount)*100)/100 : 0;
+      const splitPeople = {};
+      qaSplitWith.forEach(pid=>{ splitPeople[pid] = { amount:perShare, mode:"owes", settled:false, remainingAmt:perShare }; });
       const record = {
-        id: genId(), type:"expense", amount: parseFloat(qaAmount)||0, date: todayStr(),
+        id: genId(), type:qaType, amount: parseFloat(qaAmount)||0, date: todayStr(),
         merchant: qaWho.trim(), desc: qaWho.trim(),
-        catId: detected?.id||null, catIds: detected?[detected.id]:[], subId:null, subIds:[],
-        accId: defaultAccId, people:{}, forPerson:"", groupId:null,
-        splitMode:"none", trackingMode:"none", tagMode:null, note:"",
+        catId: qaType==="expense" ? (effectiveCat?.id||null) : null,
+        catIds: qaType==="expense" && effectiveCat ? [effectiveCat.id] : [],
+        subId:null, subIds:[],
+        accId: qaAccId, people:splitPeople, forPerson:"", groupId:null,
+        vehicleId: qaVehicleId||null,
+        excludeFromSpend: qaExcludeFromSpend,
+        splitMode:qaSplitWith.length>0?"split":"none", trackingMode:"none", tagMode:null, note:qaNote.trim(),
         createdAt: Date.now(), createdDate: todayStr(),
       };
       setTxns(prev=>[record, ...prev]);
-      setSaving(false);
       onClose();
     };
     const goToFullForm = () => {
-      setAddPrefill({ amount:qaAmount, who:qaWho.trim(), accId:defaultAccId, catId:detected?.id||"", date:todayStr() });
-      setDefaultAddType("expense");
+      setAddPrefill({ amount:qaAmount, who:qaWho.trim(), accId:qaAccId, catId:effectiveCat?.id||"", date:todayStr() });
+      setDefaultAddType(qaType);
       setShowQuickAdd(false);
       setShowAdd(true);
     };
 
     return (
       <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:350,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
-        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 40px",width:"100%",maxWidth:430,minHeight:"55vh" }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
-            <button onClick={()=>step>1?setStep(step-1):onClose()} style={{ background:"none",border:"none",color:T.sub,fontSize:14,cursor:"pointer",padding:"4px 0" }}>{step>1?"← Back":"Cancel"}</button>
-            <button onClick={()=>{ setShowQuickAdd(false); setDefaultAddType("expense"); setShowAdd(true); }} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>More options →</button>
-          </div>
-          <div style={{ display:"flex",gap:4,marginBottom:28 }}>
-            {[1,2,3].map(s=><div key={s} style={{ flex:1,height:3,borderRadius:2,background:s<=step?T.accent:T.border }}/>)}
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 32px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+            <button onClick={onClose} style={{ background:"none",border:"none",color:T.sub,fontSize:14,cursor:"pointer",padding:"4px 0" }}>Cancel</button>
+            <button onClick={goToFullForm} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>More options →</button>
           </div>
 
-          {step===1&&(
-            <div style={{ display:"flex",flexDirection:"column",alignItems:"center",paddingTop:20 }}>
-              <div style={{ color:T.sub,fontSize:13,fontWeight:700,marginBottom:16 }}>How much?</div>
-              <div style={{ display:"flex",alignItems:"center",gap:4 }}>
-                <span style={{ color:T.sub,fontSize:32,fontWeight:700 }}>{sym}</span>
-                <input autoFocus type="number" inputMode="decimal" placeholder="0" value={qaAmount} onChange={e=>setQaAmount(e.target.value)}
-                  style={{ background:"none",border:"none",outline:"none",color:T.text,fontSize:48,fontWeight:900,width:180,fontFamily:"Nunito,sans-serif" }}/>
+          {/* Expense / Income toggle */}
+          <div style={{ display:"flex",background:T.input,borderRadius:14,padding:4,marginBottom:18 }}>
+            {[["expense","➖ Expense",T.danger],["income","➕ Income",T.success]].map(([val,label,color])=>(
+              <button key={val} onClick={()=>{ setQaType(val); setQaCatId(""); }} style={{ flex:1,background:qaType===val?color+"22":"none",border:"none",borderRadius:11,padding:"10px 0",cursor:"pointer",fontSize:13,fontWeight:800,color:qaType===val?color:T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
+            ))}
+          </div>
+
+          {/* Amount */}
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:4,marginBottom:18 }}>
+            <span style={{ color:T.sub,fontSize:26,fontWeight:700 }}>{sym}</span>
+            <input autoFocus type="number" inputMode="decimal" placeholder="0" value={qaAmount} onChange={e=>setQaAmount(e.target.value)}
+              style={{ background:"none",border:"none",outline:"none",color:T.text,fontSize:40,fontWeight:900,width:200,textAlign:"center",fontFamily:"Nunito,sans-serif" }}/>
+          </div>
+
+          {/* What was it */}
+          <div style={{ marginBottom:14 }}>
+            <span style={lbl}>{qaType==="expense"?"What was it?":"Source"}</span>
+            <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder={qaType==="expense"?"e.g. Petrol, Swiggy, Netflix":"e.g. Salary, Freelance"} value={qaWho} onChange={e=>setQaWho(e.target.value)}/>
+          </div>
+
+          {/* Category (expense only) + Account, side by side */}
+          <div style={{ display:"grid",gridTemplateColumns:qaType==="expense"?"1fr 1fr":"1fr",gap:10,marginBottom:14 }}>
+            {qaType==="expense"&&(
+              <div>
+                <span style={lbl}>Category</span>
+                <button onClick={()=>setShowCatPicker(true)} style={{ ...inp,display:"flex",alignItems:"center",gap:6,cursor:"pointer",textAlign:"left" }}>
+                  {effectiveCat?<><span>{effectiveCat.icon}</span><span style={{ fontSize:13 }}>{effectiveCat.name}</span></>:<span style={{ color:T.sub,fontSize:13 }}>Pick one</span>}
+                </button>
               </div>
-              <button onClick={()=>parseFloat(qaAmount)>0&&setStep(2)} disabled={!(parseFloat(qaAmount)>0)} style={{ ...btnP,marginTop:40,opacity:parseFloat(qaAmount)>0?1:0.4 }}>Next</button>
+            )}
+            <div>
+              <span style={lbl}>Account</span>
+              <select style={inp} value={qaAccId} onChange={e=>setQaAccId(e.target.value)}>
+                {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Vehicle — only for Transport-category expenses, and only if any vehicles exist.
+              Fuel/service/insurance costs need to know WHICH vehicle, or they all collapse into
+              one generic Transport number and per-vehicle cost tracking becomes impossible. */}
+          {qaType==="expense"&&effectiveCat?.id==="transport"&&vehicles.length>0&&(
+            <div style={{ marginBottom:14 }}>
+              <span style={lbl}>Vehicle</span>
+              <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                {vehicles.map(v=>(
+                  <button key={v.id} onClick={()=>setQaVehicleId(prev=>prev===v.id?"":v.id)} style={{ display:"flex",alignItems:"center",gap:6,background:qaVehicleId===v.id?T.accentSoft:T.input,border:`1px solid ${qaVehicleId===v.id?T.accent:T.border}`,borderRadius:20,padding:"7px 12px",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                    <span style={{ fontSize:14 }}>{v.type==="bike"?"🏍️":"🚗"}</span>
+                    <span style={{ color:qaVehicleId===v.id?T.accent:T.text,fontSize:12,fontWeight:700 }}>{v.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
-          {step===2&&(
-            <div>
-              <div style={{ color:T.sub,fontSize:13,fontWeight:700,marginBottom:12 }}>What was it?</div>
-              <input autoFocus style={{ ...inp,fontSize:18,fontWeight:700,marginBottom:14 }} placeholder="e.g. Petrol, Swiggy, Netflix" value={qaWho} onChange={e=>setQaWho(e.target.value)}
-                onKeyDown={e=>{ if(e.key==="Enter"&&qaWho.trim()) setStep(3); }}/>
-              {detected&&(
-                <div style={{ display:"inline-flex",alignItems:"center",gap:6,background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:20,padding:"6px 12px",marginBottom:8 }}>
-                  <span style={{ fontSize:14 }}>{detected.icon}</span>
-                  <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{detected.name}</span>
-                </div>
+          {/* Split with — equal split only. Anything unequal or group-based still goes through
+              "More options", but splitting with 1-2 people belongs here: it's common enough that
+              a whole extra screen for it would slow down more entries than it helps. */}
+          {qaType==="expense"&&(
+            <div style={{ marginBottom:14 }}>
+              <span style={lbl}>Split with (optional)</span>
+              <div style={{ display:"flex",gap:8,flexWrap:"wrap",alignItems:"center" }}>
+                {qaSplitWith.map(pid=>{
+                  const p = people.find(x=>String(x.id)===String(pid));
+                  if(!p) return null;
+                  return (
+                    <div key={pid} style={{ display:"flex",alignItems:"center",gap:5,background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:20,padding:"5px 10px" }}>
+                      <span style={{ fontSize:12 }}>{p.emoji||"🧑"}</span>
+                      <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{p.name}</span>
+                      <button onClick={()=>setQaSplitWith(prev=>prev.filter(x=>x!==pid))} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:12,padding:0,lineHeight:1 }}>×</button>
+                    </div>
+                  );
+                })}
+                <button onClick={()=>setShowSplitPicker(true)} style={{ background:T.input,border:`1px dashed ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Person</button>
+              </div>
+              {qaSplitWith.length>0&&parseFloat(qaAmount)>0&&(
+                <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>Split {1+qaSplitWith.length} ways — you cover {sym}{fmt(Math.round((parseFloat(qaAmount)/(1+qaSplitWith.length))*100)/100)}, the rest owe their share back.</div>
               )}
-              <button onClick={()=>setStep(3)} disabled={!qaWho.trim()} style={{ ...btnP,marginTop:24,opacity:qaWho.trim()?1:0.4 }}>Next</button>
             </div>
           )}
 
-          {step===3&&(
-            <div>
-              <div style={{ color:T.sub,fontSize:13,fontWeight:700,marginBottom:14 }}>Confirm</div>
-              <div style={{ background:T.input,borderRadius:16,padding:18,marginBottom:20 }}>
-                <div style={{ color:T.danger,fontSize:30,fontWeight:900,marginBottom:4 }}>{sym}{fmt(parseFloat(qaAmount)||0)}</div>
-                <div style={{ color:T.text,fontSize:14,fontWeight:700,marginBottom:12 }}>{qaWho.trim()}</div>
-                <div style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:`1px solid ${T.border}` }}>
-                  <span style={{ color:T.sub,fontSize:12 }}>Category</span>
-                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{detected?`${detected.icon} ${detected.name}`:"Uncategorized"}</span>
-                </div>
-                <div style={{ display:"flex",justifyContent:"space-between",padding:"6px 0" }}>
-                  <span style={{ color:T.sub,fontSize:12 }}>Paid via</span>
-                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{account?.name||"—"}</span>
-                </div>
-                <div style={{ display:"flex",justifyContent:"space-between",padding:"6px 0" }}>
-                  <span style={{ color:T.sub,fontSize:12 }}>Date</span>
-                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>Today</span>
-                </div>
+          {/* Optional note */}
+          <div style={{ marginBottom:14 }}>
+            <span style={lbl}>Note (optional)</span>
+            <input style={inp} placeholder="Add a note" value={qaNote} onChange={e=>setQaNote(e.target.value)}/>
+          </div>
+
+          {qaType==="expense"&&qaSplitWith.length===0&&(
+            <button onClick={()=>setQaExcludeFromSpend(v=>!v)} style={{ display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",background:qaExcludeFromSpend?T.warn+"14":T.input,border:`1px solid ${qaExcludeFromSpend?T.warn+"44":T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",marginBottom:20,fontFamily:"Nunito,sans-serif" }}>
+              <div style={{ textAlign:"left" }}>
+                <div style={{ color:qaExcludeFromSpend?T.warn:T.text,fontSize:12,fontWeight:700 }}>Count toward my spend</div>
+                <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{qaExcludeFromSpend?"Off — logged and categorized, but not counted as anyone's spend":"On — this comes out of your personal budget"}</div>
               </div>
-              <button onClick={saveDirect} disabled={saving} style={{ ...btnP,opacity:saving?0.6:1 }}>{saving?"Saving…":"✓ Save Expense"}</button>
-              <button onClick={goToFullForm} style={{ ...btnG,marginTop:8 }}>Need to split, tag a person, or add details?</button>
-            </div>
+              <div style={{ width:38,height:22,borderRadius:11,background:qaExcludeFromSpend?T.border:T.accent,position:"relative",flexShrink:0 }}>
+                <div style={{ width:18,height:18,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:qaExcludeFromSpend?2:18,transition:"left 0.15s" }}/>
+              </div>
+            </button>
           )}
+
+          <button onClick={saveDirect} disabled={!canSave||saving} style={{ ...btnP,opacity:canSave&&!saving?1:0.4 }}>{saving?"Saving…":qaSplitWith.length>0?`✓ Save & Split (${1+qaSplitWith.length} ways)`:`✓ Save ${qaType==="expense"?"Expense":"Income"}`}</button>
         </div>
+
+        {showSplitPicker&&(
+          <div onClick={e=>{ e.stopPropagation(); if(e.target===e.currentTarget) setShowSplitPicker(false); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:360,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+            <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 40px",width:"100%",maxWidth:430,maxHeight:"70vh",overflowY:"auto" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+                <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>Split with</div>
+                <button onClick={()=>setShowSplitPicker(false)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>Done</button>
+              </div>
+              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                {people.filter(p=>!p.isMe).map(p=>{
+                  const selected = qaSplitWith.includes(p.id);
+                  return (
+                    <button key={p.id} onClick={()=>setQaSplitWith(prev=>selected?prev.filter(x=>x!==p.id):[...prev,p.id])} style={{ display:"flex",alignItems:"center",gap:10,background:selected?T.accentSoft:T.input,border:`1px solid ${selected?T.accent:T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                      <span style={{ fontSize:16 }}>{p.emoji||"🧑"}</span>
+                      <span style={{ color:T.text,fontSize:13,fontWeight:700,flex:1 }}>{p.name}</span>
+                      {selected&&<span style={{ color:T.accent,fontSize:14 }}>✓</span>}
+                    </button>
+                  );
+                })}
+                {people.filter(p=>!p.isMe).length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No people added yet — add someone in People first.</div>}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showCatPicker&&(
+          <div onClick={e=>{ e.stopPropagation(); if(e.target===e.currentTarget) setShowCatPicker(false); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:360,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+            <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 40px",width:"100%",maxWidth:430,maxHeight:"70vh",overflowY:"auto" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+                <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>Category</div>
+                <button onClick={()=>setShowCatPicker(false)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+              </div>
+              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                {cats.map(c=>(
+                  <button key={c.id} onClick={()=>{ setQaCatId(c.id); setShowCatPicker(false); }} style={{ display:"flex",alignItems:"center",gap:10,background:T.input,border:"none",borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                    <span style={{ fontSize:16 }}>{c.icon}</span>
+                    <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{c.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
 
   const AddModal = ({ defaultType="expense", prefillTxn=null, prefill=null, editTxn=null, onClose=null }) => {
+    // Guards submit() against a fast double-tap creating two transactions — this form had no
+    // guard at all (unlike Quick Add's, which had a broken one; both are fixed the same way now).
+    // A ref, not state: setState doesn't take effect until the next render, which is too slow to
+    // block a second tap that lands before React re-renders the button.
+    const submittingRef = useRef(false);
     const sourceTxn = editTxn || null;
     const linkedInvestment = sourceTxn?.linkedInvestmentId
       ? investments.find(inv=>String(inv.id)===String(sourceTxn.linkedInvestmentId) || String(inv.linkedTxnId||"")===String(sourceTxn.id||"")) || null
@@ -3819,8 +3945,10 @@ function AppContent({ onLock }) {
     );
 
     const submit = () => {
+      if(submittingRef.current) return;
       if(!hasTxnSubject){ setRefDupWarning("Enter a vendor/note before saving."); return; }
       if(!amt){ setRefDupWarning("Enter an amount before saving."); return; }
+      submittingRef.current = true;
       setRefDupWarning("");
       // Duplicate UPI/bank ref is only a warning now — never blocks the save (previously used alert(), which
       // could silently fail to render in some WebViews, making Save look like it did nothing).
@@ -6801,7 +6929,7 @@ function AppContent({ onLock }) {
 
   // ── HOME ───────────────────────────────────────────────────────────────────
 
-  const DEFAULT_CARD_ORDER = ["healthScore","quickActions","goalsHome","eventsHome","stats","categories","cc","bills","recent","aiInsight"];
+  const DEFAULT_CARD_ORDER = ["healthScore","aiInsight","quickActions","goalsHome","eventsHome","stats","categories","cc","bills","recent"];
   const KNOWN_CARD_KEYS = new Set(DEFAULT_CARD_ORDER);
   // Filters out invalid saved keys AND backfills any card added to the app after this user's
   // order was last saved. Must be applied every time cardOrder is set from a saved source
@@ -6816,9 +6944,17 @@ function AppContent({ onLock }) {
     // buried below whatever was already there. Everything else new still just appends.
     const frontInserts = ["healthScore","quickActions"].filter(k=>missing.includes(k));
     const rest = missing.filter(k=>!frontInserts.includes(k));
-    const merged = frontInserts.length
+    let merged = frontInserts.length
       ? [...frontInserts, ...filtered, ...rest]
       : [...filtered, ...missing];
+    // aiInsight moved from last to right-after-healthScore per product decision — a repositioning,
+    // not a new card, so backfill (which only handles missing cards) wouldn't move it for anyone
+    // who already had a saved order. Correct it explicitly, once, regardless of where it currently is.
+    if(merged.includes("aiInsight")){
+      merged = merged.filter(k=>k!=="aiInsight");
+      const healthIdx = merged.indexOf("healthScore");
+      merged.splice(healthIdx>=0?healthIdx+1:0, 0, "aiInsight");
+    }
     return merged.length ? merged : DEFAULT_CARD_ORDER;
   };
   const [cardOrder, setCardOrder] = useState(()=>backfillCardOrder(JSON.parse(localStorage.getItem("arth_card_order")||"null")));
@@ -7583,13 +7719,14 @@ function AppContent({ onLock }) {
 
     const hourNow = new Date().getHours();
     const greeting = hourNow<12?"Good morning":hourNow<17?"Good afternoon":"Good evening";
-    const meName = people.find(p=>p.isMe)?.name || "there";
+    const meRecord = people.find(p=>p.isMe);
+    const meName = (meRecord?.name && meRecord.name!=="Me") ? meRecord.name : "";
     return (
       <div>
         <div style={{ padding:"16px 18px 4px" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
             <div>
-              <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{greeting}, {meName} 👋</div>
+              <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{greeting}{meName?`, ${meName}`:""} 👋</div>
               <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>Here's what's happening today.</div>
             </div>
           </div>
@@ -12790,74 +12927,6 @@ function AppContent({ onLock }) {
     { id:"celebration", label:"Celebration", icon:"🎉" },
     { id:"other", label:"Other", icon:"📌" },
   ];
-  const GOAL_ICONS = ["🏠","🚗","💍","👶","🎓","✈️","🏖️","💰","🎯","🏥","📱","🛡️"];
-  const AddGoalModal = ({ existing, onClose }) => {
-    const isEdit = Boolean(existing);
-    const [name, setName] = useState(existing?.name||"");
-    const [icon, setIcon] = useState(existing?.icon||"🎯");
-    const [targetAmount, setTargetAmount] = useState(existing?.targetAmount?String(existing.targetAmount):"");
-    const [currentAmount, setCurrentAmount] = useState(existing?.currentAmount?String(existing.currentAmount):"");
-    const [targetDate, setTargetDate] = useState(existing?.targetDate||"");
-    const [linkedAccountId, setLinkedAccountId] = useState(existing?.linkedAccountId||"");
-    const canSave = name.trim() && parseFloat(targetAmount)>0;
-    const handleSave = () => {
-      if(!canSave) return;
-      const record = {
-        id: existing?.id||genId(), name:name.trim(), icon, targetAmount:parseFloat(targetAmount)||0,
-        currentAmount: linkedAccountId ? 0 : (parseFloat(currentAmount)||0), // auto-tracked goals derive progress live from the account, not a stored number
-        targetDate:targetDate||null, linkedAccountId:linkedAccountId||null,
-        status: existing?.status||"active", createdAt: existing?.createdAt||Date.now(),
-      };
-      setGoals(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[record,...prev]);
-      onClose();
-    };
-    return (
-      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:340,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
-        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit":"New"} Goal</div>
-            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
-          </div>
-          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
-            <div>
-              <span style={lbl}>Icon</span>
-              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                {GOAL_ICONS.map(ic=><button key={ic} onClick={()=>setIcon(ic)} style={{ background:icon===ic?T.accent+"22":T.input,border:`1px solid ${icon===ic?T.accent:T.border}`,borderRadius:10,padding:"7px 10px",cursor:"pointer",fontSize:18 }}>{ic}</button>)}
-              </div>
-            </div>
-            <div>
-              <span style={lbl}>Name *</span>
-              <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. House Down Payment" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
-            </div>
-            <div>
-              <span style={lbl}>Target Amount *</span>
-              <input style={inp} type="number" placeholder="e.g. 2000000" value={targetAmount} onChange={e=>setTargetAmount(e.target.value)}/>
-            </div>
-            <div>
-              <span style={lbl}>Target Date (optional)</span>
-              <input style={inp} type="date" value={targetDate} onChange={e=>setTargetDate(e.target.value)}/>
-            </div>
-            <div>
-              <span style={lbl}>Track progress from an account (optional)</span>
-              <select style={inp} value={linkedAccountId} onChange={e=>setLinkedAccountId(e.target.value)}>
-                <option value="">Manual — I'll log contributions myself</option>
-                {accounts.filter(a=>a.type!=="cc").map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-              <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>{linkedAccountId?"Progress will always match this account's live balance.":"You'll add contributions manually as you save toward this."}</div>
-            </div>
-            {!linkedAccountId&&(
-              <div>
-                <span style={lbl}>Already saved (optional)</span>
-                <input style={inp} type="number" placeholder="0" value={currentAmount} onChange={e=>setCurrentAmount(e.target.value)}/>
-              </div>
-            )}
-            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Goal"}</button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   // A goal's current amount is either its own manually-tracked number, or — if linked to an
   // account — that account's live balance, always kept in sync automatically rather than needing
   // a manual update every time the account changes.
@@ -13350,6 +13419,7 @@ function AppContent({ onLock }) {
               { icon:"👤", label:"User Profile", onClick:()=>{ setTab("home"); setShowSettings(false); onClose(); } },
               { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"📅", label:"Bills", onClick:()=>goToTab("bills") },
+              { icon:"🔍", label:"Find Duplicate Transactions", onClick:()=>{ setShowDuplicateFinder(true); onClose(); } },
               { icon:"💰", label:"Budget", onClick:()=>goToTab("budget") },
               { icon:"🎯", label:"Goals", onClick:()=>{ setShowGoalsList(true); onClose(); } },
               { icon:"✈️", label:"Trips & Outings", onClick:()=>{ setShowEventsList(true); onClose(); } },
@@ -13432,72 +13502,69 @@ function AppContent({ onLock }) {
     );
   };
 
-  const AddContributionModal = ({ goal, onClose }) => {
-    const [amount, setAmount] = useState("");
-    const save = () => {
-      const amt = parseFloat(amount)||0;
-      if(amt<=0) return;
-      setGoals(prev=>prev.map(x=>x.id===goal.id?{...x,currentAmount:Number(x.currentAmount||0)+amt}:x));
-      onClose();
+  // Finds LIKELY duplicate transactions — same type, amount, date, and account. This is the exact
+  // signature the double-submit race condition would have produced before it was fixed: two
+  // identical records, different ids/createdAt. Never deletes automatically — surfaces groups for
+  // review, keeps whichever one the user picks, deletes the rest only on explicit confirmation.
+  const DuplicateFinderModal = ({ onClose }) => {
+    const [selected, setSelected] = useState({}); // txnId -> true if marked for deletion
+    const groups = useMemo(() => {
+      const map = new Map();
+      txns.forEach(t=>{
+        if(t.type!=="expense"&&t.type!=="income") return; // transfers/settlements too often legitimately repeat
+        const key = `${t.type}|${Number(t.amount||0)}|${t.date}|${t.accId||""}`;
+        if(!map.has(key)) map.set(key, []);
+        map.get(key).push(t);
+      });
+      return [...map.values()].filter(g=>g.length>1).sort((a,b)=>Number(b[0].amount||0)-Number(a[0].amount||0));
+    }, [txns]);
+    const toggleSelect = id => setSelected(prev=>({ ...prev, [id]: !prev[id] }));
+    const selectedCount = Object.values(selected).filter(Boolean).length;
+    const deleteSelected = () => {
+      const ids = Object.entries(selected).filter(([,v])=>v).map(([id])=>id);
+      if(ids.length===0) return;
+      askConfirm(`Delete ${ids.length} duplicate transaction${ids.length>1?"s":""}? This can't be undone.`, ()=>{
+        setTxns(prev=>prev.filter(x=>!ids.includes(String(x.id))));
+        setSelected({});
+      });
     };
     return (
-      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:345,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
-        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 40px",width:"100%",maxWidth:430 }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-            <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>Add to {goal.icon} {goal.name}</div>
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",zIndex:365,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 40px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🔍 Duplicate Transactions</div>
             <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
           </div>
-          <input autoFocus style={{ ...inp,fontSize:22,fontWeight:800,marginBottom:14 }} type="number" placeholder={`${sym}0`} value={amount} onChange={e=>setAmount(e.target.value)}/>
-          <button onClick={save} disabled={!(parseFloat(amount)>0)} style={{ ...btnP,opacity:parseFloat(amount)>0?1:0.5 }}>Add Contribution</button>
-        </div>
-      </div>
-    );
-  };
-
-  const GoalsListModal = ({ onClose }) => {
-    const activeGoals = goals.filter(g=>g.status!=="completed");
-    const completedGoals = goals.filter(g=>g.status==="completed");
-    return (
-      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:335,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
-        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🎯 Goals</div>
-            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
-          </div>
-          <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
-            {activeGoals.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No goals yet. Give a rupee a purpose.</div>}
-            {activeGoals.map(g=>{
-              const { current, pct, complete } = getGoalProgress(g);
-              return (
-                <div key={g.id} style={{ background:T.input,borderRadius:14,padding:"12px 14px" }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
-                    <div onClick={()=>{ setEditingGoal(g); setShowAddGoal(true); }} style={{ cursor:"pointer" }}>
-                      <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{g.icon} {g.name}</div>
-                      <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{sym}{fmt(current)} of {sym}{fmt(g.targetAmount)}{g.targetDate?` · by ${formatShortDate(g.targetDate)||g.targetDate}`:""}{g.linkedAccountId?" · auto-tracked":""}</div>
-                    </div>
-                    <span style={{ color:complete?T.success:T.accent,fontSize:14,fontWeight:900 }}>{pct}%</span>
-                  </div>
-                  <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:complete||g.linkedAccountId?0:8 }}>
-                    <div style={{ height:"100%",width:`${pct}%`,background:complete?T.success:T.accent,borderRadius:3 }}/>
-                  </div>
-                  {complete&&<button onClick={()=>setGoals(prev=>prev.map(x=>x.id===g.id?{...x,status:"completed"}:x))} style={{ marginTop:8,background:T.success+"22",border:`1px solid ${T.success}44`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif" }}>✓ Mark Complete</button>}
-                  {!complete&&!g.linkedAccountId&&<button onClick={()=>setShowAddContribution(g)} style={{ marginTop:8,background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Add Contribution</button>}
-                </div>
-              );
-            })}
-          </div>
-          {completedGoals.length>0&&(
-            <div style={{ marginBottom:16 }}>
-              <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>COMPLETED</div>
-              {completedGoals.map(g=>(
-                <div key={g.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{g.icon} {g.name}</span>
-                  <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>✓ {sym}{fmt(g.targetAmount)}</span>
-                </div>
-              ))}
+          <div style={{ color:T.sub,fontSize:11,marginBottom:16 }}>Matches: same type, amount, date, and account. Nothing is deleted until you select and confirm — review each group before removing anything.</div>
+          {groups.length===0&&(
+            <div style={{ textAlign:"center",padding:"40px 0" }}>
+              <div style={{ fontSize:40,marginBottom:10 }}>✅</div>
+              <div style={{ color:T.text,fontSize:14,fontWeight:700 }}>No likely duplicates found</div>
             </div>
           )}
-          <button onClick={()=>{ setEditingGoal(null); setShowAddGoal(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>+ New Goal</button>
+          {groups.map((g,gi)=>{
+            const acc = accounts.find(a=>a.id===g[0].accId);
+            return (
+              <div key={gi} style={{ background:T.input,borderRadius:14,padding:"12px 14px",marginBottom:10 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:8 }}>
+                  <span style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(g[0].amount)} · {formatShortDate(g[0].date)||g[0].date}</span>
+                  <span style={{ color:T.sub,fontSize:10 }}>{acc?.name||"—"} · {g.length} matches</span>
+                </div>
+                {g.map(t=>(
+                  <label key={t.id} style={{ display:"flex",alignItems:"center",gap:10,padding:"6px 0",cursor:"pointer" }}>
+                    <input type="checkbox" checked={Boolean(selected[t.id])} onChange={()=>toggleSelect(String(t.id))} style={{ width:16,height:16,accentColor:T.danger,cursor:"pointer" }}/>
+                    <div style={{ flex:1 }}>
+                      <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{t.merchant||t.desc||"—"}</div>
+                      <div style={{ color:T.sub,fontSize:10 }}>Added {t.createdAt?new Date(t.createdAt).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}):"—"}{t.note?` · ${t.note}`:""}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            );
+          })}
+          {groups.length>0&&(
+            <button onClick={deleteSelected} disabled={selectedCount===0} style={{ width:"100%",background:selectedCount>0?T.danger:T.border,border:"none",borderRadius:14,padding:"13px",cursor:selectedCount>0?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:8 }}>{selectedCount>0?`🗑️ Delete ${selectedCount} Selected`:"Select transactions to delete"}</button>
+          )}
         </div>
       </div>
     );
@@ -14407,6 +14474,23 @@ function AppContent({ onLock }) {
   const [showWealthPin, setShowWealthPin] = useState(false);
   const hasAppPin = Boolean(localStorage.getItem("arth_pin")||"");
 
+  // FAB long-press → speed menu. A ref-based timer/flag, not state — state changes are too slow
+  // to reliably suppress the click event that fires right after a long-press's pointerup.
+  const fabPressTimer = useRef(null);
+  const fabLongPressedRef = useRef(false);
+  const handleFabPointerDown = () => {
+    fabLongPressedRef.current = false;
+    fabPressTimer.current = setTimeout(()=>{
+      fabLongPressedRef.current = true;
+      setShowFabSpeedMenu(true);
+      if(navigator.vibrate) navigator.vibrate(10);
+    }, 500);
+  };
+  const handleFabPointerUp = () => { if(fabPressTimer.current) clearTimeout(fabPressTimer.current); };
+  const handleFabClick = () => {
+    if(fabLongPressedRef.current){ fabLongPressedRef.current = false; return; }
+    handleTab("__fab__");
+  };
   const handleTab=t=>{
     if(t==="__fab__"){ setShowQuickAdd(true); return; }
     if(t==="settings_tab"){ setShowWealthPin(false); setShowSettings(true); setSettingsSection(null); return; }
@@ -14451,7 +14535,7 @@ function AppContent({ onLock }) {
                 <div style={{ color:T.sub,fontSize:9,marginTop:1,textTransform:"uppercase",letterSpacing:1 }}>Personal Finance</div>
               </div>
             </div>
-            <button onClick={()=>{ if(tab==="bills") setShowAddBill(true); else { const typeMap={"expense":"expense","income":"income","transfer":"transfer","cc_payment":"cc_payment","investment":"investment","settlement_in":"settlement_in"}; setDefaultAddType(typeMap[fType]||"expense"); setShowAdd(true); } }} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Nunito,sans-serif" }}>{tab==="bills"?"+ Add Bill":"+ Add"}</button>
+            {tab==="bills"&&<button onClick={()=>setShowAddBill(true)} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Nunito,sans-serif" }}>+ Add Bill</button>}
           </div>
           <div style={{ display:"flex",gap:8,alignItems:"center",marginTop:8,justifyContent:"flex-end" }}>
             <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif" }}>💼{workTripMode?" ON":""}</button>
@@ -14525,7 +14609,7 @@ function AppContent({ onLock }) {
           {TABS.map(t=>{
             if(t.id==="__fab__"){
               return (
-                <button key={t.id} onClick={()=>handleTab(t.id)} style={{ background:T.accent,border:`4px solid ${T.nav}`,borderRadius:"50%",width:52,height:52,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginTop:-22,boxShadow:"0 4px 12px rgba(0,0,0,0.25)",flexShrink:0 }}>
+                <button key={t.id} onClick={handleFabClick} onPointerDown={handleFabPointerDown} onPointerUp={handleFabPointerUp} onPointerLeave={handleFabPointerUp} style={{ background:T.accent,border:`4px solid ${T.nav}`,borderRadius:"50%",width:52,height:52,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginTop:-22,boxShadow:"0 4px 12px rgba(0,0,0,0.25)",flexShrink:0 }}>
                   <span style={{ fontSize:22,color:"#000",lineHeight:1 }}>+</span>
                 </button>
               );
@@ -14559,6 +14643,29 @@ function AppContent({ onLock }) {
           </div>
         )}
         {showQuickAdd&&<QuickAddModal onClose={()=>setShowQuickAdd(false)}/>}
+        {showDuplicateFinder&&<DuplicateFinderModal onClose={()=>setShowDuplicateFinder(false)}/>}
+        {showFabSpeedMenu&&(
+          <div onClick={()=>setShowFabSpeedMenu(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:355,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 40px",width:"100%",maxWidth:430 }}>
+              <div style={{ width:36,height:4,borderRadius:2,background:T.border,margin:"0 auto 16px" }}/>
+              <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10 }}>
+                {[
+                  { icon:"💸", label:"Expense", onClick:()=>{ setShowFabSpeedMenu(false); setShowQuickAdd(true); } },
+                  { icon:"💰", label:"Income", onClick:()=>{ setShowFabSpeedMenu(false); setDefaultAddType("income"); setShowAdd(true); } },
+                  { icon:"🔄", label:"Transfer", onClick:()=>{ setShowFabSpeedMenu(false); setDefaultAddType("transfer"); setShowAdd(true); } },
+                  { icon:"📈", label:"Investment", onClick:()=>{ setShowFabSpeedMenu(false); setDefaultAddType("investment"); setShowAdd(true); } },
+                  { icon:"🎯", label:"Goal", onClick:()=>{ setShowFabSpeedMenu(false); setShowGoalsList(true); } },
+                  { icon:"📅", label:"Bill", onClick:()=>{ setShowFabSpeedMenu(false); setShowAddBill(true); } },
+                ].map(item=>(
+                  <button key={item.label} onClick={item.onClick} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:8,background:T.input,border:`1px solid ${T.border}`,borderRadius:16,padding:"16px 8px",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                    <span style={{ fontSize:24 }}>{item.icon}</span>
+                    <span style={{ color:T.text,fontSize:11,fontWeight:700 }}>{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         {showAdd&&<AddModal defaultType={editTxn?editTxn.type||"expense":defaultAddType} prefillTxn={refundSourceTxn} prefill={addPrefill} editTxn={editTxn} onClose={()=>{ setShowAdd(false); setEditTxn(null); setAddPrefill(null); setRefundSourceTxn(null); }}/>}
         {showInvestments&&(
           <div onClick={e=>{ if(e.target===e.currentTarget){ setShowInvestments(false); setSelectedInvestmentTypeView("all"); } }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
@@ -14575,9 +14682,9 @@ function AppContent({ onLock }) {
         {viewingMembership&&<MembershipDetailModal membership={viewingMembership} onClose={()=>setViewingMembership(null)}/>}
         {showAddEvent&&<AddEventModal existing={editingEvent} onClose={()=>{ setShowAddEvent(false); setEditingEvent(null); }}/>}
         {showEventsList&&<EventsListModal onClose={()=>setShowEventsList(false)}/>}
-        {showAddGoal&&<AddGoalModal existing={editingGoal} onClose={()=>{ setShowAddGoal(false); setEditingGoal(null); }}/>}
-        {showGoalsList&&<GoalsListModal onClose={()=>setShowGoalsList(false)}/>}
-        {showAddContribution&&<AddContributionModal goal={showAddContribution} onClose={()=>setShowAddContribution(null)}/>}
+        {showAddGoal&&<AddGoalModal existing={editingGoal} onClose={()=>{ setShowAddGoal(false); setEditingGoal(null); }} T={T} inp={inp} lbl={lbl} accounts={accounts} setGoals={setGoals}/>}
+        {showGoalsList&&<GoalsListModal onClose={()=>setShowGoalsList(false)} T={T} sym={sym} fmt={fmt} formatShortDate={formatShortDate} goals={goals} setGoals={setGoals} getGoalProgress={getGoalProgress} setEditingGoal={setEditingGoal} setShowAddGoal={setShowAddGoal} setShowAddContribution={setShowAddContribution}/>}
+        {showAddContribution&&<AddContributionModal goal={showAddContribution} onClose={()=>setShowAddContribution(null)} T={T} inp={inp} btnP={btnP} sym={sym} setGoals={setGoals}/>}
         {showNotifications&&<NotificationsModal onClose={()=>setShowNotifications(false)}/>}
         {showHealthScoreDetail&&(
           <div onClick={e=>{ if(e.target===e.currentTarget) setShowHealthScoreDetail(false); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:335,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
