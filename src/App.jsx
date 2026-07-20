@@ -21,7 +21,8 @@ import { parseMoney, cleanMoneyInput, nearlyEqualMoney } from "./helpers/currenc
 import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/GoalsScreen";
 import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/EventsScreen";
-import { computeNextDueDate, computeNextPeriod, remainingShare } from "./domain/bills/calculations";
+import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
+import { remainingShare } from "./domain/shared/remainingShare";
 import StatCard from "./components/StatCard";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -42,7 +43,7 @@ const extractSmsBalance = txt => {
   const m = String(txt ?? "").match(/(?:avail(?:able)?[\s\w]{0,10}(?:bal(?:ance)?|limit)|(?:a\/c\s+)?bal(?:ance)?(?:\s+(?:is|:|-))?|closing\s+bal|avl\.?\s+bal|a\/c\s+bal)[\s:]*(?:Rs\.?|INR|\u20b9)?\s*([\d,]+(?:\.\d{1,2})?)/i);
   return m ? parseFloat(m[1].replace(/,/g,"")) : null;
 };
-// F12: Compute next due date based on billing model — now in domain/bills/calculations.js
+// F12: Compute next due date based on billing model — now in domain/bills/periodCalculations.js
 const normalizeIncomeTypeValue = value => String(value ?? "")
   .trim()
   .toLowerCase()

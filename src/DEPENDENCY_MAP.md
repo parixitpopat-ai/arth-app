@@ -52,33 +52,68 @@ single `ctx` object (which would reduce typo risk but not actually
 improve modularity — noted and deliberately rejected as a shortcut).
 People and Bills are in the same category for the same reason.
 
-## Domain services (new layer, first module)
+## Domain services (new layer)
 
 ```
-src/domain/bills/calculations.js
-└── zero dependency (computeNextDueDate, computeNextPeriod,
-    remainingShare) — all three passed the Function Extraction
-    Checklist (CODING_STANDARDS.md) verbatim, no signature changes.
+src/domain/bills/periodCalculations.js
+└── zero dependency (computeNextDueDate, computeNextPeriod)
 
-Bills re-measured before this pass: 38 genuine external dependencies
-(down from earlier ~48 estimate, but still far over the <20 threshold —
-picked up new deps from the Credit Card folding-in work since the last
-check). Roughly half of Bills' coupling is business-logic functions, not
-raw state — this is why domain extraction came before useArthData()
-implementation: moving bills/billers/billerAccounts into a hook without
-first addressing this would leave the coupling fully intact, just
-relocated.
-
-Left in App.jsx, NOT extracted (fail the purity checklist):
-- getCardSummary — closes over accounts/txns directly
-- getCurrentPeriod — depends on getMembershipPeriods, not yet traced further
-- getNetBillAmount — closes over refundTotalsByBill (derived state)
-
-Also found during this pass, NOT an architecture decision — logged in
-TECH_DEBT.md (TD-001) instead: sharePaymentRequest/doTxnShare exist as
-two independent, parallel implementations with different calling
-conventions.
+src/domain/shared/remainingShare.js
+└── zero dependency (remainingShare — not Bills-specific, used for
+    person/group settlement shares too; split out from the original
+    combined calculations.js after that grouping was flagged as a
+    "miscellaneous bucket" risk — same instinct the Function Extraction
+    Checklist exists to catch, one level down from App.jsx itself)
 ```
+
+## Bills — dependency classification (not just a count)
+
+A flat "38 dependencies" doesn't say where the coupling actually is.
+Reclassified after the `periodCalculations`/`remainingShare` extraction
+(which drops `BillsPage`'s own count from 36 to 35 — `remainingShare` was
+a real direct dependency of this screen, not just counted elsewhere):
+
+| Category | Count | Items |
+|---|---|---|
+| **State** | 7 | `accounts`, `billerAccounts`, `billers`, `bills`, `memberships`, `people`, `txns` |
+| **Domain logic** | 8 | `accountBalance`, `formatShortDate`, `getBillerActionType`, `getCardSummary`, `getCurrentPeriod`, `getNetBillAmount`, `sharePaymentRequest`, `toDateOnly` |
+| **Lookup** | 4 | `getBillerIcon`, `getCat`, `getGroup`, `getPerson` |
+| **UI / Style** | 3 | `T`, `card`, `btnP` |
+| **Local screen state** | 5 | `billSearch`, `setBillSearch`, `setCategoryAccountsView`, `setImageViewSrc`, `setAddBillerPresetType` |
+| **Mutations (shared state setters)** | 8 | `setActiveBillerForAction`, `setActiveBillerShell`, `setBillers`, `setBills`, `setEditingBill`, `setSettleTxn`, `setShowAddBillerModal`, `setTxns` |
+
+**What this tells us that the flat count didn't:**
+- **Local screen state (5) is not a blocker at all** — per `useArthData()`'s
+  own design (`USE_ARTH_DATA_DESIGN.md`, "Local Screen State — Explicitly
+  Out of Scope"), these were never meant to move into the hook. They stay
+  exactly where they are regardless of what happens next.
+- **Lookup (4) is near-zero-risk** — `getBillerIcon`, `getCat`, `getGroup`,
+  `getPerson` are simple id→object lookups against state arrays. Once
+  `people`/`groups`/`cats`/billers-related state lives in `useArthData()`,
+  these four could plausibly move alongside it or even earlier, as thin
+  wrappers.
+- **Domain logic (8) is the real blocker** — `getCardSummary` and
+  `getNetBillAmount` specifically close over state directly (confirmed
+  earlier) and need a real signature refactor, not a mechanical move.
+  This is where the next dedicated pass should focus, not on `useArthData()`
+  itself yet.
+- **State (7) is exactly what `useArthData()`'s Phase 1/2 already
+  anticipated** — `USE_ARTH_DATA_DESIGN.md` already scoped `accounts` in
+  Phase 1 and `bills`/`billerAccounts`/`billers`/`people` in Phase 2.
+  Nothing new here; this confirms the existing design doc's phasing
+  rather than changing it.
+- **Mutations (8) split roughly in half**: some are simple shared-state
+  setters that move naturally with their state (`setBills`, `setBillers`,
+  `setTxns`), others are UI-flow setters (`setActiveBillerForAction`,
+  `setShowAddBillerModal`) that arguably belong with the screen, not the
+  hook, once it's actually implemented — worth deciding case-by-case
+  rather than bulk-moving every setter.
+
+**Conclusion:** the real next blocker for Bills isn't state ownership —
+it's `getCardSummary` and `getNetBillAmount` specifically needing a
+signature refactor (parameters instead of closures). That's a small,
+scoped, two-function pass — not a reason to start `useArthData()`
+implementation yet, and not a reason to avoid it forever either.
 
 ## Extracted screens (Phase 2)
 

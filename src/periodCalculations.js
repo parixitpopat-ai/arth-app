@@ -1,13 +1,7 @@
-// First domain service module — extracted per the Function Extraction Checklist
-// (CODING_STANDARDS.md): no React hooks, no closure over component state, no setters, no JSX,
-// no DOM access, no implicit globals. All three functions moved here verbatim — no signature
-// changes, no behavior changes, exactly the "mechanical extraction only" rule that's governed
-// every pass so far (Pass 3A/3B, ADR-002).
-//
-// This is the first module under src/domain/ — the pattern this establishes (pure business logic
-// grouped by the domain it serves, separate from both App.jsx and useArthData()) is meant to
-// generalize to other domains (goals, events, people) as their own coupling gets audited the
-// same way Bills' was.
+// Bills' billing-period date logic. Extracted per the Function Extraction Checklist
+// (CODING_STANDARDS.md) — both pure, no signature changes. Split out from the original
+// calculations.js, which mixed these with remainingShare (not a date calculation, and not
+// Bills-specific — see domain/shared/remainingShare.js).
 
 export const computeNextDueDate = (bill, paidDate) => {
   const base = bill.billingModel === "prorata"
@@ -34,13 +28,4 @@ export const computeNextPeriod = (bill, paidDate) => {
   else if(freq === "annual" || freq === "yearly") end.setFullYear(end.getFullYear() + 1);
   end.setDate(end.getDate() - 1);
   return { periodStart: start.toISOString().split("T")[0], periodEnd: end.toISOString().split("T")[0] };
-};
-
-// Not Bills-specific by name (also used for person/group settlement shares elsewhere), but lives
-// here because Bills is the first domain to have its business logic actually audited. If a
-// people/settlements domain module gets built later, this may move again — noted, not acted on.
-export const remainingShare = info => {
-  if(!info) return 0;
-  if(info.settled) return 0;
-  return Math.max(0, Number(info?.remainingAmt ?? info?.amount ?? 0));
 };
