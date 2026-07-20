@@ -64,12 +64,19 @@ hooks, no closures, no setters, no JSX, no DOM, no implicit globals),
 | `getCardCycleDates` | ✅ Extracted | `domain/cards/summaries.js` |
 | `getCardSummary` | ✅ Extracted | `domain/cards/summaries.js` |
 | `dateAtDay` | ✅ Extracted (discovered as a Cards-blocking dependency, general-purpose, not domain-specific) | `helpers/dateHelpers.js` |
-| `computeRefundTotalsByBill` | ✅ Audited, not yet extracted | `domain/bills/refunds.js` (next pass) |
-| `getNetBillAmount` | ✅ Audited, not yet extracted | `domain/bills/refunds.js` (next pass) |
+| `computeRefundTotalsByBill` | ✅ Extracted | `domain/bills/refunds.js` |
+| `getNetBillAmount` | ✅ Extracted | `domain/bills/refunds.js` |
 
 ## Domain services (new layer)
 
 ```
+src/domain/bills/refunds.js
+└── zero dependency (computeRefundTotalsByBill(txns), getNetBillAmount(bill, refundTotalsByBill))
+
+4 call sites updated in one pass (UI rendering x3, one derived calculation — BillsPage's
+totalUnpaid). refundTotalsByBill's useMemo stays in App.jsx (memoization needs a component to
+live in), now calling the pure function instead of inlining the reduction — same performance
+characteristic, same behavior, logic lives in one place instead of two.
 src/domain/cards/summaries.js
 ├── helpers/dateHelpers.js (dateAtDay)
 └── exports: getCardCycleDates, getCardSummary(card, accounts, txns, toDateOnly)

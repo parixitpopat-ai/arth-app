@@ -22,6 +22,7 @@ import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/GoalsScreen";
 import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/EventsScreen";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
+import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import StatCard from "./components/StatCard";
@@ -1185,13 +1186,7 @@ function AppContent({ onLock }) {
   const cm = viewMonth;
   const thisMonthTxns = useMemo(()=>txns.filter(t=>t.date&&t.date.startsWith(cm)),[txns,cm]);
   const expenses = useMemo(()=>thisMonthTxns.filter(t=>t.type==="expense"),[thisMonthTxns]);
-  const refundTotalsByBill = useMemo(()=>txns.reduce((map,txn)=>{
-    if(txn.type!=="settlement_in" || !txn.isRefund || !txn.againstBillId) return map;
-    const key = String(txn.againstBillId);
-    map[key] = (map[key]||0) + Number(txn.amount||0);
-    return map;
-  },{}), [txns]);
-  const getNetBillAmount = useCallback(bill=>Math.max(0, Number(bill?.amount||0) - Number(refundTotalsByBill[String(bill?.id)]||0)),[refundTotalsByBill]);
+  const refundTotalsByBill = useMemo(()=>computeRefundTotalsByBill(txns), [txns]);
   const refundTotalsByExpense = useMemo(()=>txns.reduce((map,txn)=>{
     if(txn.type!=="settlement_in" || !txn.againstTxnId) return map;
     const key = String(txn.againstTxnId);
@@ -7532,7 +7527,7 @@ function AppContent({ onLock }) {
                     <div style={{ color:isOverdue?T.danger:daysUntil<=3?T.warn:T.sub,fontSize:11 }}>{isOverdue?`${Math.abs(daysUntil)}d overdue`:daysUntil===0?"Due today":`Due in ${daysUntil}d`}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    {b.amount>0&&<div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(getNetBillAmount(b))}</div>}
+                    {b.amount>0&&<div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(getNetBillAmount(b, refundTotalsByBill))}</div>}
                     <button onClick={e=>{ e.stopPropagation();
                       const accId=b.accId||accounts.find(a=>a.type!=="cc")?.id||"";
                       setTxns(p=>[{id:Date.now(),type:"expense",desc:b.name,merchant:b.merchant||"",date:todayStr(),note:"Bill payment",catId:b.catId,catIds:b.catIds||[b.catId],subId:b.subId||null,accId,people:b.splitPeople||{},forPerson:"",groupId:b.groupId||null,groupCollectiveAmount:Number(b.groupCollectiveAmount||0),amount:b.amount||0,isBillPayment:true,billInvoiceNo:b.invoiceNo||null,paidBillId:b.id,paidBillName:b.name,imageBase64:b.imageBase64||null,paymentImageBase64:b.paymentImageBase64||null},...p]);
@@ -9358,7 +9353,7 @@ function AppContent({ onLock }) {
                       <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{b.name}</div>
                       <div style={{ color:T.danger,fontSize:11 }}>Due {b.dueDate}</div>
                     </div>
-                    <div style={{ color:T.danger,fontSize:13,fontWeight:700 }}>{sym}{fmt(getNetBillAmount(b))}</div>
+                    <div style={{ color:T.danger,fontSize:13,fontWeight:700 }}>{sym}{fmt(getNetBillAmount(b, refundTotalsByBill))}</div>
                   </div>
                 ))}
                 <div style={{ marginBottom:12 }}/>
@@ -12443,7 +12438,7 @@ function AppContent({ onLock }) {
         if(bFilter==="paid") return paidB - paidA || dueA - dueB || billB - billA;
         return dueA - dueB || billB - billA;
       });
-    const totalUnpaid = bills.filter(b=>b.status==="unpaid").reduce((s,b)=>s+getNetBillAmount(b),0);
+    const totalUnpaid = bills.filter(b=>b.status==="unpaid").reduce((s,b)=>s+getNetBillAmount(b, refundTotalsByBill),0);
     const ccBillsDue = accounts.filter(a=>a.type==="cc").map(a=>{
       const summary = getCardSummary(a, accounts, txns, toDateOnly);
       if(!summary?.currentDue||summary.currentDue<=0) return null;
@@ -12661,7 +12656,7 @@ function AppContent({ onLock }) {
                 <div style={{ flex:1,minWidth:0,textAlign:"justify" }}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10 }}>
                     <div style={{ color:T.text,fontSize:14,fontWeight:800,flex:1,wordBreak:"break-word" }}>{b.name}</div>
-                    <div style={{ color:T.text,fontSize:15,fontWeight:800,whiteSpace:"nowrap",textAlign:"right" }}>{sym}{fmt(getNetBillAmount(b))}</div>
+                    <div style={{ color:T.text,fontSize:15,fontWeight:800,whiteSpace:"nowrap",textAlign:"right" }}>{sym}{fmt(getNetBillAmount(b, refundTotalsByBill))}</div>
                   </div>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:5 }}>
                     <span style={{ color:group?.color || T.sub,fontSize:10,fontWeight:700 }}>{group ? `${group.icon||"👥"} ${group.name}` : "Group: —"}</span>
@@ -14522,6 +14517,16 @@ function AppContent({ onLock }) {
                   </div>
                   <div style={{ display:"flex",alignItems:"center" }}>
                     <button onClick={()=>{ setEditingBillerShell(shell); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"Nunito,sans-serif",marginRight:8 }}>✏️ Edit</button>
+                    <button onClick={()=>{
+                      if(accs.length>0){
+                        askConfirm(`Cannot delete: "${shell.name}" has ${accs.length} account${accs.length>1?"s":""} under it. Delete or move those first — open each account and use "Delete Account" (which also blocks if it has bills/memberships attached, so you'll be prompted to clear those too).`,null);
+                        return;
+                      }
+                      askConfirm(`Delete "${shell.name}"? This can't be undone.`,()=>{
+                        setBillers(prev=>prev.filter(b=>b.id!==shell.id));
+                        setActiveBillerShell(null);
+                      });
+                    }} style={{ background:"none",border:`1px solid ${T.danger}44`,color:T.danger,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"Nunito,sans-serif",marginRight:8 }}>🗑 Delete</button>
                     <button onClick={()=>setActiveBillerShell(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
                   </div>
                 </div>

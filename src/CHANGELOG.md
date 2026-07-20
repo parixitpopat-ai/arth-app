@@ -3,6 +3,55 @@
 Format: newest first. One entry per shipped batch, not per individual
 fix — see `SCREEN_ARCHITECTURE.md` for per-screen implementation detail.
 
+## v0.9.3 — Bills refunds domain pass (Pass 2 of 2, Domain Layer Phase 2)
+
+Same six-step process as Cards (Pass 1): measure → call-site audit →
+dependency-chain audit → parameterize → extract → validate → document.
+Both functions had already passed the audit cleanly in the prior pass —
+this pass confirmed that hadn't changed, then executed.
+
+- `src/domain/bills/refunds.js` — `computeRefundTotalsByBill(txns)`,
+  `getNetBillAmount(bill, refundTotalsByBill)`
+- 4 call sites updated in one pass (3 UI rendering, 1 derived
+  calculation — BillsPage's `totalUnpaid`)
+- The `useMemo` wrapping `refundTotalsByBill` stays in `App.jsx`
+  (memoization needs a component to live in) — now calls the pure
+  function instead of inlining the reduction, same performance
+  characteristic, logic in one place instead of two
+
+Validated by full bundling. Zero duplicate declarations confirmed.
+
+`App.jsx`: 15,330 → 15,325 lines.
+
+No breaking changes. No behavior changes — pure mechanical move plus
+parameterization.
+
+**Domain Layer Phase 2 closed.** Per the established roadmap, next is
+re-measuring Bills' full dependency count (now that both domain passes
+are done), then the UI/UX polish sprint — not further architecture work
+by default.
+
+## v0.9.2 — Biller shell delete + Domain Layer Phase 1 confirmed closed
+
+Runtime regression for the Cards domain extraction (v0.9.1) confirmed
+against the live app — no issues found. Domain Layer Phase 1 is closed
+(`ARCHITECTURE_DECISIONS.md` ADR-013, `DOCS_INDEX.md` milestone status).
+
+Unrelated bug surfaced during that verification, fixed separately:
+- **Biller shells had no delete option at all.** The shell detail modal
+  had Edit and Close, but no way to remove a shell — meaning duplicate
+  shells (from before the earlier dedup-on-load fix) had no manual
+  cleanup path. Added a Delete button, same safety pattern as the
+  existing account-level delete: blocks if the shell still has linked
+  accounts, deletes immediately (with confirmation) if empty.
+
+Validated by full bundling.
+
+`App.jsx`: 15,321 → 15,330 lines (net add — new delete button + guard
+logic).
+
+No breaking changes.
+
 ## v0.9.1 — Cards domain pass (Pass 1 of 2)
 
 Followed the audit-first process end to end: call-site inventory (8

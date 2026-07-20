@@ -6,29 +6,45 @@ on `arth-app.vercel.app`. Update this file with the date/result as you go
 — that becomes the record of what's actually been confirmed, not just
 shipped.
 
+## Bills refunds domain extraction (v0.9.3)
+
+Same verification principle as Cards — nothing about the math changed,
+only where it lives. Any difference here is a real regression.
+
+| Test | Expected Result | Status | Notes |
+|---|---|:---:|---|
+| Bill with no refunds against it | Net amount = full bill amount | ☐ | |
+| Bill with a partial refund | Net amount = bill amount minus refund | ☐ | |
+| Bill with a refund covering the full amount | Net amount = 0, not negative | ☐ | |
+| `totalUnpaid` on Bills screen | Sum matches manual addition of each unpaid bill's net amount | ☐ | |
+| Bill amount shown in bill list/detail views | Matches across every screen it appears (list, detail, Bills tab) | ☐ | |
+
 ## Cards domain extraction (v0.9.1)
+
+**Confirmed by user against the live app — passed, no issues found.**
 
 Verify every number matches exactly what it showed before this pass —
 nothing about the math changed, only where the code lives, so any
 difference here is a real regression, not expected drift.
 
-**Functional**
-- ☐ Credit card dashboard totals (Home's CC summary card)
-- ☐ Current statement amount
-- ☐ Previous statement amount, where applicable
-- ☐ Available credit / utilization percentage
-- ☐ Upcoming payment / due date calculations
-- ☐ Card cycle dates (statement date, due date)
-- ☐ Card summaries on every screen that shows one: Home, Money/account
-  detail, Reports/Insights CC breakdown, Bills' `ccBillsDue`,
-  biller-linked-card views
-
-**Edge cases**
-- ☐ A credit card with zero transactions
-- ☐ Multiple credit card accounts at once
-- ☐ A closed/inactive card, if that state exists
-- ☐ A transaction dated in the future
-- ☐ A refund transaction against a card
+| Test | Expected Result | Status | Notes |
+|---|---|:---:|---|
+| Card dashboard totals (Home's CC summary) | Identical to pre-refactor | ☐ | |
+| Current statement amount | Unchanged | ☐ | |
+| Previous statement amount, where applicable | Unchanged | ☐ | |
+| Available credit / utilization % | Unchanged | ☐ | |
+| Upcoming payment / due date | Same due date, same amount | ☐ | |
+| Card cycle dates (statement date, due date) | Same start/end dates as before | ☐ | |
+| Card summary — Home | Matches other screens showing the same card | ☐ | |
+| Card summary — Money/account detail | Matches Home's number for the same card | ☐ | |
+| Card summary — Reports/Insights CC breakdown | Matches Home's number for the same card | ☐ | |
+| Card summary — Bills' `ccBillsDue` | Matches Home's number for the same card | ☐ | |
+| Card summary — biller-linked-card views | Matches Home's number for the same card | ☐ | |
+| Card with zero transactions | No errors, zero values displayed cleanly | ☐ | |
+| Multiple credit cards at once | Each card's numbers independent, no bleed-over | ☐ | |
+| Closed/inactive card, if that state exists | Handled without error | ☐ | |
+| Transaction dated in the future | Excluded from current-cycle totals correctly | ☐ | |
+| Refund transaction against a card | Net amount reduced correctly, matches pre-refactor math | ☐ | |
 
 ## How to verify each one
 

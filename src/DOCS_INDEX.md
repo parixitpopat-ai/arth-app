@@ -74,28 +74,28 @@ Record *why* and *when* — append to these, don't rewrite history in them.
 
 ## Current Milestone
 
-**Name:** Domain Layer Phase 1
+**Name:** Domain Layer Phase 2 (Bills refunds)
 
-**Status:** 🟡 Awaiting runtime regression — engineering-complete,
-product-complete pending the Cards table in `REGRESSION_CHECKLIST.md`
-being run against the live app. Not yet confirmed as of this writing.
+**Status:** 🟡 Engineering-complete, awaiting runtime regression — see
+the Bills refunds table in `REGRESSION_CHECKLIST.md`.
 
 **Completed**
+- Domain Layer Phase 1 (Cards) — 🟢 closed, confirmed
 - Shared domain module (`domain/shared/remainingShare.js`)
 - Bills period calculations (`domain/bills/periodCalculations.js`)
+- Bills refunds (`domain/bills/refunds.js`)
 - Cards summaries (`domain/cards/summaries.js`)
 - Design System v1 (`BottomSheet`, `EmptyState`, `StatCard`)
 - Goals extraction (`screens/GoalsScreen.jsx`)
 - Events extraction (`screens/EventsScreen.jsx`)
 
 **Next**
-1. Runtime regression on Cards (blocking — see Status above)
-2. Bills refunds domain (`computeRefundTotalsByBill`, `getNetBillAmount`) — Pass 2
-3. Bills dependency re-measurement (post Pass 2)
-4. UI/UX polish sprint
+1. Runtime regression on Bills refunds (blocking — see Status above)
+2. Re-measure Bills' full dependency count (both domain passes complete)
+3. UI/UX polish sprint
 
 **Blocked by**
-- Runtime regression checklist (Cards) — not yet run/confirmed
+- Runtime regression checklist (Bills refunds) — not yet run/confirmed
 
 ---
 
@@ -111,6 +111,19 @@ Every architectural extraction should update:
 `TECH_DEBT.md` should only be updated for known defects or deliberately
 deferred engineering work — never for intentional decisions (those go in
 `ARCHITECTURE_DECISIONS.md` instead).
+
+## How to Use These Documents
+
+Before making architectural changes:
+
+1. Read `CODING_STANDARDS.md`.
+2. Check `DEPENDENCY_MAP.md` for current measurements.
+3. Review relevant ADRs in `ARCHITECTURE_DECISIONS.md`.
+4. Make the change.
+5. Run the regression checklist.
+6. Update all affected documentation listed in this index.
+
+This keeps the engineering documentation synchronized with the codebase.
 
 ## Reading order for someone new to the project
 

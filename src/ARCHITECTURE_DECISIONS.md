@@ -7,6 +7,51 @@ retroactively in a batch.
 
 ---
 
+## ADR-014 — Milestone: Domain Layer Phase 2 (Bills refunds)
+**Decision:** Extracted `computeRefundTotalsByBill`/`getNetBillAmount`
+into `domain/bills/refunds.js`, same six-step process as Cards (ADR-013).
+Both had passed the parameterization audit cleanly in an earlier pass;
+this pass confirmed nothing had changed since, then executed.
+**Why:** Closes out the two-pass Domain Layer work identified when Bills
+was re-measured and found to be roughly half business-logic coupling,
+not state (ADR-012). Both target functions turned out simpler than
+Cards' — no transitive dependency surprises like `toDateOnly`, since
+`refundTotalsByBill` only ever depended on `txns` directly.
+
+**Per the established roadmap, this closes Domain Layer work by
+default** — next is re-measuring Bills' full dependency count (now with
+both `getCardSummary` and `getNetBillAmount` gone from its closure), then
+a UI/UX polish sprint. Further architecture work isn't ruled out, but
+isn't the default next step either — it would need its own justification
+the way this pass was justified by Bills' re-measurement.
+
+## ADR-013 — Milestone: Domain Layer Phase 1
+**Decision:** Treating the point after the Cards pass (pending its
+runtime regression check) as an internal milestone — "Domain Layer
+Phase 1" — not a user-facing release, but the first point where three
+domains (`shared`, `bills`, `cards`) exist, each introduced through the
+same disciplined process: measure → audit → parameterize → extract →
+validate → document.
+**Why:** Gives a clean, named baseline before Bills refunds (Pass 2)
+starts, and a concrete point to reference later if anything needs
+tracing back ("this predates/postdates Domain Layer Phase 1"). Structure
+at this point:
+```
+src/domain/
+├── bills/periodCalculations.js
+├── cards/summaries.js
+└── shared/remainingShare.js
+```
+Measured, not claimed: BillsPage's own dependency count dropped 35→34
+from the Cards pass — `getCardSummary` was a direct dependency,
+`getCardCycleDates`/`dateAtDay` were not (only called inside
+`getCardSummary`'s body), so they don't move BillsPage's own number even
+though they did move real code out of `App.jsx`. Reporting the smaller,
+accurate figure rather than counting all three as "removed dependencies."
+
+**Closed:** runtime regression confirmed against the live app — Cards
+checklist passed clean, no regressions found. Phase 1 status: 🟢 Complete.
+
 ## ADR-012 — Domain service layer, extracted before useArthData() implementation
 **Decision:** Re-measuring Bills for extraction readiness surfaced that
 ~half its coupling is business-logic functions, not raw state. Rather
