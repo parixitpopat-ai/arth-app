@@ -20,6 +20,7 @@ import { genId } from "./helpers/idGenerator";
 import { parseMoney, cleanMoneyInput, nearlyEqualMoney } from "./helpers/currency";
 import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/GoalsScreen";
+import StatCard from "./components/StatCard";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 // Wraps localStorage.setItem so a QuotaExceededError (or any other storage failure) never crashes
@@ -12622,10 +12623,7 @@ function AppContent({ onLock }) {
                     <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>QUICK SUMMARY</div>
                     <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8 }}>
                       {[["Bills",totalBills,T.text],["Paid",paidCount,T.success],["Upcoming",upcomingCount,T.warn],["Overdue",overdueCount,T.danger]].map(([label,count,color])=>(
-                        <div key={label} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"10px 6px",textAlign:"center" }}>
-                          <div style={{ color, fontSize:18,fontWeight:900 }}>{count}</div>
-                          <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>{label}</div>
-                        </div>
+                        <StatCard key={label} value={count} label={label} color={color} T={T} valueSize={18}/>
                       ))}
                     </div>
                   </div>

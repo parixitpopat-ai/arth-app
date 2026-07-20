@@ -3,6 +3,67 @@
 Format: newest first. One entry per shipped batch, not per individual
 fix — see `SCREEN_ARCHITECTURE.md` for per-screen implementation detail.
 
+## v0.5.0 — Design System v1: BottomSheet, EmptyState, StatCard
+
+Built the three highest-ROI shared components identified by
+`COMPONENT_INVENTORY.md`'s audit (15+ duplicated BottomSheets, 6
+duplicated EmptyStates, 4+ duplicated StatCards), following the "build
+one, migrate one, prove it" discipline rather than converting everything
+at once.
+
+- `src/components/BottomSheet.jsx` — migrated `AddContributionModal`
+  (`GoalsScreen.jsx`) to prove cross-file component composition works,
+  same pattern any extracted screen (Events next) will need
+- `src/components/EmptyState.jsx` — migrated Goals' "No goals yet" state
+- `src/components/StatCard.jsx` — migrated Bills Home's Quick Summary
+  grid (Bills/Paid/Upcoming/Overdue)
+
+Deliberately **not** converting Button/Card/Page/Header this pass — the
+audit found these are shared style *objects*, not components; converting
+them touches a much larger surface of the app for less proven benefit
+than three new components. Remaining duplicate BottomSheet/EmptyState/
+StatCard call sites (14+/5/3+) are left as-is, to migrate opportunistically
+as each screen gets touched, not swept in one large change.
+
+**New rule, going forward:** no screen extraction may hand-write a new
+BottomSheet, EmptyState, or StatCard — only reuse these three, or
+document a genuine gap that justifies a fourth primitive.
+
+Validated by full bundling. `App.jsx`: 15,552 → 15,550 lines (net change
+small since this pass added a components layer more than it removed
+inline code — the real payoff compounds as more screens migrate to it).
+
+No breaking changes. No behavior changes — same visual output, different
+underlying implementation.
+
+## v0.4.0 — First screen extraction: Goals
+
+The Extraction Readiness Score (dependency count < 20, measured
+mechanically) was applied to five candidates before choosing one — see
+`DEPENDENCY_MAP.md` for the full comparison table. Timeline, originally
+assumed to be the easy first screen, measured at 61 external dependencies
+and was postponed; Goals measured under 10 across all three of its pieces
+and became the actual first extraction.
+
+- `src/screens/GoalsScreen.jsx` — `AddGoalModal`, `GoalsListModal`,
+  `AddContributionModal`, each accepting only the explicit props it uses
+  (no shared "god object" of props)
+- `GOAL_ICONS` also moved into `constants/appConstants.js` (zero
+  dependency, free addition found while tracing this extraction)
+
+Caught two boundary-measurement bugs (component line ranges bleeding into
+the next component) while building the comparison table — both corrected
+before extracting, which is exactly why the mechanical trace matters more
+than reading the code by eye at this file's size.
+
+Validated by full bundling. Zero duplicate declarations confirmed by
+direct grep before and after.
+
+`App.jsx`: 15,477 → 15,339 lines.
+
+No breaking changes. No behavior changes — pure code motion, same
+component logic, same render output.
+
 ## v0.3.1 — Pass 3B: idGenerator, currency, csv
 
 Dependency map built first, per the standing rule established after Pass
