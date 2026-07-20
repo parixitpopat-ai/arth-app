@@ -74,13 +74,15 @@ Record *why* and *when* — append to these, don't rewrite history in them.
 
 ## Current Milestone
 
-**Name:** Domain Layer Phase 2 (Bills refunds)
+**Name:** Architecture exploration complete — transitioning to UI/UX Polish Sprint
 
-**Status:** 🟡 Engineering-complete, awaiting runtime regression — see
-the Bills refunds table in `REGRESSION_CHECKLIST.md`.
+**Status:** 🟢 Domain Layer (Phases 1+2) closed. Further Bills extraction
+suspended per ADR-015 — evidence-based, not a guess: remaining coupling
+is State/Mutations, categories pure-function extraction can't touch.
 
 **Completed**
-- Domain Layer Phase 1 (Cards) — 🟢 closed, confirmed
+- Domain Layer Phase 1 (Cards) — 🟢 closed
+- Domain Layer Phase 2 (Bills refunds) — 🟢 closed
 - Shared domain module (`domain/shared/remainingShare.js`)
 - Bills period calculations (`domain/bills/periodCalculations.js`)
 - Bills refunds (`domain/bills/refunds.js`)
@@ -88,14 +90,25 @@ the Bills refunds table in `REGRESSION_CHECKLIST.md`.
 - Design System v1 (`BottomSheet`, `EmptyState`, `StatCard`)
 - Goals extraction (`screens/GoalsScreen.jsx`)
 - Events extraction (`screens/EventsScreen.jsx`)
+- Bills re-measured post-both-passes: 38 → 34 dependencies (ADR-015)
+- `useArthData()` v1.0 question resolved: not required (`V1_DEFINITION.md`)
 
 **Next**
-1. Runtime regression on Bills refunds (blocking — see Status above)
-2. Re-measure Bills' full dependency count (both domain passes complete)
-3. UI/UX polish sprint
+1. UI/UX Polish Sprint — no architecture goals, no dependency targets,
+   no extraction quotas. Typography, card spacing, motion, empty-state
+   coverage, loading states.
+2. Product Review — after the polish sprint, use Arth for a week before
+   writing more code. Real usage surfaces UX issues a dependency audit
+   can't.
+3. Revisit `V1_DEFINITION.md`'s open screen-scope question (which of the
+   10 non-✅ screens are must-ship) — informed by the Product Review, not
+   decided in the abstract beforehand.
+4. Decide on `useArthData()` on its own merits (testability,
+   consistency, duplication reduction) — not before Product Review, and
+   not as a means of hitting a dependency number.
 
 **Blocked by**
-- Runtime regression checklist (Bills refunds) — not yet run/confirmed
+- Nothing architectural. Next step is product/design work, not engineering.
 
 ---
 

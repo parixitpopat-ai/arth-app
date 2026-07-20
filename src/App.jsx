@@ -26,6 +26,7 @@ import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refu
 import { remainingShare } from "./domain/shared/remainingShare";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import StatCard from "./components/StatCard";
+import Toast from "./components/Toast";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 // Wraps localStorage.setItem so a QuotaExceededError (or any other storage failure) never crashes
@@ -914,6 +915,7 @@ function AppContent({ onLock }) {
   // ── MODAL STATE ────────────────────────────────────────────────────────────
   const [showAdd, setShowAdd] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [toast, setToast] = useState(null); // { message, icon } | null
   const [showFabSpeedMenu, setShowFabSpeedMenu] = useState(false);
   const [showDuplicateFinder, setShowDuplicateFinder] = useState(false);
   const [defaultAddType, setDefaultAddType] = useState("expense");
@@ -2833,6 +2835,7 @@ function AppContent({ onLock }) {
         createdAt: Date.now(), createdDate: todayStr(),
       };
       setTxns(prev=>[record, ...prev]);
+      setToast({ message: `${sym}${fmt(record.amount)} saved to ${effectiveCat?.name||(qaType==="income"?"Income":"Uncategorized")}` });
       onClose();
     };
     const goToFullForm = () => {
@@ -14374,6 +14377,7 @@ function AppContent({ onLock }) {
           </div>
         )}
         {showQuickAdd&&<QuickAddModal onClose={()=>setShowQuickAdd(false)}/>}
+        {toast&&<Toast message={toast.message} icon={toast.icon} T={T} onDone={()=>setToast(null)}/>}
         {showDuplicateFinder&&<DuplicateFinderModal onClose={()=>setShowDuplicateFinder(false)}/>}
         {showFabSpeedMenu&&(
           <div onClick={()=>setShowFabSpeedMenu(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:355,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>

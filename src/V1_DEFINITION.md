@@ -45,13 +45,22 @@ derivable from the code.
 - ✅ Documentation (`DOCS_INDEX.md` + 11 other living/historical docs)
 - 🟡 No critical tech debt — `TECH_DEBT.md` has one open item (TD-001,
   duplicate UPI sharing implementation), not yet investigated or resolved
-- ⬜ `useArthData()` — designed (`USE_ARTH_DATA_DESIGN.md`), not implemented
+- ⬜ `useArthData()` — designed (`USE_ARTH_DATA_DESIGN.md`), not
+  implemented; per ADR-015, **not required for v1.0** — its original
+  justification (Bills needs it to extract) no longer holds
 - ⬜ Timeline, Bills, People screen extractions — all measured over the
   20-dependency threshold, none extracted yet
 
-**Open question:** does v1.0 require `useArthData()` implemented, or is
-the current `App.jsx`-as-coordinator shape acceptable for a first ship,
-with further extraction as a post-v1.0 concern?
+**Answered, based on evidence (ADR-015):** No, v1.0 does not require
+`useArthData()`. Domain-function extraction closed most of what Bills
+could shed without it (38 → 34 dependencies), and what remains — State,
+Mutations — was never going to be solved by more pure-function pulls.
+The original case for building `useArthData()` ("Bills needs it to
+extract") no longer holds on its own. If it gets built, it should be
+justified by testability, consistency, or reduced duplication across
+screens — not as a means of forcing a screen under a dependency
+threshold. This is a decision to revisit on its own merits post-launch,
+not a v1.0 blocker.
 
 ## UX
 

@@ -7,6 +7,36 @@ retroactively in a batch.
 
 ---
 
+## ADR-015 — Suspend further Bills domain extraction
+**Decision:** Domain-function extraction for Bills is suspended. No more
+searching for pure functions inside `BillsPage`. Future coupling
+reduction targets state architecture (`useArthData()` or equivalent) or
+screen-responsibility changes, not further pure-function pulls.
+
+**Evidence:** BillsPage's own dependency count across all domain work:
+38 → 35 (`remainingShare`) → 34 (Cards pass) → 34 (Bills refunds pass,
+net zero — `getNetBillAmount` left the list, `refundTotalsByBill`
+entered it, since the extraction removed the closure that used to hide
+it). The re-classification from ADR-012 explains why: Domain logic (8
+items) has largely been addressed by the two completed passes. What
+remains — State (7) and Mutations (8) — are exactly the categories
+pure-function extraction was never designed to solve. More auditing
+would find fewer and fewer qualifying functions for diminishing benefit.
+
+**Conclusion, stated formally:** Dependency measurements indicate that
+additional domain-function extraction is unlikely to materially reduce
+BillsPage coupling. Further reductions require state architecture or
+changes to screen responsibilities, not more pure-function extraction.
+
+**Consequence for `useArthData()`:** the original justification for
+building it (Bills needs it to become extractable) no longer holds on
+its own — domain extraction closed most of what was closeable without
+it. Whether to build `useArthData()` now needs to stand on its own
+merits (testability, consistency, reduced duplication across screens),
+not as a means of forcing Bills under a dependency threshold. See
+`V1_DEFINITION.md`'s updated answer to "does v1.0 require
+`useArthData()`."
+
 ## ADR-014 — Milestone: Domain Layer Phase 2 (Bills refunds)
 **Decision:** Extracted `computeRefundTotalsByBill`/`getNetBillAmount`
 into `domain/bills/refunds.js`, same six-step process as Cards (ADR-013).
@@ -24,6 +54,10 @@ both `getCardSummary` and `getNetBillAmount` gone from its closure), then
 a UI/UX polish sprint. Further architecture work isn't ruled out, but
 isn't the default next step either — it would need its own justification
 the way this pass was justified by Bills' re-measurement.
+
+**Closed:** runtime regression confirmed against the live app — Bills
+refunds checklist passed clean, no issues found. Domain Layer Phase 2
+status: 🟢 Complete.
 
 ## ADR-013 — Milestone: Domain Layer Phase 1
 **Decision:** Treating the point after the Cards pass (pending its
