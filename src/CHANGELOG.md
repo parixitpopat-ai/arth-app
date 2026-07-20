@@ -3,6 +3,40 @@
 Format: newest first. One entry per shipped batch, not per individual
 fix — see `SCREEN_ARCHITECTURE.md` for per-screen implementation detail.
 
+## v0.8.0 — Second screen extraction: Events (Sprint 2 begins)
+
+First extraction of Sprint 2, following the exact process from Sprint 1:
+mechanical dependency trace before touching anything, not reused from an
+earlier estimate — the codebase had changed since Events was last
+measured (budget-tracking work grew `EventsListModal`). Caught the same
+boundary-measurement bug a third time (component range bleeding into a
+later-added component, this time `DuplicateFinderModal`) before trusting
+the count — same lesson as Pass 3A/3B, mechanical measurement over
+manual reading at this file's size.
+
+- `src/screens/EventsScreen.jsx` — `AddEventModal` (7 deps),
+  `EventDetailModal` (12 deps), `EventsListModal` (10 deps), all well
+  under the 20-dependency threshold
+- **First extraction built using the Design System** — uses
+  `BottomSheet` (all three modals) and `EmptyState` (two empty states)
+  instead of hand-writing new copies, exactly the case
+  `COMPONENT_INVENTORY.md` predicted would happen if a screen was
+  extracted without the shared components existing first
+
+Validated by full bundling. Zero duplicate declarations confirmed by
+direct grep.
+
+`App.jsx`: 15,552 → 15,415 lines.
+
+No breaking changes. No behavior changes — pure code motion.
+
+## v0.7 — Architecture Foundation (Sprint 1 closed, tagged)
+
+Sprint 1 closed cleanly and tagged `v0.7`: utility extraction, Goals
+extraction, Design System v1, `useArthData()` design, architecture
+decision log, repository cleanup (removed dead duplicate files, old
+April snapshots, stray junk from the repo root and `src/`).
+
 ## v0.5.0 — Design System v1: BottomSheet, EmptyState, StatCard
 
 Built the three highest-ROI shared components identified by

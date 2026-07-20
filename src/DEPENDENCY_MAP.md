@@ -52,6 +52,65 @@ single `ctx` object (which would reduce typo risk but not actually
 improve modularity — noted and deliberately rejected as a shortcut).
 People and Bills are in the same category for the same reason.
 
+## Extracted screens (Phase 2)
+
+```
+src/screens/EventsScreen.jsx
+├── helpers/idGenerator.js (genId)
+├── components/BottomSheet.jsx (all three modals use it)
+├── components/EmptyState.jsx (EventDetailModal's "no expenses linked",
+│   EventsListModal's "no trips or outings")
+└── exports: AddEventModal, EventDetailModal, EventsListModal
+
+Re-measured at extraction time (not reused from the earlier estimate —
+the codebase had changed since then, EventsListModal specifically grew
+from budget-tracking work). Caught the same boundary-measurement bug a
+third time (EventsListModal's range bled into the later-added
+DuplicateFinderModal) before trusting the count:
+
+AddEventModal    → 7 deps  (EVENT_TYPES, T, card, inp, lbl, people, setEvents)
+EventDetailModal → 12 deps (+ askConfirm, formatShortDate, getMyExpenseAmount,
+                              getPerson, setEditingEvent, setShowAddEvent,
+                              setTxnDetailId, txns)
+EventsListModal  → 10 deps (events, formatShortDate, setEditingEvent,
+                              setShowAddEvent, setViewingEvent, txns)
+
+All three explicit-props, no shared "ctx" object — consistent with Goals.
+This is also the first extraction built after BottomSheet/EmptyState
+existed, so it uses them instead of hand-writing new copies — the
+concrete case COMPONENT_INVENTORY.md predicted.
+```
+
+src/screens/GoalsScreen.jsx
+├── constants/appConstants.js (GOAL_ICONS — moved here too, zero deps,
+│   free addition while tracing this extraction)
+├── helpers/idGenerator.js (genId)
+├── components/BottomSheet.jsx (AddContributionModal, migrated)
+├── components/EmptyState.jsx (Goals empty state, migrated)
+└── exports: AddGoalModal, GoalsListModal, AddContributionModal
+
+Each component takes only the props it uses (checklist rule "imports only
+what it needs") — AddContributionModal doesn't receive GOAL_ICONS or
+accounts, since it never touches them:
+
+AddGoalModal      → existing, onClose, T, inp, lbl, accounts, setGoals
+GoalsListModal    → onClose, T, sym, fmt, formatShortDate, goals, setGoals,
+                     getGoalProgress, setEditingGoal, setShowAddGoal,
+                     setShowAddContribution
+AddContributionModal → goal, onClose, T, inp, btnP, sym, setGoals
+```
+
+`formatShortDate` and `getGoalProgress` are passed as props rather than
+imported — both still live in `App.jsx` (the date-parsing chain is still
+deliberately un-extracted; `getGoalProgress` is a `useCallback` depending
+on `accountBalance`, business logic, not yet extracted either). This is
+the intended shape for now — a screen can depend on business logic
+through props without that logic needing to be extracted first.
+
+Caught two boundary bugs while measuring this extraction's candidates
+(component ranges bleeding into the next component during the mechanical
+trace) — both found and fixed before extracting anything, not after.
+
 ## Extracted modules (Pass 3B)
 
 ```

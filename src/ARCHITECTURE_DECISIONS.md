@@ -7,6 +7,20 @@ retroactively in a batch.
 
 ---
 
+## ADR-011 — Events extraction: re-measure, don't reuse old numbers
+**Decision:** Re-ran the mechanical dependency trace on Events
+immediately before extracting, rather than trusting the count from the
+original Goals-vs-Events comparison several turns earlier.
+**Why:** The codebase changed in between (Events gained Budget tracking,
+`EventsListModal` grew from 39 to 107 raw lines). Re-measuring caught
+this growth and, in the process, caught a third instance of the same
+boundary-measurement bug (component range bleeding into a
+later-added component) before it could produce a wrong dependency count.
+Confirms the rule from ADR-006 generalizes: measure at the time of
+extraction, not once and assume it stays valid.
+
+---
+
 ## ADR-010 — useArthData() is designed before it's built
 **Decision:** Wrote `USE_ARTH_DATA_DESIGN.md` fully before writing any
 implementation code.

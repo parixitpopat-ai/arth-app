@@ -20,6 +20,7 @@ import { genId } from "./helpers/idGenerator";
 import { parseMoney, cleanMoneyInput, nearlyEqualMoney } from "./helpers/currency";
 import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/GoalsScreen";
+import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/EventsScreen";
 import StatCard from "./components/StatCard";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -12930,130 +12931,6 @@ function AppContent({ onLock }) {
     return { current, pct, complete: current>=g.targetAmount && g.targetAmount>0 };
   },[accountBalance]);
 
-  const AddEventModal = ({ existing, onClose }) => {
-    const isEdit = Boolean(existing);
-    const [name, setName] = useState(existing?.name||"");
-    const [occasionType, setOccasionType] = useState(existing?.occasionType||"trip");
-    const [date, setDate] = useState(existing?.date||todayStr());
-    const [selectedPeople, setSelectedPeople] = useState(existing?.peopleIds||[]);
-    const [budget, setBudget] = useState(existing?.budget?String(existing.budget):"");
-    const canSave = name.trim();
-    const handleSave = () => {
-      if(!canSave) return;
-      const record = { id: existing?.id||genId(), name:name.trim(), occasionType, date, peopleIds:selectedPeople, budget:parseFloat(budget)||0, createdAt:existing?.createdAt||Date.now() };
-      setEvents(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[record, ...prev]);
-      onClose();
-    };
-    return (
-      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:340,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
-        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit":"Add"} Trip / Outing</div>
-            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
-          </div>
-          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
-            <div>
-              <span style={lbl}>Name *</span>
-              <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. Day out to North Goa" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
-            </div>
-            <div>
-              <span style={lbl}>Occasion</span>
-              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                {EVENT_TYPES.map(et=>(
-                  <button key={et.id} onClick={()=>setOccasionType(et.id)} style={{ display:"flex",alignItems:"center",gap:5,background:occasionType===et.id?T.accent+"22":T.input,border:`1px solid ${occasionType===et.id?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:occasionType===et.id?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{et.icon} {et.label}</button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <span style={lbl}>Date</span>
-              <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
-            </div>
-            <div>
-              <span style={lbl}>Budget (optional)</span>
-              <input style={inp} type="number" placeholder="e.g. 60000" value={budget} onChange={e=>setBudget(e.target.value)}/>
-            </div>
-            <div>
-              <span style={lbl}>People (optional)</span>
-              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                {people.map(p=>{
-                  const isOn = selectedPeople.includes(p.id);
-                  return (
-                    <button key={p.id} onClick={()=>setSelectedPeople(prev=>isOn?prev.filter(id=>id!==p.id):[...prev,p.id])} style={{ background:isOn?p.color+"22":T.input,border:`1px solid ${isOn?p.color:T.border}`,borderRadius:20,padding:"5px 11px",cursor:"pointer",fontSize:11,fontWeight:700,color:isOn?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
-                  );
-                })}
-              </div>
-            </div>
-            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Trip/Outing"}</button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const EventDetailModal = ({ event, onClose }) => {
-    const linkedTxns = txns.filter(t=>t.eventId===event.id);
-    const total = linkedTxns.reduce((s,t)=>s+(t.type==="expense"?Number(t.amount||0):0),0);
-    const myTotal = linkedTxns.reduce((s,t)=>s+(t.type==="expense"?getMyExpenseAmount(t):0),0);
-    const et = EVENT_TYPES.find(x=>x.id===event.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1];
-    return (
-      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:340,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
-        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-            <div>
-              <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{et.icon} {event.name}</div>
-              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{formatShortDate(event.date)||event.date}</div>
-            </div>
-            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
-          </div>
-          {event.peopleIds?.length>0&&(
-            <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:14 }}>
-              {event.peopleIds.map(pid=>{ const p=getPerson(pid); return <span key={pid} style={{ background:T.input,borderRadius:20,padding:"4px 10px",fontSize:11,fontWeight:700,color:T.sub }}>{p.emoji} {p.name}</span>; })}
-            </div>
-          )}
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16 }}>
-            <div style={{ background:T.input,borderRadius:14,padding:"14px",textAlign:"center" }}>
-              <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>{sym}{fmt(total)}</div>
-              <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>OVERALL</div>
-            </div>
-            <div style={{ background:T.accentSoft,borderRadius:14,padding:"14px",textAlign:"center" }}>
-              <div style={{ color:T.accent,fontSize:20,fontWeight:900 }}>{sym}{fmt(myTotal)}</div>
-              <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>MY SHARE</div>
-            </div>
-          </div>
-          {event.budget>0&&(
-            <div style={{ background:T.input,borderRadius:14,padding:"14px",marginBottom:14 }}>
-              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
-                <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(total)} of {sym}{fmt(event.budget)} budget</span>
-                <span style={{ color:total>event.budget?T.danger:T.accent,fontSize:12,fontWeight:900 }}>{Math.round(total/event.budget*100)}%</span>
-              </div>
-              <div style={{ height:6,background:T.border,borderRadius:3 }}>
-                <div style={{ height:"100%",width:`${Math.min(100,Math.round(total/event.budget*100))}%`,background:total>event.budget?T.danger:T.accent,borderRadius:3 }}/>
-              </div>
-              {total>event.budget&&<div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:6 }}>⚠️ Over budget by {sym}{fmt(total-event.budget)}</div>}
-            </div>
-          )}
-          <div style={{ color:T.sub,fontSize:10,textAlign:"center",marginBottom:14 }}>{linkedTxns.length} expense{linkedTxns.length!==1?"s":""} · amounts below show what actually happened, full card charges included</div>
-          <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
-            {linkedTxns.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No expenses linked yet. Tag an expense to this trip from the transaction form.</div>}
-            {linkedTxns.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).map(t=>(
-              <div key={t.id} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"10px 14px",cursor:"pointer" }}>
-                <div>
-                  <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{t.merchant||t.who||t.desc||"Expense"}</div>
-                  <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(t.date)||t.date}</div>
-                </div>
-                <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(t.amount)}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-            <button onClick={()=>{ setEditingEvent(event); setShowAddEvent(true); onClose(); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
-            <button onClick={()=>askConfirm(`Delete "${event.name}"? Linked expenses stay in your transactions, only the trip grouping is removed.`,()=>{ setEvents(prev=>prev.filter(x=>x.id!==event.id)); onClose(); })} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   // -- STATS PAGE (new module, starting with Cash Flow) -----------------------
   const StatsPage = ({ embedded = false } = {}) => {
     const [statsTab, setStatsTab] = useState("overview");
@@ -13451,46 +13328,6 @@ function AppContent({ onLock }) {
               <button onClick={()=>archive(a.id)} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>✓ Archive</button>
             </div>
           ))}
-        </div>
-      </div>
-    );
-  };
-
-  const EventsListModal = ({ onClose }) => {
-    return (
-      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:335,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
-        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Trips & Outings</div>
-            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
-          </div>
-          <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
-            {events.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No trips or outings yet.</div>}
-            {events.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(ev=>{
-              const et = EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1];
-              const total = txns.filter(t=>t.eventId===ev.id&&t.type==="expense").reduce((s,t)=>s+Number(t.amount||0),0);
-              return (
-                <div key={ev.id} onClick={()=>{ setViewingEvent(ev); onClose(); }} style={{ background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer" }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                    <div>
-                      <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{et.icon} {ev.name}</div>
-                      <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(ev.date)||ev.date}</div>
-                    </div>
-                    <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(total)}</div>
-                  </div>
-                  {ev.budget>0&&(
-                    <div style={{ marginTop:8 }}>
-                      <div style={{ height:4,background:T.border,borderRadius:2 }}>
-                        <div style={{ height:"100%",width:`${Math.min(100,Math.round(total/ev.budget*100))}%`,background:total>ev.budget?T.danger:T.accent,borderRadius:2 }}/>
-                      </div>
-                      <div style={{ color:T.sub,fontSize:9,marginTop:3 }}>{Math.round(total/ev.budget*100)}% of {sym}{fmt(ev.budget)}</div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <button onClick={()=>{ setEditingEvent(null); setShowAddEvent(true); onClose(); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>+ Add Trip / Outing</button>
         </div>
       </div>
     );
@@ -14674,8 +14511,8 @@ function AppContent({ onLock }) {
         {attachExpensesFor&&<AttachExpensesModal ba={attachExpensesFor} onClose={()=>setAttachExpensesFor(null)}/>}
         {showAddYouOwe&&<AddYouOweModal personId={showAddYouOwe} onClose={()=>setShowAddYouOwe(null)}/>}
         {viewingMembership&&<MembershipDetailModal membership={viewingMembership} onClose={()=>setViewingMembership(null)}/>}
-        {showAddEvent&&<AddEventModal existing={editingEvent} onClose={()=>{ setShowAddEvent(false); setEditingEvent(null); }}/>}
-        {showEventsList&&<EventsListModal onClose={()=>setShowEventsList(false)}/>}
+        {showAddEvent&&<AddEventModal existing={editingEvent} onClose={()=>{ setShowAddEvent(false); setEditingEvent(null); }} T={T} inp={inp} lbl={lbl} people={people} setEvents={setEvents} EVENT_TYPES={EVENT_TYPES}/>}
+        {showEventsList&&<EventsListModal onClose={()=>setShowEventsList(false)} T={T} sym={sym} fmt={fmt} events={events} txns={txns} formatShortDate={formatShortDate} setViewingEvent={setViewingEvent} setEditingEvent={setEditingEvent} setShowAddEvent={setShowAddEvent} EVENT_TYPES={EVENT_TYPES}/>}
         {showAddGoal&&<AddGoalModal existing={editingGoal} onClose={()=>{ setShowAddGoal(false); setEditingGoal(null); }} T={T} inp={inp} lbl={lbl} accounts={accounts} setGoals={setGoals}/>}
         {showGoalsList&&<GoalsListModal onClose={()=>setShowGoalsList(false)} T={T} sym={sym} fmt={fmt} formatShortDate={formatShortDate} goals={goals} setGoals={setGoals} getGoalProgress={getGoalProgress} setEditingGoal={setEditingGoal} setShowAddGoal={setShowAddGoal} setShowAddContribution={setShowAddContribution}/>}
         {showAddContribution&&<AddContributionModal goal={showAddContribution} onClose={()=>setShowAddContribution(null)} T={T} inp={inp} btnP={btnP} sym={sym} setGoals={setGoals}/>}
@@ -14714,7 +14551,7 @@ function AppContent({ onLock }) {
             </div>
           </div>
         )}
-        {viewingEvent&&<EventDetailModal event={viewingEvent} onClose={()=>setViewingEvent(null)}/>}
+        {viewingEvent&&<EventDetailModal event={viewingEvent} onClose={()=>setViewingEvent(null)} T={T} sym={sym} fmt={fmt} txns={txns} getMyExpenseAmount={getMyExpenseAmount} getPerson={getPerson} formatShortDate={formatShortDate} askConfirm={askConfirm} setEvents={setEvents} setEditingEvent={setEditingEvent} setShowAddEvent={setShowAddEvent} setTxnDetailId={setTxnDetailId} EVENT_TYPES={EVENT_TYPES}/>}
         {showNavDrawer&&<NavDrawer onClose={()=>setShowNavDrawer(false)}/>}
         {confirmDialog&&(
           <div onClick={e=>{ if(e.target===e.currentTarget) setConfirmDialog(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>

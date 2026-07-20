@@ -17,11 +17,11 @@ Legend: ✅ Done · 🟡 Partial · ⬜ Not started
 |---|---|---|
 | 4. Home | ✅ | Greeting, Financial Health Score (real formula), Action Centre, Quick Actions, Goals card, Events card, Stats, Category breakdown, CC summary, Bills, Recent Activity, AI Insight (rule-based, one card max). |
 | 5. Add Transaction | ✅ | Quick Add: Amount → What was it? (live category detection) → Confirm → direct save, 3 taps. "More options" routes to the full legacy form (2,600+ lines, untouched) for splits/people/groups/investments. |
-| 6. Timeline | ✅ COMPLETE | See detail below. |
+| 6. Timeline | ✅ V1 COMPLETE | See detail below. Core is stable; voice entry, natural language, OCR, AI categorization, undo, and Timeline Replay are V2 — deliberately not in scope for V1. |
 
 ### Screen 6 — Transaction Timeline
 
-**Status: ✅ COMPLETE**
+**Status: ✅ V1 COMPLETE**
 
 **Implemented**
 - Swipe actions (right: ⭐ Favourite / 🔁 Repeat, left: 📤 Share / 🗑️ Delete) — via a `SwipeableTxnRow` wrapper, `TxnRow` itself untouched (still used as-is by Home Recent and Account Detail)
@@ -33,9 +33,12 @@ Legend: ✅ Done · 🟡 Partial · ⬜ Not started
 - Bulk delete, bulk category change, bulk CSV export (real file download: date/merchant/category/amount/type — CSV mechanics now come from `reports/csv.js`; the column definition and transaction→row mapping stay local, since that's business logic, not CSV plumbing)
 
 **Deferred (V2)**
-- Month Replay
-- AI Highlights on transactions
+- Month Replay (Timeline Replay)
+- AI Highlights on transactions (AI categorization)
 - Receipt OCR preview
+- Voice entry
+- Natural language search/commands
+- Undo (delete/edit)
 
 **Regression Checklist**
 - ✓ Existing transactions render correctly (grouping/sorting is additive, no data shape changes)
@@ -52,8 +55,8 @@ Legend: ✅ Done · 🟡 Partial · ⬜ Not started
 | 7. Money | 🟡 | Exists as "Wealth" tab, renamed. Account Story / Money Map not built. |
 | 8. Bills | ✅ | Needs Attention/Pinned/All Billers, Connection Dashboard, Analytics, Units/Meter fields, Credit Cards folded into the Biller hierarchy, shell/account/provider editing. |
 | 9. Budgets | ✅ | Monthly Dashboard, per-month person/group overrides, Annual Person View, "Can I Afford This?", alerts (Notifications only, not duplicated on Home). |
-| 10. Goals | ✅ | Create/edit, manual or account-auto-tracked progress, list, completion, Home card. |
-| 11. Events | ✅ | Was already more built than assessed (expense linking, spend totals, people). Added: Budget field + progress tracking. |
+| 10. Goals | ✅ | Create/edit, manual or account-auto-tracked progress, list, completion, Home card. **Extracted** into `src/screens/GoalsScreen.jsx` — first true component extraction (not just a utility module), per the Extraction Readiness Score. |
+| 11. Events | ✅ | Was already more built than assessed (expense linking, spend totals, people). Added: Budget field + progress tracking. **Extracted** into `src/screens/EventsScreen.jsx` — second screen extraction, first one built using the Design System (BottomSheet, EmptyState). |
 | 12. Reports | ⬜ | No dedicated screen. Fragments exist (Bill Analytics, Budget Insights) but nothing unified. |
 
 ## Wealth
