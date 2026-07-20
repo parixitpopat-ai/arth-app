@@ -7,6 +7,31 @@ retroactively in a batch.
 
 ---
 
+## ADR-012 — Domain service layer, extracted before useArthData() implementation
+**Decision:** Re-measuring Bills for extraction readiness surfaced that
+~half its coupling is business-logic functions, not raw state. Rather
+than implement `useArthData()` next as originally planned (Phase 1:
+Transactions/Accounts/Categories), inserted a new layer —
+`src/domain/<area>/` — and extracted Bills' provably-pure functions
+first. Architecture is now `App → useArthData → Domain Services →
+Screens`, not `App → useArthData → Screens`.
+**Why:** Moving `bills`/`billers`/`billerAccounts` into a hook without
+addressing the business-logic coupling first would relocate the data but
+leave Bills exactly as coupled as before — the hook would just become a
+new place for that coupling to live, risking the "second 15,000-line
+file, just inside a hook" failure mode. Splitting "move pure functions"
+(mechanical, low-risk) from "design the shared state hook"
+(higher-stakes) keeps each pass provable on its own. Also formalized the
+**Function Extraction Checklist** (`CODING_STANDARDS.md`) as a result —
+a function needs no hooks, no closure over state, no setters, no JSX, no
+DOM access to qualify; anything that fails is a refactor candidate, not
+an extraction candidate, and gets its own dedicated pass.
+
+**Not logged here:** the `sharePaymentRequest`/`doTxnShare` duplicate
+implementation found during this audit. That's a defect, not a decision
+— tracked in `TECH_DEBT.md` (TD-001) instead, kept deliberately separate
+from this log.
+
 ## ADR-011 — Events extraction: re-measure, don't reuse old numbers
 **Decision:** Re-ran the mechanical dependency trace on Events
 immediately before extracting, rather than trusting the count from the

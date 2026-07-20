@@ -3,6 +3,38 @@
 Format: newest first. One entry per shipped batch, not per individual
 fix — see `SCREEN_ARCHITECTURE.md` for per-screen implementation detail.
 
+## v0.9.0 — First domain service module: Bills calculations
+
+Re-measured Bills before deciding on `useArthData()`'s next step (not
+reusing the earlier estimate — same lesson as Events/ADR-011). Found 38
+genuine dependencies, still far over threshold, and — more importantly —
+found that roughly half of that coupling is business-logic functions,
+not state. That finding changed the plan: architecture is now
+`App → useArthData → Domain Services → Screens`, not
+`App → useArthData → Screens` (see `ARCHITECTURE_DECISIONS.md` ADR-012).
+
+- `src/domain/bills/calculations.js` — `computeNextDueDate`,
+  `computeNextPeriod`, `remainingShare`. All three passed a new,
+  formalized **Function Extraction Checklist** (`CODING_STANDARDS.md`)
+  verbatim — no signature changes, no behavior changes.
+- Deliberately left `getCardSummary`, `getCurrentPeriod`,
+  `getNetBillAmount` in `App.jsx` — each closes over component state
+  directly and would need a real signature refactor (parameters instead
+  of closures) before qualifying, which is a behavior-risk change, not a
+  mechanical move.
+- **Found a real defect while auditing**, not an architecture decision:
+  `sharePaymentRequest`/`doTxnShare` exist as two independent, parallel
+  implementations with different calling conventions. Logged as
+  `TECH_DEBT.md` TD-001, kept out of the ADR log on purpose — neither
+  implementation was touched pending investigation.
+
+Validated by full bundling. Zero duplicate declarations confirmed.
+
+`App.jsx`: 15,415 → 15,386 lines.
+
+No breaking changes. No behavior changes — pure code motion for the
+three extracted functions; the flagged defect was found, not fixed.
+
 ## v0.8.0 — Second screen extraction: Events (Sprint 2 begins)
 
 First extraction of Sprint 2, following the exact process from Sprint 1:

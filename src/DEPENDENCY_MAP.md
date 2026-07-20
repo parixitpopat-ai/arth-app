@@ -52,6 +52,34 @@ single `ctx` object (which would reduce typo risk but not actually
 improve modularity — noted and deliberately rejected as a shortcut).
 People and Bills are in the same category for the same reason.
 
+## Domain services (new layer, first module)
+
+```
+src/domain/bills/calculations.js
+└── zero dependency (computeNextDueDate, computeNextPeriod,
+    remainingShare) — all three passed the Function Extraction
+    Checklist (CODING_STANDARDS.md) verbatim, no signature changes.
+
+Bills re-measured before this pass: 38 genuine external dependencies
+(down from earlier ~48 estimate, but still far over the <20 threshold —
+picked up new deps from the Credit Card folding-in work since the last
+check). Roughly half of Bills' coupling is business-logic functions, not
+raw state — this is why domain extraction came before useArthData()
+implementation: moving bills/billers/billerAccounts into a hook without
+first addressing this would leave the coupling fully intact, just
+relocated.
+
+Left in App.jsx, NOT extracted (fail the purity checklist):
+- getCardSummary — closes over accounts/txns directly
+- getCurrentPeriod — depends on getMembershipPeriods, not yet traced further
+- getNetBillAmount — closes over refundTotalsByBill (derived state)
+
+Also found during this pass, NOT an architecture decision — logged in
+TECH_DEBT.md (TD-001) instead: sharePaymentRequest/doTxnShare exist as
+two independent, parallel implementations with different calling
+conventions.
+```
+
 ## Extracted screens (Phase 2)
 
 ```

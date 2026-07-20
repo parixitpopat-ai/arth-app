@@ -55,6 +55,31 @@ already implicit in the current code and worth formalizing on extraction:
 - `calculateSafeSpend()`
 - `calculateGoalForecast()`
 
+## Function Extraction Checklist
+
+Distinct from the screen-level "Definition of Extractable" below — this
+applies to individual functions being moved into `src/domain/*` or
+`src/helpers/*`, not whole screens. A function may only be extracted if
+it satisfies **all** of the following:
+
+- ✅ No React hooks (`useState`, `useCallback`, `useMemo`, etc.)
+- ✅ No closure over component state (reads only its own parameters)
+- ✅ No setter usage (`setX(...)`)
+- ✅ No JSX
+- ✅ No DOM access
+- ✅ No implicit globals
+- ✅ Behavior unchanged after extraction (verbatim move, no signature changes)
+
+If any item fails, it's a **refactor candidate**, not an extraction
+candidate — changing a function's signature to make it pure (e.g. taking
+`accounts`/`txns` as parameters instead of closing over them) is a real
+behavior-affecting change that deserves its own dedicated pass, not to
+be folded into what should be a zero-risk mechanical move. See
+`domain/bills/calculations.js` for the first real example: three
+functions passed this checklist as-is; three others (`getCardSummary`,
+`getCurrentPeriod`, `getNetBillAmount`) didn't and were deliberately left
+in `App.jsx` rather than force-extracted.
+
 ## Definition of Extractable
 A screen or component may leave `App.jsx` only if **all** of the following
 are true:

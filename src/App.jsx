@@ -21,6 +21,7 @@ import { parseMoney, cleanMoneyInput, nearlyEqualMoney } from "./helpers/currenc
 import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/GoalsScreen";
 import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/EventsScreen";
+import { computeNextDueDate, computeNextPeriod, remainingShare } from "./domain/bills/calculations";
 import StatCard from "./components/StatCard";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -41,32 +42,7 @@ const extractSmsBalance = txt => {
   const m = String(txt ?? "").match(/(?:avail(?:able)?[\s\w]{0,10}(?:bal(?:ance)?|limit)|(?:a\/c\s+)?bal(?:ance)?(?:\s+(?:is|:|-))?|closing\s+bal|avl\.?\s+bal|a\/c\s+bal)[\s:]*(?:Rs\.?|INR|\u20b9)?\s*([\d,]+(?:\.\d{1,2})?)/i);
   return m ? parseFloat(m[1].replace(/,/g,"")) : null;
 };
-// F12: Compute next due date based on billing model
-const computeNextDueDate = (bill, paidDate) => {
-  const base = bill.billingModel === "prorata"
-    ? new Date(paidDate || bill.dueDate || bill.activationDate || new Date())
-    : new Date(bill.periodEnd || bill.dueDate || new Date());
-  const next = new Date(base);
-  const freq = bill.frequency || "monthly";
-  if(freq === "monthly") next.setMonth(next.getMonth() + 1);
-  else if(freq === "quarterly") next.setMonth(next.getMonth() + 3);
-  else if(freq === "halfyearly") next.setMonth(next.getMonth() + 6);
-  else if(freq === "annual" || freq === "yearly") next.setFullYear(next.getFullYear() + 1);
-  else if(freq === "custom" && bill.validityDays) next.setDate(next.getDate() + Number(bill.validityDays));
-  return next.toISOString().split("T")[0];
-};
-const computeNextPeriod = (bill, paidDate) => {
-  if(bill.billingModel !== "calendar" || !bill.periodStart || !bill.periodEnd) return null;
-  const start = new Date(bill.periodEnd); start.setDate(start.getDate() + 1);
-  const end = new Date(start);
-  const freq = bill.frequency || "monthly";
-  if(freq === "monthly") end.setMonth(end.getMonth() + 1);
-  else if(freq === "quarterly") end.setMonth(end.getMonth() + 3);
-  else if(freq === "halfyearly") end.setMonth(end.getMonth() + 6);
-  else if(freq === "annual" || freq === "yearly") end.setFullYear(end.getFullYear() + 1);
-  end.setDate(end.getDate() - 1);
-  return { periodStart: start.toISOString().split("T")[0], periodEnd: end.toISOString().split("T")[0] };
-};
+// F12: Compute next due date based on billing model — now in domain/bills/calculations.js
 const normalizeIncomeTypeValue = value => String(value ?? "")
   .trim()
   .toLowerCase()
@@ -402,11 +378,6 @@ const findSmsAccountMatches = (txt, accounts=[]) => {
     })
     .filter(Boolean)
     .sort((a,b)=>b.score-a.score || String(a.account?.name||"").localeCompare(String(b.account?.name||"")));
-};
-const remainingShare = info => {
-  if(!info) return 0;
-  if(info.settled) return 0;
-  return Math.max(0, Number(info?.remainingAmt ?? info?.amount ?? 0));
 };
 const linkedSettlementKey = t => t?.type==="settlement_in" && t?.againstTxnId
   ? [t.fromPersonId||"", t.againstTxnId||"", t.date||"", Number(t.amount||0), t.accId||""].join("|")
