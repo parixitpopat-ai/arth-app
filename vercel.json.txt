@@ -1,3 +1,0 @@
-{
-  "alias": ["arth-app.vercel.app"]
-}
