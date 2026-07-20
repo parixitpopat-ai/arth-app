@@ -1673,78 +1673,46 @@ function AppContent({ onLock }) {
   },[getMembershipPeriods]);
   const getPersonAttributedAmount = useCallback((t, pid) => {
     if(t.type!=="expense") return 0;
-    let total = 0;
-    // The "tag → attribute" flow writes the same amount to BOTH t.forPerson and
-    // t.people[pid].mode==="spent_on" for the same person — two fields stating one fact, not two
-    // separate amounts. Summing both double-counted every attribute-tagged expense. The people
-    // map is the current (F8) system, so it takes priority; forPerson only counts when there's no
-    // people-map entry for this person (older transactions that predate the people map).
-    // A transaction can ALSO carry a groupId alongside individual people entries (a group split
-    // that names who owes what). When that happens, the group's own total (matched on t.groupId
-    // elsewhere) already accounts for this money — counting it again here for the individual
-    // would double it against the group total. Only "spent_on" (attribution, no repayment) is
-    // affected; "owes" (a genuine receivable) is left untouched since that's real debt tracking,
-    // not spend aggregation, and doesn't overlap with a group spend total.
-    if(t.people?.[pid]?.mode==="spent_on"){
-      if(!t.groupId) total += Number(t.people[pid].amount||0);
-    } else if(t.forPerson===pid){
-      total += Number(t.tagPersonAmount||t.amount||0);
+    // A transaction can carry attribution in up to four different fields depending on which flow
+    // or app version created it: the people map, forPerson, tagItems, allocations. These are
+    // meant to be mutually exclusive descriptions of the same fact — but older transactions from
+    // earlier in this app's development may have more than one populated at once. Summing
+    // whichever ones matched (the previous approach) silently doubled the amount whenever that
+    // happened. This takes exactly ONE contribution per transaction, in a fixed priority order,
+    // and returns immediately — structurally impossible to double-count no matter how many fields
+    // are populated, not just for the specific combination we happened to find.
+    if(t.people?.[pid]?.mode==="spent_on" && !t.groupId){
+      return Number(t.people[pid].amount||0);
     }
     if(t.tagItems?.length){
-      t.tagItems.forEach(item=>{ if(item.targetType==="person"&&item.targetId===pid) total += Number(item.amount||0); });
+      const item = t.tagItems.find(i=>i.targetType==="person"&&i.targetId===pid);
+      if(item) return Number(item.amount||0);
     }
     if(t.allocations?.length){
-      t.allocations.forEach(alloc=>{ if(alloc.targetType==="person"&&alloc.targetId===pid&&alloc.mode==="spent_on") total += Number(alloc.amount||0); });
+      const alloc = t.allocations.find(a=>a.targetType==="person"&&a.targetId===pid&&a.mode==="spent_on");
+      if(alloc) return Number(alloc.amount||0);
     }
-    return total;
+    if(t.forPerson===pid){
+      return Number(t.tagPersonAmount||t.amount||0);
+    }
+    return 0;
   },[]);
+  // Reuses getPersonAttributedAmount directly rather than re-implementing the same field-priority
+  // logic a second time — that duplication is exactly how the two versions drifted apart before
+  // (one got the groupId/tagItems/allocations fix, the other didn't) and produced the doubled
+  // category totals. One function, one source of truth; this just sums it across people.
   const personSpend = useMemo(()=>{
     const map={};
+    const knownPersonIds = people.map(p=>p.id).filter(id=>id!=="__me__");
     thisMonthTxns.forEach(t=>{
       if(t.type!=="expense") return;
-      // people map (spent_on) is the current system and takes priority — forPerson gets set to
-      // the same person by the same "tag → attribute" flow, so only count it as a fallback for
-      // older transactions that predate the people map (see getPersonAttributedAmount above).
-      if(t.people?.[t.forPerson]?.mode==="spent_on"){
-        // already covered by the people-map branch below; skip forPerson entirely
-      } else if(t.forPerson){
-        if(!map[t.forPerson]) map[t.forPerson]=0;
-        map[t.forPerson]+=(t.tagPersonAmount||t.amount);
-      }
-      // tagItems (itemized tag)
-      if(t.tagItems?.length){
-        t.tagItems.forEach(item=>{
-          if(item.targetType==="person"&&item.targetId){
-            if(!map[item.targetId]) map[item.targetId]=0;
-            map[item.targetId]+=Number(item.amount||0);
-          }
-        });
-      }
-      // Txn breakup / allocate: mode="spent_on" (A=Attribute) counts as spend on person.
-      // Skip when the transaction also has a groupId — that money is already counted in the
-      // group's own total elsewhere, so counting it again per-member would double it (same fix
-      // as getPersonAttributedAmount above).
-      if(t.people&&!t.groupId){
-        Object.entries(t.people).forEach(([pid,info])=>{
-          if(pid==="__me__") return;
-          if(info.mode==="spent_on"&&Number(info.amount||0)>0){
-            if(!map[pid]) map[pid]=0;
-            map[pid]+=Number(info.amount||0);
-          }
-        });
-      }
-      // allocations array (unified/allocate mode)
-      if(t.allocations?.length){
-        t.allocations.forEach(alloc=>{
-          if(alloc.targetType==="person"&&alloc.targetId&&alloc.mode==="spent_on"&&Number(alloc.amount||0)>0){
-            if(!map[alloc.targetId]) map[alloc.targetId]=0;
-            map[alloc.targetId]+=Number(alloc.amount||0);
-          }
-        });
-      }
+      knownPersonIds.forEach(pid=>{
+        const amt = getPersonAttributedAmount(t,pid);
+        if(amt>0){ if(!map[pid]) map[pid]=0; map[pid]+=amt; }
+      });
     });
     return map;
-  },[thisMonthTxns]);
+  },[thisMonthTxns, people, getPersonAttributedAmount]);
 
   // Personal budget alerts — same 80%/over-budget thresholds as the Monthly Dashboard's Budget
   // Insights, surfaced as notifications instead of a permanent Home card. Each alert's id is
