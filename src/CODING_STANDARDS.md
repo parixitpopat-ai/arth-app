@@ -55,6 +55,17 @@ already implicit in the current code and worth formalizing on extraction:
 - `calculateSafeSpend()`
 - `calculateGoalForecast()`
 
+## Lessons from the Cards extraction
+
+**A closure audit verifies component coupling. It does not replace a
+dependency-chain audit.** `getCardSummary`'s audit correctly found it
+closed over exactly `accounts` and `txns` — clean. But extraction itself
+surfaced one more blocker the audit didn't catch: `toDateOnly`, called
+*inside* the function, part of a separately-deferred chain (ADR-002).
+Always inspect transitive helper dependencies — what the function *calls*,
+not just what it *closes over* — before assuming a passed audit means a
+frictionless move.
+
 ## Function Extraction Checklist
 
 Distinct from the screen-level "Definition of Extractable" below — this
