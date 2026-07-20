@@ -48,3 +48,13 @@ export const getPreviousMonthKey = (monthKey = todayStr().slice(0,7)) => {
   const ref = new Date((year || new Date().getFullYear()), (month || 1) - 2, 1);
   return `${ref.getFullYear()}-${String(ref.getMonth()+1).padStart(2,"0")}`;
 };
+
+// Returns the given day-of-month within (year, monthIndex), clamped to that month's actual last
+// day — e.g. day 31 in a 30-day month becomes the 30th, not an overflow into the next month.
+// Used by getCardCycleDates (domain/cards/summaries.js) and getNextDueDate. General-purpose, not
+// domain-specific, so it lives here rather than in a domain module.
+export const dateAtDay = (year, monthIndex, day) => {
+  const safeDay = Math.max(1, Number(day)||1);
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  return new Date(year, monthIndex, Math.min(safeDay, lastDay), 12, 0, 0, 0);
+};

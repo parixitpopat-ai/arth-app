@@ -23,6 +23,7 @@ import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/Go
 import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/EventsScreen";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { remainingShare } from "./domain/shared/remainingShare";
+import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import StatCard from "./components/StatCard";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -293,33 +294,12 @@ const txnHasPerson = (txn, personId) => {
   if(String(txn.toPersonId||"")===String(personId)) return true;
   return Object.keys(txn.people||{}).some(pid=>String(pid)===String(personId));
 };
-const dateAtDay = (year, monthIndex, day) => {
-  const safeDay = Math.max(1, Number(day)||1);
-  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
-  return new Date(year, monthIndex, Math.min(safeDay, lastDay), 12, 0, 0, 0);
-};
 const getNextDueDate = (startDate, dueDay) => {
   const base = toDateOnly(startDate) || new Date();
   const safeDay = Math.max(1, Math.min(31, parseInt(dueDay || base.getDate(), 10) || base.getDate()));
   let candidate = dateAtDay(base.getFullYear(), base.getMonth(), safeDay);
   if(candidate < base) candidate = dateAtDay(base.getFullYear(), base.getMonth() + 1, safeDay);
   return candidate.toISOString().split("T")[0];
-};
-const getCardCycleDates = (card, refDate = new Date()) => {
-  const statementDay = Math.max(1, Math.min(31, parseInt(card?.statementDate || 15, 10)));
-  const dueDay = Math.max(1, Math.min(31, parseInt(card?.dueDate || 5, 10)));
-  const ref = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate(), 12, 0, 0, 0);
-
-  let lastStatementDate = dateAtDay(ref.getFullYear(), ref.getMonth(), statementDay);
-  if(ref < lastStatementDate) lastStatementDate = dateAtDay(ref.getFullYear(), ref.getMonth() - 1, statementDay);
-
-  const prevStatementDate = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth() - 1, statementDay);
-  const nextStatementDate = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth() + 1, statementDay);
-
-  let dueOn = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth(), dueDay);
-  if(dueOn <= lastStatementDate) dueOn = dateAtDay(lastStatementDate.getFullYear(), lastStatementDate.getMonth() + 1, dueDay);
-
-  return { prevStatementDate, lastStatementDate, nextStatementDate, dueOn };
 };
 const isInvestmentAccount = account => {
   if(!account || account.type==="cc") return false;
@@ -2035,53 +2015,6 @@ function AppContent({ onLock }) {
   },[txns,accounts]);
   const creditCardLiabilityTotal = useMemo(()=>accounts.reduce((sum,a)=>sum+(a.type==="cc"?cardOutstanding(a):0),0),[accounts,cardOutstanding]);
   const otherLiabilityTotal = useMemo(()=>liabilities.reduce((sum,l)=>sum+Number(l.outstanding||0),0),[liabilities]);
-  const getCardSummary = useCallback((card)=>{
-    const { prevStatementDate, lastStatementDate, nextStatementDate, dueOn } = getCardCycleDates(card, new Date());
-    const linkedUpiIds = accounts.filter(a=>a.type==="upi"&&a.linkedAccount===card.id).map(a=>a.id);
-    const allIds = [card.id, ...linkedUpiIds];
-    const today = new Date();
-    const todayMid = new Date(today.getFullYear(),today.getMonth(),today.getDate(),12,0,0,0);
-    const todayS = todayStr();
-    // Outstanding = last closed billing cycle charges (prevStatementDate < date ≤ lastStatementDate)
-    const lastCycleCharges = txns.reduce((sum,t)=>{
-      if((t.type!=="expense"&&t.type!=="investment"&&t.type!=="cc_emi")||!allIds.includes(t.accId)) return sum;
-      if(!t.date||String(t.date)>todayS) return sum;
-      const d=toDateOnly(t.date);
-      if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
-      return sum+Number(t.amount||0);
-    },0);
-    // Refunds WITHIN the billing cycle reduce charges directly
-    const inCycleRefunds = txns.reduce((sum,t)=>{
-      if(t.type!=="settlement_in"||!t.isRefund||!allIds.includes(t.accId)) return sum;
-      const d=toDateOnly(t.date);
-      if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
-      return sum+Number(t.amount||0);
-    },0);
-    // Payments AND refunds AFTER statement date reduce outstanding
-    const paymentsSinceStatement = txns.reduce((sum,t)=>{
-      const isCcPayment = t.type==="cc_payment" && t.toAccId===card.id;
-      const isCcRefund = t.type==="settlement_in" && t.isRefund && allIds.includes(t.accId);
-      if(!isCcPayment && !isCcRefund) return sum;
-      const d=toDateOnly(t.date);
-      if(!d||!lastStatementDate||d<=lastStatementDate) return sum;
-      return sum+Number(t.amount||0);
-    },0);
-    const totalOutstanding = Math.max(0, lastCycleCharges - inCycleRefunds - paymentsSinceStatement);
-    // Unbilled = current open cycle charges (after lastStatementDate, up to today)
-    const currentCycleSpend = Math.max(0, txns.reduce((sum,t)=>{
-      if((t.type!=="expense"&&t.type!=="cc_emi")||!allIds.includes(t.accId)) return sum;
-      const txnDate=toDateOnly(t.date);
-      if(!txnDate||!lastStatementDate||txnDate<=lastStatementDate||txnDate>todayMid) return sum;
-      return sum+Number(t.amount||0);
-    },0));
-    // Due Now = unpaid statement amount (already net of payments above)
-    const currentDue = totalOutstanding;
-    const alertPct=Number(card.alertPct??30);
-    const thresholdAmount=card.limit?(Number(card.limit||0)*alertPct)/100:0;
-    const isOverAlert=Boolean(card.limit)&&alertPct>0&&currentCycleSpend>=thresholdAmount&&currentCycleSpend>0;
-    const daysToDue=Math.ceil((dueOn-todayMid)/(1000*60*60*24));
-    return { prevStatementDate,lastStatementDate,nextStatementDate,dueOn,totalOutstanding,currentCycleSpend,currentDue,alertPct,thresholdAmount,isOverAlert,daysToDue };
-  },[txns,accounts]);
   const groupReceivableTotal = useCallback(groupId=>{
     const txnOwed = txns.filter(t=>t.type==="expense" && (
       t.groupId===groupId ||
@@ -6539,7 +6472,7 @@ function AppContent({ onLock }) {
     const linkedDebitIds = a.type==="bank"
       ? accounts.filter(x=>(x.type==="debit"&&x.linkedBank===a.id)||(x.type==="upi"&&x.linkedAccount===a.id)).map(x=>x.id)
       : [];
-    const cardSummary = a.type==="cc" ? getCardSummary(a) : null;
+    const cardSummary = a.type==="cc" ? getCardSummary(a, accounts, txns, toDateOnly) : null;
     const util = a.type==="cc" && a.limit ? Math.round((((cardSummary?.currentCycleSpend)||0)/a.limit)*100) : 0;
     const utilLimit = cardSummary?.alertPct || 30;
     const currentBalance = a.type==="cc"
@@ -7371,7 +7304,7 @@ function AppContent({ onLock }) {
 
   const Home = () => {
     const ccList = accounts.filter(a=>a.type==="cc");
-    const ccSummaries = ccList.map(card=>({ card, ...getCardSummary(card) }));
+    const ccSummaries = ccList.map(card=>({ card, ...getCardSummary(card, accounts, txns, toDateOnly) }));
     const totalDue = ccSummaries.reduce((s,item)=>s+item.currentDue,0);
     const totalUnbilled = ccSummaries.reduce((s,item)=>s+item.currentCycleSpend,0);
     const anyHighUtil = ccSummaries.some(item=>item.isOverAlert);
@@ -10376,7 +10309,7 @@ function AppContent({ onLock }) {
         color:T.purple,
       })),
       cc: accounts.filter(a=>a.type==="cc").map(a=>{
-        const summary = getCardSummary(a);
+        const summary = getCardSummary(a, accounts, txns, toDateOnly);
         return {
           id:a.id,
           title:a.name,
@@ -10648,7 +10581,7 @@ function AppContent({ onLock }) {
         title:"💳 Credit card breakup",
         subtitle:"Current due vs total outstanding",
         items: accounts.filter(a=>a.type==="cc").map(a=>{
-          const summary = getCardSummary(a);
+          const summary = getCardSummary(a, accounts, txns, toDateOnly);
           return {
             id:a.id,
             title:a.name,
@@ -11057,7 +10990,7 @@ function AppContent({ onLock }) {
                 {accs.map(a=>{
                   const bal=a.type==="cc"?null:(a.type==="bank" ? effectiveAccountBalance(a.id) : accountBalance(a.id));
                   const linkedB=a.type==="debit"?accounts.find(b=>b.id===a.linkedBank):null;
-                  const ccSummary = a.type==="cc" ? getCardSummary(a) : null;
+                  const ccSummary = a.type==="cc" ? getCardSummary(a, accounts, txns, toDateOnly) : null;
                   return (
                     <div key={a.id} style={{ ...card,cursor:"pointer" }} onClick={()=>setShowAccDetail(a)}>
                       <div style={{ display:"flex",alignItems:"center",gap:12 }}>
@@ -12512,7 +12445,7 @@ function AppContent({ onLock }) {
       });
     const totalUnpaid = bills.filter(b=>b.status==="unpaid").reduce((s,b)=>s+getNetBillAmount(b),0);
     const ccBillsDue = accounts.filter(a=>a.type==="cc").map(a=>{
-      const summary = getCardSummary(a);
+      const summary = getCardSummary(a, accounts, txns, toDateOnly);
       if(!summary?.currentDue||summary.currentDue<=0) return null;
       return { _isCC:true,id:`cc_due_${a.id}`,name:`${a.name} CC Bill`,type:"Credit Card",amount:summary.currentDue,dueDate:a.dueDate||"",accId:a.id,status:"unpaid" };
     }).filter(Boolean);
@@ -12570,7 +12503,7 @@ function AppContent({ onLock }) {
                   // stored as Bill records.
                   const ccAcc = accs.find(a=>a.accId) ? accounts.find(a=>a.id===accs.find(x=>x.accId).accId) : null;
                   if(ccAcc){
-                    const summary = getCardSummary(ccAcc);
+                    const summary = getCardSummary(ccAcc, accounts, txns, toDateOnly);
                     const hasDue = summary?.currentDue>0;
                     const needsAttention = Boolean(hasDue && summary.daysToDue!=null && summary.daysToDue<=7);
                     return { key:"shell-"+billerId, billerId, icon:getBillerIcon(shell.type), name:shell.name, connLabel:shell.type, unpaidCount:hasDue?1:0, pinned:Boolean(shell.pinned), needsAttention, amount:hasDue?Number(summary.currentDue):0, dueText:hasDue?dueSoonText(ccAcc.dueDate||summary.dueOn):"", onClick:()=>setActiveBillerForAction(accs[0]) };
@@ -14646,7 +14579,7 @@ function AppContent({ onLock }) {
                 {ba.accId&&(()=>{
                   const ccAcc = accounts.find(a=>a.id===ba.accId);
                   if(!ccAcc) return null;
-                  const summary = getCardSummary(ccAcc);
+                  const summary = getCardSummary(ccAcc, accounts, txns, toDateOnly);
                   return (
                     <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16 }}>
                       <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>

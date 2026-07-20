@@ -3,6 +3,41 @@
 Format: newest first. One entry per shipped batch, not per individual
 fix — see `SCREEN_ARCHITECTURE.md` for per-screen implementation detail.
 
+## v0.9.1 — Cards domain pass (Pass 1 of 2)
+
+Followed the audit-first process end to end: call-site inventory (8
+sites, all found and classified) before any signature change, then
+parameterize, then extract, then validate — not the other way around.
+
+- `src/domain/cards/summaries.js` — `getCardCycleDates`,
+  `getCardSummary(card, accounts, txns, toDateOnly)`
+- `dateAtDay` moved to `helpers/dateHelpers.js` — discovered as a
+  Cards-blocking dependency during extraction; general-purpose (also
+  used by `getNextDueDate`), not domain-specific, so it belongs in
+  helpers rather than a domain module
+- `toDateOnly` deliberately **not** extracted alongside this, even
+  though it blocked the module — it's part of the date-parsing chain
+  already deferred in ADR-002. Passed as an explicit parameter instead
+  of reopening that decision. Kept this pass contained to exactly what
+  was scoped.
+- All 8 call sites updated in a single commit, per the checklist: find
+  every caller → classify → confirm `accounts`/`txns` already in scope
+  → change signature → update all call sites together → validate
+
+Split `DEPENDENCY_MAP.md`'s tracking into three explicit stages —
+Measured / Audited / Extracted — rather than one flat status, per the
+"Parameterization Candidates" table.
+
+Validated by full bundling. Zero duplicate declarations confirmed.
+
+`App.jsx`: 15,386 → 15,320 lines.
+
+No breaking changes. No behavior changes — pure mechanical move plus
+parameterization, same output for every call site.
+
+Pass 2 (Bills refunds: `computeRefundTotalsByBill` + `getNetBillAmount`)
+already audited clean, not yet extracted — next pass.
+
 ## v0.9.0 — First domain service module: Bills calculations
 
 Re-measured Bills before deciding on `useArthData()`'s next step (not

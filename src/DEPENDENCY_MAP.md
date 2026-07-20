@@ -52,9 +52,40 @@ single `ctx` object (which would reduce typo risk but not actually
 improve modularity — noted and deliberately rejected as a shortcut).
 People and Bills are in the same category for the same reason.
 
+## Parameterization Candidates
+
+Distinguishes three stages: **Measured** (dependency count known),
+**Audited** (checked against the Function Extraction Checklist — no
+hooks, no closures, no setters, no JSX, no DOM, no implicit globals),
+**Extracted** (actually moved, validated by build).
+
+| Function | Status | Target Module |
+|---|---|---|
+| `getCardCycleDates` | ✅ Extracted | `domain/cards/summaries.js` |
+| `getCardSummary` | ✅ Extracted | `domain/cards/summaries.js` |
+| `dateAtDay` | ✅ Extracted (discovered as a Cards-blocking dependency, general-purpose, not domain-specific) | `helpers/dateHelpers.js` |
+| `computeRefundTotalsByBill` | ✅ Audited, not yet extracted | `domain/bills/refunds.js` (next pass) |
+| `getNetBillAmount` | ✅ Audited, not yet extracted | `domain/bills/refunds.js` (next pass) |
+
 ## Domain services (new layer)
 
 ```
+src/domain/cards/summaries.js
+├── helpers/dateHelpers.js (dateAtDay)
+└── exports: getCardCycleDates, getCardSummary(card, accounts, txns, toDateOnly)
+
+getCardSummary's audit (Function Extraction Checklist) found it closed over exactly `accounts`
+and `txns` — clean. Its one helper call, getCardCycleDates, was already fully module-level pure.
+One more dependency surfaced during extraction, not caught by the audit alone: toDateOnly, part
+of the date-parsing chain deliberately deferred in ADR-002. Rather than reopen that deferral,
+toDateOnly is passed as an explicit parameter — keeps this pass contained to exactly what was
+scoped (Cards), not a backdoor re-litigation of a separate decision.
+
+8 call sites updated in one pass (all within AppContent's own closure — no nested wrapper
+functions needed their own parameterization, confirmed during the call-site audit before any
+signature change was made): Home, account-list utilization, Reports/Insights CC breakdown,
+account detail, Bills' ccBillsDue, biller-linked-card views.
+
 src/domain/bills/periodCalculations.js
 └── zero dependency (computeNextDueDate, computeNextPeriod)
 
