@@ -2888,6 +2888,24 @@ function AppContent({ onLock }) {
 
     const effectiveCat = qaCatId ? cats.find(c=>c.id===qaCatId) : detected;
     const canSave = parseFloat(qaAmount)>0 && qaWho.trim();
+
+    // Vendor name suggestions — recent/frequent merchants matching what's typed so far, so you
+    // don't have to fully retype "Swiggy" every time. Ranked by recency, deduped by name.
+    const [showVendorSuggestions, setShowVendorSuggestions] = useState(false);
+    const vendorSuggestions = useMemo(() => {
+      const vendorText = normalizeVendorText(qaWho);
+      if(!vendorText || qaType!=="expense") return [];
+      const seen = new Map(); // normalized name -> { name, lastUsed }
+      [...txns].sort((a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a)).forEach(t=>{
+        if(t.type!=="expense") return;
+        const name = t.merchant||t.desc;
+        if(!name) return;
+        const norm = normalizeVendorText(name);
+        if(!norm.includes(vendorText) || norm===vendorText) return; // hide exact match to current input
+        if(!seen.has(norm)) seen.set(norm, name);
+      });
+      return [...seen.values()].slice(0,5);
+    }, [qaWho, qaType, txns]);
     const savingRef = useRef(false);
     const [saving, setSaving] = useState(false);
     // Directly saves — no split, no person/group tagging, no items. Anything needing those goes
@@ -2948,7 +2966,17 @@ function AppContent({ onLock }) {
           {/* What was it */}
           <div style={{ marginBottom:14 }}>
             <span style={lbl}>{qaType==="expense"?"What was it?":"Source"}</span>
-            <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder={qaType==="expense"?"e.g. Petrol, Swiggy, Netflix":"e.g. Salary, Freelance"} value={qaWho} onChange={e=>setQaWho(e.target.value)}/>
+            <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder={qaType==="expense"?"e.g. Petrol, Swiggy, Netflix":"e.g. Salary, Freelance"} value={qaWho}
+              onChange={e=>{ setQaWho(e.target.value); setShowVendorSuggestions(true); }}
+              onFocus={()=>setShowVendorSuggestions(true)}
+              onBlur={()=>setTimeout(()=>setShowVendorSuggestions(false),150)}/>
+            {showVendorSuggestions&&vendorSuggestions.length>0&&(
+              <div style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:12,marginTop:6,overflow:"hidden" }}>
+                {vendorSuggestions.map(name=>(
+                  <button key={name} onMouseDown={e=>e.preventDefault()} onClick={()=>{ setQaWho(name); setShowVendorSuggestions(false); }} style={{ display:"block",width:"100%",textAlign:"left",background:"none",border:"none",borderBottom:`1px solid ${T.border}`,padding:"9px 14px",cursor:"pointer",color:T.text,fontSize:13,fontWeight:600,fontFamily:"Nunito,sans-serif" }}>{name}</button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Category (expense only) + Account, side by side */}
