@@ -13971,7 +13971,7 @@ function AppContent({ onLock }) {
     };
 
     const submit=()=>{
-      if(!name.trim()||!parseFloat(amount) || duplicateInvoiceBill) return;
+      if(!name.trim()||!parseFloat(amount)||!dueDate||duplicateInvoiceBill) return;
       const shares=calcShares();
       const peopleSplit={};
       Object.entries(shares).forEach(([pid,sh])=>{ const p=getPerson(pid); peopleSplit[pid]={amount:sh,mode:p.personType!=="dependant"?"owes":"spent_on"}; });
@@ -14111,7 +14111,7 @@ function AppContent({ onLock }) {
 
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={()=>setShowAddBill(false)} style={btnG}>Cancel</button>
-              <button onClick={submit} style={{ ...btnP,opacity:name.trim()?1:0.5 }}>Add Bill</button>
+              <button onClick={submit} disabled={!name.trim()||!parseFloat(amount)||!dueDate} style={{ ...btnP,opacity:(name.trim()&&parseFloat(amount)&&dueDate)?1:0.5 }}>{!dueDate&&name.trim()&&parseFloat(amount)?"Enter a due date":"Add Bill"}</button>
             </div>
           </div>
         </div>
@@ -14526,15 +14526,15 @@ function AppContent({ onLock }) {
           return (
             <div onClick={e=>{ if(e.target===e.currentTarget) setActiveBillerShell(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
               <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-                  <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-                    <span style={{ fontSize:24 }}>{getBillerIcon(shell.type)}</span>
-                    <div>
-                      <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{shell.name}</div>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:16 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1 }}>
+                    <span style={{ fontSize:24,flexShrink:0 }}>{getBillerIcon(shell.type)}</span>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ color:T.text,fontSize:16,fontWeight:900,wordBreak:"break-word" }}>{shell.name}</div>
                       <div style={{ color:T.sub,fontSize:11 }}>{shell.type}</div>
                     </div>
                   </div>
-                  <div style={{ display:"flex",alignItems:"center" }}>
+                  <div style={{ display:"flex",alignItems:"center",flexShrink:0 }}>
                     <button onClick={()=>{ setEditingBillerShell(shell); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"Nunito,sans-serif",marginRight:8 }}>✏️ Edit</button>
                     <button onClick={()=>{
                       if(accs.length>0){
@@ -14584,15 +14584,34 @@ function AppContent({ onLock }) {
           return (
             <div onClick={e=>{ if(e.target===e.currentTarget) setActiveBillerForAction(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
               <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-                  <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-                    <span style={{ fontSize:28 }}>{getBillerIcon(ba.type)}</span>
-                    <div>
-                      <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{ba.name}</div>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:16 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:10,minWidth:0,flex:1 }}>
+                    <span style={{ fontSize:28,flexShrink:0 }}>{getBillerIcon(ba.type)}</span>
+                    <div style={{ minWidth:0 }}>
+                      <div style={{ color:T.text,fontSize:15,fontWeight:900,wordBreak:"break-word" }}>{ba.name}</div>
                       <div style={{ color:T.sub,fontSize:11 }}>{ba.billerId&&billers.find(b=>b.id===ba.billerId)?.name || ba.type}{ba.consumerNo?` · #${ba.consumerNo}`:""}</div>
                     </div>
                   </div>
-                  <button onClick={()=>setActiveBillerForAction(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+                  <button onClick={()=>setActiveBillerForAction(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>x</button>
+                </div>
+                {/* Edit / Delete biller account — moved right under the header, not buried below
+                    Analytics/History/Documents, so it's reachable without scrolling. */}
+                <div style={{ display:"flex",gap:8,marginBottom:16 }}>
+                  <button onClick={()=>{ setEditingBillerAccount(ba); setActiveBillerForAction(null); }} style={{ flex:1,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit Account</button>
+                  <button onClick={()=>{
+                    const linkedBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
+                    const linkedMem = memberships.filter(m=>m.billerAccountId===ba.id);
+                    const linkedFee = feePayments.filter(f=>f.billerAccountId===ba.id);
+                    const total = linkedBills.length+linkedMem.length+linkedFee.length;
+                    if(total>0){
+                      askConfirm(`Cannot delete: ${ba.name} has ${total} linked record${total>1?"s":""}. Delete the bills, memberships and fee payments first.`,null);
+                      return;
+                    }
+                    askConfirm(`Delete ${ba.name}?`,()=>{
+                      setBillerAccounts(prev=>prev.filter(x=>x.id!==ba.id));
+                      setActiveBillerForAction(null);
+                    });
+                  }} style={{ flex:1,background:"none",border:`1px solid ${T.danger}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete Account</button>
                 </div>
                 {/* Current Bill / Last Bill / Average — the at-a-glance summary from the Connection
                     Dashboard spec. Bill-type accounts only; memberships have their own Hero Card
@@ -14934,24 +14953,6 @@ function AppContent({ onLock }) {
                     </div>
                   );
                 })()}
-                {/* Edit / Delete biller account */}
-                <div style={{ display:"flex",gap:8,marginTop:8 }}>
-                  <button onClick={()=>{ setEditingBillerAccount(ba); setActiveBillerForAction(null); }} style={{ flex:1,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit Account</button>
-                  <button onClick={()=>{
-                    const linkedBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
-                    const linkedMem = memberships.filter(m=>m.billerAccountId===ba.id);
-                    const linkedFee = feePayments.filter(f=>f.billerAccountId===ba.id);
-                    const total = linkedBills.length+linkedMem.length+linkedFee.length;
-                    if(total>0){
-                      askConfirm(`Cannot delete: ${ba.name} has ${total} linked record${total>1?"s":""}. Delete the bills, memberships and fee payments first.`,null);
-                      return;
-                    }
-                    askConfirm(`Delete ${ba.name}?`,()=>{
-                      setBillerAccounts(prev=>prev.filter(x=>x.id!==ba.id));
-                      setActiveBillerForAction(null);
-                    });
-                  }} style={{ flex:1,background:"none",border:`1px solid ${T.danger}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete Account</button>
-                </div>
               </div>
             </div>
           );
