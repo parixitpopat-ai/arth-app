@@ -12634,8 +12634,7 @@ function AppContent({ onLock }) {
           ))}
         </div>
         {filtered.length===0?<div style={{ ...card,textAlign:"center",padding:40 }}>
-          <div style={{ fontSize:40,marginBottom:12 }}>📭</div>
-          <div style={{ color:T.sub,fontSize:13 }}>No bills here</div>
+          <EmptyState icon="📭" title="No bills here" T={T}/>
         </div>:filtered.map(b=>{
           const today=new Date();
           const daysUntil=Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
@@ -14267,6 +14266,7 @@ function AppContent({ onLock }) {
         input[type=date]::-webkit-calendar-picker-indicator{filter:${dark?"invert(1)":"none"};}
         select option{background:#13131a;}
         textarea{font-family:Nunito,sans-serif;}
+        @keyframes arth-spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
       `}</style>
       <div style={{ maxWidth:430,margin:"0 auto",minHeight:"100vh",position:"relative",paddingBottom:80,fontFamily:"Nunito,sans-serif" }}>
 
@@ -14277,7 +14277,10 @@ function AppContent({ onLock }) {
               <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
               <div style={{ width:32,height:32,borderRadius:9,background:T.accentSoft,border:`1px solid ${T.accent}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:900,color:T.accent,fontFamily:"Nunito,sans-serif" }}>₹</div>
               <div>
-                <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1 }}>Arth</div>
+                <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                  <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1 }}>Arth</div>
+                  {cloudBusy&&<span title="Syncing..." style={{ fontSize:11,display:"inline-block",animation:"arth-spin 0.8s linear infinite" }}>🔄</span>}
+                </div>
                 <div style={{ color:T.sub,fontSize:9,marginTop:1,textTransform:"uppercase",letterSpacing:1 }}>Personal Finance</div>
               </div>
             </div>
