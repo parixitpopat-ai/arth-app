@@ -12653,12 +12653,17 @@ function AppContent({ onLock }) {
           const billImageSrc = b.imageBase64 || linkedPaymentTxn?.imageBase64 || null;
           const paymentImageSrc = b.paymentImageBase64 || linkedPaymentTxn?.paymentImageBase64 || null;
           const isExpanded = expandedBillId===b.id;
+          const linkedBA = billerAccounts.find(ba=>String(ba.id)===String(b.billerAccountId));
+          const attributedPerson = linkedBA?.attributeType==="person" && linkedBA.attributedTo ? getPerson(linkedBA.attributedTo) : null;
           return (
             <div key={b.id} style={{ ...card,border:`1px solid ${isOverdue?T.danger+"44":T.border}` }}>
               <div onClick={()=>setExpandedBillId(prev=>prev===b.id?null:b.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,cursor:"pointer" }}>
                 <div style={{ flex:1,minWidth:0,textAlign:"justify" }}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10 }}>
-                    <div style={{ color:T.text,fontSize:14,fontWeight:800,flex:1,wordBreak:"break-word" }}>{b.name}</div>
+                    <div style={{ display:"flex",alignItems:"center",gap:6,flex:1,minWidth:0 }}>
+                      <div style={{ color:T.text,fontSize:14,fontWeight:800,wordBreak:"break-word" }}>{b.name}</div>
+                      {attributedPerson&&<span title={attributedPerson.name} style={{ fontSize:12,flexShrink:0 }}>{attributedPerson.emoji||"🧑"}</span>}
+                    </div>
                     <div style={{ color:T.text,fontSize:15,fontWeight:800,whiteSpace:"nowrap",textAlign:"right" }}>{sym}{fmt(getNetBillAmount(b, refundTotalsByBill))}</div>
                   </div>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:5 }}>
@@ -13676,7 +13681,7 @@ function AppContent({ onLock }) {
   const AddMembershipModal = ({ billerAccount, existing, onClose }) => {
     const isEdit = !!existing;
     const derivedPersonId = (billerAccount.attributeType==="person" && billerAccount.attributedTo) ? String(billerAccount.attributedTo) : "self";
-    const memberPersonId = existing?.personId||derivedPersonId;
+    const [memberPersonId, setMemberPersonId] = useState(existing?.personId||derivedPersonId);
     const existingPeriods = existing?.periods || (existing ? [{ id:genId(), label:existing.cycle||"Period", from:existing.validFrom, to:existing.validUntil, amount:existing.amount, graceDays: existing.graceAppliedSeparately ? Number(existing.graceDays||0) : 0 }] : null);
 
     const [plan, setPlan] = useState(existing?.cycle||"monthly");
@@ -13746,6 +13751,14 @@ function AppContent({ onLock }) {
             <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
           </div>
           <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+
+            <div>
+              <span style={lbl}>For</span>
+              <select style={inp} value={memberPersonId} onChange={e=>setMemberPersonId(e.target.value)}>
+                <option value="self">Me</option>
+                {people.filter(p=>!p.isMe).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
 
             <div>
               <span style={lbl}>Plan</span>
