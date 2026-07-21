@@ -26,6 +26,7 @@ import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refu
 import { remainingShare } from "./domain/shared/remainingShare";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import StatCard from "./components/StatCard";
+import EmptyState from "./components/EmptyState";
 import Toast from "./components/Toast";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -2385,7 +2386,7 @@ function AppContent({ onLock }) {
   }, [txns, bills, monthOverrides, annualBudget, cashBankTotal, cashWalletTotal, upiTotal, totalAssetsValue, totalLiabilitiesValue, wealthSnapshots, netWorthValue, getMyExpenseAmount]);
 
   // ── STYLES ─────────────────────────────────────────────────────────────────
-  const card = { background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:16, marginBottom:12 };
+  const card = { background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:16, marginBottom:12, boxShadow:`0 2px 8px ${T.sh}` };
   const lbl = { color:T.sub, fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.2, display:"block", marginBottom:6 };
   const inp = { background:T.input, border:`1px solid ${T.border}`, borderRadius:10, padding:"11px 14px", color:T.text, fontSize:16, width:"100%", outline:"none", fontFamily:"Nunito,sans-serif", boxSizing:"border-box" };
   const inpSm = { background:T.input, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px 10px", color:T.text, fontSize:16, outline:"none", fontFamily:"Nunito,sans-serif" };
@@ -7565,10 +7566,8 @@ function AppContent({ onLock }) {
         </div>
       ) : (
         <div key="recent" style={{ ...card,textAlign:"center",padding:40 }}>
-          <div style={{ fontSize:48,marginBottom:12 }}>💸</div>
-          <div style={{ color:T.text,fontSize:16,fontWeight:800,marginBottom:8 }}>No transactions yet</div>
-          <div style={{ color:T.sub,fontSize:13,marginBottom:20 }}>Tap + Add to get started</div>
-          <button onClick={()=>setShowAdd(true)} style={btnP}>+ Add First Expense</button>
+          <EmptyState icon="💸" title="No transactions yet" subtitle="Tap + Add to get started" T={T}
+            action={<button onClick={()=>setShowAdd(true)} style={btnP}>+ Add First Expense</button>}/>
         </div>
       ),
     };
@@ -10945,11 +10944,7 @@ function AppContent({ onLock }) {
             </div>
           )}
           {vehicles.length===0&&!editingVehicle&&(
-            <div style={{ textAlign:"center",color:T.sub,fontSize:13,padding:"40px 0" }}>
-              <div style={{ fontSize:36,marginBottom:8 }}>🚗</div>
-              <div>No vehicles yet.</div>
-              <div style={{ fontSize:11,marginTop:4 }}>Add a vehicle to tag fuel, PUC and insurance expenses.</div>
-            </div>
+            <EmptyState icon="🚗" title="No vehicles yet" subtitle="Add a vehicle to tag fuel, PUC and insurance expenses." T={T}/>
           )}
           {vehicles.map(v=>{
             const vt=VEHICLE_TYPES.find(x=>x.id===v.type)||VEHICLE_TYPES[0];
@@ -13276,10 +13271,7 @@ function AppContent({ onLock }) {
           </div>
           <div style={{ color:T.sub,fontSize:11,marginBottom:16 }}>Matches: same type, amount, date, and account. Nothing is deleted until you select and confirm — review each group before removing anything.</div>
           {groups.length===0&&(
-            <div style={{ textAlign:"center",padding:"40px 0" }}>
-              <div style={{ fontSize:40,marginBottom:10 }}>✅</div>
-              <div style={{ color:T.text,fontSize:14,fontWeight:700 }}>No likely duplicates found</div>
-            </div>
+            <EmptyState icon="✅" title="No likely duplicates found" T={T}/>
           )}
           {groups.map((g,gi)=>{
             const acc = accounts.find(a=>a.id===g[0].accId);
@@ -14225,7 +14217,14 @@ function AppContent({ onLock }) {
   // to reliably suppress the click event that fires right after a long-press's pointerup.
   const fabPressTimer = useRef(null);
   const fabLongPressedRef = useRef(false);
+  // Visual press feedback, separate from the ref above — this one SHOULD be state, since the
+  // whole point is a re-render to show the scale change. The FAB gets a stronger, springier press
+  // (scale 0.88 + overshoot easing) than the universal button:active rule (scale 0.97, index.css)
+  // since it's the single most-tapped element in the app — chosen over the universal press by
+  // comparing both side by side.
+  const [fabPressed, setFabPressed] = useState(false);
   const handleFabPointerDown = () => {
+    setFabPressed(true);
     fabLongPressedRef.current = false;
     fabPressTimer.current = setTimeout(()=>{
       fabLongPressedRef.current = true;
@@ -14233,7 +14232,7 @@ function AppContent({ onLock }) {
       if(navigator.vibrate) navigator.vibrate(10);
     }, 500);
   };
-  const handleFabPointerUp = () => { if(fabPressTimer.current) clearTimeout(fabPressTimer.current); };
+  const handleFabPointerUp = () => { setFabPressed(false); if(fabPressTimer.current) clearTimeout(fabPressTimer.current); };
   const handleFabClick = () => {
     if(fabLongPressedRef.current){ fabLongPressedRef.current = false; return; }
     handleTab("__fab__");
@@ -14356,7 +14355,7 @@ function AppContent({ onLock }) {
           {TABS.map(t=>{
             if(t.id==="__fab__"){
               return (
-                <button key={t.id} onClick={handleFabClick} onPointerDown={handleFabPointerDown} onPointerUp={handleFabPointerUp} onPointerLeave={handleFabPointerUp} style={{ background:T.accent,border:`4px solid ${T.nav}`,borderRadius:"50%",width:52,height:52,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginTop:-22,boxShadow:"0 4px 12px rgba(0,0,0,0.25)",flexShrink:0 }}>
+                <button key={t.id} onClick={handleFabClick} onPointerDown={handleFabPointerDown} onPointerUp={handleFabPointerUp} onPointerLeave={handleFabPointerUp} style={{ background:T.accent,border:`4px solid ${T.nav}`,borderRadius:"50%",width:52,height:52,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginTop:-22,boxShadow:"0 4px 12px rgba(0,0,0,0.25)",flexShrink:0,transform:fabPressed?"scale(0.88)":"scale(1)",transition:"transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1)" }}>
                   <span style={{ fontSize:22,color:"#000",lineHeight:1 }}>+</span>
                 </button>
               );

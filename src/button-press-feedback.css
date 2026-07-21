@@ -1,0 +1,13 @@
+/* Button press feedback — Week 2 motion pass. Catches every button in the app at once (a
+   single global rule), rather than needing to touch every btnP/btnG call site individually.
+   Plain style objects (btnP, btnG in App.jsx) can't carry :active states since inline styles
+   don't support pseudo-classes — this is the reason a global CSS rule, not a component change,
+   is the right fix here. */
+button:not(:disabled):active {
+  transform: scale(0.97);
+  transition: transform 0.08s ease;
+}
+
+button:not(:disabled) {
+  transition: transform 0.08s ease;
+}
