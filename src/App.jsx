@@ -2765,6 +2765,11 @@ function AppContent({ onLock }) {
     // (categorized, searchable, shows in Timeline) without counting it as anyone's personal
     // spend — distinct from splitting, which still counts your own share. For costs that are
     // real and worth logging but genuinely aren't "your money" or anyone else's to track.
+    const [qaPaymentMethod, setQaPaymentMethod] = useState(""); // only meaningful for
+    // Expense + Bank account (ADR-018/021) — CC and Cash accounts don't need it, it's redundant
+    // with the account itself. Income/Transfer never show it: how the other party paid you, or
+    // which account-to-account rail a transfer used, isn't something Arth can know or needs to.
+    const [qaDate, setQaDate] = useState(todayStr());
 
     const recentTxnSort = (a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a);
     const [qaAccId, setQaAccId] = useState(()=>{
@@ -2833,13 +2838,14 @@ function AppContent({ onLock }) {
       const splitPeople = {};
       qaSplitWith.forEach(pid=>{ splitPeople[pid] = { amount:perShare, mode:"owes", settled:false, remainingAmt:perShare }; });
       const record = {
-        id: genId(), type:qaType, amount: parseFloat(qaAmount)||0, date: todayStr(),
+        id: genId(), type:qaType, amount: parseFloat(qaAmount)||0, date: qaDate,
         merchant: qaWho.trim(), desc: qaWho.trim(),
         catId: qaType==="expense" ? (effectiveCat?.id||null) : null,
         catIds: qaType==="expense" && effectiveCat ? [effectiveCat.id] : [],
         subId:null, subIds:[],
         accId: qaAccId, people:splitPeople, forPerson:"", groupId:null,
         vehicleId: qaVehicleId||null,
+        paymentMethod: (qaType==="expense" && accounts.find(a=>a.id===qaAccId)?.type==="bank") ? (qaPaymentMethod||null) : null,
         excludeFromSpend: qaExcludeFromSpend,
         splitMode:qaSplitWith.length>0?"split":"none", trackingMode:"none", tagMode:null, note:qaNote.trim(),
         createdAt: Date.now(), createdDate: todayStr(),
@@ -2909,6 +2915,26 @@ function AppContent({ onLock }) {
                 {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
+          </div>
+
+          {/* Payment Method — only Expense + Bank account (ADR-018/021). CC/Cash accounts don't
+              need it (redundant with the account itself); Income/Transfer never show it. */}
+          {qaType==="expense"&&accounts.find(a=>a.id===qaAccId)?.type==="bank"&&(
+            <div style={{ marginBottom:14 }}>
+              <span style={lbl}>Payment Method (optional)</span>
+              <div style={{ display:"flex",gap:8 }}>
+                {["Debit Card","UPI"].map(pm=>(
+                  <button key={pm} onClick={()=>setQaPaymentMethod(prev=>prev===pm?"":pm)} style={{ flex:1,background:qaPaymentMethod===pm?T.accentSoft:T.input,border:`1px solid ${qaPaymentMethod===pm?T.accent:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:12,fontWeight:700,color:qaPaymentMethod===pm?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pm}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Date — tappable pill, native date input so it opens the OS picker directly. Defaults
+              to today; being able to backdate without leaving Quick Add is worth the one row. */}
+          <div style={{ marginBottom:14 }}>
+            <span style={lbl}>Date</span>
+            <input type="date" value={qaDate} max={todayStr()} onChange={e=>setQaDate(e.target.value||todayStr())} style={{ ...inp,display:"inline-flex",width:"auto",cursor:"pointer" }}/>
           </div>
 
           {/* Vehicle — only for Transport-category expenses, and only if any vehicles exist.
@@ -3096,6 +3122,7 @@ function AppContent({ onLock }) {
     const [catIds, setCatIds] = useState(initialCatIds);  // multiple categories
     const [subIds, setSubIds] = useState(initialSubIds);  // multiple subcats
     const [accId, setAccId] = useState(isEditing ? (sourceTxn.accId || sourceTxn.fromAccId || defaultAccId) : (refundPrefill?.accId || safePrefill.accId || defaultAccId));
+    const [paymentMethod, setPaymentMethod] = useState(isEditing ? (sourceTxn.paymentMethod||"") : "");
     const [fromAccId, setFromAccId] = useState(isEditing ? (sourceTxn.fromAccId || defaultFromAccId) : (safePrefill.fromAccId || defaultFromAccId));
     const [toAccId, setToAccId] = useState(isEditing ? (sourceTxn.toAccId || defaultToCardId) : (safePrefill.toAccId || defaultToCardId));
     const [note, setNote] = useState(isEditing ? (sourceTxn.note || "") : (refundPrefill ? `Refund for ${refundPrefill.desc||refundPrefill.merchant||"expense"}` : (safePrefill.note || "")));
@@ -4203,6 +4230,7 @@ function AppContent({ onLock }) {
           subIds:validSubIds,
           subId:validSubIds[0]||null,
           accId,
+          paymentMethod: (txnType==="expense" && getAcc(accId)?.type==="bank") ? (paymentMethod||null) : null,
           isBillPayment,
           billInvoiceNo:billInvoiceNo.trim()||null,
           paidBillId:linkedBillId,
@@ -4715,6 +4743,16 @@ function AppContent({ onLock }) {
                   <span style={lbl}>Paid via</span>
                   <AccountChipGroup items={accounts} value={accId} onChange={setAccId} />
                 </div>
+                {getAcc(accId)?.type==="bank"&&(
+                  <div>
+                    <span style={lbl}>Payment Method (optional)</span>
+                    <div style={{ display:"flex",gap:8 }}>
+                      {["Debit Card","UPI"].map(pm=>(
+                        <button key={pm} onClick={()=>setPaymentMethod(prev=>prev===pm?"":pm)} style={{ flex:1,background:paymentMethod===pm?T.accentSoft:T.input,border:`1px solid ${paymentMethod===pm?T.accent:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:12,fontWeight:700,color:paymentMethod===pm?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pm}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {expensePaymentMode==="emi"&&(
                   <div style={{ background:T.input,border:`1px solid ${T.warn}33`,borderRadius:12,padding:"12px" }}>
                     <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>EMI plan details</div>
@@ -15270,6 +15308,7 @@ function AppContent({ onLock }) {
                 </div>
                 <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
                   {tCats.length>0&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Category</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{tCats.join(", ")}</span></div>}
+                  {t.paymentMethod&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Payment Method</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{t.paymentMethod}</span></div>}
                   {allocDisplayRows&&allocDisplayRows.map((r,i)=>(
                     <div key={i} style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>{r.label}</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{r.isGroup?(r.target.icon||"👥"):(r.target.emoji||"👤")} {r.target.name} · {sym}{fmt(r.amount)}</span></div>
                   ))}

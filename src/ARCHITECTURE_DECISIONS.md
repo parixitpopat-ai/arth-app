@@ -7,6 +7,249 @@ retroactively in a batch.
 
 ---
 
+## ADR-020 — Supersedes ADR-019: Membership survives as a legacy
+compatibility layer for 2.0, not eliminated
+
+**Decision:** ADR-019's "Bill + Transaction is sufficient, no
+Membership/BillPayment entity needed" is reversed. Membership is kept,
+unchanged in shape, for Arth 2.0 — not deleted, not converted to a new
+`BillPayment`/`BillSettlement` entity yet.
+
+**Why ADR-019 was wrong, specifically:** working through a real example
+(₹6,000 paid once, covering 6 months of gym) exposed a genuine gap.
+Recognition (ADR-016) answers *when should this expense appear* —
+that's a different question from *which specific obligations did this
+payment settle*. Neither `paidBillId` (one transaction → one bill) nor
+Recognition (a schedule on the Bill) can answer "which periods has this
+payment already covered" once the same Bill has 6 more payments across
+its lifetime and needs to reconcile against each one, plus handle
+partial payments and overpayments cleanly. That's a real, load-bearing
+gap Bill + Transaction alone doesn't close — ADR-019 collapsed two
+distinct concepts (Recognition timing, Settlement tracking) into one
+and lost information doing it.
+
+**What's kept from ADR-019 (still correct, not reversed):**
+- Bill remains the single canonical obligation entity (ADR-016)
+- `paidBillId`/`isBillPayment`/`paidBillName` on Transaction is the
+  correct, already-working link between a payment and its Bill —
+  unchanged
+- Recognition stays a Bill property (ADR-016) — unchanged
+
+**What's different:** a future entity (tentatively `BillSettlement` —
+Bill + covered Recognition periods + linked Transaction(s) + settled
+amount) would properly answer the "which periods were covered" and
+"partial/overpayment" questions. But building it now means a new
+entity, new migration, new UI, and new bugs for benefits not yet
+validated against real usage. Explicitly deferred.
+
+**Staged plan, frozen for 2.0:**
+```
+Arth 2.0
+  Bill                    — the obligation (per ADR-016)
+  Transaction             — the payment, links via paidBillId (existing, unchanged)
+  Membership (legacy)     — kept as-is: linkedTxnId, periods[], billerAccountId
+                            + ONE new field: billId (links it to its Bill)
+```
+Migration for 2.0, deliberately minimal: for each Membership, create or
+match its Bill, set `billId` on the Membership, and set
+`isBillPayment/paidBillId/paidBillName` on its linked Transaction.
+`periods[]` stays exactly where it is — not moved, not restructured.
+Nothing deleted, nothing invented, smallest change that connects
+Membership to the new Bill domain without losing what it already knows.
+
+**Explicitly deferred to 2.1/3.0, not decided now:** whether Membership
+becomes a real `BillSettlement` entity, or disappears entirely once
+Bills have run in production long enough to answer that from real usage
+rather than speculation — partial payments, prepayments, and prevention
+of a premature abstraction are all real open questions parked here on
+purpose.
+
+## ADR-019 — Membership eliminated; collapses into Bill + Transaction
+**⚠️ Superseded by ADR-020 above.** Kept in full below for the reasoning
+trail — the Recognition-vs-Settlement gap that prompted the reversal is
+itself useful history, not something to delete.
+
+**Decision:** No separate `Membership` entity in Arth 2.0, and no new
+`BillPayment` entity either. Both collapse into two entities already
+frozen in earlier ADRs:
+
+- **Bill** — the recurring obligation itself. `type` becomes an
+  attribute (`one-time | recurring | subscription | EMI | loan |
+  insurance | utility | tax`), not a separate module per type.
+  "Subscription" is a Bill type, not its own system.
+- **Transaction** — the payment. A Bill payment is an ordinary
+  Transaction with `paidBillId` set (per ADR-017's relationship
+  mechanism — already frozen, not new).
+
+**Why no `BillPayment` entity was needed:** the one thing Membership's
+current shape does that a plain Transaction doesn't — covering multiple
+future periods in one payment (`periods[]`, e.g., paying 6 months of
+gym at once) — is structurally identical to **Recognition**, already a
+property of Bill (ADR-016: `recognitionMethod`, `recognitionDuration`).
+A ₹24,000 insurance payment recognized ₹4,000×6 months and a single
+payment covering 6 gym periods are the same shape; Recognition already
+covers it. No third entity required.
+
+**Net result:** the entire obligations domain (Bills, Subscriptions,
+Memberships, Insurance, Utilities, EMIs, Loans) is now exactly two
+entities — Bill and Transaction — both already fully specified by prior
+ADRs (ADR-016 Recognition, ADR-017 relationships, ADR-018 Account/Payment
+Method). This is a bigger simplification than an earlier proposed chain
+(Membership → Bill Template → Bill → BillPayment); it collapses to Bill
++ Transaction directly.
+
+**Migration approach — Assisted Migration, not automatic or manual-only:**
+never silently invent a Bill from inferred data, and never force a
+tedious per-item reconciliation wizard either. For each existing
+Membership: pre-fill a Bill draft from its known merchant, frequency,
+amount, and paying account; derive `type` and Recognition settings from
+its `periods[]` shape; show a review screen with everything pre-filled
+so the user only corrects what Arth genuinely can't infer (e.g., exact
+due-day, auto-debit status); on confirm, create the Bill and re-point
+the Membership's `linkedTxnId` transaction to carry `paidBillId`
+instead. Real data migration, not a cosmetic relabeling — every existing
+Membership record needs to go through this flow, not just new ones.
+
+**Not yet designed:** the actual review-screen UI/flow for this
+migration, and the exact `periods[]` → Recognition field mapping logic.
+Both are next.
+
+## ADR-018 — Account vs Payment Method, and permanent delete for 2.0
+
+**Decision 1 — Account vs Payment Method, genuinely new modeling, not a
+formalization of what exists.** `Account` answers "where does the money
+live" (required). `Payment Method` answers "how was it executed"
+(optional — Debit Card, UPI, Net Banking, Cheque). Today, UPI is its own
+account type, meaning "HDFC Savings," "HDFC UPI," and "HDFC Debit Card"
+would represent the same real money three separate ways. Under this
+model, the money lives in one `Account` (HDFC Savings), and Payment
+Method is a thin, optional label on top — cleaner for Cash Flow, Net
+Worth, Reports, and transfers, since balance calculations stop needing
+to reconcile near-duplicate account representations of the same funds.
+
+**Credit cards stay Accounts, not payment methods** — they carry a
+balance, statement, due date, interest, and EMI support, i.e. they're a
+real financial entity with liabilities, not just a payment rail. A
+credit card transaction has `Account: HDFC Credit Card`, `Payment
+Method: (blank)`.
+
+**Real implication, not yet resolved (flagging so it isn't lost):** this
+is a genuine data-model change from what exists today — migrating a
+UPI-typed account into "a payment method on a bank account" affects
+every historical transaction tied to that account. This ADR freezes the
+target model; it does not yet decide the migration path for existing
+UPI accounts. That's implementation work for whenever this actually gets
+built, not decided here.
+
+**Implemented:** `paymentMethod` (optional, nullable field) added to
+Quick Add, Full Add, and Transaction Details — scoped exactly per
+follow-up decisions: only shown/settable for Expense + Bank-account
+transactions (Debit Card or UPI), never for CC/Cash accounts (redundant
+with the account), never for Income or Transfer (the payer's method
+isn't knowable, and account-to-account transfers don't need it). No
+migration performed — existing transactions simply have this field as
+`null`, matching the Release Criteria's "no schema migration required."
+The UPI-account-migration question above remains genuinely open.
+
+**Decision 2 — Delete stays permanent for Arth 2.0.** No soft delete, no
+`deletedAt`, no recycle bin, no restore — `Delete → Confirm → Yes →
+Permanent`. Matches what's actually built today (confirmed: deletion is
+already immediate and permanent, no code change required for this
+decision). Explicitly revisitable as its own future ADR if
+Sync/Cloud-Backup/Collaboration ever make undo-ability matter — not
+bundled into the Transactions domain model now.
+
+## ADR-017 — Transaction Type Taxonomy: frozen, not redesigned
+**Decision:** The `type` field represents the primary financial event
+only, and stays intentionally small. **Frozen list — these are the only
+top-level transaction types:**
+```
+expense · income · transfer · cc_payment · cc_emi · settlement_in · settlement_out · investment
+```
+Everything else extends a transaction via **flags** (`isRefund`,
+`reimbursable`) or **relationships** (`paidBillId` — this already exists
+today, paired with an `isBillPayment` flag; not a new field — `linkedLoanId`,
+`linkedInvestmentId`, `linkedPersonId`) rather than a new type.
+
+**Why this wasn't a redesign:** checked the actual codebase before
+deciding anything — Refund, Loan repayment, and Investment redemption
+*already* work exactly this way (`isRefund` flag on `settlement_in`,
+`linkedLoanId`/`linkedInvestmentId` relationships on ordinary
+transactions). This ADR formalizes an existing, working pattern as a
+rule, rather than replacing a system that was never actually broken.
+Redesigning transaction types from scratch here would have been exactly
+the "second system requiring migration" mistake rejected in ADR-016.
+
+**Adjustment — resolved as NOT a transaction type.** Two different use
+cases exist under that name: (1) a user mis-entered an amount — that's
+just editing the existing transaction, no new concept needed; (2) real
+bank-vs-Arth balance mismatch reconciliation — a genuine gap, but the
+right shape for it is a future **Account Reconciliation workflow**
+(`Account → Reconcile → Difference Detected → Create System Adjustment
+Transaction`) that generates a system transaction when needed, not a
+type users manually pick day-to-day. Deferred until that workflow is
+designed — not blocking anything now.
+
+**Deferred future consideration, explicitly not acted on now (recorded
+so it isn't silently forgotten, but also isn't touched prematurely):**
+whether `cc_payment`/`cc_emi` should eventually become account/payment-
+method behavior rather than top-level transaction types (buying
+something on a card is still an `expense`; paying the card bill is
+arguably a `transfer` between a liability and an asset account; an EMI
+is a repayment schedule on a purchase, not its own event type). Real
+migration risk if changed now — explicitly parked for a future
+"Arth 3.0" re-evaluation, not this pass.
+
+## ADR-016 — Financial Engine architecture: Bills as the single source of truth for obligations
+**Decision:** Rejected a new `Commitment` entity. Bills is promoted to
+the canonical engine for all future financial obligations — insurance,
+gym, SIPs, EMIs, school fees are "Bills with metadata," not a separate
+system. Recognition (amortization) becomes a property *of* a Bill, not
+of Transactions/Budget/Cash Flow. Cash Flow consumes Bills + Transactions
++ Expected Income directly — nothing consumes a `Commitments` table,
+because one never gets created. Safe to Spend is upgraded in place
+(Opening Balance + Expected Income − Upcoming Bills − Expected Variable),
+not replaced with a parallel calculation.
+
+**Formal principle adopted, to govern all future additions:** there must
+be exactly one source of truth for every financial concept — Transactions
+= money that moved, Bills = future obligations, Accounts = where money
+lives, Expected Income = future inflows, Recognition = a Bill property,
+Safe to Spend = a calculation, never stored data.
+
+**Module boundary, explicit (prevents the ambiguity the review flagged):**
+
+| Module | Uses Cash | Uses Recognition |
+|---|---|---|
+| Transactions | ✅ | ❌ |
+| Cash Flow | ✅ | ❌ |
+| Budget | ❌ | ✅ |
+| Reports | Both (toggle) | ✅ |
+| Timeline | ✅ | ❌ |
+| Net Worth | ✅ | ❌ |
+
+**Verified against the real data model before accepting the plan (not
+assumed):** Bills already has `frequency`, `recurring`, `dueDate`,
+`billerAccountId`, `consumerNumber` — that part of "extend Bills" is
+genuinely free. Two things are completely new, not already-there:
+Recognition fields (`recognitionMethod`, `recognitionDuration` — don't
+exist at all today) and a flexible metadata store (today there's only
+one hardcoded `consumerNumber` field; the doc's "Policy Number/Student
+Name/Membership ID" idea needs a genuine `metadata: {}` object added to
+the Bill record, not more hardcoded per-type fields). Both are additive
+— nothing existing needs to migrate — so the plan holds, but Sprint 1
+scoping should account for these two real additions rather than assume
+Bills needs zero schema work.
+
+**Sprint 1 scope, as redefined:** Transactions 2.0 (enhance, don't
+replace), a new Cash Flow screen (consumes Bills/Transactions/Expected
+Income only), and Expected Income as simple recurring entries. Explicitly
+NOT in Sprint 1: touching Bills' schema, migrating Memberships, redesigning
+Safe to Spend's existing calculation. The Recognition fields and metadata
+store are prerequisites for Cash Flow's "Committed Outflow" card
+specifically, so they land whenever that card is actually built, not
+before it's needed.
+
 ## ADR-015 — Suspend further Bills domain extraction
 **Decision:** Domain-function extraction for Bills is suspended. No more
 searching for pure functions inside `BillsPage`. Future coupling
