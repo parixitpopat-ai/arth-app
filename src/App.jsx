@@ -21,6 +21,7 @@ import { parseMoney, cleanMoneyInput, nearlyEqualMoney } from "./helpers/currenc
 import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/GoalsScreen";
 import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/EventsScreen";
+import { AddExpectedIncomeModal, ExpectedIncomeListModal } from "./screens/ExpectedIncomeScreen";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { remainingShare } from "./domain/shared/remainingShare";
@@ -699,6 +700,12 @@ function AppContent({ onLock }) {
   const [defaultGroupId, setDefaultGroupId] = useState(()=>localStorage.getItem("arth_default_group")||"");
   const [editingRecurring, setEditingRecurring] = useState(null);
   const [bills, setBills] = useState(()=>JSON.parse(localStorage.getItem("arth_bills")||"[]"));
+  // Expected Income — first piece of the Financial Engine work (ADR-016/ADR-017). Deliberately
+  // self-contained: doesn't touch Bills, Recognition, or Cash Flow, since those don't exist yet
+  // and this needs to be buildable/verifiable entirely on its own.
+  const [expectedIncome, setExpectedIncome] = useState(()=>JSON.parse(localStorage.getItem("arth_expected_income")||"[]"));
+  const [showAddExpectedIncome, setShowAddExpectedIncome] = useState(false);
+  const [editingExpectedIncome, setEditingExpectedIncome] = useState(null);
   const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
   const [billers, setBillers] = useState(()=>JSON.parse(localStorage.getItem("arth_billers")||"[]"));
   const [memberships, setMemberships] = useState(()=>JSON.parse(localStorage.getItem("arth_memberships")||"[]"));
@@ -765,6 +772,7 @@ function AppContent({ onLock }) {
   useEffect(()=>safeSetLocalStorage("arth_gifts",JSON.stringify(gifts)),[gifts]);
   useEffect(()=>safeSetLocalStorage("arth_wealth_snapshots",JSON.stringify(wealthSnapshots)),[wealthSnapshots]);
   useEffect(()=>safeSetLocalStorage("arth_goals",JSON.stringify(goals)),[goals]);
+  useEffect(()=>safeSetLocalStorage("arth_expected_income",JSON.stringify(expectedIncome)),[expectedIncome]);
   useEffect(()=>safeSetLocalStorage("arth_dismissed_alerts",JSON.stringify(dismissedAlerts)),[dismissedAlerts]);
   useEffect(()=>safeSetLocalStorage("arth_budget",monthBudget),[monthBudget]);
   useEffect(()=>safeSetLocalStorage("arth_bills",JSON.stringify(bills)),[bills]);
@@ -919,6 +927,7 @@ function AppContent({ onLock }) {
   const [toast, setToast] = useState(null); // { message, icon } | null
   const [showFabSpeedMenu, setShowFabSpeedMenu] = useState(false);
   const [showDuplicateFinder, setShowDuplicateFinder] = useState(false);
+  const [showExpectedIncome, setShowExpectedIncome] = useState(false);
   const [defaultAddType, setDefaultAddType] = useState("expense");
   const [addPrefill, setAddPrefill] = useState(null);
   const [showInvestments, setShowInvestments] = useState(false);
@@ -6928,14 +6937,14 @@ function AppContent({ onLock }) {
     dismissedAlerts,
     wealthSnapshots,
     goals,
-    liabilities,
+    expectedIncome,
     trackedAssets,
     loans,
     annualBudget,
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -6974,6 +6983,7 @@ function AppContent({ onLock }) {
     if(Array.isArray(snapshot.dismissedAlerts)) setDismissedAlerts(snapshot.dismissedAlerts);
     if(Array.isArray(snapshot.wealthSnapshots)) setWealthSnapshots(snapshot.wealthSnapshots);
     if(Array.isArray(snapshot.goals)) setGoals(snapshot.goals);
+    if(Array.isArray(snapshot.expectedIncome)) setExpectedIncome(snapshot.expectedIncome);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
@@ -13191,6 +13201,7 @@ function AppContent({ onLock }) {
               { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"📅", label:"Bills", onClick:()=>goToTab("bills") },
               { icon:"🔍", label:"Find Duplicate Transactions", onClick:()=>{ setShowDuplicateFinder(true); onClose(); } },
+              { icon:"💰", label:"Expected Income", onClick:()=>{ setShowExpectedIncome(true); onClose(); } },
               { icon:"💰", label:"Budget", onClick:()=>goToTab("budget") },
               { icon:"🎯", label:"Goals", onClick:()=>{ setShowGoalsList(true); onClose(); } },
               { icon:"✈️", label:"Trips & Outings", onClick:()=>{ setShowEventsList(true); onClose(); } },
@@ -13532,6 +13543,9 @@ function AppContent({ onLock }) {
   };
 
   // -- BILLER ACCOUNT MODAL --------------------------------------------------
+  // Expected Income — Add/Edit. Deliberately simple: name, amount, frequency, next expected
+  // date. No account linking, no recognition, no cash-flow math here — this is just the source
+  // entity; Cash Flow (not built yet) will be the thing that reads it.
   const BillerAccountModal = ({ existing, onClose }) => {
     const isEdit = !!existing;
     const [baName, setBaName] = useState(existing?.name||"");
@@ -14392,6 +14406,8 @@ function AppContent({ onLock }) {
         {showQuickAdd&&<QuickAddModal onClose={()=>setShowQuickAdd(false)}/>}
         {toast&&<Toast message={toast.message} icon={toast.icon} T={T} onDone={()=>setToast(null)}/>}
         {showDuplicateFinder&&<DuplicateFinderModal onClose={()=>setShowDuplicateFinder(false)}/>}
+        {showExpectedIncome&&<ExpectedIncomeListModal onClose={()=>setShowExpectedIncome(false)} T={T} sym={sym} fmt={fmt} formatShortDate={formatShortDate} expectedIncome={expectedIncome} setExpectedIncome={setExpectedIncome} setTxns={setTxns} accounts={accounts} setToast={setToast} setEditingExpectedIncome={setEditingExpectedIncome} setShowAddExpectedIncome={setShowAddExpectedIncome}/>}
+        {showAddExpectedIncome&&<AddExpectedIncomeModal existing={editingExpectedIncome} onClose={()=>{ setShowAddExpectedIncome(false); setEditingExpectedIncome(null); }} T={T} inp={inp} lbl={lbl} setExpectedIncome={setExpectedIncome}/>}
         {showFabSpeedMenu&&(
           <div onClick={()=>setShowFabSpeedMenu(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:355,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
             <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 40px",width:"100%",maxWidth:430 }}>
