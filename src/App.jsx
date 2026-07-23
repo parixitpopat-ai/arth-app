@@ -1158,6 +1158,13 @@ function AppContent({ onLock }) {
     return matched || {name:"?",color:"#888",icon:"❓",subs:[]};
   },[cats]);
   const getAcc = useCallback(id=>accounts.find(a=>a.id===id)||{name:"?",color:"#888",type:"cash"},[accounts]);
+  // "Paid via" account pickers exclude debit/UPI-type accounts — those are now selected as a
+  // Payment Method under their parent bank account (linkedBank/linkedAccount), not as their own
+  // top-level "Paid via" choice. Historical transactions that already point at a debit/UPI
+  // account's id are untouched — their balances still compute correctly, they're just no longer
+  // offered as a NEW selection. One shared list, used everywhere an account gets picked for
+  // paying, so this can't drift into 6 separate copies of the same filter.
+  const paidViaAccounts = useMemo(()=>accounts.filter(a=>a.type!=="debit"&&a.type!=="upi"),[accounts]);
   const getPerson = useCallback(id=>people.find(p=>p.id===id)||{name:"?",emoji:"👤",color:"#888",relation:"",personType:"contact"},[people]);
   const getGroup = useCallback(id=>groups.find(g=>g.id===id)||null,[groups]);
   const getRefundCandidates = useCallback((refundTxn, excludeRefundId = null)=>{
@@ -2912,23 +2919,28 @@ function AppContent({ onLock }) {
             <div>
               <span style={lbl}>Account</span>
               <select style={inp} value={qaAccId} onChange={e=>setQaAccId(e.target.value)}>
-                {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+                {paidViaAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
           </div>
 
-          {/* Payment Method — only Expense + Bank account (ADR-018/021). CC/Cash accounts don't
-              need it (redundant with the account itself); Income/Transfer never show it. */}
-          {qaType==="expense"&&accounts.find(a=>a.id===qaAccId)?.type==="bank"&&(
-            <div style={{ marginBottom:14 }}>
-              <span style={lbl}>Payment Method (optional)</span>
-              <div style={{ display:"flex",gap:8 }}>
-                {["Debit Card","UPI"].map(pm=>(
-                  <button key={pm} onClick={()=>setQaPaymentMethod(prev=>prev===pm?"":pm)} style={{ flex:1,background:qaPaymentMethod===pm?T.accentSoft:T.input,border:`1px solid ${qaPaymentMethod===pm?T.accent:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:12,fontWeight:700,color:qaPaymentMethod===pm?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pm}</button>
-                ))}
+          {/* Payment Method — only Expense + Bank account (ADR-018/021). Shows the ACTUAL debit
+              cards/UPI handles configured under this specific bank account (linkedBank/linkedAccount
+              — already existing infrastructure), not a generic "Debit Card"/"UPI" label. Selecting
+              HDFC only shows HDFC's own linked debit cards and UPI handles, not every bank's. */}
+          {qaType==="expense"&&accounts.find(a=>a.id===qaAccId)?.type==="bank"&&(()=>{
+            const linkedMethods = accounts.filter(a=>(a.type==="debit"&&a.linkedBank===qaAccId)||(a.type==="upi"&&a.linkedAccount===qaAccId));
+            if(!linkedMethods.length) return null;
+            return (
+              <div style={{ marginBottom:14 }}>
+                <span style={lbl}>Payment Method (optional)</span>
+                <select style={inp} value={qaPaymentMethod} onChange={e=>setQaPaymentMethod(e.target.value)}>
+                  <option value="">— None —</option>
+                  {linkedMethods.map(m=><option key={m.id} value={m.name}>{m.type==="upi"?"📱":"🏧"} {m.name}</option>)}
+                </select>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Date — tappable pill, native date input so it opens the OS picker directly. Defaults
               to today; being able to backdate without leaving Quick Add is worth the one row. */}
@@ -3505,7 +3517,7 @@ function AppContent({ onLock }) {
     const validCatIds = catIds.filter(cid=>getCat(cid));
     const validSubIds = subIds.filter(sid=>validCatIds.some(cid=>getCat(cid)?.subs?.some(sub=>sub.id===sid)));
     const catId = validCatIds[0]||null;  // primary cat for backward compat
-    const nonCCAccs = accounts.filter(a=>a.type!=="cc");
+    const nonCCAccs = paidViaAccounts.filter(a=>a.type!=="cc");
     const ccAccs = accounts.filter(a=>a.type==="cc");
     const investmentMetricConfig = getInvestmentMetricConfig(investType);
     const selectedPids = Object.entries(splitPeople).filter(([,v])=>v).map(([k])=>k).filter(p=>p!=="__me__");
@@ -4741,18 +4753,21 @@ function AppContent({ onLock }) {
               <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
                 <div>
                   <span style={lbl}>Paid via</span>
-                  <AccountChipGroup items={accounts} value={accId} onChange={setAccId} />
+                  <AccountChipGroup items={paidViaAccounts} value={accId} onChange={setAccId} />
                 </div>
-                {getAcc(accId)?.type==="bank"&&(
-                  <div>
-                    <span style={lbl}>Payment Method (optional)</span>
-                    <div style={{ display:"flex",gap:8 }}>
-                      {["Debit Card","UPI"].map(pm=>(
-                        <button key={pm} onClick={()=>setPaymentMethod(prev=>prev===pm?"":pm)} style={{ flex:1,background:paymentMethod===pm?T.accentSoft:T.input,border:`1px solid ${paymentMethod===pm?T.accent:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:12,fontWeight:700,color:paymentMethod===pm?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pm}</button>
-                      ))}
+                {(()=>{
+                  const linkedMethods = accounts.filter(a=>(a.type==="debit"&&a.linkedBank===accId)||(a.type==="upi"&&a.linkedAccount===accId));
+                  if(getAcc(accId)?.type!=="bank"||!linkedMethods.length) return null;
+                  return (
+                    <div>
+                      <span style={lbl}>Payment Method (optional)</span>
+                      <select style={inp} value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)}>
+                        <option value="">— None —</option>
+                        {linkedMethods.map(m=><option key={m.id} value={m.name}>{m.type==="upi"?"📱":"🏧"} {m.name}</option>)}
+                      </select>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
                 {expensePaymentMode==="emi"&&(
                   <div style={{ background:T.input,border:`1px solid ${T.warn}33`,borderRadius:12,padding:"12px" }}>
                     <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>EMI plan details</div>
@@ -4821,7 +4836,7 @@ function AppContent({ onLock }) {
                     </div>
                     <div>
                       <span style={lbl}>Repayment from</span>
-                      <AccountChipGroup items={accounts} value={accId} onChange={setAccId} />
+                      <AccountChipGroup items={paidViaAccounts} value={accId} onChange={setAccId} />
                     </div>
                   </div>
                 )}
@@ -4963,7 +4978,7 @@ function AppContent({ onLock }) {
                 </div>
                 <div>
                   <span style={lbl}>Paid from</span>
-                  <AccountChipGroup items={accounts} value={accId} onChange={setAccId} />
+                  <AccountChipGroup items={paidViaAccounts} value={accId} onChange={setAccId} />
                 </div>
               </div>
             )}
@@ -5123,7 +5138,7 @@ function AppContent({ onLock }) {
                 <div>
                   <span style={lbl}>Received into</span>
                   <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                    {accounts.map(a=><button key={a.id} onClick={()=>setAccId(a.id)} style={{ background:accId===a.id?a.color+"22":"none",border:`1px solid ${accId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:accId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
+                    {paidViaAccounts.map(a=><button key={a.id} onClick={()=>setAccId(a.id)} style={{ background:accId===a.id?a.color+"22":"none",border:`1px solid ${accId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:accId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
                   </div>
                 </div>
               </div>
@@ -5984,7 +5999,7 @@ function AppContent({ onLock }) {
           <div style={{ marginBottom:12 }}>
             <span style={lbl}>Payment mode / received into</span>
             <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-              {accounts.filter(a=>a.type!=="cc").map(a=><button key={a.id} onClick={()=>setAccId(a.id)} style={{ background:accId===a.id?a.color+"22":"none",border:`1px solid ${accId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:accId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
+              {paidViaAccounts.filter(a=>a.type!=="cc").map(a=><button key={a.id} onClick={()=>setAccId(a.id)} style={{ background:accId===a.id?a.color+"22":"none",border:`1px solid ${accId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:accId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
             </div>
           </div>
 
@@ -6376,7 +6391,7 @@ function AppContent({ onLock }) {
             </div>
             <div>
               <span style={lbl}>Payment account</span>
-              <AccountChipGroup items={accounts} value={paymentAccId} onChange={setPaymentAccId} />
+              <AccountChipGroup items={paidViaAccounts} value={paymentAccId} onChange={setPaymentAccId} />
             </div>
             <div>
               <span style={lbl}>Transaction ID / Ref (optional)</span>
@@ -6792,7 +6807,7 @@ function AppContent({ onLock }) {
                       <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>DAY OF MONTH</div><input style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:14,fontWeight:800,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} type="number" min="1" max="31" placeholder="e.g. 3" defaultValue={existing?.day||""} id={`rec-day-${groupKey}`}/></div>
                       <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>AMOUNT ({sym})</div><input style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:14,fontWeight:800,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} type="text" inputMode="decimal" placeholder="0" defaultValue={existing?.amount||""} id={`rec-amt-${groupKey}`}/></div>
                     </div>
-                    <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>DEBIT ACCOUNT</div><select style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:13,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} defaultValue={existing?.accId||(accounts.find(a=>a.type!=="cc")?.id||"")} id={`rec-acc-${groupKey}`}>{accounts.filter(a=>a.type!=="cc").map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
+                    <div><div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>DEBIT ACCOUNT</div><select style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",color:T.text,fontSize:13,width:"100%",outline:"none",fontFamily:"Nunito,sans-serif" }} defaultValue={existing?.accId||(paidViaAccounts.find(a=>a.type!=="cc")?.id||"")} id={`rec-acc-${groupKey}`}>{paidViaAccounts.filter(a=>a.type!=="cc").map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></div>
                     <div style={{ display:"flex",gap:8 }}>
                       <button onClick={()=>{
                         const day = Number(document.getElementById(`rec-day-${groupKey}`)?.value||0);
@@ -10044,7 +10059,7 @@ function AppContent({ onLock }) {
               <div>
                 <span style={lbl}>{direction==="taken"?"Repayment from":"Receive into"}</span>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                  {accounts.map(a=><button key={a.id} onClick={()=>setPaymentAccId(a.id)} style={{ background:paymentAccId===a.id?a.color+"22":"none",border:`1px solid ${paymentAccId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:paymentAccId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
+                  {paidViaAccounts.map(a=><button key={a.id} onClick={()=>setPaymentAccId(a.id)} style={{ background:paymentAccId===a.id?a.color+"22":"none",border:`1px solid ${paymentAccId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:paymentAccId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
                 </div>
               </div>
             </div>
@@ -10159,7 +10174,7 @@ function AppContent({ onLock }) {
             <div>
               <span style={lbl}>{item?.direction==="taken"?"Paid from":"Received into"}</span>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                {accounts.map(a=><button key={a.id} onClick={()=>setAccId(a.id)} style={{ background:accId===a.id?a.color+"22":"none",border:`1px solid ${accId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:accId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
+                {paidViaAccounts.map(a=><button key={a.id} onClick={()=>setAccId(a.id)} style={{ background:accId===a.id?a.color+"22":"none",border:`1px solid ${accId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:accId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
               </div>
             </div>
             <input style={inp} placeholder="Note (optional)" value={note} onChange={e=>setNote(e.target.value)}/>
@@ -10233,7 +10248,7 @@ function AppContent({ onLock }) {
             <div>
               <span style={lbl}>Repayment from</span>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                {accounts.map(a=><button key={a.id} onClick={()=>setPaymentAccId(a.id)} style={{ background:paymentAccId===a.id?a.color+"22":"none",border:`1px solid ${paymentAccId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:paymentAccId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
+                {paidViaAccounts.map(a=><button key={a.id} onClick={()=>setPaymentAccId(a.id)} style={{ background:paymentAccId===a.id?a.color+"22":"none",border:`1px solid ${paymentAccId===a.id?a.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,color:paymentAccId===a.id?a.color:T.sub,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{accIcon(a.type)} {a.name}</button>)}
               </div>
             </div>
             <input style={inp} placeholder="Note (optional)" value={note} onChange={e=>setNote(e.target.value)}/>
@@ -13828,7 +13843,7 @@ function AppContent({ onLock }) {
               <div>
                 <span style={lbl}>Paid From</span>
                 <select style={inp} value={accId} onChange={e=>setAccId(e.target.value)}>
-                  {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+                  {paidViaAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </div>
             </div>
@@ -14056,6 +14071,31 @@ function AppContent({ onLock }) {
             <button onClick={()=>setShowAddBill(false)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
           </div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+
+            {/* Pick an existing biller account — was missing entirely from this general Add Bill
+                flow (only pre-filled if opened from inside a specific biller's own screen). Picking
+                one auto-fills name/merchant AND links billerAccountId, instead of leaving you to
+                retype a name that creates a disconnected bill with no real link. */}
+            {billerAccounts.length>0&&(
+              <div>
+                <span style={lbl}>Existing Biller (optional)</span>
+                <select style={inp} value={billerAccountId} onChange={e=>{
+                  const ba = billerAccounts.find(x=>x.id===e.target.value);
+                  setBillerAccountId(e.target.value);
+                  if(ba){
+                    const parentBiller = billers.find(b=>b.id===ba.billerId);
+                    setName(prev=>prev.trim()?prev:(parentBiller?.name||ba.name));
+                    setMerchant(prev=>prev.trim()?prev:(parentBiller?.name||ba.name));
+                  }
+                }}>
+                  <option value="">— Not linked to an existing biller —</option>
+                  {billerAccounts.map(ba=>{
+                    const parentBiller = billers.find(b=>b.id===ba.billerId);
+                    return <option key={ba.id} value={ba.id}>{parentBiller?.name?`${parentBiller.name} — `:""}{ba.name}</option>;
+                  })}
+                </select>
+              </div>
+            )}
 
             <input style={{ ...inp,fontSize:17,fontWeight:700,border:`1px solid ${!name.trim()?T.danger+"66":T.border}` }} placeholder="Bill name * e.g. Common Meter Electric" value={name} onChange={e=>setName(e.target.value)}/>
             <input style={inp} placeholder="Biller / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
