@@ -3310,32 +3310,33 @@ function AppContent({ onLock }) {
         const raw=localStorage.getItem(DRAFT_KEY);
         if(!raw) return;
         const d=JSON.parse(raw);
-        if(d?.who||d?.amount){ setDraftData(d); setDraftBanner(true); }
+        // Auto-restore rather than requiring a manual "Restore" tap on a banner — a silent
+        // background-tab reload (common on Android/PWA under memory pressure) gives no warning,
+        // so the user may never see a banner to notice. Still show a brief banner afterward so
+        // there's SOME visible confirmation of what happened, but the data is already back.
+        if(d?.who||d?.amount){
+          setDraftData(d);
+          if(d.txnType) setTxnType(d.txnType);
+          if(d.who) setWho(d.who);
+          if(d.amount) setAmount(d.amount);
+          if(d.date) setDate(d.date);
+          if(d.note) setNote(d.note);
+          if(d.accId) setAccId(d.accId);
+          if(d.catIds) setCatIds(d.catIds);
+          if(d.subIds) setSubIds(d.subIds);
+          if(d.splitMode) setSplitMode(d.splitMode);
+          if(typeof d.useItemizedLines === "boolean") setUseItemizedLines(d.useItemizedLines);
+          if(d.lineItems?.length) setLineItems(d.lineItems);
+          if(d.tagMode) setTagMode(d.tagMode);
+          if(d.tagPerson) setTagPerson(d.tagPerson);
+          if(d.tagGroup) setTagGroup(d.tagGroup);
+          if(d.tagItems?.length) setTagItems(d.tagItems);
+          if(d.splitPeople?.length) setSplitPeople(d.splitPeople);
+          if(d.transactionRef) setTransactionRef(d.transactionRef);
+          setDraftBanner(true);
+        }
       }catch{}
     },[]);
-    const restoreDraft = () => {
-      if(!draftData) return;
-      try{
-        if(draftData.txnType) setTxnType(draftData.txnType);
-        if(draftData.who) setWho(draftData.who);
-        if(draftData.amount) setAmount(draftData.amount);
-        if(draftData.date) setDate(draftData.date);
-        if(draftData.note) setNote(draftData.note);
-        if(draftData.accId) setAccId(draftData.accId);
-        if(draftData.catIds) setCatIds(draftData.catIds);
-        if(draftData.subIds) setSubIds(draftData.subIds);
-        if(draftData.splitMode) setSplitMode(draftData.splitMode);
-        if(typeof draftData.useItemizedLines === "boolean") setUseItemizedLines(draftData.useItemizedLines);
-        if(draftData.lineItems?.length) setLineItems(draftData.lineItems);
-        if(draftData.tagMode) setTagMode(draftData.tagMode);
-        if(draftData.tagPerson) setTagPerson(draftData.tagPerson);
-        if(draftData.tagGroup) setTagGroup(draftData.tagGroup);
-        if(draftData.tagItems?.length) setTagItems(draftData.tagItems);
-        if(draftData.splitPeople?.length) setSplitPeople(draftData.splitPeople);
-        if(draftData.transactionRef) setTransactionRef(draftData.transactionRef);
-      }catch{}
-      setDraftBanner(false);
-    };
     useEffect(()=>{
       if(isEditing) return;
       const t=setTimeout(()=>{
@@ -4572,11 +4573,8 @@ function AppContent({ onLock }) {
             <button onClick={closeModal} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
           </div>
           {draftBanner&&<div style={{ background:T.accent+"18",border:`1px solid ${T.accent}44`,borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8 }}>
-            <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>📝 You have an unsaved draft</span>
-            <div style={{ display:"flex",gap:6 }}>
-              <button onClick={restoreDraft} style={{ background:T.accent,border:"none",borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Restore</button>
-              <button onClick={()=>{ setDraftBanner(false); try{localStorage.removeItem(DRAFT_KEY);}catch{} }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Dismiss</button>
-            </div>
+            <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>📝 Recovered what you'd typed before this reopened</span>
+            <button onClick={()=>{ setDraftBanner(false); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:7,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>OK</button>
           </div>}
 
           {/* STEP 1 — TYPE */}
