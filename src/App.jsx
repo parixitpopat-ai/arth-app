@@ -5228,7 +5228,7 @@ function AppContent({ onLock }) {
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
                   <button onClick={()=>{ setCategoryTouched(true); setCatIds([]); setSubIds([]); setCatAllocations({}); }} style={{ background:!catId?"#88888822":"none",border:`1px solid ${!catId?"#888888":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:!catId?"#888888":T.sub,fontFamily:"Nunito,sans-serif" }}>❓ None</button>
                   {cats.map(c=>(
-                    <button key={c.id} onClick={()=>{ setCategoryTouched(true); const existingValidIds=catIds.filter(id=>getCat(id)); const newIds=existingValidIds.includes(c.id)?existingValidIds.filter(x=>x!==c.id):[...existingValidIds,c.id]; setCatIds(newIds); setSubIds(prev=>prev.filter(sid=>newIds.some(cid=>getCat(cid)?.subs?.find(s=>s.id===sid)))); setCatAllocations(()=>buildEqualCategoryAllocations(newIds, amt)); }} style={{ background:catIds.includes(c.id)?c.color+"22":"none",border:`1px solid ${catIds.includes(c.id)?c.color:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:catIds.includes(c.id)?c.color:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>{c.icon} {c.name.split(" ")[0]}</button>
+                    <button key={c.id} onClick={()=>{ setCategoryTouched(true); const existingValidIds=catIds.filter(id=>getCat(id)); const newIds=existingValidIds.includes(c.id)?existingValidIds.filter(x=>x!==c.id):[...existingValidIds,c.id]; setCatIds(newIds); setSubIds(prev=>prev.filter(sid=>newIds.some(cid=>getCat(cid)?.subs?.find(s=>s.id===sid)))); setCatAllocations(prev=>({ ...buildEqualCategoryAllocations(newIds, amt), ...prev })); }} style={{ background:catIds.includes(c.id)?c.color+"22":"none",border:`1px solid ${catIds.includes(c.id)?c.color:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:catIds.includes(c.id)?c.color:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>{c.icon} {c.name.split(" ")[0]}</button>
                   ))}
                 </div>
                 {showQuickCategoryAdd && (
@@ -12200,8 +12200,16 @@ function AppContent({ onLock }) {
     const [meterReading,setMeterReading]=useState(b.meterReading!=null?String(b.meterReading):"");
     const [editPhoto,setEditPhoto]=useState(b.imageBase64||null);
     const [editSplitPeople,setEditSplitPeople]=useState(()=>{ const m={}; Object.entries(b.splitPeople||{}).forEach(([pid])=>m[pid]=true); return m; });
-    const [editSplitCalc,setEditSplitCalc]=useState("equally");
-    const [editSplitCustom,setEditSplitCustom]=useState({});
+    // Restore the ACTUAL saved per-person amounts, not a fresh equal split — this was the bug:
+    // both of these previously hardcoded to "equally"/{} regardless of what was actually saved,
+    // silently overwriting any custom split the moment the bill was reopened (even just to view
+    // it, since calcEditShares() drives the display too, not only the save).
+    const [editSplitCalc,setEditSplitCalc]=useState(Object.keys(b.splitPeople||{}).length?"amount":"equally");
+    const [editSplitCustom,setEditSplitCustom]=useState(()=>{
+      const m={};
+      Object.entries(b.splitPeople||{}).forEach(([pid,info])=>{ m[pid]=String(info.amount||0); });
+      return m;
+    });
     const [editGroup,setEditGroup]=useState(b.groupId||"");
     const curCat=getCat(catId||"");
     const billDateText = b.billDate || b.createdDate || b.dueDate || "";
