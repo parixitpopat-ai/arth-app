@@ -22,6 +22,7 @@ import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/GoalsScreen";
 import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/EventsScreen";
 import { AddExpectedIncomeModal, ExpectedIncomeListModal } from "./screens/ExpectedIncomeScreen";
+import { AddInsurancePolicyModal, InsurancePolicyListModal, InsurancePolicyDetailModal } from "./screens/InsuranceScreen";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { remainingShare } from "./domain/shared/remainingShare";
@@ -707,6 +708,11 @@ function AppContent({ onLock }) {
   // self-contained: doesn't touch Bills, Recognition, or Cash Flow, since those don't exist yet
   // and this needs to be buildable/verifiable entirely on its own.
   const [expectedIncome, setExpectedIncome] = useState(()=>JSON.parse(localStorage.getItem("arth_expected_income")||"[]"));
+  const [insurancePolicies, setInsurancePolicies] = useState(()=>JSON.parse(localStorage.getItem("arth_insurance_policies")||"[]"));
+  const [showInsuranceList, setShowInsuranceList] = useState(false);
+  const [showAddPolicy, setShowAddPolicy] = useState(false);
+  const [editingPolicy, setEditingPolicy] = useState(null);
+  const [viewingPolicy, setViewingPolicy] = useState(null);
   const [showAddExpectedIncome, setShowAddExpectedIncome] = useState(false);
   const [editingExpectedIncome, setEditingExpectedIncome] = useState(null);
   const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
@@ -776,6 +782,7 @@ function AppContent({ onLock }) {
   useEffect(()=>safeSetLocalStorage("arth_wealth_snapshots",JSON.stringify(wealthSnapshots)),[wealthSnapshots]);
   useEffect(()=>safeSetLocalStorage("arth_goals",JSON.stringify(goals)),[goals]);
   useEffect(()=>safeSetLocalStorage("arth_expected_income",JSON.stringify(expectedIncome)),[expectedIncome]);
+  useEffect(()=>safeSetLocalStorage("arth_insurance_policies",JSON.stringify(insurancePolicies)),[insurancePolicies]);
   useEffect(()=>safeSetLocalStorage("arth_dismissed_alerts",JSON.stringify(dismissedAlerts)),[dismissedAlerts]);
   useEffect(()=>safeSetLocalStorage("arth_budget",monthBudget),[monthBudget]);
   useEffect(()=>safeSetLocalStorage("arth_bills",JSON.stringify(bills)),[bills]);
@@ -7041,13 +7048,14 @@ function AppContent({ onLock }) {
     wealthSnapshots,
     goals,
     expectedIncome,
+    insurancePolicies,
     trackedAssets,
     loans,
     annualBudget,
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -7087,6 +7095,7 @@ function AppContent({ onLock }) {
     if(Array.isArray(snapshot.wealthSnapshots)) setWealthSnapshots(snapshot.wealthSnapshots);
     if(Array.isArray(snapshot.goals)) setGoals(snapshot.goals);
     if(Array.isArray(snapshot.expectedIncome)) setExpectedIncome(snapshot.expectedIncome);
+    if(Array.isArray(snapshot.insurancePolicies)) setInsurancePolicies(snapshot.insurancePolicies);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
@@ -7446,7 +7455,7 @@ function AppContent({ onLock }) {
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (idx, dir) => {
     const arr = cardOrder.map(x=>x); // fully mutable copy
@@ -11752,9 +11761,7 @@ function AppContent({ onLock }) {
           <Row icon="👥" title="People & Groups" subtitle="Manage who you split expenses with" onClick={()=>{ setTab("people"); setShowSettings(false); }}/>
           <Row icon="🚗" title="Vehicles" subtitle={vehicles.length>0?`${vehicles.length} vehicle${vehicles.length===1?"":"s"}`:"Track fuel, PUC, insurance by vehicle"} onClick={()=>setSettingsSection("vehicles")}/>
           <Row icon="🧾" title="Billers" subtitle="Manage billers and biller accounts" onClick={()=>{ setTab("bills"); setShowSettings(false); }}/>
-          {/* Insurance Policy intentionally NOT linked here yet — UX-004's Manage entity doesn't
-              exist in code (Sprint 1 item #2, a separate piece of work). Linking to nothing would
-              be worse than omitting it; this row returns once that entity is actually built. */}
+          <Row icon="🛡️" title="Insurance" subtitle={insurancePolicies.filter(p=>p.status!=="archived").length>0?`${insurancePolicies.filter(p=>p.status!=="archived").length} polic${insurancePolicies.filter(p=>p.status!=="archived").length===1?"y":"ies"}`:"Track premiums, renewals, and coverage"} onClick={()=>{ setShowInsuranceList(true); setShowSettings(false); }}/>
         </div>
 
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Data</div>
@@ -14774,6 +14781,9 @@ function AppContent({ onLock }) {
         {toast&&<Toast message={toast.message} icon={toast.icon} T={T} onDone={()=>setToast(null)}/>}
         {showDuplicateFinder&&<DuplicateFinderModal onClose={()=>setShowDuplicateFinder(false)}/>}
         {showExpectedIncome&&<ExpectedIncomeListModal onClose={()=>setShowExpectedIncome(false)} T={T} sym={sym} fmt={fmt} formatShortDate={formatShortDate} expectedIncome={expectedIncome} setExpectedIncome={setExpectedIncome} setTxns={setTxns} accounts={accounts} setToast={setToast} setEditingExpectedIncome={setEditingExpectedIncome} setShowAddExpectedIncome={setShowAddExpectedIncome}/>}
+        {showInsuranceList&&<InsurancePolicyListModal onClose={()=>setShowInsuranceList(false)} T={T} sym={sym} fmt={fmt} insurancePolicies={insurancePolicies.filter(p=>p.status!=="archived")} setEditingPolicy={setEditingPolicy} setShowAddPolicy={setShowAddPolicy} setViewingPolicy={setViewingPolicy}/>}
+        {showAddPolicy&&<AddInsurancePolicyModal existing={editingPolicy} onClose={()=>{ setShowAddPolicy(false); setEditingPolicy(null); }} T={T} inp={inp} lbl={lbl} setInsurancePolicies={setInsurancePolicies} setBills={setBills} billers={billers}/>}
+        {viewingPolicy&&<InsurancePolicyDetailModal policy={viewingPolicy} onClose={()=>setViewingPolicy(null)} T={T} sym={sym} fmt={fmt} bills={bills} setEditingPolicy={setEditingPolicy} setShowAddPolicy={setShowAddPolicy} setInsurancePolicies={setInsurancePolicies} askConfirm={askConfirm}/>}
         {showAddExpectedIncome&&<AddExpectedIncomeModal existing={editingExpectedIncome} onClose={()=>{ setShowAddExpectedIncome(false); setEditingExpectedIncome(null); }} T={T} inp={inp} lbl={lbl} setExpectedIncome={setExpectedIncome}/>}
         {showFabSpeedMenu&&(
           <div onClick={()=>setShowFabSpeedMenu(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:355,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
