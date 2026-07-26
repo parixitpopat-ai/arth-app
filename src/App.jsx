@@ -10405,6 +10405,112 @@ function AppContent({ onLock }) {
     </div>
   );
 
+  // Money Hub — Sprint 1 Item #3. Pure navigation/presentation refactor: every number here reuses
+  // an existing top-level calculation (netWorthValue, totalAssetsValue, totalLiabilitiesValue,
+  // accountBalance, investmentTypeSummaries, settlements) — nothing new computed. Credit Cards'
+  // Available Limit/Utilization show "Not set"/"—" rather than a fabricated number, since CC
+  // accounts don't carry a credit-limit field today (confirmed by checking the code) — per the
+  // Progressive Enrichment rule (ADR-021 addendum), missing data is shown as missing, not invented.
+  const MoneyPage = () => {
+    const bankAccts = accounts.filter(a=>a.type==="bank"&&!isInvestmentAccount(a));
+    const cashAccts = accounts.filter(a=>a.type==="cash"&&!isInvestmentAccount(a));
+    const ccAccts = accounts.filter(a=>a.type==="cc");
+    const receivable = Object.entries(settlements).filter(([,v])=>Number(v?.owesMe||0)>0);
+    const payable = Object.entries(settlements).filter(([,v])=>Number(v?.iOwe||v?.owed||0)>0);
+    const Section = ({ title, children }) => (
+      <div style={{ marginBottom:20 }}>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginBottom:8 }}>{title}</div>
+        {children}
+      </div>
+    );
+    const Line = ({ label, value, sub, onClick }) => (
+      <div onClick={onClick} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${T.border}`,cursor:onClick?"pointer":"default" }}>
+        <div><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{label}</div>{sub&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{sub}</div>}</div>
+        <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{value}</div>
+      </div>
+    );
+    return (
+      <div style={{ padding:"14px 16px 90px" }}>
+        <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:20 }}>💰 Money</div>
+
+        <div style={{ ...card,textAlign:"center",marginBottom:20 }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>NET WORTH</div>
+          <div style={{ color:netWorthValue>=0?T.success:T.danger,fontSize:28,fontWeight:900,marginTop:4 }}>{sym}{fmt(netWorthValue)}</div>
+          <div style={{ display:"flex",justifyContent:"center",gap:20,marginTop:10 }}>
+            <div><div style={{ color:T.sub,fontSize:9 }}>Assets</div><div style={{ color:T.success,fontSize:14,fontWeight:800 }}>{sym}{fmt(totalAssetsValue)}</div></div>
+            <div><div style={{ color:T.sub,fontSize:9 }}>Liabilities</div><div style={{ color:T.danger,fontSize:14,fontWeight:800 }}>{sym}{fmt(totalLiabilitiesValue)}</div></div>
+          </div>
+        </div>
+
+        <Section title="Cash">
+          <div style={{ ...card }}>
+            {bankAccts.map(a=><Line key={a.id} label={a.name} value={`${sym}${fmt(accountBalance(a.id))}`} sub="Bank" onClick={()=>setShowAccDetail(a)}/>)}
+            {cashAccts.map(a=><Line key={a.id} label={a.name} value={`${sym}${fmt(accountBalance(a.id))}`} sub="Cash in hand" onClick={()=>setShowAccDetail(a)}/>)}
+            {bankAccts.length===0&&cashAccts.length===0&&<div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>No cash accounts yet.</div>}
+          </div>
+        </Section>
+
+        <Section title="Investments">
+          <div style={{ ...card }}>
+            {investmentTypeSummaries.map(t=><Line key={t.id} label={t.name.split("/")[0].trim()} value={`${sym}${fmt(t.total)}`} sub={`${t.groupCount} holding${t.groupCount===1?"":"s"}`} onClick={()=>{ setSelectedInvestmentTypeView(t.id); setShowInvestments(true); }}/>)}
+            {investmentTypeSummaries.length===0&&<div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>No investments yet.</div>}
+          </div>
+        </Section>
+
+        <Section title="Credit Cards">
+          <div style={{ ...card }}>
+            {ccAccts.map(a=>{
+              const bal = accountBalance(a.id);
+              return (
+                <div key={a.id} style={{ padding:"10px 0",borderBottom:`1px solid ${T.border}` }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>{a.name}</div>
+                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:11 }}>
+                    <div><span style={{ color:T.sub }}>Outstanding: </span><span style={{ color:T.danger,fontWeight:800 }}>{sym}{fmt(Math.abs(bal))}</span></div>
+                    <div><span style={{ color:T.sub }}>Available Limit: </span><span style={{ color:T.sub }}>Not set</span></div>
+                    <div><span style={{ color:T.sub }}>Utilisation: </span><span style={{ color:T.sub }}>—</span></div>
+                    <div><span style={{ color:T.sub }}>Total Exposure: </span><span style={{ color:T.danger,fontWeight:800 }}>{sym}{fmt(Math.abs(bal))}</span></div>
+                  </div>
+                </div>
+              );
+            })}
+            {ccAccts.length===0&&<div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>No credit cards yet.</div>}
+          </div>
+        </Section>
+
+        <Section title="Money to Receive">
+          <div style={{ ...card }}>
+            {receivable.map(([pid,v])=><Line key={pid} label={getPerson(pid).name} value={`${sym}${fmt(v.owesMe||0)}`}/>)}
+            {receivable.length===0&&<div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>Nobody owes you right now.</div>}
+          </div>
+        </Section>
+
+        <Section title="Money You Owe">
+          <div style={{ ...card }}>
+            {payable.map(([pid,v])=><Line key={pid} label={getPerson(pid).name} value={`${sym}${fmt(v.iOwe||v.owed||0)}`}/>)}
+            {payable.length===0&&<div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>You don't owe anyone right now.</div>}
+          </div>
+        </Section>
+
+        <Section title="Vehicles">
+          <div style={{ ...card }}>
+            {vehicles.map(v=>(
+              <Line key={v.id} label={v.name||v.number} sub={v.number} value={v.purchaseValue?`${sym}${fmt(v.purchaseValue)}`:"Value not set"}/>
+            ))}
+            {vehicles.length===0&&<div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>No vehicles added yet.</div>}
+          </div>
+        </Section>
+
+        <Section title="Property">
+          <div style={{ ...card }}><div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>No properties added yet.</div></div>
+        </Section>
+
+        <Section title="Business Assets">
+          <div style={{ ...card }}><div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>No business assets added yet.</div></div>
+        </Section>
+      </div>
+    );
+  };
+
   const WealthPage = () => {
     const getLoanStatusMeta = loan => {
       if(loan.status==="written_off") return { label:"Written off", color:T.sub };
@@ -11966,8 +12072,9 @@ function AppContent({ onLock }) {
                       <span>{ins.ok?"✓":"⚠️"}</span><span>{ins.text}</span>
                     </div>
                   ))}
+                  <button onClick={()=>setTab("insights")} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer",marginTop:8,padding:0 }}>View all Insights →</button>
                 </div>
-              </div>
+                </div>
 
               <button onClick={()=>{ setAffordAmount(""); setShowAffordModal(true); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"14px",cursor:"pointer",color:T.accent,fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif",marginBottom:12 }}>🧮 Can I Afford This?</button>
 
@@ -13376,10 +13483,8 @@ function AppContent({ onLock }) {
               { icon:"👤", label:"User Profile", onClick:()=>{ setTab("home"); setShowSettings(false); onClose(); } },
               { icon:"⚙️", label:"Settings", onClick:()=>{ setShowSettings(true); setSettingsSection(null); onClose(); } },
               { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
-              { icon:"📅", label:"Bills", onClick:()=>goToTab("bills") },
+              { icon:"🔮", label:"Outlook", onClick:()=>goToTab("outlook") },
               { icon:"🔍", label:"Find Duplicate Transactions", onClick:()=>{ setShowDuplicateFinder(true); onClose(); } },
-              { icon:"💰", label:"Expected Income", onClick:()=>{ setShowExpectedIncome(true); onClose(); } },
-              { icon:"💰", label:"Budget", onClick:()=>goToTab("budget") },
               { icon:"🎯", label:"Goals", onClick:()=>{ setShowGoalsList(true); onClose(); } },
               { icon:"✈️", label:"Trips & Outings", onClick:()=>{ setShowEventsList(true); onClose(); } },
             ].map(item=>(
@@ -14514,7 +14619,7 @@ function AppContent({ onLock }) {
         {!showSettings&&tab==="people"&&<People/>}
         {!showSettings&&tab==="budget"&&<BudgetPage/>}
         {!showSettings&&tab==="bills"&&<BillsPage/>}
-        {!showSettings&&tab==="wealth"&&wealthUnlocked&&<WealthPage/>}
+        {!showSettings&&tab==="wealth"&&wealthUnlocked&&<MoneyPage/>}
         {!showSettings&&tab==="outlook"&&<OutlookPage/>}
         {!showSettings&&tab==="insights"&&<InsightsPage/>}
         {showSettings&&<Settings/>}
