@@ -14335,26 +14335,46 @@ function AppContent({ onLock }) {
                 flow (only pre-filled if opened from inside a specific biller's own screen). Picking
                 one auto-fills name/merchant AND links billerAccountId, instead of leaving you to
                 retype a name that creates a disconnected bill with no real link. */}
-            {billerAccounts.length>0&&(
-              <div>
-                <span style={lbl}>Existing Biller (optional)</span>
-                <select style={inp} value={billerAccountId} onChange={e=>{
-                  const ba = billerAccounts.find(x=>x.id===e.target.value);
-                  setBillerAccountId(e.target.value);
-                  if(ba){
-                    const parentBiller = billers.find(b=>b.id===ba.billerId);
-                    setName(prev=>prev.trim()?prev:(parentBiller?.name||ba.name));
-                    setMerchant(prev=>prev.trim()?prev:(parentBiller?.name||ba.name));
-                  }
-                }}>
-                  <option value="">— Not linked to an existing biller —</option>
-                  {billerAccounts.map(ba=>{
-                    const parentBiller = billers.find(b=>b.id===ba.billerId);
-                    return <option key={ba.id} value={ba.id}>{parentBiller?.name?`${parentBiller.name} — `:""}{ba.name}</option>;
-                  })}
-                </select>
-              </div>
-            )}
+            {billers.length>0&&(()=>{
+              const currentBa = billerAccounts.find(x=>x.id===billerAccountId);
+              const selectedBillerId = currentBa?.billerId || "";
+              const accountsForSelectedBiller = billerAccounts.filter(ba=>ba.billerId===selectedBillerId);
+              return (
+                <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                  <div>
+                    <span style={lbl}>Existing Biller (optional)</span>
+                    <select style={inp} value={selectedBillerId} onChange={e=>{
+                      const billerId = e.target.value;
+                      setBillerAccountId(""); // reset account when biller changes - was previously
+                      // possible to end up with an account that doesn't belong to the newly
+                      // selected biller
+                      if(!billerId) return;
+                      const biller = billers.find(b=>b.id===billerId);
+                      setName(prev=>prev.trim()?prev:(biller?.name||""));
+                      setMerchant(prev=>prev.trim()?prev:(biller?.name||""));
+                    }}>
+                      <option value="">— Not linked to an existing biller —</option>
+                      {billers.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  </div>
+                  {selectedBillerId&&accountsForSelectedBiller.length>0&&(
+                    <div>
+                      <span style={lbl}>Account under {billers.find(b=>b.id===selectedBillerId)?.name}</span>
+                      <select style={inp} value={billerAccountId} onChange={e=>{
+                        const ba = accountsForSelectedBiller.find(x=>x.id===e.target.value);
+                        setBillerAccountId(e.target.value);
+                        if(ba){
+                          setName(prev=>prev.trim()===billers.find(b=>b.id===selectedBillerId)?.name||!prev.trim()?ba.name:prev);
+                        }
+                      }}>
+                        <option value="">— Select account —</option>
+                        {accountsForSelectedBiller.map(ba=><option key={ba.id} value={ba.id}>{ba.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <input style={{ ...inp,fontSize:17,fontWeight:700,border:`1px solid ${!name.trim()?T.danger+"66":T.border}` }} placeholder="Bill name * e.g. Common Meter Electric" value={name} onChange={e=>setName(e.target.value)}/>
             <input style={inp} placeholder="Biller / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
