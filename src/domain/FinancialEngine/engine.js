@@ -8,10 +8,11 @@
 //
 // Outputs (this file, growing over time — see each function's status below):
 //   calculateExpectedIncomeTotal  — ✅ real, Phase 1
-//   calculateCommittedOutflow     — 🚧 stub, Phase 2 (Bills integration)
-//   calculateProjectedBalance     — 🚧 stub, Phase 3
-//   calculateSafeToSpend          — 🚧 stub, Phase 3
-//   calculateRecognition          — 🚧 stub, later (Recognition-as-Bill-property)
+//   calculateCommittedOutflow     — ✅ real, implemented this pass
+//   calculateProjectedBalance     — ✅ real, implemented this pass
+//   calculateSafeToSpend          — ✅ real, implemented this pass
+//   calculateRecognition          — 🚧 stub — genuinely blocked on schema, not effort:
+//                                    Bill has no recognitionMethod/recognitionDuration fields yet
 //
 // Every function takes explicit parameters, no closures over component state — same Function
 // Extraction Checklist discipline as domain/bills, domain/cards. This module can be unit tested
@@ -33,30 +34,58 @@ export const calculateExpectedIncomeTotal = (expectedIncome, monthKey) => {
 };
 
 /**
- * STUB — Phase 2. Will read unpaid Bills due within the given month and sum them, per ADR-016
- * ("Cash Flow consumes Bills, not a new Commitments entity"). Returns 0 until Bills integration
- * lands — deliberately not estimated or guessed at now, so nothing downstream silently assumes a
- * real number where there isn't one yet.
+ * Sum of unpaid Bills due within the given month. Per ADR-016 ("Cash Flow consumes Bills, not a
+ * new Commitments entity") — reads Bill directly, no separate entity. Uses each bill's net amount
+ * (after refunds) via getNetBillAmount if a refund map is supplied, otherwise the raw amount —
+ * callers with refund data should pass it; this function doesn't fetch it itself (pure, no I/O).
  */
-export const calculateCommittedOutflow = (_bills, _monthKey) => 0;
+export const calculateCommittedOutflow = (bills, monthKey, refundTotalsByBill = {}) => {
+  const { start, end } = getMonthBounds(monthKey);
+  return (bills||[])
+    .filter(b => b.status !== "paid" && b.dueDate >= start && b.dueDate <= end)
+    .reduce((sum, b) => {
+      const refunded = (refundTotalsByBill[b.id] || 0);
+      return sum + Math.max(0, Number(b.amount||0) - refunded);
+    }, 0);
+};
 
 /**
- * STUB — Phase 3. Opening Balance + Expected Income − Committed Outflow − Estimated Variable.
- * Returns null (not 0) until real, so callers can distinguish "not built yet" from "genuinely
- * zero" — a UI showing "₹0 projected balance" would be actively misleading before this is real.
+ * Projected balance at the end of the given month: Opening Balance + Expected Income - Committed
+ * Outflow - Estimated Variable Spend. Deliberately takes `openingBalance` as a parameter rather
+ * than `accounts`/`txns` - balance computation belongs to the Balance Engine (per the Engine
+ * Ownership table), not re-derived here. `estimatedVariableSpend` is also a parameter, not
+ * computed here - deciding HOW to estimate variable spend (e.g. average of last 3 months) is a
+ * product decision for the caller, not something this pure function should silently assume.
+ * Returns null (not 0) if openingBalance is not a valid number - callers must distinguish
+ * "not enough data yet" from "genuinely zero balance projected."
  */
-export const calculateProjectedBalance = (_accounts, _txns, _bills, _expectedIncome, _monthKey) => null;
+export const calculateProjectedBalance = (openingBalance, bills, expectedIncome, estimatedVariableSpend, monthKey, refundTotalsByBill) => {
+  if (typeof openingBalance !== "number" || Number.isNaN(openingBalance)) return null;
+  const income = calculateExpectedIncomeTotal(expectedIncome, monthKey);
+  const outflow = calculateCommittedOutflow(bills, monthKey, refundTotalsByBill);
+  const variable = Number(estimatedVariableSpend||0);
+  return openingBalance + income - outflow - variable;
+};
 
 /**
- * STUB — Phase 3. This does NOT replace the existing Safe Spend Today calculation already live
- * elsewhere in the app (per ADR-016, "upgrade in place, don't replace") — this is the new,
- * Financial-Engine-driven version, to be wired in once Projected Balance is real.
+ * Safe to Spend, Financial-Engine version. Does NOT replace the existing Safe Spend Today formula
+ * already live elsewhere in the app (ADR-016: "upgrade in place, don't replace") - this is the
+ * parallel, engine-driven version, to be wired into Home/Outlook once callers are ready to switch.
+ * Same null-vs-zero distinction as calculateProjectedBalance.
  */
-export const calculateSafeToSpend = (_accounts, _txns, _bills, _expectedIncome, _monthKey) => null;
+export const calculateSafeToSpend = (openingBalance, bills, expectedIncome, estimatedVariableSpend, monthKey, refundTotalsByBill) => {
+  const projected = calculateProjectedBalance(openingBalance, bills, expectedIncome, estimatedVariableSpend, monthKey, refundTotalsByBill);
+  if (projected === null) return null;
+  return Math.max(0, projected);
+};
 
 /**
- * STUB — later. Recognition is a property of a Bill (ADR-016), not of Transactions/Budget/Cash
- * Flow — this function will read a bill's recognitionMethod/recognitionDuration once those
- * fields exist (currently absent from the Bill record, confirmed in ADR-016).
+ * STUB — genuinely blocked, not deferred by choice. Recognition is a property of a Bill
+ * (ADR-016), not of Transactions/Budget/Cash Flow - this function will read a bill's
+ * recognitionMethod/recognitionDuration once those fields exist. Confirmed by checking the Bill
+ * record's actual current shape: neither field exists yet. Implementing this now would mean
+ * inventing a schema shape here that the real Bill record might not end up matching - the field
+ * addition has to land on Bill first (Insurance module work, Sprint A item 2), then this function
+ * becomes real.
  */
 export const calculateRecognition = (_bill) => null;
