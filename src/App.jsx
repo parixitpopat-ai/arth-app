@@ -6984,6 +6984,11 @@ function AppContent({ onLock }) {
   const backupFileInputRef = useRef(null);
   const applyingCloudSnapshotRef = useRef(false);
   const cloudSnapshotRef = useRef(null);
+  const syncConflictPendingRef = useRef(false); // set when "local looks newer than cloud" fires in
+  // pullCloudSnapshot - blocks auto-push until the user explicitly resolves the conflict, since
+  // cloudHydrated alone isn't a safe enough signal (that flag used to double as "safe to push",
+  // which is exactly how a fresh device's own just-computed timestamp could silently overwrite
+  // genuine cloud data moments after its own pull was correctly blocked).
 
   useEffect(() => {
     safeSetLocalStorage("arth_card_order", JSON.stringify(cardOrder));
@@ -7212,7 +7217,12 @@ function AppContent({ onLock }) {
     const now = Date.now();
     setAutoBackups(prev => {
       const list = Array.isArray(prev) ? prev : [];
-      const latestTime = list[0]?.exportedAt ? new Date(list[0].exportedAt).getTime() : 0;
+      // Was comparing against list[0] regardless of backup type — a pre-sync backup landing in
+      // that slot (e.g. during multi-device sync activity) made this think a daily backup had
+      // just run, even if the last REAL daily backup was a full day ago. Compare against the most
+      // recent "auto" entry specifically.
+      const mostRecentAuto = list.find(b=>b.backupType==="auto");
+      const latestTime = mostRecentAuto?.exportedAt ? new Date(mostRecentAuto.exportedAt).getTime() : 0;
       if(latestTime && (now - latestTime) < minGap) return list;
       const exportedAt = new Date(now).toISOString();
       const nextItem = {
@@ -7221,7 +7231,12 @@ function AppContent({ onLock }) {
         exportedAt,
         snapshot:{ ...snapshot, savedAt:snapshot?.savedAt || exportedAt },
       };
-      return [nextItem, ...list].slice(0, 3);
+      // Pre-sync and auto backups no longer compete for one shared 3-slot pool — each type keeps
+      // its own most-recent 10, so a busy sync day can't silently evict the one daily snapshot
+      // that matters, and vice versa.
+      const others = list.filter(b=>b.backupType!=="auto");
+      const sameType = list.filter(b=>b.backupType==="auto");
+      return [...others, nextItem, ...sameType].slice(0, 20);
     });
   }, [cloudSnapshot, autoBackupEnabled, autoBackupFrequency]);
 
@@ -7240,7 +7255,7 @@ function AppContent({ onLock }) {
     }
   }, [cloudUser]);
 
-  const pullCloudSnapshot = useCallback(async () => {
+  const pullCloudSnapshot = useCallback(async (force = false) => {
     if(!cloudUser?.id || !isCloudSyncConfigured) return;
     setCloudBusy(true);
     try{
@@ -7258,19 +7273,42 @@ function AppContent({ onLock }) {
           const exportedAt = new Date().toISOString();
           setAutoBackups(prev=>{
             const list = Array.isArray(prev) ? prev : [];
-            return [{ id:`presync_${Date.now()}`, backupType:"pre-sync", exportedAt, snapshot:{ ...localBeforePull, savedAt:localBeforePull.savedAt||exportedAt } }, ...list].slice(0,3);
+            // Real incident this fix responds to: rapid successive syncs (e.g. troubleshooting a
+            // sync issue) created several pre-sync backups within minutes of each other, evicting
+            // the one older backup that actually mattered under the old 3-slot cap. Two changes:
+            // (1) skip creating a new snapshot if the most recent pre-sync backup is under 2
+            // minutes old — rapid re-syncs shouldn't each consume a rotation slot; (2) raise the
+            // cap from 3 to 10, so a real day's worth of distinct sync events has room to coexist
+            // instead of the newest few silently evicting anything older within the same day.
+            const mostRecentPreSync = list.find(b=>b.backupType==="pre-sync");
+            const tooSoon = mostRecentPreSync && (Date.now()-new Date(mostRecentPreSync.exportedAt).getTime()) < 2*60*1000;
+            if(tooSoon) return list;
+            const nextItem = { id:`presync_${Date.now()}`, backupType:"pre-sync", exportedAt, snapshot:{ ...localBeforePull, savedAt:localBeforePull.savedAt||exportedAt } };
+            const others = list.filter(b=>b.backupType!=="pre-sync");
+            const sameType = list.filter(b=>b.backupType==="pre-sync");
+            return [...others, nextItem, ...sameType].slice(0, 20);
           });
         }
         // Local data looks newer than what's in the cloud (e.g. changes made while signed out) —
         // don't silently overwrite it. The backup above is already saved either way, so nothing
         // is at risk while the person decides.
-        if(localSavedAt && cloudSavedAt && localSavedAt>cloudSavedAt+60000){
+        if(!force && localSavedAt && cloudSavedAt && localSavedAt>cloudSavedAt+60000){
           setCloudStatus("Your device has newer local data than the cloud. It's been saved to Backup & Restore — review before syncing to avoid losing it. Tap Sync Now again to pull the cloud version anyway.");
           setCloudBusy(false);
           setCloudHydrated(true);
+          syncConflictPendingRef.current = true; // blocks auto-push until the user explicitly
+          // resolves this (Sync Now again) — cloudHydrated alone used to be enough to unlock the
+          // auto-push effect, meaning a fresh device's own just-computed timestamp (near-always
+          // "newer" than real cloud data, since genuine edits take time to accumulate) would block
+          // the pull here, then silently push that same stale/empty local state over the cloud a
+          // moment later. This is the confirmed cause of "recorded on device A, opened device B,
+          // lost the day's transactions" — the safety check was protecting local data from a pull,
+          // but had no equivalent protection against auto-pushing over the cloud right after.
           return;
         }
         applyCloudSnapshot(record.snapshot);
+        syncConflictPendingRef.current = false; // conflict resolved - the pull succeeded, this
+        // device's state now matches the cloud, safe to allow auto-push again going forward.
         setLastSyncedAt(record.updated_at || record.snapshot?.savedAt || new Date().toISOString());
         setCloudStatus("Cloud data loaded for this account.");
       } else {
@@ -7401,7 +7439,7 @@ function AppContent({ onLock }) {
 
   const pendingPushRef = useRef(false);
   useEffect(() => {
-    if(!cloudUser?.id || !isCloudSyncConfigured || !cloudHydrated || applyingCloudSnapshotRef.current) return;
+    if(!cloudUser?.id || !isCloudSyncConfigured || !cloudHydrated || applyingCloudSnapshotRef.current || syncConflictPendingRef.current) return;
     pendingPushRef.current = true;
     const timer = window.setTimeout(() => {
       pendingPushRef.current = false;
@@ -11400,7 +11438,7 @@ function AppContent({ onLock }) {
               <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>Auto-syncing across devices</div>
               <div style={{ color:T.sub,fontSize:11 }}>Every change saves to cloud automatically. Sign in on any device to access your data.</div>
             </div>
-            <button onClick={()=>pullCloudSnapshot()} disabled={cloudBusy} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{cloudBusy?"🔄 Syncing...":"🔄 Sync Now"}</button>
+            <button onClick={()=>pullCloudSnapshot(syncConflictPendingRef.current)} disabled={cloudBusy} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{cloudBusy?"🔄 Syncing...":"🔄 Sync Now"}</button>
             <button onClick={handleCloudSignOut} disabled={cloudBusy} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.danger,fontFamily:"Nunito,sans-serif" }}>Sign Out</button>
             {cloudStatus&&<div style={{ color:T.sub,fontSize:11,textAlign:"center",marginTop:4 }}>{cloudStatus}</div>}
           </div>
