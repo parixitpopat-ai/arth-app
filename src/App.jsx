@@ -29,6 +29,9 @@ import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import StatCard from "./components/StatCard";
 import EmptyState from "./components/EmptyState";
 import Toast from "./components/Toast";
+import ConfirmDialog from "./components/ConfirmDialog";
+import Chip from "./components/Chip";
+import EntityCard from "./components/EntityCard";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 // Wraps localStorage.setItem so a QuotaExceededError (or any other storage failure) never crashes
@@ -2761,10 +2764,14 @@ function AppContent({ onLock }) {
     const [qaNote, setQaNote] = useState("");
     const [showCatPicker, setShowCatPicker] = useState(false);
     const [qaSplitWith, setQaSplitWith] = useState([]); // person ids, equal-split only — anything
-    // more (unequal, groups) still goes through "More options", but splitting with 1-2 people is
-    // common enough that making it a whole extra screen would slow down the common case instead
-    // of speeding it up.
+    // unequal still goes through "More options", but splitting with 1-2 people is common enough
+    // that making it a whole extra screen would slow down the common case instead of speeding it up.
     const [showSplitPicker, setShowSplitPicker] = useState(false);
+    const [showGroupPicker, setShowGroupPicker] = useState(false);
+    const [qaGroupId, setQaGroupId] = useState(""); // mutually exclusive with Split-with — a
+    // transaction having both an attributed group AND individual people splits is exactly the
+    // double-counting bug fixed earlier this session (ADR-era person-attribution fix); keeping
+    // these as alternatives, not simultaneous options, avoids reintroducing that class of bug.
     const [qaVehicleId, setQaVehicleId] = useState(""); // only surfaces for Transport-category
     // expenses — without this, every fuel/service cost for every vehicle gets lumped into one
     // generic "Transport" total, losing the per-vehicle cost tracking Vehicles exists to provide.
@@ -2850,7 +2857,7 @@ function AppContent({ onLock }) {
         catId: qaType==="expense" ? (effectiveCat?.id||null) : null,
         catIds: qaType==="expense" && effectiveCat ? [effectiveCat.id] : [],
         subId:null, subIds:[],
-        accId: qaAccId, people:splitPeople, forPerson:"", groupId:null,
+        accId: qaAccId, people:splitPeople, forPerson:"", groupId:qaGroupId||null,
         vehicleId: qaVehicleId||null,
         paymentMethod: (qaType==="expense" && accounts.find(a=>a.id===qaAccId)?.type==="bank") ? (qaPaymentMethod||null) : null,
         excludeFromSpend: qaExcludeFromSpend,
@@ -2957,19 +2964,16 @@ function AppContent({ onLock }) {
               <span style={lbl}>Vehicle</span>
               <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
                 {vehicles.map(v=>(
-                  <button key={v.id} onClick={()=>setQaVehicleId(prev=>prev===v.id?"":v.id)} style={{ display:"flex",alignItems:"center",gap:6,background:qaVehicleId===v.id?T.accentSoft:T.input,border:`1px solid ${qaVehicleId===v.id?T.accent:T.border}`,borderRadius:20,padding:"7px 12px",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
-                    <span style={{ fontSize:14 }}>{v.type==="bike"?"🏍️":"🚗"}</span>
-                    <span style={{ color:qaVehicleId===v.id?T.accent:T.text,fontSize:12,fontWeight:700 }}>{v.name}</span>
-                  </button>
+                  <Chip key={v.id} icon={v.type==="bike"?"🏍️":"🚗"} label={v.name} active={qaVehicleId===v.id} onClick={()=>setQaVehicleId(prev=>prev===v.id?"":v.id)} T={T}/>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Split with — equal split only. Anything unequal or group-based still goes through
-              "More options", but splitting with 1-2 people belongs here: it's common enough that
-              a whole extra screen for it would slow down more entries than it helps. */}
-          {qaType==="expense"&&(
+          {/* Split with / Tag Group — mutually exclusive (same reasoning as the double-count fix:
+              a transaction shouldn't carry both an attributed group AND individual people splits).
+              Equal split only for people; anything unequal still goes through "More options". */}
+          {qaType==="expense"&&!qaGroupId&&(
             <div style={{ marginBottom:14 }}>
               <span style={lbl}>Split with (optional)</span>
               <div style={{ display:"flex",gap:8,flexWrap:"wrap",alignItems:"center" }}>
@@ -2985,12 +2989,30 @@ function AppContent({ onLock }) {
                   );
                 })}
                 <button onClick={()=>setShowSplitPicker(true)} style={{ background:T.input,border:`1px dashed ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Person</button>
+                {qaSplitWith.length===0&&groups.length>0&&(
+                  <button onClick={()=>setShowGroupPicker(true)} style={{ background:T.input,border:`1px dashed ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Group</button>
+                )}
               </div>
               {qaSplitWith.length>0&&parseFloat(qaAmount)>0&&(
                 <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>Split {1+qaSplitWith.length} ways — you cover {sym}{fmt(Math.round((parseFloat(qaAmount)/(1+qaSplitWith.length))*100)/100)}, the rest owe their share back.</div>
               )}
             </div>
           )}
+          {qaType==="expense"&&qaGroupId&&(()=>{
+            const g = groups.find(x=>String(x.id)===String(qaGroupId));
+            if(!g) return null;
+            return (
+              <div style={{ marginBottom:14 }}>
+                <span style={lbl}>Group (optional)</span>
+                <div style={{ display:"flex",alignItems:"center",gap:5,background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:20,padding:"5px 10px",width:"fit-content" }}>
+                  <span style={{ fontSize:12 }}>{g.icon||"👥"}</span>
+                  <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{g.name}</span>
+                  <button onClick={()=>setQaGroupId("")} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:12,padding:0,lineHeight:1 }}>×</button>
+                </div>
+                <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>This expense is attributed to {g.name} as a whole — for splitting between individual people instead, remove the group first.</div>
+              </div>
+            );
+          })()}
 
           {/* Optional note */}
           <div style={{ marginBottom:14 }}>
@@ -3036,6 +3058,26 @@ function AppContent({ onLock }) {
             </div>
           </div>
         )}
+
+        {showGroupPicker&&(
+          <div onClick={e=>{ e.stopPropagation(); if(e.target===e.currentTarget) setShowGroupPicker(false); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:360,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+            <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 40px",width:"100%",maxWidth:430,maxHeight:"70vh",overflowY:"auto" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+                <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>Tag Group</div>
+                <button onClick={()=>setShowGroupPicker(false)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+              </div>
+              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+                {groups.map(g=>(
+                  <button key={g.id} onClick={()=>{ setQaGroupId(g.id); setShowGroupPicker(false); }} style={{ display:"flex",alignItems:"center",gap:10,background:String(qaGroupId)===String(g.id)?T.accentSoft:T.input,border:`1px solid ${String(qaGroupId)===String(g.id)?T.accent:T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                    <span style={{ fontSize:16 }}>{g.icon||"👥"}</span>
+                    <span style={{ color:T.text,fontSize:13,fontWeight:700,flex:1 }}>{g.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
 
         {showCatPicker&&(
           <div onClick={e=>{ e.stopPropagation(); if(e.target===e.currentTarget) setShowCatPicker(false); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:360,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
@@ -4103,11 +4145,11 @@ function AppContent({ onLock }) {
         if(splitMode==="split"){
           const percentTotal = selectedPids.reduce((sum,pid)=>sum+(parseFloat(splitCustom[pid])||0),0);
           if(splitCalc==="percent" && percentTotal > 100.01){
-            alert("Split percentages cannot exceed 100% of the bill.");
+            setRefDupWarning("Split percentages cannot exceed 100% of the bill.");
             return;
           }
           if(splitTotal > amt+0.01){
-            alert("Split amount cannot exceed the total expense amount.");
+            setRefDupWarning("Split amount cannot exceed the total expense amount.");
             return;
           }
         }
@@ -4122,7 +4164,7 @@ function AppContent({ onLock }) {
           const qtyOver = Object.entries(qtyBySource).find(([sid,qty])=>qty > (Math.max(0, parseFloat((lineItems||[]).find(li=>li.id===sid)?.qty)||0) + 0.0001));
           if(qtyOver){
             const src = (lineItems||[]).find(li=>li.id===qtyOver[0]);
-            alert(`Allocated qty for item \"${src?.label||"Unnamed item"}\" exceeds bought qty.`);
+            setRefDupWarning(`Allocated qty for item "${src?.label||"Unnamed item"}" exceeds bought qty.`);
             return;
           }
           const allocTotal = allocRows.reduce((sum,row)=>{
@@ -4133,7 +4175,7 @@ function AppContent({ onLock }) {
             return sum + Math.max(0,rowAmt);
           },0);
           if(allocTotal > amt+0.01){
-            alert("Allocated total cannot exceed the total expense amount.");
+            setRefDupWarning("Allocated total cannot exceed the total expense amount.");
             return;
           }
         }
@@ -4144,13 +4186,13 @@ function AppContent({ onLock }) {
           if(tagMode==="itemize"){
             const itemizedTotal = (savedTagItems||[]).reduce((sum,item)=>sum+Number(item.amount||0),0);
             if(itemizedTotal > amt+0.01){
-              alert("Itemized total cannot exceed the total expense amount.");
+              setRefDupWarning("Itemized total cannot exceed the total expense amount.");
               return;
             }
           } else {
             const taggedTotal = Number(tagAmt||0) + Number(tagGrpAmt||0);
             if(taggedTotal > amt+0.01){
-              alert("Tagged amount cannot exceed the total expense amount.");
+              setRefDupWarning("Tagged amount cannot exceed the total expense amount.");
               return;
             }
           }
@@ -4219,8 +4261,11 @@ function AppContent({ onLock }) {
             return splitQty > Number(item.qty||0) + 0.0001;
           });
           if(qtyOverAllocated){
-            alert(`Item split qty cannot exceed item qty for "${qtyOverAllocated.label||"Unnamed item"}".`);
-            return;
+            // Was alert()+return — the exact silent-failure risk flagged elsewhere in this file:
+            // if alert() doesn't render in some mobile WebViews, the return right after it still
+            // fires, silently blocking the ENTIRE save (not just the item) with zero visible
+            // feedback. Same non-blocking inline-warning fix as the duplicate-ref/amount checks.
+            setRefDupWarning(`Note: "${qtyOverAllocated.label||"Unnamed item"}" has more split quantity assigned than the item's own quantity — saved anyway, but double-check that item's split.`);
           }
         }
         const matchedBill = bills.find(b=>b.status==="unpaid"&&b.catId===catId&&b.amount>0&&b.amount===amt);
@@ -4533,12 +4578,12 @@ function AppContent({ onLock }) {
           if(pending.length>0) setReimbursementMatchSuggestion({ incomeTxnId:resolvedTxnId, pending });
         }
       } else if(txnType==="cc_emi"){
-        if(!ccEmiCardId){ alert("Please select a credit card."); return; }
+        if(!ccEmiCardId){ setRefDupWarning("Please select a credit card."); return; }
         let planId = ccEmiPlanId;
         if(ccEmiNewPlanMode){
           const monthlyAmt = parseMoney(ccEmiNewMonthly)||0;
-          if(!ccEmiNewName.trim()){ alert("Enter a plan name."); return; }
-          if(!monthlyAmt){ alert("Enter the monthly EMI amount."); return; }
+          if(!ccEmiNewName.trim()){ setRefDupWarning("Enter a plan name."); return; }
+          if(!monthlyAmt){ setRefDupWarning("Enter the monthly EMI amount."); return; }
           const newPlan = {
             id:genId(),
             name:ccEmiNewName.trim(),
@@ -4581,7 +4626,7 @@ function AppContent({ onLock }) {
             },...prev]);
           }
         }
-        if(!planId){ alert("Please select or create an EMI plan."); return; }
+        if(!planId){ setRefDupWarning("Please select or create an EMI plan."); return; }
         const plan = ccEmiNewPlanMode
           ? { id:planId, name:ccEmiNewName.trim(), tenure:Math.max(1,parseInt(ccEmiNewTenure,10)||1) }
           : ccEmiPlans.find(p=>p.id===planId);
@@ -7336,19 +7381,34 @@ function AppContent({ onLock }) {
   useEffect(() => {
     if(!cloudUser?.id || !isCloudSyncConfigured) return;
     const handle = () => {
-      if(document.visibilityState==="visible") pullCloudSnapshot();
+      if(document.visibilityState!=="visible") return;
+      // If a push is still waiting on its debounce timer (a change was made in the last 900ms),
+      // pulling right now would fetch stale cloud data and silently overwrite that fresh local
+      // change — exactly the bug that made vehicles/transactions "randomly disappear." Push
+      // first, whatever's pending, then pull — never pull ahead of an unsaved local change.
+      if(pendingPushRef.current){
+        pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true).then(()=>{
+          pendingPushRef.current = false;
+          pullCloudSnapshot();
+        });
+        return;
+      }
+      pullCloudSnapshot();
     };
     document.addEventListener("visibilitychange", handle);
     return () => document.removeEventListener("visibilitychange", handle);
-  }, [cloudUser?.id, pullCloudSnapshot]);
+  }, [cloudUser?.id, pullCloudSnapshot, pushCloudSnapshot]);
 
+  const pendingPushRef = useRef(false);
   useEffect(() => {
     if(!cloudUser?.id || !isCloudSyncConfigured || !cloudHydrated || applyingCloudSnapshotRef.current) return;
+    pendingPushRef.current = true;
     const timer = window.setTimeout(() => {
+      pendingPushRef.current = false;
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (idx, dir) => {
     const arr = cardOrder.map(x=>x); // fully mutable copy
@@ -10299,6 +10359,52 @@ function AppContent({ onLock }) {
     );
   };
 
+  // Outlook placeholder — Sprint 1 Item #2. Functional, not empty: real navigation to the
+  // existing screens it will eventually absorb (Bills, Budget, Scheduled Income), plus an honest
+  // "Coming Soon" list for what genuinely doesn't exist yet (Cash Forecast, Calendar, Planned
+  // Expenses — all explicit stubs in the Financial Engine). No fake numbers, no invented
+  // forecasts — per the Architecture Freeze Enforcement rule: placeholder screens are fine,
+  // placeholder business logic is not.
+  const OutlookPage = () => (
+    <div style={{ padding:"14px 16px 90px" }}>
+      <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:4 }}>🔮 Outlook</div>
+      <div style={{ color:T.sub,fontSize:12,marginBottom:20 }}>Coming in Sprint 4</div>
+
+      <div style={{ ...card }}>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>ALREADY AVAILABLE</div>
+        <button onClick={()=>setTab("bills")} style={{ ...btnG,width:"100%",textAlign:"left",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+          <span>✓ Bills</span><span style={{ color:T.accent }}>Open →</span>
+        </button>
+        <button onClick={()=>setTab("budget")} style={{ ...btnG,width:"100%",textAlign:"left",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+          <span>✓ Budget Progress</span><span style={{ color:T.accent }}>Open →</span>
+        </button>
+        <button onClick={()=>setShowExpectedIncome(true)} style={{ ...btnG,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+          <span>✓ Scheduled Income</span><span style={{ color:T.accent }}>Open →</span>
+        </button>
+      </div>
+
+      <div style={{ ...card,marginTop:14 }}>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>COMING SOON</div>
+        <div style={{ color:T.sub,fontSize:13,marginBottom:6 }}>• Cash Forecast</div>
+        <div style={{ color:T.sub,fontSize:13,marginBottom:6 }}>• Calendar</div>
+        <div style={{ color:T.sub,fontSize:13 }}>• Planned Expenses</div>
+      </div>
+    </div>
+  );
+
+  // Insights placeholder — Sprint 1 Item #2. Deliberately no charts, no fake data — Insights is
+  // confirmed 0% built (Screen Inventory). A blank "under development" state is more honest than
+  // a chart drawn from nothing.
+  const InsightsPage = () => (
+    <div style={{ padding:"14px 16px 90px" }}>
+      <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:4 }}>📊 Insights</div>
+      <div style={{ color:T.sub,fontSize:12,marginBottom:20 }}>Coming in Sprint 5</div>
+      <div style={{ ...card,textAlign:"center",padding:40 }}>
+        <EmptyState icon="📊" title="Spending · Income · Net Worth" subtitle="This section is under development." T={T}/>
+      </div>
+    </div>
+  );
+
   const WealthPage = () => {
     const getLoanStatusMeta = loan => {
       if(loan.status==="written_off") return { label:"Written off", color:T.sub };
@@ -11011,15 +11117,20 @@ function AppContent({ onLock }) {
             const vt=VEHICLE_TYPES.find(x=>x.id===v.type)||VEHICLE_TYPES[0];
             const txnCount=txns.filter(t=>t.vehicleId===v.id).length;
             return (
-              <div key={v.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",marginBottom:10,display:"flex",alignItems:"center",gap:12 }}>
-                <div style={{ width:40,height:40,borderRadius:10,background:v.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0 }}>{vt.icon}</div>
-                <div style={{ flex:1,minWidth:0 }}>
-                  <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{v.number}</div>
-                  {v.name&&<div style={{ color:T.sub,fontSize:11 }}>{v.name}</div>}
-                  <div style={{ color:T.sub,fontSize:10 }}>{vt.label} · {txnCount} txn{txnCount===1?"":"s"}</div>
-                </div>
-                <button onClick={()=>openEdit(v)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Edit</button>
-                <button onClick={()=>setVehicles(prev=>prev.filter(x=>x.id!==v.id))} style={{ background:"none",border:`1px solid ${T.danger}`,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:12,color:T.danger,fontFamily:"Nunito,sans-serif" }}>✕</button>
+              <div key={v.id} style={{ marginBottom:10 }}>
+                <EntityCard
+                  icon={vt.icon}
+                  accentColor={v.color}
+                  title={v.number}
+                  subtitle={`${v.name?v.name+" · ":""}${vt.label} · ${txnCount} txn${txnCount===1?"":"s"}`}
+                  T={T}
+                  trailing={
+                    <div style={{ display:"flex",gap:6 }}>
+                      <button onClick={()=>openEdit(v)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Edit</button>
+                      <button onClick={()=>setVehicles(prev=>prev.filter(x=>x.id!==v.id))} style={{ background:"none",border:`1px solid ${T.danger}`,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:12,color:T.danger,fontFamily:"Nunito,sans-serif" }}>✕</button>
+                    </div>
+                  }
+                />
               </div>
             );
           })}
@@ -11489,35 +11600,39 @@ function AppContent({ onLock }) {
           <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>Settings</div>
         </div>
 
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Appearance</div>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Manage</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
-          <Row icon="🌙" title="Dark Mode" subtitle={dark?"On — dark theme active":"Off — light theme active"} right={<Toggle val={dark} fn={()=>setDark(v=>!v)}/>}/>
-          <Row icon="🏷️" title="Auto-suggest Category" subtitle={autoDetectExpenseCategory?"On — category suggested from store name":"Off — manual category selection"} right={<Toggle val={autoDetectExpenseCategory} fn={()=>setAutoDetectExpenseCategory(v=>!v)}/>}/>
-        </div>
-
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Security</div>
-        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
-          <Row icon="🔐" title="PIN & Lock" subtitle="Change your app PIN or lock Arth now" onClick={()=>setSettingsSection("security")}/>
+          <Row icon="🏦" title="Accounts" subtitle={`${accounts.length} account${accounts.length===1?"":"s"}`} onClick={()=>setSettingsSection("accounts")}/>
+          <Row icon="🗂️" title="Categories" subtitle={`${cats.length} categories`} onClick={()=>setSettingsSection("categories")}/>
+          <Row icon="🏷️" title="Account, Income & Liability Types" subtitle="Add custom types" onClick={()=>setSettingsSection("types")}/>
+          <Row icon="👥" title="People & Groups" subtitle="Manage who you split expenses with" onClick={()=>{ setTab("people"); setShowSettings(false); }}/>
+          <Row icon="🚗" title="Vehicles" subtitle={vehicles.length>0?`${vehicles.length} vehicle${vehicles.length===1?"":"s"}`:"Track fuel, PUC, insurance by vehicle"} onClick={()=>setSettingsSection("vehicles")}/>
+          <Row icon="🧾" title="Billers" subtitle="Manage billers and biller accounts" onClick={()=>{ setTab("bills"); setShowSettings(false); }}/>
+          {/* Insurance Policy intentionally NOT linked here yet — UX-004's Manage entity doesn't
+              exist in code (Sprint 1 item #2, a separate piece of work). Linking to nothing would
+              be worse than omitting it; this row returns once that entity is actually built. */}
         </div>
 
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Data</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
-          <Row icon="🏦" title="Manage Accounts" subtitle={`${accounts.length} account${accounts.length===1?"":"s"}`} onClick={()=>setSettingsSection("accounts")}/>
-          <Row icon="🚗" title="Vehicles" subtitle={vehicles.length>0?`${vehicles.length} vehicle${vehicles.length===1?"":"s"}`:"Track fuel, PUC, insurance by vehicle"} onClick={()=>setSettingsSection("vehicles")}/>
-          <Row icon="🗂️" title="Manage Categories" subtitle={`${cats.length} categories`} onClick={()=>setSettingsSection("categories")}/>
-          <Row icon="🏷️" title="Account, Income & Liability Types" subtitle="Add custom types" onClick={()=>setSettingsSection("types")}/>
-        </div>
-
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Backup & Sync</div>
-        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
+          {/* Import intentionally not listed — confirmed not built anywhere in the app today
+              (per the Screen Inventory). Export exists via CSV, listed below under Backup. */}
           <Row icon="🔑" title="Cloud Sync & Account" subtitle={cloudUser?.email ? `Signed in as ${cloudUser.email}${lastSyncedAt ? " · synced" : ""}` : "Sign in to sync across devices"} onClick={()=>setSettingsSection("cloudsync")}/>
           <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
         </div>
 
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Settings</div>
+        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
+          <Row icon="🌙" title="Dark Mode" subtitle={dark?"On — dark theme active":"Off — light theme active"} right={<Toggle val={dark} fn={()=>setDark(v=>!v)}/>}/>
+          <Row icon="🏷️" title="Auto-suggest Category" subtitle={autoDetectExpenseCategory?"On — category suggested from store name":"Off — manual category selection"} right={<Toggle val={autoDetectExpenseCategory} fn={()=>setAutoDetectExpenseCategory(v=>!v)}/>}/>
+          <Row icon="🔐" title="PIN & Lock" subtitle="Change your app PIN or lock Arth now" onClick={()=>setSettingsSection("security")}/>
+          <Row icon="🔔" title="Notifications" subtitle="Bill reminders and alerts" onClick={()=>{ setShowNotifications(true); }}/>
+        </div>
+
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Help</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 24px",overflow:"hidden" }}>
-          <Row icon="📖" title="User Guides" subtitle="How-to guides for features" onClick={()=>setSettingsSection("guides")}/>
-          <Row icon="🚀" title="Release Notes" subtitle={`v${APP_VERSION} · What's new`} onClick={()=>setSettingsSection("releasenotes")}/>
+          <Row icon="📖" title="Help & Support" subtitle="How-to guides for features" onClick={()=>setSettingsSection("guides")}/>
+          <Row icon="🚀" title="About Arth" subtitle={`v${APP_VERSION} · What's new`} onClick={()=>setSettingsSection("releasenotes")}/>
         </div>
 
         <div style={{ color:T.sub,fontSize:10,textAlign:"center",padding:"0 16px 8px" }}>
@@ -13259,6 +13374,7 @@ function AppContent({ onLock }) {
           <div style={{ padding:"10px 8px",display:"flex",flexDirection:"column",gap:2 }}>
             {[
               { icon:"👤", label:"User Profile", onClick:()=>{ setTab("home"); setShowSettings(false); onClose(); } },
+              { icon:"⚙️", label:"Settings", onClick:()=>{ setShowSettings(true); setSettingsSection(null); onClose(); } },
               { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"📅", label:"Bills", onClick:()=>goToTab("bills") },
               { icon:"🔍", label:"Find Duplicate Transactions", onClick:()=>{ setShowDuplicateFinder(true); onClose(); } },
@@ -14300,10 +14416,10 @@ function AppContent({ onLock }) {
 
   const TABS=[
     {id:"home",icon:"🏠",label:"Home"},
-    {id:"transactions",icon:"📖",label:"Timeline"},
-    {id:"__fab__",icon:"➕",label:""},
     {id:"wealth",icon:"💰",label:"Money"},
-    {id:"settings_tab",icon:"👤",label:"Me"}
+    {id:"__fab__",icon:"➕",label:""},
+    {id:"outlook",icon:"🔮",label:"Outlook"},
+    {id:"insights",icon:"📊",label:"Insights"}
   ];
 
   const [wealthUnlocked, setWealthUnlocked] = useState(false);
@@ -14399,6 +14515,8 @@ function AppContent({ onLock }) {
         {!showSettings&&tab==="budget"&&<BudgetPage/>}
         {!showSettings&&tab==="bills"&&<BillsPage/>}
         {!showSettings&&tab==="wealth"&&wealthUnlocked&&<WealthPage/>}
+        {!showSettings&&tab==="outlook"&&<OutlookPage/>}
+        {!showSettings&&tab==="insights"&&<InsightsPage/>}
         {showSettings&&<Settings/>}
 
       {/* Universal Search Overlay */}
@@ -14572,17 +14690,7 @@ function AppContent({ onLock }) {
         )}
         {viewingEvent&&<EventDetailModal event={viewingEvent} onClose={()=>setViewingEvent(null)} T={T} sym={sym} fmt={fmt} txns={txns} getMyExpenseAmount={getMyExpenseAmount} getPerson={getPerson} formatShortDate={formatShortDate} askConfirm={askConfirm} setEvents={setEvents} setEditingEvent={setEditingEvent} setShowAddEvent={setShowAddEvent} setTxnDetailId={setTxnDetailId} EVENT_TYPES={EVENT_TYPES}/>}
         {showNavDrawer&&<NavDrawer onClose={()=>setShowNavDrawer(false)}/>}
-        {confirmDialog&&(
-          <div onClick={e=>{ if(e.target===e.currentTarget) setConfirmDialog(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:24 }}>
-            <div style={{ background:T.card,borderRadius:18,padding:"20px 18px",width:"100%",maxWidth:360 }}>
-              <div style={{ color:T.text,fontSize:14,fontWeight:700,lineHeight:1.5,marginBottom:18,whiteSpace:"pre-line" }}>{confirmDialog.message}</div>
-              <div style={{ display:"grid",gridTemplateColumns:confirmDialog.onConfirm?"1fr 1fr":"1fr",gap:10 }}>
-                {confirmDialog.onConfirm&&<button onClick={()=>setConfirmDialog(null)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>}
-                <button onClick={()=>{ const fn=confirmDialog.onConfirm; setConfirmDialog(null); fn?.(); }} style={{ background:confirmDialog.onConfirm?T.danger:T.accent,border:"none",borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:800,color:confirmDialog.onConfirm?"#fff":"#000",fontFamily:"Nunito,sans-serif" }}>{confirmDialog.onConfirm?"Confirm":"OK"}</button>
-              </div>
-            </div>
-          </div>
-        )}
+        {confirmDialog&&<ConfirmDialog message={confirmDialog.message} onConfirm={confirmDialog.onConfirm} onClose={()=>setConfirmDialog(null)} variant={confirmDialog.variant||(confirmDialog.onConfirm?"danger":"default")} T={T}/>}
         {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); setPreselectedBillerProvider(""); setPreselectedBillerId(""); }}/>}
         {categoryAccountsView&&(()=>{
           const type = categoryAccountsView;
