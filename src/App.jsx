@@ -10429,16 +10429,21 @@ function AppContent({ onLock }) {
     const hasEnoughData = typeof openingBalance === "number" && !Number.isNaN(openingBalance);
     const safeToSpendPerDay = hasEnoughData && safeToSpend!=null ? safeToSpend/30 : null;
 
-    // Forecast Status classifier — ADR-022, implemented here for the first time (was previously
-    // spec-only). Thresholds are hardcoded for now, not yet product-config values as ADR-022
-    // calls for — flagged directly rather than silently treated as final.
+    // Forecast Status classifier — ADR-022, revised after review: data completeness must be
+    // checked BEFORE financial health. The original version could show "Comfortable" purely
+    // because no Bills/Income existed to subtract — mathematically valid, practically a false
+    // confidence signal. Real bug, not cosmetic — fixed here.
+    const unpaidBillCount = bills.filter(b=>b.status!=="paid").length;
+    const pendingIncomeCount = (expectedIncome||[]).filter(e=>e.status!=="received").length;
+    const hasCommitmentData = unpaidBillCount>0 || pendingIncomeCount>0;
     const mandatoryCovered = !negativeCheck.negative;
     const forecastStatus = !hasEnoughData ? null
+      : !hasCommitmentData ? { level:"incomplete", icon:"⚪", label:"Needs Setup", detail:"No Bills or Scheduled Income recorded yet — add them to improve forecast accuracy." }
       : negativeCheck.negative || safeToSpend<0 ? { level:"risk", icon:"🔴", label:"At Risk", detail:"Forecast goes negative or a commitment can't be covered." }
       : safeToSpendPerDay!==null && safeToSpendPerDay<200 ? { level:"tight", icon:"🟠", label:"Tight", detail:"Buffer is small — one unexpected expense could create stress." }
       : safeToSpendPerDay!==null && safeToSpendPerDay<600 ? { level:"watchful", icon:"🟡", label:"Watchful", detail:"Commitments are covered, but margin is limited." }
       : { level:"comfortable", icon:"🟢", label:"Comfortable", detail:"All known commitments are covered." };
-    const statusColor = { risk:T.danger, tight:T.warn, watchful:T.gold||T.warn, comfortable:T.success }[forecastStatus?.level] || T.sub;
+    const statusColor = { incomplete:T.sub, risk:T.danger, tight:T.warn, watchful:T.gold||T.warn, comfortable:T.success }[forecastStatus?.level] || T.sub;
 
     // Bills grouped by urgency, not a flat "Already Available" launcher list — Overdue / Due
     // Today / Next 7 Days / Later. Reuses the exact daysUntil/isOverdue logic already used
@@ -10483,7 +10488,11 @@ function AppContent({ onLock }) {
         ) : (
           <>
             <div style={{ color:T.accent,fontSize:30,fontWeight:900,margin:"6px 0" }}>{sym}{fmt(safeToSpend)}</div>
-            <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(safeToSpendPerDay))}/day for the next 30 days</div>
+            {!hasCommitmentData ? (
+              <div style={{ color:T.warn,fontSize:10,marginTop:4 }}>⚠ No future commitments recorded. This amount may be inaccurate until Bills, SIPs, or Income are added.</div>
+            ) : (
+              <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(safeToSpendPerDay))}/day for the next 30 days</div>
+            )}
           </>
         )}
       </div>
