@@ -6974,6 +6974,8 @@ function AppContent({ onLock }) {
   };
   const [cardOrder, setCardOrder] = useState(()=>backfillCardOrder(JSON.parse(localStorage.getItem("arth_card_order")||"null")));
   const [editingCards, setEditingCards] = useState(false);
+  const [hiddenCards, setHiddenCards] = useState(()=>new Set(JSON.parse(localStorage.getItem("arth_hidden_cards")||"[]")));
+  useEffect(()=>safeSetLocalStorage("arth_hidden_cards", JSON.stringify([...hiddenCards])), [hiddenCards]);
   const [syncEmail, setSyncEmail] = useState("");
   const [syncPassword, setSyncPassword] = useState("");
   const [cloudUser, setCloudUser] = useState(null);
@@ -7983,15 +7985,25 @@ function AppContent({ onLock }) {
             <button onClick={()=>setEditingCards(e=>!e)} style={{ background:editingCards?T.accent+"22":"none",border:`1px solid ${editingCards?T.accent:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:editingCards?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{editingCards?"✓ Done":"⠿ Arrange"}</button>
           </div>
 
-          {(()=>{ const validCards=cardOrder.filter(id=>CARDS[id]!=null); return validCards.map((cardId, idx) => {
+          {(()=>{
+            const validCards=cardOrder.filter(id=>CARDS[id]!=null);
+            const visibleCount = validCards.filter(id=>!hiddenCards.has(id)).length;
+            const displayCards = editingCards ? validCards : validCards.filter(id=>!hiddenCards.has(id));
+            return displayCards.map((cardId, idx) => {
             const cardEl = CARDS[cardId];
             if(!cardEl) return null;
+            const isHidden = hiddenCards.has(cardId);
             return (
-              <div key={cardId} style={{ position:"relative",marginBottom:12 }}>
+              <div key={cardId} style={{ position:"relative",marginBottom:12, opacity:editingCards&&isHidden?0.4:1 }}>
                 {editingCards&&(
                   <div style={{ position:"absolute",right:-8,top:"50%",transform:"translateY(-50%)",display:"flex",flexDirection:"column",gap:4,zIndex:10 }}>
+                    <button onClick={()=>{
+                      // At least one widget must remain visible - refuse to hide the last one
+                      if(!isHidden && visibleCount<=1) return;
+                      setHiddenCards(prev=>{ const next=new Set(prev); if(isHidden) next.delete(cardId); else next.add(cardId); return next; });
+                    }} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:13,color:isHidden?T.sub:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>{isHidden?"🚫":"👁"}</button>
                     <button onClick={()=>moveCard(idx,-1)} disabled={idx===0} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===0?"not-allowed":"pointer",fontSize:14,color:idx===0?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↑</button>
-                    <button onClick={()=>moveCard(idx,1)} disabled={idx===validCards.length-1} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===validCards.length-1?"not-allowed":"pointer",fontSize:14,color:idx===validCards.length-1?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↓</button>
+                    <button onClick={()=>moveCard(idx,1)} disabled={idx===displayCards.length-1} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===displayCards.length-1?"not-allowed":"pointer",fontSize:14,color:idx===displayCards.length-1?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↓</button>
                   </div>
                 )}
                 <div style={{ marginRight:editingCards?36:0, transition:"margin 0.2s" }}>
