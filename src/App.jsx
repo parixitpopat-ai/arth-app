@@ -6944,7 +6944,7 @@ function AppContent({ onLock }) {
 
   // ── HOME ───────────────────────────────────────────────────────────────────
 
-  const DEFAULT_CARD_ORDER = ["healthScore","aiInsight","quickActions","goalsHome","eventsHome","stats","categories","cc","bills","recent"];
+  const DEFAULT_CARD_ORDER = ["bills","safeToSpend","protectedMoney","quickActions","goalsHome","recent"];
   const KNOWN_CARD_KEYS = new Set(DEFAULT_CARD_ORDER);
   // Filters out invalid saved keys AND backfills any card added to the app after this user's
   // order was last saved. Must be applied every time cardOrder is set from a saved source
@@ -7471,6 +7471,41 @@ function AppContent({ onLock }) {
   };
 
   const Home = () => {
+    // Safe to Spend / Protected Money — same calculations as OutlookPage (ADR-024), duplicated
+    // here since Home and Outlook are separate component closures. Flagging the duplication
+    // directly rather than hide it: if this formula changes again, both places need updating -
+    // a shared hook would be the right fix, not done here to keep this change scoped to Home.
+    const homeMonthKey = todayStr().slice(0,7);
+    const homeTodayDate = new Date(); homeTodayDate.setHours(0,0,0,0);
+    const homeOpeningBalance = accounts
+      .filter(a=>["bank","cash","upi"].includes(a.type) && !isInvestmentAccount(a))
+      .reduce((sum,a)=>sum+accountBalance(a.id), 0);
+    const homeSipsAsBills = (recurringSchedules||[]).filter(r=>r.active!==false).map(r=>{
+      const thisMonthDue = new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth(), r.day);
+      const nextDue = thisMonthDue >= homeTodayDate ? thisMonthDue : new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth()+1, r.day);
+      return { id:`sip_${r.id}`, type:"sip", amount:r.amount, dueDate:nextDue.toISOString().slice(0,10), status:"unpaid" };
+    });
+    const homeCcStatementsAsBills = accounts.filter(a=>a.type==="cc").map(a=>{
+      const summary = getCardSummary(a, accounts, txns, toDateOnly);
+      if(!summary.currentDue || summary.currentDue<=0) return null;
+      return { id:`ccstmt_${a.id}`, type:"cc_statement", amount:summary.currentDue, dueDate:summary.dueOn.toISOString().slice(0,10), status:"unpaid" };
+    }).filter(Boolean);
+    const homeBillsForForecast = [...bills, ...homeSipsAsBills, ...homeCcStatementsAsBills];
+    const homeThisMonthTxns = txns.filter(t=>t.date&&t.date.startsWith(homeMonthKey));
+    const homeMonthSpend = homeThisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
+    const homeMonthBudget = monthOverrides[homeMonthKey] || Math.round(Number(annualBudget||0)/12);
+    const homeSafeToSpend = homeMonthBudget - homeMonthSpend;
+    const homeDaysLeftInMonth = new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth()+1, 0).getDate() - homeTodayDate.getDate() + 1;
+    const homeSafeToSpendPerDay = homeDaysLeftInMonth>0 ? homeSafeToSpend/homeDaysLeftInMonth : homeSafeToSpend;
+    const homeCashRequired = homeBillsForForecast.filter(b=>b.status!=="paid").reduce((sum,b)=>sum+Number(b.amount||0),0);
+    const homeBuffer = homeOpeningBalance - homeCashRequired;
+    const homeHasCommitmentData = homeBillsForForecast.filter(b=>b.status!=="paid").length>0 || (expectedIncome||[]).filter(e=>e.status!=="received").length>0;
+    const homeStatus = !homeHasCommitmentData ? { icon:"⚪", label:"Needs Setup", color:T.sub }
+      : homeBuffer<0 ? { icon:"🔴", label:"At Risk", color:T.danger }
+      : homeBuffer<homeCashRequired*0.1 ? { icon:"🟠", label:"Tight", color:T.warn }
+      : homeBuffer<homeCashRequired*0.3 ? { icon:"🟡", label:"Watchful", color:T.gold||T.warn }
+      : { icon:"🟢", label:"Comfortable", color:T.success };
+
     const ccList = accounts.filter(a=>a.type==="cc");
     const ccSummaries = ccList.map(card=>({ card, ...getCardSummary(card, accounts, txns, toDateOnly) }));
     const totalDue = ccSummaries.reduce((s,item)=>s+item.currentDue,0);
@@ -7601,6 +7636,36 @@ function AppContent({ onLock }) {
           </div>
         );
       })(),
+      safeToSpend: (
+        <div key="safeToSpend" onClick={()=>setTab("outlook")} style={{ ...card,textAlign:"center",cursor:"pointer" }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND</div>
+          {homeMonthBudget<=0 ? (
+            <div style={{ color:T.sub,fontSize:12,padding:"8px 0" }}>No budget set for this month yet.</div>
+          ) : (
+            <>
+              <div style={{ color:homeSafeToSpend>=0?T.accent:T.danger,fontSize:26,fontWeight:900,margin:"4px 0" }}>{sym}{fmt(homeSafeToSpend)}</div>
+              <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(homeSafeToSpendPerDay))}/day</div>
+            </>
+          )}
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:5,marginTop:8 }}>
+            <span>{homeStatus.icon}</span><span style={{ color:homeStatus.color,fontSize:11,fontWeight:700 }}>{homeStatus.label}</span>
+          </div>
+          <div style={{ color:T.accent,fontSize:10,fontWeight:700,marginTop:6 }}>Open Outlook →</div>
+        </div>
+      ),
+      protectedMoney: (
+        <div key="protectedMoney" onClick={()=>setTab("outlook")} style={{ ...card,cursor:"pointer" }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>PROTECTED MONEY</div>
+          <div style={{ color:T.text,fontSize:22,fontWeight:900,marginBottom:8 }}>{sym}{fmt(homeCashRequired)}</div>
+          <div style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:T.sub,marginBottom:2 }}>
+            <span>Cash Available</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeOpeningBalance)}</span>
+          </div>
+          <div style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:T.sub }}>
+            <span>Buffer</span><span style={{ color:homeBuffer>=0?T.success:T.danger,fontWeight:800 }}>{sym}{fmt(homeBuffer)}</span>
+          </div>
+          <div style={{ color:T.accent,fontSize:10,fontWeight:700,marginTop:8,textAlign:"right" }}>View Commitments →</div>
+        </div>
+      ),
       stats: (
         <div key="stats" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
           {[
