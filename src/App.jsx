@@ -10435,7 +10435,17 @@ function AppContent({ onLock }) {
       const nextDue = thisMonthDue >= todayDate ? thisMonthDue : new Date(todayDate.getFullYear(), todayDate.getMonth()+1, r.day);
       return { id:`sip_${r.id}`, type:"sip", name:r.name?`${r.name} SIP`:"SIP", amount:r.amount, dueDate:nextDue.toISOString().slice(0,10), status:"unpaid" };
     });
-    const billsForForecast = [...bills, ...sipsAsBills];
+    // Same gap, different entity: CC statement amounts are computed dynamically via
+    // getCardSummary's cycle logic (confirmed by an explicit code comment: "card statements
+    // aren't stored as Bill records") — meaning they were also silently excluded from Safe to
+    // Spend, same root cause as the SIP bug. currentDue > 0 only, so a fully-paid card doesn't
+    // show as a phantom commitment.
+    const ccStatementsAsBills = accounts.filter(a=>a.type==="cc").map(a=>{
+      const summary = getCardSummary(a, accounts, txns, toDateOnly);
+      if(!summary.currentDue || summary.currentDue<=0) return null;
+      return { id:`ccstmt_${a.id}`, type:"cc_statement", name:`${a.name} Statement`, amount:summary.currentDue, dueDate:summary.dueOn.toISOString().slice(0,10), status:"unpaid" };
+    }).filter(Boolean);
+    const billsForForecast = [...bills, ...sipsAsBills, ...ccStatementsAsBills];
 
     const estimatedVariable = averageOfLastNMonthsVariableSpend(txns, 3, monthKey);
     const timeline = buildCashFlowTimeline(openingBalance, billsForForecast, expectedIncome, 30, refundTotalsByBill);
@@ -10484,12 +10494,15 @@ function AppContent({ onLock }) {
     const netWorthDelta = yesterdaySnap && todaySnap ? todaySnap.netWorth - yesterdaySnap.netWorth : null;
     const cashDelta = yesterdaySnap && todaySnap ? todaySnap.cash - yesterdaySnap.cash : null;
 
-    const BillRow = ({ b }) => (
-      <div onClick={()=>{ if(!b.id.toString().startsWith("sip_")) setEditingBill(b); }} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:b.id.toString().startsWith("sip_")?"default":"pointer" }}>
-        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name||b.type}{b.type==="sip"&&<span style={{ color:T.sub,fontWeight:400 }}> · SIP</span>}</span>
+    const BillRow = ({ b }) => {
+      const isSynthetic = b.id.toString().startsWith("sip_") || b.id.toString().startsWith("ccstmt_");
+      return (
+      <div onClick={()=>{ if(!isSynthetic) setEditingBill(b); }} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:isSynthetic?"default":"pointer" }}>
+        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name||b.type}{b.type==="sip"&&<span style={{ color:T.sub,fontWeight:400 }}> · SIP</span>}{b.type==="cc_statement"&&<span style={{ color:T.sub,fontWeight:400 }}> · Card</span>}</span>
         <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(b.amount)}</span>
       </div>
-    );
+      );
+    };
 
     return (
     <div style={{ padding:"14px 16px 90px" }}>
@@ -10663,7 +10676,12 @@ function AppContent({ onLock }) {
         <Section title="Credit Cards">
           <div style={{ ...card }}>
             {ccAccts.map(a=>{
-              const bal = accountBalance(a.id);
+              // accountBalance() explicitly returns 0 for any CC account by design (confirmed by
+              // reading the code) — it was never meant to be used here. cardOutstanding() is the
+              // real function, already used correctly elsewhere (creditCardLiabilityTotal). This
+              // was a real bug, not a display issue — every card showed Outstanding: ₹0 regardless
+              // of actual Bills due.
+              const bal = cardOutstanding(a);
               return (
                 <div key={a.id} style={{ padding:"10px 0",borderBottom:`1px solid ${T.border}` }}>
                   <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>{a.name}</div>
@@ -14407,6 +14425,13 @@ function AppContent({ onLock }) {
 
 
   const AddBillModal = () => {
+    const _preBA0 = defaultBillerAccountId ? billerAccounts.find(b=>b.id===defaultBillerAccountId) : null;
+    // Tracks which biller is selected in step 1, independently of billerAccountId (step 2). Was
+    // previously *derived* from billerAccountId (`currentBa?.billerId`) — but picking a biller in
+    // step 1 resets billerAccountId to "", which immediately collapsed the derived value back to
+    // "" too, so step 2 could never actually appear. Real bug, not a display issue - confirmed by
+    // tracing the state dependency, not assumed.
+    const [selectedBillerId,setSelectedBillerId]=useState(_preBA0?.billerId||"");
     const [billerAccountId,setBillerAccountId]=useState(defaultBillerAccountId||"");
     const selectedBA = billerAccountId ? billerAccounts.find(b=>b.id===billerAccountId) : null;
     const _preBA = defaultBillerAccountId ? billerAccounts.find(b=>b.id===defaultBillerAccountId) : null;
@@ -14499,8 +14524,6 @@ function AppContent({ onLock }) {
                 one auto-fills name/merchant AND links billerAccountId, instead of leaving you to
                 retype a name that creates a disconnected bill with no real link. */}
             {billers.length>0&&(()=>{
-              const currentBa = billerAccounts.find(x=>x.id===billerAccountId);
-              const selectedBillerId = currentBa?.billerId || "";
               const accountsForSelectedBiller = billerAccounts.filter(ba=>ba.billerId===selectedBillerId);
               return (
                 <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
@@ -14508,6 +14531,7 @@ function AppContent({ onLock }) {
                     <span style={lbl}>Existing Biller (optional)</span>
                     <select style={inp} value={selectedBillerId} onChange={e=>{
                       const billerId = e.target.value;
+                      setSelectedBillerId(billerId);
                       setBillerAccountId(""); // reset account when biller changes - was previously
                       // possible to end up with an account that doesn't belong to the newly
                       // selected biller
