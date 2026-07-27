@@ -7751,19 +7751,36 @@ function AppContent({ onLock }) {
         // Legacy alerts folded in here - Membership Expiry and Recurring Investment Reminder used
         // to render as separate, always-visible blocks outside the card system entirely,
         // duplicating exactly what this widget is meant to consolidate. One system, one source.
+        // Correction: an earlier pass folded Membership in but left a comment falsely implying
+        // Investment Reminders were folded too - they weren't (confirmed via a real screenshot
+        // showing the old standalone card still live). Actually folding it in now.
         const todayStrFocus = today.toISOString().split("T")[0];
         const in7Focus = new Date(Date.now()+7*24*60*60*1000).toISOString().split("T")[0];
         const withPeriodFocus = memberships.map(m=>({ m, period:getCurrentPeriod(m) })).filter(x=>x.period);
         const expiringMemberships = withPeriodFocus.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); return eff>=todayStrFocus && eff<=in7Focus; });
         const lapsedMemberships = withPeriodFocus.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); if(eff>=todayStrFocus) return false; const diffDays = Math.round((new Date()-new Date(eff))/(1000*60*60*24)); return diffDays<=3; });
-        const focusCount = upcoming.length + expiringMemberships.length + lapsedMemberships.length;
-        if(!upcoming.length && !expiringMemberships.length && !lapsedMemberships.length) return null;
+        const unrecordedInvestments = allFoliosDue.slice(0,3); // cap at 3 within Today's Focus - the
+        // old standalone card showed up to 5+"more"; Today's Focus is meant to stay short, so the
+        // full list is still reachable via the Investments screen itself, not duplicated here.
+        const focusCount = upcoming.length + expiringMemberships.length + lapsedMemberships.length + allFoliosDue.length;
+        if(!upcoming.length && !expiringMemberships.length && !lapsedMemberships.length && !allFoliosDue.length) return null;
         return (
           <div key="bills" style={card}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
               <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>🎯 Today's Focus {focusCount>0&&<span style={{ color:T.accent }}>({focusCount})</span>}</span>
               {overdue.length>0&&<span style={{ background:T.danger+"22",color:T.danger,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700 }}>{overdue.length} overdue</span>}
             </div>
+            {unrecordedInvestments.map(g=>(
+              <div key={`inv_${g.key}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                <div style={{ width:32,height:32,borderRadius:9,background:T.info+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>📈</div>
+                <div style={{ flex:1 }}><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{g.name}</div><div style={{ color:T.sub,fontSize:11 }}>{g.type?.toUpperCase()||"INVESTMENT"} not recorded{g.amount?` · ${sym}${fmt(g.amount)}`:""}</div></div>
+                <div style={{ display:"flex",gap:6 }}>
+                  <button onClick={()=>{ setAddPrefill({ amount:String(g.amount||""), accId:g.accId||"", who:g.name||"", investFolio:g.key||"", investType:g.type||"mf", date:todayStr() }); setDefaultAddType("investment"); setShowAdd(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Record</button>
+                  <button onClick={()=>{ const key=g.key; setSkippedInvestmentMonths(prev=>prev.includes(`${key}_${thisMonthKey}`)?prev:[...prev,`${key}_${thisMonthKey}`]); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Skip</button>
+                </div>
+              </div>
+            ))}
+            {allFoliosDue.length>3&&<div style={{ color:T.sub,fontSize:10,padding:"4px 0" }}>+{allFoliosDue.length-3} more in Investments</div>}
             {lapsedMemberships.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
               <div key={`lapsed_${m.id}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
                 <div style={{ width:32,height:32,borderRadius:9,background:T.danger+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>🔴</div>
@@ -7956,28 +7973,10 @@ function AppContent({ onLock }) {
               ))}
             </div>
           )}
-          {/* All investment folios not yet recorded this month */}
-          {allFoliosDue.length>0&&(
-            <div style={{ background:T.accent+"10",border:`1px solid ${T.accent}22`,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
-              <div style={{ color:T.accent,fontSize:13,fontWeight:800,marginBottom:8 }}>💹 {allFoliosDue.length} investment{allFoliosDue.length>1?"s":""} not recorded this month</div>
-              {allFoliosDue.slice(0,5).map(g=>(
-                <div key={g.key} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
-                  <div>
-                    <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{g.name}</div>
-                    <div style={{ color:T.sub,fontSize:10 }}>{g.type?.toUpperCase()||"INVESTMENT"}{g.amount?` · ${sym}${fmt(g.amount)}`:""}</div>
-                  </div>
-                  <div style={{ display:"flex",gap:6 }}>
-                    <button onClick={()=>{
-                      setAddPrefill({ amount:String(g.amount||""), accId:g.accId||"", who:g.name||"", investFolio:g.key||"", investType:g.type||"mf", date:todayStr() });
-                      setDefaultAddType("investment"); setShowAdd(true);
-                    }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Record</button>
-                    <button onClick={()=>{ const key=g.key; setSkippedInvestmentMonths(prev=>prev.includes(`${key}_${thisMonthKey}`)?prev:[...prev,`${key}_${thisMonthKey}`]); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Skip</button>
-                  </div>
-                </div>
-              ))}
-              {allFoliosDue.length>5&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>+{allFoliosDue.length-5} more</div>}
-            </div>
-          )}
+          {/* Investment reminders folded into Today's Focus (the "bills" card above) - actually
+              done this time, unlike the earlier pass that only claimed to via a comment while the
+              standalone block below kept rendering. Confirmed via a real screenshot showing the
+              old card still live before this fix. */}
           {/* Membership expiry alerts folded into Today's Focus (the "bills" card above) per the
               Home audit - this used to render as a separate, always-visible, un-hideable block
               outside the card system, duplicating what Today's Focus is meant to consolidate. */}
