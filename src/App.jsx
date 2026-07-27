@@ -10421,10 +10421,26 @@ function AppContent({ onLock }) {
       .filter(a=>["bank","cash","upi"].includes(a.type) && !isInvestmentAccount(a))
       .reduce((sum,a)=>sum+accountBalance(a.id), 0);
     const monthKey = todayStr().slice(0,7);
+
+    // SIPs are tracked via a genuinely separate entity (recurringSchedules), not Bill.type="sip" —
+    // confirmed by checking the code, contradicting what this doc set had assumed. The engine
+    // functions only ever receive `bills` — so without this merge, SIP amounts were silently
+    // never subtracted from Safe to Spend at all (a real calculation bug, not a display issue).
+    // Converting each active schedule into a bill-shaped object here, at the call site, rather
+    // than editing engine.js directly, since it lets the pure functions stay untouched and
+    // correct for what's actually passed in.
+    const todayDate = new Date(); todayDate.setHours(0,0,0,0);
+    const sipsAsBills = (recurringSchedules||[]).filter(r=>r.active!==false).map(r=>{
+      const thisMonthDue = new Date(todayDate.getFullYear(), todayDate.getMonth(), r.day);
+      const nextDue = thisMonthDue >= todayDate ? thisMonthDue : new Date(todayDate.getFullYear(), todayDate.getMonth()+1, r.day);
+      return { id:`sip_${r.id}`, type:"sip", name:r.name?`${r.name} SIP`:"SIP", amount:r.amount, dueDate:nextDue.toISOString().slice(0,10), status:"unpaid" };
+    });
+    const billsForForecast = [...bills, ...sipsAsBills];
+
     const estimatedVariable = averageOfLastNMonthsVariableSpend(txns, 3, monthKey);
-    const timeline = buildCashFlowTimeline(openingBalance, bills, expectedIncome, 30, refundTotalsByBill);
-    const projectedBalance = calculateProjectedBalance(openingBalance, bills, expectedIncome, estimatedVariable, monthKey, refundTotalsByBill);
-    const safeToSpend = calculateSafeToSpend(openingBalance, bills, expectedIncome, estimatedVariable, monthKey, refundTotalsByBill);
+    const timeline = buildCashFlowTimeline(openingBalance, billsForForecast, expectedIncome, 30, refundTotalsByBill);
+    const projectedBalance = calculateProjectedBalance(openingBalance, billsForForecast, expectedIncome, estimatedVariable, monthKey, refundTotalsByBill);
+    const safeToSpend = calculateSafeToSpend(openingBalance, billsForForecast, expectedIncome, estimatedVariable, monthKey, refundTotalsByBill);
     const negativeCheck = hasTransientNegativeBalance(timeline);
     const hasEnoughData = typeof openingBalance === "number" && !Number.isNaN(openingBalance);
     const safeToSpendPerDay = hasEnoughData && safeToSpend!=null ? safeToSpend/30 : null;
@@ -10433,7 +10449,7 @@ function AppContent({ onLock }) {
     // checked BEFORE financial health. The original version could show "Comfortable" purely
     // because no Bills/Income existed to subtract — mathematically valid, practically a false
     // confidence signal. Real bug, not cosmetic — fixed here.
-    const unpaidBillCount = bills.filter(b=>b.status!=="paid").length;
+    const unpaidBillCount = billsForForecast.filter(b=>b.status!=="paid").length;
     const pendingIncomeCount = (expectedIncome||[]).filter(e=>e.status!=="received").length;
     const hasCommitmentData = unpaidBillCount>0 || pendingIncomeCount>0;
     const mandatoryCovered = !negativeCheck.negative;
@@ -10449,7 +10465,7 @@ function AppContent({ onLock }) {
     // Today / Next 7 Days / Later. Reuses the exact daysUntil/isOverdue logic already used
     // elsewhere (O003/O004), not a new calculation.
     const today = new Date(); today.setHours(0,0,0,0);
-    const unpaidBills = bills.filter(b=>b.status!=="paid").map(b=>{
+    const unpaidBills = billsForForecast.filter(b=>b.status!=="paid").map(b=>{
       const daysUntil = Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
       return { ...b, daysUntil, isOverdue: daysUntil<0 };
     });
@@ -10469,8 +10485,8 @@ function AppContent({ onLock }) {
     const cashDelta = yesterdaySnap && todaySnap ? todaySnap.cash - yesterdaySnap.cash : null;
 
     const BillRow = ({ b }) => (
-      <div onClick={()=>setEditingBill(b)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
-        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name||b.type}</span>
+      <div onClick={()=>{ if(!b.id.toString().startsWith("sip_")) setEditingBill(b); }} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:b.id.toString().startsWith("sip_")?"default":"pointer" }}>
+        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name||b.type}{b.type==="sip"&&<span style={{ color:T.sub,fontWeight:400 }}> · SIP</span>}</span>
         <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(b.amount)}</span>
       </div>
     );
