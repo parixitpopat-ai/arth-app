@@ -10450,24 +10450,43 @@ function AppContent({ onLock }) {
     const estimatedVariable = averageOfLastNMonthsVariableSpend(txns, 3, monthKey);
     const timeline = buildCashFlowTimeline(openingBalance, billsForForecast, expectedIncome, 30, refundTotalsByBill);
     const projectedBalance = calculateProjectedBalance(openingBalance, billsForForecast, expectedIncome, estimatedVariable, monthKey, refundTotalsByBill);
-    const safeToSpend = calculateSafeToSpend(openingBalance, billsForForecast, expectedIncome, estimatedVariable, monthKey, refundTotalsByBill);
-    const negativeCheck = hasTransientNegativeBalance(timeline);
     const hasEnoughData = typeof openingBalance === "number" && !Number.isNaN(openingBalance);
-    const safeToSpendPerDay = hasEnoughData && safeToSpend!=null ? safeToSpend/30 : null;
 
-    // Forecast Status classifier — ADR-022, revised after review: data completeness must be
-    // checked BEFORE financial health. The original version could show "Comfortable" purely
-    // because no Bills/Income existed to subtract — mathematically valid, practically a false
-    // confidence signal. Real bug, not cosmetic — fixed here.
+    // Two genuinely different questions, per the review that led to this - conflating them into
+    // one "Safe to Spend" number was the actual bug, not just a labeling issue.
+    //
+    // (1) Safe to Spend = Monthly Budget - Spent This Month. Pure budget concept. Reuses the exact
+    // same monthBudget/monthSpend formula already used for the real household Budget elsewhere
+    // (confirmed by checking, not reinvented) - so this never drifts into a second, slightly
+    // different Budget number.
+    const thisMonthTxns = txns.filter(t=>t.date&&t.date.startsWith(monthKey));
+    const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
+    const monthBudget = monthOverrides[monthKey] || Math.round(Number(annualBudget||0)/12);
+    const safeToSpend = monthBudget - monthSpend;
+    const daysLeftInMonth = new Date(todayDate.getFullYear(), todayDate.getMonth()+1, 0).getDate() - todayDate.getDate() + 1;
+    const safeToSpendPerDay = daysLeftInMonth>0 ? safeToSpend/daysLeftInMonth : safeToSpend;
+
+    // (2) Protected Money = cash that's already committed and shouldn't be spent on something
+    // else - Bills (incl. Insurance, still Bill.type per the frozen ADR-021/023 - unchanged),
+    // SIPs, CC statements. Cash Available is the real opening balance; Buffer is what's left.
+    const cashRequired = billsForForecast.filter(b=>b.status!=="paid").reduce((sum,b)=>sum+Number(b.amount||0),0);
+    const cashAvailable = openingBalance;
+    const buffer = cashAvailable - cashRequired;
+    const negativeCheck = hasTransientNegativeBalance(timeline);
+
+    // Forecast Status classifier — ADR-022, revised twice now: (1) data completeness must be
+    // checked before financial health, (2) classifies against Buffer (the cash-commitment
+    // check), not the budget-based Safe to Spend — status answers "can I survive the month,"
+    // not "am I within budget," which are the two different questions this whole redesign
+    // exists to separate.
     const unpaidBillCount = billsForForecast.filter(b=>b.status!=="paid").length;
     const pendingIncomeCount = (expectedIncome||[]).filter(e=>e.status!=="received").length;
     const hasCommitmentData = unpaidBillCount>0 || pendingIncomeCount>0;
-    const mandatoryCovered = !negativeCheck.negative;
     const forecastStatus = !hasEnoughData ? null
       : !hasCommitmentData ? { level:"incomplete", icon:"⚪", label:"Needs Setup", detail:"No Bills or Scheduled Income recorded yet — add them to improve forecast accuracy." }
-      : negativeCheck.negative || safeToSpend<0 ? { level:"risk", icon:"🔴", label:"At Risk", detail:"Forecast goes negative or a commitment can't be covered." }
-      : safeToSpendPerDay!==null && safeToSpendPerDay<200 ? { level:"tight", icon:"🟠", label:"Tight", detail:"Buffer is small — one unexpected expense could create stress." }
-      : safeToSpendPerDay!==null && safeToSpendPerDay<600 ? { level:"watchful", icon:"🟡", label:"Watchful", detail:"Commitments are covered, but margin is limited." }
+      : negativeCheck.negative || buffer<0 ? { level:"risk", icon:"🔴", label:"At Risk", detail:"Forecast goes negative or a commitment can't be covered." }
+      : buffer<cashRequired*0.1 ? { level:"tight", icon:"🟠", label:"Tight", detail:"Buffer is small — one unexpected expense could create stress." }
+      : buffer<cashRequired*0.3 ? { level:"watchful", icon:"🟡", label:"Watchful", detail:"Commitments are covered, but margin is limited." }
       : { level:"comfortable", icon:"🟢", label:"Comfortable", detail:"All known commitments are covered." };
     const statusColor = { incomplete:T.sub, risk:T.danger, tight:T.warn, watchful:T.gold||T.warn, comfortable:T.success }[forecastStatus?.level] || T.sub;
 
@@ -10508,19 +10527,45 @@ function AppContent({ onLock }) {
     <div style={{ padding:"14px 16px 90px" }}>
       <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:16 }}>🔮 Outlook</div>
 
-      {/* Safe to Spend — the hero, per O014's frozen spec. Not equal-weight with Projected
-          Balance anymore; it's the one number this whole screen leads with. */}
+      {/* Safe to Spend — now genuinely the budget question ("can I follow my budget?"), not
+          conflated with the cash-commitment question. Monthly Budget minus Spent This Month,
+          reusing the exact real Budget formula, not a separate calculation. */}
       <div style={{ ...card,textAlign:"center",padding:20,marginBottom:12 }}>
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND</div>
-        {!hasEnoughData ? (
-          <div style={{ color:T.sub,fontSize:13,padding:"14px 0" }}>Not enough data yet.</div>
+        {monthBudget<=0 ? (
+          <div style={{ color:T.sub,fontSize:13,padding:"14px 0" }}>No budget set for this month yet.</div>
         ) : (
           <>
-            <div style={{ color:T.accent,fontSize:30,fontWeight:900,margin:"6px 0" }}>{sym}{fmt(safeToSpend)}</div>
-            {!hasCommitmentData ? (
-              <div style={{ color:T.warn,fontSize:10,marginTop:4 }}>⚠ No future commitments recorded. This amount may be inaccurate until Bills, SIPs, or Income are added.</div>
-            ) : (
-              <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(safeToSpendPerDay))}/day for the next 30 days</div>
+            <div style={{ color:safeToSpend>=0?T.accent:T.danger,fontSize:30,fontWeight:900,margin:"6px 0" }}>{sym}{fmt(safeToSpend)}</div>
+            <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(safeToSpendPerDay))}/day for the rest of this month</div>
+          </>
+        )}
+      </div>
+
+      {/* Protected Money — the cash-commitment question ("how much cash must I keep available?").
+          This is what the old, conflated "Safe to Spend" was actually computing. Money you've
+          already committed to Bills/SIPs/CC statements — Outlook is telling you not to
+          accidentally spend this on something else. */}
+      <div style={{ ...card,marginBottom:12 }}>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>PROTECTED MONEY</div>
+        {!hasEnoughData ? (
+          <div style={{ color:T.sub,fontSize:13,textAlign:"center",padding:"10px 0" }}>Not enough data yet.</div>
+        ) : (
+          <>
+            <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
+              <span style={{ color:T.sub,fontSize:11 }}>Cash Required</span>
+              <span style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(cashRequired)}</span>
+            </div>
+            <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
+              <span style={{ color:T.sub,fontSize:11 }}>Cash Available</span>
+              <span style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(cashAvailable)}</span>
+            </div>
+            <div style={{ display:"flex",justifyContent:"space-between",paddingTop:6,borderTop:`1px solid ${T.border}` }}>
+              <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Buffer</span>
+              <span style={{ color:buffer>=0?T.success:T.danger,fontSize:14,fontWeight:900 }}>{sym}{fmt(buffer)}</span>
+            </div>
+            {!hasCommitmentData&&(
+              <div style={{ color:T.warn,fontSize:10,marginTop:8 }}>⚠ No Bills, SIPs, or CC statements recorded yet — this figure may be inaccurate.</div>
             )}
           </>
         )}
