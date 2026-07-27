@@ -6944,7 +6944,7 @@ function AppContent({ onLock }) {
 
   // ── HOME ───────────────────────────────────────────────────────────────────
 
-  const DEFAULT_CARD_ORDER = ["bills","safeToSpend","protectedMoney","quickActions","goalsHome","recent"];
+  const DEFAULT_CARD_ORDER = ["bills","safeToSpend","quickActions","goalsHome","recent"];
   const KNOWN_CARD_KEYS = new Set(DEFAULT_CARD_ORDER);
   // Filters out invalid saved keys AND backfills any card added to the app after this user's
   // order was last saved. Must be applied every time cardOrder is set from a saved source
@@ -7583,7 +7583,7 @@ function AppContent({ onLock }) {
         </div>
       ),
       goalsHome: (()=>{
-        const topGoals = goals.filter(g=>g.status!=="completed").slice(0,3);
+        const topGoals = goals.filter(g=>g.status!=="completed").slice(0,2);
         if(topGoals.length===0) return null;
         return (
           <div key="goalsHome" style={{ ...card }}>
@@ -7591,11 +7591,11 @@ function AppContent({ onLock }) {
               <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>🎯 Goals</span>
               <button onClick={()=>setShowGoalsList(true)} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer" }}>See all →</button>
             </div>
-            <div style={{ display:"flex",gap:10,overflowX:"auto",paddingBottom:2 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
               {topGoals.map(g=>{
                 const { pct } = getGoalProgress(g);
                 return (
-                  <div key={g.id} onClick={()=>setShowGoalsList(true)} style={{ minWidth:120,background:T.input,borderRadius:14,padding:"12px",cursor:"pointer",flexShrink:0 }}>
+                  <div key={g.id} onClick={()=>setShowGoalsList(true)} style={{ background:T.input,borderRadius:14,padding:"12px",cursor:"pointer" }}>
                     <div style={{ fontSize:20,marginBottom:6 }}>{g.icon}</div>
                     <div style={{ color:T.text,fontSize:11,fontWeight:800,marginBottom:6,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{g.name}</div>
                     <div style={{ height:4,background:T.border,borderRadius:2,marginBottom:4 }}>
@@ -7639,33 +7639,33 @@ function AppContent({ onLock }) {
         );
       })(),
       safeToSpend: (
-        <div key="safeToSpend" onClick={()=>setTab("outlook")} style={{ ...card,textAlign:"center",cursor:"pointer" }}>
-          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND</div>
-          {homeMonthBudget<=0 ? (
-            <div style={{ color:T.sub,fontSize:12,padding:"8px 0" }}>No budget set for this month yet.</div>
-          ) : (
-            <>
-              <div style={{ color:homeSafeToSpend>=0?T.accent:T.danger,fontSize:26,fontWeight:900,margin:"4px 0" }}>{sym}{fmt(homeSafeToSpend)}</div>
-              <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(homeSafeToSpendPerDay))}/day</div>
-            </>
-          )}
-          <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:5,marginTop:8 }}>
-            <span>{homeStatus.icon}</span><span style={{ color:homeStatus.color,fontSize:11,fontWeight:700 }}>{homeStatus.label}</span>
+        <div key="safeToSpendRow" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+          <div onClick={()=>setTab("outlook")} style={{ ...card,margin:0,textAlign:"center",cursor:"pointer" }}>
+            <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND</div>
+            {homeMonthBudget<=0 ? (
+              <div style={{ color:T.sub,fontSize:11,padding:"8px 0" }}>No budget set yet.</div>
+            ) : (
+              <>
+                <div style={{ color:homeSafeToSpend>=0?T.accent:T.danger,fontSize:22,fontWeight:900,margin:"4px 0" }}>{sym}{fmt(homeSafeToSpend)}</div>
+                <div style={{ color:T.sub,fontSize:9 }}>~{sym}{fmt(Math.round(homeSafeToSpendPerDay))}/day</div>
+              </>
+            )}
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:4,marginTop:6 }}>
+              <span style={{ fontSize:11 }}>{homeStatus.icon}</span><span style={{ color:homeStatus.color,fontSize:10,fontWeight:700 }}>{homeStatus.label}</span>
+            </div>
+            <div style={{ color:T.accent,fontSize:9,fontWeight:700,marginTop:6 }}>Open Outlook →</div>
           </div>
-          <div style={{ color:T.accent,fontSize:10,fontWeight:700,marginTop:6 }}>Open Outlook →</div>
-        </div>
-      ),
-      protectedMoney: (
-        <div key="protectedMoney" onClick={()=>setTab("outlook")} style={{ ...card,cursor:"pointer" }}>
-          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>PROTECTED MONEY</div>
-          <div style={{ color:T.text,fontSize:22,fontWeight:900,marginBottom:8 }}>{sym}{fmt(homeCashRequired)}</div>
-          <div style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:T.sub,marginBottom:2 }}>
-            <span>Cash Available</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeOpeningBalance)}</span>
+          <div onClick={()=>setTab("outlook")} style={{ ...card,margin:0,cursor:"pointer" }}>
+            <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>PROTECTED MONEY</div>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900,marginBottom:6 }}>{sym}{fmt(homeCashRequired)}</div>
+            <div style={{ display:"flex",justifyContent:"space-between",fontSize:9,color:T.sub,marginBottom:2 }}>
+              <span>Available</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeOpeningBalance)}</span>
+            </div>
+            <div style={{ display:"flex",justifyContent:"space-between",fontSize:9,color:T.sub }}>
+              <span>Buffer</span><span style={{ color:homeBuffer>=0?T.success:T.danger,fontWeight:800 }}>{sym}{fmt(homeBuffer)}</span>
+            </div>
+            <div style={{ color:T.accent,fontSize:9,fontWeight:700,marginTop:6 }}>View Commitments →</div>
           </div>
-          <div style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:T.sub }}>
-            <span>Buffer</span><span style={{ color:homeBuffer>=0?T.success:T.danger,fontWeight:800 }}>{sym}{fmt(homeBuffer)}</span>
-          </div>
-          <div style={{ color:T.accent,fontSize:10,fontWeight:700,marginTop:8,textAlign:"right" }}>View Commitments →</div>
         </div>
       ),
       stats: (
@@ -7748,13 +7748,36 @@ function AppContent({ onLock }) {
         const today = new Date();
         const upcoming = bills.filter(b=>b.status==="unpaid").sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).slice(0,4);
         const overdue = upcoming.filter(b=>new Date(b.dueDate)<today);
-        if(!upcoming.length) return null;
+        // Legacy alerts folded in here - Membership Expiry and Recurring Investment Reminder used
+        // to render as separate, always-visible blocks outside the card system entirely,
+        // duplicating exactly what this widget is meant to consolidate. One system, one source.
+        const todayStrFocus = today.toISOString().split("T")[0];
+        const in7Focus = new Date(Date.now()+7*24*60*60*1000).toISOString().split("T")[0];
+        const withPeriodFocus = memberships.map(m=>({ m, period:getCurrentPeriod(m) })).filter(x=>x.period);
+        const expiringMemberships = withPeriodFocus.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); return eff>=todayStrFocus && eff<=in7Focus; });
+        const lapsedMemberships = withPeriodFocus.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); if(eff>=todayStrFocus) return false; const diffDays = Math.round((new Date()-new Date(eff))/(1000*60*60*24)); return diffDays<=3; });
+        const focusCount = upcoming.length + expiringMemberships.length + lapsedMemberships.length;
+        if(!upcoming.length && !expiringMemberships.length && !lapsedMemberships.length) return null;
         return (
           <div key="bills" style={card}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-              <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>📅 Bills Due</span>
+              <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>🎯 Today's Focus {focusCount>0&&<span style={{ color:T.accent }}>({focusCount})</span>}</span>
               {overdue.length>0&&<span style={{ background:T.danger+"22",color:T.danger,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700 }}>{overdue.length} overdue</span>}
             </div>
+            {lapsedMemberships.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
+              <div key={`lapsed_${m.id}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                <div style={{ width:32,height:32,borderRadius:9,background:T.danger+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>🔴</div>
+                <div style={{ flex:1 }}><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{ba?.name||"Membership"} lapsed</div><div style={{ color:T.danger,fontSize:11 }}>Expired {formatShortDate(getPeriodEffectiveEnd(period))||getPeriodEffectiveEnd(period)}</div></div>
+                <button onClick={()=>setActiveBillerForAction(ba)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Renew</button>
+              </div>
+            );})}
+            {expiringMemberships.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
+              <div key={`expiring_${m.id}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                <div style={{ width:32,height:32,borderRadius:9,background:T.warn+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>🟡</div>
+                <div style={{ flex:1 }}><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{ba?.name||"Membership"} renewal due</div><div style={{ color:T.warn,fontSize:11 }}>Until {formatShortDate(getPeriodEffectiveEnd(period))||getPeriodEffectiveEnd(period)}</div></div>
+                <button onClick={()=>setActiveBillerForAction(ba)} style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Renew</button>
+              </div>
+            );})}
             {upcoming.map(b=>{
               const daysUntil=Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
               const isOverdue=daysUntil<0;
@@ -7955,29 +7978,9 @@ function AppContent({ onLock }) {
               {allFoliosDue.length>5&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>+{allFoliosDue.length-5} more</div>}
             </div>
           )}
-          {/* Membership expiry alerts */}
-          {(()=>{
-            const today = new Date().toISOString().split("T")[0];
-            const in7 = new Date(Date.now()+7*24*60*60*1000).toISOString().split("T")[0];
-            const withPeriod = memberships.map(m=>({ m, period:getCurrentPeriod(m) })).filter(x=>x.period);
-            const expiring = withPeriod.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); return eff>=today && eff<=in7; });
-            const lapsed = withPeriod.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); if(eff>=today) return false; const diffDays = Math.round((new Date()-new Date(eff))/(1000*60*60*24)); return diffDays<=3; });
-            if(!expiring.length && !lapsed.length) return null;
-            return (<div style={{ marginBottom:12 }}>
-              {expiring.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
-                <div key={m.id} style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:14,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                  <div><div style={{ color:T.warn,fontSize:12,fontWeight:800 }}>⚠️ {ba?.name||"Membership"} expiring</div><div style={{ color:T.sub,fontSize:10 }}>Until {formatShortDate(getPeriodEffectiveEnd(period))||getPeriodEffectiveEnd(period)}{period.graceDays>0?` (incl. +${period.graceDays}d grace)`:""}</div></div>
-                  <button onClick={()=>{ setActiveBillerForAction(ba); }} style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Renew</button>
-                </div>
-              ); })}
-              {lapsed.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
-                <div key={m.id} style={{ background:T.danger+"16",border:`1px solid ${T.danger}33`,borderRadius:14,padding:"10px 14px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                  <div><div style={{ color:T.danger,fontSize:12,fontWeight:800 }}>🔴 {ba?.name||"Membership"} lapsed</div><div style={{ color:T.sub,fontSize:10 }}>Expired {formatShortDate(getPeriodEffectiveEnd(period))||getPeriodEffectiveEnd(period)}{period.graceDays>0?` (incl. +${period.graceDays}d grace)`:""}</div></div>
-                  <button onClick={()=>{ setActiveBillerForAction(ba); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Renew</button>
-                </div>
-              ); })}
-            </div>);
-          })()}
+          {/* Membership expiry alerts folded into Today's Focus (the "bills" card above) per the
+              Home audit - this used to render as a separate, always-visible, un-hideable block
+              outside the card system, duplicating what Today's Focus is meant to consolidate. */}
           {/* Personal budget alerts moved to Drawer → Notifications (see budgetAlerts/
               activeBudgetAlerts memo + NotificationsModal) so they can be read and archived
               instead of sitting permanently on Home. */}
@@ -7986,9 +7989,10 @@ function AppContent({ onLock }) {
           </div>
 
           {(()=>{
+            const MANDATORY_CARDS = new Set(["bills","quickActions"]); // HW-001, HW-004 per the registry
             const validCards=cardOrder.filter(id=>CARDS[id]!=null);
             const visibleCount = validCards.filter(id=>!hiddenCards.has(id)).length;
-            const displayCards = editingCards ? validCards : validCards.filter(id=>!hiddenCards.has(id));
+            const displayCards = editingCards ? validCards : validCards.filter(id=>MANDATORY_CARDS.has(id)||!hiddenCards.has(id));
             return displayCards.map((cardId, idx) => {
             const cardEl = CARDS[cardId];
             if(!cardEl) return null;
@@ -7997,11 +8001,14 @@ function AppContent({ onLock }) {
               <div key={cardId} style={{ position:"relative",marginBottom:12, opacity:editingCards&&isHidden?0.4:1 }}>
                 {editingCards&&(
                   <div style={{ position:"absolute",right:-8,top:"50%",transform:"translateY(-50%)",display:"flex",flexDirection:"column",gap:4,zIndex:10 }}>
-                    <button onClick={()=>{
-                      // At least one widget must remain visible - refuse to hide the last one
-                      if(!isHidden && visibleCount<=1) return;
-                      setHiddenCards(prev=>{ const next=new Set(prev); if(isHidden) next.delete(cardId); else next.add(cardId); return next; });
-                    }} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:13,color:isHidden?T.sub:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>{isHidden?"🚫":"👁"}</button>
+                    {/* HW-001 (Today's Focus/bills) and HW-004 (Quick Actions) are mandatory per
+                        the Home Widget Registry - no hide toggle for these two specifically. */}
+                    {cardId!=="bills"&&cardId!=="quickActions"&&(
+                      <button onClick={()=>{
+                        if(!isHidden && visibleCount<=1) return;
+                        setHiddenCards(prev=>{ const next=new Set(prev); if(isHidden) next.delete(cardId); else next.add(cardId); return next; });
+                      }} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:13,color:isHidden?T.sub:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>{isHidden?"🚫":"👁"}</button>
+                    )}
                     <button onClick={()=>moveCard(idx,-1)} disabled={idx===0} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===0?"not-allowed":"pointer",fontSize:14,color:idx===0?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↑</button>
                     <button onClick={()=>moveCard(idx,1)} disabled={idx===displayCards.length-1} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===displayCards.length-1?"not-allowed":"pointer",fontSize:14,color:idx===displayCards.length-1?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↓</button>
                   </div>
@@ -15019,24 +15026,42 @@ function AppContent({ onLock }) {
         {/* Top bar */}
         {!showSettings&&<div style={{ background:T.nav,borderBottom:`1px solid ${T.border}`,padding:"10px 18px 8px",position:"sticky",top:0,zIndex:50 }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-            <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-              <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
-              <div style={{ width:32,height:32,borderRadius:9,background:T.accentSoft,border:`1px solid ${T.accent}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:900,color:T.accent,fontFamily:"Nunito,sans-serif" }}>₹</div>
-              <div>
-                <div style={{ display:"flex",alignItems:"center",gap:6 }}>
-                  <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1 }}>Arth</div>
-                  {cloudBusy&&<span title="Syncing..." style={{ fontSize:11,display:"inline-block",animation:"arth-spin 0.8s linear infinite" }}>🔄</span>}
+            {tab==="home" ? (()=>{
+              const h = new Date().getHours();
+              const greeting = h<12?"Good Morning":h<17?"Good Afternoon":h<21?"Good Evening":"Good Night";
+              const greetIcon = h<12?"☀️":h<17?"🌤️":h<21?"🌇":"🌙";
+              const dateStr = new Date().toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"});
+              return (
+                <div>
+                  <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1.2 }}>{greetIcon} {greeting}{(people.find(p=>p.isMe)?.name)?`, ${people.find(p=>p.isMe).name}`:""}</div>
+                  <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{dateStr}</div>
                 </div>
-                <div style={{ color:T.sub,fontSize:9,marginTop:1,textTransform:"uppercase",letterSpacing:1 }}>Personal Finance</div>
+              );
+            })() : (
+              <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
+                <div style={{ width:32,height:32,borderRadius:9,background:T.accentSoft,border:`1px solid ${T.accent}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:900,color:T.accent,fontFamily:"Nunito,sans-serif" }}>₹</div>
+                <div>
+                  <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                    <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1 }}>Arth</div>
+                    {cloudBusy&&<span title="Syncing..." style={{ fontSize:11,display:"inline-block",animation:"arth-spin 0.8s linear infinite" }}>🔄</span>}
+                  </div>
+                  <div style={{ color:T.sub,fontSize:9,marginTop:1,textTransform:"uppercase",letterSpacing:1 }}>Personal Finance</div>
+                </div>
               </div>
-            </div>
+            )}
             {tab==="bills"&&<button onClick={()=>setShowAddBill(true)} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Nunito,sans-serif" }}>+ Add Bill</button>}
           </div>
-          <div style={{ display:"flex",gap:8,alignItems:"center",marginTop:8,justifyContent:"flex-end" }}>
+          <div style={{ display:"flex",gap:8,alignItems:"center",marginTop:8,justifyContent:"space-between" }}>
+            {tab==="home"&&(
+              <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
+            )}
+            <div style={{ display:"flex",gap:8,alignItems:"center",justifyContent:"flex-end",flex:1 }}>
             <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif" }}>💼{workTripMode?" ON":""}</button>
             <button onClick={()=>{ setShowSearch(true); setSearchQuery(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:14,color:T.sub }} title="Search">🔍</button>
             <button onClick={toggleMask} style={{ background:maskMode?T.warn+"22":"none",border:`1px solid ${maskMode?T.warn:T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:14,color:maskMode?T.warn:T.sub }} title={maskMode?"Tap to reveal (PIN) or disable":"Tap to hide amounts"}>{maskMode?"🙈":"👁️"}</button>
             <button onClick={onLock} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:14,color:T.sub }} title="Lock app">🔒</button>
+            </div>
           </div>
         </div>}
 
