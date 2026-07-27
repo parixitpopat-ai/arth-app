@@ -10623,36 +10623,57 @@ function AppContent({ onLock }) {
   // a chart drawn from nothing.
   const InsightsPage = () => {
     // Real metrics only - no fabricated "unlock in X days" countdown, since no actual readiness
-    // threshold has been decided anywhere in this design process (the 30-day example in the
-    // review that led to this was illustrative, not a spec). Shows real progress; doesn't invent
-    // a finish line that doesn't exist yet.
+    // threshold has been decided anywhere in this design process. Ranked by actual importance to
+    // analytics quality, not shown as equal.
     const txnDates = txns.map(t=>t.date).filter(Boolean).sort();
     const daysOfHistory = txnDates.length>0 ? Math.max(1, Math.ceil((new Date()-new Date(txnDates[0]))/(1000*60*60*24))) : 0;
-    const readinessItems = [
-      { label:"Transactions", value:txns.length, ready:txns.length>0 },
-      { label:"Categories", value:cats.length, ready:cats.length>0 },
-      { label:"History", value:`${daysOfHistory} day${daysOfHistory===1?"":"s"}`, ready:daysOfHistory>0 },
+    const monthsOfHistory = Math.floor(daysOfHistory/30);
+    const hasBudget = Number(annualBudget||0)>0 || Object.keys(monthOverrides||{}).length>0;
+    const hasIncomeSources = (expectedIncome||[]).length>0;
+
+    const tiers = [
+      { label:"Required", items:[
+        { label:"Transactions", value:txns.length, ready:txns.length>0 },
+        { label:"Categories", value:cats.length, ready:cats.length>0 },
+      ]},
+      { label:"Helpful", items:[
+        { label:"Budgets", value:hasBudget?"Set":"Not set", ready:hasBudget },
+        { label:"Income Sources", value:expectedIncome.length, ready:hasIncomeSources },
+      ]},
+      { label:"Improves Accuracy", items:[
+        { label:"History Length", value:monthsOfHistory>0?`${monthsOfHistory} month${monthsOfHistory===1?"":"s"}`:`${daysOfHistory} day${daysOfHistory===1?"":"s"}`, ready:daysOfHistory>=30 },
+      ]},
     ];
+
     return (
     <div style={{ padding:"14px 16px 90px" }}>
       <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:2 }}>📊 Insights</div>
       <div style={{ color:T.sub,fontSize:12,marginBottom:16 }}>Understand your money.</div>
 
       <div style={{ ...card,marginBottom:14 }}>
-        <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>Insights are being prepared</div>
+        <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>Data Readiness</div>
         <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Arth is collecting enough history to identify your spending patterns.</div>
-        <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8 }}>Progress</div>
-        {readinessItems.map(item=>(
-          <div key={item.label} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0" }}>
-            <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.ready?"✓":"○"} {item.label}</span>
-            <span style={{ color:item.ready?T.accent:T.sub,fontSize:12,fontWeight:800 }}>{item.value}</span>
+        {tiers.map(tier=>(
+          <div key={tier.label} style={{ marginBottom:12 }}>
+            <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>{tier.label}</div>
+            {tier.items.map(item=>(
+              <div key={item.label} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0" }}>
+                <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.ready?"✔":"○"} {item.label}</span>
+                <span style={{ color:item.ready?T.accent:T.sub,fontSize:12,fontWeight:800 }}>{item.value}</span>
+              </div>
+            ))}
           </div>
         ))}
       </div>
 
+      <div style={{ ...card,marginBottom:14 }}>
+        <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:6 }}>Why isn't Insights available yet?</div>
+        <div style={{ color:T.sub,fontSize:11,lineHeight:1.6 }}>Arth doesn't use generic averages. It builds insights from your own financial behaviour — the more history you record, the more personalized your insights become.</div>
+      </div>
+
       <div style={{ ...card }}>
-        <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10 }}>Coming Soon</div>
-        {["Spending Analysis","Income Trends","Net Worth Growth","Merchant Analysis","Financial Health History","Saving Rate"].map(f=>(
+        <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10 }}>Insights You'll Receive</div>
+        {["Spending Patterns","Income Trends","Net Worth Growth","Merchant Insights","Financial Health","Saving Rate"].map(f=>(
           <div key={f} style={{ color:T.text,fontSize:12,fontWeight:700,padding:"5px 0" }}>✓ {f}</div>
         ))}
       </div>
