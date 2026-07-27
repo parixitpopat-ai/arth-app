@@ -10591,6 +10591,16 @@ function AppContent({ onLock }) {
         <div style={{ ...card,textAlign:"center",color:T.sub,fontSize:12,padding:20,marginBottom:12 }}>No upcoming commitments tracked yet.</div>
       )}
 
+      {/* Budget — deliberately not folded into Commitments above (it's a limit, not a scheduled
+          item, per O005's spec). But removing the old launcher list also removed the only general
+          entry point to it, since the Drawer's direct link was already removed earlier this
+          session in favor of routing through Outlook - leaving Budget genuinely unreachable for a
+          plain check-in. This restores that entry point without re-adding the launcher pattern. */}
+      <button onClick={()=>setTab("budget")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,cursor:"pointer",border:`1px solid ${T.border}` }}>
+        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>📊 Budget Progress</span>
+        <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>View →</span>
+      </button>
+
       {/* What Changed — Facts tier, using the real wealthSnapshots mechanism. Reasons/Impact
           omitted rather than fabricated (ADS rule: omit when the underlying data isn't there). */}
       {netWorthDelta!==null&&(
