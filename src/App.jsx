@@ -7759,17 +7759,25 @@ function AppContent({ onLock }) {
         const withPeriodFocus = memberships.map(m=>({ m, period:getCurrentPeriod(m) })).filter(x=>x.period);
         const expiringMemberships = withPeriodFocus.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); return eff>=todayStrFocus && eff<=in7Focus; });
         const lapsedMemberships = withPeriodFocus.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); if(eff>=todayStrFocus) return false; const diffDays = Math.round((new Date()-new Date(eff))/(1000*60*60*24)); return diffDays<=3; });
-        const unrecordedInvestments = allFoliosDue.slice(0,3); // cap at 3 within Today's Focus - the
-        // old standalone card showed up to 5+"more"; Today's Focus is meant to stay short, so the
-        // full list is still reachable via the Investments screen itself, not duplicated here.
-        const focusCount = upcoming.length + expiringMemberships.length + lapsedMemberships.length + allFoliosDue.length;
-        if(!upcoming.length && !expiringMemberships.length && !lapsedMemberships.length && !allFoliosDue.length) return null;
+        const unrecordedInvestments = allFoliosDue.slice(0,3);
+        const focusCount = upcoming.length + expiringMemberships.length + lapsedMemberships.length + allFoliosDue.length + dueRecurring.length;
+        if(!upcoming.length && !expiringMemberships.length && !lapsedMemberships.length && !allFoliosDue.length && !dueRecurring.length) return null;
         return (
           <div key="bills" style={card}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
               <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>🎯 Today's Focus {focusCount>0&&<span style={{ color:T.accent }}>({focusCount})</span>}</span>
               {overdue.length>0&&<span style={{ background:T.danger+"22",color:T.danger,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700 }}>{overdue.length} overdue</span>}
             </div>
+            {dueRecurring.map(r=>(
+              <div key={`due_${r.id}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                <div style={{ width:32,height:32,borderRadius:9,background:T.info+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>💹</div>
+                <div style={{ flex:1 }}><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{r.name}</div><div style={{ color:T.info,fontSize:11 }}>Due today · {sym}{fmt(r.amount)}</div></div>
+                <div style={{ display:"flex",gap:6 }}>
+                  <button onClick={()=>{ setAddPrefill({ amount:String(r.amount||""), accId:r.accId||"", who:r.name||"", investFolio:r.name||"", investType:r.investType||"mf", date:todayStr(), recurringScheduleId:r.id }); setDefaultAddType("investment"); setShowAdd(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Record</button>
+                  <button onClick={()=>setRecurringSchedules(prev=>prev.map(x=>x.id===r.id?{...x,snoozedUntil:new Date(Date.now()+24*60*60*1000).toISOString().split("T")[0]}:x))} style={{ background:"none",border:`1px solid ${T.warn}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Snooze</button>
+                </div>
+              </div>
+            ))}
             {unrecordedInvestments.map(g=>(
               <div key={`inv_${g.key}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
                 <div style={{ width:32,height:32,borderRadius:9,background:T.info+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>📈</div>
@@ -7893,96 +7901,21 @@ function AppContent({ onLock }) {
       );
     }
 
-    const hourNow = new Date().getHours();
-    const greeting = hourNow<12?"Good morning":hourNow<17?"Good afternoon":"Good evening";
-    const meRecord = people.find(p=>p.isMe);
-    const meName = (meRecord?.name && meRecord.name!=="Me") ? meRecord.name : "";
     return (
-      <div>
-        <div style={{ padding:"16px 18px 4px" }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-            <div>
-              <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{greeting}{meName?`, ${meName}`:""} 👋</div>
-              <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>Here's what's happening today.</div>
-            </div>
-          </div>
-        </div>
-        {/* Hero — sticky spend+budget+month nav */}
-        <div style={{ position:"sticky",top:56,zIndex:40,background:dark?"#0d0a05":"#fffbf0",borderBottom:`1px solid ${T.border}`,padding:"14px 18px 16px" }}>
-          {/* Month nav */}
-          <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:12 }}>
-            <button onClick={()=>setViewMonth(m=>{ const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })} style={{ background:"none",border:"none",color:T.accent,fontSize:22,cursor:"pointer",padding:0,lineHeight:1 }}>‹</button>
-            <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1.5,flex:1,textAlign:"center" }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
-            <button onClick={()=>setViewMonth(m=>{ const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })} style={{ background:"none",border:"none",color:T.accent,fontSize:22,cursor:"pointer",padding:0,lineHeight:1 }}>›</button>
-          </div>
-          {/* Spend + Budget side by side */}
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12 }}>
-            <div>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:3 }}>Spent</div>
-              <div style={{ color:T.danger,fontSize:28,fontWeight:900,lineHeight:1 }}>{sym}{fmt(myActual)}</div>
-            </div>
-            <div style={{ textAlign:"right" }}>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:3 }}>Budget</div>
-              <div style={{ color:T.text,fontSize:28,fontWeight:900,lineHeight:1 }}>{sym}{fmt(monthly)}</div>
-            </div>
-          </div>
-          {/* Progress bar */}
-          <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:6 }}>
-            <div style={{ height:"100%",width:`${budgetPct}%`,background:budgetPct>90?T.danger:budgetPct>70?T.warn:T.success,borderRadius:3,transition:"width 0.3s" }}/>
-          </div>
-          {/* Bottom row */}
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-            <span style={{ color:isOver?T.danger:T.success,fontSize:12,fontWeight:800 }}>{isOver?"−":"+"}{sym}{fmt(Math.abs(diff))} {isOver?"over":"left"} · {leftDays}d</span>
-            {safePerDay!==null&&<span style={{ color:T.success,fontSize:12,fontWeight:800 }}>Safe/day: {sym}{fmt(safePerDay)}</span>}
-          </div>
-        </div>
-
-        <div style={{ padding:"14px 16px 0" }}>
-          {dueRecurring.length>0 && (
-            <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>⚠ ACTION CENTRE</div>
-          )}
-          {/* Personal budget alerts live in Notifications only — not duplicated here, so there's
-              one place to read and archive them, not two to keep in sync mentally. */}
-          {/* Recurring investment reminders */}
-          {dueRecurring.length>0&&(
-            <div style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
-              <div style={{ color:T.info,fontSize:13,fontWeight:800,marginBottom:8 }}>💹 {dueRecurring.length} Investment{dueRecurring.length>1?"s":"" } due today</div>
-              {dueRecurring.map(r=>(
-                <div key={r.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6 }}>
-                  <div>
-                    <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{r.name}</div>
-                    <div style={{ color:T.sub,fontSize:10 }}>{sym}{fmt(r.amount)} · {accounts.find(a=>a.id===r.accId)?.name||"Account"}</div>
-                  </div>
-                  <div style={{ display:"flex",gap:6 }}>
-                    <button onClick={()=>{
-                      setAddPrefill({
-                        amount: String(r.amount||""),
-                        accId: r.accId||"",
-                        who: r.name||"",
-                        investFolio: r.name||"",
-                        investType: r.investType||"mf",
-                        date: todayStr(),
-                        recurringScheduleId: r.id,
-                      });
-                      setDefaultAddType("investment");
-                      setShowAdd(true);
-                    }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>Record</button>
-                    <button onClick={()=>setRecurringSchedules(prev=>prev.map(x=>x.id===r.id?{...x,snoozedUntil:new Date(Date.now()+24*60*60*1000).toISOString().split("T")[0]}:x))} style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Snooze 1d</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {/* Investment reminders folded into Today's Focus (the "bills" card above) - actually
-              done this time, unlike the earlier pass that only claimed to via a comment while the
-              standalone block below kept rendering. Confirmed via a real screenshot showing the
-              old card still live before this fix. */}
-          {/* Membership expiry alerts folded into Today's Focus (the "bills" card above) per the
-              Home audit - this used to render as a separate, always-visible, un-hideable block
-              outside the card system, duplicating what Today's Focus is meant to consolidate. */}
-          {/* Personal budget alerts moved to Drawer → Notifications (see budgetAlerts/
-              activeBudgetAlerts memo + NotificationsModal) so they can be read and archived
-              instead of sitting permanently on Home. */}
+      <div style={{ padding:"14px 16px 0" }}>
+          {/* Real, confirmed duplication removed here: this Home render previously had its own
+              separate greeting ("Good evening / Here's what's happening today"), a month
+              navigator (‹ July / August ›), and a Spent/Budget/Safe-per-day hero — all sitting
+              ABOVE the CARDS system below, completely unknown to the redesign work done this
+              session until a real screenshot exposed it. Removed because: (1) the greeting
+              duplicated the shared header's greeting, (2) Spent/Budget duplicated the Safe to
+              Spend + Protected Money card below, (3) month navigation on Home directly
+              contradicted the explicit design decision that month browsing belongs in Outlook,
+              not Home. dueRecurring (investments due specifically today, with Snooze) is folded
+              into Today's Focus below, same as allFoliosDue and Membership were previously. */}
+          {/* Investment reminders (due today + not recorded this month) and Membership expiry
+              alerts all folded into Today's Focus (the "bills" card below) - one system, one
+              source, not three separate always-visible legacy blocks. */}
           <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:8 }}>
             <button onClick={()=>setEditingCards(e=>!e)} style={{ background:editingCards?T.accent+"22":"none",border:`1px solid ${editingCards?T.accent:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:editingCards?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{editingCards?"✓ Done":"⠿ Arrange"}</button>
           </div>
@@ -8019,7 +7952,6 @@ function AppContent({ onLock }) {
             );
           }); })()}
         </div>
-      </div>
     );
   };
 

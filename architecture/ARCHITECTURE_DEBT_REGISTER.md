@@ -20,11 +20,12 @@ randomly later. Every entry below is verified against the actual code
 | AD-010 | Property and Business Assets have zero CRUD — pure static placeholders | High | Visible | Confirmed — no add/edit modal exists for either |
 | AD-011 | Import (transactions) doesn't exist anywhere in the app | Medium | Visible | Confirmed, deliberately no fake link added anywhere |
 | AD-012 | Analytics Engine doesn't exist — blocks all 15 Insights screens as a single dependency, not incrementally | High | Visible | Confirmed, unchanged since the original Screen Inventory |
+| AD-014 | ~~Home had an entire second, undiscovered render path~~ **RESOLVED** — a duplicate greeting, a month navigator, and a Spent/Budget hero were sitting above the whole CARDS system this entire session, invisible until a real screenshot exposed it. Also put month navigation directly on Home, contradicting the explicit "month browsing belongs in Outlook" decision. Removed entirely; `dueRecurring` (investments due today, with Snooze) properly folded into Today's Focus in its place. | ~~High~~ Resolved | ~~Visible (very)~~ None | Confirmed via 4 real screenshots showing duplicate greetings and a Budget-style hero never touched by any of this session's Home work |
 
 ## Priority summary
 
 **High (visible to users, worth prioritizing before more feature work):**
-AD-004 (duplicate Investment Reminders), AD-010 (Property/Business Assets have no CRUD), AD-012 (Analytics Engine).
+AD-010 (Property/Business Assets have no CRUD), AD-012 (Analytics Engine).
 
 **Medium (real, but not user-visible yet or narrowly scoped):**
 AD-001, AD-002, AD-006, AD-011.
@@ -32,7 +33,7 @@ AD-001, AD-002, AD-006, AD-011.
 **Low (correct-but-incomplete data model gaps, already handled honestly in the UI):**
 AD-003, AD-005, AD-007, AD-008, AD-009.
 
-## What this register is *not*
+**Resolved:** AD-004, AD-014.
 
 Not a blocker to shipping. Not a reason to pause feature/screen work.
 Reviewed and re-prioritized after each Freeze Package, not fixed
