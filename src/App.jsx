@@ -10656,6 +10656,71 @@ function AppContent({ onLock }) {
           entry point to it, since the Drawer's direct link was already removed earlier this
           session in favor of routing through Outlook - leaving Budget genuinely unreachable for a
           plain check-in. This restores that entry point without re-adding the launcher pattern. */}
+      {/* Next Month Preview — genuinely new, confirmed nothing like this existed anywhere before
+          this. Answers "how much of next month's budget will already be eaten by known
+          commitments?" using the exact same data sources as the rest of this screen (bills,
+          recurringSchedules-as-SIPs, CC statements), just scoped to next calendar month instead
+          of the current one. Never fabricates - if a bill's date falls in next month, it counts;
+          nothing estimated or guessed for recurring items without a real next occurrence. */}
+      {(()=>{
+        const nextMonthDate = new Date(todayDate.getFullYear(), todayDate.getMonth()+1, 1);
+        const nextMonthKey = `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth()+1).padStart(2,"0")}`;
+        const nextMonthAll = billsForForecast.filter(b=>b.status!=="paid" && b.dueDate && b.dueDate.startsWith(nextMonthKey));
+        // Real correction, not in the original version: CC bills and SIPs are NOT genuine new
+        // Budget expenses. A CC bill settles spending that was already counted as an expense the
+        // month the purchase happened - subtracting it from next month's Budget too would double
+        // count it. SIP is an investment, not consumption, so it doesn't reduce Budget either.
+        // Both are real CASH requirements (Protected Money's territory), just not Budget ones -
+        // this is exactly ADR-024's Budget-vs-Cash-Commitment split, applied correctly this time.
+        const isCashOnlyNotBudget = b => b.type==="sip" || b.type==="cc_statement" || b.type==="Credit Card";
+        const nextMonthBudgetExpenses = nextMonthAll.filter(b=>!isCashOnlyNotBudget(b));
+        const nextMonthCashOnly = nextMonthAll.filter(isCashOnlyNotBudget);
+        const nextMonthCommitted = nextMonthBudgetExpenses.reduce((sum,b)=>sum+Number(b.amount||0), 0);
+        const nextMonthCashRequired = nextMonthCashOnly.reduce((sum,b)=>sum+Number(b.amount||0), 0);
+        const nextMonthBudget = monthOverrides[nextMonthKey] || Math.round(Number(annualBudget||0)/12);
+        const nextMonthLabel = nextMonthDate.toLocaleString("en-IN",{month:"long"});
+        if(nextMonthBudget<=0 && nextMonthAll.length<=0) return null;
+        return (
+          <div style={{ ...card,marginBottom:12 }}>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>NEXT MONTH — {nextMonthLabel.toUpperCase()}</div>
+            {nextMonthBudget<=0 ? (
+              <div style={{ color:T.sub,fontSize:12 }}>No budget set for {nextMonthLabel} yet.</div>
+            ) : (
+              <>
+                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
+                  <span style={{ color:T.sub,fontSize:11 }}>Budget</span>
+                  <span style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(nextMonthBudget)}</span>
+                </div>
+                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
+                  <span style={{ color:T.sub,fontSize:11 }}>Expected Expenses <span style={{ color:T.sub,fontStyle:"italic" }}>(new, not yet spent)</span></span>
+                  <span style={{ color:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(nextMonthCommitted)}</span>
+                </div>
+                <div style={{ display:"flex",justifyContent:"space-between",paddingTop:6,borderTop:`1px solid ${T.border}` }}>
+                  <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Remaining Before Spending</span>
+                  <span style={{ color:(nextMonthBudget-nextMonthCommitted)>=0?T.success:T.danger,fontSize:14,fontWeight:900 }}>{sym}{fmt(nextMonthBudget-nextMonthCommitted)}</span>
+                </div>
+              </>
+            )}
+            {nextMonthCashRequired>0&&(
+              <div style={{ marginTop:10,paddingTop:8,borderTop:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between" }}>
+                <span style={{ color:T.sub,fontSize:11 }}>+ Cash Required <span style={{ fontStyle:"italic" }}>(CC/SIP — cash, not new spend)</span></span>
+                <span style={{ color:T.warn,fontSize:12,fontWeight:800 }}>{sym}{fmt(nextMonthCashRequired)}</span>
+              </div>
+            )}
+            {nextMonthBudgetExpenses.length>0&&(
+              <div style={{ marginTop:10,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
+                {nextMonthBudgetExpenses.slice(0,3).map(b=>(
+                  <div key={b.id} style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:T.sub,padding:"3px 0" }}>
+                    <span>{b.name||b.type}</span><span>{sym}{fmt(b.amount)}</span>
+                  </div>
+                ))}
+                {nextMonthBudgetExpenses.length>3&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>+{nextMonthBudgetExpenses.length-3} more</div>}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       <button onClick={()=>setTab("budget")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,cursor:"pointer",border:`1px solid ${T.border}` }}>
         <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>📊 Budget Progress</span>
         <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>View →</span>
