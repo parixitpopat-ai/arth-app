@@ -10414,10 +10414,9 @@ function AppContent({ onLock }) {
   // forecasts — per the Architecture Freeze Enforcement rule: placeholder screens are fine,
   // placeholder business logic is not.
   const OutlookPage = () => {
-    // O014 Cash Forecast — real, using the Forecast Engine functions implemented earlier this
-    // session (verified at runtime against a worked scenario before ever being wired into a
-    // screen). openingBalance = liquid accounts only (bank/cash/upi), excluding investments and
-    // credit cards, per Balance Engine's ownership of the actual balance figure.
+    // O014 Cash Forecast — real, using the Forecast Engine functions. openingBalance = liquid
+    // accounts only (bank/cash/upi), excluding investments and credit cards, per Balance Engine's
+    // ownership of the actual balance figure.
     const openingBalance = accounts
       .filter(a=>["bank","cash","upi"].includes(a.type) && !isInvestmentAccount(a))
       .reduce((sum,a)=>sum+accountBalance(a.id), 0);
@@ -10428,73 +10427,145 @@ function AppContent({ onLock }) {
     const safeToSpend = calculateSafeToSpend(openingBalance, bills, expectedIncome, estimatedVariable, monthKey, refundTotalsByBill);
     const negativeCheck = hasTransientNegativeBalance(timeline);
     const hasEnoughData = typeof openingBalance === "number" && !Number.isNaN(openingBalance);
+    const safeToSpendPerDay = hasEnoughData && safeToSpend!=null ? safeToSpend/30 : null;
+
+    // Forecast Status classifier — ADR-022, implemented here for the first time (was previously
+    // spec-only). Thresholds are hardcoded for now, not yet product-config values as ADR-022
+    // calls for — flagged directly rather than silently treated as final.
+    const mandatoryCovered = !negativeCheck.negative;
+    const forecastStatus = !hasEnoughData ? null
+      : negativeCheck.negative || safeToSpend<0 ? { level:"risk", icon:"🔴", label:"At Risk", detail:"Forecast goes negative or a commitment can't be covered." }
+      : safeToSpendPerDay!==null && safeToSpendPerDay<200 ? { level:"tight", icon:"🟠", label:"Tight", detail:"Buffer is small — one unexpected expense could create stress." }
+      : safeToSpendPerDay!==null && safeToSpendPerDay<600 ? { level:"watchful", icon:"🟡", label:"Watchful", detail:"Commitments are covered, but margin is limited." }
+      : { level:"comfortable", icon:"🟢", label:"Comfortable", detail:"All known commitments are covered." };
+    const statusColor = { risk:T.danger, tight:T.warn, watchful:T.gold||T.warn, comfortable:T.success }[forecastStatus?.level] || T.sub;
+
+    // Bills grouped by urgency, not a flat "Already Available" launcher list — Overdue / Due
+    // Today / Next 7 Days / Later. Reuses the exact daysUntil/isOverdue logic already used
+    // elsewhere (O003/O004), not a new calculation.
+    const today = new Date(); today.setHours(0,0,0,0);
+    const unpaidBills = bills.filter(b=>b.status!=="paid").map(b=>{
+      const daysUntil = Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
+      return { ...b, daysUntil, isOverdue: daysUntil<0 };
+    });
+    const overdueBills = unpaidBills.filter(b=>b.isOverdue).sort((a,b)=>a.daysUntil-b.daysUntil);
+    const dueTodayBills = unpaidBills.filter(b=>b.daysUntil===0);
+    const next7Bills = unpaidBills.filter(b=>b.daysUntil>0 && b.daysUntil<=7).sort((a,b)=>a.daysUntil-b.daysUntil);
+    const laterBills = unpaidBills.filter(b=>b.daysUntil>7).sort((a,b)=>a.daysUntil-b.daysUntil);
+
+    // What Changed — Facts tier only, using the real daily snapshot mechanism (wealthSnapshots).
+    // Reasons/Impact tiers omitted here since deriving "why" reliably from raw transactions is a
+    // separate piece of work, not silently assumed — matches the ADS's own "omit when data isn't
+    // available" rule rather than fabricate a reason.
+    const todayStr2 = todayStr();
+    const yesterdaySnap = [...wealthSnapshots].filter(s=>s.date<todayStr2).sort((a,b)=>b.date.localeCompare(a.date))[0];
+    const todaySnap = wealthSnapshots.find(s=>s.date===todayStr2);
+    const netWorthDelta = yesterdaySnap && todaySnap ? todaySnap.netWorth - yesterdaySnap.netWorth : null;
+    const cashDelta = yesterdaySnap && todaySnap ? todaySnap.cash - yesterdaySnap.cash : null;
+
+    const BillRow = ({ b }) => (
+      <div onClick={()=>setEditingBill(b)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
+        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name||b.type}</span>
+        <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(b.amount)}</span>
+      </div>
+    );
 
     return (
     <div style={{ padding:"14px 16px 90px" }}>
       <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:16 }}>🔮 Outlook</div>
 
-      {/* Cash Forecast — the flagship, per O014's spec. Real numbers, or an honest
-          "not enough data" state — never fabricated. */}
-      <div style={{ ...card,marginBottom:14 }}>
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>CASH FORECAST — NEXT 30 DAYS</div>
+      {/* Safe to Spend — the hero, per O014's frozen spec. Not equal-weight with Projected
+          Balance anymore; it's the one number this whole screen leads with. */}
+      <div style={{ ...card,textAlign:"center",padding:20,marginBottom:12 }}>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND</div>
         {!hasEnoughData ? (
-          <div style={{ color:T.sub,fontSize:13,textAlign:"center",padding:"10px 0" }}>Not enough data yet.</div>
+          <div style={{ color:T.sub,fontSize:13,padding:"14px 0" }}>Not enough data yet.</div>
         ) : (
           <>
-            <div style={{ display:"flex",justifyContent:"space-between",marginBottom:10 }}>
-              <div>
-                <div style={{ color:T.sub,fontSize:9 }}>PROJECTED BALANCE</div>
-                <div style={{ color:projectedBalance>=0?T.success:T.danger,fontSize:20,fontWeight:900 }}>{sym}{fmt(projectedBalance)}</div>
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ color:T.sub,fontSize:9 }}>SAFE TO SPEND</div>
-                <div style={{ color:T.accent,fontSize:20,fontWeight:900 }}>{sym}{fmt(safeToSpend)}</div>
-              </div>
-            </div>
-            {negativeCheck.negative&&(
-              <div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",marginBottom:10 }}>
-                <span style={{ color:T.danger,fontSize:11,fontWeight:700 }}>⚠ Balance dips to {sym}{fmt(negativeCheck.firstNegativeAmount)} on {formatShortDate(negativeCheck.firstNegativeDate)||negativeCheck.firstNegativeDate}, even though the month may end positive.</span>
-              </div>
-            )}
-            {timeline.length===0 ? (
-              <div style={{ color:T.sub,fontSize:11 }}>No upcoming Bills or Income tracked in this window yet.</div>
-            ) : timeline.map((ev,i)=>(
-              <div key={i} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:i<timeline.length-1?`1px solid ${T.border}`:"none" }}>
-                <div>
-                  <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{ev.label}</div>
-                  <div style={{ color:T.sub,fontSize:9 }}>{formatShortDate(ev.date)||ev.date}</div>
-                </div>
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ color:ev.amount>=0?T.success:T.danger,fontSize:12,fontWeight:700 }}>{ev.amount>=0?"+":""}{sym}{fmt(ev.amount)}</div>
-                  <div style={{ color:ev.runningBalance<0?T.danger:T.sub,fontSize:9 }}>{sym}{fmt(ev.runningBalance)}</div>
-                </div>
-              </div>
-            ))}
+            <div style={{ color:T.accent,fontSize:30,fontWeight:900,margin:"6px 0" }}>{sym}{fmt(safeToSpend)}</div>
+            <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(safeToSpendPerDay))}/day for the next 30 days</div>
           </>
         )}
       </div>
 
-      <div style={{ ...card }}>
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>ALREADY AVAILABLE</div>
-        <button onClick={()=>setTab("bills")} style={{ ...btnG,width:"100%",textAlign:"left",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-          <span>✓ Bills</span><span style={{ color:T.accent }}>Open →</span>
-        </button>
-        <button onClick={()=>setTab("budget")} style={{ ...btnG,width:"100%",textAlign:"left",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-          <span>✓ Budget Progress</span><span style={{ color:T.accent }}>Open →</span>
-        </button>
-        <button onClick={()=>setShowExpectedIncome(true)} style={{ ...btnG,width:"100%",textAlign:"left",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-          <span>✓ Scheduled Income</span><span style={{ color:T.accent }}>Open →</span>
-        </button>
-        <button onClick={()=>{ setShowInsuranceList(true); }} style={{ ...btnG,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-          <span>✓ Insurance</span><span style={{ color:T.accent }}>Open →</span>
-        </button>
+      {/* Forecast Status — ADR-022, weather-style interpretation, never a numeric score. */}
+      {forecastStatus&&(
+        <div style={{ background:statusColor+"15",border:`1px solid ${statusColor}44`,borderRadius:14,padding:"12px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:10 }}>
+          <span style={{ fontSize:22 }}>{forecastStatus.icon}</span>
+          <div>
+            <div style={{ color:statusColor,fontSize:14,fontWeight:800 }}>{forecastStatus.label}</div>
+            <div style={{ color:T.sub,fontSize:10 }}>{forecastStatus.detail}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Forecast Timeline */}
+      <div style={{ ...card,marginBottom:12 }}>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>FORECAST TIMELINE — NEXT 30 DAYS</div>
+        {negativeCheck.negative&&(
+          <div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",marginBottom:10 }}>
+            <span style={{ color:T.danger,fontSize:11,fontWeight:700 }}>⚠ Balance dips to {sym}{fmt(negativeCheck.firstNegativeAmount)} on {formatShortDate(negativeCheck.firstNegativeDate)||negativeCheck.firstNegativeDate}, even though the month may end positive.</span>
+          </div>
+        )}
+        {timeline.length===0 ? (
+          <div style={{ color:T.sub,fontSize:11 }}>No upcoming Bills or Income tracked in this window yet.</div>
+        ) : timeline.slice(0,6).map((ev,i)=>(
+          <div key={i} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:i<Math.min(timeline.length,6)-1?`1px solid ${T.border}`:"none" }}>
+            <div>
+              <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{ev.label}</div>
+              <div style={{ color:T.sub,fontSize:9 }}>{formatShortDate(ev.date)||ev.date}</div>
+            </div>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ color:ev.amount>=0?T.success:T.danger,fontSize:12,fontWeight:700 }}>{ev.amount>=0?"+":""}{sym}{fmt(ev.amount)}</div>
+              <div style={{ color:ev.runningBalance<0?T.danger:T.sub,fontSize:9 }}>{sym}{fmt(ev.runningBalance)}</div>
+            </div>
+          </div>
+        ))}
       </div>
 
-      <div style={{ ...card,marginTop:14 }}>
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>COMING SOON</div>
-        <div style={{ color:T.sub,fontSize:13,marginBottom:6 }}>• Calendar</div>
-        <div style={{ color:T.sub,fontSize:13 }}>• Monthly Planner</div>
-      </div>
+      {/* Upcoming Commitments — grouped by urgency, replaces the old "Already Available"
+          launcher list entirely. No "Open →" cards. */}
+      {overdueBills.length>0&&(
+        <div style={{ marginBottom:12 }}>
+          <div style={{ color:T.danger,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>OVERDUE ({overdueBills.length})</div>
+          <div style={{ ...card }}>{overdueBills.map(b=><BillRow key={b.id} b={b}/>)}</div>
+        </div>
+      )}
+      {dueTodayBills.length>0&&(
+        <div style={{ marginBottom:12 }}>
+          <div style={{ color:T.warn,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>DUE TODAY ({dueTodayBills.length})</div>
+          <div style={{ ...card }}>{dueTodayBills.map(b=><BillRow key={b.id} b={b}/>)}</div>
+        </div>
+      )}
+      {next7Bills.length>0&&(
+        <div style={{ marginBottom:12 }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>NEXT 7 DAYS</div>
+          <div style={{ ...card }}>{next7Bills.map(b=><BillRow key={b.id} b={b}/>)}</div>
+        </div>
+      )}
+      {laterBills.length>0&&(
+        <div style={{ marginBottom:12,opacity:0.7 }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>LATER</div>
+          <div style={{ ...card }}>{laterBills.map(b=><BillRow key={b.id} b={b}/>)}</div>
+        </div>
+      )}
+      {overdueBills.length===0&&dueTodayBills.length===0&&next7Bills.length===0&&laterBills.length===0&&(
+        <div style={{ ...card,textAlign:"center",color:T.sub,fontSize:12,padding:20,marginBottom:12 }}>No upcoming commitments tracked yet.</div>
+      )}
+
+      {/* What Changed — Facts tier, using the real wealthSnapshots mechanism. Reasons/Impact
+          omitted rather than fabricated (ADS rule: omit when the underlying data isn't there). */}
+      {netWorthDelta!==null&&(
+        <div style={{ background:T.info+"12",border:`1px solid ${T.info}33`,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
+          <div style={{ color:T.info,fontSize:10,fontWeight:800,letterSpacing:0.5,marginBottom:6 }}>WHAT CHANGED — SINCE YESTERDAY</div>
+          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{netWorthDelta>=0?"📈":"📉"} Net Worth {netWorthDelta>=0?"+":""}{sym}{fmt(netWorthDelta)}</div>
+          {cashDelta!==null&&<div style={{ color:T.text,fontSize:12,fontWeight:700,marginTop:4 }}>{cashDelta>=0?"💰":"💸"} Cash {cashDelta>=0?"+":""}{sym}{fmt(cashDelta)}</div>}
+        </div>
+      )}
+
+      {/* Coming Soon removed entirely — per this review's finding, permanent "not built yet"
+          reminders don't belong on a production screen. Calendar/Monthly Planner will simply
+          appear here once they exist. */}
     </div>
     );
   };
