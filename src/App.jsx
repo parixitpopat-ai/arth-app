@@ -10621,15 +10621,44 @@ function AppContent({ onLock }) {
   // Insights placeholder — Sprint 1 Item #2. Deliberately no charts, no fake data — Insights is
   // confirmed 0% built (Screen Inventory). A blank "under development" state is more honest than
   // a chart drawn from nothing.
-  const InsightsPage = () => (
+  const InsightsPage = () => {
+    // Real metrics only - no fabricated "unlock in X days" countdown, since no actual readiness
+    // threshold has been decided anywhere in this design process (the 30-day example in the
+    // review that led to this was illustrative, not a spec). Shows real progress; doesn't invent
+    // a finish line that doesn't exist yet.
+    const txnDates = txns.map(t=>t.date).filter(Boolean).sort();
+    const daysOfHistory = txnDates.length>0 ? Math.max(1, Math.ceil((new Date()-new Date(txnDates[0]))/(1000*60*60*24))) : 0;
+    const readinessItems = [
+      { label:"Transactions", value:txns.length, ready:txns.length>0 },
+      { label:"Categories", value:cats.length, ready:cats.length>0 },
+      { label:"History", value:`${daysOfHistory} day${daysOfHistory===1?"":"s"}`, ready:daysOfHistory>0 },
+    ];
+    return (
     <div style={{ padding:"14px 16px 90px" }}>
-      <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:4 }}>📊 Insights</div>
-      <div style={{ color:T.sub,fontSize:12,marginBottom:20 }}>Coming in Sprint 5</div>
-      <div style={{ ...card,textAlign:"center",padding:40 }}>
-        <EmptyState icon="📊" title="Spending · Income · Net Worth" subtitle="This section is under development." T={T}/>
+      <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:2 }}>📊 Insights</div>
+      <div style={{ color:T.sub,fontSize:12,marginBottom:16 }}>Understand your money.</div>
+
+      <div style={{ ...card,marginBottom:14 }}>
+        <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>Insights are being prepared</div>
+        <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Arth is collecting enough history to identify your spending patterns.</div>
+        <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8 }}>Progress</div>
+        {readinessItems.map(item=>(
+          <div key={item.label} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0" }}>
+            <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.ready?"✓":"○"} {item.label}</span>
+            <span style={{ color:item.ready?T.accent:T.sub,fontSize:12,fontWeight:800 }}>{item.value}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ ...card }}>
+        <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10 }}>Coming Soon</div>
+        {["Spending Analysis","Income Trends","Net Worth Growth","Merchant Analysis","Financial Health History","Saving Rate"].map(f=>(
+          <div key={f} style={{ color:T.text,fontSize:12,fontWeight:700,padding:"5px 0" }}>✓ {f}</div>
+        ))}
       </div>
     </div>
-  );
+    );
+  };
 
   // Money Hub — Sprint 1 Item #3. Pure navigation/presentation refactor: every number here reuses
   // an existing top-level calculation (netWorthValue, totalAssetsValue, totalLiabilitiesValue,
