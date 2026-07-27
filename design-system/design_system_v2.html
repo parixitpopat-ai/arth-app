@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Nunito', sans-serif; padding: 40px; color: #333; }
+  .page-title { font-size: 28px; font-weight: 900; color: #fff; margin-bottom: 4px; }
+  .page-sub { font-size: 13px; color: #999; margin-bottom: 30px; }
+  .section { background: #fff; border-radius: 16px; padding: 24px; margin-bottom: 20px; }
+  .section-title { font-size: 12px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; border-bottom: 1px solid #eee; padding-bottom: 8px; display:flex; justify-content:space-between; }
+  .cmp-id { font-size: 10px; background:#222; color:#fff; padding:2px 8px; border-radius:6px; font-family: monospace; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align:left; color:#999; font-size:10px; text-transform:uppercase; padding: 6px 8px; border-bottom: 2px solid #eee; }
+  td { padding: 8px; border-bottom: 1px solid #f2f2f2; }
+  .token-code { font-family: monospace; font-size: 11px; background:#f4f4f4; padding:2px 6px; border-radius:4px; }
+  .swatch-sq { width:24px; height:24px; border-radius:6px; display:inline-block; vertical-align:middle; margin-right:8px; }
+  .radius-demo { display:inline-block; background:#22c55e; width:40px; height:40px; margin-right:12px; }
+  .elev-demo { display:inline-block; background:#0f0f1a; width:70px; height:44px; border-radius:10px; margin-right:16px; }
+  .status-tag { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px; }
+  .impl { background: #d4f4dd; color: #1a7a3a; }
+  .spec { background: #cfe8ff; color: #1a5a9a; }
+  .future { background: #ffd6d6; color: #b32020; }
+  .deprecated { background: #eee; color: #888; }
+  .chart-box { background:#08080f; border-radius:12px; padding:14px; width:200px; color:#e8e4dc; }
+  .card-mini { background:#08080f; border-radius:14px; padding:12px; width:170px; color:#e8e4dc; margin-bottom:10px; }
+  .row { display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start; }
+</style>
+</head>
+<body>
+
+<div class="page-title">Arth Design System v2.0</div>
+<div class="page-sub">Design tokens, components, motion, behaviour, patterns, status model — renamed from "High-Fidelity Design System" per this review, since it's broader than visuals</div>
+
+<!-- STATUS MODEL -->
+<div class="section" style="background:#222;color:#fff;">
+  <div class="section-title" style="color:#aaa;">Component Status Model (formalized)</div>
+  <span class="status-tag impl">🟢 Implemented</span> — verified in code &nbsp;&nbsp;
+  <span class="status-tag spec">🔵 Specified</span> — documented, approved, not yet built &nbsp;&nbsp;
+  <span class="status-tag future">🔴 Future</span> — intentionally deferred &nbsp;&nbsp;
+  <span class="status-tag deprecated">🟡 Deprecated</span> — being phased out
+</div>
+
+<!-- 1. DESIGN TOKENS -->
+<div class="section">
+  <div class="section-title">1. Design Tokens <span class="status-tag impl">🟢 Implemented</span></div>
+  <table>
+    <tr><th>Token</th><th>Value</th><th>Usage</th></tr>
+    <tr><td><span class="swatch-sq" style="background:#22c55e;"></span><span class="token-code">T.color.accent</span></td><td>#22c55e</td><td>Primary CTA, success, positive amounts</td></tr>
+    <tr><td><span class="swatch-sq" style="background:#ef4444;"></span><span class="token-code">T.color.danger</span></td><td>#ef4444</td><td>Destructive actions, negative amounts, errors</td></tr>
+    <tr><td><span class="swatch-sq" style="background:#f97316;"></span><span class="token-code">T.color.warn</span></td><td>#f97316</td><td>Warnings, budget-approaching-limit states</td></tr>
+    <tr><td><span class="swatch-sq" style="background:#06b6d4;"></span><span class="token-code">T.color.info</span></td><td>#06b6d4</td><td>Informational badges, neutral highlights</td></tr>
+    <tr><td><span class="swatch-sq" style="background:#0f0f1a;"></span><span class="token-code">T.color.card</span></td><td>#0f0f1a</td><td>Card backgrounds</td></tr>
+    <tr><td><span class="swatch-sq" style="background:#08080f;"></span><span class="token-code">T.color.bg</span></td><td>#08080f</td><td>Screen background</td></tr>
+    <tr><td><span class="swatch-sq" style="background:#5a5a7a;"></span><span class="token-code">T.color.sub</span></td><td>#5a5a7a</td><td>Secondary text, labels</td></tr>
+    <tr><td><span class="swatch-sq" style="background:#e8e4dc;border:1px solid #ccc;"></span><span class="token-code">T.color.text</span></td><td>#e8e4dc</td><td>Primary text</td></tr>
+  </table>
+</div>
+
+<!-- 2. RADIUS SCALE -->
+<div class="section">
+  <div class="section-title">2. Radius Scale <span class="status-tag impl">🟢 Implemented</span> — grounded in actual usage frequency, not guessed</div>
+  <table>
+    <tr><th></th><th>Token</th><th>Value</th><th>Real usage count</th><th>Primary use</th></tr>
+    <tr><td><div class="radius-demo" style="border-radius:8px;"></div></td><td class="token-code">R.xs</td><td>8px</td><td>105 occurrences</td><td>Icon containers, small chips</td></tr>
+    <tr><td><div class="radius-demo" style="border-radius:10px;"></div></td><td class="token-code">R.sm</td><td>10px</td><td>128 occurrences</td><td>Inputs, list rows</td></tr>
+    <tr><td><div class="radius-demo" style="border-radius:12px;"></div></td><td class="token-code">R.md</td><td>12px</td><td>103 occurrences</td><td>Buttons, form cards</td></tr>
+    <tr><td><div class="radius-demo" style="border-radius:14px;"></div></td><td class="token-code">R.lg</td><td>14px</td><td>44 occurrences</td><td>Primary buttons, action cards</td></tr>
+    <tr><td><div class="radius-demo" style="border-radius:16px;"></div></td><td class="token-code">R.xl</td><td>16px</td><td>28 occurrences</td><td>Cards (the shared `card` object)</td></tr>
+    <tr><td><div class="radius-demo" style="border-radius:20px;"></div></td><td class="token-code">R.pill</td><td>20px</td><td><b>170 occurrences — most common value in the app</b></td><td>Chips, pills, bottom-sheet top corners</td></tr>
+  </table>
+  <div style="font-size:11px;color:#b32020;margin-top:8px;">Correction to the originally proposed mapping: 20px is not reserved for Bottom Sheets alone — it's the single most-used radius value in the entire codebase, primarily for pill/chip shapes.</div>
+</div>
+
+<!-- 3. ELEVATION -->
+<div class="section">
+  <div class="section-title">3. Elevation System <span class="status-tag spec">🔵 Specified</span> — formalizing an existing but inconsistently-applied shadow token</div>
+  <div class="row">
+    <div><div class="elev-demo" style="box-shadow:none;"></div><div style="font-size:11px;margin-top:6px;">Elevation 0 — None (flat list rows)</div></div>
+    <div><div class="elev-demo" style="box-shadow:0 2px 8px rgba(0,0,0,0.6);"></div><div style="font-size:11px;margin-top:6px;">Elevation 1 — Cards</div></div>
+    <div><div class="elev-demo" style="box-shadow:0 6px 16px rgba(0,0,0,0.5);"></div><div style="font-size:11px;margin-top:6px;">Elevation 2 — Dialogs</div></div>
+    <div><div class="elev-demo" style="box-shadow:0 8px 20px rgba(34,197,94,0.3);"></div><div style="font-size:11px;margin-top:6px;">Elevation 3 — FAB</div></div>
+    <div><div class="elev-demo" style="box-shadow:0 -8px 24px rgba(0,0,0,0.5);"></div><div style="font-size:11px;margin-top:6px;">Elevation 4 — Bottom Sheets</div></div>
+  </div>
+  <div style="font-size:11px;color:#666;margin-top:10px;">Elevation 1 uses T.sh — a token that existed but was used in only 4 places before this session's Design Foundation pass; Elevations 2-4 are newly formalized here, not yet applied consistently across all dialogs/FAB/sheets.</div>
+</div>
+
+<!-- 4. CHART SYSTEM -->
+<div class="section">
+  <div class="section-title">4. Chart System <span class="status-tag future">🔴 Future</span> — was completely missing, genuinely new</div>
+  <div class="row">
+    <div class="chart-box">
+      <div style="font-size:10px;color:#5a5a7a;margin-bottom:8px;">LINE — Net Worth Growth</div>
+      <svg width="100%" height="50"><polyline points="5,40 40,30 75,35 110,15 145,20 180,8" style="fill:none;stroke:#22c55e;stroke-width:2;"/></svg>
+    </div>
+    <div class="chart-box">
+      <div style="font-size:10px;color:#5a5a7a;margin-bottom:8px;">FORECAST — dashed = projected</div>
+      <svg width="100%" height="50">
+        <polyline points="5,30 70,25" style="fill:none;stroke:#22c55e;stroke-width:2;"/>
+        <polyline points="70,25 100,35 140,15 180,10" style="fill:none;stroke:#22c55e;stroke-width:2;stroke-dasharray:4,3;"/>
+        <circle cx="70" cy="25" r="3" fill="#fff"/>
+      </svg>
+      <div style="font-size:8px;color:#999;margin-top:4px;">● = Today's marker, always highlighted</div>
+    </div>
+    <div class="chart-box">
+      <div style="font-size:10px;color:#5a5a7a;margin-bottom:8px;">PIE — Category Split</div>
+      <div style="width:60px;height:60px;border-radius:50%;background:conic-gradient(#22c55e 0deg 140deg, #06b6d4 140deg 220deg, #5a5a7a 220deg 360deg);margin:0 auto;"></div>
+    </div>
+    <div class="chart-box">
+      <div style="font-size:10px;color:#5a5a7a;margin-bottom:8px;">BAR — Monthly Spend</div>
+      <div style="display:flex;align-items:flex-end;gap:4px;height:45px;">
+        <div style="flex:1;background:#22c55e;height:60%;border-radius:2px 2px 0 0;"></div>
+        <div style="flex:1;background:#22c55e;height:80%;border-radius:2px 2px 0 0;"></div>
+        <div style="flex:1;background:#ef4444;height:100%;border-radius:2px 2px 0 0;"></div>
+        <div style="flex:1;background:#22c55e;height:50%;border-radius:2px 2px 0 0;"></div>
+      </div>
+    </div>
+  </div>
+  <div style="font-size:11px;color:#666;margin-top:12px;"><b>Rules:</b> positive values always accent green · negative always danger red · forecast/projected segments always dashed with a solid "today" marker · Recharts already a library dependency, reduces build cost.</div>
+</div>
+
+<!-- 5. FORM COMPONENTS -->
+<div class="section">
+  <div class="section-title">5. Form Components <span class="status-tag impl">🟢 Implemented</span> (mostly) — native inputs today, not custom-built</div>
+  <div class="row" style="background:#08080f;padding:16px;border-radius:12px;">
+    <div style="width:140px;"><div style="font-size:9px;color:#5a5a7a;margin-bottom:4px;">TEXT FIELD</div><div style="background:#0b0b18;border:1px solid #1a1a2e;border-radius:10px;padding:10px;color:#5a5a7a;font-size:12px;">Merchant</div></div>
+    <div style="width:140px;"><div style="font-size:9px;color:#5a5a7a;margin-bottom:4px;">CURRENCY</div><div style="background:#0b0b18;border:1px solid #1a1a2e;border-radius:10px;padding:10px;color:#e8e4dc;font-size:14px;font-weight:800;">₹ 850</div></div>
+    <div style="width:140px;"><div style="font-size:9px;color:#5a5a7a;margin-bottom:4px;">DROPDOWN</div><div style="background:#0b0b18;border:1px solid #1a1a2e;border-radius:10px;padding:10px;color:#e8e4dc;font-size:12px;">HDFC Bank ▾</div></div>
+    <div style="width:140px;"><div style="font-size:9px;color:#5a5a7a;margin-bottom:4px;">DATE PICKER</div><div style="background:#0b0b18;border:1px solid #1a1a2e;border-radius:10px;padding:10px;color:#e8e4dc;font-size:12px;">27 Jul 📅</div></div>
+    <div style="width:140px;"><div style="font-size:9px;color:#5a5a7a;margin-bottom:4px;">TOGGLE</div><div style="width:38px;height:22px;background:#22c55e;border-radius:11px;position:relative;"><div style="width:18px;height:18px;background:#fff;border-radius:50%;position:absolute;right:2px;top:2px;"></div></div></div>
+    <div style="width:140px;"><div style="font-size:9px;color:#5a5a7a;margin-bottom:4px;">SEARCH</div><div style="background:#0b0b18;border:1px solid #1a1a2e;border-radius:20px;padding:10px 14px;color:#5a5a7a;font-size:12px;">🔍 Search...</div></div>
+  </div>
+  <div style="font-size:11px;color:#b32020;margin-top:10px;">Checkbox/Radio not confirmed as distinct styled components anywhere in the app today — flagging as unverified rather than assuming they exist.</div>
+</div>
+
+<!-- 6. CARD CATALOGUE -->
+<div class="section">
+  <div class="section-title">6. Card Catalogue</div>
+  <div class="row">
+    <div><div class="card-mini"><div style="font-size:9px;color:#5a5a7a;">SUMMARY / MONEY CARD <span class="cmp-id">CMP-002</span></div><div style="font-size:18px;font-weight:900;margin-top:4px;">₹48,500</div></div><span class="status-tag impl">🟢</span></div>
+    <div><div class="card-mini"><div style="font-size:9px;color:#5a5a7a;">FORECAST CARD <span class="cmp-id">CMP-004</span></div><svg width="100%" height="24" style="margin-top:4px;"><polyline points="0,18 40,10 80,15 120,5" style="fill:none;stroke:#22c55e;stroke-width:2;"/></svg></div><span class="status-tag future">🔴</span></div>
+    <div><div class="card-mini"><div style="font-size:9px;color:#5a5a7a;">GOAL CARD</div><div style="font-size:11px;font-weight:700;margin-top:4px;">Emergency Fund 72%</div></div><span class="status-tag impl">🟢</span></div>
+    <div><div class="card-mini"><div style="font-size:9px;color:#5a5a7a;">BILL CARD</div><div style="font-size:11px;font-weight:700;margin-top:4px;">Electricity · ₹1,240</div></div><span class="status-tag impl">🟢</span></div>
+    <div><div class="card-mini"><div style="font-size:9px;color:#5a5a7a;">INSURANCE CARD</div><div style="font-size:11px;font-weight:700;margin-top:4px;">LIC Jeevan Anand</div></div><span class="status-tag future">🔴</span></div>
+    <div><div class="card-mini"><div style="font-size:9px;color:#5a5a7a;">VEHICLE CARD</div><div style="font-size:11px;font-weight:700;margin-top:4px;">🚗 GA07 AB 1234</div></div><span class="status-tag impl">🟢</span></div>
+    <div><div class="card-mini"><div style="font-size:9px;color:#5a5a7a;">PERSON CARD</div><div style="font-size:11px;font-weight:700;margin-top:4px;">👤 Amit</div></div><span class="status-tag impl">🟢</span></div>
+    <div><div class="card-mini"><div style="font-size:9px;color:#5a5a7a;">ANALYTICS CARD</div><div style="font-size:11px;font-weight:700;margin-top:4px;">Spending Trend</div></div><span class="status-tag future">🔴</span></div>
+  </div>
+</div>
+
+<!-- 7. STATUS COLOURS -->
+<div class="section">
+  <div class="section-title">7. Status Colours (frozen)</div>
+  <table>
+    <tr><th>Meaning</th><th>Colour</th><th>Background</th><th>Border</th><th>Text/Icon</th></tr>
+    <tr><td>Success</td><td><span class="swatch-sq" style="background:#22c55e;"></span></td><td>accent + 13% opacity</td><td>accent solid</td><td>accent solid</td></tr>
+    <tr><td>Warning</td><td><span class="swatch-sq" style="background:#f97316;"></span></td><td>warn + 13% opacity</td><td>warn solid</td><td>warn solid</td></tr>
+    <tr><td>Error</td><td><span class="swatch-sq" style="background:#ef4444;"></span></td><td>danger + 13% opacity</td><td>danger solid</td><td>danger solid</td></tr>
+    <tr><td>Info</td><td><span class="swatch-sq" style="background:#06b6d4;"></span></td><td>info + 13% opacity</td><td>info solid</td><td>info solid</td></tr>
+    <tr><td>Neutral</td><td><span class="swatch-sq" style="background:#5a5a7a;"></span></td><td>T.input</td><td>T.border</td><td>T.sub</td></tr>
+  </table>
+</div>
+
+<!-- 9. ICON STRATEGY -->
+<div class="section">
+  <div class="section-title">9. Icon Strategy</div>
+  <div style="font-size:12px;"><b>Current implementation:</b> Emoji — confirmed as the real, actual icon system today, not a placeholder.<br><b>Target:</b> Dedicated icon set (Material Symbols, Lucide, or custom) — not yet decided, not yet started. Kept as emoji through this entire design phase deliberately, since it's fast, zero-asset-cost, and already visually consistent — but this is a real decision to make explicitly before high-fidelity mockups get too far, not something to swap silently mid-design.</div>
+</div>
+
+<!-- 10. COMPONENT IDS -->
+<div class="section">
+  <div class="section-title">10. Component Registry</div>
+  <table>
+    <tr><th>ID</th><th>Component</th><th>Status</th></tr>
+    <tr><td class="cmp-id">CMP-001</td><td>Primary Button</td><td><span class="status-tag impl">🟢</span></td></tr>
+    <tr><td class="cmp-id">CMP-002</td><td>Summary / Money Card</td><td><span class="status-tag impl">🟢</span></td></tr>
+    <tr><td class="cmp-id">CMP-003</td><td>Bottom Navigation</td><td><span class="status-tag impl">🟢</span></td></tr>
+    <tr><td class="cmp-id">CMP-004</td><td>Forecast Card</td><td><span class="status-tag future">🔴</span></td></tr>
+    <tr><td class="cmp-id">CMP-005</td><td>Chip (PAT-005)</td><td><span class="status-tag impl">🟢</span></td></tr>
+    <tr><td class="cmp-id">CMP-006</td><td>Confirmation Dialog (PAT-006)</td><td><span class="status-tag impl">🟢</span></td></tr>
+    <tr><td class="cmp-id">CMP-007</td><td>Empty State (PAT-002)</td><td><span class="status-tag impl">🟢</span></td></tr>
+    <tr><td class="cmp-id">CMP-008</td><td>Entity Card (PAT-008)</td><td><span class="status-tag impl">🟢</span></td></tr>
+    <tr><td class="cmp-id">CMP-009</td><td>Bottom Sheet (PAT-001)</td><td><span class="status-tag impl">🟢</span></td></tr>
+    <tr><td class="cmp-id">CMP-010</td><td>Toast (PAT-003)</td><td><span class="status-tag impl">🟢</span></td></tr>
+  </table>
+  <div style="font-size:11px;color:#666;margin-top:8px;">Future screen specs reference components by ID (e.g. "Uses CMP-002, CMP-009") instead of redescribing them.</div>
+</div>
+
+</body>
+</html>

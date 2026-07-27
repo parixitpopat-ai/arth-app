@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Nunito', sans-serif; padding: 40px; }
+  .pack-title { font-size: 24px; font-weight: 900; color: #fff; margin-bottom: 4px; }
+  .pack-sub { font-size: 13px; color: #999; margin-bottom: 30px; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .unit { width: 300px; }
+  .label { font-size: 12px; font-weight: 800; color: #ccc; margin-bottom: 10px; }
+  .status-tag { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px; margin-left: 6px; }
+  .impl { background: #d4f4dd; color: #1a7a3a; }
+  .phone { background: #08080f; border-radius: 32px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 6px solid #000; }
+  .phone.light { background: #f4f3ef; }
+  .screen { border-radius: 26px; overflow: hidden; min-height: 560px; background: #08080f; color: #e8e4dc; display:flex; flex-direction:column; }
+  .screen.light { background: #f4f3ef; color: #1a1a2e; }
+  .statusbar { display: flex; justify-content: space-between; padding: 8px 16px 0; font-size: 11px; }
+  .appbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; }
+  .appbar-title { font-size: 14px; font-weight: 900; }
+  .content { padding: 12px 16px; flex:1; }
+  .card { background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 16px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); margin-bottom: 10px; }
+  .light .card { background: #ffffff; border: 1px solid #e5e1d8; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .hero { text-align:center; padding:18px; }
+  .hero-label { font-size:10px; color:#5a5a7a; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; }
+  .hero-num { font-size:26px; font-weight:900; margin:6px 0; }
+  .split-row { display:flex; justify-content:center; gap:24px; margin-top:8px; }
+  .split-item { text-align:center; }
+  .split-label { font-size:9px; color:#5a5a7a; }
+  .split-val { font-size:14px; font-weight:800; }
+  .section-label { font-size: 10px; font-weight: 700; color: #5a5a7a; text-transform: uppercase; letter-spacing: 0.5px; margin: 10px 0 6px; }
+  .row-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #1a1a2e; }
+  .light .row-item { border-bottom: 1px solid #e5e1d8; }
+  .row-name { font-size: 13px; font-weight: 700; }
+  .row-val { font-size: 13px; font-weight: 800; }
+  .navbar { display: flex; justify-content: space-around; padding: 10px 0; background: #0a0a16; border-top: 1px solid #1a1a2e; }
+  .light .navbar { background: #ffffff; border-top: 1px solid #e5e1d8; }
+  .navitem { text-align: center; font-size: 9px; color: #5a5a7a; font-weight: 700; }
+  .navitem.active { color: #22c55e; }
+  .fab { width: 42px; height: 42px; border-radius: 50%; background: #22c55e; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #000; margin-top: -18px; border: 3px solid #0a0a16; }
+  .light .fab { border-color: #fff; }
+  .footer-trace { background: #222; color: #ccc; border-radius: 10px; padding: 10px 12px; font-size: 9px; font-family: monospace; margin-top: 10px; line-height: 1.6; }
+  .footer-trace b { color: #fff; }
+  .donut { width: 70px; height: 70px; border-radius: 50%; margin: 8px auto; background: conic-gradient(#22c55e 0deg 216deg, #ef4444 216deg 360deg); }
+  .field { background:#0b0b18; border:1px solid #1a1a2e; border-radius:10px; padding:11px; font-size:13px; color:#5a5a7a; margin-bottom:10px; }
+  .btn-primary { background:#22c55e; color:#000; border:none; border-radius:14px; padding:13px; font-size:13px; font-weight:800; width:100%; }
+</style>
+</head>
+<body>
+
+<div class="pack-title">HF-001 — Money Dashboard (M001–M005)</div>
+<div class="pack-sub">Golden Reference Pack · Design System v2.0.0 · Validates CMP-001–010, tokens, radius, elevation, typography, light/dark mode, charts</div>
+
+<div class="row">
+
+  <!-- M001 DARK -->
+  <div class="unit">
+    <div class="label">M001 — Money Dashboard (Dark) <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">💰 Money</div></div>
+      <div class="content">
+        <div class="card hero">
+          <div class="hero-label">Net Worth</div>
+          <div class="hero-num" style="color:#22c55e;">₹24,75,600</div>
+          <div class="split-row">
+            <div class="split-item"><div class="split-label">Assets</div><div class="split-val" style="color:#22c55e;">₹31,40,000</div></div>
+            <div class="split-item"><div class="split-label">Liabilities</div><div class="split-val" style="color:#ef4444;">₹6,64,400</div></div>
+          </div>
+        </div>
+        <div class="section-label">Cash</div>
+        <div class="card"><div class="row-item"><span class="row-name">HDFC Savings</span><span class="row-val">₹1,20,000</span></div></div>
+        <div class="section-label">Investments</div>
+        <div class="card"><div class="row-item"><span class="row-name">Mutual Funds</span><span class="row-val">₹12,80,000</span></div></div>
+        <div class="section-label">Credit Cards</div>
+        <div class="card"><div class="row-item"><span class="row-name">Coral RuPay</span><span class="row-val" style="color:#ef4444;">₹18,000</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="footer-trace">
+      <b>ADS Version:</b> 2.0.0 | <b>Screen:</b> M001<br>
+      <b>Components:</b> CMP-002, CMP-003<br>
+      <b>Tokens:</b> Radius XL(card)/Pill(nav), Elevation 1, Colour Accent/Danger
+    </div>
+  </div>
+
+  <!-- M001 LIGHT -->
+  <div class="unit">
+    <div class="label">M001 — Money Dashboard (Light) <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone light"><div class="screen light">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">💰 Money</div></div>
+      <div class="content">
+        <div class="card hero">
+          <div class="hero-label">Net Worth</div>
+          <div class="hero-num" style="color:#16a34a;">₹24,75,600</div>
+          <div class="split-row">
+            <div class="split-item"><div class="split-label">Assets</div><div class="split-val" style="color:#16a34a;">₹31,40,000</div></div>
+            <div class="split-item"><div class="split-label">Liabilities</div><div class="split-val" style="color:#dc2626;">₹6,64,400</div></div>
+          </div>
+        </div>
+        <div class="section-label">Cash</div>
+        <div class="card"><div class="row-item"><span class="row-name">HDFC Savings</span><span class="row-val">₹1,20,000</span></div></div>
+        <div class="section-label">Investments</div>
+        <div class="card"><div class="row-item"><span class="row-name">Mutual Funds</span><span class="row-val">₹12,80,000</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="footer-trace">
+      <b>ADS Version:</b> 2.0.0 | <b>Screen:</b> M001 (Light)<br>
+      <b>Components:</b> CMP-002, CMP-003<br>
+      <b>Tokens:</b> LIGHT.accent #16a34a, LIGHT.danger #dc2626
+    </div>
+  </div>
+
+  <!-- M002 -->
+  <div class="unit">
+    <div class="label">M002 — Net Worth <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Net Worth</div></div>
+      <div class="content">
+        <div class="card hero">
+          <div class="hero-label">Net Worth</div>
+          <div class="donut"></div>
+          <div class="hero-num" style="font-size:20px;">₹24,75,600</div>
+        </div>
+        <div class="section-label">Breakdown</div>
+        <div class="card">
+          <div class="row-item"><span class="row-name">🟢 Assets</span><span class="row-val">₹31,40,000</span></div>
+          <div class="row-item"><span class="row-name">🔴 Liabilities</span><span class="row-val">₹6,64,400</span></div>
+        </div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="footer-trace">
+      <b>ADS Version:</b> 2.0.0 | <b>Screen:</b> M002<br>
+      <b>Components:</b> CMP-002, Chart(Donut)<br>
+      <b>Tokens:</b> Radius XL, Elevation 1
+    </div>
+  </div>
+
+  <!-- M003 -->
+  <div class="unit">
+    <div class="label">M003 — Assets <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Assets</div></div>
+      <div class="content">
+        <div class="section-label">Bank &amp; Cash</div>
+        <div class="card"><div class="row-item"><span class="row-name">🏦 HDFC Savings</span><span class="row-val">₹1,20,000</span></div><div class="row-item"><span class="row-name">💵 Cash in Hand</span><span class="row-val">₹22,500</span></div></div>
+        <div class="section-label">Investments</div>
+        <div class="card"><div class="row-item"><span class="row-name">📈 Mutual Funds</span><span class="row-val">₹12,80,000</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="footer-trace">
+      <b>ADS Version:</b> 2.0.0 | <b>Screen:</b> M003<br>
+      <b>Components:</b> CMP-008 (Entity Card)<br>
+      <b>Tokens:</b> Radius XL, Elevation 1
+    </div>
+  </div>
+
+  <!-- M004 -->
+  <div class="unit">
+    <div class="label">M004 — Asset Detail <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Mutual Funds</div></div>
+      <div class="content">
+        <div class="card hero">
+          <div class="hero-label">Current Value</div>
+          <div class="hero-num" style="color:#22c55e;">₹12,80,000</div>
+        </div>
+        <div class="row-item"><span class="row-name">Type</span><span class="row-val">Investment</span></div>
+        <div class="row-item"><span class="row-name">Purchase Value</span><span class="row-val">₹10,00,000</span></div>
+        <div class="section-label">History</div>
+        <div class="card" style="text-align:center;color:#5a5a7a;font-size:11px;padding:20px;">Transaction history</div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="footer-trace">
+      <b>ADS Version:</b> 2.0.0 | <b>Screen:</b> M004<br>
+      <b>Components:</b> CMP-002<br>
+      <b>Tokens:</b> Radius XL, Elevation 1
+    </div>
+  </div>
+
+  <!-- M005 -->
+  <div class="unit">
+    <div class="label">M005 — Add Asset <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Add Asset</div></div>
+      <div class="content">
+        <div class="section-label">Name *</div>
+        <div class="field">e.g. Mutual Fund</div>
+        <div class="section-label">Type</div>
+        <div class="field">Investment ▾</div>
+        <div class="section-label">Value (optional)</div>
+        <div class="field">₹ 0</div>
+        <div style="font-size:9px;color:#5a5a7a;margin:-4px 0 12px;">Progressive Enrichment — value can be added later</div>
+        <button class="btn-primary">Save Asset</button>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="footer-trace">
+      <b>ADS Version:</b> 2.0.0 | <b>Screen:</b> M005<br>
+      <b>Components:</b> CMP-001 (Button)<br>
+      <b>Tokens:</b> Radius SM(fields)/LG(button), Elevation 0
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Nunito', sans-serif; padding: 40px; }
+  .pack-title { font-size: 24px; font-weight: 900; color: #fff; margin-bottom: 4px; }
+  .pack-sub { font-size: 13px; color: #999; margin-bottom: 30px; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .unit { width: 300px; }
+  .label { font-size: 12px; font-weight: 800; color: #ccc; margin-bottom: 10px; }
+  .status-tag { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px; margin-left: 6px; }
+  .impl { background: #d4f4dd; color: #1a7a3a; }
+  .phone { background: #08080f; border-radius: 32px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 6px solid #000; }
+  .screen { border-radius: 26px; overflow: hidden; min-height: 560px; background: #08080f; color: #e8e4dc; display:flex; flex-direction:column; }
+  .statusbar { display: flex; justify-content: space-between; padding: 8px 16px 0; font-size: 11px; }
+  .appbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; }
+  .appbar-title { font-size: 14px; font-weight: 900; }
+  .content { padding: 0 16px 12px; flex:1; }
+  .card { background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 16px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); margin-bottom: 10px; }
+  .hero { text-align:center; padding:16px; }
+  .hero-label { font-size:10px; color:#5a5a7a; font-weight:700; text-transform:uppercase; }
+  .hero-num { font-size:22px; font-weight:900; margin:6px 0; }
+  .row-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid #1a1a2e; }
+  .row-flex { display:flex; align-items:center; flex:1; }
+  .row-icon { width:32px; height:32px; border-radius:8px; background:#1a1a2e; display:flex; align-items:center; justify-content:center; font-size:14px; margin-right:9px; }
+  .row-name { font-size: 13px; font-weight: 700; }
+  .row-sub { font-size:9px; color:#5a5a7a; }
+  .row-val { font-size: 13px; font-weight: 800; }
+  .section-label { font-size: 10px; font-weight: 700; color: #5a5a7a; text-transform: uppercase; margin: 8px 0 6px; }
+  .chip { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:20px; font-size:9px; font-weight:700; }
+  .donut { width:64px; height:64px; border-radius:50%; margin:6px auto; }
+  .gauge { width:64px; height:64px; border-radius:50%; margin:6px auto; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:900; }
+  .not-set { font-size:11px; color:#5a5a7a; font-style:italic; font-weight:700; }
+  .metric-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:10px; }
+  .progress-track { height:8px; background:#1a1a2e; border-radius:4px; overflow:hidden; margin:6px 0; }
+  .progress-fill { height:100%; border-radius:4px; }
+  .interaction-layer { background: #222; color: #ddd; border-radius: 10px; padding: 10px 12px; font-size: 10px; margin-top: 10px; line-height: 1.7; }
+  .interaction-layer b { color: #fff; }
+  .na { color: #b32020; }
+  .footer-trace { background: #333; color: #ccc; border-radius: 8px; padding: 8px 10px; font-size: 9px; font-family: monospace; margin-top: 6px; }
+  .navbar { display: flex; justify-content: space-around; padding: 10px 0; background: #0a0a16; border-top: 1px solid #1a1a2e; }
+  .navitem { text-align: center; font-size: 9px; color: #5a5a7a; font-weight: 700; }
+  .navitem.active { color: #22c55e; }
+  .fab { width: 42px; height: 42px; border-radius: 50%; background: #22c55e; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #000; margin-top: -18px; border: 3px solid #0a0a16; }
+</style>
+</head>
+<body>
+
+<div class="pack-title">HF-003 — Investments &amp; Credit (M011–M016)</div>
+<div class="pack-sub">Design System v2.0.0 · Financial visualization, Progressive Enrichment, explainable metrics, mature chip system</div>
+
+<div class="row">
+
+  <!-- M011 -->
+  <div class="unit">
+    <div class="label">M011 — Investments <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Investments</div></div>
+      <div class="content">
+        <div class="card" style="text-align:center;">
+          <div class="hero-label">Portfolio Allocation</div>
+          <div class="donut" style="background:conic-gradient(#22c55e 0deg 200deg,#06b6d4 200deg 300deg,#f0a500 300deg 360deg);"></div>
+        </div>
+        <div class="card"><div class="row-item"><div class="row-flex"><div class="row-icon">📈</div><div><div class="row-name">Mutual Funds</div><div class="row-sub">65% of portfolio</div></div></div><span class="row-val">₹12,80,000</span></div></div>
+        <div class="section-label">Benchmark Comparison</div>
+        <div class="card" style="text-align:center;"><span class="not-set">Benchmark: Not configured</span></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed:</b> Tap holding → M012 Detail<br>
+      <b>Not confirmed:</b> <span class="na">swipe, long press, drag reorder</span>
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M011 | CMP-002, Chart(Donut) | Radius XL, Elev 1</div>
+  </div>
+
+  <!-- M012 -->
+  <div class="unit">
+    <div class="label">M012 — Investment Detail <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Mutual Funds</div></div>
+      <div class="content">
+        <div class="card hero"><div class="hero-label">Current Value</div><div class="hero-num" style="color:#22c55e;">₹12,80,000</div></div>
+        <div class="card"><svg width="100%" height="40"><polyline points="0,32 40,25 80,28 120,15 160,18 200,8" style="fill:none;stroke:#22c55e;stroke-width:2;"/></svg></div>
+        <div class="metric-grid">
+          <div><span style="color:#5a5a7a;">Invested</span><br><b>₹10,00,000</b></div>
+          <div><span style="color:#5a5a7a;">Gain</span><br><b style="color:#22c55e;">+₹2,80,000 (28%)</b></div>
+        </div>
+        <div class="section-label">Linked SIP</div>
+        <div class="card" style="font-size:11px;color:#5a5a7a;">Schedule lives in Outlook (O009)</div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed:</b> Tap "Linked SIP" → Outlook O009<br>
+      <b>Metric check:</b> Gain % only shown because both Invested and Current Value exist — would omit if either were missing
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M012 | CMP-002, Chart(Line) | Radius XL</div>
+  </div>
+
+  <!-- M013 -->
+  <div class="unit">
+    <div class="label">M013 — Credit Cards <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Credit Cards</div></div>
+      <div class="content">
+        <div class="card">
+          <div class="row-item" style="border:none;"><div class="row-name">Coral RuPay</div><span class="chip" style="background:rgba(240,165,0,0.15);color:#f0a500;">🟠 Payment Due</span></div>
+          <div class="metric-grid" style="margin-top:8px;">
+            <div><span style="color:#5a5a7a;">Outstanding</span><br><b style="color:#ef4444;">₹18,000</b></div>
+            <div><span style="color:#5a5a7a;">Available Limit</span><br><span class="not-set">Not set</span></div>
+            <div><span style="color:#5a5a7a;">Utilisation</span><br><span class="not-set">—</span></div>
+            <div><span style="color:#5a5a7a;">Total Exposure</span><br><b style="color:#ef4444;">₹18,000</b></div>
+          </div>
+        </div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed:</b> Tap → M014 Card Detail<br>
+      <b>Metric check:</b> Limit/Utilisation genuinely "Not set" — no creditLimit field exists on CC accounts (confirmed by code check, same finding as HF-001 pass)
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M013 | CMP-002, CMP-005(chip) | Radius XL, Pill</div>
+  </div>
+
+  <!-- M014 -->
+  <div class="unit">
+    <div class="label">M014 — Credit Card Detail <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Coral RuPay</div></div>
+      <div class="content">
+        <div class="card" style="text-align:center;">
+          <div class="hero-label">Utilisation</div>
+          <div class="gauge" style="background:conic-gradient(#5a5a7a 0deg 360deg);color:#5a5a7a;">—</div>
+          <span class="not-set">Not configured — add credit limit to see this</span>
+        </div>
+        <div class="section-label">Recent Charges</div>
+        <div class="card"><div class="row-item"><span class="row-name">Amazon</span><span class="row-val">₹2,499</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed:</b> Tap charge → Transaction Detail<br>
+      <b>Metric check:</b> Gauge shows neutral grey "—", not a fabricated ring segment, since utilisation can't be computed without a limit
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M014 | Chart(Gauge) | Radius XL</div>
+  </div>
+
+  <!-- M015 -->
+  <div class="unit">
+    <div class="label">M015 — Loans <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Loans</div></div>
+      <div class="content">
+        <div class="section-label">Taken</div>
+        <div class="card">
+          <div class="row-item" style="border:none;"><div class="row-name">Home Loan</div><span class="chip" style="background:rgba(34,197,94,0.15);color:#22c55e;">🟢 On Track</span></div>
+          <div class="progress-track"><div class="progress-fill" style="width:35%;background:#22c55e;"></div></div>
+          <div style="font-size:10px;color:#5a5a7a;">₹3,53,600 repaid of ₹10,00,000</div>
+        </div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed:</b> Tap → M016 Loan Detail<br>
+      <b>Status chips:</b> reuse CMP-005 with color-only variation (accent/warn/danger/info/neutral) — no new chip component
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M015 | CMP-005(chip), Progress bar | Radius XL, Pill</div>
+  </div>
+
+  <!-- M016 -->
+  <div class="unit">
+    <div class="label">M016 — Loan Detail <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Home Loan</div></div>
+      <div class="content">
+        <div class="card hero"><div class="hero-label">Outstanding</div><div class="hero-num" style="color:#ef4444;">₹6,46,400</div></div>
+        <div class="metric-grid">
+          <div><span style="color:#5a5a7a;">EMI</span><br><b>₹18,500/mo</b></div>
+          <div><span style="color:#5a5a7a;">Remaining Tenure</span><br><span class="not-set">Not tracked</span></div>
+        </div>
+        <div class="section-label">Repayment History</div>
+        <div class="card"><div class="row-item"><span class="row-name">Jul EMI</span><span class="row-val">₹18,500</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Metric check:</b> "Remaining Tenure" honestly marked not tracked rather than computing a possibly-wrong estimate without confirmed loan-term data
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M016 | CMP-002 | Radius XL</div>
+  </div>
+
+</div>
+
+<div style="margin-top:30px;background:#fff;border-radius:12px;padding:16px 20px;font-size:11px;color:#444;">
+<b>HF-003 Compliance Check:</b> No new components introduced (Donut/Line/Gauge/Progress all reuse the frozen Chart System) · No new chip visual treatment (CMP-005 reused with color-token variation only) · Every derived metric either fully computed or explicitly marked unavailable (Utilisation, Benchmark, Remaining Tenure) · Zero interactions documented without evidence.
+</div>
+
+</body>
+</html>

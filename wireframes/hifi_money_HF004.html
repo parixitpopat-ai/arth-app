@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Nunito', sans-serif; padding: 40px; }
+  .pack-title { font-size: 24px; font-weight: 900; color: #fff; margin-bottom: 4px; }
+  .pack-sub { font-size: 13px; color: #999; margin-bottom: 30px; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .unit { width: 300px; }
+  .label { font-size: 12px; font-weight: 800; color: #ccc; margin-bottom: 10px; }
+  .status-tag { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px; margin-left: 6px; }
+  .impl { background: #d4f4dd; color: #1a7a3a; }
+  .new { background: #ffd6d6; color: #b32020; }
+  .phone { background: #08080f; border-radius: 32px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 6px solid #000; }
+  .screen { border-radius: 26px; overflow: hidden; min-height: 540px; background: #08080f; color: #e8e4dc; display:flex; flex-direction:column; }
+  .statusbar { display: flex; justify-content: space-between; padding: 8px 16px 0; font-size: 11px; }
+  .appbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; }
+  .appbar-title { font-size: 14px; font-weight: 900; }
+  .content { padding: 0 16px 12px; flex:1; }
+  .card { background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 16px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); margin-bottom: 10px; }
+  .row-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid #1a1a2e; }
+  .row-flex { display:flex; align-items:center; flex:1; }
+  .row-icon { width:32px; height:32px; border-radius:8px; background:#1a1a2e; display:flex; align-items:center; justify-content:center; font-size:14px; margin-right:9px; }
+  .row-name { font-size: 13px; font-weight: 700; }
+  .row-sub { font-size:9px; color:#5a5a7a; }
+  .row-val { font-size: 13px; font-weight: 800; }
+  .section-label { font-size: 10px; font-weight: 700; color: #5a5a7a; text-transform: uppercase; margin: 8px 0 6px; }
+  .not-set { font-size:11px; color:#5a5a7a; font-style:italic; font-weight:700; }
+  .empty-block { text-align:center; padding:40px 20px; color:#5a5a7a; }
+  .btn-outline { background:none; border:1px solid #22c55e; color:#22c55e; border-radius:14px; padding:11px; font-size:12px; font-weight:800; width:100%; }
+  .interaction-layer { background: #222; color: #ddd; border-radius: 10px; padding: 10px 12px; font-size: 10px; margin-top: 10px; line-height: 1.7; }
+  .interaction-layer b { color: #fff; }
+  .na { color: #b32020; }
+  .footer-trace { background: #333; color: #ccc; border-radius: 8px; padding: 8px 10px; font-size: 9px; font-family: monospace; margin-top: 6px; }
+  .navbar { display: flex; justify-content: space-around; padding: 10px 0; background: #0a0a16; border-top: 1px solid #1a1a2e; }
+  .navitem { text-align: center; font-size: 9px; color: #5a5a7a; font-weight: 700; }
+  .navitem.active { color: #22c55e; }
+  .fab { width: 42px; height: 42px; border-radius: 50%; background: #22c55e; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #000; margin-top: -18px; border: 3px solid #0a0a16; }
+  .field { background:#0b0b18; border:1px solid #1a1a2e; border-radius:10px; padding:11px; font-size:13px; color:#5a5a7a; margin-bottom:8px; }
+</style>
+</head>
+<body>
+
+<div class="pack-title">HF-004 — Receivables &amp; Assets (M017–M022)</div>
+<div class="pack-sub">Design System v2.0.0 · Final Money pack · Receivables visually distinct from Cash · Progressive Enrichment on new entities</div>
+
+<div class="row">
+
+  <!-- M017 -->
+  <div class="unit">
+    <div class="label">M017 — Money to Receive <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Money to Receive</div></div>
+      <div class="content">
+        <div style="font-size:9px;color:#5a5a7a;background:#1a1a2e;border-radius:8px;padding:6px 10px;margin-bottom:10px;">⚠️ People owe this — it's not cash you can spend today</div>
+        <div class="card"><div class="row-item"><div class="row-flex"><div class="row-icon">👤</div><div class="row-name">Amit</div></div><span class="row-val" style="color:#22c55e;">₹1,500</span></div></div>
+        <div class="card"><div class="row-item"><div class="row-flex"><div class="row-icon">👤</div><div class="row-name">Priya</div></div><span class="row-val" style="color:#22c55e;">₹800</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed:</b> Tap → Person Detail / Remind action<br>
+      <b>Data check:</b> owesMe is a flat running total (settlements[pid].owesMe) — not a separate partial-payment ledger; it decreases as settlement transactions are recorded
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M017 | CMP-008 | Radius XL</div>
+  </div>
+
+  <!-- M018 -->
+  <div class="unit">
+    <div class="label">M018 — Money You Owe <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Money You Owe</div></div>
+      <div class="content">
+        <div style="font-size:9px;color:#5a5a7a;background:#1a1a2e;border-radius:8px;padding:6px 10px;margin-bottom:10px;">⚠️ Same data model as Receivables, opposite direction (iOwe)</div>
+        <div class="card"><div class="row-item"><div class="row-flex"><div class="row-icon">👤</div><div class="row-name">Rohan</div></div><span class="row-val" style="color:#ef4444;">₹2,000</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed:</b> Tap → Person Detail / Record Payment
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M018 | CMP-008 | Radius XL</div>
+  </div>
+
+  <!-- M019 -->
+  <div class="unit">
+    <div class="label">M019 — Vehicles <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Vehicles</div></div>
+      <div class="content">
+        <div class="card"><div class="row-item"><div class="row-flex"><div class="row-icon">🏍️</div><div><div class="row-name">Honda Activa</div><div class="row-sub">GA07 AB 1234</div></div></div><span class="not-set">Value not set</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed fields today:</b> id, type, number, name, color — that's all<br>
+      <b>Confirmed NOT built:</b> <span class="na">photo, purchaseValue, insurance linkage (entity doesn't exist), service history</span> — all future
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M019 | CMP-008 | Radius XL</div>
+  </div>
+
+  <!-- M020 -->
+  <div class="unit">
+    <div class="label">M020 — Vehicle Detail <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Honda Activa</div></div>
+      <div class="content">
+        <div class="card" style="text-align:center;padding:24px;"><div style="font-size:36px;">🏍️</div></div>
+        <div class="row-item"><span class="row-name">Registration</span><span class="row-val">GA07 AB 1234</span></div>
+        <div class="row-item"><span class="row-name">Value</span><span class="not-set">Not set</span></div>
+        <div class="row-item"><span class="row-name">Insurance</span><span class="not-set">Not linked (entity not built)</span></div>
+        <button class="btn-outline" style="margin-top:12px;">Add Value</button>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed:</b> Edit → opens existing Vehicle edit form<br>
+      <b>Not built:</b> <span class="na">no photo upload UI exists anywhere in the app for vehicles</span>
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M020 | CMP-001, CMP-002 | Radius XL/LG</div>
+  </div>
+
+  <!-- M021 -->
+  <div class="unit">
+    <div class="label">M021 — Property <span class="status-tag new">🔴 NEW — placeholder only</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Property</div></div>
+      <div class="content empty-block" style="margin-top:60px;">
+        <div style="font-size:36px;margin-bottom:10px;">🏠</div>
+        <div style="font-size:14px;font-weight:800;color:#e8e4dc;margin-bottom:4px;">No properties yet.</div>
+        <div style="font-size:11px;margin-bottom:20px;">Add your first property.</div>
+      </div>
+    </div>
+    <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed today:</b> zero CRUD exists — no add form, no fields defined in code, this is a literal static placeholder<br>
+      <b>Target (Progressive Enrichment):</b> Name, Type, Estimated Value only at creation — everything else later
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M021 | CMP-007(Empty State) | Radius XL — no other components apply, nothing else exists</div>
+  </div>
+
+  <!-- M022 -->
+  <div class="unit">
+    <div class="label">M022 — Business Assets <span class="status-tag new">🔴 NEW — placeholder only</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Business Assets</div></div>
+      <div class="content empty-block" style="margin-top:60px;">
+        <div style="font-size:36px;margin-bottom:10px;">💼</div>
+        <div style="font-size:14px;font-weight:800;color:#e8e4dc;margin-bottom:4px;">No business assets yet.</div>
+        <div style="font-size:11px;margin-bottom:20px;">Add your first business asset.</div>
+      </div>
+    </div>
+    <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed today:</b> identical to M021 — zero CRUD, static placeholder only, no fields defined anywhere
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M022 | CMP-007(Empty State) | Radius XL — same honest limitation as M021</div>
+  </div>
+
+</div>
+
+<div style="margin-top:30px;background:#fff;border-radius:12px;padding:16px 20px;font-size:11px;color:#444;">
+<b>HF-004 Compliance Check:</b> Receivables visually distinct from Cash (warning banner, no bank-account styling) · M019/M020 show only the 5 real fields, nothing fabricated · M021/M022 are honest empty states, not dressed-up fake dashboards — verified zero CRUD exists for either before drawing anything.
+</div>
+
+<div style="margin-top:16px;background:#222;color:#fff;border-radius:12px;padding:16px 20px;font-size:13px;">
+<b>Money Module: 🟢 FROZEN</b><br>
+<span style="font-size:11px;color:#ccc;">Specification ✅ · Wireframes ✅ · High-fidelity ✅ · Design System compliant ✅ — all 22 screens (M001–M022) complete across HF-001 through HF-004. No further changes except bug fixes or usability findings.</span>
+</div>
+
+</body>
+</html>

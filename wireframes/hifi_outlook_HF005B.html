@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Nunito', sans-serif; padding: 40px; }
+  .pack-title { font-size: 24px; font-weight: 900; color: #fff; margin-bottom: 4px; }
+  .pack-sub { font-size: 13px; color: #999; margin-bottom: 30px; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .unit { width: 300px; }
+  .label { font-size: 12px; font-weight: 800; color: #ccc; margin-bottom: 10px; }
+  .status-tag { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px; margin-left: 6px; }
+  .impl { background: #d4f4dd; color: #1a7a3a; }
+  .refactor { background: #fff3cd; color: #8a6500; }
+  .phone { background: #08080f; border-radius: 32px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 6px solid #000; }
+  .screen { border-radius: 26px; overflow: hidden; min-height: 560px; background: #08080f; color: #e8e4dc; display:flex; flex-direction:column; }
+  .statusbar { display: flex; justify-content: space-between; padding: 8px 16px 0; font-size: 11px; }
+  .appbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; }
+  .appbar-title { font-size: 14px; font-weight: 900; }
+  .content { padding: 0 16px 12px; flex:1; }
+  .commit-card { background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 16px; padding: 12px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+  .cc-top { display: flex; align-items: center; gap: 10px; }
+  .cc-icon { width: 36px; height: 36px; border-radius: 10px; background: #1a1a2e; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .cc-name { font-size: 13px; font-weight: 800; }
+  .cc-freq { font-size: 9px; color: #5a5a7a; }
+  .cc-amt { font-size: 14px; font-weight: 900; margin-left: auto; }
+  .cc-bottom { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid #1a1a2e; }
+  .cc-date { font-size: 10px; color: #5a5a7a; }
+  .chip { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:20px; font-size:9px; font-weight:700; }
+  .section-label { font-size: 10px; font-weight: 700; color: #5a5a7a; text-transform: uppercase; margin: 8px 0 6px; }
+  .interaction-layer { background: #222; color: #ddd; border-radius: 10px; padding: 10px 12px; font-size: 10px; margin-top: 10px; line-height: 1.7; }
+  .interaction-layer b { color: #fff; }
+  .footer-trace { background: #333; color: #ccc; border-radius: 8px; padding: 8px 10px; font-size: 9px; font-family: monospace; margin-top: 6px; }
+  .navbar { display: flex; justify-content: space-around; padding: 10px 0; background: #0a0a16; border-top: 1px solid #1a1a2e; }
+  .navitem { text-align: center; font-size: 9px; color: #5a5a7a; font-weight: 700; }
+  .navitem.active { color: #22c55e; }
+  .fab { width: 42px; height: 42px; border-radius: 50%; background: #22c55e; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #000; margin-top: -18px; border: 3px solid #0a0a16; }
+</style>
+</head>
+<body>
+
+<div class="pack-title">HF-005B — Commitments (O005–O013)</div>
+<div class="pack-sub">One family, one card (CMP-016) · ADR-023 · "What have I committed to?"</div>
+
+<div class="row">
+
+  <!-- CMP-016 showcase -->
+  <div class="unit">
+    <div class="label">CMP-016 — Commitment Card (all variants)</div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Commitments</div></div>
+      <div class="content">
+        <div class="commit-card">
+          <div class="cc-top"><div class="cc-icon">📺</div><div><div class="cc-name">Netflix</div><div class="cc-freq">Monthly</div></div><div class="cc-amt">₹799</div></div>
+          <div class="cc-bottom"><span class="cc-date">27 Aug</span><span class="chip" style="background:rgba(34,197,94,0.15);color:#22c55e;">🟢 Active</span></div>
+        </div>
+        <div class="commit-card">
+          <div class="cc-top"><div class="cc-icon">🛡️</div><div><div class="cc-name">Insurance</div><div class="cc-freq">Annual</div></div><div class="cc-amt">₹18,000</div></div>
+          <div class="cc-bottom"><span class="cc-date">14 Dec</span><span class="chip" style="background:rgba(6,182,212,0.15);color:#06b6d4;">🔵 AutoPay</span></div>
+        </div>
+        <div class="commit-card">
+          <div class="cc-top"><div class="cc-icon">🚗</div><div><div class="cc-name">Car Loan EMI</div><div class="cc-freq">Monthly</div></div><div class="cc-amt">₹14,250</div></div>
+          <div class="cc-bottom"><span class="cc-date">3 Sep</span><span class="chip" style="background:rgba(34,197,94,0.15);color:#22c55e;">🟢 On Track</span></div>
+        </div>
+        <div class="commit-card">
+          <div class="cc-top"><div class="cc-icon">📈</div><div><div class="cc-name">Nifty 50 SIP</div><div class="cc-freq">Monthly</div></div><div class="cc-amt">₹5,000</div></div>
+          <div class="cc-bottom"><span class="cc-date">5 Sep</span><span class="chip" style="background:rgba(34,197,94,0.15);color:#22c55e;">🟢 Active</span></div>
+        </div>
+        <div class="commit-card">
+          <div class="cc-top"><div class="cc-icon">💰</div><div><div class="cc-name">Salary</div><div class="cc-freq">Monthly</div></div><div class="cc-amt" style="color:#22c55e;">+₹75,000</div></div>
+          <div class="cc-bottom"><span class="cc-date">1 Aug</span><span class="chip" style="background:rgba(34,197,94,0.15);color:#22c55e;">🟢 Expected</span></div>
+        </div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Same component, 5 backing sources:</b> Bill.type=Subscription/Insurance/EMI/SIP (ADR-019/021, unchanged) + ExpectedIncome (separate entity, ADR-023) — only icon/chip color changes
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | CMP-016 | CMP-005(chip reused) | Radius XL</div>
+  </div>
+
+  <!-- O005 Budget Progress -->
+  <div class="unit">
+    <div class="label">O005 — Budget Progress <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Budget</div></div>
+      <div class="content">
+        <div class="commit-card" style="text-align:center;padding:18px;">
+          <div style="font-size:10px;color:#5a5a7a;">SPENT THIS MONTH</div>
+          <div style="font-size:22px;font-weight:900;margin:6px 0;">₹42,500 <span style="font-size:12px;color:#5a5a7a;">/ ₹55,000</span></div>
+        </div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer"><b>Note:</b> Budget isn't a "scheduled" item like the others — it's a limit, not a Commitment (ADR-023 doesn't claim to cover it); kept as its own layout deliberately, not forced into CMP-016</div>
+    <div class="footer-trace">ADS 2.0.0 | O005 | CMP-002 | Radius XL</div>
+  </div>
+
+  <!-- O007 Subscriptions using CMP-016 -->
+  <div class="unit">
+    <div class="label">O007 — Subscriptions <span class="status-tag refactor">🟡 REFACTOR</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Subscriptions</div></div>
+      <div class="content">
+        <div class="commit-card"><div class="cc-top"><div class="cc-icon">📺</div><div><div class="cc-name">Netflix</div><div class="cc-freq">Monthly</div></div><div class="cc-amt">₹799</div></div><div class="cc-bottom"><span class="cc-date">27 Aug</span><span class="chip" style="background:rgba(34,197,94,0.15);color:#22c55e;">🟢 Active</span></div></div>
+        <div class="commit-card"><div class="cc-top"><div class="cc-icon">🎵</div><div><div class="cc-name">Spotify</div><div class="cc-freq">Monthly</div></div><div class="cc-amt">₹119</div></div><div class="cc-bottom"><span class="cc-date">15 Aug</span><span class="chip" style="background:rgba(34,197,94,0.15);color:#22c55e;">🟢 Active</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer"><b>Confirmed:</b> filtered view of Bill.type="subscription" — CMP-016 applied, zero new layout</div>
+    <div class="footer-trace">ADS 2.0.0 | O007 | CMP-016 | Radius XL</div>
+  </div>
+
+  <!-- O013 Scheduled Income using CMP-016 -->
+  <div class="unit">
+    <div class="label">O013 — Scheduled Income <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Scheduled Income</div></div>
+      <div class="content">
+        <div class="commit-card"><div class="cc-top"><div class="cc-icon">💰</div><div><div class="cc-name">Salary</div><div class="cc-freq">Monthly</div></div><div class="cc-amt" style="color:#22c55e;">+₹75,000</div></div><div class="cc-bottom"><span class="cc-date">1 Aug</span><span class="chip" style="background:rgba(34,197,94,0.15);color:#22c55e;">🟢 Expected</span></div></div>
+        <div style="text-align:center;margin-top:8px;"><button style="background:#22c55e;color:#000;border:none;border-radius:12px;padding:10px 20px;font-size:11px;font-weight:800;">✓ Mark Received</button></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer"><b>Confirmed:</b> "Mark Received" is the real, existing event-driven action (Financial Engine Phase 1) — CMP-016 wraps it, doesn't replace its logic</div>
+    <div class="footer-trace">ADS 2.0.0 | O013 | CMP-016 | Radius XL</div>
+  </div>
+
+</div>
+
+<div style="margin-top:24px;background:#fff;border-radius:12px;padding:16px 20px;font-size:11px;color:#444;">
+<b>HF-005B note:</b> 4 of 9 screens shown as representative — O006/O008/O010/O012 (the Detail screens) all follow O004's Bill Detail layout pattern already established in HF-005A, applied per commitment type. O009/O011 (SIP/Insurance lists) follow O007's exact CMP-016 pattern shown here. No new layout decisions needed for the remaining 5 — same family, confirmed.
+</div>
+
+</body>
+</html>

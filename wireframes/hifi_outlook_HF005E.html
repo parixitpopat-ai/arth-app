@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Nunito', sans-serif; padding: 40px; }
+  .pack-title { font-size: 24px; font-weight: 900; color: #fff; margin-bottom: 4px; }
+  .pack-sub { font-size: 13px; color: #999; margin-bottom: 30px; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .phone { background: #08080f; border-radius: 32px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 6px solid #000; width: 320px; }
+  .screen { border-radius: 26px; overflow: hidden; min-height: 600px; background: #08080f; color: #e8e4dc; display:flex; flex-direction:column; }
+  .statusbar { display: flex; justify-content: space-between; padding: 8px 16px 0; font-size: 11px; }
+  .appbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; }
+  .appbar-title { font-size: 15px; font-weight: 900; }
+  .content { padding: 0 16px 12px; flex:1; }
+  .card { background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 16px; padding: 14px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+  .action-btn { width:100%; text-align:left; background:#0b0b18; border:1px solid #1a1a2e; border-radius:12px; padding:11px 14px; font-size:12px; font-weight:700; color:#e8e4dc; margin-bottom:8px; }
+  .action-btn.danger { color:#ef4444; border-color:rgba(239,68,68,0.3); }
+  .impact-row { display:flex; justify-content:space-between; font-size:12px; padding:5px 0; }
+  .impact-delta { color:#22c55e; font-weight:900; }
+  .btn-confirm { background:#22c55e; color:#000; border:none; border-radius:14px; padding:13px; font-size:13px; font-weight:800; width:100%; margin-top:6px; }
+  .label { font-size: 12px; font-weight: 800; color: #ccc; margin-bottom: 10px; }
+  .status-tag { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px; margin-left: 6px; background:#eee;color:#888; }
+  .navbar { display: flex; justify-content: space-around; padding: 10px 0; background: #0a0a16; border-top: 1px solid #1a1a2e; }
+  .navitem { text-align: center; font-size: 9px; color: #5a5a7a; font-weight: 700; }
+  .navitem.active { color: #22c55e; }
+  .fab { width: 42px; height: 42px; border-radius: 50%; background: #22c55e; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #000; margin-top: -18px; border: 3px solid #0a0a16; }
+  .checklist { background:#fff; border-radius:14px; padding:20px 24px; margin-top:20px; width:600px; }
+  .check-row { display:flex; align-items:center; gap:10px; padding:6px 0; font-size:13px; color:#333; }
+</style>
+</head>
+<body>
+
+<div class="pack-title">HF-005E — Decisions (O019–O020) · Final Outlook Pack</div>
+<div class="pack-sub">Action → Consequence → Explanation → Confirmation</div>
+
+<div class="row">
+
+  <div>
+    <div class="label">O019 — Commitment Detail <span class="status-tag">Decision screen, not a detail screen</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Netflix</div></div>
+      <div class="content">
+        <div class="card" style="text-align:center;">
+          <div style="font-size:16px;font-weight:900;">Netflix</div>
+          <div style="font-size:11px;color:#5a5a7a;">₹799/month · 27 Aug</div>
+        </div>
+        <div class="card">
+          <div style="font-size:9px;color:#5a5a7a;text-transform:uppercase;font-weight:800;margin-bottom:8px;">Actions</div>
+          <button class="action-btn">Continue</button>
+          <button class="action-btn">Pause This Month</button>
+          <button class="action-btn">Skip Once</button>
+          <button class="action-btn danger">Disable AutoPay</button>
+        </div>
+        <div class="card">
+          <div style="font-size:9px;color:#06b6d4;text-transform:uppercase;font-weight:800;margin-bottom:8px;">Forecast Impact — if Paused</div>
+          <div class="impact-row"><span>Current Closing Balance</span><span>₹12,480</span></div>
+          <div class="impact-row"><span>After Pause</span><span class="impact-delta">₹13,279</span></div>
+          <div class="impact-row" style="border-top:1px solid #1a1a2e;padding-top:6px;margin-top:4px;"><span>Difference</span><span class="impact-delta">+₹799</span></div>
+        </div>
+        <div class="card">
+          <div style="font-size:9px;color:#5a5a7a;text-transform:uppercase;font-weight:800;margin-bottom:4px;">Why?</div>
+          <div style="font-size:11px;color:#5a5a7a;">One monthly commitment removed from this forecast only.</div>
+        </div>
+        <button class="btn-confirm">Confirm Pause</button>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+  </div>
+
+  <div>
+    <div class="label">O020 — AI Recommendations <span class="status-tag">Space reserved, not faked</span></div>
+    <div class="phone"><div class="screen" style="opacity:0.7;">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← AI Recommendations</div></div>
+      <div class="content" style="text-align:center;padding-top:60px;">
+        <div style="font-size:36px;margin-bottom:10px;">🤖</div>
+        <div style="font-size:14px;font-weight:800;margin-bottom:4px;">Coming in a future release</div>
+        <div style="font-size:11px;color:#5a5a7a;text-align:left;background:#0f0f1a;border:1px solid #1a1a2e;border-radius:14px;padding:14px;margin-top:16px;line-height:1.9;">
+          AI will eventually help you:<br>
+          • Identify unnecessary subscriptions<br>
+          • Recommend better payment timing<br>
+          • Suggest savings opportunities<br>
+          • Detect unusual spending<br>
+          • Explain forecast changes
+        </div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+  </div>
+
+</div>
+
+<div class="checklist">
+  <div style="font-size:14px;font-weight:800;margin-bottom:10px;">Outlook Freeze Checklist — verified, not assumed</div>
+  <div class="check-row">✅ O014 remains the visual benchmark — O001, O017 both directly reuse its Safe to Spend + Status pattern</div>
+  <div class="check-row">✅ CMP-016 used consistently — 5 real variants shown in HF-005B (Subscription/Insurance/EMI/SIP/Income)</div>
+  <div class="check-row">✅ No duplicate metrics — Financial Confidence explicitly rejected (ADR-022), one metric per domain confirmed</div>
+  <div class="check-row">✅ Forecast Status is the only interpretation layer — no second status system introduced anywhere in HF-005</div>
+  <div class="check-row">✅ Timeline Strip consistent — O002, O014, O017/O018 all reuse the same component</div>
+  <div class="check-row">✅ Every derived value has an explanation path — Explanation Panel (O014), Why? (O019), tap-to-inspect (O018)</div>
+  <div class="check-row">✅ Every forecast-changing action offers impact preview — O017 (Pause/Skip toggle), O019 (this screen)</div>
+  <div class="check-row">✅ AI clearly separated — O020 dimmed, "coming in future release," no functional-looking cards</div>
+  <div class="check-row">✅ Domain boundaries intact — ADR-023 explicit: Bills ≠ ExpectedIncome despite shared CMP-016 presentation</div>
+  <div style="margin-top:14px;background:#222;color:#fff;border-radius:10px;padding:12px 16px;font-size:13px;">
+  <b>🟢 Outlook Module — Frozen.</b> All 9 checklist items pass. Specification ✅ · Wireframes ✅ · High-fidelity ✅ · Design System compliant ✅ — O001-O020 complete.
+  </div>
+</div>
+
+</body>
+</html>

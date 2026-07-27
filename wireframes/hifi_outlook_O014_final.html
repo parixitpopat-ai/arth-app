@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Nunito', sans-serif; padding: 40px; }
+  .pack-title { font-size: 26px; font-weight: 900; color: #fff; margin-bottom: 4px; }
+  .pack-sub { font-size: 13px; color: #999; margin-bottom: 30px; }
+  .row { display: flex; gap: 30px; flex-wrap: wrap; align-items: flex-start; }
+  .phone { background: #08080f; border-radius: 34px; padding: 9px; box-shadow: 0 12px 36px rgba(0,0,0,0.55); border: 7px solid #000; width: 340px; }
+  .screen { border-radius: 27px; overflow: hidden; min-height: 700px; background: #08080f; color: #e8e4dc; display:flex; flex-direction:column; }
+  .statusbar { display: flex; justify-content: space-between; padding: 8px 18px 0; font-size: 12px; }
+  .appbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 18px; }
+  .appbar-title { font-size: 16px; font-weight: 900; }
+  .content { padding: 0 16px 12px; flex:1; overflow-y:auto; }
+  .sts-hero { text-align: center; padding: 18px; background:#0f0f1a; border:1px solid #1a1a2e; border-radius:16px; margin-bottom:10px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+  .sts-label { font-size: 10px; color: #5a5a7a; font-weight: 700; text-transform: uppercase; }
+  .sts-num { font-size: 32px; font-weight: 900; color: #22c55e; margin: 6px 0; }
+  .sts-sub { font-size: 10px; color: #5a5a7a; }
+  .status-banner { border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; display:flex; align-items:center; gap:10px; }
+  .status-banner.comfortable { background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.35); }
+  .status-icon { font-size: 22px; }
+  .status-text-main { font-size: 14px; font-weight: 800; color: #22c55e; }
+  .status-text-sub { font-size: 10px; color: #5a5a7a; }
+  .timeline-strip { display: flex; justify-content: space-between; background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 9px; color: #5a5a7a; font-weight: 700; }
+  .active-day { color: #22c55e; }
+  .chart-card { background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 16px; padding: 14px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+  .chart-label { font-size: 10px; color: #5a5a7a; font-weight: 700; text-transform: uppercase; margin-bottom: 8px; }
+  .explain-row { display: flex; justify-content: space-between; padding: 4px 0; color: #5a5a7a; font-size: 11px; }
+  .explain-row.positive { color: #22c55e; }
+  .explain-row.negative { color: #ef4444; }
+  .explain-total { border-top: 1px solid #1a1a2e; margin-top: 6px; padding-top: 8px; font-weight: 900; color: #e8e4dc; font-size: 13px; }
+  .whatschanged { background: rgba(6,182,212,0.08); border: 1px solid rgba(6,182,212,0.25); border-radius: 16px; padding: 14px; margin-bottom: 12px; }
+  .wc-title { font-size: 11px; font-weight: 800; color: #06b6d4; text-transform: uppercase; margin-bottom: 8px; }
+  .wc-item { font-size: 12px; font-weight: 700; padding: 4px 0; }
+  .action-chip { display: inline-flex; align-items: center; gap: 6px; background: rgba(240,165,0,0.1); border: 1px solid rgba(240,165,0,0.3); color: #f0a500; border-radius: 20px; padding: 8px 14px; font-size: 11px; font-weight: 700; margin-right: 8px; margin-bottom: 8px; }
+  .navbar { display: flex; justify-content: space-around; padding: 10px 0; background: #0a0a16; border-top: 1px solid #1a1a2e; }
+  .navitem { text-align: center; font-size: 9px; color: #5a5a7a; font-weight: 700; }
+  .navitem.active { color: #22c55e; }
+  .fab { width: 44px; height: 44px; border-radius: 50%; background: #22c55e; display: flex; align-items: center; justify-content: center; font-size: 19px; color: #000; margin-top: -19px; border: 3px solid #0a0a16; }
+  .sidebar { width: 440px; }
+  .side-title { font-size: 16px; font-weight: 900; color: #fff; margin-bottom: 12px; }
+  .side-section { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 14px; font-size: 12px; color: #333; }
+  .side-section h4 { font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 8px; }
+  .real { color: #1a7a3a; font-weight: 700; }
+  .needs-work { color: #b32020; font-weight: 700; }
+  table { width:100%; border-collapse:collapse; font-size:11px; margin-top:6px; }
+  th { text-align:left; color:#999; font-size:9px; padding:4px; border-bottom:1px solid #eee; }
+  td { padding:5px 4px; border-bottom:1px solid #f5f5f5; }
+</style>
+</head>
+<body>
+
+<div class="pack-title">O014 — Cash Forecast (Final Structure)</div>
+<div class="pack-sub">Safe to Spend hero → Forecast Status (deterministic, not a score) → Timeline → Chart → Explanation → What Changed → Suggestions</div>
+
+<div class="row">
+
+  <div class="phone"><div class="screen">
+    <div class="statusbar"><span>9:41</span><span>📶 🔋98%</span></div>
+    <div class="appbar"><div class="appbar-title">🔮 Cash Forecast</div></div>
+    <div class="content">
+
+      <div class="sts-hero">
+        <div class="sts-label">Safe to Spend</div>
+        <div class="sts-num">₹2,350/day</div>
+        <div class="sts-sub">Based on commitments until 31 Aug</div>
+      </div>
+
+      <div class="status-banner comfortable">
+        <div class="status-icon">🟢</div>
+        <div>
+          <div class="status-text-main">Comfortable</div>
+          <div class="status-text-sub">All known commitments are covered.</div>
+        </div>
+      </div>
+
+      <div class="timeline-strip">
+        <span class="active-day">Today</span><span>30 Jul</span><span>5 Aug</span><span>Month End</span>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-label">Cash Forecast</div>
+        <svg width="100%" height="80" viewBox="0 0 300 80">
+          <polyline points="10,45 60,35 110,42 160,25 210,38 260,28 290,50" style="fill:none;stroke:#22c55e;stroke-width:2.5;"/>
+          <circle cx="60" cy="35" r="4" fill="#fff" stroke="#22c55e" stroke-width="2"/>
+        </svg>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-label">Why This Number?</div>
+        <div class="explain-row">Current Cash <span>₹48,500</span></div>
+        <div class="explain-row positive">+ Income <span>₹82,000</span></div>
+        <div class="explain-row negative">− Bills <span>₹31,500</span></div>
+        <div class="explain-row negative">− SIPs <span>₹10,000</span></div>
+        <div class="explain-row negative">− Variable Spend <span>₹18,000</span></div>
+        <div class="explain-row explain-total"><span>Available</span><span>₹71,000</span></div>
+      </div>
+
+      <div class="whatschanged">
+        <div class="wc-title">What Changed?</div>
+        <div style="font-size:9px;color:#06b6d4;font-weight:800;margin-bottom:4px;">FACTS</div>
+        <div class="wc-item">+₹18,500 Cash</div>
+        <div class="wc-item">+₹620 Net Worth</div>
+        <div style="font-size:9px;color:#06b6d4;font-weight:800;margin:8px 0 4px;">REASONS</div>
+        <div class="wc-item">Salary received</div>
+        <div class="wc-item">Electricity bill paid</div>
+        <div style="font-size:9px;color:#06b6d4;font-weight:800;margin:8px 0 4px;">IMPACT <span style="color:#5a5a7a;font-weight:600;">(optional — omitted when data isn't available)</span></div>
+        <div class="wc-item">Forecast remains 🟢 Comfortable</div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-label">Suggestions</div>
+        <span class="action-chip">💡 Move ₹10k to savings</span>
+      </div>
+
+    </div>
+    <div class="navbar">
+      <div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div>
+    </div>
+  </div></div>
+
+  <div class="sidebar">
+    <div class="side-title">Domain Identity, Confirmed Clean</div>
+    <div class="side-section">
+      <table>
+        <tr><th>Domain</th><th>Question</th><th>Metric</th></tr>
+        <tr><td>Home</td><td>How healthy am I?</td><td>Financial Health Score</td></tr>
+        <tr><td>Money</td><td>What do I own/owe?</td><td>Net Worth</td></tr>
+        <tr><td>Outlook</td><td>Can I get through what's ahead?</td><td>Safe to Spend</td></tr>
+        <tr><td>Insights</td><td>Why did this happen?</td><td>Analysis &amp; Trends</td></tr>
+      </table>
+      <div style="font-size:10px;color:#666;margin-top:8px;">No domain shares a metric with another — Financial Confidence dropped specifically to preserve this.</div>
+    </div>
+
+    <div class="side-section">
+      <h4>Forecast Status — new classifier needed</h4>
+      <span class="needs-work">Not built yet</span> — this is genuinely new logic, though small: a threshold function reading the real outputs of <code>calculateProjectedBalance</code>/<code>calculateSafeToSpend</code> (both implemented this session) and mapping them to one of 4 states.
+      <table>
+        <tr><th>Status</th><th>Rule</th></tr>
+        <tr><td>🟢 Comfortable</td><td>Forecast stays positive, all commitments covered</td></tr>
+        <tr><td>🟡 Watchful</td><td>Positive but buffer/Safe-to-Spend is tight</td></tr>
+        <tr><td>🟠 Tight</td><td>Covered, but one unexpected expense creates stress</td></tr>
+        <tr><td>🔴 At Risk</td><td>Forecast goes negative or commitments can't be met</td></tr>
+      </table>
+      <div style="font-size:10px;color:#b32020;margin-top:6px;">Exact thresholds (what counts as "tight buffer") are a product decision, not yet made — needed before this can be implemented, not just designed.</div>
+    </div>
+
+    <div class="side-section">
+      <h4>Everything else</h4>
+      Safe to Spend, Cash Forecast chart, and Explanation Panel line items are unchanged from the earlier hero draft — all real engine outputs, confirmed this session. "What Changed" now has three tiers: Facts (real, wealthSnapshots) → Reasons (derivable from transaction data) → <b>Impact (optional)</b>, only shown once Forecast Status itself exists — layout stays stable either way, feature grows as data becomes available.
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

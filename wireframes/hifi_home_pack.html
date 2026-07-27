@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Nunito', sans-serif; padding: 40px; }
+  .pack-title { font-size: 24px; font-weight: 900; color: #fff; margin-bottom: 4px; }
+  .pack-sub { font-size: 13px; color: #999; margin-bottom: 30px; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .unit { width: 300px; }
+  .label { font-size: 12px; font-weight: 800; color: #ccc; margin-bottom: 10px; }
+  .status-tag { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px; margin-left: 6px; }
+  .impl { background: #d4f4dd; color: #1a7a3a; }
+  .partial { background: #cfe8ff; color: #1a5a9a; }
+  .phone { background: #08080f; border-radius: 32px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 6px solid #000; }
+  .screen { border-radius: 26px; overflow: hidden; min-height: 560px; background: #08080f; color: #e8e4dc; }
+  .statusbar { display: flex; justify-content: space-between; padding: 8px 16px 0; font-size: 11px; color: #e8e4dc; }
+  .appbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; }
+  .appbar-title { font-size: 16px; font-weight: 900; }
+  .appbar-sub { font-size: 8px; color: #5a5a7a; text-transform: uppercase; letter-spacing: 1px; }
+  .content { padding: 12px 16px; }
+  .health-card { background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 16px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); margin-bottom: 12px; }
+  .health-label { font-size: 9px; color: #5a5a7a; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; }
+  .health-score { font-size: 22px; font-weight: 900; color: #22c55e; margin: 4px 0; }
+  .health-bar { height: 6px; background: #1a1a2e; border-radius: 3px; overflow: hidden; }
+  .health-fill { height: 100%; background: #22c55e; border-radius: 3px; }
+  .sts-card { background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.3); border-radius: 16px; padding: 14px; margin-bottom: 12px; }
+  .focus-card { background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 16px; padding: 14px; margin-bottom: 12px; }
+  .focus-item { font-size: 12px; font-weight: 700; padding: 6px 0; display: flex; gap: 8px; }
+  .qa-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .qa-item { flex: 1; background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 14px; padding: 10px 4px; text-align: center; }
+  .qa-icon { font-size: 18px; }
+  .qa-label { font-size: 9px; color: #5a5a7a; font-weight: 700; margin-top: 4px; }
+  .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .section-title { font-size: 13px; font-weight: 800; }
+  .section-link { font-size: 11px; color: #22c55e; font-weight: 700; }
+  .goal-bar-track { height: 8px; background: #1a1a2e; border-radius: 4px; overflow: hidden; margin: 4px 0 10px; }
+  .goal-bar-fill { height: 100%; background: #22c55e; border-radius: 4px; }
+  .txn-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #1a1a2e; }
+  .txn-name { font-size: 13px; font-weight: 700; }
+  .txn-sub { font-size: 10px; color: #5a5a7a; }
+  .txn-amt-neg { color: #ef4444; font-weight: 800; font-size: 13px; }
+  .txn-amt-pos { color: #22c55e; font-weight: 800; font-size: 13px; }
+  .navbar { display: flex; justify-content: space-around; padding: 10px 0; background: #0a0a16; border-top: 1px solid #1a1a2e; margin-top: auto; }
+  .navitem { text-align: center; font-size: 9px; color: #5a5a7a; font-weight: 700; }
+  .navitem.active { color: #22c55e; }
+  .fab { width: 46px; height: 46px; border-radius: 50%; background: #22c55e; display: flex; align-items: center; justify-content: center; font-size: 20px; color: #000; margin-top: -20px; border: 4px solid #0a0a16; }
+  .bell-badge { position: relative; }
+  .badge-dot { position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; background: #ef4444; border-radius: 50%; }
+  .notif-row { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid #1a1a2e; align-items: flex-start; }
+  .notif-icon { font-size: 16px; }
+  .empty-wrap { text-align: center; padding: 60px 20px; }
+  .empty-icon { font-size: 44px; margin-bottom: 12px; }
+  .empty-title { font-size: 15px; font-weight: 800; margin-bottom: 6px; }
+  .empty-sub { font-size: 12px; color: #5a5a7a; margin-bottom: 20px; }
+  .btn-primary { background: #22c55e; color: #000; border: none; border-radius: 14px; padding: 13px; font-size: 13px; font-weight: 800; width: 100%; margin-bottom: 8px; }
+  .btn-outline { background: none; color: #22c55e; border: 1px solid #22c55e; border-radius: 14px; padding: 12px; font-size: 13px; font-weight: 800; width: 100%; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<div class="pack-title">Home — High-Fidelity Screen Pack</div>
+<div class="pack-sub">Phase 2, Batch 1 · Real theme.js tokens (#08080f / #22c55e / Nunito) · Screen Registry v2.0.0</div>
+
+<div class="row">
+
+  <!-- H001 -->
+  <div class="unit" style="width:320px;">
+    <div class="label">H001 — Home Dashboard <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶 🔋98%</span></div>
+      <div class="appbar">
+        <div><div class="appbar-title">Arth</div><div class="appbar-sub">Personal Finance</div></div>
+        <div class="bell-badge">🔔<div class="badge-dot"></div></div>
+      </div>
+      <div class="content">
+        <div style="font-size:15px;font-weight:700;margin-bottom:10px;color:#e8e4dc;">Good Morning, Major</div>
+        <div class="health-card">
+          <div class="health-label">Financial Health</div>
+          <div class="health-score">82 <span style="font-size:11px;color:#5a5a7a;font-weight:700;">Excellent</span></div>
+          <div class="health-bar"><div class="health-fill" style="width:82%;"></div></div>
+        </div>
+        <div class="sts-card">
+          <div class="health-label" style="color:#22c55e;">Safe to Spend</div>
+          <div style="font-size:20px;font-weight:900;color:#22c55e;margin-top:4px;">₹18,450</div>
+        </div>
+        <div class="focus-card">
+          <div class="section-title" style="margin-bottom:6px;">Today's Focus</div>
+          <div class="focus-item">🔴 Electricity Bill due today</div>
+          <div class="focus-item">🟢 Salary expected tomorrow</div>
+          <div class="focus-item">⚠️ Grocery budget at 81%</div>
+        </div>
+        <div class="qa-row">
+          <div class="qa-item"><div class="qa-icon">💸</div><div class="qa-label">Expense</div></div>
+          <div class="qa-item"><div class="qa-icon">💰</div><div class="qa-label">Income</div></div>
+          <div class="qa-item"><div class="qa-icon">🔄</div><div class="qa-label">Transfer</div></div>
+          <div class="qa-item"><div class="qa-icon">📅</div><div class="qa-label">Bill</div></div>
+        </div>
+        <div class="section-header"><span class="section-title">Goals</span><span class="section-link">View All</span></div>
+        <div style="font-size:11px;font-weight:700;">Emergency Fund <span style="color:#5a5a7a;">72%</span></div>
+        <div class="goal-bar-track"><div class="goal-bar-fill" style="width:72%;"></div></div>
+        <div class="section-header"><span class="section-title">Recent Activity</span><span class="section-link">See all</span></div>
+        <div class="txn-row"><div><div class="txn-name">DMart</div><div class="txn-sub">Groceries</div></div><div class="txn-amt-neg">-₹850</div></div>
+        <div class="txn-row"><div><div class="txn-name">Salary</div><div class="txn-sub">Income</div></div><div class="txn-amt-pos">+₹75,000</div></div>
+      </div>
+      <div class="navbar">
+        <div class="navitem active">🏠<br>Home</div>
+        <div class="navitem">💰<br>Money</div>
+        <div class="fab">➕</div>
+        <div class="navitem">🔮<br>Outlook</div>
+        <div class="navitem">📊<br>Insights</div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- H004 -->
+  <div class="unit" style="width:300px;">
+    <div class="label">H004 — Today's Focus (full) <span class="status-tag partial">🔵 SPECIFIED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶 🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title" style="font-size:14px;">← Today's Focus</div></div>
+      <div class="content">
+        <div style="font-size:10px;color:#5a5a7a;font-weight:700;text-transform:uppercase;margin:10px 0 6px;">Morning</div>
+        <div class="focus-card"><div class="focus-item">🔴 Electricity Bill due today</div><div class="focus-item">🟢 Salary expected tomorrow</div></div>
+        <div style="font-size:10px;color:#5a5a7a;font-weight:700;text-transform:uppercase;margin:10px 0 6px;">Afternoon</div>
+        <div class="focus-card"><div class="focus-item">🟠 ₹1,500 outstanding — Amit</div></div>
+        <div style="font-size:10px;color:#5a5a7a;font-weight:700;text-transform:uppercase;margin:10px 0 6px;">Evening</div>
+        <div class="focus-card"><div class="focus-item">✅ Spent ₹620 less than yesterday</div></div>
+      </div>
+      <div class="navbar">
+        <div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- H009 -->
+  <div class="unit" style="width:300px;">
+    <div class="label">H009 — Notification Centre <span class="status-tag partial">🔵 SPECIFIED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶 🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title" style="font-size:14px;">← Notifications</div></div>
+      <div class="content">
+        <div style="font-size:10px;color:#5a5a7a;font-weight:700;text-transform:uppercase;margin:6px 0;">Today</div>
+        <div class="notif-row"><div class="notif-icon">🔴</div><div><div class="txn-name">Electricity Bill due today</div><div class="txn-sub">₹2,350 · HDFC</div></div></div>
+        <div class="notif-row"><div class="notif-icon">🟢</div><div><div class="txn-name">Salary credited</div><div class="txn-sub">₹75,000</div></div></div>
+        <div style="font-size:10px;color:#5a5a7a;font-weight:700;text-transform:uppercase;margin:12px 0 6px;">Yesterday</div>
+        <div class="notif-row"><div class="notif-icon">⚠️</div><div><div class="txn-name">Grocery budget at 81%</div></div></div>
+      </div>
+      <div class="navbar">
+        <div class="navitem active">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- H013 -->
+  <div class="unit" style="width:300px;">
+    <div class="label">H013 — Empty Home State <span class="status-tag partial">🔵 SPECIFIED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶 🔋98%</span></div>
+      <div class="appbar">
+        <div><div class="appbar-title">Arth</div><div class="appbar-sub">Personal Finance</div></div>
+      </div>
+      <div class="content empty-wrap" style="margin-top:60px;">
+        <div class="empty-icon">💰</div>
+        <div class="empty-title">Welcome to Arth</div>
+        <div class="empty-sub">Let's record your first transaction.</div>
+        <button class="btn-outline">Connect Bank</button>
+        <button class="btn-primary">Add First Transaction</button>
+        <button class="btn-outline">Create Budget</button>
+      </div>
+      <div class="navbar">
+        <div class="navitem active">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div>
+      </div>
+    </div></div>
+  </div>
+
+</div>
+
+<div style="margin-top:30px;background:#fff;border-radius:12px;padding:16px 20px;font-size:11px;color:#444;">
+<b>Coverage note:</b> 4 of 15 Home screens rendered at high fidelity here (H001 flagship + 3 representative states: prioritized-alert list, notification history, empty/first-run). Remaining 11 (H002, H003, H005-H008, H010-H012, H014-H015) follow the same visual language directly — can be produced on request, same tokens, same components, no new design decisions needed.
+</div>
+
+</body>
+</html>

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Nunito', sans-serif; padding: 40px; }
+  .pack-title { font-size: 24px; font-weight: 900; color: #fff; margin-bottom: 4px; }
+  .pack-sub { font-size: 13px; color: #999; margin-bottom: 30px; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .unit { width: 300px; }
+  .label { font-size: 12px; font-weight: 800; color: #ccc; margin-bottom: 10px; }
+  .status-tag { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px; margin-left: 6px; }
+  .impl { background: #d4f4dd; color: #1a7a3a; }
+  .phone { background: #08080f; border-radius: 32px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 6px solid #000; }
+  .screen { border-radius: 26px; overflow: hidden; min-height: 540px; background: #08080f; color: #e8e4dc; display:flex; flex-direction:column; }
+  .statusbar { display: flex; justify-content: space-between; padding: 8px 16px 0; font-size: 11px; }
+  .appbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; }
+  .appbar-title { font-size: 14px; font-weight: 900; }
+  .search-bar { display:flex; align-items:center; gap:8px; background:#0b0b18; border:1px solid #1a1a2e; border-radius:20px; padding:9px 14px; margin: 0 16px 10px; font-size:12px; color:#5a5a7a; }
+  .content { padding: 0 16px 12px; flex:1; }
+  .card { background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 16px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); margin-bottom: 10px; }
+  .hero { text-align:center; padding:18px; }
+  .hero-label { font-size:10px; color:#5a5a7a; font-weight:700; text-transform:uppercase; }
+  .hero-num { font-size:24px; font-weight:900; margin:6px 0; }
+  .row-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #1a1a2e; }
+  .row-icon { width:34px; height:34px; border-radius:8px; background:#1a1a2e; display:flex; align-items:center; justify-content:center; font-size:15px; margin-right:10px; }
+  .row-flex { display:flex; align-items:center; flex:1; }
+  .row-name { font-size: 13px; font-weight: 700; }
+  .row-sub { font-size:10px; color:#5a5a7a; }
+  .row-val { font-size: 13px; font-weight: 800; }
+  .section-label { font-size: 10px; font-weight: 700; color: #5a5a7a; text-transform: uppercase; margin: 8px 0 6px; }
+  .empty-block { text-align:center; padding:40px 16px; color:#5a5a7a; }
+  .navbar { display: flex; justify-content: space-around; padding: 10px 0; background: #0a0a16; border-top: 1px solid #1a1a2e; }
+  .navitem { text-align: center; font-size: 9px; color: #5a5a7a; font-weight: 700; }
+  .navitem.active { color: #22c55e; }
+  .fab { width: 42px; height: 42px; border-radius: 50%; background: #22c55e; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #000; margin-top: -18px; border: 3px solid #0a0a16; }
+  .interaction-layer { background: #222; color: #ddd; border-radius: 10px; padding: 10px 12px; font-size: 10px; margin-top: 10px; line-height: 1.7; }
+  .interaction-layer b { color: #fff; }
+  .na { color: #b32020; }
+  .footer-trace { background: #333; color: #ccc; border-radius: 8px; padding: 8px 10px; font-size: 9px; font-family: monospace; margin-top: 6px; }
+</style>
+</head>
+<body>
+
+<div class="pack-title">HF-002 — Accounts &amp; Cash (M006–M010)</div>
+<div class="pack-sub">Design System v2.0.0 · Stress-tests lists, tables, currency formatting, empty states, search · Status: 🟡 In Progress</div>
+
+<div class="row">
+
+  <!-- M006 -->
+  <div class="unit">
+    <div class="label">M006 — Liabilities <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Liabilities</div></div>
+      <div class="content">
+        <div class="section-label">Credit Card Debt</div>
+        <div class="card"><div class="row-item"><div class="row-flex"><div class="row-icon">💳</div><div><div class="row-name">Coral RuPay</div><div class="row-sub">HDFC Bank</div></div></div><span class="row-val" style="color:#ef4444;">₹18,000</span></div></div>
+        <div class="section-label">Loans Taken</div>
+        <div class="card"><div class="row-item"><div class="row-flex"><div class="row-icon">🏦</div><div><div class="row-name">Home Loan</div></div></div><span class="row-val" style="color:#ef4444;">₹6,46,400</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Tap row</b> → M007 Liability Detail<br>
+      <b>Long Press</b> → <span class="na">not confirmed to exist</span><br>
+      <b>Swipe</b> → <span class="na">no — swipe is Timeline-only by design</span><br>
+      <b>Pull to Refresh</b> → <span class="na">not confirmed</span>
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M006 | CMP-008 | Radius XL, Elev 1</div>
+  </div>
+
+  <!-- M008 -->
+  <div class="unit">
+    <div class="label">M008 — Accounts <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Accounts</div></div>
+      <div class="search-bar">🔍 Search accounts...</div>
+      <div class="content">
+        <div class="card"><div class="row-item"><div class="row-flex"><div class="row-icon">🏦</div><div><div class="row-name">HDFC Savings</div><div class="row-sub">Bank</div></div></div><span class="row-val">₹1,20,000</span></div></div>
+        <div class="card"><div class="row-item"><div class="row-flex"><div class="row-icon">💳</div><div><div class="row-name">Coral RuPay</div><div class="row-sub">Credit Card</div></div></div><span class="row-val" style="color:#ef4444;">₹18,000</span></div></div>
+        <div class="card"><div class="row-item"><div class="row-flex"><div class="row-icon">💵</div><div><div class="row-name">Cash</div><div class="row-sub">Cash in Hand</div></div></div><span class="row-val">₹22,500</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Tap</b> → M009 Account Detail<br>
+      <b>Search bar</b> → filters list live (existing pattern)<br>
+      <b>Swipe</b> → <span class="na">no — Timeline-only, confirmed by code comment</span><br>
+      <b>FAB</b> → Add Account flow
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M008 | CMP-008, Search field | Radius XL/Pill</div>
+  </div>
+
+  <!-- M009 -->
+  <div class="unit">
+    <div class="label">M009 — Account Detail <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← HDFC Savings</div></div>
+      <div class="content">
+        <div class="card hero"><div class="hero-label">Balance</div><div class="hero-num" style="color:#22c55e;">₹1,20,000</div></div>
+        <div class="section-label">Transactions</div>
+        <div class="card"><div class="row-item"><span class="row-name">DMart</span><span class="row-val" style="color:#ef4444;">-₹850</span></div><div class="row-item"><span class="row-name">Salary</span><span class="row-val" style="color:#22c55e;">+₹75,000</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Tap transaction</b> → Transaction Detail<br>
+      <b>Pull to Refresh</b> → <span class="na">not confirmed</span><br>
+      <b>Long Press account</b> → <span class="na">not confirmed</span>
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M009 | CMP-002 | Radius XL, Elev 1</div>
+  </div>
+
+  <!-- M010 -->
+  <div class="unit">
+    <div class="label">M010 — Cash <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Cash</div></div>
+      <div class="content">
+        <div class="section-label">Bank Accounts</div>
+        <div class="card"><div class="row-item"><div class="row-flex"><div class="row-icon">🏦</div><div class="row-name">HDFC Savings</div></div><span class="row-val">₹1,20,000</span></div></div>
+        <div class="section-label">Cash in Hand</div>
+        <div class="card"><div class="row-item"><div class="row-flex"><div class="row-icon">💵</div><div class="row-name">Wallet</div></div><span class="row-val">₹22,500</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Tap</b> → Account Detail (M009)<br>
+      <b>Swipe</b> → <span class="na">no — Timeline-only</span>
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M010 | CMP-008 | Radius XL</div>
+  </div>
+
+  <!-- M007 with empty state stress test -->
+  <div class="unit">
+    <div class="label">M007 — Liability Detail (empty history) <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Home Loan</div></div>
+      <div class="content">
+        <div class="card hero"><div class="hero-label">Outstanding</div><div class="hero-num" style="color:#ef4444;">₹6,46,400</div></div>
+        <div class="section-label">Payment History</div>
+        <div class="card empty-block">
+          <div style="font-size:30px;margin-bottom:8px;">📭</div>
+          <div style="font-size:12px;font-weight:800;color:#e8e4dc;">No payments recorded yet</div>
+          <div style="font-size:10px;margin-top:2px;">Payments will appear here once made</div>
+        </div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem active">💰</div><div class="fab">➕</div><div class="navitem">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Empty state</b> → CMP-007, icon+title+subtitle, no CTA needed (payments come from Bills, not created here)
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | M007 | CMP-002, CMP-007 | Radius XL</div>
+  </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #e8e8e8; font-family: 'Helvetica Neue', Arial, sans-serif; padding: 40px; }
+  .sheet-title { font-size: 22px; font-weight: 700; color: #222; margin-bottom: 4px; }
+  .sheet-sub { font-size: 13px; color: #666; margin-bottom: 20px; }
+  .flow-box { background: #fff; border: 1px solid #ccc; border-radius: 10px; padding: 16px 20px; margin-bottom: 24px; font-size: 12px; color: #333; line-height: 1.7; font-family: 'Courier New', monospace; white-space: pre; display: inline-block; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  .unit { width: 260px; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 10px; margin-bottom: 8px; }
+  .badge-existing { background: #d4f4dd; color: #1a7a3a; }
+  .badge-refactor { background: #fff3cd; color: #8a6500; }
+  .badge-partial { background: #cfe8ff; color: #1a5a9a; }
+  .badge-new { background: #ffd6d6; color: #b32020; }
+  .screen-id { font-size: 13px; font-weight: 700; color: #222; margin-bottom: 2px; }
+  .screen-name { font-size: 11px; color: #888; margin-bottom: 10px; }
+  .phone { background: #fff; border: 3px solid #333; border-radius: 24px; padding: 9px; box-shadow: 0 6px 18px rgba(0,0,0,0.15); }
+  .status-bar { height: 12px; background: #ddd; border-radius: 4px; margin-bottom: 7px; }
+  .screen-body { min-height: 420px; background: #fafafa; border-radius: 8px; padding: 11px; }
+  .wf-line { height: 7px; background: #d5d5d5; border-radius: 3px; margin-bottom: 6px; }
+  .wf-line.w60 { width: 60%; } .wf-line.w40 { width: 40%; } .wf-line.w80 { width: 80%; }
+  .wf-card { background: #fff; border: 1.5px solid #bbb; border-radius: 10px; padding: 9px; margin-bottom: 9px; }
+  .wf-hero { background: #fff; border: 1.5px solid #999; border-radius: 12px; padding: 14px; margin-bottom: 10px; text-align: center; }
+  .wf-hero-num { height: 20px; width: 55%; background: #ccc; border-radius: 4px; margin: 7px auto; }
+  .wf-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid #eee; }
+  .wf-dot { width: 30px; height: 30px; border-radius: 8px; background: #ddd; flex-shrink: 0; }
+  .wf-text-block { flex: 1; margin: 0 9px; }
+  .wf-val { width: 55px; height: 9px; background: #ccc; border-radius: 3px; }
+  .wf-val.dim { background: #eee; border: 1px dashed #ccc; }
+  .section-label { font-size: 8px; font-weight: 700; color: #aaa; letter-spacing: 0.5px; margin: 9px 0 5px; text-transform: uppercase; }
+  .btn-ph { height: 28px; background: #333; border-radius: 8px; margin-top: 7px; }
+  .btn-ph-outline { height: 24px; border: 1.5px solid #999; border-radius: 8px; margin-top: 6px; }
+  .bottom-nav { display: flex; justify-content: space-around; margin-top: 9px; padding-top: 7px; border-top: 1px solid #ddd; }
+  .nav-dot { width: 16px; height: 16px; border-radius: 5px; background: #ccc; }
+  .nav-dot.active { background: #333; }
+  .cta-label { font-size: 10px; color: #555; margin-top: 8px; font-style: italic; }
+  .footer { margin-top: 30px; background: #fff; border: 1px solid #ccc; border-radius: 10px; padding: 14px 20px; font-size: 11px; color: #444; display: flex; gap: 30px; }
+  .footer b { color: #222; }
+</style>
+</head>
+<body>
+
+<div class="sheet-title">Money — Sheet 2: Liabilities, Accounts &amp; Cash (M006–M010)</div>
+<div class="sheet-sub">Low-fidelity visual wireframes · Screen Registry v2.0.0</div>
+
+<div class="flow-box">Money Dashboard (M001)
+  |
+  +-- Liabilities (M006) -&gt; Liability Detail (M007)
+  |
+  +-- Accounts (M008) -&gt; Account Detail (M009)
+  |
+  +-- Cash (M010)</div>
+
+<div class="row">
+
+  <div class="unit">
+    <span class="badge badge-existing">🟢 EXISTING</span>
+    <div class="screen-id">M006</div>
+    <div class="screen-name">Liabilities</div>
+    <div class="phone">
+      <div class="status-bar"></div>
+      <div class="screen-body">
+        <div class="wf-line w40" style="height:13px;background:#999;"></div>
+        <div class="section-label">Credit Card Debt</div>
+        <div class="wf-row"><div class="wf-dot"></div><div class="wf-text-block"><div class="wf-line w60"></div></div><div class="wf-val"></div></div>
+        <div class="section-label">Loans Taken</div>
+        <div class="wf-row"><div class="wf-dot"></div><div class="wf-text-block"><div class="wf-line w60"></div></div><div class="wf-val"></div></div>
+        <div class="section-label">Other Liabilities</div>
+        <div class="wf-row"><div class="wf-dot"></div><div class="wf-text-block"><div class="wf-line w60"></div></div><div class="wf-val"></div></div>
+        <div class="bottom-nav"><div class="nav-dot"></div><div class="nav-dot active"></div><div class="nav-dot"></div><div class="nav-dot"></div><div class="nav-dot"></div></div>
+      </div>
+    </div>
+    <div class="cta-label">Primary CTA: View Liability</div>
+  </div>
+
+  <div class="unit">
+    <span class="badge badge-existing">🟢 EXISTING</span>
+    <div class="screen-id">M007</div>
+    <div class="screen-name">Liability Detail</div>
+    <div class="phone">
+      <div class="status-bar"></div>
+      <div class="screen-body">
+        <div class="wf-line w40" style="height:13px;background:#999;"></div>
+        <div class="wf-hero"><div class="wf-line w40" style="margin:0 auto 7px;"></div><div class="wf-hero-num"></div></div>
+        <div class="wf-row"><div class="wf-text-block"><div class="wf-line w40"></div></div><div class="wf-val"></div></div>
+        <div class="wf-row"><div class="wf-text-block"><div class="wf-line w40"></div></div><div class="wf-val"></div></div>
+        <div class="section-label">Payment History</div>
+        <div class="wf-card"><div class="wf-line w60"></div></div>
+        <div class="bottom-nav"><div class="nav-dot"></div><div class="nav-dot active"></div><div class="nav-dot"></div><div class="nav-dot"></div><div class="nav-dot"></div></div>
+      </div>
+    </div>
+    <div class="cta-label">Primary CTA: View History</div>
+  </div>
+
+  <div class="unit">
+    <span class="badge badge-existing">🟢 EXISTING</span>
+    <div class="screen-id">M008</div>
+    <div class="screen-name">Accounts</div>
+    <div class="phone">
+      <div class="status-bar"></div>
+      <div class="screen-body">
+        <div class="wf-line w40" style="height:13px;background:#999;"></div>
+        <div class="wf-row"><div class="wf-dot"></div><div class="wf-text-block"><div class="wf-line w60"></div><div class="wf-line w40" style="margin-top:4px;"></div></div><div class="wf-val"></div></div>
+        <div class="wf-row"><div class="wf-dot"></div><div class="wf-text-block"><div class="wf-line w60"></div><div class="wf-line w40" style="margin-top:4px;"></div></div><div class="wf-val"></div></div>
+        <div class="wf-row"><div class="wf-dot"></div><div class="wf-text-block"><div class="wf-line w60"></div><div class="wf-line w40" style="margin-top:4px;"></div></div><div class="wf-val"></div></div>
+        <div class="btn-ph-outline"></div>
+        <div class="bottom-nav"><div class="nav-dot"></div><div class="nav-dot active"></div><div class="nav-dot"></div><div class="nav-dot"></div><div class="nav-dot"></div></div>
+      </div>
+    </div>
+    <div class="cta-label">Primary CTA: Add Account</div>
+  </div>
+
+  <div class="unit">
+    <span class="badge badge-existing">🟢 EXISTING</span>
+    <div class="screen-id">M009</div>
+    <div class="screen-name">Account Detail</div>
+    <div class="phone">
+      <div class="status-bar"></div>
+      <div class="screen-body">
+        <div class="wf-line w40" style="height:13px;background:#999;"></div>
+        <div class="wf-hero"><div class="wf-line w40" style="margin:0 auto 7px;"></div><div class="wf-hero-num"></div></div>
+        <div class="section-label">Transactions</div>
+        <div class="wf-row"><div class="wf-text-block"><div class="wf-line w60"></div></div><div class="wf-val"></div></div>
+        <div class="wf-row"><div class="wf-text-block"><div class="wf-line w60"></div></div><div class="wf-val"></div></div>
+        <div class="wf-row"><div class="wf-text-block"><div class="wf-line w60"></div></div><div class="wf-val"></div></div>
+        <div class="bottom-nav"><div class="nav-dot"></div><div class="nav-dot active"></div><div class="nav-dot"></div><div class="nav-dot"></div><div class="nav-dot"></div></div>
+      </div>
+    </div>
+    <div class="cta-label">Primary CTA: View Transactions</div>
+  </div>
+
+  <div class="unit">
+    <span class="badge badge-existing">🟢 EXISTING</span>
+    <div class="screen-id">M010</div>
+    <div class="screen-name">Cash</div>
+    <div class="phone">
+      <div class="status-bar"></div>
+      <div class="screen-body">
+        <div class="wf-line w40" style="height:13px;background:#999;"></div>
+        <div class="section-label">Bank Accounts</div>
+        <div class="wf-row"><div class="wf-dot"></div><div class="wf-text-block"><div class="wf-line w60"></div></div><div class="wf-val"></div></div>
+        <div class="wf-row"><div class="wf-dot"></div><div class="wf-text-block"><div class="wf-line w60"></div></div><div class="wf-val"></div></div>
+        <div class="section-label">Cash in Hand</div>
+        <div class="wf-row"><div class="wf-dot"></div><div class="wf-text-block"><div class="wf-line w60"></div></div><div class="wf-val"></div></div>
+        <div class="bottom-nav"><div class="nav-dot"></div><div class="nav-dot active"></div><div class="nav-dot"></div><div class="nav-dot"></div><div class="nav-dot"></div></div>
+      </div>
+    </div>
+    <div class="cta-label">Primary CTA: View Account</div>
+  </div>
+
+</div>
+
+<div class="footer">
+  <div><b>Owner Engine:</b> Balance</div>
+  <div><b>Complexity:</b> S (all five)</div>
+  <div><b>Screen IDs:</b> M006–M010</div>
+  <div><b>Version:</b> ADS v2.0.0</div>
+</div>
+
+</body>
+</html>

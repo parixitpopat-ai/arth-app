@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Nunito', sans-serif; padding: 40px; }
+  .pack-title { font-size: 24px; font-weight: 900; color: #fff; margin-bottom: 4px; }
+  .pack-sub { font-size: 13px; color: #999; margin-bottom: 30px; }
+  .row { display: flex; gap: 30px; flex-wrap: wrap; align-items: flex-start; }
+  .phone { background: #08080f; border-radius: 32px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 6px solid #000; width: 320px; }
+  .screen { border-radius: 26px; overflow: hidden; min-height: 620px; background: #08080f; color: #e8e4dc; display:flex; flex-direction:column; }
+  .statusbar { display: flex; justify-content: space-between; padding: 8px 16px 0; font-size: 11px; }
+  .appbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; }
+  .appbar-title { font-size: 15px; font-weight: 900; }
+  .content { padding: 0 16px 12px; flex:1; overflow-y:auto; }
+  .card { background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 16px; padding: 12px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); }
+  .plan-row { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #1a1a2e; }
+  .plan-name { font-size:13px; font-weight:700; }
+  .plan-date { font-size:10px; color:#22c55e; }
+  .plan-toggle { font-size:9px; color:#f0a500; font-weight:700; border:1px solid rgba(240,165,0,0.4); border-radius:12px; padding:4px 8px; }
+  .impact-card { background: rgba(6,182,212,0.08); border: 1px solid rgba(6,182,212,0.3); border-radius: 14px; padding: 12px; margin-top: 8px; }
+  .impact-label { font-size:9px; color:#06b6d4; font-weight:800; text-transform:uppercase; }
+  .impact-row { display:flex; justify-content:space-between; font-size:12px; margin-top:6px; }
+  .impact-delta { color:#22c55e; font-weight:900; font-size:16px; }
+  .tl-node { display:flex; gap:10px; padding: 8px 0; }
+  .tl-dot { width:10px; height:10px; border-radius:50%; background:#22c55e; margin-top:4px; flex-shrink:0; }
+  .tl-line { width:1px; background:#1a1a2e; flex:1; margin-left:4.5px; }
+  .tl-content { flex:1; padding-bottom:8px; }
+  .tl-event { font-size:12px; font-weight:700; }
+  .tl-bal { font-size:9px; color:#5a5a7a; margin-top:2px; }
+  .expand-detail { background:#0b0b18; border-radius:10px; padding:8px 10px; margin-top:4px; font-size:10px; color:#5a5a7a; }
+  .navbar { display: flex; justify-content: space-around; padding: 10px 0; background: #0a0a16; border-top: 1px solid #1a1a2e; }
+  .navitem { text-align: center; font-size: 9px; color: #5a5a7a; font-weight: 700; }
+  .navitem.active { color: #22c55e; }
+  .fab { width: 42px; height: 42px; border-radius: 50%; background: #22c55e; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #000; margin-top: -18px; border: 3px solid #0a0a16; }
+  .sidebar { width: 420px; }
+  .side-title { font-size: 16px; font-weight: 900; color: #fff; margin-bottom: 12px; }
+  .side-section { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 14px; font-size: 12px; color: #333; }
+  .side-section h4 { font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 8px; }
+  .real { color: #1a7a3a; font-weight: 700; }
+  .needs-work { color: #b32020; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div class="pack-title">HF-005D — Planning (O017–O018)</div>
+<div class="pack-sub">"If I change something today, what happens next?" — not a calendar, a decision simulator</div>
+
+<div class="row">
+
+  <div class="phone"><div class="screen">
+    <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+    <div class="appbar"><div class="appbar-title">← Monthly Planner</div></div>
+    <div class="content">
+      <div class="card">
+        <div style="font-size:11px;font-weight:800;color:#5a5a7a;margin-bottom:8px;">SEPTEMBER</div>
+        <div class="plan-row"><span class="plan-name">✔ Salary</span><span class="plan-date">5 Sep</span></div>
+        <div class="plan-row"><span class="plan-name">✔ Rent</span><span class="plan-date">7 Sep</span></div>
+        <div class="plan-row"><span class="plan-name">✔ EMI</span><span class="plan-date">12 Sep</span></div>
+        <div class="plan-row"><span class="plan-name">Gym</span><span class="plan-toggle">Pause this month?</span></div>
+        <div class="plan-row" style="border:none;"><span class="plan-name">SIP</span><span class="plan-toggle">Skip September?</span></div>
+      </div>
+      <div class="impact-card">
+        <div class="impact-label">Forecast Impact — if Gym paused</div>
+        <div class="impact-row"><span>Before</span><span>₹1,240</span></div>
+        <div class="impact-row"><span>After</span><span class="impact-delta">₹2,890</span></div>
+      </div>
+    </div>
+    <div class="navbar"><div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div></div>
+  </div></div>
+
+  <div class="phone"><div class="screen">
+    <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+    <div class="appbar"><div class="appbar-title">← Forecast Timeline</div></div>
+    <div class="content">
+      <div class="card">
+        <div class="tl-node"><div><div class="tl-dot"></div><div class="tl-line"></div></div><div class="tl-content"><div class="tl-event">Today</div><div class="tl-bal">₹48,500</div></div></div>
+        <div class="tl-node"><div><div class="tl-dot" style="background:#06b6d4;"></div><div class="tl-line"></div></div><div class="tl-content"><div class="tl-event">Salary +₹75,000</div><div class="tl-bal">₹1,23,500</div></div></div>
+        <div class="tl-node"><div><div class="tl-dot" style="background:#ef4444;"></div><div class="tl-line"></div></div><div class="tl-content">
+          <div class="tl-event">Rent -₹15,000</div>
+          <div class="tl-bal">₹1,08,500</div>
+          <div class="expand-detail">Before: ₹1,23,500 → Event: Rent → After: ₹1,08,500</div>
+        </div></div>
+        <div class="tl-node"><div><div class="tl-dot" style="background:#ef4444;"></div><div class="tl-line"></div></div><div class="tl-content"><div class="tl-event">Netflix -₹799</div><div class="tl-bal">₹1,07,701</div></div></div>
+        <div class="tl-node"><div><div class="tl-dot" style="background:#ef4444;"></div></div><div class="tl-content"><div class="tl-event">Month End</div><div class="tl-bal">₹71,000</div></div></div>
+      </div>
+    </div>
+    <div class="navbar"><div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div></div>
+  </div></div>
+
+  <div class="sidebar">
+    <div class="side-title">Build Reality</div>
+    <div class="side-section">
+      <h4>Forecast Impact Preview (O017)</h4>
+      <span class="real">Genuinely free from an engine perspective</span> — <code>calculateProjectedBalance</code> is a pure function taking <code>bills</code> explicitly (no closures, built this session). Calling it twice — full list vs. list-minus-paused-item — and diffing needs zero new engine code, just two calls to what already exists.<br><br>
+      <span class="needs-work">Still needed:</span> the Pause/Skip toggle shown here is a preview only — actually *persisting* a skip still needs the per-instance Skip/Snooze fields on Bill flagged back at O019/UX-002. This screen can show the impact today; committing to it needs that gap closed first.
+    </div>
+    <div class="side-section">
+      <h4>Tap-to-inspect (O018)</h4>
+      <span class="real">Real</span> — each timeline node is just Balance-before/Event/Balance-after, all values already produced by the same projection walk <code>calculateProjectedBalance</code> does internally. Exposing the intermediate steps (not just the final number) is new UI, not new calculation.
+    </div>
+    <div class="side-section">
+      <h4>Commitment Timeline convention</h4>
+      Logged as a UI pattern (Shared Design Patterns doc), not an ADR — presentation-only lifecycle mapping, same principle as ADR-023, applied to status instead of card layout.
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

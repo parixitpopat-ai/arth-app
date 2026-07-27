@@ -23,6 +23,7 @@ import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/Go
 import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/EventsScreen";
 import { AddExpectedIncomeModal, ExpectedIncomeListModal } from "./screens/ExpectedIncomeScreen";
 import { AddInsurancePolicyModal, InsurancePolicyListModal, InsurancePolicyDetailModal } from "./screens/InsuranceScreen";
+import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { remainingShare } from "./domain/shared/remainingShare";
@@ -10412,10 +10413,66 @@ function AppContent({ onLock }) {
   // Expenses — all explicit stubs in the Financial Engine). No fake numbers, no invented
   // forecasts — per the Architecture Freeze Enforcement rule: placeholder screens are fine,
   // placeholder business logic is not.
-  const OutlookPage = () => (
+  const OutlookPage = () => {
+    // O014 Cash Forecast — real, using the Forecast Engine functions implemented earlier this
+    // session (verified at runtime against a worked scenario before ever being wired into a
+    // screen). openingBalance = liquid accounts only (bank/cash/upi), excluding investments and
+    // credit cards, per Balance Engine's ownership of the actual balance figure.
+    const openingBalance = accounts
+      .filter(a=>["bank","cash","upi"].includes(a.type) && !isInvestmentAccount(a))
+      .reduce((sum,a)=>sum+accountBalance(a.id), 0);
+    const monthKey = todayStr().slice(0,7);
+    const estimatedVariable = averageOfLastNMonthsVariableSpend(txns, 3, monthKey);
+    const timeline = buildCashFlowTimeline(openingBalance, bills, expectedIncome, 30, refundTotalsByBill);
+    const projectedBalance = calculateProjectedBalance(openingBalance, bills, expectedIncome, estimatedVariable, monthKey, refundTotalsByBill);
+    const safeToSpend = calculateSafeToSpend(openingBalance, bills, expectedIncome, estimatedVariable, monthKey, refundTotalsByBill);
+    const negativeCheck = hasTransientNegativeBalance(timeline);
+    const hasEnoughData = typeof openingBalance === "number" && !Number.isNaN(openingBalance);
+
+    return (
     <div style={{ padding:"14px 16px 90px" }}>
-      <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:4 }}>🔮 Outlook</div>
-      <div style={{ color:T.sub,fontSize:12,marginBottom:20 }}>Coming in Sprint 4</div>
+      <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:16 }}>🔮 Outlook</div>
+
+      {/* Cash Forecast — the flagship, per O014's spec. Real numbers, or an honest
+          "not enough data" state — never fabricated. */}
+      <div style={{ ...card,marginBottom:14 }}>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>CASH FORECAST — NEXT 30 DAYS</div>
+        {!hasEnoughData ? (
+          <div style={{ color:T.sub,fontSize:13,textAlign:"center",padding:"10px 0" }}>Not enough data yet.</div>
+        ) : (
+          <>
+            <div style={{ display:"flex",justifyContent:"space-between",marginBottom:10 }}>
+              <div>
+                <div style={{ color:T.sub,fontSize:9 }}>PROJECTED BALANCE</div>
+                <div style={{ color:projectedBalance>=0?T.success:T.danger,fontSize:20,fontWeight:900 }}>{sym}{fmt(projectedBalance)}</div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ color:T.sub,fontSize:9 }}>SAFE TO SPEND</div>
+                <div style={{ color:T.accent,fontSize:20,fontWeight:900 }}>{sym}{fmt(safeToSpend)}</div>
+              </div>
+            </div>
+            {negativeCheck.negative&&(
+              <div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",marginBottom:10 }}>
+                <span style={{ color:T.danger,fontSize:11,fontWeight:700 }}>⚠ Balance dips to {sym}{fmt(negativeCheck.firstNegativeAmount)} on {formatShortDate(negativeCheck.firstNegativeDate)||negativeCheck.firstNegativeDate}, even though the month may end positive.</span>
+              </div>
+            )}
+            {timeline.length===0 ? (
+              <div style={{ color:T.sub,fontSize:11 }}>No upcoming Bills or Income tracked in this window yet.</div>
+            ) : timeline.map((ev,i)=>(
+              <div key={i} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:i<timeline.length-1?`1px solid ${T.border}`:"none" }}>
+                <div>
+                  <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{ev.label}</div>
+                  <div style={{ color:T.sub,fontSize:9 }}>{formatShortDate(ev.date)||ev.date}</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ color:ev.amount>=0?T.success:T.danger,fontSize:12,fontWeight:700 }}>{ev.amount>=0?"+":""}{sym}{fmt(ev.amount)}</div>
+                  <div style={{ color:ev.runningBalance<0?T.danger:T.sub,fontSize:9 }}>{sym}{fmt(ev.runningBalance)}</div>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
 
       <div style={{ ...card }}>
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>ALREADY AVAILABLE</div>
@@ -10425,19 +10482,22 @@ function AppContent({ onLock }) {
         <button onClick={()=>setTab("budget")} style={{ ...btnG,width:"100%",textAlign:"left",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
           <span>✓ Budget Progress</span><span style={{ color:T.accent }}>Open →</span>
         </button>
-        <button onClick={()=>setShowExpectedIncome(true)} style={{ ...btnG,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+        <button onClick={()=>setShowExpectedIncome(true)} style={{ ...btnG,width:"100%",textAlign:"left",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
           <span>✓ Scheduled Income</span><span style={{ color:T.accent }}>Open →</span>
+        </button>
+        <button onClick={()=>{ setShowInsuranceList(true); }} style={{ ...btnG,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+          <span>✓ Insurance</span><span style={{ color:T.accent }}>Open →</span>
         </button>
       </div>
 
       <div style={{ ...card,marginTop:14 }}>
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>COMING SOON</div>
-        <div style={{ color:T.sub,fontSize:13,marginBottom:6 }}>• Cash Forecast</div>
         <div style={{ color:T.sub,fontSize:13,marginBottom:6 }}>• Calendar</div>
-        <div style={{ color:T.sub,fontSize:13 }}>• Planned Expenses</div>
+        <div style={{ color:T.sub,fontSize:13 }}>• Monthly Planner</div>
       </div>
     </div>
-  );
+    );
+  };
 
   // Insights placeholder — Sprint 1 Item #2. Deliberately no charts, no fake data — Insights is
   // confirmed 0% built (Screen Inventory). A blank "under development" state is more honest than

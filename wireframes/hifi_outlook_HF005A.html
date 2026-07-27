@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Nunito', sans-serif; padding: 40px; }
+  .pack-title { font-size: 24px; font-weight: 900; color: #fff; margin-bottom: 4px; }
+  .pack-sub { font-size: 13px; color: #999; margin-bottom: 30px; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; }
+  .unit { width: 300px; }
+  .label { font-size: 12px; font-weight: 800; color: #ccc; margin-bottom: 10px; }
+  .status-tag { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px; margin-left: 6px; }
+  .impl { background: #d4f4dd; color: #1a7a3a; }
+  .partial { background: #cfe8ff; color: #1a5a9a; }
+  .phone { background: #08080f; border-radius: 32px; padding: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 6px solid #000; }
+  .screen { border-radius: 26px; overflow: hidden; min-height: 560px; background: #08080f; color: #e8e4dc; display:flex; flex-direction:column; }
+  .statusbar { display: flex; justify-content: space-between; padding: 8px 16px 0; font-size: 11px; }
+  .appbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; }
+  .appbar-title { font-size: 14px; font-weight: 900; }
+  .content { padding: 0 16px 12px; flex:1; }
+  .card { background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 16px; padding: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); margin-bottom: 10px; }
+  .section-label { font-size: 10px; font-weight: 700; text-transform: uppercase; margin: 10px 0 6px; }
+  .section-label.overdue { color: #ef4444; }
+  .section-label.today { color: #f0a500; }
+  .section-label.upcoming { color: #5a5a7a; }
+  .row-item { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid #1a1a2e; }
+  .row-flex { display:flex; align-items:center; flex:1; }
+  .row-icon { width:32px; height:32px; border-radius:8px; background:#1a1a2e; display:flex; align-items:center; justify-content:center; font-size:14px; margin-right:9px; }
+  .row-name { font-size: 13px; font-weight: 700; }
+  .row-sub { font-size:9px; }
+  .row-val { font-size: 13px; font-weight: 800; }
+  .timeline-strip { display: flex; justify-content: space-between; background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 12px; padding: 8px 10px; margin-bottom: 10px; font-size: 8px; color: #5a5a7a; font-weight: 700; }
+  .btn-primary { background:#22c55e; color:#000; border:none; border-radius:14px; padding:12px; font-size:13px; font-weight:800; width:100%; margin-top:8px; }
+  .interaction-layer { background: #222; color: #ddd; border-radius: 10px; padding: 10px 12px; font-size: 10px; margin-top: 10px; line-height: 1.7; }
+  .interaction-layer b { color: #fff; }
+  .footer-trace { background: #333; color: #ccc; border-radius: 8px; padding: 8px 10px; font-size: 9px; font-family: monospace; margin-top: 6px; }
+  .navbar { display: flex; justify-content: space-around; padding: 10px 0; background: #0a0a16; border-top: 1px solid #1a1a2e; }
+  .navitem { text-align: center; font-size: 9px; color: #5a5a7a; font-weight: 700; }
+  .navitem.active { color: #22c55e; }
+  .fab { width: 42px; height: 42px; border-radius: 50%; background: #22c55e; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #000; margin-top: -18px; border: 3px solid #0a0a16; }
+</style>
+</head>
+<body>
+
+<div class="pack-title">HF-005A — Daily Outlook (O001–O004)</div>
+<div class="pack-sub">"What needs my attention today?" · Design System v2.0.0 · Grouping verified against real code before drawing</div>
+
+<div class="row">
+
+  <div class="unit">
+    <div class="label">O001 — Outlook Dashboard <span class="status-tag partial">🔵 SPECIFIED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">🔮 Outlook</div></div>
+      <div class="content">
+        <div class="card" style="text-align:center;padding:16px;">
+          <div style="font-size:10px;color:#5a5a7a;">SAFE TO SPEND</div>
+          <div style="font-size:22px;font-weight:900;color:#22c55e;margin:4px 0;">₹2,350/day</div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:6px;"><span>🟢</span><span style="font-size:11px;font-weight:700;">Comfortable</span></div>
+        </div>
+        <div class="section-label overdue">Overdue (1)</div>
+        <div class="card"><div class="row-item" style="border:none;"><div class="row-flex"><div class="row-icon">🔴</div><div class="row-name">Water Bill</div></div><span class="row-val" style="color:#ef4444;">₹650</span></div></div>
+        <div class="section-label today">Due Today (1)</div>
+        <div class="card"><div class="row-item" style="border:none;"><div class="row-flex"><div class="row-icon">🟠</div><div class="row-name">Electricity</div></div><span class="row-val">₹1,240</span></div></div>
+        <div class="section-label upcoming">Upcoming (3)</div>
+        <div class="card"><div class="row-item"><span class="row-name">SIP — Parag Parikh</span><span class="row-val">₹5,000</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed:</b> tap section item → O004 Bill Detail<br>
+      <b>Alert linkage:</b> Overdue/Due Today sections should eventually source from ADR-022's centralized Alerts (O016) — today they read Bills directly, same known gap as H004/H009/O016
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | O001 | CMP-002, CMP-005 | Radius XL, Elev 1</div>
+  </div>
+
+  <div class="unit">
+    <div class="label">O002 — Overview <span class="status-tag partial">🔵 SPECIFIED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Overview</div></div>
+      <div class="content">
+        <div class="timeline-strip"><span style="color:#22c55e;">Today</span><span>30 Jul</span><span>5 Aug</span><span>Month End</span></div>
+        <div class="card"><div class="row-item"><span class="row-name">This Week</span><span class="row-val">₹8,240</span></div></div>
+        <div class="card"><div class="row-item"><span class="row-name">This Month</span><span class="row-val">₹42,500</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed:</b> Timeline Strip reused identically from O014 (CMP consistency, per frozen rule)
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | O002 | Timeline Strip (shared) | Radius XL</div>
+  </div>
+
+  <div class="unit">
+    <div class="label">O003 — Upcoming Bills <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Upcoming Bills</div></div>
+      <div class="content">
+        <div class="section-label overdue">Overdue</div>
+        <div class="card"><div class="row-item" style="border:none;"><span class="row-name">Water Bill</span><span class="row-val" style="color:#ef4444;">₹650</span></div></div>
+        <div class="section-label today">Due Today</div>
+        <div class="card"><div class="row-item" style="border:none;"><span class="row-name">Electricity</span><span class="row-val">₹1,240</span></div></div>
+        <div class="section-label upcoming">Next 7 Days</div>
+        <div class="card">
+          <div class="row-item"><span class="row-name">Rent</span><span class="row-val">₹15,000</span></div>
+          <div class="row-item"><span class="row-name">Insurance</span><span class="row-val">₹18,000</span></div>
+          <div class="row-item"><span class="row-name">SIP</span><span class="row-val">₹5,000</span></div>
+        </div>
+        <div class="section-label upcoming" style="opacity:0.6;">Later</div>
+        <div class="card" style="opacity:0.7;"><div class="row-item"><span class="row-name">Netflix</span><span class="row-val">₹799</span></div></div>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed by code check:</b> isOverdue = status==="unpaid" && daysUntil&lt;0. "Due Today" is a distinct real label (daysUntil===0), not merged into Upcoming — 3-bucket grouping is honest, not invented<br>
+      <b>Refinement applied:</b> Upcoming split into Next 7 Days / Later by urgency, not flat date order — keeps the screen calm with many recurring bills. This split doesn't exist in code yet — new grouping logic, not just a relabel.
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | O003 | CMP-008 | Radius XL</div>
+  </div>
+
+  <div class="unit">
+    <div class="label">O004 — Bill Detail <span class="status-tag impl">🟢 IMPLEMENTED</span></div>
+    <div class="phone"><div class="screen">
+      <div class="statusbar"><span>9:41</span><span>📶🔋98%</span></div>
+      <div class="appbar"><div class="appbar-title">← Electricity Bill</div></div>
+      <div class="content">
+        <div class="card" style="text-align:center;padding:18px;">
+          <div style="font-size:10px;color:#5a5a7a;">AMOUNT</div>
+          <div style="font-size:24px;font-weight:900;">₹1,240</div>
+          <div style="font-size:11px;color:#f0a500;margin-top:4px;">Due Today</div>
+        </div>
+        <div class="row-item"><span class="row-name">Biller</span><span class="row-val">Goa Electricity Dept</span></div>
+        <div class="row-item"><span class="row-name">Account</span><span class="row-val">HDFC</span></div>
+        <button class="btn-primary">Pay Now</button>
+      </div>
+      <div class="navbar"><div class="navitem">🏠</div><div class="navitem">💰</div><div class="fab">➕</div><div class="navitem active">🔮</div><div class="navitem">📊</div></div>
+    </div></div>
+    <div class="interaction-layer">
+      <b>Confirmed:</b> Pay Now → existing Bill payment flow (isBillPayment/paidBillId, unchanged)
+    </div>
+    <div class="footer-trace">ADS 2.0.0 | O004 | CMP-001, CMP-002 | Radius XL/LG</div>
+  </div>
+
+</div>
+
+<div style="margin-top:24px;background:#fff;border-radius:12px;padding:16px 20px;font-size:11px;color:#444;">
+<b>HF-005A note:</b> O001's Safe to Spend hero + Forecast Status banner directly reuses O014's frozen pattern (per "O014 is the benchmark" instruction) — not a new design, a deliberate repeat. O001/O002 marked 🔵 Specified since the real dashboard (beyond the Sprint 1 placeholder) doesn't exist yet; O003/O004 marked 🟢 since both are fully built already.
+</div>
+
+</body>
+</html>

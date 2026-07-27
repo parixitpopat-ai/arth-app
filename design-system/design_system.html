@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a1a; font-family: 'Nunito', 'Helvetica Neue', Arial, sans-serif; padding: 40px; color: #333; }
+  .page-title { font-size: 26px; font-weight: 900; color: #fff; margin-bottom: 4px; }
+  .page-sub { font-size: 13px; color: #999; margin-bottom: 30px; }
+  .section { background: #fff; border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+  .section-title { font-size: 12px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+  .swatch-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .swatch { width: 110px; }
+  .swatch-color { height: 60px; border-radius: 10px; margin-bottom: 6px; border: 1px solid rgba(0,0,0,0.1); }
+  .swatch-name { font-size: 11px; font-weight: 700; color: #222; }
+  .swatch-hex { font-size: 9px; color: #999; font-family: monospace; }
+  .type-row { display: flex; align-items: baseline; gap: 16px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #f0f0f0; }
+  .type-label { width: 90px; font-size: 10px; color: #999; font-family: monospace; }
+  .space-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .space-bar { background: #22c55e; height: 16px; border-radius: 3px; }
+  .space-label { font-size: 11px; color: #666; width: 100px; font-family: monospace; }
+  .card-demo { background: #0f0f1a; border: 1px solid #1a1a2e; border-radius: 16px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.6); color: #e8e4dc; width: 220px; }
+  .btn-demo { display: inline-block; padding: 13px 20px; border-radius: 12px; font-size: 14px; font-weight: 800; font-family: 'Nunito', sans-serif; margin-right: 10px; margin-bottom: 10px; cursor: pointer; }
+  .chip-demo { display: inline-flex; align-items: center; gap: 5px; padding: 7px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; margin-right: 8px; margin-bottom: 8px; }
+  .row-flex { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  .dark-demo-box { background: #08080f; border-radius: 16px; padding: 20px; }
+  .light-demo-box { background: #f4f3ef; border-radius: 16px; padding: 20px; }
+  .app-bar-demo { display: flex; justify-content: space-between; align-items: center; background: #0f0f1a; border-radius: 12px; padding: 12px 16px; color: #e8e4dc; margin-bottom: 10px; }
+  .nav-demo { display: flex; justify-content: space-around; background: #0a0a16; border-radius: 20px; padding: 10px; width: 300px; }
+  .nav-item { text-align: center; font-size: 9px; color: #5a5a7a; }
+  .nav-item.active { color: #22c55e; }
+  .dialog-demo { background: #0f0f1a; border-radius: 18px; padding: 20px; width: 260px; color: #e8e4dc; }
+  .empty-demo { text-align: center; padding: 40px 20px; color: #5a5a7a; background: #0f0f1a; border-radius: 16px; width: 220px; }
+  .icon-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; }
+  .icon-cell { text-align: center; background: #f8f8f8; border-radius: 10px; padding: 10px; font-size: 20px; }
+  .icon-label { font-size: 8px; color: #999; margin-top: 4px; }
+  .status-tag { display: inline-block; font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px; margin-left: 8px; }
+  .impl { background: #d4f4dd; color: #1a7a3a; }
+</style>
+</head>
+<body>
+
+<div class="page-title">Arth v2.0 — High-Fidelity Design System</div>
+<div class="page-sub">Every token below is real — pulled directly from src/constants/theme.js, not invented for this document<span class="status-tag impl">🟢 IMPLEMENTED IN CODE</span></div>
+
+<!-- COLOR SYSTEM -->
+<div class="section">
+  <div class="section-title">Color System — Dark Mode (default)</div>
+  <div class="swatch-row">
+    <div class="swatch"><div class="swatch-color" style="background:#08080f;"></div><div class="swatch-name">bg</div><div class="swatch-hex">#08080f</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#0f0f1a;"></div><div class="swatch-name">card</div><div class="swatch-hex">#0f0f1a</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#22c55e;"></div><div class="swatch-name">accent</div><div class="swatch-hex">#22c55e</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#ef4444;"></div><div class="swatch-name">danger</div><div class="swatch-hex">#ef4444</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#f97316;"></div><div class="swatch-name">warn</div><div class="swatch-hex">#f97316</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#06b6d4;"></div><div class="swatch-name">info</div><div class="swatch-hex">#06b6d4</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#8b5cf6;"></div><div class="swatch-name">purple</div><div class="swatch-hex">#8b5cf6</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#f0a500;"></div><div class="swatch-name">gold</div><div class="swatch-hex">#f0a500</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#e8e4dc;"></div><div class="swatch-name">text</div><div class="swatch-hex">#e8e4dc</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#5a5a7a;"></div><div class="swatch-name">sub</div><div class="swatch-hex">#5a5a7a</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#1a1a2e;"></div><div class="swatch-name">border</div><div class="swatch-hex">#1a1a2e</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Color System — Light Mode</div>
+  <div class="swatch-row">
+    <div class="swatch"><div class="swatch-color" style="background:#f4f3ef;border:1px solid #ddd;"></div><div class="swatch-name">bg</div><div class="swatch-hex">#f4f3ef</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#ffffff;border:1px solid #ddd;"></div><div class="swatch-name">card</div><div class="swatch-hex">#ffffff</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#16a34a;"></div><div class="swatch-name">accent</div><div class="swatch-hex">#16a34a</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#dc2626;"></div><div class="swatch-name">danger</div><div class="swatch-hex">#dc2626</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#ea6c00;"></div><div class="swatch-name">warn</div><div class="swatch-hex">#ea6c00</div></div>
+    <div class="swatch"><div class="swatch-color" style="background:#1a1a2e;"></div><div class="swatch-name">text</div><div class="swatch-hex">#1a1a2e</div></div>
+  </div>
+</div>
+
+<!-- TYPOGRAPHY -->
+<div class="section">
+  <div class="section-title">Typography Scale (TYPE, theme.js)</div>
+  <div class="type-row"><div class="type-label">h1 / 26·900</div><div style="font-size:26px;font-weight:900;">Screen headers, big numbers</div></div>
+  <div class="type-row"><div class="type-label">h2 / 20·900</div><div style="font-size:20px;font-weight:900;">Section headers</div></div>
+  <div class="type-row"><div class="type-label">h3 / 16·900</div><div style="font-size:16px;font-weight:900;">Sheet/modal titles</div></div>
+  <div class="type-row"><div class="type-label">strong / 14·800</div><div style="font-size:14px;font-weight:800;">Emphasized body, card titles</div></div>
+  <div class="type-row"><div class="type-label">body / 13·600</div><div style="font-size:13px;font-weight:600;">Default body text</div></div>
+  <div class="type-row"><div class="type-label">label / 11·700</div><div style="font-size:11px;font-weight:700;">Field labels, section headers</div></div>
+  <div class="type-row"><div class="type-label">micro / 9·700</div><div style="font-size:9px;font-weight:700;">Badges, tiny labels</div></div>
+  <div style="font-size:11px;color:#999;margin-top:8px;">Font family: Nunito (loaded via Google Fonts import, confirmed in App.jsx)</div>
+</div>
+
+<!-- SPACING -->
+<div class="section">
+  <div class="section-title">Spacing Scale (SPACE, theme.js) — not an 8dp grid, a 4px-step scale</div>
+  <div class="space-row"><div class="space-label">xs = 4px</div><div class="space-bar" style="width:4px;"></div></div>
+  <div class="space-row"><div class="space-label">sm = 8px</div><div class="space-bar" style="width:8px;"></div></div>
+  <div class="space-row"><div class="space-label">md = 12px</div><div class="space-bar" style="width:12px;"></div></div>
+  <div class="space-row"><div class="space-label">lg = 16px</div><div class="space-bar" style="width:16px;"></div></div>
+  <div class="space-row"><div class="space-label">xl = 24px</div><div class="space-bar" style="width:24px;"></div></div>
+  <div class="space-row"><div class="space-label">xxl = 32px</div><div class="space-bar" style="width:32px;"></div></div>
+  <div style="font-size:11px;color:#b32020;margin-top:8px;">Note: existing inline styles across the app are NOT retrofitted to this scale — it applies to new components only, confirmed in the theme.js comment itself.</div>
+</div>
+
+<!-- CARDS -->
+<div class="section">
+  <div class="section-title">Card Style — the shared `card` object</div>
+  <div class="row-flex">
+    <div class="dark-demo-box">
+      <div class="card-demo">
+        <div style="font-size:11px;color:#5a5a7a;margin-bottom:6px;">FINANCIAL CARD</div>
+        <div style="font-size:22px;font-weight:900;color:#e8e4dc;">₹48,500</div>
+      </div>
+    </div>
+  </div>
+  <div style="font-size:11px;color:#666;margin-top:12px;">borderRadius: 16 · boxShadow via T.sh (added this session — was defined but used in only 4 places before) · border 1px solid T.border</div>
+</div>
+
+<!-- BUTTONS -->
+<div class="section">
+  <div class="section-title">Buttons</div>
+  <div class="dark-demo-box">
+    <button class="btn-demo" style="background:#22c55e;color:#000;border:none;">Primary</button>
+    <button class="btn-demo" style="background:none;color:#5a5a7a;border:1px solid #1a1a2e;">Secondary</button>
+    <button class="btn-demo" style="background:#ef4444;color:#fff;border:none;">Danger</button>
+    <button class="btn-demo" style="background:none;color:#22c55e;border:none;">Text</button>
+  </div>
+  <div style="font-size:11px;color:#666;margin-top:10px;">Press feedback: universal scale(0.97) via global CSS; FAB uses a stronger scale(0.88) with springy easing — both real, built this session.</div>
+</div>
+
+<!-- CHIPS -->
+<div class="section">
+  <div class="section-title">Chips (PAT-005, extracted this session)</div>
+  <div class="dark-demo-box">
+    <span class="chip-demo" style="background:rgba(34,197,94,0.13);border:1px solid #22c55e;color:#22c55e;">🚗 Active</span>
+    <span class="chip-demo" style="background:#0b0b18;border:1px solid #1a1a2e;color:#5a5a7a;">🏍️ Inactive</span>
+  </div>
+</div>
+
+<!-- APP BAR + BOTTOM NAV -->
+<div class="section">
+  <div class="section-title">App Bar &amp; Bottom Navigation</div>
+  <div class="app-bar-demo">
+    <div>
+      <div style="font-size:16px;font-weight:900;">Arth <span style="font-size:11px;">🔄</span></div>
+      <div style="font-size:9px;color:#5a5a7a;text-transform:uppercase;letter-spacing:1px;">Personal Finance</div>
+    </div>
+    <div style="font-size:16px;">🔔</div>
+  </div>
+  <div class="nav-demo">
+    <div class="nav-item active">🏠<br>Home</div>
+    <div class="nav-item">💰<br>Money</div>
+    <div class="nav-item" style="color:#22c55e;">➕</div>
+    <div class="nav-item">🔮<br>Outlook</div>
+    <div class="nav-item">📊<br>Insights</div>
+  </div>
+  <div style="font-size:11px;color:#666;margin-top:10px;">🔄 spinner shows only when cloudBusy is true (built this session) — never a permanent fixture.</div>
+</div>
+
+<!-- DIALOGS -->
+<div class="section">
+  <div class="section-title">Dialogs (PAT-006, extracted this session)</div>
+  <div class="row-flex">
+    <div class="dark-demo-box">
+      <div class="dialog-demo">
+        <div style="font-size:14px;font-weight:700;margin-bottom:16px;">Delete this bill?</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <button style="background:none;border:1px solid #1a1a2e;border-radius:12px;padding:10px;color:#5a5a7a;font-size:13px;font-weight:700;">Cancel</button>
+          <button style="background:#ef4444;border:none;border-radius:12px;padding:10px;color:#fff;font-size:13px;font-weight:800;">Confirm</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- EMPTY STATES -->
+<div class="section">
+  <div class="section-title">Empty State (PAT-002)</div>
+  <div class="row-flex">
+    <div class="dark-demo-box">
+      <div class="empty-demo">
+        <div style="font-size:36px;margin-bottom:10px;">📭</div>
+        <div style="font-size:14px;font-weight:800;color:#e8e4dc;margin-bottom:4px;">No bills yet</div>
+        <div style="font-size:11px;">Tap + to add your first bill</div>
+      </div>
+    </div>
+  </div>
+  <div style="font-size:11px;color:#666;margin-top:10px;">Rule: icon + title + subtitle + CTA. Never "No data." — 7 real migrated locations in the app today.</div>
+</div>
+
+<!-- ICONS -->
+<div class="section">
+  <div class="section-title">Icon Language (emoji-based today, not an icon font)</div>
+  <div class="icon-grid">
+    <div class="icon-cell">🏠<div class="icon-label">Home</div></div>
+    <div class="icon-cell">💰<div class="icon-label">Money</div></div>
+    <div class="icon-cell">🔮<div class="icon-label">Outlook</div></div>
+    <div class="icon-cell">📊<div class="icon-label">Insights</div></div>
+    <div class="icon-cell">🚗<div class="icon-label">Vehicle</div></div>
+    <div class="icon-cell">🛡️<div class="icon-label">Insurance</div></div>
+    <div class="icon-cell">🎯<div class="icon-label">Goals</div></div>
+    <div class="icon-cell">📅<div class="icon-label">Bills</div></div>
+  </div>
+  <div style="font-size:11px;color:#b32020;margin-top:10px;">Honest note: Arth's real icon system today is emoji, not a custom icon font/SVG set. A "high-fidelity" pass should decide explicitly whether to keep emoji (fast, zero-asset-cost, already consistent) or commission real icons — not silently swap mid-design.</div>
+</div>
+
+<!-- MOTION -->
+<div class="section">
+  <div class="section-title">Motion Guidelines — all real, built this session</div>
+  <div style="font-size:12px;line-height:1.8;">
+    <b>Bottom Sheet:</b> slide up + fade backdrop, 0.22s cubic-bezier(0.32, 0.72, 0, 1)<br>
+    <b>Toast:</b> fade + 12px rise on enter, ~2.2s auto-dismiss<br>
+    <b>Button press:</b> scale(0.97), 0.08s ease, universal via global CSS<br>
+    <b>FAB press:</b> scale(0.88), 0.12s springy cubic-bezier(0.34, 1.56, 0.64, 1) — chosen by direct side-by-side comparison<br>
+    <b>Sync spinner:</b> continuous rotate, 0.8s linear, only visible when cloudBusy
+  </div>
+</div>
+
+<div class="section" style="background:#222;color:#fff;">
+  <div class="section-title" style="color:#aaa;">Status Legend for all future changes</div>
+  <div style="font-size:12px;">🟢 Implemented – verified in code &nbsp;·&nbsp; 🔵 Specified – documented and approved, not yet built &nbsp;·&nbsp; 🔴 Future – intentionally deferred</div>
+</div>
+
+</body>
+</html>
