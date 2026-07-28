@@ -1693,6 +1693,36 @@ function AppContent({ onLock }) {
     return map;
   },[thisMonthTxns, people, getPersonAttributedAmount]);
 
+  // getGroupAttributedAmount — the real consolidation this session's People & Groups design work
+  // called for. Confirmed by checking, NOT assumed missing (an earlier design pass wrongly said
+  // "no group-level spend aggregation exists anywhere" - it does, just duplicated across at least
+  // 4 separate places in this file, each checking a slightly different combination of fields
+  // (groupId / tagGroup / taggedGroupId / groupAllocations), exactly the kind of drift the
+  // getPersonAttributedAmount comment above already warned had happened once before with people.
+  // This is the canonical version - checks every field variant found across all 4 existing call
+  // sites, so nothing that currently counts stops counting once call sites migrate to this.
+  const getGroupAttributedAmount = useCallback((t, groupId) => {
+    if(t.type!=="expense") return 0;
+    if(t.groupId===groupId || t.tagGroup===groupId || t.taggedGroupId===groupId) return Number(t.amount||0);
+    const alloc = (t.groupAllocations||[]).find(ga=>ga.groupId===groupId);
+    if(alloc) return Number(alloc.amount||0);
+    return 0;
+  },[]);
+  // Group-level equivalent of personSpend above - real monthly spend per group, one source, not
+  // four. Migrating the 4 existing inline calculations (lines ~9866, ~12877, ~13895, ~13907) to
+  // call this instead is real follow-up work, deliberately not done in this same pass - each of
+  // those call sites needs individual verification before being changed, not a blind find-replace
+  // across a codebase this size.
+  const groupSpend = useMemo(()=>{
+    const map={};
+    groups.forEach(g=>{
+      let total = 0;
+      thisMonthTxns.forEach(t=>{ total += getGroupAttributedAmount(t, g.id); });
+      map[g.id] = total;
+    });
+    return map;
+  },[thisMonthTxns, groups, getGroupAttributedAmount]);
+
   // Personal budget alerts — same 80%/over-budget thresholds as the Monthly Dashboard's Budget
   // Insights, surfaced as notifications instead of a permanent Home card. Each alert's id is
   // threshold-specific (80 vs over), so archiving the 80% alert doesn't hide a later escalation
@@ -7499,7 +7529,19 @@ function AppContent({ onLock }) {
     const homeSafeToSpend = homeMonthBudget - homeMonthSpend;
     const homeDaysLeftInMonth = new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth()+1, 0).getDate() - homeTodayDate.getDate() + 1;
     const homeSafeToSpendPerDay = homeDaysLeftInMonth>0 ? homeSafeToSpend/homeDaysLeftInMonth : homeSafeToSpend;
-    const homeCashRequired = homeBillsForForecast.filter(b=>b.status!=="paid").reduce((sum,b)=>sum+Number(b.amount||0),0);
+    // Same fix as OutlookPage's getMyBillShare - duplicated here since Home and Outlook are
+    // separate component closures (AD-002, tracked debt). Real bug: split bills were counted at
+    // their full amount instead of the user's own share.
+    const homeGetMyBillShare = b => {
+      if(b.type==="sip"||b.type==="cc_statement") return Number(b.amount||0);
+      const owedTotal = Object.values(b.splitPeople||{}).reduce((sum,info)=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
+      const fallbackShare = Math.max(0, Number(b.amount||0)-owedTotal-Number(b.groupCollectiveAmount||0));
+      const storedShare = Number(b.myShare);
+      const group = b.groupId?getGroup(b.groupId):null;
+      const meExcluded = group?.includeMe===false;
+      return Number.isFinite(storedShare)&&(storedShare>0||fallbackShare<=0||meExcluded) ? storedShare : fallbackShare;
+    };
+    const homeCashRequired = homeBillsForForecast.filter(b=>b.status!=="paid").reduce((sum,b)=>sum+homeGetMyBillShare(b),0);
     const homeBuffer = homeOpeningBalance - homeCashRequired;
     const homeHasCommitmentData = homeBillsForForecast.filter(b=>b.status!=="paid").length>0 || (expectedIncome||[]).filter(e=>e.status!=="received").length>0;
     const homeStatus = !homeHasCommitmentData ? { icon:"⚪", label:"Needs Setup", color:T.sub }
@@ -10462,6 +10504,21 @@ function AppContent({ onLock }) {
     }).filter(Boolean);
     const billsForForecast = [...bills, ...sipsAsBills, ...ccStatementsAsBills];
 
+    // Shared across every calculation on this screen — a bill split with other people should only
+    // count the USER's own share, not the full amount. Real bug found via a live screenshot (a
+    // ₹4,292 utility bill split 4 ways, user's real share ₹858.40) that was affecting both
+    // Protected Money and Next Month Preview identically, since both summed raw b.amount. Reuses
+    // the exact same fallback logic already used on the real Bill Detail screen.
+    const getMyBillShare = b => {
+      if(b.type==="sip"||b.type==="cc_statement") return Number(b.amount||0); // synthetic entries, no split concept applies
+      const owedTotal = Object.values(b.splitPeople||{}).reduce((sum,info)=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
+      const fallbackShare = Math.max(0, Number(b.amount||0)-owedTotal-Number(b.groupCollectiveAmount||0));
+      const storedShare = Number(b.myShare);
+      const group = b.groupId?getGroup(b.groupId):null;
+      const meExcluded = group?.includeMe===false;
+      return Number.isFinite(storedShare)&&(storedShare>0||fallbackShare<=0||meExcluded) ? storedShare : fallbackShare;
+    };
+
     const estimatedVariable = averageOfLastNMonthsVariableSpend(txns, 3, monthKey);
     const timeline = buildCashFlowTimeline(openingBalance, billsForForecast, expectedIncome, 30, refundTotalsByBill);
     const projectedBalance = calculateProjectedBalance(openingBalance, billsForForecast, expectedIncome, estimatedVariable, monthKey, refundTotalsByBill);
@@ -10484,7 +10541,7 @@ function AppContent({ onLock }) {
     // (2) Protected Money = cash that's already committed and shouldn't be spent on something
     // else - Bills (incl. Insurance, still Bill.type per the frozen ADR-021/023 - unchanged),
     // SIPs, CC statements. Cash Available is the real opening balance; Buffer is what's left.
-    const cashRequired = billsForForecast.filter(b=>b.status!=="paid").reduce((sum,b)=>sum+Number(b.amount||0),0);
+    const cashRequired = billsForForecast.filter(b=>b.status!=="paid").reduce((sum,b)=>sum+getMyBillShare(b),0);
     const cashAvailable = openingBalance;
     const buffer = cashAvailable - cashRequired;
     const negativeCheck = hasTransientNegativeBalance(timeline);
@@ -10533,7 +10590,7 @@ function AppContent({ onLock }) {
       return (
       <div onClick={()=>{ if(!isSynthetic) setEditingBill(b); }} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:isSynthetic?"default":"pointer" }}>
         <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name||b.type}{b.type==="sip"&&<span style={{ color:T.sub,fontWeight:400 }}> · SIP</span>}{b.type==="cc_statement"&&<span style={{ color:T.sub,fontWeight:400 }}> · Card</span>}</span>
-        <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(b.amount)}</span>
+        <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(getMyBillShare(b))}</span>
       </div>
       );
     };
@@ -10651,6 +10708,15 @@ function AppContent({ onLock }) {
         <div style={{ ...card,textAlign:"center",color:T.sub,fontSize:12,padding:20,marginBottom:12 }}>No upcoming commitments tracked yet.</div>
       )}
 
+      {/* Real gap found: Outlook had ZERO direct link to the full Bills screen (My Bills/Bill
+          History) - the only paths were buried in a Person's budget context or a 5-step detour
+          through Settings -> Manage -> Billers. Given Outlook is the actual home for commitments,
+          this belongs here directly, not behind Settings. */}
+      <button onClick={()=>setTab("bills")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,cursor:"pointer",border:`1px solid ${T.border}` }}>
+        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>📋 View All Bills</span>
+        <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Open →</span>
+      </button>
+
       {/* Budget — deliberately not folded into Commitments above (it's a limit, not a scheduled
           item, per O005's spec). But removing the old launcher list also removed the only general
           entry point to it, since the Drawer's direct link was already removed earlier this
@@ -10665,18 +10731,16 @@ function AppContent({ onLock }) {
       {(()=>{
         const nextMonthDate = new Date(todayDate.getFullYear(), todayDate.getMonth()+1, 1);
         const nextMonthKey = `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth()+1).padStart(2,"0")}`;
+        // Real bug found via a live screenshot: this previously used the bill's FULL amount, even
+        // for bills split with other people (e.g. a ₹4,292 utility bill split 4 ways where the
+        // user's actual share is ₹858.40). Now reuses the shared getMyBillShare defined at the top
+        // of this component, same fix applied consistently to Protected Money and here.
         const nextMonthAll = billsForForecast.filter(b=>b.status!=="paid" && b.dueDate && b.dueDate.startsWith(nextMonthKey));
-        // Real correction, not in the original version: CC bills and SIPs are NOT genuine new
-        // Budget expenses. A CC bill settles spending that was already counted as an expense the
-        // month the purchase happened - subtracting it from next month's Budget too would double
-        // count it. SIP is an investment, not consumption, so it doesn't reduce Budget either.
-        // Both are real CASH requirements (Protected Money's territory), just not Budget ones -
-        // this is exactly ADR-024's Budget-vs-Cash-Commitment split, applied correctly this time.
         const isCashOnlyNotBudget = b => b.type==="sip" || b.type==="cc_statement" || b.type==="Credit Card";
         const nextMonthBudgetExpenses = nextMonthAll.filter(b=>!isCashOnlyNotBudget(b));
         const nextMonthCashOnly = nextMonthAll.filter(isCashOnlyNotBudget);
-        const nextMonthCommitted = nextMonthBudgetExpenses.reduce((sum,b)=>sum+Number(b.amount||0), 0);
-        const nextMonthCashRequired = nextMonthCashOnly.reduce((sum,b)=>sum+Number(b.amount||0), 0);
+        const nextMonthCommitted = nextMonthBudgetExpenses.reduce((sum,b)=>sum+getMyBillShare(b), 0);
+        const nextMonthCashRequired = nextMonthCashOnly.reduce((sum,b)=>sum+getMyBillShare(b), 0);
         const nextMonthBudget = monthOverrides[nextMonthKey] || Math.round(Number(annualBudget||0)/12);
         const nextMonthLabel = nextMonthDate.toLocaleString("en-IN",{month:"long"});
         if(nextMonthBudget<=0 && nextMonthAll.length<=0) return null;
@@ -10692,7 +10756,7 @@ function AppContent({ onLock }) {
                   <span style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(nextMonthBudget)}</span>
                 </div>
                 <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
-                  <span style={{ color:T.sub,fontSize:11 }}>Expected Expenses <span style={{ color:T.sub,fontStyle:"italic" }}>(new, not yet spent)</span></span>
+                  <span style={{ color:T.sub,fontSize:11 }}>Expected Expenses <span style={{ color:T.sub,fontStyle:"italic" }}>(your share, new)</span></span>
                   <span style={{ color:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(nextMonthCommitted)}</span>
                 </div>
                 <div style={{ display:"flex",justifyContent:"space-between",paddingTop:6,borderTop:`1px solid ${T.border}` }}>
@@ -10711,7 +10775,7 @@ function AppContent({ onLock }) {
               <div style={{ marginTop:10,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
                 {nextMonthBudgetExpenses.slice(0,3).map(b=>(
                   <div key={b.id} style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:T.sub,padding:"3px 0" }}>
-                    <span>{b.name||b.type}</span><span>{sym}{fmt(b.amount)}</span>
+                    <span>{b.name||b.type}</span><span>{sym}{fmt(getMyBillShare(b))}</span>
                   </div>
                 ))}
                 {nextMonthBudgetExpenses.length>3&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>+{nextMonthBudgetExpenses.length-3} more</div>}
@@ -10724,6 +10788,15 @@ function AppContent({ onLock }) {
       <button onClick={()=>setTab("budget")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,cursor:"pointer",border:`1px solid ${T.border}` }}>
         <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>📊 Budget Progress</span>
         <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>View →</span>
+      </button>
+
+      {/* Direct entry point to Bills (My Bills / Bill History tabs) - real friction found and
+          fixed: reaching Bills previously required Drawer -> Settings -> Manage -> Billers ->
+          lands on Bills tab, 5 steps for something used often. Outlook already owns Commitments
+          conceptually, so this is the natural, short home for it. */}
+      <button onClick={()=>setTab("bills")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,cursor:"pointer",border:`1px solid ${T.border}` }}>
+        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>🧾 Manage Bills</span>
+        <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Open →</span>
       </button>
 
       {/* What Changed — Facts tier, using the real wealthSnapshots mechanism. Reasons/Impact
@@ -10867,13 +10940,20 @@ function AppContent({ onLock }) {
               // was a real bug, not a display issue — every card showed Outstanding: ₹0 regardless
               // of actual Bills due.
               const bal = cardOutstanding(a);
+              // Real mistake, corrected: previously assumed no credit-limit field existed on CC
+              // accounts, showing "Not set"/"—" as if that were an honest gap. It wasn't - a.limit
+              // is a real field, already collected in Add Account for CC type and already used by
+              // a utilization calculation elsewhere (line ~6588). Fixed to use it here too.
+              const hasLimit = a.limit && a.limit>0;
+              const availableLimit = hasLimit ? Math.max(0, a.limit - Math.abs(bal)) : null;
+              const utilPct = hasLimit ? Math.min(100, Math.round((Math.abs(bal)/a.limit)*100)) : null;
               return (
                 <div key={a.id} style={{ padding:"10px 0",borderBottom:`1px solid ${T.border}` }}>
                   <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>{a.name}</div>
                   <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:11 }}>
                     <div><span style={{ color:T.sub }}>Outstanding: </span><span style={{ color:T.danger,fontWeight:800 }}>{sym}{fmt(Math.abs(bal))}</span></div>
-                    <div><span style={{ color:T.sub }}>Available Limit: </span><span style={{ color:T.sub }}>Not set</span></div>
-                    <div><span style={{ color:T.sub }}>Utilisation: </span><span style={{ color:T.sub }}>—</span></div>
+                    <div><span style={{ color:T.sub }}>Available Limit: </span><span style={{ color:hasLimit?T.text:T.sub,fontWeight:hasLimit?800:400 }}>{hasLimit?`${sym}${fmt(availableLimit)}`:"Not set"}</span></div>
+                    <div><span style={{ color:T.sub }}>Utilisation: </span><span style={{ color:hasLimit?(utilPct>80?T.danger:utilPct>50?T.warn:T.success):T.sub,fontWeight:hasLimit?800:400 }}>{hasLimit?`${utilPct}%`:"—"}</span></div>
                     <div><span style={{ color:T.sub }}>Total Exposure: </span><span style={{ color:T.danger,fontWeight:800 }}>{sym}{fmt(Math.abs(bal))}</span></div>
                   </div>
                 </div>
@@ -12169,6 +12249,7 @@ function AppContent({ onLock }) {
     const [openingBalance, setOpeningBalance] = useState(String(a.openingBalance||"0"));
     const [openingBalanceDate, setOpeningBalanceDate] = useState(a.openingBalanceDate||todayStr());
     const [linkedBank, setLinkedBank] = useState(a.linkedBank||"");
+    const [linkedUpiAccount, setLinkedUpiAccount] = useState(a.linkedAccount||"");
     const [excludeFromWealth, setExcludeFromWealth] = useState(a.excludeFromWealth||false);
     const [accAttributedTo, setAccAttributedTo] = useState(a.attributedTo||"");
     const [accAttributeType, setAccAttributeType] = useState(a.attributeType||"person");
@@ -12181,7 +12262,7 @@ function AppContent({ onLock }) {
         ...x, name:name.trim(), last4, color, excludeFromWealth, attributedTo:accAttributedTo||null, attributeType:accAttributedTo?accAttributeType:null,
         ...(a.type==="cc"&&{ limit:parseFloat(limit)||0, statementDate:parseInt(statementDate)||15, dueDate:parseInt(dueDate)||5, alertPct:Math.max(0,parseFloat(alertPct)||0), billingCycle:billingCycle||`${statementDate}th–${dueDate}th` }),
         ...((a.type==="bank"||a.type==="cash")&&{ openingBalance:parseMoney(openingBalance)||0, openingBalanceDate:openingBalanceDate||todayStr(), needsCalibration }),
-        ...(a.type==="upi"&&{ handle }),
+        ...(a.type==="upi"&&{ handle, linkedAccount:linkedUpiAccount||"" }),
         ...(a.type==="debit"&&{ linkedBank }),
       }:x));
       onClose();
@@ -12226,6 +12307,18 @@ function AppContent({ onLock }) {
               <div><span style={lbl}>Billing Cycle (e.g. 15th–14th)</span><input style={inp} placeholder="e.g. 15th–14th" value={billingCycle} onChange={e=>setBillingCycle(e.target.value)}/></div>
             </>}
             {a.type==="upi"&&<input style={inp} placeholder="UPI handle" value={handle} onChange={e=>setHandle(e.target.value)}/>}
+            {/* Was completely missing - a real gap, not intentional. linkedAccount existed on the
+                UPI account's own data and worked correctly at creation time, but this edit modal
+                never had a way to view or change it afterward - confirmed via a real user report
+                that an existing UPI account showed no bank link with no way to fix it short of
+                deleting and recreating the account. Matches the debit-card pattern exactly above. */}
+            {a.type==="upi"&&banks.length>0&&<div>
+              <span style={lbl}>Linked Bank Account</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                <button onClick={()=>setLinkedUpiAccount("")} style={{ background:!linkedUpiAccount?T.pill:"none",border:`1px solid ${!linkedUpiAccount?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:!linkedUpiAccount?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>None</button>
+                {banks.map(b=><button key={b.id} onClick={()=>setLinkedUpiAccount(b.id)} style={{ background:linkedUpiAccount===b.id?b.color+"22":"none",border:`1px solid ${linkedUpiAccount===b.id?b.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:linkedUpiAccount===b.id?b.color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏦 {b.name}</button>)}
+              </div>
+            </div>}
             {a.type==="debit"&&banks.length>0&&<div>
               <span style={lbl}>Linked Bank Account</span>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -13888,6 +13981,7 @@ function AppContent({ onLock }) {
               { icon:"⚙️", label:"Settings", onClick:()=>{ setShowSettings(true); setSettingsSection(null); onClose(); } },
               { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"🔮", label:"Outlook", onClick:()=>goToTab("outlook") },
+              { icon:"🧾", label:"Bills", onClick:()=>goToTab("bills") },
               { icon:"🔍", label:"Find Duplicate Transactions", onClick:()=>{ setShowDuplicateFinder(true); onClose(); } },
               { icon:"🎯", label:"Goals", onClick:()=>{ setShowGoalsList(true); onClose(); } },
               { icon:"✈️", label:"Trips & Outings", onClick:()=>{ setShowEventsList(true); onClose(); } },
@@ -14722,7 +14816,11 @@ function AppContent({ onLock }) {
                       // selected biller
                       if(!billerId) return;
                       const biller = billers.find(b=>b.id===billerId);
-                      setName(prev=>prev.trim()?prev:(biller?.name||""));
+                      // Was also auto-filling Bill name with the biller's name, creating up to 4
+                      // visible repeats of the same string on screen (biller dropdown + account
+                      // dropdown + bill name + merchant) - confirmed genuinely ugly/confusing via
+                      // a real screenshot. Bill name should stay empty for the user to type
+                      // something specific (e.g. "July Electricity"), not blindly echo the biller.
                       setMerchant(prev=>prev.trim()?prev:(biller?.name||""));
                     }}>
                       <option value="">— Not linked to an existing biller —</option>
@@ -14733,11 +14831,9 @@ function AppContent({ onLock }) {
                     <div>
                       <span style={lbl}>Account under {billers.find(b=>b.id===selectedBillerId)?.name}</span>
                       <select style={inp} value={billerAccountId} onChange={e=>{
-                        const ba = accountsForSelectedBiller.find(x=>x.id===e.target.value);
                         setBillerAccountId(e.target.value);
-                        if(ba){
-                          setName(prev=>prev.trim()===billers.find(b=>b.id===selectedBillerId)?.name||!prev.trim()?ba.name:prev);
-                        }
+                        // Was also overwriting Bill name with the account's name here - same
+                        // redundancy fix as the biller selection above, removed for the same reason.
                       }}>
                         <option value="">— Select account —</option>
                         {accountsForSelectedBiller.map(ba=><option key={ba.id} value={ba.id}>{ba.name}</option>)}
