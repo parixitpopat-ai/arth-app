@@ -13982,6 +13982,8 @@ function AppContent({ onLock }) {
               { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"🔮", label:"Outlook", onClick:()=>goToTab("outlook") },
               { icon:"🧾", label:"Bills", onClick:()=>goToTab("bills") },
+              { icon:"👥", label:"People & Groups", onClick:()=>goToTab("people") },
+              { icon:"🚗", label:"Vehicles", onClick:()=>{ setShowSettings(true); setSettingsSection("vehicles"); onClose(); } },
               { icon:"🔍", label:"Find Duplicate Transactions", onClick:()=>{ setShowDuplicateFinder(true); onClose(); } },
               { icon:"🎯", label:"Goals", onClick:()=>{ setShowGoalsList(true); onClose(); } },
               { icon:"✈️", label:"Trips & Outings", onClick:()=>{ setShowEventsList(true); onClose(); } },
