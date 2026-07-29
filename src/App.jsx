@@ -4748,7 +4748,7 @@ function AppContent({ onLock }) {
                     point into modals that already exist. */}
                 <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
                   <button onClick={()=>{ setTxnType("cc_payment"); setUserSetTxnType(true); setWho(""); }} style={{ background:txnType==="cc_payment"?T.purple+"22":"none",border:`1px solid ${txnType==="cc_payment"?T.purple:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:txnType==="cc_payment"?T.purple:T.sub,fontFamily:"Nunito,sans-serif" }}>💳 Pay Credit Card</button>
-                  <button onClick={()=>{ closeModal(); handleTab("wealth"); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏦 Pay/Receive Loan →</button>
+                  <button onClick={()=>{ closeModal(); setShowAddLoan(true); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏦 Pay/Receive Loan</button>
                 </div>
               </div>
           }
@@ -4817,6 +4817,16 @@ function AppContent({ onLock }) {
                 <button onClick={()=>setShowAdvancedTracking(v=>!v)} style={{ background:"none",border:`1px dashed ${showAdvancedTracking?T.accent:T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,color:showAdvancedTracking?T.accent:T.sub,fontFamily:"Nunito,sans-serif",fontWeight:700,textAlign:"left" }}>
                   {showAdvancedTracking?"▲ Hide Advanced":"▼ Advanced (optional)"}
                 </button>
+                {showAdvancedTracking&&(
+                  <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                    {/* Guest Person / Trip shortcuts - same real state as their original location
+                        (chip row near Person/Group), not moved or duplicated logic, just a second
+                        access point here per the safe pattern already used for Itemise Purchase.
+                        Original toggles remain exactly where they were, untouched. */}
+                    <button onClick={()=>setShowGuestPerson(v=>!v)} style={{ background:showGuestPerson?T.warn+"22":"none",border:`1px solid ${showGuestPerson?T.warn:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showGuestPerson?T.warn:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 One-time Guest</button>
+                    <button onClick={()=>setShowTripPicker(v=>!v)} style={{ background:showTripPicker?T.accent+"22":"none",border:`1px solid ${showTripPicker?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showTripPicker?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>✈️ Link Trip</button>
+                  </div>
+                )}
                 {showAdvancedTracking&&getAcc(accId)?.type==="cc"&&(
               <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
                 <button onClick={()=>setShowPriceBreakdown(v=>!v)} style={{ background:"none",border:`1px dashed ${showPriceBreakdown?T.accent:T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,color:showPriceBreakdown?T.accent:T.sub,fontFamily:"Nunito,sans-serif",fontWeight:700,textAlign:"left" }}>
