@@ -4748,7 +4748,7 @@ function AppContent({ onLock }) {
                     point into modals that already exist. */}
                 <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
                   <button onClick={()=>{ setTxnType("cc_payment"); setUserSetTxnType(true); setWho(""); }} style={{ background:txnType==="cc_payment"?T.purple+"22":"none",border:`1px solid ${txnType==="cc_payment"?T.purple:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:txnType==="cc_payment"?T.purple:T.sub,fontFamily:"Nunito,sans-serif" }}>💳 Pay Credit Card</button>
-                  <button onClick={()=>{ closeModal(); setTab("wealth"); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏦 Pay/Receive Loan →</button>
+                  <button onClick={()=>{ closeModal(); handleTab("wealth"); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏦 Pay/Receive Loan →</button>
                 </div>
               </div>
           }
@@ -4874,6 +4874,15 @@ function AppContent({ onLock }) {
                 <div>
                   <span style={lbl}>Paid via</span>
                   <AccountChipGroup items={paidViaAccounts} value={accId} onChange={setAccId} />
+                </div>
+                {/* Itemise Purchase toggle moved here per WF-TXN001 - same real useItemizedLines
+                    state as the existing Items section below, so both stay in sync. Category
+                    section above is now hidden when this is ON (single-condition change). */}
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.input,borderRadius:10,padding:"8px 12px" }}>
+                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>📦 Itemise Purchase</span>
+                  <button onClick={()=>setUseItemizedLines(v=>!v)} style={{ background:useItemizedLines?T.accent:T.border,border:"none",borderRadius:20,width:40,height:22,position:"relative",cursor:"pointer" }}>
+                    <div style={{ position:"absolute",top:2,left:useItemizedLines?20:2,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left 0.15s" }}/>
+                  </button>
                 </div>
                 {(()=>{
                   const linkedMethods = accounts.filter(a=>(a.type==="debit"&&a.linkedBank===accId)||(a.type==="upi"&&a.linkedAccount===accId));
@@ -5052,7 +5061,6 @@ function AppContent({ onLock }) {
             )}
             {(txnType==="transfer"||txnType==="cc_payment")&&(
               <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-                {txnType==="cc_payment"&&<div style={{ background:T.purple+"14",border:`1px solid ${T.purple}33`,borderRadius:10,padding:"6px 12px",display:"flex",alignItems:"center",gap:6 }}><span>💳</span><span style={{ color:T.purple,fontSize:11,fontWeight:800 }}>Paying a Credit Card Bill</span></div>}
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
                   <div><span style={lbl}>From</span><select style={inp} value={fromAccId} onChange={e=>setFromAccId(e.target.value)}>{(txnType==="cc_payment"?nonCCAccs:accounts).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
                   <div><span style={lbl}>To</span><select style={inp} value={toAccId} onChange={e=>setToAccId(e.target.value)}>{(txnType==="cc_payment"?ccAccs:accounts).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
@@ -5375,7 +5383,7 @@ function AppContent({ onLock }) {
             )}
 
             {/* STEP 4 — CATEGORY (expense only) */}
-            {txnType==="expense"&&(
+            {txnType==="expense"&&!useItemizedLines&&(
               <div>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:6 }}>
                   <span style={{ ...lbl,marginBottom:0 }}>Categories (select one or more)</span>
@@ -5786,8 +5794,9 @@ function AppContent({ onLock }) {
               </div>}
             </div>
 
-            {/* ATTACHMENTS */}
-            <div style={{ background:T.input,borderRadius:12,padding:"11px 14px" }}>
+            {/* ATTACHMENTS - per WF-TXN001's adaptive table, every type has this except Transfer.
+                Was previously global (no conditional at all), incorrectly showing for Transfer too. */}
+            {txnType!=="transfer"&&<div style={{ background:T.input,borderRadius:12,padding:"11px 14px" }}>
               <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap" }}>
                 <div style={{ display:"flex",alignItems:"center",gap:10,minWidth:0 }}>
                   <span>📷</span>
@@ -5818,7 +5827,7 @@ function AppContent({ onLock }) {
                   </div>}
                 </div>
               )}
-            </div>
+            </div>}
 
             {refDupWarning&&(
               <div style={{ background:T.warn+"18",border:`1px solid ${T.warn}44`,borderRadius:10,padding:"8px 12px",color:T.warn,fontSize:11,fontWeight:700 }}>{refDupWarning}</div>
