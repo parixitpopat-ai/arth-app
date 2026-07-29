@@ -3716,7 +3716,13 @@ function AppContent({ onLock }) {
     const applyInvestmentTemplate = useCallback(template=>{
       if(!template) return;
       setInvestType(template.type || "mf");
-      setInvestFolio(template.folioNo || "");
+      // Real bug fix: this used to only set template.folioNo, defaulting to "" if the investment
+      // never had a folio number explicitly tracked. But the investment's own grouping key
+      // (used to check "recorded this month") falls back through folioNo -> name -> id (line
+      // ~7581) - this didn't apply the same fallback, so selecting a no-folio-number investment
+      // saved an empty investFolio, which could never match its own group's key. Confirmed via a
+      // real report: MF genuinely recorded, still showing "not recorded" every month after.
+      setInvestFolio(template.folioNo || template.name || template.id || "");
       if(template.name) setWho(template.name);
       if(Number(template.amount||0)>0) setAmount(String(template.amount));
       setInvestFreq(template.freq || "");
@@ -3975,18 +3981,26 @@ function AppContent({ onLock }) {
       txnType==="cc_emi"
     );
 
-    const submit = () => {
+    const submit = (skipRefCheck) => {
       if(submittingRef.current) return;
       if(!hasTxnSubject){ setRefDupWarning("Enter a vendor/note before saving."); return; }
       if(!amt){ setRefDupWarning("Enter an amount before saving."); return; }
-      submittingRef.current = true;
       setRefDupWarning("");
-      // Duplicate UPI/bank ref is only a warning now — never blocks the save (previously used alert(), which
-      // could silently fail to render in some WebViews, making Save look like it did nothing).
-      if(transactionRef.trim()){
+      // Real gap found via a live report: a passive banner (never blocking, by deliberate design
+      // to avoid alert()'s WebView reliability issue) was too easy to miss for entries made days
+      // apart, resulting in two genuinely separate transactions sharing one reference number with
+      // no warning ever noticed. Now uses a real confirm step (askConfirm - the same reliable
+      // in-app modal pattern used elsewhere, not the rejected native alert()) instead of a banner
+      // that can be scrolled past. skipRefCheck lets the confirmed retry bypass this and proceed
+      // without duplicating the whole save block below.
+      if(!skipRefCheck && transactionRef.trim()){
         const refConflict = txns.find(x => x.transactionRef === transactionRef.trim() && String(x.id) !== String(sourceTxn?.id||""));
-        if(refConflict) setRefDupWarning(`Note: UPI/bank ref "${transactionRef.trim()}" is already used on another transaction — saved anyway.`);
+        if(refConflict){
+          askConfirm(`Reference "${transactionRef.trim()}" is already used on another transaction (${refConflict.desc||refConflict.merchant||"unnamed"}, ${formatShortDate(refConflict.date)||refConflict.date}). Save this one too?`, ()=>submit(true));
+          return;
+        }
       }
+      submittingRef.current = true;
       const resolvedTxnId = isEditing ? sourceTxn.id : Date.now();
       const baseLabel = who.trim() || sourceTxn?.desc || sourceTxn?.merchant || note.trim() || "";
       const base = {
@@ -5787,7 +5801,7 @@ function AppContent({ onLock }) {
             )}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={closeModal} style={btnG}>Cancel</button>
-              <button onClick={submit} style={{ ...btnP,opacity:canSubmit?1:0.5 }}>{canSubmit?(isEditing?"Save Changes ✓":"Add ✓"):txnType==="investment"?"Fill name & amount":"Fill vendor & amount"}</button>
+              <button onClick={()=>submit()} style={{ ...btnP,opacity:canSubmit?1:0.5 }}>{canSubmit?(isEditing?"Save Changes ✓":"Add ✓"):txnType==="investment"?"Fill name & amount":"Fill vendor & amount"}</button>
             </div>
           </div>
         </div>
@@ -6343,7 +6357,10 @@ function AppContent({ onLock }) {
       if(!template) return;
       setIType(template.type || "mf");
       setName(template.name || "Investment");
-      setFolioNo(template.folioNo || "");
+      // Same real bug fix as the other applyInvestmentTemplate (QuickAdd flow) - falls back to
+      // name/id when no folio number was ever tracked, matching the group-key derivation exactly,
+      // so a recorded transaction can actually match its own investment group afterward.
+      setFolioNo(template.folioNo || template.name || template.id || "");
       if(Number(template.amount||0)>0) setAmount(String(template.amount));
       setFreq(template.freq || "");
       if(template.accId) setPaymentAccId(template.accId);

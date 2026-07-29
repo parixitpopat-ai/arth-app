@@ -26,6 +26,182 @@ until that's complete.
 
 ---
 
+## ADR-031 — Record Transaction Flow
+
+**Purpose:** the state diagram for each transaction type's entry path,
+per the sequencing this review established (engine → flow → screens).
+Grounded in the real current field sequence from the actual save
+handler where verified; genuinely new proposals marked explicitly.
+
+### Required Field Table (as proposed, cross-checked against ADR-030)
+
+| Field | Required | Real field (ADR-030) |
+|---|---|---|
+| Transaction Type | Yes | `type` |
+| Amount | Yes | `amount` |
+| Date | Yes | `date` |
+| Source Account | Depends | `accId` |
+| Destination Account | Depends | `toAccId` |
+| Merchant | Optional | `merchant` |
+| Items | Optional | `items` |
+| Category/Sub-category | Derived from Item or manual | `catId`/`subId` — **derivation from Item is new, not yet real; vendor-text matching (`VENDOR_CATEGORY_RULES`) is the closest existing mechanism, and it matches merchant text, not individual items** |
+| Bill | Optional | `paidBillId`/`isBillPayment` |
+| Person(s) | Optional | `people`/`splitPeople` — **still the unresolved overlap flagged in ADR-030, not resolved by this ADR either** |
+| Group | Optional | `groupId` |
+| Credit Card | Optional | `accId` pointing at a `type==="cc"` account |
+| Notes | Optional | `note` |
+| Attachments | Optional | `imageBase64` (confirmed real field) |
+
+### Item Confidence — genuinely new, not yet built
+
+| Confidence | Example | Behaviour |
+|---|---|---|
+| High | Milk | Auto-select Item → Sub-category → Category |
+| Medium | Amazon | Suggest likely items from history |
+| Low | Unknown | Leave uncategorized, decide later |
+
+**Nothing like this exists today.** The closest real mechanism is
+`VENDOR_CATEGORY_RULES` — a flat pattern-match on merchant text to a
+single category, no confidence tiering, no item-level granularity, no
+history-based suggestion. This would be new engine work, not a UI
+change over existing capability.
+
+### State Diagrams (per type, grounded in the real current field order)
+
+**Expense** (verified against the actual save handler's field sequence):
+```
+Start
+  |
+Choose Type: Expense
+  |
+Merchant (optional, autofills Category via VENDOR_CATEGORY_RULES if matched)
+  |
+Amount (required)
+  |
+Account (required)
+  |
+Items (optional; real field, no auto-derivation yet)
+  |
+Attribution: Person(s) / Group / Vehicle (all optional, all real fields)
+  |
+Bill link (optional, if paying an existing Bill)
+  |
+Save -> checks: transactionRef duplicate (real, this session's fix) + same-amount/account 5-min window (real, pre-existing)
+```
+
+**Income:**
+```
+Start -> Choose Type: Income -> Amount -> Account -> Merchant/Source (optional) -> Save
+```
+No item/attribution step — confirmed no `items`/`splitPeople` usage found on income-type saves in the current handler.
+
+**Transfer:**
+```
+Start -> Choose Type: Transfer -> Source Account -> Destination Account (toAccId) -> Amount -> Save
+```
+
+**Settlement** (`settlement_in`/`settlement_out`, per ADR-030's resolution — stays its own type):
+```
+Start -> Choose Type: Settlement -> Person -> Amount -> Against which receivable? (againstTxnId, real field) -> Save
+```
+
+**Investment:**
+```
+Start -> Choose Type: Investment -> Investment Type -> Fund/Folio (real: folioNo, name, id fallback chain - this session's fix ensures template selection matches this exactly) -> Amount -> Account -> Save
+```
+
+**Loan** (per ADR-030 — not a transaction type, its own domain):
+```
+Not part of this flow. LoanModal/LoanRepaymentModal remain separate,
+unchanged by this ADR.
+```
+
+### What this ADR deliberately leaves open
+
+- Item Confidence and Item→Category derivation are specified but **not implemented** — real new engine work, sequenced after this freeze, not assumed to already exist.
+- The `people`/`splitPeople` overlap from ADR-030 is referenced again here, still unresolved — this flow diagram doesn't pick a field, it just shows where attribution happens in the sequence.
+- Whether "Quick Record" (5-second minimal entry) is a separate, shorter path through this same diagram or a genuinely different flow is not decided here.
+
+### Status: Frozen
+
+The state diagrams — not any specific UI layout — are what the Record
+Transaction screen work should build against next.
+
+---
+
+## ADR-030 — Transaction Engine
+
+**Purpose:** freeze the transaction data model as the foundation every
+other module builds on, per the recommendation that came out of the
+Record Transaction screen discussion — engine before UI. **Every field
+and type below is the real, current model, verified against code, not
+proposed from scratch.** Where this ADR extends or changes something,
+that's called out explicitly.
+
+### Transaction Types — 8, frozen (confirmed real, unchanged)
+`expense`, `income`, `transfer`, `investment`, `settlement_in`,
+`settlement_out`, `cc_payment`, `cc_emi`
+
+**Settlement decision, resolved:** Settlement remains its own
+transaction type — not folded into an item, per this review's
+explicit conclusion. `Expense → creates receivable`,
+`Settlement → reduces receivable`. History, reversal, search, and audit
+trail all depend on settlement being a real, independent ledger entry.
+
+**Loan decision, resolved:** Loan is **not** a transaction type. It's
+its own domain (principal, lender/borrower, repayment schedule, EMI,
+interest, outstanding balance) — confirmed by the existing separate
+`LoanModal`/`LoanRepaymentModal`, which this ADR does not change.
+Loan *repayments* surface as transactions (via the existing modals),
+but "Loan" itself is never a value in a transaction's `type` field.
+
+### Core Fields (real, confirmed on the actual transaction object)
+
+| Field | Answers |
+|---|---|
+| `id`, `createdAt`, `updatedAt` | Identity, when recorded, last changed |
+| `type` | What happened (one of the 8 above) |
+| `amount` | How much |
+| `date` | When |
+| `desc`, `merchant`, `note` | Why / what |
+| `accId`, `toAccId` | Money moved from where / to where (`toAccId` for transfers) |
+| `catId`, `catIds`, `subId`, `subIds` | Category (single + multi-category support both real) |
+| `people`, `splitPeople`, `forPerson` | Who benefits — three distinct real fields, not one; `people` and `splitPeople` both exist (confirmed) — this ADR does **not** attempt to unify them, flagging as a real naming/purpose overlap worth a future cleanup pass, not resolved here |
+| `groupId` | Group attribution |
+| `vehicleId` | Vehicle attribution |
+| `items` | Itemized line items (real, confirmed field) |
+| `paidBillId`, `isBillPayment`, `paidBillName` | Bill link — confirmed real, 21 references across the codebase |
+| `billerLinkId` | Biller link (distinct from Bill link) |
+| `linkedInvestmentId` | Investment link |
+| `paymentMethod` | How (relevant for bank-account expenses) |
+| `excludeFromSpend` | Budget impact override — real field, lets a transaction exist without counting toward Safe to Spend |
+| `splitMode`, `trackingMode`, `tagMode` | Real mode flags governing how the above relational fields are interpreted |
+| `transactionRef` | Reference/UPI number — used for the duplicate-detection confirm dialog (this session's fix) |
+
+### Relationships (confirmed real, not aspirational)
+
+- **Person** — via `people`/`splitPeople`/`forPerson`. Feeds `getPersonAttributedAmount`, which feeds Settlements, Budget-per-person, and Money's Money-to-Receive/Owe.
+- **Group** — via `groupId`. Feeds `getGroupAttributedAmount` (added this session, consolidating what was previously 4 duplicated inline calculations).
+- **Bill** — via `paidBillId`/`isBillPayment`/`paidBillName`. This is the mechanism that makes a paid Bill also count as a real expense in Budget — confirmed this is why `monthSpend` already reflects paid bills (the basis of ADR-024's Budget-vs-Cash-Commitment split).
+- **Item** — via `items[]`. Confirmed real; per-item person/group attribution shown inline is the pattern the Record Transaction design proposes formalizing visually, not a new data capability.
+- **Category** — via `catId`/`catIds`/`subId`/`subIds`.
+- **Credit Card** — via `accId` pointing at a `type==="cc"` account, plus `cc_payment`/`cc_emi` as distinct transaction types for statement settlement.
+- **Budget** — every `expense` counts via `monthSpend`, unless `excludeFromSpend` is set.
+- **Settlement** — `settlement_in`/`settlement_out`, linked back via `againstTxnId` (confirmed real, used by the linked-settlement-key logic).
+
+### What this ADR deliberately does NOT resolve
+
+- The `people` vs. `splitPeople` overlap — both are real, both are used, this ADR documents the fact rather than picking a winner. Worth its own focused decision, not bundled into this freeze.
+- Whether Quick Add's redefinition ("Quick Record — 5 seconds, enrich later") replaces or sits alongside the current `QuickAddModal`. That's a UI/flow decision for the Record Transaction screen work, not a data-model question this ADR needs to answer.
+
+### Status: Frozen
+
+Every UI decision for Bills, People, Credit Cards, Budget, and the
+Record Transaction screen should read from this model — not introduce
+parallel fields or relationships without extending this ADR first.
+
+---
+
 ## ADR-025 — Financial Relationships
 
 **Purpose:** freeze People and Groups as the domain that owns financial
