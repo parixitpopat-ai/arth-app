@@ -4807,7 +4807,17 @@ function AppContent({ onLock }) {
               </div>
             </div>
 
-            {txnType==="expense"&&getAcc(accId)?.type==="cc"&&(
+            {/* Advanced (optional) - real collapsible wrapper, using showAdvancedTracking which
+                existed as declared state but was never actually wired to anything (confirmed by
+                checking - zero conditional renders referenced it). This is the first section
+                moved inside; Guest Person/Trip/Membership/Category Allocation follow in later
+                increments, not all moved at once per the incremental-refactor rule. */}
+            {txnType==="expense"&&(
+              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                <button onClick={()=>setShowAdvancedTracking(v=>!v)} style={{ background:"none",border:`1px dashed ${showAdvancedTracking?T.accent:T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,color:showAdvancedTracking?T.accent:T.sub,fontFamily:"Nunito,sans-serif",fontWeight:700,textAlign:"left" }}>
+                  {showAdvancedTracking?"▲ Hide Advanced":"▼ Advanced (optional)"}
+                </button>
+                {showAdvancedTracking&&getAcc(accId)?.type==="cc"&&(
               <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
                 <button onClick={()=>setShowPriceBreakdown(v=>!v)} style={{ background:"none",border:`1px dashed ${showPriceBreakdown?T.accent:T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,color:showPriceBreakdown?T.accent:T.sub,fontFamily:"Nunito,sans-serif",fontWeight:700,textAlign:"left" }}>
                   {showPriceBreakdown?"▲ Hide price breakdown":"▼ Price breakdown (MRP · discount · fees · interest · GST)"}
@@ -4839,6 +4849,8 @@ function AppContent({ onLock }) {
                       </div>
                     )}
                   </div>
+                )}
+              </div>
                 )}
               </div>
             )}
@@ -5040,6 +5052,7 @@ function AppContent({ onLock }) {
             )}
             {(txnType==="transfer"||txnType==="cc_payment")&&(
               <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                {txnType==="cc_payment"&&<div style={{ background:T.purple+"14",border:`1px solid ${T.purple}33`,borderRadius:10,padding:"6px 12px",display:"flex",alignItems:"center",gap:6 }}><span>💳</span><span style={{ color:T.purple,fontSize:11,fontWeight:800 }}>Paying a Credit Card Bill</span></div>}
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
                   <div><span style={lbl}>From</span><select style={inp} value={fromAccId} onChange={e=>setFromAccId(e.target.value)}>{(txnType==="cc_payment"?nonCCAccs:accounts).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
                   <div><span style={lbl}>To</span><select style={inp} value={toAccId} onChange={e=>setToAccId(e.target.value)}>{(txnType==="cc_payment"?ccAccs:accounts).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
