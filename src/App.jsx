@@ -4733,12 +4733,23 @@ function AppContent({ onLock }) {
                 </div>
                 <button onClick={()=>setTxnType("expense")} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap" }}>← Change type</button>
               </div>
-            : <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
-                {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["investment","💹","Invest",T.info],["transfer","🔄","Transfer",T.info],["cc_payment","💳","CC Pay",T.purple],["settlement_in","💼","Settlement",T.info]].map(([v,ic,lb,col])=>(
-                  <button key={v} onClick={()=>{ setTxnType(v); setUserSetTxnType(true); if(v==="cc_payment"||v==="transfer") setWho(""); }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
-                    <span style={{ fontSize:16 }}>{ic}</span>{lb}
-                  </button>
-                ))}
+            : <div>
+                <div style={{ display:"flex",gap:8,marginBottom:10,flexWrap:"wrap" }}>
+                  {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["transfer","🔄","Transfer",T.info],["settlement_in","💼","Settlement",T.info],["investment","💹","Invest",T.info]].map(([v,ic,lb,col])=>(
+                    <button key={v} onClick={()=>{ setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
+                      <span style={{ fontSize:16 }}>{ic}</span>{lb}
+                    </button>
+                  ))}
+                </div>
+                {/* Quick Actions - real decision made during implementation (WF-TXN001 v1.4): CC
+                    Payment stays a real ADR-030 type, reached here rather than as a 6th chip.
+                    Loan actions open the existing, separate LoanRepaymentModal (Loan is a domain,
+                    not a transaction type, per ADR-030) - not new logic, just a different entry
+                    point into modals that already exist. */}
+                <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
+                  <button onClick={()=>{ setTxnType("cc_payment"); setUserSetTxnType(true); setWho(""); }} style={{ background:txnType==="cc_payment"?T.purple+"22":"none",border:`1px solid ${txnType==="cc_payment"?T.purple:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:txnType==="cc_payment"?T.purple:T.sub,fontFamily:"Nunito,sans-serif" }}>💳 Pay Credit Card</button>
+                  <button onClick={()=>{ closeModal(); setTab("wealth"); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏦 Pay/Receive Loan →</button>
+                </div>
               </div>
           }
 
