@@ -3226,6 +3226,7 @@ function AppContent({ onLock }) {
     const [discount, setDiscount] = useState("");
     const [guestPersonAmount, setGuestPersonAmount] = useState("");
     const [showGuestPerson, setShowGuestPerson] = useState(false);
+    const [attributionSearch, setAttributionSearch] = useState("");
     const [showMembershipPanel, setShowMembershipPanel] = useState(false);
     const [showBillPicker, setShowBillPicker] = useState(false);
     const [showTripPicker, setShowTripPicker] = useState(false);
@@ -4883,7 +4884,9 @@ function AppContent({ onLock }) {
               <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
                 <div>
                   <span style={lbl}>Paid via</span>
-                  <AccountChipGroup items={paidViaAccounts} value={accId} onChange={setAccId} />
+                  <select style={inp} value={accId} onChange={e=>setAccId(e.target.value)}>
+                    {paidViaAccounts.map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}
+                  </select>
                 </div>
                 {/* Itemise Purchase toggle moved here per WF-TXN001 - same real useItemizedLines
                     state as the existing Items section below, so both stay in sync. Category
@@ -5544,7 +5547,7 @@ function AppContent({ onLock }) {
             {txnType==="expense"&&(
               <div>
                 <span style={lbl}>Who is this for? (optional)</span>
-                <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:10 }}>
+                <div style={{ display:"flex",gap:8,marginBottom:8 }}>
                   {(()=>{
                     const meRowSelected = allocRows.some(r=>r.targetType==="person"&&r.targetId==="__me__");
                     return (
@@ -5554,30 +5557,63 @@ function AppContent({ onLock }) {
                       }} style={{ background:meRowSelected?T.accent+"22":"none",border:`1px solid ${meRowSelected?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:meRowSelected?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🧑 Me</button>
                     );
                   })()}
-                  {people.filter(p=>!p.isMe).map(p=>{
-                    const isSelected = allocRows.some(r=>r.targetType==="person"&&r.targetId===p.id);
-                    return (
-                      <button key={p.id} onClick={()=>{
-                        if(isSelected){ setAllocRows(prev=>prev.filter(r=>!(r.targetType==="person"&&r.targetId===p.id))); }
-                        else { setSplitMode("allocate"); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:p.id, mode:"owes", amount:"", items:[] }]); }
-                      }} style={{ background:isSelected?p.color+"22":"none",border:`1px solid ${isSelected?p.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
-                    );
-                  })}
-                  {groups.map(g=>{
-                    const isSelected = allocRows.some(r=>r.targetType==="group"&&r.targetId===g.id);
-                    return (
-                      <button key={g.id} onClick={()=>{
-                        if(isSelected){ setAllocRows(prev=>prev.filter(r=>!(r.targetType==="group"&&r.targetId===g.id))); }
-                        else {
-                          const di = g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
-                          setSplitMode("allocate");
-                          setAllocRows(prev=>[...prev,{ id:genId(), targetType:"group", targetId:g.id, mode:di==="attributed"?"spent_on":"owes", amount:"", items:[] }]);
-                        }
-                      }} style={{ background:isSelected?g.color+"22":"none",border:`1px solid ${isSelected?g.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon||"👥"} {g.name}</button>
-                    );
-                  })}
                   <button onClick={()=>setShowGuestPerson(v=>!v)} style={{ background:showGuestPerson?T.warn+"22":"none",border:`1px solid ${showGuestPerson?T.warn:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showGuestPerson?T.warn:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 One-time</button>
                 </div>
+                {/* Unified Person+Group search, replacing separate chip rows per this review -
+                    user searches by WHO ("Vyom", "Family"), not by picking Person-vs-Group first.
+                    Selecting adds a new allocRow via the exact same logic the old chips used -
+                    multi-select preserved, tap again to add another row, same as before.
+                    "Suggested" (frequency-based) and "Remember" (learning) are explicitly NOT
+                    built here - both require the Learning Engine (BP-001B.3), not yet built. This
+                    implements only "Recent", derived from real transaction history below. */}
+                <input style={inp} placeholder="Search person or group..." value={attributionSearch} onChange={e=>setAttributionSearch(e.target.value)}/>
+                {(()=>{
+                  const q = attributionSearch.trim().toLowerCase();
+                  const peopleOpts = people.filter(p=>!p.isMe).map(p=>({ type:"person", id:p.id, name:p.name, icon:p.emoji, color:p.color }));
+                  const groupOpts = groups.map(g=>({ type:"group", id:g.id, name:g.name, icon:g.icon||"👥", color:g.color }));
+                  const all = [...peopleOpts, ...groupOpts];
+                  let list;
+                  if(q){
+                    list = all.filter(x=>x.name.toLowerCase().includes(q));
+                  } else {
+                    // Recent - real, derived from actual transaction history's allocations[]
+                    // array (confirmed real field, not forPerson/groupId which don't exist on
+                    // multi-select allocation transactions), most-recent first, deduplicated.
+                    const recentIds = [];
+                    for(const t of txns){
+                      if(recentIds.length>=5) break;
+                      for(const a of (t.allocations||[])){
+                        if(recentIds.length>=5) break;
+                        if(a.targetId && a.targetId!=="__me__" && !recentIds.some(r=>r.type===a.targetType&&r.id===a.targetId)) recentIds.push({type:a.targetType,id:a.targetId});
+                      }
+                    }
+                    list = recentIds.map(r=>all.find(x=>x.type===r.type&&x.id===r.id)).filter(Boolean);
+                  }
+                  return (
+                    <div style={{ marginTop:8 }}>
+                      {!q&&list.length>0&&<div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>RECENT</div>}
+                      <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                        {list.map(x=>{
+                          const isSelected = allocRows.some(r=>r.targetType===x.type&&r.targetId===x.id);
+                          return (
+                            <button key={`${x.type}_${x.id}`} onClick={()=>{
+                              if(isSelected){ setAllocRows(prev=>prev.filter(r=>!(r.targetType===x.type&&r.targetId===x.id))); return; }
+                              if(x.type==="person"){ setSplitMode("allocate"); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:x.id, mode:"owes", amount:"", items:[] }]); }
+                              else {
+                                const g = groups.find(gr=>gr.id===x.id);
+                                const di = g?.defaultIntent||(g?.typeId==="family"||g?.typeId==="business"?"attributed":"split");
+                                setSplitMode("allocate");
+                                setAllocRows(prev=>[...prev,{ id:genId(), targetType:"group", targetId:x.id, mode:di==="attributed"?"spent_on":"owes", amount:"", items:[] }]);
+                              }
+                              setAttributionSearch("");
+                            }} style={{ background:isSelected?x.color+"22":"none",border:`1px solid ${isSelected?x.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?x.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{x.icon} {x.name}</button>
+                          );
+                        })}
+                        {q&&list.length===0&&<div style={{ color:T.sub,fontSize:11,padding:"6px 0" }}>No results — try "+ One-time" above to record a guest.</div>}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {/* Rows appear automatically for whoever's tapped above — set Attribute/Own/Collect + amount
                     per row here, optionally linked to specific purchased items instead of a flat amount */}
                 {allocRows.length>0&&(
