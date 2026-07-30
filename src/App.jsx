@@ -4897,6 +4897,10 @@ function AppContent({ onLock }) {
                     so flipping it ON hid Category with nothing visible taking its place. */}
                 {useItemizedLines&&(
                   <div style={{ background:T.input,borderRadius:10,padding:10 }}>
+                    {/* TEMPORARY DEBUG - remove once the bug is found */}
+                    <div style={{ background:"#ff000022",border:"1px solid red",borderRadius:6,padding:6,marginBottom:6,fontSize:9,color:"red",fontFamily:"monospace" }}>
+                      DEBUG lineItems.length={lineItems.length} | raw={JSON.stringify(lineItems)}
+                    </div>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                       <div style={{ display:"flex",alignItems:"center",gap:8 }}>
                         <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>ITEMS</div>
