@@ -3227,6 +3227,7 @@ function AppContent({ onLock }) {
     const [guestPersonAmount, setGuestPersonAmount] = useState("");
     const [showGuestPerson, setShowGuestPerson] = useState(false);
     const [attributionSearch, setAttributionSearch] = useState("");
+    const [showAttributionSearch, setShowAttributionSearch] = useState(false);
     const [showMembershipPanel, setShowMembershipPanel] = useState(false);
     const [showBillPicker, setShowBillPicker] = useState(false);
     const [showTripPicker, setShowTripPicker] = useState(false);
@@ -4748,7 +4749,7 @@ function AppContent({ onLock }) {
                     not a transaction type, per ADR-030) - not new logic, just a different entry
                     point into modals that already exist. */}
                 <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
-                  <button onClick={()=>{ setTxnType("cc_payment"); setUserSetTxnType(true); setWho(""); }} style={{ background:txnType==="cc_payment"?T.purple+"22":"none",border:`1px solid ${txnType==="cc_payment"?T.purple:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:txnType==="cc_payment"?T.purple:T.sub,fontFamily:"Nunito,sans-serif" }}>💳 Pay Credit Card</button>
+                  <button onClick={()=>{ closeModal(); setTab("bills"); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>💳 Pay Credit Card</button>
                   <button onClick={()=>{ closeModal(); setShowAddLoan(true); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏦 Pay/Receive Loan</button>
                 </div>
               </div>
@@ -4818,16 +4819,10 @@ function AppContent({ onLock }) {
                 <button onClick={()=>setShowAdvancedTracking(v=>!v)} style={{ background:"none",border:`1px dashed ${showAdvancedTracking?T.accent:T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,color:showAdvancedTracking?T.accent:T.sub,fontFamily:"Nunito,sans-serif",fontWeight:700,textAlign:"left" }}>
                   {showAdvancedTracking?"▲ Hide Advanced":"▼ Advanced (optional)"}
                 </button>
-                {showAdvancedTracking&&(
-                  <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
-                    {/* Guest Person / Trip shortcuts - same real state as their original location
-                        (chip row near Person/Group), not moved or duplicated logic, just a second
-                        access point here per the safe pattern already used for Itemise Purchase.
-                        Original toggles remain exactly where they were, untouched. */}
-                    <button onClick={()=>setShowGuestPerson(v=>!v)} style={{ background:showGuestPerson?T.warn+"22":"none",border:`1px solid ${showGuestPerson?T.warn:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showGuestPerson?T.warn:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 One-time Guest</button>
-                    <button onClick={()=>setShowTripPicker(v=>!v)} style={{ background:showTripPicker?T.accent+"22":"none",border:`1px solid ${showTripPicker?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showTripPicker?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>✈️ Link Trip</button>
-                  </div>
-                )}
+                {/* Guest Person / Trip Link shortcuts removed from here per real feedback - having
+                    them both here AND in their original location (near Who is this for?) was
+                    genuine, confusing duplication, not a helpful shortcut. Kept only in their one
+                    real location now. */}
                 {showAdvancedTracking&&getAcc(accId)?.type==="cc"&&(
               <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
                 <button onClick={()=>setShowPriceBreakdown(v=>!v)} style={{ background:"none",border:`1px dashed ${showPriceBreakdown?T.accent:T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,color:showPriceBreakdown?T.accent:T.sub,fontFamily:"Nunito,sans-serif",fontWeight:700,textAlign:"left" }}>
@@ -4897,6 +4892,43 @@ function AppContent({ onLock }) {
                     <div style={{ position:"absolute",top:2,left:useItemizedLines?20:2,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left 0.15s" }}/>
                   </button>
                 </div>
+                {/* Items list moved here directly - real bug fix: previously the actual item
+                    entry UI stayed far below in the form while this toggle lived up here,
+                    so flipping it ON hid Category with nothing visible taking its place. */}
+                {useItemizedLines&&(
+                  <div style={{ background:T.input,borderRadius:10,padding:10 }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                      <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>ITEMS</div>
+                        {lineItems.length>0&&<span style={{ background:T.accent+"22",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>{lineItems.length} item{lineItems.length>1?"s":""}</span>}
+                      </div>
+                      <button onClick={()=>{setEditingItemId(null);setShowItemSheet(true);}} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add item</button>
+                    </div>
+                    {lineItems.length===0&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>No items yet. Tap + Add item to start.</div>}
+                    {lineItems.length>0&&(
+                      <div style={{ marginTop:8,display:"flex",flexDirection:"column",gap:6 }}>
+                        {lineItems.map(item=>{
+                          const itemTotal = lineItemAmount(item);
+                          return (
+                            <div key={item.id} style={{ display:"flex",alignItems:"center",gap:8,background:T.card||T.bg,borderRadius:10,padding:"8px 10px",border:`1px solid ${T.border}` }}>
+                              <div style={{ flex:1,minWidth:0 }}>
+                                <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.label||"Unnamed item"}</div>
+                                <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{item.qty||1} {item.unit||"nos"} @ {sym}{fmt(item.unitPrice||0)} each</div>
+                              </div>
+                              <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(itemTotal)}</div>
+                              <button onClick={()=>{setEditingItemId(item.id);setShowItemSheet(true);}} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:11,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Edit</button>
+                              <button onClick={()=>removeLineItem(item.id)} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:11,color:T.danger,fontFamily:"Nunito,sans-serif" }}>x</button>
+                            </div>
+                          );
+                        })}
+                        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4 }}>
+                          <span style={{ color:T.sub,fontSize:10 }}>Items total</span>
+                          <span style={{ color:Math.abs(lineItemsTotal-amt)<0.01?T.success:T.warn,fontSize:13,fontWeight:800 }}>{sym}{fmt(lineItemsTotal)}{Math.abs(lineItemsTotal-amt)>=0.01?` (\u2260 ${sym}${fmt(amt)} txn total)`:""}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {(()=>{
                   const linkedMethods = accounts.filter(a=>(a.type==="debit"&&a.linkedBank===accId)||(a.type==="upi"&&a.linkedAccount===accId));
                   if(getAcc(accId)?.type!=="bank"||!linkedMethods.length) return null;
@@ -5504,42 +5536,10 @@ function AppContent({ onLock }) {
                   </div>
                 )}
 
-                <div style={{ marginTop:10, background:T.input, borderRadius:10, padding:10 }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                    <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                      <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>Items (beta)</div>
-                      {useItemizedLines&&lineItems.length>0&&<span style={{ background:T.accent+"22",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>{lineItems.length} item{lineItems.length>1?"s":""}</span>}
-                    </div>
-                    <div style={{ display:"flex",gap:6 }}>
-                      {useItemizedLines&&<button onClick={()=>{setEditingItemId(null);setShowItemSheet(true);}} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add item</button>}
-                      <button onClick={()=>{setUseItemizedLines(v=>!v);setShowItemSheet(false);}} style={{ background:useItemizedLines?T.accent+"22":"none",border:`1px solid ${useItemizedLines?T.accent:T.border}`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:useItemizedLines?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{useItemizedLines?"ON":"OFF"}</button>
-                    </div>
-                  </div>
-                  {!useItemizedLines&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>Turn on to itemise this purchase by name, qty, unit and price.</div>}
-                  {useItemizedLines&&lineItems.length===0&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>No items yet. Tap + Add item to start.</div>}
-                  {useItemizedLines&&lineItems.length>0&&(
-                    <div style={{ marginTop:8,display:"flex",flexDirection:"column",gap:6 }}>
-                      {lineItems.map(item=>{
-                        const itemTotal = lineItemAmount(item);
-                        return (
-                          <div key={item.id} style={{ display:"flex",alignItems:"center",gap:8,background:T.card||T.bg,borderRadius:10,padding:"8px 10px",border:`1px solid ${T.border}` }}>
-                            <div style={{ flex:1,minWidth:0 }}>
-                              <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.label||"Unnamed item"}</div>
-                              <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{item.qty||1} {item.unit||"nos"} @ {sym}{fmt(item.unitPrice||0)} each</div>
-                            </div>
-                            <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(itemTotal)}</div>
-                            <button onClick={()=>{setEditingItemId(item.id);setShowItemSheet(true);}} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:11,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Edit</button>
-                            <button onClick={()=>removeLineItem(item.id)} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:11,color:T.danger,fontFamily:"Nunito,sans-serif" }}>x</button>
-                          </div>
-                        );
-                      })}
-                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4 }}>
-                        <span style={{ color:T.sub,fontSize:10 }}>Items total</span>
-                        <span style={{ color:Math.abs(lineItemsTotal-amt)<0.01?T.success:T.warn,fontSize:13,fontWeight:800 }}>{sym}{fmt(lineItemsTotal)}{Math.abs(lineItemsTotal-amt)>=0.01?` (\u2260 ${sym}${fmt(amt)} txn total)`:""}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                {/* Items block moved up next to the real Itemise Purchase toggle (near Paid Via)
+                    per a real reported bug: tapping that toggle hid Category but nothing visible
+                    replaced it, since Items was still scrolled far below - looked like data
+                    "disappeared". Now Items renders immediately next to its own toggle. */}
               </div>
             )}
 
@@ -5566,8 +5566,11 @@ function AppContent({ onLock }) {
                     "Suggested" (frequency-based) and "Remember" (learning) are explicitly NOT
                     built here - both require the Learning Engine (BP-001B.3), not yet built. This
                     implements only "Recent", derived from real transaction history below. */}
-                <input style={inp} placeholder="Search person or group..." value={attributionSearch} onChange={e=>setAttributionSearch(e.target.value)}/>
-                {(()=>{
+                {!showAttributionSearch&&(
+                  <button onClick={()=>setShowAttributionSearch(true)} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"8px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",textAlign:"left" }}>+ Add person or group</button>
+                )}
+                {showAttributionSearch&&<input autoFocus style={inp} placeholder="Search person or group..." value={attributionSearch} onChange={e=>setAttributionSearch(e.target.value)}/>}
+                {showAttributionSearch&&(()=>{
                   const q = attributionSearch.trim().toLowerCase();
                   const peopleOpts = people.filter(p=>!p.isMe).map(p=>({ type:"person", id:p.id, name:p.name, icon:p.emoji, color:p.color }));
                   const groupOpts = groups.map(g=>({ type:"group", id:g.id, name:g.name, icon:g.icon||"👥", color:g.color }));
@@ -5605,7 +5608,11 @@ function AppContent({ onLock }) {
                                 setSplitMode("allocate");
                                 setAllocRows(prev=>[...prev,{ id:genId(), targetType:"group", targetId:x.id, mode:di==="attributed"?"spent_on":"owes", amount:"", items:[] }]);
                               }
+                              // Collapse back to a clean, single-line summary after selection -
+                              // "hides from main page until selected" per real feedback. Tap the
+                              // input again (or the + trigger) to add another.
                               setAttributionSearch("");
+                              setShowAttributionSearch(false);
                             }} style={{ background:isSelected?x.color+"22":"none",border:`1px solid ${isSelected?x.color:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?x.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{x.icon} {x.name}</button>
                           );
                         })}
@@ -12293,8 +12300,9 @@ function AppContent({ onLock }) {
           <Row icon="🏦" title="Accounts" subtitle={`${accounts.length} account${accounts.length===1?"":"s"}`} onClick={()=>setSettingsSection("accounts")}/>
           <Row icon="🗂️" title="Categories" subtitle={`${cats.length} categories`} onClick={()=>setSettingsSection("categories")}/>
           <Row icon="🏷️" title="Account, Income & Liability Types" subtitle="Add custom types" onClick={()=>setSettingsSection("types")}/>
-          <Row icon="👥" title="People & Groups" subtitle="Manage who you split expenses with" onClick={()=>{ setTab("people"); setShowSettings(false); }}/>
-          <Row icon="🚗" title="Vehicles" subtitle={vehicles.length>0?`${vehicles.length} vehicle${vehicles.length===1?"":"s"}`:"Track fuel, PUC, insurance by vehicle"} onClick={()=>setSettingsSection("vehicles")}/>
+          {/* People & Groups and Vehicles removed from here per real feedback - both are now
+              reachable only via the Drawer shortcuts, avoiding the same two-places-for-one-thing
+              duplication already cleaned up elsewhere. */}
           <Row icon="🧾" title="Billers" subtitle="Manage billers and biller accounts" onClick={()=>{ setTab("bills"); setShowSettings(false); }}/>
           <Row icon="🛡️" title="Insurance" subtitle={insurancePolicies.filter(p=>p.status!=="archived").length>0?`${insurancePolicies.filter(p=>p.status!=="archived").length} polic${insurancePolicies.filter(p=>p.status!=="archived").length===1?"y":"ies"}`:"Track premiums, renewals, and coverage"} onClick={()=>{ setShowInsuranceList(true); setShowSettings(false); }}/>
         </div>
@@ -14074,15 +14082,14 @@ function AppContent({ onLock }) {
           <div style={{ padding:"10px 8px",display:"flex",flexDirection:"column",gap:2 }}>
             {[
               { icon:"👤", label:"User Profile", onClick:()=>{ setTab("home"); setShowSettings(false); onClose(); } },
-              { icon:"⚙️", label:"Settings", onClick:()=>{ setShowSettings(true); setSettingsSection(null); onClose(); } },
               { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
-              { icon:"🔮", label:"Outlook", onClick:()=>goToTab("outlook") },
               { icon:"🧾", label:"Bills", onClick:()=>goToTab("bills") },
               { icon:"👥", label:"People & Groups", onClick:()=>goToTab("people") },
               { icon:"🚗", label:"Vehicles", onClick:()=>{ setShowSettings(true); setSettingsSection("vehicles"); onClose(); } },
               { icon:"🔍", label:"Find Duplicate Transactions", onClick:()=>{ setShowDuplicateFinder(true); onClose(); } },
               { icon:"🎯", label:"Goals", onClick:()=>{ setShowGoalsList(true); onClose(); } },
               { icon:"✈️", label:"Trips & Outings", onClick:()=>{ setShowEventsList(true); onClose(); } },
+              { icon:"⚙️", label:"Settings", onClick:()=>{ setShowSettings(true); setSettingsSection(null); onClose(); } },
             ].map(item=>(
               <button key={item.label} onClick={item.onClick} style={{ display:"flex",alignItems:"center",gap:14,background:"none",border:"none",padding:"13px 14px",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:700,color:T.text,fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                 <span style={{ fontSize:18 }}>{item.icon}</span>{item.label}
