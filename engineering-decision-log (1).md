@@ -10,39 +10,7 @@ Newest entries at the top. Each entry: date, decision, reasoning, what it doesn'
 
 ---
 
-## EDL-030 — CR-001 Step 1 executed: applyRepaymentAllocations txn-kind branch repointed to canonical Transaction.applySettlement(), via a proven-equivalent adapter. CR-006 registered as explicit architectural debt.
-
-`2026-08-03`
-
-**Decision:** Built `settlePersonShareOnTransaction` adapter, bridging plain `txn` objects to `Transaction.applySettlement()` for person-share settlement, while keeping `groupCollectiveAmount`/`groupCollectiveSettledAmt` advancement as legacy pass-through inside the same adapter rather than absorbing it into the `Transaction` aggregate — per the explicit decision that group-collective tracking hasn't been audited as a business concept the way person-share settlement, Loans, and Payables were (ADR-001's "don't expand a model without evidence" applied here). Wrote 5 equivalence tests proving the adapter's composed output is identical to the legacy function's, for both the settlement math and the group-collective cap edge case, before touching production. Repointed the actual `applyRepaymentAllocations` txn-kind branch in `App.jsx` to call the adapter — one block, nothing else in the function touched. Verified via AST re-parse (the sandbox's bundler has an unrelated native-binary issue) and the full 66-test suite, all green. Registered CR-006 (Group Collective Canonicalization) as explicit, tracked architectural debt with a stated exit criterion, not a silent compromise. Updated CR-001 to `In Progress` — deliberately not `Complete`, since Step 2 (`SettleModal.settle()`) and 3 of CR-001's 4 duplicate locations remain legacy.
-
-**Reasoning:** This is the first time in the whole modernization effort that registered duplication was actually reduced, not just identified or designed around — worth executing with the same rigor as everything that led up to it, not less, since production code was genuinely at stake for the first time.
-
-**What it doesn't decide:** CR-006's actual resolution (deferred to its own future audit), and whether/when Step 2 happens.
-
-**Affected Tickets:** TRX-002C3 (Step 1 complete), CR-001 (In Progress), CR-006 (new, Open)
-**Affected Modules:** Transactions, Settlements
-**Affected ADRs:** ADR-001 (evidence-before-expansion applied to the CR-006 decision), ADR-033 (SettlementTarget contract now live in production)
-
----
-
-
-
-`2026-08-03`
-
-**Decision:** Extracted `applyRepaymentAllocations` and `SettleModal.settle()` mechanically (Michael Feathers' "seam" technique — closure variables converted to explicit parameters, zero logic changes, verified by direct line-by-line copy from the real `App.jsx`) into standalone testable modules. Wrote 14 characterization tests capturing current behavior across all branches of both functions, including a direct regression anchor for this session's two settlement bug fixes and a reconstruction of the real "UG1/Public Works" scenario. All 14 pass; 61/61 across the full suite built this session. Reused the real, already-canonical `remainingShare` (`src/domain/shared/remainingShare.js`) rather than re-implementing it. Deliberately stopped before repointing either legacy function in `App.jsx` — that's real production surgery on the highest-stakes code in the app, and doing it without explicit sign-off would repeat exactly the pattern this whole session has been correcting.
-
-**Reasoning:** "No regression tests fail" (the stated TRX-002C success criterion) was previously unfalsifiable — no tests existed to check it against. This makes it real. Repointing is a separate, much higher-stakes decision than writing the safety net, and shouldn't be bundled into the same commit as the tests that are supposed to protect it.
-
-**What it doesn't decide:** Whether/when to actually perform the repointing — explicitly left as the next decision point, not assumed.
-
-**Affected Tickets:** TRX-002C2 (prerequisite complete, repointing pending)
-**Affected Modules:** Transactions, Settlements, Bills
-**Affected ADRs:** none new — this is test infrastructure, not an architectural decision
-
----
-
-
+## EDL-028 — SettlementService built and proven; production retirement flagged as blocked, not attempted without a safety net
 
 `2026-08-03`
 

@@ -10,23 +10,7 @@ Newest entries at the top. Each entry: date, decision, reasoning, what it doesn'
 
 ---
 
-## EDL-030 — CR-001 Step 1 executed: applyRepaymentAllocations txn-kind branch repointed to canonical Transaction.applySettlement(), via a proven-equivalent adapter. CR-006 registered as explicit architectural debt.
-
-`2026-08-03`
-
-**Decision:** Built `settlePersonShareOnTransaction` adapter, bridging plain `txn` objects to `Transaction.applySettlement()` for person-share settlement, while keeping `groupCollectiveAmount`/`groupCollectiveSettledAmt` advancement as legacy pass-through inside the same adapter rather than absorbing it into the `Transaction` aggregate — per the explicit decision that group-collective tracking hasn't been audited as a business concept the way person-share settlement, Loans, and Payables were (ADR-001's "don't expand a model without evidence" applied here). Wrote 5 equivalence tests proving the adapter's composed output is identical to the legacy function's, for both the settlement math and the group-collective cap edge case, before touching production. Repointed the actual `applyRepaymentAllocations` txn-kind branch in `App.jsx` to call the adapter — one block, nothing else in the function touched. Verified via AST re-parse (the sandbox's bundler has an unrelated native-binary issue) and the full 66-test suite, all green. Registered CR-006 (Group Collective Canonicalization) as explicit, tracked architectural debt with a stated exit criterion, not a silent compromise. Updated CR-001 to `In Progress` — deliberately not `Complete`, since Step 2 (`SettleModal.settle()`) and 3 of CR-001's 4 duplicate locations remain legacy.
-
-**Reasoning:** This is the first time in the whole modernization effort that registered duplication was actually reduced, not just identified or designed around — worth executing with the same rigor as everything that led up to it, not less, since production code was genuinely at stake for the first time.
-
-**What it doesn't decide:** CR-006's actual resolution (deferred to its own future audit), and whether/when Step 2 happens.
-
-**Affected Tickets:** TRX-002C3 (Step 1 complete), CR-001 (In Progress), CR-006 (new, Open)
-**Affected Modules:** Transactions, Settlements
-**Affected ADRs:** ADR-001 (evidence-before-expansion applied to the CR-006 decision), ADR-033 (SettlementTarget contract now live in production)
-
----
-
-
+## EDL-029 — Characterization tests built for both legacy settlement functions; repointing deliberately not attempted without explicit go-ahead
 
 `2026-08-03`
 
