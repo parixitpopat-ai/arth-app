@@ -411,6 +411,8 @@ Every UI decision for Bills, People, Credit Cards, Budget, and the
 Record Transaction screen should read from this model — not introduce
 parallel fields or relationships without extending this ADR first.
 
+**Addendum (AQ-002, 2026-08-03) — Precision correction on the `people`/`splitPeople` overlap.** Direct code audit confirms this is not ambiguity on one object: `people` belongs to Transaction, `splitPeople` belongs to Bill — the same person-share value shape, expressed under different names on two different entities. All bill-payment transactions already copy `Bill.splitPeople` into `Transaction.people` at creation, confirming this is the intended, consistent pattern, not drift. No code change required by this addendum.
+
 \---
 
 ## ADR-025 — Financial Relationships
