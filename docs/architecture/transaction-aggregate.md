@@ -103,6 +103,10 @@ The contract Teams 2–8 work against. A proposed refactor that violates a `✓`
 
 ---
 
+## 9. Addendum (AQ-002, 2026-08-03)
+
+`PersonShare` is a value object **shared by both the `Transaction` and `Bill` aggregates**, not exclusive to Transaction. Confirmed via direct code audit: real `Bill.splitPeople` and `Transaction.people` are the identical shape (amount/mode/settledAmt/remainingAmt/settled), and every read site treats them interchangeably via a fallback (`t.people?.[pid] || t.splitPeople?.[pid]`). This doesn't change Transaction's own boundary (§1) — it means Bill, as its own aggregate, independently owns a `PersonShare[]` of its own, using the same value object definition. No design change; this model already accommodated it, just wasn't stated explicitly until this audit.
+
 ## 8. What this deliberately does not answer
 
 - Whether Settlement becomes a shared domain capability across Transaction/Loan/Receivable (Team 4/CR-004's question) — this model assumes `Transaction.applySettlement(personId, amount)` exists as an aggregate-owned method with enforced invariants, callable *by* a settlement capability, without deciding whether that capability is a shared service or per-aggregate logic. Both designs are compatible with the boundary drawn here.

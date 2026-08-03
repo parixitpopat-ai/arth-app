@@ -10,7 +10,23 @@ Newest entries at the top. Each entry: date, decision, reasoning, what it doesn'
 
 ---
 
-## EDL-025 — TRX-002A implemented and proven: Application Layer plumbing, first tests this repo has ever had
+## EDL-026 — AQ-002 resolved: people/splitPeople is cross-entity naming, not same-entity ambiguity. Architecture Phase Complete.
+
+`2026-08-03`
+
+**Decision:** Audited `people` (125 refs), `splitPeople` (80 refs), `forPerson` (22 refs) directly against ADR-030. Confirmed all 13 `splitPeople:` write sites construct Bill objects (never Transaction), all 14 person-lookup read sites use the identical `t.people?.[pid] || t.splitPeople?.[pid]` fallback, and every bill-payment transaction copies `Bill.splitPeople` into `Transaction.people` at creation. Conclusion: `people` belongs to Transaction, `splitPeople` belongs to Bill — same underlying value object shape, different entities, not an unresolved ambiguity on one object as ADR-030's wording implied. `forPerson` confirmed genuinely distinct (single ID, tagMode-gated, no split math). Outcome A (no code change, no Change Register entry) with one documentation addendum: `PersonShare` is a value object shared by both `Transaction` and `Bill` aggregates, added to Team 1's frozen model. Declared Architecture Phase Complete.
+
+**Reasoning:** This was the last flagged uncertainty before TRX-002B. Resolving it as a naming-precision correction rather than a code-level fix or an ADR-030 reopen matches the evidence exactly — no drift was found, only an imprecise description in the original ADR text.
+
+**What it doesn't decide:** TRX-002B's actual implementation — that's next, now unblocked with no acknowledged architectural uncertainty carried forward.
+
+**Affected Tickets:** AQ-002, TRX-002B (unblocked)
+**Affected Modules:** Transactions, Bills
+**Affected ADRs:** ADR-030 (addendum recommended, not reopened)
+
+---
+
+
 
 `2026-08-03`
 
