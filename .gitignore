@@ -34,3 +34,5 @@ release
 # Delivery bundles - extract and place contents, never commit the zip/folder itself
 trx-*-bundle*
 trx-*-bundle*.zip
+
+.env*
