@@ -10,7 +10,23 @@ Newest entries at the top. Each entry: date, decision, reasoning, what it doesn'
 
 ---
 
-## EDL-030 — CR-001 Step 1 executed: applyRepaymentAllocations txn-kind branch repointed to canonical Transaction.applySettlement(), via a proven-equivalent adapter. CR-006 registered as explicit architectural debt.
+## EDL-031 — CR-001 Step 2 executed: SettleModal.settle()'s plain-transaction branch reuses the same proven adapter as Step 1
+
+`2026-08-03`
+
+**Decision:** Confirmed `SettleModal.settle()`'s plain-transaction (else) branch has identical person-share settlement math to `applyRepaymentAllocations`'s txn-kind branch — same formula, same fields. Reused the existing `settlePersonShareOnTransaction` adapter directly rather than building a second one. Wrote 3 new equivalence tests confirming the reuse holds before touching `App.jsx`. Repointed the actual `SettleModal.settle()` else-branch to call the adapter — one block changed, `upsertSettlement`/bill-mirroring/settlement-transaction-creation logic all untouched. Full suite: 69/69 (66 + 3 new).
+
+**Reasoning:** Given the noted time constraint, reusing a component already proven equivalent (rather than building and re-proving a near-identical one) was the correct efficiency, not a shortcut on rigor — the equivalence test still ran before the repoint, same discipline as Step 1.
+
+**What it doesn't decide:** CR-001 remains In Progress, not Complete — bill-kind branches of both functions, `applyRepaymentAllocations`'s group-txn/group-bill/tagged branches, and `AddModal` L4480/L4641 are all still legacy, untouched. Overclaiming completion here would contradict the accuracy this whole process depends on.
+
+**Affected Tickets:** TRX-002C4 (Step 2 complete), CR-001 (still In Progress)
+**Affected Modules:** Transactions, Settlements
+**Affected ADRs:** none new
+
+---
+
+
 
 `2026-08-03`
 

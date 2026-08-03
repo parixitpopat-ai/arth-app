@@ -6127,18 +6127,15 @@ function AppContent({ onLock }) {
           }));
         }
       } else {
+        // TRX-002C4 (CR-001, step 2): reuses the same settlePersonShareOnTransaction
+        // adapter proven for applyRepaymentAllocations (TRX-002C3) — identical
+        // formula, second call site. Proven equivalent by
+        // settle-branch-equivalence.test.js before this repoint was made.
         setTxns(prev=>[
           ...upsertSettlement([]),
           ...prev.map(x=>{
             if(x.id!==t.id) return x;
-            const originalAmt = Number(x.people[pid]?.amount||0);
-            const prevSettled = Number(x.people[pid]?.settledAmt||0);
-            const nextSettled = Math.min(originalAmt, prevSettled + appliedAmt);
-            const nextRemaining = Math.max(0, originalAmt-nextSettled);
-            const addedAmt = nextSettled - prevSettled;
-            const groupCap = Number(x.groupCollectiveAmount||0);
-            const nextGroupSettled = groupCap > 0 ? Math.min(groupCap, Number(x.groupCollectiveSettledAmt||0) + addedAmt) : x.groupCollectiveSettledAmt;
-            return { ...x, people:{ ...x.people, [pid]:{ ...x.people[pid], settled:nextRemaining<=0, settledAmt:nextSettled, remainingAmt:nextRemaining } }, ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGroupSettled } : {}) };
+            return settlePersonShareOnTransaction({ txn:x, personId:pid, amount:appliedAmt, todayStr });
           })
         ]);
         // Update any bill that mirrors this person's split
