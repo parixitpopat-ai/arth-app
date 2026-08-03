@@ -22,7 +22,7 @@ Behavior is expressed once, as a command handled by exactly one owner (Teams 1�
 
 ## Decision
 
-**Business behavior may no longer mutate application state directly. All state changes happen through commands, handled by the aggregate that owns the relevant invariant, per ADR-032/025.** This is true regardless of what technology persists the result.
+**Business behavior may no longer mutate application state directly. All state changes happen through commands, handled by the aggregate that owns the relevant invariant, per ADR-032/033.** This is true regardless of what technology persists the result.
 
 **Persistence technology is explicitly not decided by this ADR and may not change for some time.** A snapshot can remain the serialization format at the edge — `Command → Aggregate → Snapshot Serializer → saveCloudSnapshot()` is a legitimate, ADR-033-compliant flow. What's frozen is that nothing upstream of the serializer is allowed to bypass the aggregate to write state directly. This makes the ADR durable independent of whether Supabase, SQLite, Postgres, or something else eventually holds the data.
 

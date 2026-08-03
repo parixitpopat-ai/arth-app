@@ -28,7 +28,7 @@ The output of this sprint wasn't just Transactions' architecture. It was this me
 
 1. `ACC-000` — module audit (same shape as TRX-000A–D, scaled to what Accounts actually contains)
 2. A Canonical Business Rules Register for Accounts (or extend the existing one, if rules genuinely overlap — Payable's introduction this session already touches Accounts)
-3. Any ownership gaps found → their own ADR, following ADR-032/025/026's evidentiary bar, not a lower one
+3. Any ownership gaps found → their own ADR, following ADR-032/033/034's evidentiary bar, not a lower one
 4. A Change Register for Accounts-specific migrations
 5. Behavior-first implementation sequencing, same reasoning as ADR-034
 

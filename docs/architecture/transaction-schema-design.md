@@ -1,7 +1,7 @@
 # Transaction Domain — Schema Design
 
 `2026-08-03` · TRX-001C, Team 5 deliverable · Status: **Draft — for review**
-Schema only. No migrations, no implementation. Every table below traces to a decision already frozen (Team 1's model, ADR-032/025, AQ-001) — nothing here introduces new ownership, it encodes ownership already decided.
+Schema only. No migrations, no implementation. Every table below traces to a decision already frozen (Team 1's model, ADR-032/033, AQ-001) — nothing here introduces new ownership, it encodes ownership already decided.
 
 ---
 

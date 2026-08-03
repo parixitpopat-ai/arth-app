@@ -30,7 +30,7 @@ Newest entries at the top. Each entry: date, decision, reasoning, what it doesn'
 
 `2026-08-03`
 
-**Decision:** Froze ADR-034. Elevated "audit reality before designing the target" from an observation in the method doc's retrospective section to its stated core principle, since both near-failures this session shared that root cause. Closed TRX-001C at a milestone documenting all nine deliverables produced beyond the original single-aggregate-design scope. Established the implementation-phase Definition of Done: no new ADRs unless implementation reveals a genuine gap against ADR-032/025/026, conformance to frozen architecture becomes the review standard, replacing architecture-discovery as the default mode.
+**Decision:** Froze ADR-034. Elevated "audit reality before designing the target" from an observation in the method doc's retrospective section to its stated core principle, since both near-failures this session shared that root cause. Closed TRX-001C at a milestone documenting all nine deliverables produced beyond the original single-aggregate-design scope. Established the implementation-phase Definition of Done: no new ADRs unless implementation reveals a genuine gap against ADR-032/033/034, conformance to frozen architecture becomes the review standard, replacing architecture-discovery as the default mode.
 
 **Reasoning:** Naming the core principle explicitly (not just implying it via two examples) makes the method actually teachable to whoever picks up the next module, per the stated goal. Closing formally, with a stated Definition of Done change, prevents the implementation phase from drifting back into "discover architecture as you go" by default — the same discipline ADR-032's freeze notice already modeled at the repo level, applied here at the workstream level.
 
@@ -54,7 +54,7 @@ Newest entries at the top. Each entry: date, decision, reasoning, what it doesn'
 
 **Affected Tickets:** ADR-034 (new, Proposed), TRX-002A–D (sequencing established)
 **Affected Modules:** Transactions, all future modules (via the extracted method)
-**Affected ADRs:** ADR-034 (new), ADR-032/025 (reasoning extended to persistence sequencing)
+**Affected ADRs:** ADR-034 (new), ADR-032/033 (reasoning extended to persistence sequencing)
 
 ---
 
@@ -70,7 +70,7 @@ Newest entries at the top. Each entry: date, decision, reasoning, what it doesn'
 
 **Affected Tickets:** Team 7, Team 8 (both draft — completes the original 8-team TRX-001C sprint)
 **Affected Modules:** Transactions, Accounts, Loans, Payables, all future API/frontend work
-**Affected ADRs:** none new; ADR-017/018/024/025 all reflected in the design
+**Affected ADRs:** none new; ADR-017/018/032/033 all reflected in the design
 
 ---
 

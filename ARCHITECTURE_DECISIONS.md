@@ -5,26 +5,229 @@ from now the reasoning is still there, not just the outcome. Newest
 first. Add an entry whenever a decision this size gets made, not
 retroactively in a batch.
 
----
+\---
 
 ## 🔒 ARCHITECTURE FREEZE NOTICE — Arth v2.0
 
 **Status: FROZEN, as of ADR-021.** The architectural phase is complete.
 From this point on:
-- ❌ No new ADRs unless a major architectural flaw is discovered
-- ❌ No moving modules between domains
-- ❌ No creating new top-level navigation items
-- ❌ No redesigning ownership rules
+
+* ❌ No new ADRs unless a major architectural flaw is discovered
+* ❌ No moving modules between domains
+* ❌ No creating new top-level navigation items
+* ❌ No redesigning ownership rules
 
 Any new feature must fit within this frozen architecture. See
-`ARTH_V2_IA.md` for the full navigation, drawer structure, and the final
+`ARTH\\\_V2\\\_IA.md` for the full navigation, drawer structure, and the final
 ownership-rules summary (Manage/Money/Outlook/Timeline/Insights, ten
 Final Architecture Principles). **Next deliverable: Phase 2 — Screen
 Inventory** (catalogue every screen, classify Existing/Refactor/New, map
 each to its owning domain and engine). No wireframes or mockups begin
 until that's complete.
 
----
+\---
+
+## ADR-034 — Transition from State-Centric to Command-Centric Architecture
+
+`Proposed 2026-08-03` · **Status: ✅ Approved (Frozen)** — signed off 2026-08-03
+
+Not a persistence ADR. `saveCloudSnapshot()` is the most visible symptom of the actual gap, not the gap itself.
+
+\---
+
+## The actual difference
+
+**Today (state-centric):**
+
+```
+Current State → Mutate JavaScript Objects → saveCloudSnapshot(snapshot)
+```
+
+Business behavior and state mutation are the same act, performed inline, wherever a component happens to need it — which is the root mechanical cause of every duplicate rule this project found (BUG-TRX-001, CR-001 through CR-005).
+
+**Target (command-centric):**
+
+```
+User Intent → Command → Application Layer → Aggregate → Domain Events → Persistence
+```
+
+Behavior is expressed once, as a command handled by exactly one owner (Teams 1–6's entire output). Persistence is what happens *after* behavior has already been correctly applied and validated — not the mechanism behavior is smuggled through.
+
+## Decision
+
+**Business behavior may no longer mutate application state directly. All state changes happen through commands, handled by the aggregate that owns the relevant invariant, per ADR-032/033.** This is true regardless of what technology persists the result.
+
+**Persistence technology is explicitly not decided by this ADR and may not change for some time.** A snapshot can remain the serialization format at the edge — `Command → Aggregate → Snapshot Serializer → saveCloudSnapshot()` is a legitimate, ADR-033-compliant flow. What's frozen is that nothing upstream of the serializer is allowed to bypass the aggregate to write state directly. This makes the ADR durable independent of whether Supabase, SQLite, Postgres, or something else eventually holds the data.
+
+\---
+
+## Migration sequencing (revised — behavior before storage)
+
+Persistence migration is deliberately **last**, not first, because changing behavior while storage stays constant is lower-risk than changing both simultaneously.
+
+* **TRX-002A — Application Layer.** Command Dispatcher, Command Handlers, Aggregate Repository interfaces, Unit of Work if required. **No `Transaction` implementation yet** — this is plumbing only, and it's testable/verifiable independent of any specific aggregate.
+* **TRX-002B — Transaction Aggregate implementation.** Built against TRX-002A's plumbing.
+* **TRX-002C — Settlement extraction.** `SettlementService` + `SettlementTarget`, per ADR-033 — this is where CR-001/CR-004 actually get resolved in code.
+* **TRX-002D — Payable introduction.** Per AQ-001 — this is where CR-002/CR-003/CR-005 get resolved.
+* **(Not yet scheduled) Persistence migration** — replacing or supplementing `saveCloudSnapshot()`'s whole-blob approach with real per-aggregate storage, once TRX-002A–D have proven the command-centric behavior works correctly against the existing snapshot mechanism. Only scheduled after, not before.
+
+## Why this ordering reduces risk
+
+Snapshot persistence isn't the problem — direct state mutation is. Fixing behavior first, while storage stays exactly as it is today, means every one of TRX-002A–D can be verified against real running behavior (the app still works, still syncs, still shows correct data) without also debugging a storage migration at the same time. This is the same reasoning already applied throughout TRX-001C: don't change two things at once when they can be sequenced and verified independently (see: ADR-032's transitional 3B policy, applied here at the persistence layer instead of the code layer).
+
+## What this does not decide
+
+* The actual replacement persistence technology, if any — not scheduled, not designed here
+* Whether the snapshot format itself needs to change shape to accommodate the new schema (Team 5) before or after TRX-002A–D — open question for whoever schedules the eventual persistence work
+* Timeline for TRX-002A–D beyond the ordering stated
+
+## Sign-off
+
+Proposed, not Active. Needs explicit approval, per the same discipline applied to every prior ADR this session.
+
+\---
+
+## ADR-033 — Cross-Aggregate Orchestration: Domain Services Decide, Aggregates Mutate
+
+`Proposed 2026-08-03` · **Status: ✅ Approved (Frozen)** — signed off 2026-08-03
+
+Resolves CR-004. Elevated from a Transactions-scoped decision (Team 4, TRX-001C) to a general architectural rule because the reasoning applies wherever a business process spans more than one aggregate — this is bigger than Settlement alone.
+
+**Relationship to ADR-032:** this doesn't invoke ADR-018's reopening clause independently — it's answering a question ADR-032 itself left open (§Q1, "who owns settlement"), within work ADR-032 already authorized. Not a new precedent for the freeze; a continuation of one already granted.
+
+\---
+
+## Decision
+
+**Cross-aggregate decisions belong to domain services. Aggregate state changes belong only to the aggregate that owns the invariant.**
+
+A domain service may decide *what should happen* across multiple aggregates — but it may never *make it happen* by reaching into an aggregate's internal state directly. Every aggregate exposes intention-revealing methods; the service calls them and never bypasses them.
+
+## Why (the two failure modes this rejects)
+
+**Failure mode 1 — every aggregate independently reinvents the same cross-cutting logic.** This is today's actual Settlement code: `applyRepaymentAllocations`, `SettleModal.settle()`, and two more independent blocks, each hand-implementing "reduce an owed amount, recompute settled." Four correct-in-isolation implementations with no mechanism keeping them consistent — confirmed as the direct cause of 3 production bugs this session (BUG-TRX-001, plus the earlier bill-settlement fixes).
+
+**Failure mode 2 — a shared service reaches directly into aggregate state to avoid the duplication.** This looks like the fix, but breaks a harder rule: an aggregate is the only thing allowed to enforce its own invariants. If a service sets `share.remainingAmt -= x; share.settled = (remainingAmt<=0)` directly, that invariant is enforced by service discipline, not by the aggregate boundary — which is exactly how the duplication in failure mode 1 happened, just moved to a new location. The aggregate becomes a passive data structure; the service becomes the real (undeclared) owner.
+
+## The pattern this decision establishes
+
+```
+SettlementTarget {
+  outstanding()
+  applySettlement(allocation)
+}
+```
+
+Any aggregate that can receive a settlement implements this contract. The orchestrating domain service depends on the contract, never on a concrete aggregate type. For Settlement specifically: `Transaction implements SettlementTarget`, `Loan implements SettlementTarget`; `Receivable`/`Payable` join only when real business evidence requires it — the interface existing is not license to implement it everywhere for symmetry (Bills explicitly do not implement it today, per insufficient evidence — see Team 4's settlement-architecture.md).
+
+**The orchestrating service itself must be stateless** — stores nothing, owns nothing, persists nothing, pure orchestration. Without this constraint, a domain service accumulates responsibility over time the way a computation engine legitimately can (`src/domain/financialEngine/engine.js` is fine being stateful-adjacent for forecasting) — but an orchestrator drifting into ownership is exactly the failure this ADR exists to prevent.
+
+## Domain events, two tiers
+
+* **Aggregate events** (e.g. `TransactionSettlementApplied`, `LoanPaymentApplied`) — fired by the aggregate itself when its own state changes. These are what downstream consumers react to.
+* **Process events** (e.g. `SettlementCompleted`) — fired by the orchestrating service to record that a cross-aggregate process occurred, carrying the full allocation breakdown. For audit/history, not for triggering further side effects — those come from the aggregate-level events, not the process event.
+
+## Scope of this ADR
+
+**ADR-033 establishes a preferred architectural pattern, not a mandatory framework. It should be adopted only where an audited domain process spans multiple aggregates and the separation of orchestration from invariant enforcement provides measurable architectural benefit.** It does not itself decide:
+
+* Which other business processes in Arth beyond Settlement should adopt it (evaluated case by case, as evidence emerges — not applied pre-emptively, and never adopted merely because the pattern is available or elegant)
+* Whether Bills ever implement `SettlementTarget` (open, insufficient evidence today)
+* Implementation details of `settlement.js` itself (Team 3's migration plan)
+
+## Sign-off
+
+**Approved and Frozen 2026-08-03.** Scoping clause (adopt case-by-case, not as mandatory framework) incorporated per review before freezing.
+
+\---
+
+## ADR-032 — Settlement \& Ledger Mutation Ownership
+
+`Proposed 2026-08-01` · **Status: ✅ Approved (Frozen)** — signed off 2026-08-01
+
+**Reason for approval:** TRX-000C demonstrated an architectural ownership gap, not merely an implementation issue. The audit established that settlement and outstanding-balance mutation are duplicated across independent UI implementations with no canonical owner. That satisfies the reopening criterion established by ADR-018 and justifies a new architectural decision.
+
+**Invokes ADR-018's reopening clause.** ADR-018 Decision 2 (permanent delete, no soft-delete) explicitly named its own trigger for revisiting: *"if Sync/Cloud-Backup/Collaboration ever make undo-ability matter."* This ADR isn't reopening that specific decision, but it establishes the same justification pattern for touching the repo under its stated freeze (`Status: FROZEN, as of ADR-021 — no new ADRs unless a major architectural flaw is discovered`).
+
+**Precedent statement, recorded explicitly since this is the freeze's first invocation:** This ADR was approved because repository evidence (TRX-000C and the Canonical Business Rules Register) demonstrated duplicated ownership of core financial business rules with no canonical owner, resulting in multiple confirmed production defects. **This establishes that the architectural freeze may be reconsidered only when objective repository evidence demonstrates a systemic ownership gap that materially affects correctness or maintainability** — not on the basis of a general sense that something looks messy. Future ADRs invoking this clause should be held to the same evidentiary bar: an audit (`XXX-000`), a register entry (CBR or equivalent), and confirmed production defects or an equivalent measurable harm — not stylistic disagreement.
+
+**Evidence this ADR is answering to** (not repeated in full — see TRX-000C and the Canonical Business Rules Register):
+
+* `applyRepaymentAllocations` and `SettleModal.settle()` share zero code; one call site total for the former in the entire file
+* 4 independent implementations of "reduce person's owed amount + recompute settled"
+* 2 duplicate pairs implementing outstanding-balance mutation
+* CBR baseline: 2 canonical rules, 4 duplicate rules, as of 2026-08-01
+
+\---
+
+## Question 1 — Who owns settlement?
+
+**Decision:** Settlement allocation and its consequences (reducing owed amounts, recomputing settled status, mirroring to linked bills) become the responsibility of a single domain owner: the **Transactions domain.** Not because settlement is conceptually "a transaction," but because every settlement in this app either originates as a transaction (the Settlement-tab repayment flow) or targets one (bills' `paidByTxnId` link already makes transactions the source of truth over bills, confirmed in this session's bug fixes). Bills and Accounts consume settlement outcomes; they don't own the rule.
+
+## Question 2 — Who owns outstanding balance mutation?
+
+**Decision:** Outstanding balance mutation becomes the responsibility of the **Accounts domain.** Currently it's an inline side-effect of whatever transaction happens to touch a CC account (`AddModal`, 4 sites). Under this decision, a transaction that affects an account's outstanding balance *requests* that change from Accounts; it does not compute or apply the change itself.
+
+## Question 3 — Which module is allowed to mutate ledger state?
+
+### 3A. Architectural Invariant (Frozen)
+
+**Only the canonical domain owner may own the business rules that mutate ledger state. UI components are never the canonical owner of ledger mutation rules.**
+
+This is timeless — it remains true regardless of whether the canonical implementation currently exists. It does not, by itself, require any code to change today.
+
+### 3B. Implementation Policy (Transitional)
+
+**Until the canonical domain services are implemented, existing UI mutations may remain in place for backward compatibility.** However:
+
+* **No new business-rule mutations may be introduced directly into UI components.** All new mutation logic must follow the ownership model defined by this ADR.
+* **Existing duplicated mutations shall be removed incrementally through approved Change Register items** — not a big-bang rewrite, not left indefinitely either.
+
+This is the specific, enforceable rule that prevents duplicate implementation #5: a component that needs to change ledger state calls a named domain function going forward; it does not `setTxns(prev=>prev.map(...))` inline in new code. It is a hard rule for new code and is **not** retroactively enforced against existing code by this ADR alone — that migration happens through tracked Change Register items, giving 3A something to converge toward without forcing an immediate rewrite.
+
+## Question 4 — What is the canonical lifecycle?
+
+**Decision:**
+
+```
+Transaction recorded
+        ↓
+Settlement calculated (if applicable)
+        ↓
+Account balances updated
+        ↓
+Bill state updated
+        ↓
+Derived projections refreshed (Home/Outlook/Insights aggregates)
+```
+
+Each arrow is a domain boundary. A step may only be triggered by the step before it completing — never invoked directly by a UI component skipping ahead (e.g., a component should not update Bill state directly without Settlement having calculated what changed and Account balances having been updated first, even if today's code sometimes does exactly that).
+
+\---
+
+## Migration Impact
+
+Ownership only — no implementation steps, no code changes proposed by this ADR itself:
+
+|Existing rule|Current owner|Future canonical owner|
+|-|-|-|
+|Settlement allocation|None (duplicated: `AddModal`, `SettleModal` — 4 locations)|Transactions domain|
+|Reduce person's owed amount + recompute settled|None (same 4 locations)|Transactions domain|
+|Outstanding balance — CC charge/payment|None (duplicated inline in `AddModal` — 4 sites, 2 rule-pairs)|Accounts domain|
+|Bill status recomputation|Bills (canonical, but component-scope)|Bills domain (unchanged owner, formalized location)|
+|Bill-to-transaction settlement mirroring|Bills/Transactions (canonical, but component-scope)|Transactions domain (settlement is the trigger; bill state is the consequence)|
+
+## What this ADR does not decide
+
+* The actual code structure (file names, whether "domain function" means a plain module export, a class, or something else) — implementation detail for `TRX-001+`
+* Timeline or sequencing of which rule gets migrated first (though the CBR and TRX-000A/C evidence make Settlement and Outstanding Balance the obvious starting pair, being the only rules already proven duplicated)
+* Anything about Accounts, People, or Loans domains beyond the two rules explicitly addressed above — this ADR is scoped to what TRX-000A/C's evidence actually covered, not a full ledger redesign
+
+## Sign-off
+
+**Approved and Frozen 2026-08-01.** Amendments 1 (3A/3B split) and 2 (strengthened precedent statement) incorporated per review before freezing.
+
+\---
 
 ## ADR-031 — Record Transaction Flow
 
@@ -35,33 +238,33 @@ handler where verified; genuinely new proposals marked explicitly.
 
 ### Required Field Table (as proposed, cross-checked against ADR-030)
 
-| Field | Required | Real field (ADR-030) |
-|---|---|---|
-| Transaction Type | Yes | `type` |
-| Amount | Yes | `amount` |
-| Date | Yes | `date` |
-| Source Account | Depends | `accId` |
-| Destination Account | Depends | `toAccId` |
-| Merchant | Optional | `merchant` |
-| Items | Optional | `items` |
-| Category/Sub-category | Derived from Item or manual | `catId`/`subId` — **derivation from Item is new, not yet real; vendor-text matching (`VENDOR_CATEGORY_RULES`) is the closest existing mechanism, and it matches merchant text, not individual items** |
-| Bill | Optional | `paidBillId`/`isBillPayment` |
-| Person(s) | Optional | `people`/`splitPeople` — **still the unresolved overlap flagged in ADR-030, not resolved by this ADR either** |
-| Group | Optional | `groupId` |
-| Credit Card | Optional | `accId` pointing at a `type==="cc"` account |
-| Notes | Optional | `note` |
-| Attachments | Optional | `imageBase64` (confirmed real field) |
+|Field|Required|Real field (ADR-030)|
+|-|-|-|
+|Transaction Type|Yes|`type`|
+|Amount|Yes|`amount`|
+|Date|Yes|`date`|
+|Source Account|Depends|`accId`|
+|Destination Account|Depends|`toAccId`|
+|Merchant|Optional|`merchant`|
+|Items|Optional|`items`|
+|Category/Sub-category|Derived from Item or manual|`catId`/`subId` — **derivation from Item is new, not yet real; vendor-text matching (`VENDOR\\\_CATEGORY\\\_RULES`) is the closest existing mechanism, and it matches merchant text, not individual items**|
+|Bill|Optional|`paidBillId`/`isBillPayment`|
+|Person(s)|Optional|`people`/`splitPeople` — **still the unresolved overlap flagged in ADR-030, not resolved by this ADR either**|
+|Group|Optional|`groupId`|
+|Credit Card|Optional|`accId` pointing at a `type==="cc"` account|
+|Notes|Optional|`note`|
+|Attachments|Optional|`imageBase64` (confirmed real field)|
 
 ### Item Confidence — genuinely new, not yet built
 
-| Confidence | Example | Behaviour |
-|---|---|---|
-| High | Milk | Auto-select Item → Sub-category → Category |
-| Medium | Amazon | Suggest likely items from history |
-| Low | Unknown | Leave uncategorized, decide later |
+|Confidence|Example|Behaviour|
+|-|-|-|
+|High|Milk|Auto-select Item → Sub-category → Category|
+|Medium|Amazon|Suggest likely items from history|
+|Low|Unknown|Leave uncategorized, decide later|
 
 **Nothing like this exists today.** The closest real mechanism is
-`VENDOR_CATEGORY_RULES` — a flat pattern-match on merchant text to a
+`VENDOR\\\_CATEGORY\\\_RULES` — a flat pattern-match on merchant text to a
 single category, no confidence tiering, no item-level granularity, no
 history-based suggestion. This would be new engine work, not a UI
 change over existing capability.
@@ -69,12 +272,13 @@ change over existing capability.
 ### State Diagrams (per type, grounded in the real current field order)
 
 **Expense** (verified against the actual save handler's field sequence):
+
 ```
 Start
   |
 Choose Type: Expense
   |
-Merchant (optional, autofills Category via VENDOR_CATEGORY_RULES if matched)
+Merchant (optional, autofills Category via VENDOR\\\_CATEGORY\\\_RULES if matched)
   |
 Amount (required)
   |
@@ -90,27 +294,33 @@ Save -> checks: transactionRef duplicate (real, this session's fix) + same-amoun
 ```
 
 **Income:**
+
 ```
 Start -> Choose Type: Income -> Amount -> Account -> Merchant/Source (optional) -> Save
 ```
+
 No item/attribution step — confirmed no `items`/`splitPeople` usage found on income-type saves in the current handler.
 
 **Transfer:**
+
 ```
 Start -> Choose Type: Transfer -> Source Account -> Destination Account (toAccId) -> Amount -> Save
 ```
 
-**Settlement** (`settlement_in`/`settlement_out`, per ADR-030's resolution — stays its own type):
+**Settlement** (`settlement\\\_in`/`settlement\\\_out`, per ADR-030's resolution — stays its own type):
+
 ```
 Start -> Choose Type: Settlement -> Person -> Amount -> Against which receivable? (againstTxnId, real field) -> Save
 ```
 
 **Investment:**
+
 ```
 Start -> Choose Type: Investment -> Investment Type -> Fund/Folio (real: folioNo, name, id fallback chain - this session's fix ensures template selection matches this exactly) -> Amount -> Account -> Save
 ```
 
 **Loan** (per ADR-030 — not a transaction type, its own domain):
+
 ```
 Not part of this flow. LoanModal/LoanRepaymentModal remain separate,
 unchanged by this ADR.
@@ -118,16 +328,16 @@ unchanged by this ADR.
 
 ### What this ADR deliberately leaves open
 
-- Item Confidence and Item→Category derivation are specified but **not implemented** — real new engine work, sequenced after this freeze, not assumed to already exist.
-- The `people`/`splitPeople` overlap from ADR-030 is referenced again here, still unresolved — this flow diagram doesn't pick a field, it just shows where attribution happens in the sequence.
-- Whether "Quick Record" (5-second minimal entry) is a separate, shorter path through this same diagram or a genuinely different flow is not decided here.
+* Item Confidence and Item→Category derivation are specified but **not implemented** — real new engine work, sequenced after this freeze, not assumed to already exist.
+* The `people`/`splitPeople` overlap from ADR-030 is referenced again here, still unresolved — this flow diagram doesn't pick a field, it just shows where attribution happens in the sequence.
+* Whether "Quick Record" (5-second minimal entry) is a separate, shorter path through this same diagram or a genuinely different flow is not decided here.
 
 ### Status: Frozen
 
 The state diagrams — not any specific UI layout — are what the Record
 Transaction screen work should build against next.
 
----
+\---
 
 ## ADR-030 — Transaction Engine
 
@@ -139,8 +349,9 @@ proposed from scratch.** Where this ADR extends or changes something,
 that's called out explicitly.
 
 ### Transaction Types — 8, frozen (confirmed real, unchanged)
-`expense`, `income`, `transfer`, `investment`, `settlement_in`,
-`settlement_out`, `cc_payment`, `cc_emi`
+
+`expense`, `income`, `transfer`, `investment`, `settlement\\\_in`,
+`settlement\\\_out`, `cc\\\_payment`, `cc\\\_emi`
 
 **Settlement decision, resolved:** Settlement remains its own
 transaction type — not folded into an item, per this review's
@@ -157,42 +368,42 @@ but "Loan" itself is never a value in a transaction's `type` field.
 
 ### Core Fields (real, confirmed on the actual transaction object)
 
-| Field | Answers |
-|---|---|
-| `id`, `createdAt`, `updatedAt` | Identity, when recorded, last changed |
-| `type` | What happened (one of the 8 above) |
-| `amount` | How much |
-| `date` | When |
-| `desc`, `merchant`, `note` | Why / what |
-| `accId`, `toAccId` | Money moved from where / to where (`toAccId` for transfers) |
-| `catId`, `catIds`, `subId`, `subIds` | Category (single + multi-category support both real) |
-| `people`, `splitPeople`, `forPerson` | Who benefits — three distinct real fields, not one; `people` and `splitPeople` both exist (confirmed) — this ADR does **not** attempt to unify them, flagging as a real naming/purpose overlap worth a future cleanup pass, not resolved here |
-| `groupId` | Group attribution |
-| `vehicleId` | Vehicle attribution |
-| `items` | Itemized line items (real, confirmed field) |
-| `paidBillId`, `isBillPayment`, `paidBillName` | Bill link — confirmed real, 21 references across the codebase |
-| `billerLinkId` | Biller link (distinct from Bill link) |
-| `linkedInvestmentId` | Investment link |
-| `paymentMethod` | How (relevant for bank-account expenses) |
-| `excludeFromSpend` | Budget impact override — real field, lets a transaction exist without counting toward Safe to Spend |
-| `splitMode`, `trackingMode`, `tagMode` | Real mode flags governing how the above relational fields are interpreted |
-| `transactionRef` | Reference/UPI number — used for the duplicate-detection confirm dialog (this session's fix) |
+|Field|Answers|
+|-|-|
+|`id`, `createdAt`, `updatedAt`|Identity, when recorded, last changed|
+|`type`|What happened (one of the 8 above)|
+|`amount`|How much|
+|`date`|When|
+|`desc`, `merchant`, `note`|Why / what|
+|`accId`, `toAccId`|Money moved from where / to where (`toAccId` for transfers)|
+|`catId`, `catIds`, `subId`, `subIds`|Category (single + multi-category support both real)|
+|`people`, `splitPeople`, `forPerson`|Who benefits — three distinct real fields, not one; `people` and `splitPeople` both exist (confirmed) — this ADR does **not** attempt to unify them, flagging as a real naming/purpose overlap worth a future cleanup pass, not resolved here|
+|`groupId`|Group attribution|
+|`vehicleId`|Vehicle attribution|
+|`items`|Itemized line items (real, confirmed field)|
+|`paidBillId`, `isBillPayment`, `paidBillName`|Bill link — confirmed real, 21 references across the codebase|
+|`billerLinkId`|Biller link (distinct from Bill link)|
+|`linkedInvestmentId`|Investment link|
+|`paymentMethod`|How (relevant for bank-account expenses)|
+|`excludeFromSpend`|Budget impact override — real field, lets a transaction exist without counting toward Safe to Spend|
+|`splitMode`, `trackingMode`, `tagMode`|Real mode flags governing how the above relational fields are interpreted|
+|`transactionRef`|Reference/UPI number — used for the duplicate-detection confirm dialog (this session's fix)|
 
 ### Relationships (confirmed real, not aspirational)
 
-- **Person** — via `people`/`splitPeople`/`forPerson`. Feeds `getPersonAttributedAmount`, which feeds Settlements, Budget-per-person, and Money's Money-to-Receive/Owe.
-- **Group** — via `groupId`. Feeds `getGroupAttributedAmount` (added this session, consolidating what was previously 4 duplicated inline calculations).
-- **Bill** — via `paidBillId`/`isBillPayment`/`paidBillName`. This is the mechanism that makes a paid Bill also count as a real expense in Budget — confirmed this is why `monthSpend` already reflects paid bills (the basis of ADR-024's Budget-vs-Cash-Commitment split).
-- **Item** — via `items[]`. Confirmed real; per-item person/group attribution shown inline is the pattern the Record Transaction design proposes formalizing visually, not a new data capability.
-- **Category** — via `catId`/`catIds`/`subId`/`subIds`.
-- **Credit Card** — via `accId` pointing at a `type==="cc"` account, plus `cc_payment`/`cc_emi` as distinct transaction types for statement settlement.
-- **Budget** — every `expense` counts via `monthSpend`, unless `excludeFromSpend` is set.
-- **Settlement** — `settlement_in`/`settlement_out`, linked back via `againstTxnId` (confirmed real, used by the linked-settlement-key logic).
+* **Person** — via `people`/`splitPeople`/`forPerson`. Feeds `getPersonAttributedAmount`, which feeds Settlements, Budget-per-person, and Money's Money-to-Receive/Owe.
+* **Group** — via `groupId`. Feeds `getGroupAttributedAmount` (added this session, consolidating what was previously 4 duplicated inline calculations).
+* **Bill** — via `paidBillId`/`isBillPayment`/`paidBillName`. This is the mechanism that makes a paid Bill also count as a real expense in Budget — confirmed this is why `monthSpend` already reflects paid bills (the basis of ADR-024's Budget-vs-Cash-Commitment split).
+* **Item** — via `items\\\[]`. Confirmed real; per-item person/group attribution shown inline is the pattern the Record Transaction design proposes formalizing visually, not a new data capability.
+* **Category** — via `catId`/`catIds`/`subId`/`subIds`.
+* **Credit Card** — via `accId` pointing at a `type==="cc"` account, plus `cc\\\_payment`/`cc\\\_emi` as distinct transaction types for statement settlement.
+* **Budget** — every `expense` counts via `monthSpend`, unless `excludeFromSpend` is set.
+* **Settlement** — `settlement\\\_in`/`settlement\\\_out`, linked back via `againstTxnId` (confirmed real, used by the linked-settlement-key logic).
 
 ### What this ADR deliberately does NOT resolve
 
-- The `people` vs. `splitPeople` overlap — both are real, both are used, this ADR documents the fact rather than picking a winner. Worth its own focused decision, not bundled into this freeze.
-- Whether Quick Add's redefinition ("Quick Record — 5 seconds, enrich later") replaces or sits alongside the current `QuickAddModal`. That's a UI/flow decision for the Record Transaction screen work, not a data-model question this ADR needs to answer.
+* The `people` vs. `splitPeople` overlap — both are real, both are used, this ADR documents the fact rather than picking a winner. Worth its own focused decision, not bundled into this freeze.
+* Whether Quick Add's redefinition ("Quick Record — 5 seconds, enrich later") replaces or sits alongside the current `QuickAddModal`. That's a UI/flow decision for the Record Transaction screen work, not a data-model question this ADR needs to answer.
 
 ### Status: Frozen
 
@@ -200,7 +411,7 @@ Every UI decision for Bills, People, Credit Cards, Budget, and the
 Record Transaction screen should read from this model — not introduce
 parallel fields or relationships without extending this ADR first.
 
----
+\---
 
 ## ADR-025 — Financial Relationships
 
@@ -210,8 +421,8 @@ surfaced while designing it.
 
 **Rule 1.** People and Groups are financial relationships, not tags or
 contacts. `personType` (Contact/Dependant/Vendor/Employee/Tenant/Other)
-is identity classification only — the `modules[]` capability system
-(ADR-independent, already real, see `PEOPLE_GROUPS_MODEL.md`) governs
+is identity classification only — the `modules\\\[]` capability system
+(ADR-independent, already real, see `PEOPLE\\\_GROUPS\\\_MODEL.md`) governs
 what features apply, not the type label itself.
 
 **Rule 2.** People and Groups receive **allocations** from the
@@ -232,7 +443,7 @@ a separately-maintained running total that could drift out of sync.
 **Status: Frozen.** Sits alongside ADR-022 (Forecast Status), ADR-023
 (Commitments), and ADR-024 (Financial Model) as foundational.
 
----
+\---
 
 ## ADR-024 — Financial Model (Budget vs. Cash Commitment)
 
@@ -246,14 +457,15 @@ bills was answering a different question while wearing the same name.
 
 **The two questions, permanently separated:**
 
-| Concept | Question | Formula | Status |
-|---|---|---|---|
-| **Budget** | Am I staying within my spending plan? | Monthly Budget − Spent This Month | Existing, reused as-is |
-| **Safe to Spend** | Same as Budget's remaining — this *is* the budget question, not a separate one | `monthBudget − monthSpend`, exact same formula as Budget elsewhere | Real, implemented |
-| **Protected Money** | How much cash must I keep available? | Cash Required (unpaid Bills + SIPs + CC statements) vs. Cash Available (opening balance) → Buffer | Real, implemented |
-| **Forecast Status** | Can I survive the month, cash-wise? | Classifies against Buffer, not Safe to Spend | Real, implemented |
+|Concept|Question|Formula|Status|
+|-|-|-|-|
+|**Budget**|Am I staying within my spending plan?|Monthly Budget − Spent This Month|Existing, reused as-is|
+|**Safe to Spend**|Same as Budget's remaining — this *is* the budget question, not a separate one|`monthBudget − monthSpend`, exact same formula as Budget elsewhere|Real, implemented|
+|**Protected Money**|How much cash must I keep available?|Cash Required (unpaid Bills + SIPs + CC statements) vs. Cash Available (opening balance) → Buffer|Real, implemented|
+|**Forecast Status**|Can I survive the month, cash-wise?|Classifies against Buffer, not Safe to Spend|Real, implemented|
 
 **Rules, frozen:**
+
 1. **Budget measures consumption.** Safe to Spend is the same measurement, not a second one.
 2. **Commitments (Bills/SIPs/CC statements) measure cash required**, never budget. A Credit Card bill reduces Protected Money's Cash Required; it does **not** reduce Safe to Spend a second time once it's been paid and counted as an expense.
 3. **Forecast Status measures cash-flow risk** (via Buffer), not budget adherence.
@@ -264,7 +476,7 @@ bills was answering a different question while wearing the same name.
 
 **Status: Frozen**, matching what's already live in `OutlookPage` as of the Protected Money implementation.
 
----
+\---
 
 ## ADR-023 — Commitments are first-class citizens (presentation layer)
 
@@ -285,14 +497,16 @@ which entity backs it. The domain object differs (Bill vs
 ExpectedIncome); the presentation doesn't.
 
 **CMP-016 — Commitment Card, frozen shape:**
+
 ```
-[Icon]  Name
+\\\[Icon]  Name
         Frequency
         Amount
         Next Occurrence
         Status Chip (CMP-005, reused)
-        [Details ->]
+        \\\[Details ->]
 ```
+
 Only icon and metadata change per commitment type — Netflix
 (Subscription), Insurance (Annual), Car Loan (EMI), Nifty 50 (SIP),
 Salary (Scheduled Income) all render through this exact same card shape.
@@ -303,7 +517,7 @@ designs — directly reduces the design surface for that batch.
 
 **Status: Frozen.**
 
----
+\---
 
 ## ADR-022 — Forecast Status Classifier
 
@@ -314,29 +528,32 @@ from Financial Health (Home) and any "Financial Confidence" concept
 (explicitly rejected — see below).
 
 **Inputs, from the existing engine:**
-- Safe to Spend (`calculateSafeToSpend`, real, implemented this session)
-- Projected Closing Balance (`calculateProjectedBalance`, real, implemented this session)
-- Transient Negative Balance (boolean — derived from the projection, not separately computed)
-- Mandatory Commitments Covered (boolean — derived from `calculateCommittedOutflow` vs available balance)
-- **Future, optional:** Cash buffer, Days until next income — not required for v1 of this classifier
+
+* Safe to Spend (`calculateSafeToSpend`, real, implemented this session)
+* Projected Closing Balance (`calculateProjectedBalance`, real, implemented this session)
+* Transient Negative Balance (boolean — derived from the projection, not separately computed)
+* Mandatory Commitments Covered (boolean — derived from `calculateCommittedOutflow` vs available balance)
+* **Future, optional:** Cash buffer, Days until next income — not required for v1 of this classifier
 
 **Outputs — exactly one of four states, never a numeric score:**
 
-| Status | Rule |
-|---|---|
-| 🟢 Comfortable | No transient negative balance · all mandatory commitments covered · Safe to Spend comfortably above the configured minimum |
-| 🟡 Watchful | Commitments covered · forecast stays positive · Safe to Spend above zero but below the "comfortable" threshold |
-| 🟠 Tight | Forecast stays positive · buffer is very small or one unexpected expense could materially affect commitments |
-| 🔴 At Risk | Transient negative balance detected, OR mandatory commitments cannot be covered |
+|Status|Rule|
+|-|-|
+|🟢 Comfortable|No transient negative balance · all mandatory commitments covered · Safe to Spend comfortably above the configured minimum|
+|🟡 Watchful|Commitments covered · forecast stays positive · Safe to Spend above zero but below the "comfortable" threshold|
+|🟠 Tight|Forecast stays positive · buffer is very small or one unexpected expense could materially affect commitments|
+|🔴 At Risk|Transient negative balance detected, OR mandatory commitments cannot be covered|
 
 **Product decision, explicitly required before implementation — not
 hard-coded constants:**
+
 ```
-comfortable_daily_spend
-watchful_daily_spend
-minimum_cash_buffer
-minimum_forecast_balance
+comfortable\\\_daily\\\_spend
+watchful\\\_daily\\\_spend
+minimum\\\_cash\\\_buffer
+minimum\\\_forecast\\\_balance
 ```
+
 These are **product configuration values**, tunable after beta testing
 without rewriting the Forecast Engine itself. Exact numbers not yet
 decided — this ADR freezes the classifier's *shape*, not its thresholds.
@@ -348,38 +565,37 @@ differently-scored, differently-named metrics measuring mostly the same
 thing. Rejected specifically to preserve the one-metric-per-domain
 principle:
 
-| Domain | Question | Metric |
-|---|---|---|
-| Home | How healthy am I financially? | Financial Health Score |
-| Money | What do I own and owe? | Net Worth |
-| Outlook | Can I comfortably get through what's ahead? | Safe to Spend (+ this Forecast Status interpretation) |
-| Insights | Why did this happen? | Analysis & Trends |
+|Domain|Question|Metric|
+|-|-|-|
+|Home|How healthy am I financially?|Financial Health Score|
+|Money|What do I own and owe?|Net Worth|
+|Outlook|Can I comfortably get through what's ahead?|Safe to Spend (+ this Forecast Status interpretation)|
+|Insights|Why did this happen?|Analysis \& Trends|
 
 No domain shares a metric with another.
 
 **Status: Frozen.** Not yet implemented — the classifier shape is
 decided, the threshold values are not.
 
----
+\---
 
 ## ADR-021 — Master Data vs Financial Objects (Manage vs Outlook)
 
 **Core principle:** every object has exactly one owner. Other modules
 reference it; they never own it. Two kinds of objects exist:
 
-- **Master Data (Manage)** — things that exist independently of any
-  transaction: Accounts, Categories, People, Groups, Vehicles, Insurance
-  Policies, Billers, Properties/Business Assets (future). Long-lived,
-  created once, referenced everywhere.
-- **Financial Objects (Outlook)** — commitments/obligations, time-based:
-  Bills, EMIs, SIPs, Subscriptions, Insurance Premiums, Credit Card
-  Payments. All of these are `Bill.type` values on the one Bill entity
-  (ADR-019/020 unchanged) — not separate entities.
+* **Master Data (Manage)** — things that exist independently of any
+transaction: Accounts, Categories, People, Groups, Vehicles, Insurance
+Policies, Billers, Properties/Business Assets (future). Long-lived,
+created once, referenced everywhere.
+* **Financial Objects (Outlook)** — commitments/obligations, time-based:
+Bills, EMIs, SIPs, Subscriptions, Insurance Premiums, Credit Card
+Payments. All of these are `Bill.type` values on the one Bill entity
+(ADR-019/020 unchanged) — not separate entities.
 
 **Relationship chain:** `Biller -> Bill -> Transaction`. One Biller can
 have many Bills; one Bill creates many Transactions over its life. This
-extends the same shape to Insurance: `Insurance Policy (Manage) -> 
-Insurance Premium (a Bill.type) -> Transaction` — mirroring Biller/Bill
+extends the same shape to Insurance: `Insurance Policy (Manage) ->  Insurance Premium (a Bill.type) -> Transaction` — mirroring Biller/Bill
 exactly.
 
 **Insurance placement — refines, not silently contradicts, ADR-019/020.**
@@ -422,13 +638,14 @@ Account doesn't calculate its own balance — the Ledger/Balance Engines
 do, and Groups work the same way.
 
 **Developer rules, frozen:**
+
 1. Master Data belongs only in Manage.
 2. Financial commitments belong only in Outlook, as Bill.type values.
 3. Transactions reference Master Data; they never own it.
 4. Money displays financial position only. Outlook displays future
-   commitments only. Insights analyses historical behaviour only. Home
-   consumes from all engines but owns nothing (ADR from the IA doc,
-   consistent here).
+commitments only. Insights analyses historical behaviour only. Home
+consumes from all engines but owns nothing (ADR from the IA doc,
+consistent here).
 5. No feature exists in two places with the same responsibility.
 
 **Decision 5 — Membership migration, resolved: ADR-020 unchanged.**
@@ -472,6 +689,7 @@ refinement of how Manage entities are allowed to grow over time,
 consistent with everything else in this ADR.
 
 ## ADR-020 — Supersedes ADR-019: Membership survives as a legacy
+
 compatibility layer for 2.0, not eliminated
 
 **Decision:** ADR-019's "Bill + Transaction is sufficient, no
@@ -493,11 +711,12 @@ distinct concepts (Recognition timing, Settlement tracking) into one
 and lost information doing it.
 
 **What's kept from ADR-019 (still correct, not reversed):**
-- Bill remains the single canonical obligation entity (ADR-016)
-- `paidBillId`/`isBillPayment`/`paidBillName` on Transaction is the
-  correct, already-working link between a payment and its Bill —
-  unchanged
-- Recognition stays a Bill property (ADR-016) — unchanged
+
+* Bill remains the single canonical obligation entity (ADR-016)
+* `paidBillId`/`isBillPayment`/`paidBillName` on Transaction is the
+correct, already-working link between a payment and its Bill —
+unchanged
+* Recognition stays a Bill property (ADR-016) — unchanged
 
 **What's different:** a future entity (tentatively `BillSettlement` —
 Bill + covered Recognition periods + linked Transaction(s) + settled
@@ -507,17 +726,19 @@ entity, new migration, new UI, and new bugs for benefits not yet
 validated against real usage. Explicitly deferred.
 
 **Staged plan, frozen for 2.0:**
+
 ```
 Arth 2.0
   Bill                    — the obligation (per ADR-016)
   Transaction             — the payment, links via paidBillId (existing, unchanged)
-  Membership (legacy)     — kept as-is: linkedTxnId, periods[], billerAccountId
+  Membership (legacy)     — kept as-is: linkedTxnId, periods\\\[], billerAccountId
                             + ONE new field: billId (links it to its Bill)
 ```
+
 Migration for 2.0, deliberately minimal: for each Membership, create or
 match its Bill, set `billId` on the Membership, and set
 `isBillPayment/paidBillId/paidBillName` on its linked Transaction.
-`periods[]` stays exactly where it is — not moved, not restructured.
+`periods\\\[]` stays exactly where it is — not moved, not restructured.
 Nothing deleted, nothing invented, smallest change that connects
 Membership to the new Bill domain without losing what it already knows.
 
@@ -529,6 +750,7 @@ of a premature abstraction are all real open questions parked here on
 purpose.
 
 ## ADR-019 — Membership eliminated; collapses into Bill + Transaction
+
 **⚠️ Superseded by ADR-020 above.** Kept in full below for the reasoning
 trail — the Recognition-vs-Settlement gap that prompted the reversal is
 itself useful history, not something to delete.
@@ -537,17 +759,16 @@ itself useful history, not something to delete.
 `BillPayment` entity either. Both collapse into two entities already
 frozen in earlier ADRs:
 
-- **Bill** — the recurring obligation itself. `type` becomes an
-  attribute (`one-time | recurring | subscription | EMI | loan |
-  insurance | utility | tax`), not a separate module per type.
-  "Subscription" is a Bill type, not its own system.
-- **Transaction** — the payment. A Bill payment is an ordinary
-  Transaction with `paidBillId` set (per ADR-017's relationship
-  mechanism — already frozen, not new).
+* **Bill** — the recurring obligation itself. `type` becomes an
+attribute (`one-time | recurring | subscription | EMI | loan | insurance | utility | tax`), not a separate module per type.
+"Subscription" is a Bill type, not its own system.
+* **Transaction** — the payment. A Bill payment is an ordinary
+Transaction with `paidBillId` set (per ADR-017's relationship
+mechanism — already frozen, not new).
 
 **Why no `BillPayment` entity was needed:** the one thing Membership's
 current shape does that a plain Transaction doesn't — covering multiple
-future periods in one payment (`periods[]`, e.g., paying 6 months of
+future periods in one payment (`periods\\\[]`, e.g., paying 6 months of
 gym at once) — is structurally identical to **Recognition**, already a
 property of Bill (ADR-016: `recognitionMethod`, `recognitionDuration`).
 A ₹24,000 insurance payment recognized ₹4,000×6 months and a single
@@ -560,14 +781,15 @@ entities — Bill and Transaction — both already fully specified by prior
 ADRs (ADR-016 Recognition, ADR-017 relationships, ADR-018 Account/Payment
 Method). This is a bigger simplification than an earlier proposed chain
 (Membership → Bill Template → Bill → BillPayment); it collapses to Bill
-+ Transaction directly.
+
+* Transaction directly.
 
 **Migration approach — Assisted Migration, not automatic or manual-only:**
 never silently invent a Bill from inferred data, and never force a
 tedious per-item reconciliation wizard either. For each existing
 Membership: pre-fill a Bill draft from its known merchant, frequency,
 amount, and paying account; derive `type` and Recognition settings from
-its `periods[]` shape; show a review screen with everything pre-filled
+its `periods\\\[]` shape; show a review screen with everything pre-filled
 so the user only corrects what Arth genuinely can't infer (e.g., exact
 due-day, auto-debit status); on confirm, create the Bill and re-point
 the Membership's `linkedTxnId` transaction to carry `paidBillId`
@@ -575,7 +797,7 @@ instead. Real data migration, not a cosmetic relabeling — every existing
 Membership record needs to go through this flow, not just new ones.
 
 **Not yet designed:** the actual review-screen UI/flow for this
-migration, and the exact `periods[]` → Recognition field mapping logic.
+migration, and the exact `periods\\\[]` → Recognition field mapping logic.
 Both are next.
 
 ## ADR-018 — Account vs Payment Method, and permanent delete for 2.0
@@ -594,8 +816,7 @@ to reconcile near-duplicate account representations of the same funds.
 **Credit cards stay Accounts, not payment methods** — they carry a
 balance, statement, due date, interest, and EMI support, i.e. they're a
 real financial entity with liabilities, not just a payment rail. A
-credit card transaction has `Account: HDFC Credit Card`, `Payment
-Method: (blank)`.
+credit card transaction has `Account: HDFC Credit Card`, `Payment Method: (blank)`.
 
 **Real implication, not yet resolved (flagging so it isn't lost):** this
 is a genuine data-model change from what exists today — migrating a
@@ -616,20 +837,22 @@ migration performed — existing transactions simply have this field as
 The UPI-account-migration question above remains genuinely open.
 
 **Decision 2 — Delete stays permanent for Arth 2.0.** No soft delete, no
-`deletedAt`, no recycle bin, no restore — `Delete → Confirm → Yes →
-Permanent`. Matches what's actually built today (confirmed: deletion is
+`deletedAt`, no recycle bin, no restore — `Delete → Confirm → Yes → Permanent`. Matches what's actually built today (confirmed: deletion is
 already immediate and permanent, no code change required for this
 decision). Explicitly revisitable as its own future ADR if
 Sync/Cloud-Backup/Collaboration ever make undo-ability matter — not
 bundled into the Transactions domain model now.
 
 ## ADR-017 — Transaction Type Taxonomy: frozen, not redesigned
+
 **Decision:** The `type` field represents the primary financial event
 only, and stays intentionally small. **Frozen list — these are the only
 top-level transaction types:**
+
 ```
-expense · income · transfer · cc_payment · cc_emi · settlement_in · settlement_out · investment
+expense · income · transfer · cc\\\_payment · cc\\\_emi · settlement\\\_in · settlement\\\_out · investment
 ```
+
 Everything else extends a transaction via **flags** (`isRefund`,
 `reimbursable`) or **relationships** (`paidBillId` — this already exists
 today, paired with an `isBillPayment` flag; not a new field — `linkedLoanId`,
@@ -637,7 +860,7 @@ today, paired with an `isBillPayment` flag; not a new field — `linkedLoanId`,
 
 **Why this wasn't a redesign:** checked the actual codebase before
 deciding anything — Refund, Loan repayment, and Investment redemption
-*already* work exactly this way (`isRefund` flag on `settlement_in`,
+*already* work exactly this way (`isRefund` flag on `settlement\\\_in`,
 `linkedLoanId`/`linkedInvestmentId` relationships on ordinary
 transactions). This ADR formalizes an existing, working pattern as a
 rule, rather than replacing a system that was never actually broken.
@@ -649,14 +872,13 @@ cases exist under that name: (1) a user mis-entered an amount — that's
 just editing the existing transaction, no new concept needed; (2) real
 bank-vs-Arth balance mismatch reconciliation — a genuine gap, but the
 right shape for it is a future **Account Reconciliation workflow**
-(`Account → Reconcile → Difference Detected → Create System Adjustment
-Transaction`) that generates a system transaction when needed, not a
+(`Account → Reconcile → Difference Detected → Create System Adjustment Transaction`) that generates a system transaction when needed, not a
 type users manually pick day-to-day. Deferred until that workflow is
 designed — not blocking anything now.
 
 **Deferred future consideration, explicitly not acted on now (recorded
 so it isn't silently forgotten, but also isn't touched prematurely):**
-whether `cc_payment`/`cc_emi` should eventually become account/payment-
+whether `cc\\\_payment`/`cc\\\_emi` should eventually become account/payment-
 method behavior rather than top-level transaction types (buying
 something on a card is still an `expense`; paying the card bill is
 arguably a `transfer` between a liability and an asset account; an EMI
@@ -665,12 +887,14 @@ migration risk if changed now — explicitly parked for a future
 "Arth 3.0" re-evaluation, not this pass.
 
 ## ADR-016 — Financial Engine architecture: Bills as the single source of truth for obligations
+
 **Decision:** Rejected a new `Commitment` entity. Bills is promoted to
 the canonical engine for all future financial obligations — insurance,
 gym, SIPs, EMIs, school fees are "Bills with metadata," not a separate
 system. Recognition (amortization) becomes a property *of* a Bill, not
 of Transactions/Budget/Cash Flow. Cash Flow consumes Bills + Transactions
-+ Expected Income directly — nothing consumes a `Commitments` table,
+
+* Expected Income directly — nothing consumes a `Commitments` table,
 because one never gets created. Safe to Spend is upgraded in place
 (Opening Balance + Expected Income − Upcoming Bills − Expected Variable),
 not replaced with a parallel calculation.
@@ -683,14 +907,14 @@ Safe to Spend = a calculation, never stored data.
 
 **Module boundary, explicit (prevents the ambiguity the review flagged):**
 
-| Module | Uses Cash | Uses Recognition |
-|---|---|---|
-| Transactions | ✅ | ❌ |
-| Cash Flow | ✅ | ❌ |
-| Budget | ❌ | ✅ |
-| Reports | Both (toggle) | ✅ |
-| Timeline | ✅ | ❌ |
-| Net Worth | ✅ | ❌ |
+|Module|Uses Cash|Uses Recognition|
+|-|-|-|
+|Transactions|✅|❌|
+|Cash Flow|✅|❌|
+|Budget|❌|✅|
+|Reports|Both (toggle)|✅|
+|Timeline|✅|❌|
+|Net Worth|✅|❌|
 
 **Verified against the real data model before accepting the plan (not
 assumed):** Bills already has `frequency`, `recurring`, `dueDate`,
@@ -715,6 +939,7 @@ specifically, so they land whenever that card is actually built, not
 before it's needed.
 
 ## ADR-015 — Suspend further Bills domain extraction
+
 **Decision:** Domain-function extraction for Bills is suspended. No more
 searching for pure functions inside `BillsPage`. Future coupling
 reduction targets state architecture (`useArthData()` or equivalent) or
@@ -741,10 +966,11 @@ its own — domain extraction closed most of what was closeable without
 it. Whether to build `useArthData()` now needs to stand on its own
 merits (testability, consistency, reduced duplication across screens),
 not as a means of forcing Bills under a dependency threshold. See
-`V1_DEFINITION.md`'s updated answer to "does v1.0 require
+`V1\\\_DEFINITION.md`'s updated answer to "does v1.0 require
 `useArthData()`."
 
 ## ADR-014 — Milestone: Domain Layer Phase 2 (Bills refunds)
+
 **Decision:** Extracted `computeRefundTotalsByBill`/`getNetBillAmount`
 into `domain/bills/refunds.js`, same six-step process as Cards (ADR-013).
 Both had passed the parameterization audit cleanly in an earlier pass;
@@ -767,6 +993,7 @@ refunds checklist passed clean, no issues found. Domain Layer Phase 2
 status: 🟢 Complete.
 
 ## ADR-013 — Milestone: Domain Layer Phase 1
+
 **Decision:** Treating the point after the Cards pass (pending its
 runtime regression check) as an internal milestone — "Domain Layer
 Phase 1" — not a user-facing release, but the first point where three
@@ -777,12 +1004,14 @@ validate → document.
 starts, and a concrete point to reference later if anything needs
 tracing back ("this predates/postdates Domain Layer Phase 1"). Structure
 at this point:
+
 ```
 src/domain/
 ├── bills/periodCalculations.js
 ├── cards/summaries.js
 └── shared/remainingShare.js
 ```
+
 Measured, not claimed: BillsPage's own dependency count dropped 35→34
 from the Cards pass — `getCardSummary` was a direct dependency,
 `getCardCycleDates`/`dateAtDay` were not (only called inside
@@ -794,13 +1023,13 @@ accurate figure rather than counting all three as "removed dependencies."
 checklist passed clean, no regressions found. Phase 1 status: 🟢 Complete.
 
 ## ADR-012 — Domain service layer, extracted before useArthData() implementation
+
 **Decision:** Re-measuring Bills for extraction readiness surfaced that
-~half its coupling is business-logic functions, not raw state. Rather
+\~half its coupling is business-logic functions, not raw state. Rather
 than implement `useArthData()` next as originally planned (Phase 1:
 Transactions/Accounts/Categories), inserted a new layer —
 `src/domain/<area>/` — and extracted Bills' provably-pure functions
-first. Architecture is now `App → useArthData → Domain Services →
-Screens`, not `App → useArthData → Screens`.
+first. Architecture is now `App → useArthData → Domain Services → Screens`, not `App → useArthData → Screens`.
 **Why:** Moving `bills`/`billers`/`billerAccounts` into a hook without
 addressing the business-logic coupling first would relocate the data but
 leave Bills exactly as coupled as before — the hook would just become a
@@ -808,17 +1037,18 @@ new place for that coupling to live, risking the "second 15,000-line
 file, just inside a hook" failure mode. Splitting "move pure functions"
 (mechanical, low-risk) from "design the shared state hook"
 (higher-stakes) keeps each pass provable on its own. Also formalized the
-**Function Extraction Checklist** (`CODING_STANDARDS.md`) as a result —
+**Function Extraction Checklist** (`CODING\\\_STANDARDS.md`) as a result —
 a function needs no hooks, no closure over state, no setters, no JSX, no
 DOM access to qualify; anything that fails is a refactor candidate, not
 an extraction candidate, and gets its own dedicated pass.
 
 **Not logged here:** the `sharePaymentRequest`/`doTxnShare` duplicate
 implementation found during this audit. That's a defect, not a decision
-— tracked in `TECH_DEBT.md` (TD-001) instead, kept deliberately separate
+— tracked in `TECH\\\_DEBT.md` (TD-001) instead, kept deliberately separate
 from this log.
 
 ## ADR-011 — Events extraction: re-measure, don't reuse old numbers
+
 **Decision:** Re-ran the mechanical dependency trace on Events
 immediately before extracting, rather than trusting the count from the
 original Goals-vs-Events comparison several turns earlier.
@@ -830,10 +1060,11 @@ later-added component) before it could produce a wrong dependency count.
 Confirms the rule from ADR-006 generalizes: measure at the time of
 extraction, not once and assume it stays valid.
 
----
+\---
 
 ## ADR-010 — useArthData() is designed before it's built
-**Decision:** Wrote `USE_ARTH_DATA_DESIGN.md` fully before writing any
+
+**Decision:** Wrote `USE\\\_ARTH\\\_DATA\\\_DESIGN.md` fully before writing any
 implementation code.
 **Why:** Same discipline that made the Design System pass safe — design
 and measure first, build second. The design doc grounds every field/action
@@ -842,16 +1073,18 @@ actions marked explicitly) rather than an idealized shape that would need
 correcting during implementation anyway.
 
 ## ADR-009 — Design System: build three, migrate one each, stop
+
 **Decision:** Built `BottomSheet`, `EmptyState`, `StatCard` — each with
 exactly one real migration to prove it — and explicitly did **not**
 convert `Button`/`Card`/`Page`/`Header`.
-**Why:** The audit (`COMPONENT_INVENTORY.md`) found Card/Button are
+**Why:** The audit (`COMPONENT\\\_INVENTORY.md`) found Card/Button are
 shared style *objects*, not components. Converting those touches a much
 larger surface of the app for less proven benefit than three new,
 narrowly-scoped components. Same risk logic as not extracting Timeline
 in one shot — bigger surface, more chances for a silent mismatch.
 
 ## ADR-008 — Person attribution: one contribution per transaction, not summed across fields
+
 **Decision:** Rewrote `getPersonAttributedAmount` to return on the first
 matching field (`people` → `tagItems` → `allocations` → `forPerson`,
 priority order) instead of summing every field that happened to match.
@@ -865,16 +1098,18 @@ correcting separately — this is why the fix now calls the one function
 instead of reimplementing the field-priority logic a second time.
 
 ## ADR-007 — Timeline, People, Bills extraction postponed
+
 **Decision:** None of these three get extracted until `useArthData()`
 exists.
 **Why:** Measured, not assumed — Timeline: 61 external dependencies,
-People: 87 (also over the ~700-line ceiling), Bills: 48. All three fail
+People: 87 (also over the \~700-line ceiling), Bills: 48. All three fail
 the Extraction Readiness Score (<20). Threading 60+ individual props, or
 hiding the same giant closure behind one `ctx` object, were both
 considered and rejected — neither is real modularity, just a different
 shape of coupling.
 
 ## ADR-006 — Extraction Readiness Score: dependency count, measured mechanically
+
 **Decision:** No screen gets extracted without first measuring its
 external dependency count via a mechanical diff (every identifier used
 vs. every identifier defined locally), not by reading the code and
@@ -888,12 +1123,14 @@ wrong number, which is the argument for mechanical measurement over
 manual reading at this file's size, not just a one-time correction.
 
 ## ADR-005 — Goals is the first screen extraction, not Timeline
+
 **Decision:** Extracted Goals → `src/screens/GoalsScreen.jsx`.
 **Why:** Direct consequence of ADR-006 — every one of Goals' three pieces
 scored under 10 dependencies, lower than any single piece of Events, and
 far below Timeline/People/Bills.
 
 ## ADR-004 — Quick Add: split-with and vehicle tagging stay on the main sheet
+
 **Decision:** Split-with (equal split) and vehicle tagging are visible,
 optional chips on the primary Quick Add screen, not hidden behind "More
 options" the way an earlier spec draft proposed.
@@ -903,6 +1140,7 @@ tap increases workflow, which contradicts the app's actual goal. The
 (unequal splits, groups, investments), not moved-out-of-convenience.
 
 ## ADR-003 — Add Transaction: new simple-save path, not a rewrite of the existing form
+
 **Decision:** Quick Add constructs its own minimal transaction object
 and saves directly, rather than reusing or extending the existing
 2,653-line `AddModal`.
@@ -914,6 +1152,7 @@ reachable via "More options" — nothing was removed, a faster path was
 added alongside it.
 
 ## ADR-002 — Pure-function extraction only; business logic stays in App.jsx
+
 **Decision:** Pass 3A/3B extracted only zero-dependency pure functions
 and constants (`theme.js`, `dateHelpers.js`, `currency.js`, etc.).
 Domain/business logic (`normalizeAccountTypes`, SMS parsing, settlement
@@ -927,9 +1166,11 @@ formatting — the domain boundary should follow what the code actually
 needs, not a predetermined file list.
 
 ## ADR-001 — Extract by dependency graph, not by file size or intuition
+
 **Decision:** Adopted "map dependencies before every extraction pass" as
 a standing rule, after Pass 3A's `formatInvestmentMetric` discovery.
 **Why:** A function that looked like a simple formatter turned out to
 depend on investment-domain config — extracting it into `formatters.js`
 as originally planned would have created a misleading module boundary.
 Mapping first, every time, catches this before it becomes structural.
+

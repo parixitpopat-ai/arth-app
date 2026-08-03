@@ -5,7 +5,7 @@
 ## Migration Types
 
 Not all entries here are the same kind of work:
-- **Duplicate Migration** (CR-001–004): multiple independent implementations of the same rule, no canonical owner yet — the architecture had to decide who owns it first (ADR-032/025, AQ-001).
+- **Duplicate Migration** (CR-001–004): multiple independent implementations of the same rule, no canonical owner yet — the architecture had to decide who owns it first (ADR-032/033, AQ-001).
 - **Canonicalization Migration** (CR-005): the architecture already knows who owns the rule (`Payable` owns outstanding liability, decided in AQ-001) — what's open is an *implementation* detail inside that owner (stored field vs. derived calculation vs. cached projection), not a domain-ownership question. This does not block architecture-dependent work the way CR-001–004 could have.
 
 | ID | Type | Source | Target | ADR | Status | Approved By | Implemented In |
