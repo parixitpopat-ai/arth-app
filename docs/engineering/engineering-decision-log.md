@@ -10,7 +10,23 @@ Newest entries at the top. Each entry: date, decision, reasoning, what it doesn'
 
 ---
 
-## EDL-031 — CR-001 Step 2 executed: SettleModal.settle()'s plain-transaction branch reuses the same proven adapter as Step 1
+## EDL-032 — TRX-002C4b: applyRepaymentAllocations' bill-kind branch repointed, reusing the shared PersonShare value object per AQ-002 (no Bill aggregate required)
+
+`2026-08-03`
+
+**Decision:** Built `settlePersonShareOnBill` (+ `mirrorSettlementOntoTransaction`), reusing `TransactionPersonShare` directly rather than the full `Transaction` aggregate wrapper, since AQ-002 already established the value object is shared across both Transaction and Bill. Bill-status recomputation and cross-entity mirroring to a linked transaction kept as explicit adapter logic — real Bill-level effects, not duplicated business rules, not absorbed into the value object itself. 5 equivalence tests (including the exact bill-mirroring scenario from earlier this session) passed before touching `App.jsx`. Repointed both the bill-kind settlement block and its separate mirror-application block in `applyRepaymentAllocations`. Full suite: 74/74.
+
+**Reasoning:** This confirms AQ-002's addendum was actionable, not just descriptive — a real production repoint proceeded without waiting for TRX-002D's full Bill aggregate, because the shared value object was sufficient for the part of Bill's behavior that's actually about person-share settlement math.
+
+**What it doesn't decide:** `SettleModal.settle()`'s equivalent bill-kind branch is untouched — same adapter should apply there directly (matching how Step 2 reused Step 1's transaction adapter without building a new one). CR-001 remains In Progress.
+
+**Affected Tickets:** TRX-002C4b (complete), TRX-002C4c (SettleModal bill-kind, next)
+**Affected Modules:** Transactions, Bills, Settlements
+**Affected ADRs:** none new — AQ-002's existing addendum applied
+
+---
+
+
 
 `2026-08-03`
 

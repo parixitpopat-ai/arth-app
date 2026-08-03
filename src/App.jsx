@@ -28,6 +28,7 @@ import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalc
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
+import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./domain/transactions/legacy/settlePersonShareOnBill";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import StatCard from "./components/StatCard";
 import EmptyState from "./components/EmptyState";
@@ -2248,49 +2249,24 @@ function AppContent({ onLock }) {
         return settlePersonShareOnTransaction({ txn, personId, amount:Number(link.amount||0), todayStr });
       }));
       const billTxnMirrors = []; // collect {txnId, addedAmt} to mirror onto linked expense txns after this map
+      // TRX-002C4b (CR-001): bill-kind person-share settlement now routes through
+      // the shared TransactionPersonShare value object (per AQ-002) via
+      // settlePersonShareOnBill. Mirroring stays a separate, visible step —
+      // proven equivalent to the prior inline logic by
+      // settle-bill-equivalence.test.js before this repoint was made.
       setBills(prev=>prev.map(bill=>{
         if(!bill.splitPeople?.[personId]) return bill;
         const link = personLinks.find(item=>item.kind==="bill"&&String(item.id)===String(bill.id));
         if(!link) return bill;
-        const info = bill.splitPeople[personId];
-        const originalAmt = Number(info.amount||0);
-        const prevSettled = Number(info.settledAmt||0);
-        const nextSettled = Math.min(originalAmt, prevSettled + Number(link.amount||0));
-        const nextRemaining = Math.max(0, originalAmt-nextSettled);
-        const addedAmt = nextSettled - prevSettled;
-        // Also advance group collective tracking so the same bill can't be settled again via the group path
-        const groupCap = Number(bill.groupCollectiveAmount||0);
-        const nextGroupSettled = groupCap > 0
-          ? Math.min(groupCap, Number(bill.groupCollectiveSettledAmt||0) + addedAmt)
-          : bill.groupCollectiveSettledAmt;
-        const updatedSplitPeople = { ...bill.splitPeople, [personId]:{ ...info, settled:nextRemaining<=0, settledAmt:nextSettled, remainingAmt:nextRemaining } };
-        // Recompute bill.status the same way the group-settlement path already does:
-        // if every owed share is now settled, the bill itself is paid. Without this check
-        // an individually-settled share never clears the bill from "Unpaid" lists, because
-        // every "unpaid" filter in the app reads bill.status, not the per-person split data.
-        const allOwedSettled = Object.entries(updatedSplitPeople).filter(([p])=>p!=="__me__").every(([,i])=>i.settled||i.mode!=="owes");
-        // Mirror this settlement onto the bill's linked source expense transaction (if any).
-        // The receivables calc treats that transaction as the source of truth and skips the
-        // bill entirely whenever bill.paidByTxnId points to a txn with a populated people map —
-        // so settling only the bill here would silently leave the person's real "owes you"
-        // total on their People page unchanged, even though the bill itself shows settled.
-        if(bill.paidByTxnId && addedAmt > 0) billTxnMirrors.push({ txnId:bill.paidByTxnId, addedAmt });
-        return { ...bill,
-          splitPeople:updatedSplitPeople,
-          ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGroupSettled } : {}),
-          ...(allOwedSettled ? { status:"paid", paidDate:todayStr() } : {})
-        };
+        const { bill:updatedBill, mirror } = settlePersonShareOnBill({ bill, personId, amount:Number(link.amount||0), todayStr });
+        if(mirror) billTxnMirrors.push(mirror);
+        return updatedBill;
       }));
       if(billTxnMirrors.length){
         setTxns(prev=>prev.map(txn=>{
           const mirror = billTxnMirrors.find(m=>String(m.txnId)===String(txn.id));
           if(!mirror || !txn.people?.[personId]) return txn;
-          const info = txn.people[personId];
-          const originalAmt = Number(info.amount||0);
-          const prevSettled = Number(info.settledAmt||0);
-          const nextSettled = Math.min(originalAmt, prevSettled + mirror.addedAmt);
-          const nextRemaining = Math.max(0, originalAmt-nextSettled);
-          return { ...txn, people:{ ...txn.people, [personId]:{ ...info, settled:nextRemaining<=0, settledAmt:nextSettled, remainingAmt:nextRemaining } } };
+          return mirrorSettlementOntoTransaction({ txn, personId, addedAmt:mirror.addedAmt });
         }));
       }
     }
