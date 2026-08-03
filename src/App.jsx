@@ -2268,9 +2268,16 @@ function AppContent({ onLock }) {
         const nextGroupSettled = groupCap > 0
           ? Math.min(groupCap, Number(bill.groupCollectiveSettledAmt||0) + addedAmt)
           : bill.groupCollectiveSettledAmt;
+        const updatedSplitPeople = { ...bill.splitPeople, [personId]:{ ...info, settled:nextRemaining<=0, settledAmt:nextSettled, remainingAmt:nextRemaining } };
+        // Recompute bill.status the same way the group-settlement path already does:
+        // if every owed share is now settled, the bill itself is paid. Without this check
+        // an individually-settled share never clears the bill from "Unpaid" lists, because
+        // every "unpaid" filter in the app reads bill.status, not the per-person split data.
+        const allOwedSettled = Object.entries(updatedSplitPeople).filter(([p])=>p!=="__me__").every(([,i])=>i.settled||i.mode!=="owes");
         return { ...bill,
-          splitPeople:{ ...bill.splitPeople, [personId]:{ ...info, settled:nextRemaining<=0, settledAmt:nextSettled, remainingAmt:nextRemaining } },
-          ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGroupSettled } : {})
+          splitPeople:updatedSplitPeople,
+          ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGroupSettled } : {}),
+          ...(allOwedSettled ? { status:"paid", paidDate:todayStr() } : {})
         };
       }));
     }
@@ -7797,6 +7804,14 @@ function AppContent({ onLock }) {
               <>
                 <div style={{ color:homeSafeToSpend>=0?T.accent:T.danger,fontSize:22,fontWeight:900,margin:"4px 0" }}>{sym}{fmt(homeSafeToSpend)}</div>
                 <div style={{ color:T.sub,fontSize:9 }}>~{sym}{fmt(Math.round(homeSafeToSpendPerDay))}/day</div>
+                {/* Budget vs Spent breakdown - real fix: the net figure alone (e.g. "-10000")
+                    didn't say whether that's from a low budget or high spending. */}
+                <div style={{ display:"flex",justifyContent:"space-between",fontSize:9,color:T.sub,marginTop:6,paddingTop:6,borderTop:`1px dashed ${T.border}` }}>
+                  <span>Budget</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeMonthBudget)}</span>
+                </div>
+                <div style={{ display:"flex",justifyContent:"space-between",fontSize:9,color:T.sub,marginTop:2 }}>
+                  <span>Spent</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeMonthSpend)}</span>
+                </div>
               </>
             )}
             <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:4,marginTop:6 }}>
@@ -12612,7 +12627,7 @@ function AppContent({ onLock }) {
                 <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:12 }}><span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{dashPct}%</span></div>
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
                   <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Spent</div><div style={{ color:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(dashSpend)}</div></div>
-                  <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Remaining</div><div style={{ color:dashRemaining>=0?T.success:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(Math.abs(dashRemaining))}</div></div>
+                  <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>{dashRemaining>=0?"Remaining":"Over Budget"}</div><div style={{ color:dashRemaining>=0?T.success:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{dashRemaining<0?"-":""}{sym}{fmt(Math.abs(dashRemaining))}</div></div>
                   <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Safe to Spend</div><div style={{ color:T.info,fontSize:15,fontWeight:900,marginTop:2 }}>{dashSafePerDay===null?"—":`${sym}${fmt(dashSafePerDay)}/day`}</div></div>
                 </div>
               </div>
@@ -12959,7 +12974,7 @@ function AppContent({ onLock }) {
                           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12 }}>
                             <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Annual Budget</div><div style={{ color:T.text,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(personAnnualBudget)}</div></div>
                             <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Spent (YTD)</div><div style={{ color:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(ytdSpend)}</div></div>
-                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Remaining</div><div style={{ color:ytdRemaining>=0?"#16a34a":T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(Math.abs(ytdRemaining))}</div></div>
+                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>{ytdRemaining>=0?"Remaining":"Over Budget"}</div><div style={{ color:ytdRemaining>=0?"#16a34a":T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{ytdRemaining<0?"-":""}{sym}{fmt(Math.abs(ytdRemaining))}</div></div>
                             <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Used</div><div style={{ color:ytdPct>100?T.danger:"#16a34a",fontSize:15,fontWeight:900,marginTop:2 }}>{ytdPct}%</div></div>
                           </div>
                           <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:14 }}>

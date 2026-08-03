@@ -9,3 +9,23 @@ export const LIGHT = { bg:"#f4f3ef", card:"#ffffff", border:"#e5e1d8", text:"#1a
 // General-purpose color picker options (person/group colors, category colors, etc.)
 // — not theme-dependent, same 15 swatches in light or dark mode.
 export const PALETTE = ["#f0a500","#22c55e","#3b82f6","#ef4444","#a855f7","#06b6d4","#f97316","#ec4899","#84cc16","#14b8a6","#8b5cf6","#f43f5e","#0ea5e9","#10b981","#f59e0b"];
+
+// Spacing scale — new. Before this, every screen picked its own padding/gap values (8, 10, 12,
+// 14, 16, 18, 20... no consistent step), which is exactly why cards, gaps between sections, and
+// internal padding all feel slightly different from screen to screen even though nothing was
+// "wrong" anywhere individually. Existing inline styles aren't retrofitted in this pass — that's
+// a much larger, riskier sweep across the whole file — but every new component built from here
+// should use these instead of a fresh guess.
+export const SPACE = { xs:4, sm:8, md:12, lg:16, xl:24, xxl:32 };
+
+// Typography scale — new, same reasoning as SPACE. Existing inline fontSize values aren't
+// retrofitted; new components should use these.
+export const TYPE = {
+  micro:  { fontSize:9,  fontWeight:700 }, // badges, tiny labels
+  label:  { fontSize:11, fontWeight:700 }, // field labels, section headers
+  body:   { fontSize:13, fontWeight:600 }, // default body text
+  strong: { fontSize:14, fontWeight:800 }, // emphasized body, card titles
+  h3:     { fontSize:16, fontWeight:900 }, // sheet/modal titles
+  h2:     { fontSize:20, fontWeight:900 }, // section headers
+  h1:     { fontSize:26, fontWeight:900 }, // screen-level headers, big numbers
+};
