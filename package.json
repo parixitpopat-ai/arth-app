@@ -12,7 +12,8 @@
     "desktop": "concurrently \"npm run dev\" \"wait-on http://127.0.0.1:5174 && electron .\"",
     "desktop:build": "npm run build && electron-packager . Arth --platform=win32 --arch=x64 --out=release --overwrite",
     "desktop:pack": "npm run desktop:build",
-    "deploy": "node deploy.mjs"
+    "deploy": "node deploy.mjs",
+    "test": "node --test src/application/__tests__/pipeline.test.js"
   },
   "dependencies": {
     "@capacitor/cli": "^8.3.0",
