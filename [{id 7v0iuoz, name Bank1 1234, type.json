@@ -1,0 +1,82 @@
+[{id: "7v0iuoz", name: "Bank1 1234", type: "bank", color: "#06b6d4", last4: "1234", typeIcon: "🏦",…},…]
+0
+: 
+{id: "7v0iuoz", name: "Bank1 1234", type: "bank", color: "#06b6d4", last4: "1234", typeIcon: "🏦",…}
+1
+: 
+{id: "hc5jsvw", name: "Bank2 0120", type: "bank", color: "#f97316", last4: "0120", typeIcon: "🏦",…}
+2
+: 
+{id: "srvod5z", name: "Bank3 Savings 5678", type: "bank", color: "#14b8a6", last4: "5678",…}
+3
+: 
+{id: "frg540n", name: "C1 Visa 0001", type: "cc", color: "#3b82f6", last4: "0001", limit: 110000,…}
+4
+: 
+{id: "zwhmy6u", name: "C2 Visa 0002", type: "cc", color: "#14b8a6", last4: "0002", limit: 110000,…}
+5
+: 
+{id: "a9eltr5", name: "C3 RuPay 0003", type: "cc", color: "#f43f5e", last4: "0003", limit: 480000,…}
+6
+: 
+{id: "erw0gaz", name: "Visa", type: "debit", color: "#f97316", last4: "0111", typeIcon: "🏧",…}
+7
+: 
+{id: "4kr60zu", name: "Debit 1", type: "debit", color: "#22c55e", last4: "0112", typeIcon: "🏧",…}
+8
+: 
+{id: "cl3nfna", name: "Debit 2 ", type: "debit", color: "#3b82f6", last4: "1223",…}
+9
+: 
+{id: "et6ls3z", name: "C4", type: "cc", color: "#ec4899", last4: "1224", limit: 125000,…}
+10
+: 
+{id: "3s0eu35", name: "Bank 4", type: "bank", color: "#22c55e", last4: "1225",…}
+11
+: 
+{id: "wjvpz7v", name: "Cash", type: "cash", color: "#10b981", last4: "", typeIcon: "💵",…}
+12
+: 
+{id: "kgk42q6", name: "Cash in Wallet 2", type: "cash", color: "#3b82f6", last4: "", typeIcon: "💵",…}
+13
+: 
+{id: "6obg3rv", name: "00000012", type: "bank", color: "#f97316", last4: "0004", typeIcon: "🏦",…}
+14
+: 
+{id: "2y93cfv", name: "BHIM UPI", type: "upi", color: "#3b82f6", handle: "XXXXXXXXXXXX@UPI",…}
+accountTypeId
+: 
+"upi"
+color
+: 
+"#3b82f6"
+handle
+: 
+"XXXXXXXXXXX@UPI"
+id
+: 
+"2y93cfv"
+linkedAccount
+: 
+"srvod5z"
+name
+: 
+"BHIM UPI"
+openingBalance
+: 
+0
+openingBalanceDate
+: 
+""
+type
+: 
+"upi"
+typeBucket
+: 
+"cash"
+typeIcon
+: 
+"📱"
+typeLabel
+: 
+"UPI"

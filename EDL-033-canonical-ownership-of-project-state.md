@@ -1,0 +1,17 @@
+## EDL-033 — Canonical Ownership of Project State
+
+`2026-08-06`
+
+**Decision:** Every project artifact has exactly one canonical owner for its mutable state — ADR status lives on the ADR itself, CR status on the CR document, Work Package status on the Engineering Dashboard, validation progress on its own checklist (e.g. ACC Production Validation), program status on the Program Dashboard. Derived documents may summarize or link to canonical state, but must not maintain independent copies of mutable fields — status, blockers, approvals, numbering, progress. Where duplication is unavoidable (a dashboard line that restates a CR's status for readability, say), the canonical owner always prevails on conflict; the derived copy is a convenience, not a second source of truth.
+
+**Reasoning:** Surfaced during the Budget Modernization documentation-consistency pass, not invented in the abstract — three separate, real instances of the same failure mode showed up in one review: ADR-035/036's renumbering (documented once, in `CR-ACC-BUD-001` §3) never propagated into `BUD-001`, `BUD-001A`, or `BUD-003`'s prose, which kept citing the old numbers; `BUD-CLOSE-001` retained an "Engineering not yet started, blocked on ACC Validation" entry-criteria framing well after WP-1 had actually started and PR-1 had merged; and `budget-v1-engineering-dashboard.md` showed `CR-ACC-BUD-001` as open and WP-3 as CR-blocked after the CR document's own header already read Resolved. In every case, the underlying decision was correct — the problem was never disagreement about what the answer was, it was that the answer got copied into a second location and only one of the two copies was ever updated. Naming this as a standing rule, rather than fixing each instance ad hoc, is what actually prevents the next module (Trips, Goals, Reports, Investments) from reproducing it.
+
+**What it doesn't decide:** Does not specify tooling or enforcement — no automated staleness check, no required review step, no template change is mandated here. Does not retroactively audit every existing document in the repository for other undetected instances of the same pattern; the three cited above are the ones found during this pass, not a claim that they're the only ones that exist.
+
+**What this decision does not prohibit:** Multiple documents may legitimately restate the same stable fact for readability or context — a dashboard summarizing a CR's status, a closure report listing which ADRs are frozen. This decision governs *authority*, not *repetition*: duplicate information is acceptable, duplicate authority is not. When mutable project state (status, progress, blockers, approvals, numbering, etc.) differs between documents, the designated canonical owner is authoritative, and all derived copies must be updated to match or removed — the rule exists for the moment of disagreement, not to discourage summaries from existing at all.
+
+**Affected Tickets:** None directly — a cross-cutting governance rule, not tied to a single module's ticket chain.
+**Affected Modules:** All current and future modernization streams (TRX, ACC, HOME, BUD) and all future streams (TRIP, GOAL, REPORT, INV).
+**Affected ADRs:** None — this is process governance, not architecture; sits alongside the existing BUD-000A precedent ("a module audit is permitted to identify architectural ambiguity but is not permitted to resolve or override frozen ADRs") as a second standing rule of the same kind.
+
+---
