@@ -91,11 +91,13 @@ Category/Person Attribution totals, and all four Planning Allocation read functi
 `t.people` is confirmed to belong to Transaction (matches the `TransactionPersonShare` shape). The blocking question — whether attribution mode determines budget-countability — is now answered directly from repository evidence, not inferred:
 
 **Confirmed repository behavior:**
-- Real mode values in production: `"owes"` and `"spent_on"`. **`"on_me"` does not exist anywhere in `App.jsx`** — it was an assumption baked into the sandbox-built `TransactionPersonShare.js` (`VALID_MODES = ["owes", "owes_by_me", "on_me"]`) that does not match the actual repository vocabulary. That aggregate's enum needs correcting before it's trusted as canonical.
+- Real mode values in production: `"owes"` and `"spent_on"`. **`"on_me"` does not exist anywhere in `App.jsx`** — the sandbox-built `TransactionPersonShare.js` (`VALID_MODES = ["owes", "owes_by_me", "on_me"]`) uses a different vocabulary.
+
+  **Classified as Recovered Design Drift, not a bug.** This aggregate never became canonical — it was built in a sandbox session and never committed (see EDL-001's own "orphaned, never persisted" framing for the sibling ADR-030–035 doc set from the same incident). Something that was never adopted cannot be "incorrect"; it simply reflects an earlier, unreconciled vocabulary. If/when this aggregate is adopted, it should be **rebased against the current repository's real mode values (`"owes"`/`"spent_on"`), not copied verbatim** — the correction happens at adoption time, not retroactively against something that was never live.
 - `mode: "owes"` = a receivable owed back to the user (code comment: *"they owe me back — save as receivable"*). Explicitly **excluded** from "my" spend by the app's own `myShare` formula (`amount − sum(mode==="owes")`).
 - `mode: "spent_on"` = genuine attributed spend, no debt (code comment: *"for them, no collection — save in people as spent_on"*). Never excluded from spend anywhere in the file.
 
-**Canonical Business Rule (evidence-based, ready for CBR registration):** A person's Analytical Attribution for Budget purposes counts `mode: "spent_on"` entries only; `mode: "owes"` entries are excluded, since they represent a temporary receivable, not attributable household spend.
+**Canonical Business Rule, registered:** see `CBR-TRX-person-attribution-semantics.md` — A person's Analytical Attribution for Budget purposes counts `mode: "spent_on"` entries only; `mode: "owes"` entries are excluded, since they represent a temporary receivable, not attributable household spend.
 
 **Confirmed defect this resolves:** PR-1's `getPersonAttributedTotal` currently sums *all* `t.people` entries regardless of mode — contradicts the rule above. Not yet shipped to any consumer (WP-1 was read-only, unwired), but needs a one-line fix (filter to `mode==="spent_on"`) before this function is trusted for real Budget consumption.
 
