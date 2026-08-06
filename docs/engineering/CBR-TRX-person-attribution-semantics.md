@@ -30,6 +30,10 @@
 
 **`domain/allocations/adapter.js`, `getPersonAttributedTotal`** — previously summed all `t.people` entries regardless of mode, contradicting this rule. Corrected to filter on `mode === "spent_on"`. 16/16 tests passing post-fix. Not a product decision or a reinterpretation — a defect corrected against evidence that already existed in the codebase before the fix.
 
+## Governance Note
+
+No Change Register entry was created for this work. Change Register entries in this repository consistently represent architectural migrations — duplicate logic moving to a canonical owner, ownership changes, architectural restructuring. This is none of those: architecture didn't change, ownership didn't change, business semantics didn't change. A consumer (`getPersonAttributedTotal`) was corrected to conform to an already-canonical rule that existed in the repository before this investigation began. That belongs in the CBR, the PR, and the tests — recorded here so the absence doesn't read as an oversight to a future reader.
+
 ## What this does not decide
 
 - Whether Group-dimension attribution (`t.groupAllocations`) has an equivalent mode distinction — not audited here, `groupAllocations` entries were seen using `mode:"owes"` in the grep evidence but their full semantic treatment wasn't traced as part of this resolution.
