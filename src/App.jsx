@@ -12524,15 +12524,15 @@ function AppContent({ onLock }) {
 
         {budgetSubTab==="dashboard"&&(()=>{
           const [yy,mm] = viewMonth.split("-").map(Number);
-          const baseMonthly = monthOverrides[viewMonth] || Math.round(Number(annualBudget||0)/12);
+          const baseMonthly = getHouseholdPlanningAllocation(annualBudget, monthOverrides, viewMonth);
           const prevMonthKey = mm===1 ? `${yy-1}-12` : `${yy}-${String(mm-1).padStart(2,"0")}`;
           const dashMonthly = (()=>{
             if(!budgetCarryForward) return baseMonthly;
-            const prevBudget = monthOverrides[prevMonthKey] || Math.round(Number(annualBudget||0)/12);
+            const prevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, prevMonthKey);
             const prevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(prevMonthKey)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
             return Math.max(0, baseMonthly + (prevBudget-prevSpend));
           })();
-          const dashSpend = myActual;
+          const dashSpend = getHouseholdAttributedTotal({ periodTransactions: txns.filter(t=>t.date&&t.date.startsWith(viewMonth)), allTransactions: txns });
           const dashRemaining = dashMonthly - dashSpend;
           const dashPct = dashMonthly>0 ? Math.min(100,Math.round(dashSpend/dashMonthly*100)) : (dashSpend>0?100:0);
           const dashLeftDays = daysLeft(viewMonth);
