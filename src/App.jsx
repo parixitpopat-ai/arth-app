@@ -7075,33 +7075,25 @@ function AppContent({ onLock }) {
 
   // ── HOME ───────────────────────────────────────────────────────────────────
 
-  const DEFAULT_CARD_ORDER = ["bills","safeToSpend","quickActions","goalsHome","recent"];
-  const KNOWN_CARD_KEYS = new Set(DEFAULT_CARD_ORDER);
-  // Filters out invalid saved keys AND backfills any card added to the app after this user's
-  // order was last saved. Must be applied every time cardOrder is set from a saved source
-  // (local OR cloud) — not just at initial mount — or a cloud sync restore will silently
-  // overwrite the backfilled result with the old, pre-fix array (bug: cards appeared briefly
-  // then vanished once cloud sync completed a moment after initial render).
+  // Frozen Home order (Arth 2.0 product decision, 07 Aug 2026): Safe to Spend ->
+  // Money Required -> Upcoming Commitments -> Financial Health -> AI Insight ->
+  // Recent Activity -> Quick Actions. Enforced for every user, not just fresh
+  // installs — a previously-saved cardOrder predates this decision and would
+  // otherwise keep showing the old sequence forever.
+  const DEFAULT_CARD_ORDER = ["safeToSpend","moneyRequired","bills","healthScore","aiInsight","recent","quickActions"];
+  // Previously only contained the OLD DEFAULT_CARD_ORDER's five keys, which never
+  // included healthScore or aiInsight — meaning any saved cardOrder silently
+  // stripped both cards out via the filter step below, for every user, not just
+  // fresh ones. The aiInsight-repositioning logic further down could never
+  // actually fire as a result. Fixed by including every real card key here.
+  const KNOWN_CARD_KEYS = new Set([...DEFAULT_CARD_ORDER, "goalsHome", "eventsHome", "stats", "categories", "cc"]);
   const backfillCardOrder = (saved) => {
     const filtered = Array.isArray(saved) ? saved.filter(k=>KNOWN_CARD_KEYS.has(k)) : [];
-    const missing = DEFAULT_CARD_ORDER.filter(k=>!filtered.includes(k));
-    // healthScore and quickActions are headline elements — insert them at the front (in that
-    // order) rather than appending like other newly-added cards, so they don't get silently
-    // buried below whatever was already there. Everything else new still just appends.
-    const frontInserts = ["healthScore","quickActions"].filter(k=>missing.includes(k));
-    const rest = missing.filter(k=>!frontInserts.includes(k));
-    let merged = frontInserts.length
-      ? [...frontInserts, ...filtered, ...rest]
-      : [...filtered, ...missing];
-    // aiInsight moved from last to right-after-healthScore per product decision — a repositioning,
-    // not a new card, so backfill (which only handles missing cards) wouldn't move it for anyone
-    // who already had a saved order. Correct it explicitly, once, regardless of where it currently is.
-    if(merged.includes("aiInsight")){
-      merged = merged.filter(k=>k!=="aiInsight");
-      const healthIdx = merged.indexOf("healthScore");
-      merged.splice(healthIdx>=0?healthIdx+1:0, 0, "aiInsight");
-    }
-    return merged.length ? merged : DEFAULT_CARD_ORDER;
+    // Anything the user had that isn't part of the frozen core sequence
+    // (goalsHome/eventsHome/stats/categories/cc) keeps its relative order,
+    // appended after the frozen seven.
+    const extras = filtered.filter(k=>!DEFAULT_CARD_ORDER.includes(k));
+    return [...DEFAULT_CARD_ORDER, ...extras];
   };
   const [cardOrder, setCardOrder] = useState(()=>backfillCardOrder(JSON.parse(localStorage.getItem("arth_card_order")||"null")));
   const [editingCards, setEditingCards] = useState(false);
@@ -7718,8 +7710,8 @@ function AppContent({ onLock }) {
             { icon:"🔄", label:"Transfer", color:T.info, onClick:()=>{ setDefaultAddType("transfer"); setShowAdd(true); } },
             { icon:"📄", label:"Bill", color:T.warn, onClick:()=>{ setDefaultBillerAccountId(""); setShowAddBill(true); } },
           ].map(qa=>(
-            <button key={qa.label} onClick={qa.onClick} style={{ ...card,margin:0,padding:"14px 6px",display:"flex",flexDirection:"column",alignItems:"center",gap:6,cursor:"pointer",border:`1px solid ${T.border}` }}>
-              <div style={{ width:36,height:36,borderRadius:"50%",background:qa.color+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{qa.icon}</div>
+            <button key={qa.label} onClick={qa.onClick} style={{ background:"none",border:"none",margin:0,padding:"6px 4px",display:"flex",flexDirection:"column",alignItems:"center",gap:6,cursor:"pointer" }}>
+              <div style={{ width:44,height:44,borderRadius:"50%",background:qa.color+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{qa.icon}</div>
               <span style={{ color:T.text,fontSize:10,fontWeight:700 }}>{qa.label}</span>
             </button>
           ))}
@@ -7782,41 +7774,47 @@ function AppContent({ onLock }) {
         );
       })(),
       safeToSpend: (
-        <div key="safeToSpendRow" style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-          <div onClick={()=>setTab("outlook")} style={{ ...card,margin:0,textAlign:"center",cursor:"pointer" }}>
-            <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND</div>
-            {homeMonthBudget<=0 ? (
-              <div style={{ color:T.sub,fontSize:11,padding:"8px 0" }}>No budget set yet.</div>
-            ) : (
-              <>
-                <div style={{ color:homeSafeToSpend>=0?T.accent:T.danger,fontSize:22,fontWeight:900,margin:"4px 0" }}>{sym}{fmt(homeSafeToSpend)}</div>
-                <div style={{ color:T.sub,fontSize:9 }}>~{sym}{fmt(Math.round(homeSafeToSpendPerDay))}/day</div>
-                {/* Budget vs Spent breakdown - real fix: the net figure alone (e.g. "-10000")
-                    didn't say whether that's from a low budget or high spending. */}
-                <div style={{ display:"flex",justifyContent:"space-between",fontSize:9,color:T.sub,marginTop:6,paddingTop:6,borderTop:`1px dashed ${T.border}` }}>
-                  <span>Budget</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeMonthBudget)}</span>
-                </div>
-                <div style={{ display:"flex",justifyContent:"space-between",fontSize:9,color:T.sub,marginTop:2 }}>
-                  <span>Spent</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeMonthSpend)}</span>
-                </div>
-              </>
-            )}
-            <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:4,marginTop:6 }}>
-              <span style={{ fontSize:11 }}>{homeStatus.icon}</span><span style={{ color:homeStatus.color,fontSize:10,fontWeight:700 }}>{homeStatus.label}</span>
-            </div>
-            <div style={{ color:T.accent,fontSize:9,fontWeight:700,marginTop:6 }}>Open Outlook →</div>
+        <div key="safeToSpend" onClick={()=>setTab("outlook")} style={{ ...card,textAlign:"center",cursor:"pointer",background:`linear-gradient(135deg,${T.accent}1c,${T.card})`,border:`1px solid ${T.accent}33`,padding:20 }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND</div>
+          {homeMonthBudget<=0 ? (
+            <div style={{ color:T.sub,fontSize:11,padding:"8px 0" }}>No budget set yet.</div>
+          ) : (
+            <>
+              <div style={{ color:homeSafeToSpend>=0?T.accent:T.danger,fontSize:34,fontWeight:900,margin:"6px 0" }}>{sym}{fmt(homeSafeToSpend)}</div>
+              {/* Progress bar — same spent/budget ratio already shown in the Budget/Spent rows
+                  below, just visualized. No new calculation, reuses homeMonthSpend/homeMonthBudget. */}
+              <div style={{ height:6,background:T.border,borderRadius:3,margin:"8px 0" }}>
+                <div style={{ height:"100%",width:`${Math.max(0,Math.min(100,Math.round(homeMonthSpend/homeMonthBudget*100)))}%`,background:homeSafeToSpend>=0?T.accent:T.danger,borderRadius:3 }}/>
+              </div>
+              <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(homeSafeToSpendPerDay))}/day</div>
+              {/* Budget vs Spent breakdown - real fix: the net figure alone (e.g. "-10000")
+                  didn't say whether that's from a low budget or high spending. */}
+              <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:T.sub,marginTop:8,paddingTop:8,borderTop:`1px dashed ${T.border}` }}>
+                <span>Budget</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeMonthBudget)}</span>
+              </div>
+              <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:T.sub,marginTop:2 }}>
+                <span>Spent</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeMonthSpend)}</span>
+              </div>
+            </>
+          )}
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:4,marginTop:8 }}>
+            <span style={{ fontSize:12 }}>{homeStatus.icon}</span><span style={{ color:homeStatus.color,fontSize:11,fontWeight:700 }}>{homeStatus.label}</span>
           </div>
-          <div onClick={()=>setTab("outlook")} style={{ ...card,margin:0,cursor:"pointer" }}>
-            <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>PROTECTED MONEY</div>
-            <div style={{ color:T.text,fontSize:18,fontWeight:900,marginBottom:6 }}>{sym}{fmt(homeCashRequired)}</div>
-            <div style={{ display:"flex",justifyContent:"space-between",fontSize:9,color:T.sub,marginBottom:2 }}>
-              <span>Available</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeOpeningBalance)}</span>
-            </div>
-            <div style={{ display:"flex",justifyContent:"space-between",fontSize:9,color:T.sub }}>
-              <span>Buffer</span><span style={{ color:homeBuffer>=0?T.success:T.danger,fontWeight:800 }}>{sym}{fmt(homeBuffer)}</span>
-            </div>
-            <div style={{ color:T.accent,fontSize:9,fontWeight:700,marginTop:6 }}>View Commitments →</div>
+          <div style={{ color:T.accent,fontSize:10,fontWeight:700,marginTop:8 }}>Open Outlook →</div>
+        </div>
+      ),
+      moneyRequired: (
+        <div key="moneyRequired" onClick={()=>setTab("outlook")} style={{ ...card,cursor:"pointer" }}>
+          <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>MONEY REQUIRED</div>
+          <div style={{ color:T.text,fontSize:24,fontWeight:900,marginBottom:2 }}>{sym}{fmt(homeCashRequired)}</div>
+          <div style={{ color:T.sub,fontSize:10,marginBottom:8 }}>Next 30 days</div>
+          <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:T.sub,marginBottom:2 }}>
+            <span>Available</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeOpeningBalance)}</span>
           </div>
+          <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:T.sub }}>
+            <span>Buffer</span><span style={{ color:homeBuffer>=0?T.success:T.danger,fontWeight:800 }}>{sym}{fmt(homeBuffer)}</span>
+          </div>
+          <div style={{ color:T.accent,fontSize:10,fontWeight:700,marginTop:8 }}>View Commitments →</div>
         </div>
       ),
       stats: (
@@ -7913,15 +7911,18 @@ function AppContent({ onLock }) {
         const unrecordedInvestments = allFoliosDue.slice(0,3);
         const focusCount = upcoming.length + expiringMemberships.length + lapsedMemberships.length + allFoliosDue.length + dueRecurring.length;
         if(!upcoming.length && !expiringMemberships.length && !lapsedMemberships.length && !allFoliosDue.length && !dueRecurring.length) return null;
+        // Small colored dot, replacing the old icon-badge box — matches the Arth 2.0 Home mockup's
+        // timeline-list visual language. Cosmetic only; every row's data/handlers below are untouched.
+        const Dot = ({ color }) => <div style={{ width:8,height:8,borderRadius:"50%",background:color,flexShrink:0 }}/>;
         return (
           <div key="bills" style={card}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-              <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>🎯 Today's Focus {focusCount>0&&<span style={{ color:T.accent }}>({focusCount})</span>}</span>
+              <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>Upcoming Commitments {focusCount>0&&<span style={{ color:T.accent }}>({focusCount})</span>}</span>
               {overdue.length>0&&<span style={{ background:T.danger+"22",color:T.danger,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700 }}>{overdue.length} overdue</span>}
             </div>
             {dueRecurring.map(r=>(
               <div key={`due_${r.id}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                <div style={{ width:32,height:32,borderRadius:9,background:T.info+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>💹</div>
+                <Dot color={T.info}/>
                 <div style={{ flex:1 }}><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{r.name}</div><div style={{ color:T.info,fontSize:11 }}>Due today · {sym}{fmt(r.amount)}</div></div>
                 <div style={{ display:"flex",gap:6 }}>
                   <button onClick={()=>{ setAddPrefill({ amount:String(r.amount||""), accId:r.accId||"", who:r.name||"", investFolio:r.name||"", investType:r.investType||"mf", date:todayStr(), recurringScheduleId:r.id }); setDefaultAddType("investment"); setShowAdd(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Record</button>
@@ -7931,7 +7932,7 @@ function AppContent({ onLock }) {
             ))}
             {unrecordedInvestments.map(g=>(
               <div key={`inv_${g.key}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                <div style={{ width:32,height:32,borderRadius:9,background:T.info+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>📈</div>
+                <Dot color={T.info}/>
                 <div style={{ flex:1 }}><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{g.name}</div><div style={{ color:T.sub,fontSize:11 }}>{g.type?.toUpperCase()||"INVESTMENT"} not recorded{g.amount?` · ${sym}${fmt(g.amount)}`:""}</div></div>
                 <div style={{ display:"flex",gap:6 }}>
                   <button onClick={()=>{ setAddPrefill({ amount:String(g.amount||""), accId:g.accId||"", who:g.name||"", investFolio:g.key||"", investType:g.type||"mf", date:todayStr() }); setDefaultAddType("investment"); setShowAdd(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Record</button>
@@ -7942,14 +7943,14 @@ function AppContent({ onLock }) {
             {allFoliosDue.length>3&&<div style={{ color:T.sub,fontSize:10,padding:"4px 0" }}>+{allFoliosDue.length-3} more in Investments</div>}
             {lapsedMemberships.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
               <div key={`lapsed_${m.id}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                <div style={{ width:32,height:32,borderRadius:9,background:T.danger+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>🔴</div>
+                <Dot color={T.danger}/>
                 <div style={{ flex:1 }}><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{ba?.name||"Membership"} lapsed</div><div style={{ color:T.danger,fontSize:11 }}>Expired {formatShortDate(getPeriodEffectiveEnd(period))||getPeriodEffectiveEnd(period)}</div></div>
                 <button onClick={()=>setActiveBillerForAction(ba)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Renew</button>
               </div>
             );})}
             {expiringMemberships.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
               <div key={`expiring_${m.id}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                <div style={{ width:32,height:32,borderRadius:9,background:T.warn+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>🟡</div>
+                <Dot color={T.warn}/>
                 <div style={{ flex:1 }}><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{ba?.name||"Membership"} renewal due</div><div style={{ color:T.warn,fontSize:11 }}>Until {formatShortDate(getPeriodEffectiveEnd(period))||getPeriodEffectiveEnd(period)}</div></div>
                 <button onClick={()=>setActiveBillerForAction(ba)} style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Renew</button>
               </div>
@@ -7957,10 +7958,9 @@ function AppContent({ onLock }) {
             {upcoming.map(b=>{
               const daysUntil=Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
               const isOverdue=daysUntil<0;
-              const cat=getCat(b.catId);
               return (
                 <div key={b.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                  <div style={{ width:32,height:32,borderRadius:9,background:(isOverdue?T.danger:daysUntil<=3?T.warn:T.success)+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15 }}>{cat.icon}</div>
+                  <Dot color={isOverdue?T.danger:daysUntil<=3?T.warn:T.success}/>
                   <div style={{ flex:1 }}>
                     <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{b.name}</div>
                     <div style={{ color:isOverdue?T.danger:daysUntil<=3?T.warn:T.sub,fontSize:11 }}>{isOverdue?`${Math.abs(daysUntil)}d overdue`:daysUntil===0?"Due today":`Due in ${daysUntil}d`}</div>
@@ -8072,10 +8072,9 @@ function AppContent({ onLock }) {
           </div>
 
           {(()=>{
-            const MANDATORY_CARDS = new Set(["bills","quickActions"]); // HW-001, HW-004 per the registry
             const validCards=cardOrder.filter(id=>CARDS[id]!=null);
             const visibleCount = validCards.filter(id=>!hiddenCards.has(id)).length;
-            const displayCards = editingCards ? validCards : validCards.filter(id=>MANDATORY_CARDS.has(id)||!hiddenCards.has(id));
+            const displayCards = editingCards ? validCards : validCards.filter(id=>!hiddenCards.has(id));
             return displayCards.map((cardId, idx) => {
             const cardEl = CARDS[cardId];
             if(!cardEl) return null;
@@ -8084,14 +8083,13 @@ function AppContent({ onLock }) {
               <div key={cardId} style={{ position:"relative",marginBottom:12, opacity:editingCards&&isHidden?0.4:1 }}>
                 {editingCards&&(
                   <div style={{ position:"absolute",right:-8,top:"50%",transform:"translateY(-50%)",display:"flex",flexDirection:"column",gap:4,zIndex:10 }}>
-                    {/* HW-001 (Today's Focus/bills) and HW-004 (Quick Actions) are mandatory per
-                        the Home Widget Registry - no hide toggle for these two specifically. */}
-                    {cardId!=="bills"&&cardId!=="quickActions"&&(
-                      <button onClick={()=>{
+                    {/* Every card, including bills/quickActions, can now be hidden/shown —
+                        the previous HW-001/HW-004 mandatory-card restriction was removed per
+                        product decision (07 Aug 2026): every tile should be freely movable. */}
+                    <button onClick={()=>{
                         if(!isHidden && visibleCount<=1) return;
                         setHiddenCards(prev=>{ const next=new Set(prev); if(isHidden) next.delete(cardId); else next.add(cardId); return next; });
                       }} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:13,color:isHidden?T.sub:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>{isHidden?"🚫":"👁"}</button>
-                    )}
                     <button onClick={()=>moveCard(idx,-1)} disabled={idx===0} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===0?"not-allowed":"pointer",fontSize:14,color:idx===0?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↑</button>
                     <button onClick={()=>moveCard(idx,1)} disabled={idx===displayCards.length-1} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===displayCards.length-1?"not-allowed":"pointer",fontSize:14,color:idx===displayCards.length-1?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↓</button>
                   </div>
