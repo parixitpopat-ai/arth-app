@@ -7075,23 +7075,29 @@ function AppContent({ onLock }) {
 
   // ── HOME ───────────────────────────────────────────────────────────────────
 
-  // Frozen Home order (Arth 2.0 product decision, 07 Aug 2026): Safe to Spend ->
-  // Money Required -> Upcoming Commitments -> Financial Health -> AI Insight ->
-  // Recent Activity -> Quick Actions. Enforced for every user, not just fresh
-  // installs — a previously-saved cardOrder predates this decision and would
-  // otherwise keep showing the old sequence forever.
-  const DEFAULT_CARD_ORDER = ["safeToSpend","moneyRequired","bills","healthScore","aiInsight","recent","quickActions"];
+  // Home order — "Home UI Revision v2" (Arth 2.0, 07 Aug 2026, approved for
+  // implementation), superseding the earlier single-column freeze: Safe to Spend
+  // (sole full-width hero) -> [Money Required, Financial Health] paired ->
+  // [Upcoming, Budget Health] paired -> AI Insight -> Recent Activity -> Quick
+  // Actions. Adjacent pairs render as a 2-column grid — see PAIR_RULES below.
+  // Enforced for every user, not just fresh installs.
+  const DEFAULT_CARD_ORDER = ["safeToSpend","moneyRequired","healthScore","bills","budgetHealth","aiInsight","recent","quickActions"];
   // Previously only contained the OLD DEFAULT_CARD_ORDER's five keys, which never
   // included healthScore or aiInsight — meaning any saved cardOrder silently
   // stripped both cards out via the filter step below, for every user, not just
   // fresh ones. The aiInsight-repositioning logic further down could never
   // actually fire as a result. Fixed by including every real card key here.
   const KNOWN_CARD_KEYS = new Set([...DEFAULT_CARD_ORDER, "goalsHome", "eventsHome", "stats", "categories", "cc"]);
+  // Unordered pairs that render as a 2-column grid when adjacent in cardOrder
+  // (in either order), rather than each full-width. If a user's own reordering
+  // separates a pair, both fall back to full-width automatically — see the
+  // render loop below.
+  const PAIR_RULES = [["moneyRequired","healthScore"], ["bills","budgetHealth"]];
   const backfillCardOrder = (saved) => {
     const filtered = Array.isArray(saved) ? saved.filter(k=>KNOWN_CARD_KEYS.has(k)) : [];
     // Anything the user had that isn't part of the frozen core sequence
     // (goalsHome/eventsHome/stats/categories/cc) keeps its relative order,
-    // appended after the frozen seven.
+    // appended after the frozen set.
     const extras = filtered.filter(k=>!DEFAULT_CARD_ORDER.includes(k));
     return [...DEFAULT_CARD_ORDER, ...extras];
   };
@@ -7583,16 +7589,23 @@ function AppContent({ onLock }) {
     return () => window.clearTimeout(timer);
   }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
-  const moveCard = (idx, dir) => {
-    const arr = cardOrder.map(x=>x); // fully mutable copy
+  const moveCard = (cardId, dir) => {
+    // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
+    // array to index into the RAW cardOrder array. If cardOrder ever contains a
+    // stale key with no matching CARDS entry, those two arrays drift apart and
+    // every index past that point points at the wrong neighbor — reported as
+    // "the last card won't move." Fixed by moving by ID: look up the card's
+    // real index directly, every time, immune to any filtering mismatch.
+    const arr = cardOrder.map(x=>x);
+    const idx = arr.indexOf(cardId);
+    if(idx===-1) return;
     const swap = idx + dir;
     if(swap < 0 || swap >= arr.length) return;
     const tmp = arr[idx];
     arr[idx] = arr[swap];
     arr[swap] = tmp;
-    const newArr = arr.map(x=>x);
-    setCardOrder(newArr);
-    safeSetLocalStorage("arth_card_order", JSON.stringify(newArr));
+    setCardOrder(arr);
+    safeSetLocalStorage("arth_card_order", JSON.stringify(arr));
   };
 
   const Home = () => {
@@ -7689,17 +7702,12 @@ function AppContent({ onLock }) {
       .sort((a,b)=>a.name.localeCompare(b.name));
     const CARDS = {
       healthScore: (
-        <div key="healthScore" onClick={()=>setShowHealthScoreDetail(true)} style={{ ...card,cursor:"pointer",background:`linear-gradient(135deg,${T.accent}12,${T.card})`,border:`1px solid ${T.accent}33` }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-            <div>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Financial Health</div>
-              <div style={{ color:financialHealthScore.total>=70?T.success:financialHealthScore.total>=45?T.warn:T.danger,fontSize:32,fontWeight:900,marginTop:4 }}>{financialHealthScore.total}<span style={{ fontSize:16,color:T.sub,fontWeight:700 }}>/100</span></div>
-            </div>
-            <div style={{ width:56,height:56,borderRadius:"50%",background:`conic-gradient(${financialHealthScore.total>=70?T.success:financialHealthScore.total>=45?T.warn:T.danger} ${financialHealthScore.total*3.6}deg,${T.border} 0deg)`,display:"flex",alignItems:"center",justifyContent:"center" }}>
-              <div style={{ width:44,height:44,borderRadius:"50%",background:T.card,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{financialHealthScore.total>=70?"🟢":financialHealthScore.total>=45?"🟡":"🔴"}</div>
-            </div>
+        <div key="healthScore" onClick={()=>setShowHealthScoreDetail(true)} style={{ ...card,cursor:"pointer",background:`linear-gradient(135deg,${T.accent}12,${T.card})`,border:`1px solid ${T.accent}33`,padding:14 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:2 }}>
+            <div style={{ width:20,height:20,borderRadius:"50%",background:T.warn+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11 }}>❤️</div>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Financial Health</div>
           </div>
-          <div style={{ color:T.sub,fontSize:11,marginTop:8 }}>Tap to see what's driving your score</div>
+          <div style={{ color:financialHealthScore.total>=70?T.success:financialHealthScore.total>=45?T.warn:T.danger,fontSize:30,fontWeight:900,marginTop:2 }}>{financialHealthScore.total}<span style={{ fontSize:16,color:T.sub,fontWeight:700 }}>/100</span></div>
         </div>
       ),
       quickActions: (
@@ -7708,7 +7716,7 @@ function AppContent({ onLock }) {
             { icon:"➖", label:"Expense", color:T.danger, onClick:()=>setShowQuickAdd(true) },
             { icon:"➕", label:"Income", color:T.success, onClick:()=>{ setDefaultAddType("income"); setShowAdd(true); } },
             { icon:"🔄", label:"Transfer", color:T.info, onClick:()=>{ setDefaultAddType("transfer"); setShowAdd(true); } },
-            { icon:"📄", label:"Bill", color:T.warn, onClick:()=>{ setDefaultBillerAccountId(""); setShowAddBill(true); } },
+            { icon:"📈", label:"Investment", color:T.accent, onClick:()=>{ setDefaultAddType("investment"); setShowAdd(true); } },
           ].map(qa=>(
             <button key={qa.label} onClick={qa.onClick} style={{ background:"none",border:"none",margin:0,padding:"6px 4px",display:"flex",flexDirection:"column",alignItems:"center",gap:6,cursor:"pointer" }}>
               <div style={{ width:44,height:44,borderRadius:"50%",background:qa.color+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{qa.icon}</div>
@@ -7787,6 +7795,8 @@ function AppContent({ onLock }) {
                 <div style={{ height:"100%",width:`${Math.max(0,Math.min(100,Math.round(homeMonthSpend/homeMonthBudget*100)))}%`,background:homeSafeToSpend>=0?T.accent:T.danger,borderRadius:3 }}/>
               </div>
               <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(homeSafeToSpendPerDay))}/day</div>
+              {/* Month-end date — display-only formatting, no new business logic. */}
+              <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>Available until {new Date(homeTodayDate.getFullYear(),homeTodayDate.getMonth()+1,0).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</div>
               {/* Budget vs Spent breakdown - real fix: the net figure alone (e.g. "-10000")
                   didn't say whether that's from a low budget or high spending. */}
               <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:T.sub,marginTop:8,paddingTop:8,borderTop:`1px dashed ${T.border}` }}>
@@ -7800,21 +7810,28 @@ function AppContent({ onLock }) {
           <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:4,marginTop:8 }}>
             <span style={{ fontSize:12 }}>{homeStatus.icon}</span><span style={{ color:homeStatus.color,fontSize:11,fontWeight:700 }}>{homeStatus.label}</span>
           </div>
-          <div style={{ color:T.accent,fontSize:10,fontWeight:700,marginTop:8 }}>Open Outlook →</div>
+          <div style={{ color:T.accent,fontSize:10,fontWeight:700,marginTop:8 }}>View calculation →</div>
         </div>
       ),
       moneyRequired: (
-        <div key="moneyRequired" onClick={()=>setTab("outlook")} style={{ ...card,cursor:"pointer" }}>
-          <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>MONEY REQUIRED</div>
-          <div style={{ color:T.text,fontSize:24,fontWeight:900,marginBottom:2 }}>{sym}{fmt(homeCashRequired)}</div>
-          <div style={{ color:T.sub,fontSize:10,marginBottom:8 }}>Next 30 days</div>
-          <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:T.sub,marginBottom:2 }}>
-            <span>Available</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeOpeningBalance)}</span>
+        <div key="moneyRequired" onClick={()=>setTab("outlook")} style={{ ...card,cursor:"pointer",padding:14 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:4 }}>
+            <div style={{ width:20,height:20,borderRadius:"50%",background:T.info+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11 }}>💼</div>
+            <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>MONEY REQUIRED</div>
           </div>
-          <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:T.sub }}>
-            <span>Buffer</span><span style={{ color:homeBuffer>=0?T.success:T.danger,fontWeight:800 }}>{sym}{fmt(homeBuffer)}</span>
+          <div style={{ color:T.text,fontSize:22,fontWeight:900,marginBottom:1 }}>{sym}{fmt(homeCashRequired)}</div>
+          <div style={{ color:T.sub,fontSize:10 }}>Next 30 days</div>
+        </div>
+      ),
+      // Reuses homeStatus — the same classifier already computed for Safe to Spend
+      // (Needs Setup / Comfortable / etc.) — not a new or invented metric.
+      budgetHealth: (
+        <div key="budgetHealth" onClick={()=>setTab("outlook")} style={{ ...card,cursor:"pointer",padding:14 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:4 }}>
+            <div style={{ width:20,height:20,borderRadius:"50%",background:homeStatus.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11 }}>{homeStatus.icon}</div>
+            <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>BUDGET</div>
           </div>
-          <div style={{ color:T.accent,fontSize:10,fontWeight:700,marginTop:8 }}>View Commitments →</div>
+          <div style={{ color:homeStatus.color,fontSize:22,fontWeight:900 }}>{homeStatus.label}</div>
         </div>
       ),
       stats: (
@@ -7897,92 +7914,27 @@ function AppContent({ onLock }) {
         const today = new Date();
         const upcoming = bills.filter(b=>b.status==="unpaid").sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).slice(0,4);
         const overdue = upcoming.filter(b=>new Date(b.dueDate)<today);
-        // Legacy alerts folded in here - Membership Expiry and Recurring Investment Reminder used
-        // to render as separate, always-visible blocks outside the card system entirely,
-        // duplicating exactly what this widget is meant to consolidate. One system, one source.
-        // Correction: an earlier pass folded Membership in but left a comment falsely implying
-        // Investment Reminders were folded too - they weren't (confirmed via a real screenshot
-        // showing the old standalone card still live). Actually folding it in now.
         const todayStrFocus = today.toISOString().split("T")[0];
         const in7Focus = new Date(Date.now()+7*24*60*60*1000).toISOString().split("T")[0];
         const withPeriodFocus = memberships.map(m=>({ m, period:getCurrentPeriod(m) })).filter(x=>x.period);
         const expiringMemberships = withPeriodFocus.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); return eff>=todayStrFocus && eff<=in7Focus; });
         const lapsedMemberships = withPeriodFocus.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); if(eff>=todayStrFocus) return false; const diffDays = Math.round((new Date()-new Date(eff))/(1000*60*60*24)); return diffDays<=3; });
-        const unrecordedInvestments = allFoliosDue.slice(0,3);
         const focusCount = upcoming.length + expiringMemberships.length + lapsedMemberships.length + allFoliosDue.length + dueRecurring.length;
-        if(!upcoming.length && !expiringMemberships.length && !lapsedMemberships.length && !allFoliosDue.length && !dueRecurring.length) return null;
-        // Small colored dot, replacing the old icon-badge box — matches the Arth 2.0 Home mockup's
-        // timeline-list visual language. Cosmetic only; every row's data/handlers below are untouched.
-        const Dot = ({ color }) => <div style={{ width:8,height:8,borderRadius:"50%",background:color,flexShrink:0 }}/>;
+        // Home 2.0 spec: compact summary tile only (count + label), tap-through to the full
+        // detailed list. The per-row Pay/Record/Snooze/Skip/Renew UI (built earlier this session)
+        // is unchanged and still lives on the dedicated Bills screen (setTab("bills")) — this only
+        // changes what Home itself shows, not the underlying bills feature.
         return (
-          <div key="bills" style={card}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-              <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>Upcoming Commitments {focusCount>0&&<span style={{ color:T.accent }}>({focusCount})</span>}</span>
-              {overdue.length>0&&<span style={{ background:T.danger+"22",color:T.danger,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700 }}>{overdue.length} overdue</span>}
+          <div key="bills" onClick={()=>setTab("bills")} style={{ ...card,cursor:"pointer",padding:14 }}>
+            <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:4 }}>
+              <div style={{ width:20,height:20,borderRadius:"50%",background:(overdue.length>0?T.danger:T.info)+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11 }}>📅</div>
+              <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>UPCOMING</div>
             </div>
-            {dueRecurring.map(r=>(
-              <div key={`due_${r.id}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                <Dot color={T.info}/>
-                <div style={{ flex:1 }}><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{r.name}</div><div style={{ color:T.info,fontSize:11 }}>Due today · {sym}{fmt(r.amount)}</div></div>
-                <div style={{ display:"flex",gap:6 }}>
-                  <button onClick={()=>{ setAddPrefill({ amount:String(r.amount||""), accId:r.accId||"", who:r.name||"", investFolio:r.name||"", investType:r.investType||"mf", date:todayStr(), recurringScheduleId:r.id }); setDefaultAddType("investment"); setShowAdd(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Record</button>
-                  <button onClick={()=>setRecurringSchedules(prev=>prev.map(x=>x.id===r.id?{...x,snoozedUntil:new Date(Date.now()+24*60*60*1000).toISOString().split("T")[0]}:x))} style={{ background:"none",border:`1px solid ${T.warn}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Snooze</button>
-                </div>
-              </div>
-            ))}
-            {unrecordedInvestments.map(g=>(
-              <div key={`inv_${g.key}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                <Dot color={T.info}/>
-                <div style={{ flex:1 }}><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{g.name}</div><div style={{ color:T.sub,fontSize:11 }}>{g.type?.toUpperCase()||"INVESTMENT"} not recorded{g.amount?` · ${sym}${fmt(g.amount)}`:""}</div></div>
-                <div style={{ display:"flex",gap:6 }}>
-                  <button onClick={()=>{ setAddPrefill({ amount:String(g.amount||""), accId:g.accId||"", who:g.name||"", investFolio:g.key||"", investType:g.type||"mf", date:todayStr() }); setDefaultAddType("investment"); setShowAdd(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Record</button>
-                  <button onClick={()=>{ const key=g.key; setSkippedInvestmentMonths(prev=>prev.includes(`${key}_${thisMonthKey}`)?prev:[...prev,`${key}_${thisMonthKey}`]); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Skip</button>
-                </div>
-              </div>
-            ))}
-            {allFoliosDue.length>3&&<div style={{ color:T.sub,fontSize:10,padding:"4px 0" }}>+{allFoliosDue.length-3} more in Investments</div>}
-            {lapsedMemberships.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
-              <div key={`lapsed_${m.id}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                <Dot color={T.danger}/>
-                <div style={{ flex:1 }}><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{ba?.name||"Membership"} lapsed</div><div style={{ color:T.danger,fontSize:11 }}>Expired {formatShortDate(getPeriodEffectiveEnd(period))||getPeriodEffectiveEnd(period)}</div></div>
-                <button onClick={()=>setActiveBillerForAction(ba)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Renew</button>
-              </div>
-            );})}
-            {expiringMemberships.map(({m,period})=>{ const ba=billerAccounts.find(b=>b.id===m.billerAccountId); return (
-              <div key={`expiring_${m.id}`} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                <Dot color={T.warn}/>
-                <div style={{ flex:1 }}><div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{ba?.name||"Membership"} renewal due</div><div style={{ color:T.warn,fontSize:11 }}>Until {formatShortDate(getPeriodEffectiveEnd(period))||getPeriodEffectiveEnd(period)}</div></div>
-                <button onClick={()=>setActiveBillerForAction(ba)} style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Renew</button>
-              </div>
-            );})}
-            {upcoming.map(b=>{
-              const daysUntil=Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
-              const isOverdue=daysUntil<0;
-              return (
-                <div key={b.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                  <Dot color={isOverdue?T.danger:daysUntil<=3?T.warn:T.success}/>
-                  <div style={{ flex:1 }}>
-                    <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{b.name}</div>
-                    <div style={{ color:isOverdue?T.danger:daysUntil<=3?T.warn:T.sub,fontSize:11 }}>{isOverdue?`${Math.abs(daysUntil)}d overdue`:daysUntil===0?"Due today":`Due in ${daysUntil}d`}</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    {b.amount>0&&<div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(getNetBillAmount(b, refundTotalsByBill))}</div>}
-                    <button onClick={e=>{ e.stopPropagation();
-                      const accId=b.accId||accounts.find(a=>a.type!=="cc")?.id||"";
-                      setTxns(p=>[{id:Date.now(),type:"expense",desc:b.name,merchant:b.merchant||"",date:todayStr(),note:"Bill payment",catId:b.catId,catIds:b.catIds||[b.catId],subId:b.subId||null,accId,people:b.splitPeople||{},forPerson:"",groupId:b.groupId||null,groupCollectiveAmount:Number(b.groupCollectiveAmount||0),amount:b.amount||0,isBillPayment:true,billInvoiceNo:b.invoiceNo||null,paidBillId:b.id,paidBillName:b.name,imageBase64:b.imageBase64||null,paymentImageBase64:b.paymentImageBase64||null},...p]);
-                      const _pd=todayStr();
-                      setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:_pd,lastPaidAmount:b.amount,lastPaidDate:_pd}:x));
-                      if(b.recurring && b.autoGenerate!==false){ const _nd=computeNextDueDate(b,_pd); const _np=computeNextPeriod(b,_pd); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:_nd,billDate:null,billPeriodFrom:null,billPeriodTo:null,paidDate:null,paidByTxnId:null,lastPaidAmount:b.amount,lastPaidDate:_pd,isPaused:false,pausedDate:null,resumeDate:null,pausedDays:0,createdDate:todayStr(),createdAt:Date.now(),...(_np||{})},...p]); }
-                    }} style={{ background:T.success+"22",border:`1px solid ${T.success}44`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif" }}>Pay</button>
-                  </div>
-                </div>
-              );
-            })}
-            <button onClick={()=>setTab("bills")} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer",marginTop:8,width:"100%",textAlign:"right" }}>Manage bills →</button>
+            <div style={{ color:overdue.length>0?T.danger:T.text,fontSize:22,fontWeight:900,marginBottom:1 }}>{focusCount} Due</div>
+            <div style={{ color:T.sub,fontSize:10 }}>{overdue.length>0?`${overdue.length} overdue`:"On track"}</div>
           </div>
         );
       })(),
-
       recent: txns.length>0 ? (
         <div key="recent" style={card}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
@@ -8075,31 +8027,73 @@ function AppContent({ onLock }) {
             const validCards=cardOrder.filter(id=>CARDS[id]!=null);
             const visibleCount = validCards.filter(id=>!hiddenCards.has(id)).length;
             const displayCards = editingCards ? validCards : validCards.filter(id=>!hiddenCards.has(id));
-            return displayCards.map((cardId, idx) => {
-            const cardEl = CARDS[cardId];
-            if(!cardEl) return null;
-            const isHidden = hiddenCards.has(cardId);
-            return (
-              <div key={cardId} style={{ position:"relative",marginBottom:12, opacity:editingCards&&isHidden?0.4:1 }}>
-                {editingCards&&(
-                  <div style={{ position:"absolute",right:-8,top:"50%",transform:"translateY(-50%)",display:"flex",flexDirection:"column",gap:4,zIndex:10 }}>
-                    {/* Every card, including bills/quickActions, can now be hidden/shown —
-                        the previous HW-001/HW-004 mandatory-card restriction was removed per
-                        product decision (07 Aug 2026): every tile should be freely movable. */}
-                    <button onClick={()=>{
-                        if(!isHidden && visibleCount<=1) return;
-                        setHiddenCards(prev=>{ const next=new Set(prev); if(isHidden) next.delete(cardId); else next.add(cardId); return next; });
-                      }} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:13,color:isHidden?T.sub:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>{isHidden?"🚫":"👁"}</button>
-                    <button onClick={()=>moveCard(idx,-1)} disabled={idx===0} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===0?"not-allowed":"pointer",fontSize:14,color:idx===0?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↑</button>
-                    <button onClick={()=>moveCard(idx,1)} disabled={idx===displayCards.length-1} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===displayCards.length-1?"not-allowed":"pointer",fontSize:14,color:idx===displayCards.length-1?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↓</button>
-                  </div>
-                )}
-                <div style={{ marginRight:editingCards?36:0, transition:"margin 0.2s" }}>
-                  {cardEl}
+            // Group into rows: a "row" is either one card, or an adjacent PAIR_RULES pair
+            // rendered as a 2-column grid. Hiding one half of a pair naturally un-pairs the
+            // other (it just falls through to a solo row) since this regroups from the
+            // already-filtered displayCards every render.
+            const isPair = (a,b) => PAIR_RULES.some(([x,y])=>(a===x&&b===y)||(a===y&&b===x));
+            const rows = [];
+            for(let i=0;i<displayCards.length;i++){
+              if(i<displayCards.length-1 && isPair(displayCards[i],displayCards[i+1])){
+                rows.push([displayCards[i],displayCards[i+1]]);
+                i++;
+              } else {
+                rows.push([displayCards[i]]);
+              }
+            }
+            const renderControls = (cardId, idx, isPaired) => {
+              const isHidden = hiddenCards.has(cardId);
+              return (
+                <div style={{ position:"absolute",right:-8,top:"50%",transform:"translateY(-50%)",display:"flex",flexDirection:"column",gap:4,zIndex:10 }}>
+                  <button onClick={()=>{
+                      if(!isHidden && visibleCount<=1) return;
+                      setHiddenCards(prev=>{ const next=new Set(prev); if(isHidden) next.delete(cardId); else next.add(cardId); return next; });
+                    }} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:13,color:isHidden?T.sub:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>{isHidden?"🚫":"👁"}</button>
+                  {/* Move buttons omitted for cards currently rendered as part of a pair —
+                      moving just one half would swap it out from its partner without real
+                      drag-and-drop to keep the pair together. Hide/show above still works. */}
+                  {!isPaired && (
+                    <>
+                      <button onClick={()=>moveCard(cardId,-1)} disabled={idx===0} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===0?"not-allowed":"pointer",fontSize:14,color:idx===0?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↑</button>
+                      <button onClick={()=>moveCard(cardId,1)} disabled={idx===displayCards.length-1} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:8,width:28,height:28,cursor:idx===displayCards.length-1?"not-allowed":"pointer",fontSize:14,color:idx===displayCards.length-1?T.border:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Nunito,sans-serif" }}>↓</button>
+                    </>
+                  )}
                 </div>
-              </div>
-            );
-          }); })()}
+              );
+            };
+            let runningIdx = 0;
+            return rows.map((row, rowIdx) => {
+              if(row.length===2){
+                const [idA, idB] = row;
+                const idxA = runningIdx, idxB = runningIdx+1;
+                runningIdx += 2;
+                return (
+                  <div key={`pair_${idA}_${idB}`} style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12 }}>
+                    {[[idA,idxA],[idB,idxB]].map(([cardId,idx])=>(
+                      <div key={cardId} style={{ position:"relative",opacity:editingCards&&hiddenCards.has(cardId)?0.4:1 }}>
+                        {editingCards&&renderControls(cardId, idx, true)}
+                        <div style={{ marginRight:editingCards?36:0, transition:"margin 0.2s" }}>
+                          {CARDS[cardId]}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              }
+              const cardId = row[0];
+              const idx = runningIdx;
+              runningIdx += 1;
+              const isHidden = hiddenCards.has(cardId);
+              return (
+                <div key={cardId} style={{ position:"relative",marginBottom:12, opacity:editingCards&&isHidden?0.4:1 }}>
+                  {editingCards&&renderControls(cardId, idx, false)}
+                  <div style={{ marginRight:editingCards?36:0, transition:"margin 0.2s" }}>
+                    {CARDS[cardId]}
+                  </div>
+                </div>
+              );
+            });
+          })()}
         </div>
     );
   };
@@ -15233,9 +15227,21 @@ function AppContent({ onLock }) {
               const greetIcon = h<12?"☀️":h<17?"🌤️":h<21?"🌇":"🌙";
               const dateStr = new Date().toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"});
               return (
-                <div>
-                  <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1.2 }}>{greetIcon} {greeting}{(people.find(p=>p.isMe)?.name)?`, ${people.find(p=>p.isMe).name}`:""}</div>
-                  <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{dateStr}</div>
+                <div style={{ width:"100%" }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                    <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
+                    {/* Plain bell, no badge count — no real notification data exists yet to back one;
+                        adding a fabricated number would look real but mean nothing. */}
+                    <button style={{ background:"none",border:"none",cursor:"pointer",fontSize:18,color:T.text,padding:4 }} title="Notifications">🔔</button>
+                  </div>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8 }}>
+                    <div>
+                      <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1.2 }}>{greetIcon} {greeting}{(people.find(p=>p.isMe)?.name)?`, ${people.find(p=>p.isMe).name}`:""}</div>
+                      <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{dateStr}</div>
+                    </div>
+                    <button onClick={()=>setTab("insights")} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap",flexShrink:0 }}>✨ Insights for you</button>
+                  </div>
+                  <div style={{ color:T.accent,fontSize:11,fontWeight:700,marginTop:6 }}>You're in control today.</div>
                 </div>
               );
             })() : (
