@@ -28,6 +28,7 @@ import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalc
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
+import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal } from "../domain/allocations/adapter";
 import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./domain/transactions/legacy/settlePersonShareOnBill";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import StatCard from "./components/StatCard";
@@ -7624,8 +7625,8 @@ function AppContent({ onLock }) {
     }).filter(Boolean);
     const homeBillsForForecast = [...bills, ...homeSipsAsBills, ...homeCcStatementsAsBills];
     const homeThisMonthTxns = txns.filter(t=>t.date&&t.date.startsWith(homeMonthKey));
-    const homeMonthSpend = homeThisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
-    const homeMonthBudget = monthOverrides[homeMonthKey] || Math.round(Number(annualBudget||0)/12);
+    const homeMonthSpend = getHouseholdAttributedTotal({ periodTransactions: homeThisMonthTxns, allTransactions: txns });
+    const homeMonthBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, homeMonthKey);
     const homeSafeToSpend = homeMonthBudget - homeMonthSpend;
     const homeDaysLeftInMonth = new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth()+1, 0).getDate() - homeTodayDate.getDate() + 1;
     const homeSafeToSpendPerDay = homeDaysLeftInMonth>0 ? homeSafeToSpend/homeDaysLeftInMonth : homeSafeToSpend;
