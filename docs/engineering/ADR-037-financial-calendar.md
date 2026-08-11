@@ -1,6 +1,6 @@
 ## ADR-037 — Financial Calendar
 
-**Status: Frozen (domain/intent), OPEN for technical-shape confirmation (see CR-ACC-BUD-001)**
+**Status: Frozen (domain/intent), Frozen (technical-shape — see Addendum below)**
 
 **Renumbered from ADR-036** — that slot is now taken by the renumbered Allocation Engine ADR (see CR-ACC-BUD-001). This document's domain content is unchanged; CR-ACC-BUD-001 §4 flags that whether this needs any `AggregateRoot`-based component (vs. remaining fully read-only, like `domain/cards/summaries.js`) is unconfirmed and should be resolved before WP-2 begins in earnest.
 
@@ -126,3 +126,14 @@ This ADR does **not**:
 ---
 
 **Sign-off:** Approved via ARCH-001 — Architecture Decision Review, as the second of the two platform ADRs authorized there. Supersedes no prior ADR. Depended on by ADR-036 (Planning Allocations require a Period to attach to) — read together, not independently.
+
+Addendum — Technical Shape Resolution
+2026-08-10
+
+Financial Calendar is implemented as a read-only domain module (pattern: domain/cards/summaries.js), not an AggregateRoot.
+
+Rationale: Invariant 3 ("Periods do not own financial data... the Financial Calendar never stores amounts") and §7's entirely query-shaped public interface (getCurrentPeriod, getPeriodBounds, getFiscalYearConfig, getBillingCyclePeriod) both indicate a derived-computation module, not an entity with lifecycle/invariants requiring aggregate boundaries. Direct repository precedent exists for this exact shape of problem: domain/cards/summaries.js already derives period/cycle boundaries from configuration, read-only, in production.
+
+The Fiscal-Year-start configuration value is the one piece of genuinely mutable state Financial Calendar touches — handled as a small validated value object (pattern: Money.js), not embedded in an aggregate, and deferred as separate future work, not part of this resolution.
+
+Status change: OPEN for technical-shape confirmation → resolved. Domain/intent freeze (unchanged) now extends to technical shape.
