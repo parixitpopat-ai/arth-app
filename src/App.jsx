@@ -6084,23 +6084,20 @@ function AppContent({ onLock }) {
           });
         });
         if(t._billIds){
-          // Use settlementLinks (not shared `remaining`) to avoid React batching race where
-          // setTxns updater may mutate `remaining` before setBills updater runs.
+          // TRX-002C4c (CR-001): bill-kind person-share settlement in SettleModal
+          // now routes through the shared TransactionPersonShare value object (per
+          // AQ-002) via settlePersonShareOnBill — same adapter proven for
+          // applyRepaymentAllocations (TRX-002C4b), second call site. Proven
+          // equivalent for all currently-reachable bill-settlement cases by
+          // settle-branch-bill-equivalence.test.js before this repoint was made.
+          // Mirroring deliberately NOT added here: this branch never mirrored onto
+          // a linked transaction before this repoint either — that gap is tracked
+          // separately, explicitly out of C4c scope.
           setBills(prev=>prev.map(b=>{
             const link = settlementLinks.find(l=>l.kind==="bill"&&String(l.id)===String(b.id));
-            if(!link||!b.splitPeople?.[pid]) return b;
-            const paidNow = link.amount;
-            if(paidNow<=0) return b;
-            const prevSettled = Number(b.splitPeople[pid].settledAmt||0);
-            const nextSettled = prevSettled + paidNow;
-            const originalAmt = Number(b.splitPeople[pid].amount||0);
-            const nextRemaining = Math.max(0, originalAmt-nextSettled);
-            const groupCap = Number(b.groupCollectiveAmount||0);
-            const nextGroupSettled = groupCap > 0 ? Math.min(groupCap, Number(b.groupCollectiveSettledAmt||0) + paidNow) : b.groupCollectiveSettledAmt;
-            const updatedSplit = {...b.splitPeople,[pid]:{...b.splitPeople[pid],settled:nextRemaining<=0,settledAmt:nextSettled,remainingAmt:nextRemaining}};
-            // Auto-mark bill as paid when all owed parties have settled
-            const allOwedSettled = Object.values(updatedSplit).filter(i=>i.mode==="owes").every(i=>i.settled);
-            return { ...b, splitPeople:updatedSplit, ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGroupSettled } : {}), ...(allOwedSettled ? { status:"paid", paidDate:todayStr() } : {}) };
+            if(!link||!b.splitPeople?.[pid]||link.amount<=0) return b;
+            const { bill:updatedBill } = settlePersonShareOnBill({ bill:b, personId:pid, amount:link.amount, todayStr });
+            return updatedBill;
           }));
         }
       } else {
