@@ -12542,48 +12542,6 @@ function AppContent({ onLock }) {
           const healthLabel = isProjectedOver ? "Over Budget" : projectedMarginPct<10 ? "Cutting It Close" : "On Track";
           const healthNote = isProjectedOver ? `Projected to exceed budget by ${sym}${fmt(projectedMonthEnd-dashMonthly)}` : `${Math.abs(projectedMarginPct)}% ${projectedMarginPct>=0?"under":"over"} budget at this pace`;
 
-          // Where Money Went — spend per category this month vs that category's own budget field.
-          const catSpendMap = {};
-          expenses.forEach(t=>{
-            const amt = getMyExpenseAmount(t);
-            if(amt<=0) return;
-            const tCats = (t.catIds||[t.catId]).filter(Boolean);
-            tCats.forEach(cid=>{ catSpendMap[cid]=(catSpendMap[cid]||0)+amt/tCats.length; });
-          });
-          const catRows = cats.map(c=>({ cat:c, spend:catSpendMap[c.id]||0, budget:Number(c.budget||0) }))
-            .filter(r=>r.spend>0||r.budget>0)
-            .sort((a,b)=>b.spend-a.spend);
-
-          // Upcoming (next 10 days) — unpaid bills + membership renewals due in the window.
-          const todayStrV = todayStr();
-          const in10 = addDaysToDateStr(todayStrV,10);
-          const upcomingBills = bills.filter(b=>b.status==="unpaid"&&b.dueDate&&b.dueDate>=todayStrV&&b.dueDate<=in10)
-            .map(b=>({ id:`bill-${b.id}`, name:b.name||b.merchant||"Bill", amount:Number(b.amount||0), date:b.dueDate, icon:"📄" }));
-          const upcomingMemberships = memberships.map(m=>({ m, period:getCurrentPeriod(m) })).filter(x=>x.period)
-            .map(x=>({ ...x, effEnd:getPeriodEffectiveEnd(x.period) }))
-            .filter(x=>x.effEnd>=todayStrV&&x.effEnd<=in10)
-            .map(x=>{ const ba=billerAccounts.find(b=>b.id===x.m.billerAccountId); return { id:`mem-${x.m.id}`, name:`${ba?.name||"Membership"} Renewal`, amount:Number(x.m.amount||0), date:x.effEnd, icon:"💪" }; });
-          const upcomingAll = [...upcomingBills,...upcomingMemberships].sort((a,b)=>a.date.localeCompare(b.date));
-          const upcomingTotal = upcomingAll.reduce((s,u)=>s+u.amount,0);
-
-          // Budget Insights — deterministic rule-based comparisons, no AI involved.
-          const prevMonthCatSpend = {};
-          txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(prevMonthKey)).forEach(t=>{
-            const amt = getMyExpenseAmount(t);
-            if(amt<=0) return;
-            const tCats=(t.catIds||[t.catId]).filter(Boolean);
-            tCats.forEach(cid=>{ prevMonthCatSpend[cid]=(prevMonthCatSpend[cid]||0)+amt/tCats.length; });
-          });
-          const insights = [];
-          catRows.forEach(r=>{
-            const prevAmt = prevMonthCatSpend[r.cat.id]||0;
-            if(prevAmt>50 && r.spend>0){
-              const pctChange = Math.round(((r.spend-prevAmt)/prevAmt)*100);
-              if(Math.abs(pctChange)>=15) insights.push({ ok:pctChange<0, text:`${r.cat.name} spending is ${Math.abs(pctChange)}% ${pctChange<0?"lower":"higher"} than last month.` });
-            }
-            if(r.budget>0&&r.spend>r.budget) insights.push({ ok:false, text:`${r.cat.name} exceeded budget by ${sym}${fmt(r.spend-r.budget)}.` });
-          });
-          if(isProjectedOver) insights.push({ ok:false, text:`Bills and current pace project you'll exceed this month's budget by ${sym}${fmt(projectedMonthEnd-dashMonthly)}.` });
 
           return (
             <>
@@ -12616,57 +12574,6 @@ function AppContent({ onLock }) {
                   <div style={{ color:isProjectedOver?T.danger:T.success,fontSize:11,fontWeight:700 }}>{isProjectedOver?"⚠️":"✓"} {Math.abs(projectedMarginPct)}% {projectedMarginPct>=0?"under":"over"} budget</div>
                 </div>
               </div>
-
-              {catRows.length>0&&(
-                <div style={{ ...card }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
-                    <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>Where Money Went</div>
-                    <button onClick={()=>{ setTab("home"); setShowSettings(false); }} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>View All</button>
-                  </div>
-                  <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
-                    {catRows.slice(0,8).map(r=>{
-                      const pct = r.budget>0 ? Math.round(r.spend/r.budget*100) : null;
-                      const isOverBudget = pct!==null && pct>100;
-                      const barColor = isOverBudget?T.danger:pct!==null&&pct>80?T.warn:T.success;
-                      return (
-                        <div key={r.cat.id}>
-                          <div style={{ display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3 }}>
-                            <span style={{ color:T.text,fontWeight:700 }}>{r.cat.icon} {r.cat.name}</span>
-                            <span style={{ color:T.sub }}>{sym}{fmt(r.spend)}{r.budget>0?` / ${sym}${fmt(r.budget)}`:""} {pct!==null&&<span style={{ color:isOverBudget?T.danger:T.sub,fontWeight:800 }}>{pct}%</span>}</span>
-                          </div>
-                          <div style={{ height:6,background:T.input,borderRadius:4,overflow:"hidden" }}>
-                            <div style={{ width:`${Math.min(100,pct===null?(r.spend>0?100:0):pct)}%`,height:"100%",background:barColor }}/>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12 }}>
-                <div style={{ ...card,marginBottom:0 }}>
-                  <div style={{ color:T.text,fontSize:13,fontWeight:900,marginBottom:8 }}>Upcoming (Next 10 Days)</div>
-                  {upcomingAll.length===0&&<div style={{ color:T.sub,fontSize:11 }}>Nothing due soon.</div>}
-                  {upcomingAll.slice(0,6).map(u=>(
-                    <div key={u.id} style={{ display:"flex",justifyContent:"space-between",fontSize:11,padding:"5px 0",borderBottom:`1px solid ${T.border}` }}>
-                      <span style={{ color:T.text }}>{u.icon} {u.name}<div style={{ color:T.sub,fontSize:9 }}>{formatShortDate(u.date)||u.date}</div></span>
-                      <span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(u.amount)}</span>
-                    </div>
-                  ))}
-                  {upcomingAll.length>0&&<div style={{ display:"flex",justifyContent:"space-between",fontSize:11,paddingTop:8,fontWeight:800 }}><span style={{ color:T.sub }}>Expected Outflow</span><span style={{ color:T.accent }}>{sym}{fmt(upcomingTotal)}</span></div>}
-                </div>
-                <div style={{ ...card,marginBottom:0 }}>
-                  <div style={{ color:T.text,fontSize:13,fontWeight:900,marginBottom:8 }}>Budget Insights</div>
-                  {insights.length===0&&<div style={{ color:T.sub,fontSize:11 }}>No notable changes this month yet.</div>}
-                  {insights.slice(0,5).map((ins,i)=>(
-                    <div key={i} style={{ display:"flex",gap:6,fontSize:11,color:T.text,marginBottom:6,alignItems:"flex-start" }}>
-                      <span>{ins.ok?"✓":"⚠️"}</span><span>{ins.text}</span>
-                    </div>
-                  ))}
-                  <button onClick={()=>setTab("insights")} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer",marginTop:8,padding:0 }}>View all Insights →</button>
-                </div>
-                </div>
 
               <button onClick={()=>{ setAffordAmount(""); setShowAffordModal(true); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"14px",cursor:"pointer",color:T.accent,fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif",marginBottom:12 }}>🧮 Can I Afford This?</button>
 
