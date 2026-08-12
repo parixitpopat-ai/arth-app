@@ -32,6 +32,7 @@ import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal } from "../
 import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./domain/transactions/legacy/settlePersonShareOnBill";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import StatCard from "./components/StatCard";
+import PeriodSelector from "./components/PeriodSelector";
 import EmptyState from "./components/EmptyState";
 import Toast from "./components/Toast";
 import ConfirmDialog from "./components/ConfirmDialog";
@@ -12586,13 +12587,8 @@ function AppContent({ onLock }) {
 
           return (
             <>
-              <div style={{ ...card,padding:"10px 12px",marginBottom:12 }}>
-                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:8 }}>
-                  <button onClick={()=>setViewMonth(m=>{ const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo-2,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })} style={{ background:"none",border:"none",color:T.accent,fontSize:20,cursor:"pointer",padding:"0 6px" }}>‹</button>
-                  <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
-                  <button onClick={()=>setViewMonth(m=>{ const [y,mo]=m.split("-").map(Number); const d=new Date(y,mo,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })} style={{ background:"none",border:"none",color:T.accent,fontSize:20,cursor:"pointer",padding:"0 6px" }}>›</button>
-                </div>
-              </div>
+              {/* WP-2 (ADR-037): shared Period Selector, prop-driven, no local period state. */}
+              <PeriodSelector viewMonth={viewMonth} setViewMonth={setViewMonth} T={T}/>
 
               <div style={{ ...card }}>
                 <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Monthly Budget</div>
