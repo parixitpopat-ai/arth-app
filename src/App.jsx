@@ -12726,7 +12726,7 @@ function AppContent({ onLock }) {
             shell (Option B, locked at Gate 2). StatsPage itself is untouched and unmounted
             here, not deleted — its Cash Flow/Credit/Investments content's fate is a deferred
             product decision, not resolved by this change. */}
-        {budgetSubTab==="insights"&&<BudgetInsights viewMonth={viewMonth} setViewMonth={setViewMonth} cats={cats} txns={txns} T={T} sym={sym} fmt={fmt}/>}
+        {budgetSubTab==="insights"&&<BudgetInsights viewMonth={viewMonth} setViewMonth={setViewMonth} cats={cats} txns={txns} people={people} T={T} sym={sym} fmt={fmt}/>}
 
         {budgetSubTab==="budgets"&&(<>
         {/* Per-person budgets — the flat `spendBudget` field (edited on the person's own profile)
