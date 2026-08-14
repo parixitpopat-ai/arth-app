@@ -12517,139 +12517,108 @@ function AppContent({ onLock }) {
         </div>
 
         {budgetSubTab==="dashboard"&&(()=>{
+          // BUD-002 D.1 — Home (Observe). Every figure below is sourced exclusively
+          // from the canonical Allocation Engine read functions (fbf4219) — no
+          // monthly-value, variance, or forecast formula is reimplemented locally
+          // here, per D.1 Engineering Notes / H.1 module-level criterion M-7.
           const [yy,mm] = viewMonth.split("-").map(Number);
           const baseMonthly = getHouseholdPlanningAllocation(annualBudget, monthOverrides, viewMonth);
           const prevMonthKey = mm===1 ? `${yy-1}-12` : `${yy}-${String(mm-1).padStart(2,"0")}`;
-          const dashMonthly = (()=>{
-            if(!budgetCarryForward) return baseMonthly;
-            const prevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, prevMonthKey);
-            const prevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(prevMonthKey)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
-            return Math.max(0, baseMonthly + (prevBudget-prevSpend));
-          })();
+          // NOTE: prevSpend is the legacy raw filter, NOT getHouseholdAttributedTotal —
+          // preserved exactly per WP-4's characterization pass (fbf4219). The carry-forward
+          // discrepancy this represents (BUD-000A finding) is not corrected in this ticket.
+          const prevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, prevMonthKey);
+          const prevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(prevMonthKey)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
+          const dashMonthly = resolveCarryForwardMonthly(budgetCarryForward, baseMonthly, prevBudget, prevSpend);
           const dashSpend = getHouseholdAttributedTotal({ periodTransactions: txns.filter(t=>t.date&&t.date.startsWith(viewMonth)), allTransactions: txns });
-          const dashRemaining = dashMonthly - dashSpend;
-          const dashPct = dashMonthly>0 ? Math.min(100,Math.round(dashSpend/dashMonthly*100)) : (dashSpend>0?100:0);
+          const dashRemaining = getBudgetVariance(dashSpend, dashMonthly).variance;
+          const dashPct = getSpentPercentage(dashSpend, dashMonthly);
           const dashLeftDays = daysLeft(viewMonth);
-          const dashSafePerDay = dashMonthly>0 ? Math.max(0,Math.round(dashRemaining/Math.max(1,dashLeftDays))) : null;
-
-          // Projected month end — extrapolates the current daily average pace across the full month.
+          const dashSafePerDay = getSafeToSpendPerDay(dashRemaining, dashLeftDays, dashMonthly);
           const daysInMonth = new Date(yy,mm,0).getDate();
           const nowD = new Date();
           const isCurrentMonth = viewMonth===`${nowD.getFullYear()}-${String(nowD.getMonth()+1).padStart(2,"0")}`;
           const daysElapsed = isCurrentMonth ? nowD.getDate() : daysInMonth;
-          const dailyPace = daysElapsed>0 ? dashSpend/daysElapsed : 0;
-          const projectedMonthEnd = Math.round(dailyPace*daysInMonth);
-          const isProjectedOver = dashMonthly>0 && projectedMonthEnd>dashMonthly;
-          const projectedMarginPct = dashMonthly>0 ? Math.round(((dashMonthly-projectedMonthEnd)/dashMonthly)*100) : 0;
-          const healthColor = isProjectedOver ? T.danger : projectedMarginPct<10 ? T.warn : T.success;
-          const healthLabel = isProjectedOver ? "Over Budget" : projectedMarginPct<10 ? "Cutting It Close" : "On Track";
+          const { projectedMonthEnd, isProjectedOver, projectedMarginPct } = getMonthEndForecast(dashSpend, daysElapsed, daysInMonth, dashMonthly);
+          const { status: healthStatus } = getBudgetHealthStatus(isProjectedOver, projectedMarginPct);
+          const healthColor = healthStatus==="over" ? T.danger : healthStatus==="close" ? T.warn : T.success;
+          const healthLabel = healthStatus==="over" ? "Over Budget" : healthStatus==="close" ? "Cutting It Close" : "On Track";
           const healthNote = isProjectedOver ? `Projected to exceed budget by ${sym}${fmt(projectedMonthEnd-dashMonthly)}` : `${Math.abs(projectedMarginPct)}% ${projectedMarginPct>=0?"under":"over"} budget at this pace`;
 
+          // D.1 Empty State — zero Planning Allocations for the household this period
+          // (C.1 step 2). Not a degraded normal state: no Safe-to-Spend/Health/Variance/
+          // Forecast rendered as zeroed. Single call-to-action → Planning Workspace's
+          // Household dimension (the "overview" sub-tab, which owns Household editing).
+          if (baseMonthly <= 0 && Object.keys(monthOverrides||{}).length === 0) {
+            return (
+              <>
+                <PeriodSelector viewMonth={viewMonth} setViewMonth={setViewMonth} T={T}/>
+                <div style={{ ...card, textAlign:"center", padding:"32px 20px" }}>
+                  <div style={{ fontSize:32, marginBottom:12 }}>🎯</div>
+                  <div style={{ color:T.text, fontSize:16, fontWeight:800, marginBottom:6 }}>Set up your household budget</div>
+                  <div style={{ color:T.sub, fontSize:12, marginBottom:16, lineHeight:1.5 }}>Once you set a monthly amount, Home will show your Safe-to-Spend, Budget Health, and Forecast automatically.</div>
+                  <button onClick={()=>setBudgetSubTab("overview")} style={{ background:T.accent, border:"none", borderRadius:12, padding:"12px 20px", color:"#fff", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"Nunito,sans-serif" }}>Set Household Budget</button>
+                </div>
+              </>
+            );
+          }
 
           return (
             <>
               {/* WP-2 (ADR-037): shared Period Selector, prop-driven, no local period state. */}
               <PeriodSelector viewMonth={viewMonth} setViewMonth={setViewMonth} T={T}/>
 
+              {/* BUD-002 D.1 — Safe-to-Spend Card (Group 3, specializes KPI Card) */}
               <div style={{ ...card }}>
-                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Monthly Budget</div>
-                <div style={{ color:T.text,fontSize:26,fontWeight:900,marginTop:6,marginBottom:10 }}>{sym}{fmt(dashMonthly)}</div>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Safe to Spend</div>
+                <div style={{ color:T.text,fontSize:26,fontWeight:900,marginTop:6,marginBottom:2 }}>{dashSafePerDay===null?"—":`${sym}${fmt(dashSafePerDay)}/day`}</div>
+                <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>{dashLeftDays} day{dashLeftDays===1?"":"s"} left this period</div>
                 <div style={{ height:8,background:T.border,borderRadius:4,marginBottom:6 }}>
                   <div style={{ height:"100%",width:`${dashPct}%`,background:dashPct>=100?T.danger:dashPct>80?T.warn:T.success,borderRadius:4 }}/>
                 </div>
-                <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:12 }}><span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{dashPct}%</span></div>
+                <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:12 }}>
+                  <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{dashPct}% spent</span>
+                </div>
+                {/* D.1 Accessibility: sign stated explicitly in text, not implied by color alone */}
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
+                  <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Budgeted</div><div style={{ color:T.text,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(dashMonthly)}</div></div>
                   <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Spent</div><div style={{ color:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(dashSpend)}</div></div>
-                  <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>{dashRemaining>=0?"Remaining":"Over Budget"}</div><div style={{ color:dashRemaining>=0?T.success:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{dashRemaining<0?"-":""}{sym}{fmt(Math.abs(dashRemaining))}</div></div>
-                  <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Safe to Spend</div><div style={{ color:T.info,fontSize:15,fontWeight:900,marginTop:2 }}>{dashSafePerDay===null?"—":`${sym}${fmt(dashSafePerDay)}/day`}</div></div>
+                  <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>{dashRemaining>=0?"Remaining":"Over Budget"}</div><div style={{ color:dashRemaining>=0?T.success:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{dashRemaining<0?"−":""}{sym}{fmt(Math.abs(dashRemaining))}</div></div>
                 </div>
               </div>
 
+              {/* BUD-002 D.1 — Budget Health (Progress Ring/tile) + Forecast Card, side by side per Sections layout */}
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12 }}>
                 <div style={{ background:`linear-gradient(135deg,${healthColor}12,${T.card})`,border:`1px solid ${healthColor}44`,borderRadius:16,padding:14 }}>
                   <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Budget Health</div>
                   <div style={{ color:healthColor,fontSize:13,fontWeight:800,marginBottom:8 }}>{healthNote}</div>
+                  {/* D.1 Accessibility: status conveyed via label text, not color alone */}
                   <div style={{ display:"inline-block",background:healthColor+"22",border:`1px solid ${healthColor}44`,borderRadius:20,padding:"3px 10px" }}><span style={{ color:healthColor,fontSize:10,fontWeight:800 }}>{healthLabel.toUpperCase()}</span></div>
                 </div>
                 <div style={{ ...card,marginBottom:0 }}>
-                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Projected Month End</div>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Forecast · Month End</div>
                   <div style={{ color:isProjectedOver?T.danger:T.text,fontSize:18,fontWeight:900,marginBottom:4 }}>{sym}{fmt(projectedMonthEnd)}</div>
                   <div style={{ color:isProjectedOver?T.danger:T.success,fontSize:11,fontWeight:700 }}>{isProjectedOver?"⚠️":"✓"} {Math.abs(projectedMarginPct)}% {projectedMarginPct>=0?"under":"over"} budget</div>
                 </div>
               </div>
 
-              <button onClick={()=>{ setAffordAmount(""); setShowAffordModal(true); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"14px",cursor:"pointer",color:T.accent,fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif",marginBottom:12 }}>🧮 Can I Afford This?</button>
+              {/* BUD-002 D.1 Secondary Action: Variance summary → Insights (Month View).
+                  Household-level only on Home — dimension-level detail stays in Insights,
+                  per D.1 Displayed Data ("with a path to Insights for dimension-level detail").
+                  No category/person breakdown rendered here (A.2 — Observe never edits or
+                  analyzes; that's Understand's job). */}
+              <button onClick={()=>setBudgetSubTab("insights")} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"14px",cursor:"pointer",color:T.accent,fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}>
+                See full breakdown in Insights →
+              </button>
 
-              {/* Vertical-slice additions (this session) - Observe-level only, per BUD-002's
-                  Home/Insights IA split. "Overspending by category" here is deliberately a
-                  compact top-3 summary, not a full breakdown - full category detail stays in
-                  Insights, consistent with why "Where Money Went" was removed from Home in the
-                  BUD-002 Home Phase 1 pass. Both blocks read only through the canonical adapter
-                  functions and existing membership helpers - no new legacy-style computation. */}
-              {(() => {
-                const monthTxns = txns.filter(t=>t.date&&t.date.startsWith(viewMonth));
-                const overspendRows = cats
-                  .map(c=>{
-                    const actual = getCategoryAttributedTotal(monthTxns, c.id, { allTransactions: txns });
-                    const budget = getCategoryPlanningAllocation(c);
-                    const v = getBudgetVariance(actual, budget);
-                    return { cat:c, actual, budget, ...v };
-                  })
-                  .filter(r=>r.isOver)
-                  .sort((a,b)=>a.variance-b.variance)
-                  .slice(0,3);
-
-                return overspendRows.length>0 ? (
-                  <div style={{ ...card,marginBottom:12 }}>
-                    <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8 }}>Overspending This Month</div>
-                    {overspendRows.map(r=>(
-                      <div key={r.cat.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0" }}>
-                        <span style={{ color:T.text,fontSize:12 }}>{r.cat.icon} {r.cat.name}</span>
-                        <span style={{ color:T.danger,fontSize:12,fontWeight:800 }}>
-                          {sym}{fmt(r.actual)} <span style={{ color:T.sub,fontWeight:600 }}>/ {sym}{fmt(r.budget)}</span>
-                          {r.variancePct!==null && <> · {Math.abs(r.variancePct)}% over</>}
-                        </span>
-                      </div>
-                    ))}
-                    <button onClick={()=>setBudgetSubTab("insights")} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:800,cursor:"pointer",padding:"6px 0 0",width:"100%",textAlign:"left" }}>See full breakdown in Insights →</button>
-                  </div>
-                ) : null;
-              })()}
-
-              {(() => {
-                const todayV = todayStr();
-                const in7 = addDaysToDateStr(todayV, 7);
-                const attention = memberships
-                  .filter(m=>m.status==="active")
-                  .map(m=>({ m, period: getCurrentPeriod(m) }))
-                  .filter(x=>x.period)
-                  .map(x=>({ ...x, eff: getPeriodEffectiveEnd(x.period) }))
-                  .filter(x=>x.eff<=in7)
-                  .sort((a,b)=>a.eff.localeCompare(b.eff))
-                  .slice(0,3);
-
-                return attention.length>0 ? (
-                  <div style={{ ...card,marginBottom:12 }}>
-                    <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8 }}>Needs Attention</div>
-                    {attention.map(({m,eff})=>{
-                      const isOverdue = eff<todayV;
-                      const days = Math.abs(Math.round((new Date(eff)-new Date(todayV))/86400000));
-                      return (
-                        <div key={m.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0" }}>
-                          <span style={{ color:T.text,fontSize:12 }}>{m.cycle||"Membership"}</span>
-                          <span style={{ color:isOverdue?T.danger:T.warn,fontSize:12,fontWeight:800 }}>
-                            {sym}{fmt(m.amount)} · {isOverdue?`Overdue ${days}d`:`Renews in ${days}d`}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null;
-              })()}
+              {/* BUD-002 D.1 Alert Banner: intentionally NOT rendered here. No verified
+                  household-level alert rule exists in the repository — only a person-level
+                  threshold (budgetAlerts, App.jsx ~L1741). Inventing a household-level
+                  threshold to fill this slot would violate the "no invented behavior"
+                  instruction; this is recorded as deferred, not silently omitted. */}
             </>
           );
         })()}
-
         {budgetSubTab==="overview"&&(<>
         <div style={{ color:T.text,fontSize:15,fontWeight:900,marginBottom:2 }}>Annual Budget</div>
         <div style={{ ...card,padding:"10px 12px",marginBottom:12 }}>
