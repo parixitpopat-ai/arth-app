@@ -1,8 +1,27 @@
 // src/screens/BudgetInsights.jsx
 //
 // BUD-002 Insights shell. Read-only throughout — see BudgetInsights.helpers.js
-// for the pure calculation logic and its own header notes on canonical
+// for all pure calculation logic and its own header notes on canonical
 // function usage and open ambiguities. This file is presentation only.
+//
+// Category → Subcategory (this change): shows a breakdown of the focused
+// category's subcategories for the CURRENT selected period only (not a
+// trend — that's the existing series above it). Per the explicit product
+// decision governing this slice: subcategories are attribution tags, not
+// monetary allocation dimensions. A transaction tagged with exactly one
+// subcategory contributes its full amount to that subcategory,
+// unambiguously. A transaction tagged with two or more subcategories
+// contributes NO fabricated split — its amount is held in a separate,
+// visible "multi-category" bucket, and the transaction is only shown as a
+// count reference against each subcategory it touches, never as money.
+// See buildSubcategoryBreakdown's own header for the full accounting rule
+// and the test suite's explicit non-additive proof.
+//
+// Transaction drill-down is NOT implemented in this slice — deliberately,
+// per instruction, since doing so under the multi-tag case would require
+// deciding which subcategory a multi-tag transaction "belongs to" in a
+// list, and that decision hasn't been made. This section shows rollup
+// figures only.
 //
 // Person View relevance filter — flagged, not silently decided: the old
 // Budgets tab filtered people via getPersonModules(p).includes("budget"),
@@ -16,7 +35,7 @@
 import React, { useState, useMemo } from "react";
 import { getCategoryAttributedTotal, getCategoryPlanningAllocation } from "../../domain/allocations/adapter";
 import PeriodSelector from "../components/PeriodSelector";
-import { buildCategorySeries, buildPersonRows } from "./BudgetInsights.helpers";
+import { buildCategorySeries, buildPersonRows, buildSubcategoryBreakdown } from "./BudgetInsights.helpers";
 
 const STATUS_LABEL = { onTrack: "Within Budget", close: "Approaching Budget", over: "Over Budget", no_budget: "No Budget Set" };
 
@@ -43,6 +62,12 @@ export default function BudgetInsights({ viewMonth, setViewMonth, cats, txns, pe
     if (!focusedCategoryId) return [];
     return buildCategorySeries(focusedCategoryId, viewMonth, txns);
   }, [focusedCategoryId, viewMonth, txns]);
+
+  const subcategoryBreakdown = useMemo(() => {
+    if (!focusedCategory || !focusedCategory.subs || focusedCategory.subs.length === 0) return null;
+    const periodTxns = txns.filter(t => t.date && t.date.startsWith(viewMonth));
+    return buildSubcategoryBreakdown(focusedCategory, periodTxns, txns);
+  }, [focusedCategory, txns, viewMonth]);
 
   const personRows = useMemo(() => {
     const periodTxns = txns.filter(t => t.date && t.date.startsWith(viewMonth));
@@ -124,6 +149,57 @@ export default function BudgetInsights({ viewMonth, setViewMonth, cats, txns, pe
           </div>
           <div style={{ color: T.sub, fontSize: 11, marginBottom: 12 }}>
             Planning allocation: {sym}{fmt(getCategoryPlanningAllocation(focusedCategory))}
+          </div>
+
+          {/* Category → Subcategory breakdown, current period only.
+              See buildSubcategoryBreakdown's header for the accounting
+              rule — multi-tag transactions never appear as fabricated
+              money in any single row here. */}
+          {subcategoryBreakdown && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ color: T.sub, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+                By Subcategory
+              </div>
+              {subcategoryBreakdown.subcategories.map(row => (
+                <div key={row.subId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 4px", borderBottom: "1px solid " + T.border }}>
+                  <span style={{ color: T.text, fontSize: 12 }}>
+                    {row.name}
+                    {row.multiTagCount > 0 && (
+                      <span style={{ color: T.sub, fontSize: 10, marginLeft: 6 }}>
+                        (+{row.multiTagCount} multi-category)
+                      </span>
+                    )}
+                  </span>
+                  <span style={{ color: T.text, fontSize: 12, fontWeight: 700 }}>
+                    {row.singleTagCount > 0 ? `${sym}${fmt(row.attributedAmount)}` : "—"}
+                    {row.singleTagCount > 0 && <span style={{ color: T.sub, fontSize: 10, marginLeft: 4 }}>({row.singleTagCount})</span>}
+                  </span>
+                </div>
+              ))}
+              {subcategoryBreakdown.multiTagCount > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 4px", borderBottom: "1px solid " + T.border }}>
+                  <span style={{ color: T.sub, fontSize: 12, fontStyle: "italic" }}>
+                    Tagged to multiple subcategories ({subcategoryBreakdown.multiTagCount})
+                  </span>
+                  <span style={{ color: T.sub, fontSize: 12, fontWeight: 700 }}>{sym}{fmt(subcategoryBreakdown.multiTagAmount)}</span>
+                </div>
+              )}
+              {subcategoryBreakdown.untaggedCount > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 4px" }}>
+                  <span style={{ color: T.sub, fontSize: 12, fontStyle: "italic" }}>
+                    No subcategory ({subcategoryBreakdown.untaggedCount})
+                  </span>
+                  <span style={{ color: T.sub, fontSize: 12, fontWeight: 700 }}>{sym}{fmt(subcategoryBreakdown.untaggedAmount)}</span>
+                </div>
+              )}
+              <div style={{ color: T.sub, fontSize: 10, marginTop: 8, lineHeight: 1.4 }}>
+                Subcategory figures are tags, not a budget split — amounts shown only where a transaction is tagged to exactly one subcategory.
+              </div>
+            </div>
+          )}
+
+          <div style={{ color: T.sub, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>
+            Trend
           </div>
           {categorySeries.length === 0 ? (
             <div style={{ color: T.sub, fontSize: 12, textAlign: "center", padding: "20px 0" }}>

@@ -11,6 +11,7 @@ import {
   getPersonAttributedTotal,
   getBudgetVariance,
   getBudgetHealthStatus,
+  buildRefundTotalsByExpense,
 } from "../../domain/allocations/adapter.js";
 import { getCalendarMonthBounds } from "../domain/financialCalendar/calendarMonth.js";
 import { shiftMonthKey } from "../components/shiftMonthKey.js";
@@ -89,4 +90,138 @@ export const buildPersonRows = (people, periodTxns, viewMonth) => {
     })
     .filter(r => r.planned > 0 || r.actual > 0)
     .sort((a, b) => b.actual - a.actual);
+};
+
+// ============================================================
+// Category → Subcategory breakdown (accounting-safe, no fabricated splits)
+// ============================================================
+// ACCOUNTING RULE (the product decision this implements):
+//   - A transaction tagged with exactly ONE subcategory under the selected
+//     category: its full category-attributed amount is unambiguously that
+//     subcategory's money. Counted toward that subcategory's total.
+//   - A transaction tagged with ZERO subcategories under the selected
+//     category: its amount is real category spend with no subcategory
+//     tag. Counted as "untagged" — never silently dropped, never assigned
+//     to a subcategory it wasn't tagged with.
+//   - A transaction tagged with TWO OR MORE subcategories under the
+//     selected category: NO monetary split is fabricated. Its amount is
+//     held in a separate "multiTag" bucket, excluded from every individual
+//     subcategory's attributedAmount. The transaction is still counted
+//     (multiTagCount) against every subcategory it's tagged with, as a
+//     tag-only reference with no dollar figure attached — so a user can
+//     see "this subcategory is also referenced by 2 multi-category
+//     transactions" without those transactions' money appearing to belong
+//     to it.
+//
+// RECONCILIATION INVARIANT (tested explicitly, not just asserted here):
+//   categoryTotal === sum(subcategories[].attributedAmount) + untaggedAmount + multiTagAmount
+//   sum(subcategories[].attributedAmount) is therefore ALWAYS <= categoryTotal
+//   when any multi-tag or untagged transaction exists — subcategory rows
+//   never falsely sum to the category total in that case, by construction.
+
+// Per-transaction attributed amount for a single category, replicating
+// getCategoryAttributedTotal's exact rules at per-transaction granularity.
+// Returns 0 for any transaction that doesn't contribute to this category
+// (wrong type, excluded, refunded to zero, fully attributed away, or not
+// tagged to this category at all).
+const getTxnCategoryAmount = (t, categoryId, refundMap) => {
+  if (t.type !== "expense") return 0;
+  if (t.catAllocations && Object.prototype.hasOwnProperty.call(t.catAllocations, categoryId)) {
+    return Number(t.catAllocations[categoryId] || 0);
+  }
+  if (t.catAllocations) return 0;
+  if (t.excludeFromSpend) return 0;
+  const netAmount = Math.max(0, Number(t.amount || 0) - Number(refundMap[String(t.id)] || 0));
+  if (!(netAmount > 0)) return 0;
+  let attributedAway = 0;
+  Object.entries(t.people || {}).forEach(([pid, info]) => {
+    if (pid === "__me__") return;
+    const mode = info?.mode;
+    const part = Number(info?.amount || 0);
+    if (!(part > 0)) return;
+    if (mode === "owes") attributedAway += part;
+  });
+  const groupAllocations = Array.isArray(t.groupAllocations) ? t.groupAllocations : [];
+  groupAllocations.forEach((groupPart) => {
+    const mode = groupPart?.mode;
+    const part = Number(groupPart?.amount || 0);
+    if (!(part > 0)) return;
+    if (mode === "owes") attributedAway += part;
+  });
+  const trackingMode = t.trackingMode || (Object.keys(t.people || {}).some((pid) => pid !== "__me__") ? "split" : t.forPerson || t.groupId ? "tag" : "none");
+  if ((trackingMode === "split" || trackingMode === "allocate") && groupAllocations.length === 0) {
+    const collectivePart = Number(t.groupCollectiveAmount || 0);
+    if (collectivePart > 0) attributedAway += collectivePart;
+  }
+  const myAmount = Math.max(0, netAmount - attributedAway);
+  if (!(myAmount > 0)) return 0;
+  const tCats = (Array.isArray(t.catIds) && t.catIds.length ? t.catIds : t.catId ? [t.catId] : []).filter(Boolean);
+  if (!tCats.length || !tCats.includes(categoryId)) return 0;
+  return myAmount / tCats.length;
+};
+
+// Same field-shape normalization getTxnSubIds() already uses elsewhere in
+// App.jsx (t.subIds array, falling back to legacy t.subId) — replicated
+// here since it's a 2-line field-normalization helper, not calculation
+// logic, and isn't exported from anywhere importable.
+const getTxnSubIdsLocal = (t) => {
+  if (Array.isArray(t?.subIds) && t.subIds.length) return t.subIds.filter(Boolean);
+  if (t?.subId) return [t.subId];
+  return [];
+};
+
+// Builds the Category → Subcategory breakdown for a period. Never
+// fabricates a monetary split for multi-subcategory transactions — see
+// file header for the exact accounting rule and reconciliation invariant.
+export const buildSubcategoryBreakdown = (category, periodTxns, allTransactions) => {
+  const categoryId = category.id;
+  const subIdsInCategory = new Set((category.subs || []).map(s => s.id));
+  const refundMap = buildRefundTotalsByExpense(allTransactions);
+
+  const subRows = {};
+  (category.subs || []).forEach(s => {
+    subRows[s.id] = { subId: s.id, name: s.name, attributedAmount: 0, singleTagCount: 0, multiTagCount: 0 };
+  });
+
+  let untaggedAmount = 0, untaggedCount = 0;
+  let multiTagAmount = 0, multiTagCount = 0;
+  let categoryTotal = 0;
+
+  for (const t of periodTxns) {
+    const amt = getTxnCategoryAmount(t, categoryId, refundMap);
+    if (!(amt > 0)) continue;
+    categoryTotal += amt;
+
+    const taggedSubs = getTxnSubIdsLocal(t).filter(sid => subIdsInCategory.has(sid));
+
+    if (taggedSubs.length === 0) {
+      untaggedAmount += amt;
+      untaggedCount += 1;
+    } else if (taggedSubs.length === 1) {
+      const row = subRows[taggedSubs[0]];
+      if (row) {
+        row.attributedAmount += amt;
+        row.singleTagCount += 1;
+      }
+    } else {
+      // Two or more subcategories tagged — NO split fabricated. Amount
+      // held in the multiTag bucket only. Each tagged subcategory gets a
+      // tag-only reference count, no amount.
+      multiTagAmount += amt;
+      multiTagCount += 1;
+      taggedSubs.forEach(sid => {
+        const row = subRows[sid];
+        if (row) row.multiTagCount += 1;
+      });
+    }
+  }
+
+  return {
+    subcategories: Object.values(subRows).sort((a, b) => b.attributedAmount - a.attributedAmount),
+    untaggedAmount,
+    untaggedCount,
+    multiTagAmount,
+    multiTagCount,
+    categoryTotal,
+  };
 };
