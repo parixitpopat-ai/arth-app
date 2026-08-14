@@ -28,7 +28,9 @@ import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalc
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
-import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal } from "../domain/allocations/adapter";
+import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus } from "../domain/allocations/adapter";
+/* Vertical-slice additions (this session) - Observe-level only, per BUD-002's
+   Home/Insights IA split. (removed placeholder JSX fragments) */
 import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./domain/transactions/legacy/settlePersonShareOnBill";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import StatCard from "./components/StatCard";
@@ -38,6 +40,7 @@ import Toast from "./components/Toast";
 import ConfirmDialog from "./components/ConfirmDialog";
 import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
+import BudgetInsights from "./screens/BudgetInsights";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 // Wraps localStorage.setItem so a QuotaExceededError (or any other storage failure) never crashes
@@ -1734,7 +1737,7 @@ function AppContent({ onLock }) {
   const budgetAlerts = useMemo(()=>{
     const budgeted = people.filter(p=>!p.isMe && getPersonModules(p).includes("budget"));
     return budgeted.map(p=>{
-      const monthBudget = Number(p.spendBudgetOverrides?.[viewMonth] ?? p.spendBudget ?? 0);
+       const monthBudget = getPersonPlanningAllocation(p, viewMonth);
       if(monthBudget<=0) return null;
       const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
       const pct = Math.round(monthSpend/monthBudget*100);
@@ -12577,39 +12580,71 @@ function AppContent({ onLock }) {
 
               <button onClick={()=>{ setAffordAmount(""); setShowAffordModal(true); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"14px",cursor:"pointer",color:T.accent,fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif",marginBottom:12 }}>🧮 Can I Afford This?</button>
 
-              {showAffordModal&&(()=>{
-                const purchaseAmt = parseMoney(affordAmount)||0;
-                const afterPurchase = dashRemaining - purchaseAmt;
-                const newProjected = projectedMonthEnd + purchaseAmt;
-                const wouldBeOver = dashMonthly>0 && newProjected>dashMonthly;
-                return (
-                  <div onClick={()=>setShowAffordModal(false)} style={{ position:"fixed",inset:0,background:"#000000cc",zIndex:1000,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
-                    <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"20px 20px 0 0",padding:"20px",width:"100%",maxWidth:480 }}>
-                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
-                        <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>New Purchase</div>
-                        <button onClick={()=>setShowAffordModal(false)} style={{ background:"none",border:"none",color:T.sub,fontSize:18,cursor:"pointer" }}>✕</button>
+              {/* Vertical-slice additions (this session) - Observe-level only, per BUD-002's
+                  Home/Insights IA split. "Overspending by category" here is deliberately a
+                  compact top-3 summary, not a full breakdown - full category detail stays in
+                  Insights, consistent with why "Where Money Went" was removed from Home in the
+                  BUD-002 Home Phase 1 pass. Both blocks read only through the canonical adapter
+                  functions and existing membership helpers - no new legacy-style computation. */}
+              {(() => {
+                const monthTxns = txns.filter(t=>t.date&&t.date.startsWith(viewMonth));
+                const overspendRows = cats
+                  .map(c=>{
+                    const actual = getCategoryAttributedTotal(monthTxns, c.id, { allTransactions: txns });
+                    const budget = getCategoryPlanningAllocation(c);
+                    const v = getBudgetVariance(actual, budget);
+                    return { cat:c, actual, budget, ...v };
+                  })
+                  .filter(r=>r.isOver)
+                  .sort((a,b)=>a.variance-b.variance)
+                  .slice(0,3);
+
+                return overspendRows.length>0 ? (
+                  <div style={{ ...card,marginBottom:12 }}>
+                    <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8 }}>Overspending This Month</div>
+                    {overspendRows.map(r=>(
+                      <div key={r.cat.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0" }}>
+                        <span style={{ color:T.text,fontSize:12 }}>{r.cat.icon} {r.cat.name}</span>
+                        <span style={{ color:T.danger,fontSize:12,fontWeight:800 }}>
+                          {sym}{fmt(r.actual)} <span style={{ color:T.sub,fontWeight:600 }}>/ {sym}{fmt(r.budget)}</span>
+                          {r.variancePct!==null && <> · {Math.abs(r.variancePct)}% over</>}
+                        </span>
                       </div>
-                      <input autoFocus style={{ ...inp,fontSize:22,fontWeight:800,marginBottom:14 }} type="text" inputMode="decimal" placeholder={`${sym}0`} value={affordAmount} onChange={e=>setAffordAmount(cleanMoneyInput(e.target.value))}/>
-                      {purchaseAmt>0&&(
-                        <>
-                          <div style={{ background:T.input,borderRadius:12,padding:"12px 14px",marginBottom:12 }}>
-                            <div style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}><span style={{ color:T.sub,fontSize:12 }}>Current Remaining</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(dashRemaining)}</span></div>
-                            <div style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}><span style={{ color:T.sub,fontSize:12 }}>After Purchase</span><span style={{ color:afterPurchase>=0?T.text:T.danger,fontSize:12,fontWeight:700 }}>{sym}{fmt(afterPurchase)}</span></div>
-                            <div style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}><span style={{ color:T.sub,fontSize:12 }}>Projected Month End</span><span style={{ color:wouldBeOver?T.danger:T.success,fontSize:12,fontWeight:800 }}>{sym}{fmt(newProjected)}</span></div>
-                          </div>
-                          <div style={{ background:(wouldBeOver?T.danger:T.success)+"18",border:`1px solid ${(wouldBeOver?T.danger:T.success)}44`,borderRadius:12,padding:"12px 14px",marginBottom:14,textAlign:"center" }}>
-                            <span style={{ color:wouldBeOver?T.danger:T.success,fontSize:13,fontWeight:800 }}>{wouldBeOver?`⚠️ Over Budget by ${sym}${fmt(newProjected-dashMonthly)}`:"✓ Fits within budget"}</span>
-                          </div>
-                          <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-                            <button onClick={()=>setShowAffordModal(false)} style={{ ...btnP,background:wouldBeOver?T.danger:T.success,color:"#000" }}>Proceed Anyway</button>
-                            {wouldBeOver&&<button onClick={()=>setShowAffordModal(false)} style={btnG}>Move to Next Month</button>}
-                            <button onClick={()=>{ setShowAffordModal(false); setShowAddLoan(true); }} style={btnG}>Convert to EMI</button>
-                          </div>
-                        </>
-                      )}
-                    </div>
+                    ))}
+                    <button onClick={()=>setBudgetSubTab("insights")} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:800,cursor:"pointer",padding:"6px 0 0",width:"100%",textAlign:"left" }}>See full breakdown in Insights →</button>
                   </div>
-                );
+                ) : null;
+              })()}
+
+              {(() => {
+                const todayV = todayStr();
+                const in7 = addDaysToDateStr(todayV, 7);
+                const attention = memberships
+                  .filter(m=>m.status==="active")
+                  .map(m=>({ m, period: getCurrentPeriod(m) }))
+                  .filter(x=>x.period)
+                  .map(x=>({ ...x, eff: getPeriodEffectiveEnd(x.period) }))
+                  .filter(x=>x.eff<=in7)
+                  .sort((a,b)=>a.eff.localeCompare(b.eff))
+                  .slice(0,3);
+
+                return attention.length>0 ? (
+                  <div style={{ ...card,marginBottom:12 }}>
+                    <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8 }}>Needs Attention</div>
+                    {attention.map(({m,eff})=>{
+                      const isOverdue = eff<todayV;
+                      const days = Math.abs(Math.round((new Date(eff)-new Date(todayV))/86400000));
+                      return (
+                        <div key={m.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0" }}>
+                          <span style={{ color:T.text,fontSize:12 }}>{m.cycle||"Membership"}</span>
+                          <span style={{ color:isOverdue?T.danger:T.warn,fontSize:12,fontWeight:800 }}>
+                            {sym}{fmt(m.amount)} · {isOverdue?`Overdue ${days}d`:`Renews in ${days}d`}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null;
               })()}
             </>
           );
@@ -12718,7 +12753,11 @@ function AppContent({ onLock }) {
         })}
         </>)}
 
-        {budgetSubTab==="insights"&&<div style={{ margin:"0 -16px" }}><StatsPage embedded/></div>}
+        {/* Gate 3 (BUD-002 D.3) — StatsPage embed replaced with the dedicated BudgetInsights
+            shell (Option B, locked at Gate 2). StatsPage itself is untouched and unmounted
+            here, not deleted — its Cash Flow/Credit/Investments content's fate is a deferred
+            product decision, not resolved by this change. */}
+        {budgetSubTab==="insights"&&<BudgetInsights viewMonth={viewMonth} setViewMonth={setViewMonth} cats={cats} txns={txns} T={T} sym={sym} fmt={fmt}/>}
 
         {budgetSubTab==="budgets"&&(<>
         {/* Per-person budgets — the flat `spendBudget` field (edited on the person's own profile)
@@ -12731,7 +12770,7 @@ function AppContent({ onLock }) {
             <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
           </div>
           {people.filter(p=>getPersonModules(p).includes("budget")).map(p=>{
-            const monthBudget = Number(p.spendBudgetOverrides?.[viewMonth] ?? p.spendBudget ?? 0);
+                     const monthBudget = getPersonPlanningAllocation(p, viewMonth);
             const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
             const pct = monthBudget>0 ? Math.min(100,Math.round(monthSpend/monthBudget*100)) : 0;
             const isOver = monthSpend > monthBudget && monthBudget > 0;
@@ -12826,11 +12865,11 @@ function AppContent({ onLock }) {
                       // Annual budget for this person = sum of their 12 monthly budgets for the FY,
                       // using each month's override where set and falling back to the flat default
                       // (same default+override pattern as the household Annual Budget).
-                      const personAnnualBudget = months.reduce((s,m)=>s+Number(p.spendBudgetOverrides?.[m.key] ?? p.spendBudget ?? 0),0);
+                          const personAnnualBudget = months.reduce((s,m)=>s+getPersonPlanningAllocation(p, m.key),0);
                       const monthSpends = months.map(m=>{
                         const mTxns = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(m.key));
                         const spend = mTxns.reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
-                        const budget = Number(p.spendBudgetOverrides?.[m.key] ?? p.spendBudget ?? 0);
+                        const budget = getPersonPlanningAllocation(p, m.key);
                         return { ...m, spend, budget };
                       });
                       const ytdSpend = monthSpends.reduce((s,m)=>s+m.spend,0);
