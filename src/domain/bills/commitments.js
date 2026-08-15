@@ -20,6 +20,7 @@
 // `recurringSchedules` remain exactly as they are. This module only reads
 // and re-labels.
 import { getNetBillAmount } from "./refunds.js";
+import { dateAtDay } from "../../helpers/dateHelpers.js";
 
 const RECHARGE_CATEGORIES = ["Mobile Prepaid", "Fastag", "Metro Recharge", "NCMC Recharge", "EV Recharge", "Prepaid Meter", "DTH"];
 
@@ -84,21 +85,48 @@ const mapCcAccountToCommittedSpending = (account, accounts, txns, toDateOnly, ge
 };
 
 /**
+ * Canonical next-occurrence date for a recurring schedule (SIP, or any future
+ * recurring commitment). Reuses dateAtDay (src/helpers/dateHelpers.js) — the
+ * SAME helper getCardCycleDates already uses for "day of month" math — rather
+ * than reimplementing it, per the temporal-completeness principle (a
+ * consumer should not need to know the source entity's recurrence rules).
+ *
+ * Deliberately does NOT reproduce two confirmed bugs in Outlook's own inline
+ * calc (App.jsx ~line 10592-96): (1) that code overflows into the wrong
+ * month for day 29-31 in short months (new Date(y,m,31) in a 28-day Feb
+ * silently becomes March 3rd) — dateAtDay clamps correctly instead; (2) that
+ * code throws an uncaught RangeError on a missing/invalid `day` (Invalid
+ * Date -> .toISOString() throws) — this function instead returns null, an
+ * honest "no date computable" signal, never a fabricated guess (e.g. never
+ * silently assumes day 1).
+ *
+ * @param {Object} schedule - a recurringSchedule record, needs `.day`
+ * @param {Date} refDate - "today", injectable for deterministic tests
+ * @returns {string|null} "YYYY-MM-DD", or null if `day` is missing/invalid
+ */
+export const getNextRecurringOccurrence = (schedule, refDate = new Date()) => {
+  const day = Number(schedule?.day);
+  if (!Number.isFinite(day) || day < 1) return null;
+  const ref = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate(), 0, 0, 0, 0);
+  const thisMonthDue = dateAtDay(ref.getFullYear(), ref.getMonth(), day);
+  const due = thisMonthDue >= ref ? thisMonthDue : dateAtDay(ref.getFullYear(), ref.getMonth() + 1, day);
+  return due.toISOString().slice(0, 10);
+};
+
+/**
  * Maps an active recurringSchedule to a Committed Saving/Investing entry.
  * Inactive schedules (active === false) are EXCLUDED entirely — per the
  * approved contract's inclusion rule, an inactive schedule does not
  * represent a live commitment and must not appear in the output at all.
  */
-const mapScheduleToCommittedSaving = (r) => ({
+const mapScheduleToCommittedSaving = (r, refDate) => ({
   sourceType: "recurringSchedule",
   sourceId: r.id,
   category: "committedSaving",
   subCategory: undefined,
   name: r.name ? `${r.name} SIP` : "SIP",
   amount: Number(r.amount || 0),
-  date: null, // day-of-month only (r.day) — no single "next date" computed here; that's a
-              // consumer-side concern (e.g. Cash Flow's own nextDue projection), not this
-              // read model's job, since two different consumers may want different date logic
+  date: getNextRecurringOccurrence(r, refDate), // canonical next occurrence — null only if `day` is missing/invalid
   status: r.active !== false ? "active" : "inactive",
   recurs: true,
 });
@@ -117,16 +145,19 @@ const mapScheduleToCommittedSaving = (r) => ({
  * @param {Function} toDateOnly - date-normalization helper, passed through to getCardSummary
  * @param {Function} getCardSummary - injected, not imported, keeps this module pure
  * @param {Object} refundTotalsByBill - pre-computed refund map (from computeRefundTotalsByBill)
+ * @param {Date} refDate - "today", injectable for deterministic tests; defaults to real now.
+ *   Threaded through to committedSaving's next-occurrence calculation only — does not affect
+ *   Bill/CC entries, which already carry their own real dueDate/dueOn.
  * @returns {{ committedSpending: Array, committedSaving: Array }}
  */
-export const getCommitments = (bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill = {}) => {
+export const getCommitments = (bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill = {}, refDate = new Date()) => {
   const billEntries = (bills || []).map(b => mapBillToCommittedSpending(b, groups, refundTotalsByBill));
   const ccEntries = (accounts || [])
     .map(a => mapCcAccountToCommittedSpending(a, accounts, txns, toDateOnly, getCardSummary))
     .filter(Boolean);
   const scheduleEntries = (recurringSchedules || [])
     .filter(r => r.active !== false)
-    .map(mapScheduleToCommittedSaving);
+    .map(r => mapScheduleToCommittedSaving(r, refDate));
 
   return {
     committedSpending: [...billEntries, ...ccEntries],
