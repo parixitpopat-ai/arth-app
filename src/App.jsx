@@ -26,6 +26,7 @@ import { AddInsurancePolicyModal, InsurancePolicyListModal, InsurancePolicyDetai
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
+import { getCommitments } from "./domain/bills/commitments";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
 import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus } from "../domain/allocations/adapter";
@@ -7619,38 +7620,27 @@ function AppContent({ onLock }) {
     const homeOpeningBalance = accounts
       .filter(a=>["bank","cash","upi"].includes(a.type) && !isInvestmentAccount(a))
       .reduce((sum,a)=>sum+accountBalance(a.id), 0);
-    const homeSipsAsBills = (recurringSchedules||[]).filter(r=>r.active!==false).map(r=>{
-      const thisMonthDue = new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth(), r.day);
-      const nextDue = thisMonthDue >= homeTodayDate ? thisMonthDue : new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth()+1, r.day);
-      return { id:`sip_${r.id}`, type:"sip", amount:r.amount, dueDate:nextDue.toISOString().slice(0,10), status:"unpaid" };
-    });
-    const homeCcStatementsAsBills = accounts.filter(a=>a.type==="cc").map(a=>{
-      const summary = getCardSummary(a, accounts, txns, toDateOnly);
-      if(!summary.currentDue || summary.currentDue<=0) return null;
-      return { id:`ccstmt_${a.id}`, type:"cc_statement", amount:summary.currentDue, dueDate:summary.dueOn.toISOString().slice(0,10), status:"unpaid" };
-    }).filter(Boolean);
-    const homeBillsForForecast = [...bills, ...homeSipsAsBills, ...homeCcStatementsAsBills];
+    // Repointed to getCommitments() (Commitment Read Model, Phase 5) — replaces the old
+    // homeSipsAsBills/homeCcStatementsAsBills/homeBillsForForecast/homeGetMyBillShare block.
+    // Also fixes, as a side effect, the previously-confirmed drift where Home's synthetic
+    // SIP/CC entries omitted `name` (not user-visible today, since neither consumer below
+    // renders individual bill names, but no longer a latent inconsistency with Outlook).
+    const { committedSpending: homeCommittedSpending, committedSaving: homeCommittedSaving } =
+      getCommitments(bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill, homeTodayDate);
+    const homeUnpaidSpending = homeCommittedSpending.filter(c=>c.status!=="paid");
     const homeThisMonthTxns = txns.filter(t=>t.date&&t.date.startsWith(homeMonthKey));
     const homeMonthSpend = getHouseholdAttributedTotal({ periodTransactions: homeThisMonthTxns, allTransactions: txns });
     const homeMonthBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, homeMonthKey);
     const homeSafeToSpend = homeMonthBudget - homeMonthSpend;
     const homeDaysLeftInMonth = new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth()+1, 0).getDate() - homeTodayDate.getDate() + 1;
     const homeSafeToSpendPerDay = homeDaysLeftInMonth>0 ? homeSafeToSpend/homeDaysLeftInMonth : homeSafeToSpend;
-    // Same fix as OutlookPage's getMyBillShare - duplicated here since Home and Outlook are
-    // separate component closures (AD-002, tracked debt). Real bug: split bills were counted at
-    // their full amount instead of the user's own share.
-    const homeGetMyBillShare = b => {
-      if(b.type==="sip"||b.type==="cc_statement") return Number(b.amount||0);
-      const owedTotal = Object.values(b.splitPeople||{}).reduce((sum,info)=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
-      const fallbackShare = Math.max(0, Number(b.amount||0)-owedTotal-Number(b.groupCollectiveAmount||0));
-      const storedShare = Number(b.myShare);
-      const group = b.groupId?getGroup(b.groupId):null;
-      const meExcluded = group?.includeMe===false;
-      return Number.isFinite(storedShare)&&(storedShare>0||fallbackShare<=0||meExcluded) ? storedShare : fallbackShare;
-    };
-    const homeCashRequired = homeBillsForForecast.filter(b=>b.status!=="paid").reduce((sum,b)=>sum+homeGetMyBillShare(b),0);
+    // homeCashRequired = Committed Spending (unpaid) + Committed Saving, summed together per the
+    // approved array-scope decision — this is the "Protected Money" concept, architecturally the
+    // same shape as Outlook's "Next Month Cash Outflow" lens, just not month-scoped here (Home
+    // shows the immediate/ongoing figure, not a next-month preview).
+    const homeCashRequired = homeUnpaidSpending.reduce((sum,c)=>sum+c.amount,0) + homeCommittedSaving.reduce((sum,c)=>sum+c.amount,0);
     const homeBuffer = homeOpeningBalance - homeCashRequired;
-    const homeHasCommitmentData = homeBillsForForecast.filter(b=>b.status!=="paid").length>0 || (expectedIncome||[]).filter(e=>e.status!=="received").length>0;
+    const homeHasCommitmentData = (homeUnpaidSpending.length + homeCommittedSaving.length)>0 || (expectedIncome||[]).filter(e=>e.status!=="received").length>0;
     const homeStatus = !homeHasCommitmentData ? { icon:"⚪", label:"Needs Setup", color:T.sub }
       : homeBuffer<0 ? { icon:"🔴", label:"At Risk", color:T.danger }
       : homeBuffer<homeCashRequired*0.1 ? { icon:"🟠", label:"Tight", color:T.warn }
@@ -10604,22 +10594,24 @@ function AppContent({ onLock }) {
       if(!summary.currentDue || summary.currentDue<=0) return null;
       return { id:`ccstmt_${a.id}`, type:"cc_statement", name:`${a.name} Statement`, amount:summary.currentDue, dueDate:summary.dueOn.toISOString().slice(0,10), status:"unpaid" };
     }).filter(Boolean);
+    // billsForForecast/sipsAsBills/ccStatementsAsBills are kept EXACTLY as before, unchanged —
+    // Cash Flow (timeline/projectedBalance below) must keep consuming this array directly, per
+    // the Phase 5 decision to preserve Cash Flow semantics exactly. Confirmed in Step 4's Proof 5
+    // that Cash Flow's real dependency is this array specifically, not the Commitment Read Model
+    // — so this block is NOT repointed, on purpose.
     const billsForForecast = [...bills, ...sipsAsBills, ...ccStatementsAsBills];
 
-    // Shared across every calculation on this screen — a bill split with other people should only
-    // count the USER's own share, not the full amount. Real bug found via a live screenshot (a
-    // ₹4,292 utility bill split 4 ways, user's real share ₹858.40) that was affecting both
-    // Protected Money and Next Month Preview identically, since both summed raw b.amount. Reuses
-    // the exact same fallback logic already used on the real Bill Detail screen.
-    const getMyBillShare = b => {
-      if(b.type==="sip"||b.type==="cc_statement") return Number(b.amount||0); // synthetic entries, no split concept applies
-      const owedTotal = Object.values(b.splitPeople||{}).reduce((sum,info)=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
-      const fallbackShare = Math.max(0, Number(b.amount||0)-owedTotal-Number(b.groupCollectiveAmount||0));
-      const storedShare = Number(b.myShare);
-      const group = b.groupId?getGroup(b.groupId):null;
-      const meExcluded = group?.includeMe===false;
-      return Number.isFinite(storedShare)&&(storedShare>0||fallbackShare<=0||meExcluded) ? storedShare : fallbackShare;
-    };
+    // Repointed to getCommitments() (Commitment Read Model, Phase 5) — powers every OTHER
+    // commitment-derived output on this screen (Protected Money, unpaid list/urgency buckets,
+    // Next Month Preview). Household-share netting, refund netting, and SIP next-occurrence
+    // dates are now computed once, canonically, inside commitments.js — the old local
+    // getMyBillShare duplicate is removed; nothing on this screen needs it anymore.
+    const { committedSpending, committedSaving } = getCommitments(bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill, todayDate);
+    const unpaidSpending = committedSpending.filter(c=>c.status!=="paid");
+    // Only real Bills are ever clickable/editable in the urgency-bucket list below (synthetic
+    // SIP/CC entries never were) — this map lets BillRow open the ORIGINAL bill record for
+    // editing, rather than the read-only commitment-shaped wrapper.
+    const originalBillsById = Object.fromEntries(bills.map(b=>[String(b.id), b]));
 
     const estimatedVariable = averageOfLastNMonthsVariableSpend(txns, 3, monthKey);
     const timeline = buildCashFlowTimeline(openingBalance, billsForForecast, expectedIncome, 30, refundTotalsByBill);
@@ -10643,7 +10635,10 @@ function AppContent({ onLock }) {
     // (2) Protected Money = cash that's already committed and shouldn't be spent on something
     // else - Bills (incl. Insurance, still Bill.type per the frozen ADR-021/023 - unchanged),
     // SIPs, CC statements. Cash Available is the real opening balance; Buffer is what's left.
-    const cashRequired = billsForForecast.filter(b=>b.status!=="paid").reduce((sum,b)=>sum+getMyBillShare(b),0);
+    // Repointed (Phase 5): Committed Spending (unpaid) + Committed Saving, summed together per
+    // the approved array-scope decision — architecturally the same shape as "Next Month Cash
+    // Outflow" below, just not month-scoped (this is the immediate/ongoing figure).
+    const cashRequired = unpaidSpending.reduce((sum,c)=>sum+c.amount,0) + committedSaving.reduce((sum,c)=>sum+c.amount,0);
     const cashAvailable = openingBalance;
     const buffer = cashAvailable - cashRequired;
     const negativeCheck = hasTransientNegativeBalance(timeline);
@@ -10653,7 +10648,7 @@ function AppContent({ onLock }) {
     // check), not the budget-based Safe to Spend — status answers "can I survive the month,"
     // not "am I within budget," which are the two different questions this whole redesign
     // exists to separate.
-    const unpaidBillCount = billsForForecast.filter(b=>b.status!=="paid").length;
+    const unpaidBillCount = unpaidSpending.length + committedSaving.length;
     const pendingIncomeCount = (expectedIncome||[]).filter(e=>e.status!=="received").length;
     const hasCommitmentData = unpaidBillCount>0 || pendingIncomeCount>0;
     const forecastStatus = !hasEnoughData ? null
@@ -10668,9 +10663,15 @@ function AppContent({ onLock }) {
     // Today / Next 7 Days / Later. Reuses the exact daysUntil/isOverdue logic already used
     // elsewhere (O003/O004), not a new calculation.
     const today = new Date(); today.setHours(0,0,0,0);
-    const unpaidBills = billsForForecast.filter(b=>b.status!=="paid").map(b=>{
-      const daysUntil = Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
-      return { ...b, daysUntil, isOverdue: daysUntil<0 };
+    // Repointed (Phase 5): committedSpending + committedSaving, using each entry's own canonical
+    // date — SIPs now bucket correctly (Phase 4A gave committedSaving a real next-occurrence
+    // date via getNextRecurringOccurrence, reusing dateAtDay). An entry with no computable date
+    // (invalid/missing schedule day — an edge case, see Phase 4A) is left out of every bucket
+    // rather than guessed into one, same "honest absence over fabricated guess" principle as the
+    // read model itself.
+    const unpaidBills = [...unpaidSpending, ...committedSaving].map(c=>{
+      const daysUntil = c.date ? Math.ceil((new Date(c.date)-today)/(1000*60*60*24)) : null;
+      return { ...c, daysUntil, isOverdue: daysUntil!=null && daysUntil<0, _originalBill: c.sourceType==="bill" ? originalBillsById[String(c.sourceId)] : null };
     });
     const overdueBills = unpaidBills.filter(b=>b.isOverdue).sort((a,b)=>a.daysUntil-b.daysUntil);
     const dueTodayBills = unpaidBills.filter(b=>b.daysUntil===0);
@@ -10688,11 +10689,14 @@ function AppContent({ onLock }) {
     const cashDelta = yesterdaySnap && todaySnap ? todaySnap.cash - yesterdaySnap.cash : null;
 
     const BillRow = ({ b }) => {
-      const isSynthetic = b.id.toString().startsWith("sip_") || b.id.toString().startsWith("ccstmt_");
+      // Badge now derived from sourceType (canonical) instead of the old synthetic `type`/id-
+      // prefix check — reproduces the exact same visual badge (Step 4 Proof confirmed the
+      // mapping is equivalent). Only real Bills are clickable, same as before.
+      const isSynthetic = b.sourceType !== "bill";
       return (
-      <div onClick={()=>{ if(!isSynthetic) setEditingBill(b); }} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:isSynthetic?"default":"pointer" }}>
-        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name||b.type}{b.type==="sip"&&<span style={{ color:T.sub,fontWeight:400 }}> · SIP</span>}{b.type==="cc_statement"&&<span style={{ color:T.sub,fontWeight:400 }}> · Card</span>}</span>
-        <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(getMyBillShare(b))}</span>
+      <div onClick={()=>{ if(!isSynthetic && b._originalBill) setEditingBill(b._originalBill); }} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:isSynthetic?"default":"pointer" }}>
+        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name}{b.sourceType==="recurringSchedule"&&<span style={{ color:T.sub,fontWeight:400 }}> · SIP</span>}{b.sourceType==="ccStatement"&&<span style={{ color:T.sub,fontWeight:400 }}> · Card</span>}</span>
+        <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(b.amount)}</span>
       </div>
       );
     };
@@ -10785,25 +10789,25 @@ function AppContent({ onLock }) {
       {overdueBills.length>0&&(
         <div style={{ marginBottom:12 }}>
           <div style={{ color:T.danger,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>OVERDUE ({overdueBills.length})</div>
-          <div style={{ ...card }}>{overdueBills.map(b=><BillRow key={b.id} b={b}/>)}</div>
+          <div style={{ ...card }}>{overdueBills.map(b=><BillRow key={b.sourceId} b={b}/>)}</div>
         </div>
       )}
       {dueTodayBills.length>0&&(
         <div style={{ marginBottom:12 }}>
           <div style={{ color:T.warn,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>DUE TODAY ({dueTodayBills.length})</div>
-          <div style={{ ...card }}>{dueTodayBills.map(b=><BillRow key={b.id} b={b}/>)}</div>
+          <div style={{ ...card }}>{dueTodayBills.map(b=><BillRow key={b.sourceId} b={b}/>)}</div>
         </div>
       )}
       {next7Bills.length>0&&(
         <div style={{ marginBottom:12 }}>
           <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>NEXT 7 DAYS</div>
-          <div style={{ ...card }}>{next7Bills.map(b=><BillRow key={b.id} b={b}/>)}</div>
+          <div style={{ ...card }}>{next7Bills.map(b=><BillRow key={b.sourceId} b={b}/>)}</div>
         </div>
       )}
       {laterBills.length>0&&(
         <div style={{ marginBottom:12,opacity:0.7 }}>
           <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>LATER</div>
-          <div style={{ ...card }}>{laterBills.map(b=><BillRow key={b.id} b={b}/>)}</div>
+          <div style={{ ...card }}>{laterBills.map(b=><BillRow key={b.sourceId} b={b}/>)}</div>
         </div>
       )}
       {overdueBills.length===0&&dueTodayBills.length===0&&next7Bills.length===0&&laterBills.length===0&&(
@@ -10833,16 +10837,23 @@ function AppContent({ onLock }) {
       {(()=>{
         const nextMonthDate = new Date(todayDate.getFullYear(), todayDate.getMonth()+1, 1);
         const nextMonthKey = `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth()+1).padStart(2,"0")}`;
-        // Real bug found via a live screenshot: this previously used the bill's FULL amount, even
-        // for bills split with other people (e.g. a ₹4,292 utility bill split 4 ways where the
-        // user's actual share is ₹858.40). Now reuses the shared getMyBillShare defined at the top
-        // of this component, same fix applied consistently to Protected Money and here.
-        const nextMonthAll = billsForForecast.filter(b=>b.status!=="paid" && b.dueDate && b.dueDate.startsWith(nextMonthKey));
-        const isCashOnlyNotBudget = b => b.type==="sip" || b.type==="cc_statement" || b.type==="Credit Card";
-        const nextMonthBudgetExpenses = nextMonthAll.filter(b=>!isCashOnlyNotBudget(b));
-        const nextMonthCashOnly = nextMonthAll.filter(isCashOnlyNotBudget);
-        const nextMonthCommitted = nextMonthBudgetExpenses.reduce((sum,b)=>sum+getMyBillShare(b), 0);
-        const nextMonthCashRequired = nextMonthCashOnly.reduce((sum,b)=>sum+getMyBillShare(b), 0);
+        // Repointed (Phase 5, Decisions 1 & 2): the old isCashOnlyNotBudget bucket wrongly
+        // conflated CC statements (Committed Spending) with SIPs (Committed Saving) under one
+        // "Cash Only" label — real architectural smell, resolved by using the canonical
+        // committedSpending/committedSaving arrays instead. nextMonthBudgetExpenses stays a
+        // Bills-only Outlook presentation subset (Decision 1: committedSpending excluding
+        // ccStatement, NOT a new dataset field). "Next Month Cash Outflow" (Decision 2) replaces
+        // nextMonthCashOnly/nextMonthCashRequired's old meaning — Committed Spending + Committed
+        // Saving, both genuinely month-scoped via each entry's own canonical date (SIPs now have
+        // one, per Phase 4A). Household-share/refund netting already happened once, canonically,
+        // inside getCommitments() — no local reimplementation here.
+        const inNextMonth = c => c.status!=="paid" && c.date && c.date.startsWith(nextMonthKey);
+        const nextMonthSpending = committedSpending.filter(inNextMonth);
+        const nextMonthSaving = committedSaving.filter(inNextMonth);
+        const nextMonthBudgetExpenses = nextMonthSpending.filter(c=>c.sourceType!=="ccStatement");
+        const nextMonthAll = [...nextMonthSpending, ...nextMonthSaving]; // union, used only for the empty-state check below
+        const nextMonthCommitted = nextMonthBudgetExpenses.reduce((sum,c)=>sum+c.amount, 0);
+        const nextMonthCashOutflow = nextMonthSpending.reduce((sum,c)=>sum+c.amount,0) + nextMonthSaving.reduce((sum,c)=>sum+c.amount,0);
         const nextMonthBudget = monthOverrides[nextMonthKey] || Math.round(Number(annualBudget||0)/12);
         const nextMonthLabel = nextMonthDate.toLocaleString("en-IN",{month:"long"});
         if(nextMonthBudget<=0 && nextMonthAll.length<=0) return null;
@@ -10867,17 +10878,17 @@ function AppContent({ onLock }) {
                 </div>
               </>
             )}
-            {nextMonthCashRequired>0&&(
+            {nextMonthCashOutflow>0&&(
               <div style={{ marginTop:10,paddingTop:8,borderTop:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between" }}>
-                <span style={{ color:T.sub,fontSize:11 }}>+ Cash Required <span style={{ fontStyle:"italic" }}>(CC/SIP — cash, not new spend)</span></span>
-                <span style={{ color:T.warn,fontSize:12,fontWeight:800 }}>{sym}{fmt(nextMonthCashRequired)}</span>
+                <span style={{ color:T.sub,fontSize:11 }}>Next Month Cash Outflow <span style={{ fontStyle:"italic" }}>(total cash leaving, incl. Expected Expenses above)</span></span>
+                <span style={{ color:T.warn,fontSize:12,fontWeight:800 }}>{sym}{fmt(nextMonthCashOutflow)}</span>
               </div>
             )}
             {nextMonthBudgetExpenses.length>0&&(
               <div style={{ marginTop:10,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
-                {nextMonthBudgetExpenses.slice(0,3).map(b=>(
-                  <div key={b.id} style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:T.sub,padding:"3px 0" }}>
-                    <span>{b.name||b.type}</span><span>{sym}{fmt(getMyBillShare(b))}</span>
+                {nextMonthBudgetExpenses.slice(0,3).map(c=>(
+                  <div key={c.sourceId} style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:T.sub,padding:"3px 0" }}>
+                    <span>{c.name}</span><span>{sym}{fmt(c.amount)}</span>
                   </div>
                 ))}
                 {nextMonthBudgetExpenses.length>3&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>+{nextMonthBudgetExpenses.length-3} more</div>}
