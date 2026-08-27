@@ -718,6 +718,10 @@ function AppContent({ onLock }) {
   // and this needs to be buildable/verifiable entirely on its own.
   const [expectedIncome, setExpectedIncome] = useState(()=>JSON.parse(localStorage.getItem("arth_expected_income")||"[]"));
   const [insurancePolicies, setInsurancePolicies] = useState(()=>JSON.parse(localStorage.getItem("arth_insurance_policies")||"[]"));
+  // I-5 WP-1: School Fees domain persistence — mirrors insurancePolicies' pattern exactly.
+  const [feeSchedules, setFeeSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_schedules")||"[]"));
+  const [feePeriods, setFeePeriods] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_periods")||"[]"));
+  const [schoolCreditNotes, setSchoolCreditNotes] = useState(()=>JSON.parse(localStorage.getItem("arth_school_credit_notes")||"[]"));
   const [showInsuranceList, setShowInsuranceList] = useState(false);
   const [showAddPolicy, setShowAddPolicy] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState(null);
@@ -792,6 +796,9 @@ function AppContent({ onLock }) {
   useEffect(()=>safeSetLocalStorage("arth_goals",JSON.stringify(goals)),[goals]);
   useEffect(()=>safeSetLocalStorage("arth_expected_income",JSON.stringify(expectedIncome)),[expectedIncome]);
   useEffect(()=>safeSetLocalStorage("arth_insurance_policies",JSON.stringify(insurancePolicies)),[insurancePolicies]);
+  useEffect(()=>safeSetLocalStorage("arth_fee_schedules",JSON.stringify(feeSchedules)),[feeSchedules]);
+  useEffect(()=>safeSetLocalStorage("arth_fee_periods",JSON.stringify(feePeriods)),[feePeriods]);
+  useEffect(()=>safeSetLocalStorage("arth_school_credit_notes",JSON.stringify(schoolCreditNotes)),[schoolCreditNotes]);
   useEffect(()=>safeSetLocalStorage("arth_dismissed_alerts",JSON.stringify(dismissedAlerts)),[dismissedAlerts]);
   useEffect(()=>safeSetLocalStorage("arth_budget",monthBudget),[monthBudget]);
   useEffect(()=>safeSetLocalStorage("arth_bills",JSON.stringify(bills)),[bills]);
@@ -7183,13 +7190,16 @@ function AppContent({ onLock }) {
     goals,
     expectedIncome,
     insurancePolicies,
+    feeSchedules,
+    feePeriods,
+    schoolCreditNotes,
     trackedAssets,
     loans,
     annualBudget,
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, schoolCreditNotes, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -7230,6 +7240,9 @@ function AppContent({ onLock }) {
     if(Array.isArray(snapshot.goals)) setGoals(snapshot.goals);
     if(Array.isArray(snapshot.expectedIncome)) setExpectedIncome(snapshot.expectedIncome);
     if(Array.isArray(snapshot.insurancePolicies)) setInsurancePolicies(snapshot.insurancePolicies);
+    if(Array.isArray(snapshot.feeSchedules)) setFeeSchedules(snapshot.feeSchedules);
+    if(Array.isArray(snapshot.feePeriods)) setFeePeriods(snapshot.feePeriods);
+    if(Array.isArray(snapshot.schoolCreditNotes)) setSchoolCreditNotes(snapshot.schoolCreditNotes);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
@@ -7589,7 +7602,7 @@ function AppContent({ onLock }) {
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, schoolCreditNotes, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
