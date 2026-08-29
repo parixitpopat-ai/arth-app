@@ -12310,9 +12310,11 @@ function AppContent({ onLock }) {
           {/* People & Groups and Vehicles removed from here per real feedback - both are now
               reachable only via the Drawer shortcuts, avoiding the same two-places-for-one-thing
               duplication already cleaned up elsewhere. */}
-          <Row icon="🧾" title="Billers" subtitle="Manage billers and biller accounts" onClick={()=>{ setTab("bills"); setShowSettings(false); }}/>
-          <Row icon="🛡️" title="Insurance" subtitle={insurancePolicies.filter(p=>p.status!=="archived").length>0?`${insurancePolicies.filter(p=>p.status!=="archived").length} polic${insurancePolicies.filter(p=>p.status!=="archived").length===1?"y":"ies"}`:"Track premiums, renewals, and coverage"} onClick={()=>{ setShowInsuranceList(true); setShowSettings(false); }}/>
-          <Row icon="🎓" title="School Fees" subtitle={feeSchedules.length>0?`${feeSchedules.length} school year${feeSchedules.length===1?"":"s"}`:"Track tuition, periods, and payments"} onClick={()=>{ setShowSchoolFeesList(true); setShowSettings(false); }}/>
+          {/* Billers row removed — redundant with the "Payments" drawer entry, which routes to
+              the exact same setTab("bills") destination. No functionality removed, only the
+              duplicate navigation entry. Insurance and School Fees moved out of Settings
+              entirely — they're operational financial relationships, not configuration; both
+              remain reachable via Payments' category grid (Bills tab), same real screens. */}
         </div>
 
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Data</div>
@@ -13405,6 +13407,12 @@ function AppContent({ onLock }) {
                       const actionType = getBillerActionType(type);
                       return (
                         <div key={type} onClick={()=>{
+                          // Insurance and School/Education Fees don't participate in the
+                          // billerAccounts hierarchy (neither writes to billerAccountId in
+                          // practice) — routing them into the generic flow would be a dead end.
+                          // Route straight to their real, domain-specific screens instead.
+                          if(type==="Insurance"){ setShowInsuranceList(true); return; }
+                          if(type==="School Fees" || type==="Education Fees"){ setShowSchoolFeesList(true); return; }
                           if(billersOfType.length===0){
                             setAddBillerPresetType(type);
                             setShowAddBillerModal(true);
@@ -13998,7 +14006,7 @@ function AppContent({ onLock }) {
             {[
               { icon:"👤", label:"User Profile", onClick:()=>{ setTab("home"); setShowSettings(false); onClose(); } },
               { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
-              { icon:"🧾", label:"Bills", onClick:()=>goToTab("bills") },
+              { icon:"🧾", label:"Payments", onClick:()=>goToTab("bills") },
               { icon:"👥", label:"People & Groups", onClick:()=>goToTab("people") },
               { icon:"🚗", label:"Vehicles", onClick:()=>{ setShowSettings(true); setSettingsSection("vehicles"); onClose(); } },
               { icon:"🔍", label:"Find Duplicate Transactions", onClick:()=>{ setShowDuplicateFinder(true); onClose(); } },
