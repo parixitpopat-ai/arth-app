@@ -27,6 +27,8 @@ import { SchoolFeeScheduleListModal, AddSchoolYearModal, SchoolFeeScheduleDetail
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
+import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
+import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { getCommitments } from "./domain/bills/commitments";
 import { remainingShare } from "./domain/shared/remainingShare";
@@ -7607,6 +7609,23 @@ function AppContent({ onLock }) {
     safeSetLocalStorage("arth_card_order", JSON.stringify(arr));
   };
 
+  // Future Money — computed ONCE here, not inside Home's or OutlookPage's own closures.
+  // Both consume this exact same object below. This directly fixes the pre-existing
+  // duplication flagged in Home's own comment ("a shared hook would be the right fix, not
+  // done here") — Home and Outlook previously each called getCommitments() independently.
+  //
+  // Composition only — no new commitment calculation exists here. getCommitments() itself
+  // is untouched; this merges its output with School Fees' already-built projection via the
+  // already-tested composeFutureMoneyCommitments(). Debt Service stays empty — no adapter
+  // exists yet, and nothing here fabricates one.
+  //
+  // This feeds Protected Money (Outlook) and its Home equivalent — NOT Safe to Spend, which
+  // is a deliberately separate, pure-budget concept per the existing "two genuinely different
+  // questions" comment already in this file. Safe to Spend is not modified anywhere.
+  const futureMoneyToday = new Date(); futureMoneyToday.setHours(0,0,0,0);
+  const rawCommitments = getCommitments(bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill, futureMoneyToday);
+  const futureMoney = composeFutureMoneyCommitments(rawCommitments, [getSchoolFeeCommitments(feePeriods)]);
+
   const Home = () => {
     // Safe to Spend / Protected Money — same calculations as OutlookPage (ADR-024), duplicated
     // here since Home and Outlook are separate component closures. Flagging the duplication
@@ -7622,8 +7641,12 @@ function AppContent({ onLock }) {
     // Also fixes, as a side effect, the previously-confirmed drift where Home's synthetic
     // SIP/CC entries omitted `name` (not user-visible today, since neither consumer below
     // renders individual bill names, but no longer a latent inconsistency with Outlook).
-    const { committedSpending: homeCommittedSpending, committedSaving: homeCommittedSaving } =
-      getCommitments(bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill, homeTodayDate);
+    // Now reads the shared `futureMoney` projection computed once above, instead of calling
+    // getCommitments() independently — fixes the exact duplication this comment used to flag.
+    // School Fees now flows in automatically via composeFutureMoneyCommitments(); everything
+    // below (homeCashRequired, homeBuffer, homeStatus) is the unchanged, original formula.
+    const homeCommittedSpending = futureMoney.committedSpending;
+    const homeCommittedSaving = futureMoney.committedSaving;
     const homeUnpaidSpending = homeCommittedSpending.filter(c=>c.status!=="paid");
     const homeThisMonthTxns = txns.filter(t=>t.date&&t.date.startsWith(homeMonthKey));
     const homeMonthSpend = getHouseholdAttributedTotal({ periodTransactions: homeThisMonthTxns, allTransactions: txns });
@@ -10603,7 +10626,11 @@ function AppContent({ onLock }) {
     // Next Month Preview). Household-share netting, refund netting, and SIP next-occurrence
     // dates are now computed once, canonically, inside commitments.js — the old local
     // getMyBillShare duplicate is removed; nothing on this screen needs it anymore.
-    const { committedSpending, committedSaving } = getCommitments(bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill, todayDate);
+    // Now reads the shared `futureMoney` projection computed once above (before Home), instead
+    // of calling getCommitments() independently. School Fees flows in automatically. Everything
+    // that consumed committedSpending/committedSaving below — Protected Money, the unpaid
+    // list, Next Month Preview — is unchanged; only the input now includes School Fees.
+    const { committedSpending, committedSaving } = futureMoney;
     const unpaidSpending = committedSpending.filter(c=>c.status!=="paid");
     // Only real Bills are ever clickable/editable in the urgency-bucket list below (synthetic
     // SIP/CC entries never were) — this map lets BillRow open the ORIGINAL bill record for
@@ -10653,7 +10680,7 @@ function AppContent({ onLock }) {
       : negativeCheck.negative || buffer<0 ? { level:"risk", icon:"🔴", label:"At Risk", detail:"Forecast goes negative or a commitment can't be covered." }
       : buffer<cashRequired*0.1 ? { level:"tight", icon:"🟠", label:"Tight", detail:"Buffer is small — one unexpected expense could create stress." }
       : buffer<cashRequired*0.3 ? { level:"watchful", icon:"🟡", label:"Watchful", detail:"Commitments are covered, but margin is limited." }
-      : { level:"comfortable", icon:"🟢", label:"Comfortable", detail:"All known commitments are covered." };
+      : { level:"comfortable", icon:"🟢", label:"Comfortable", detail:"Your Bills, SIPs, and card statements are covered." };
     const statusColor = { incomplete:T.sub, risk:T.danger, tight:T.warn, watchful:T.gold||T.warn, comfortable:T.success }[forecastStatus?.level] || T.sub;
 
     // Bills grouped by urgency, not a flat "Already Available" launcher list — Overdue / Due
@@ -10715,6 +10742,46 @@ function AppContent({ onLock }) {
             <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(safeToSpendPerDay))}/day for the rest of this month</div>
           </>
         )}
+      </div>
+
+      {/* Your Future Money — I-1's three commitment classes, made visible for the first time.
+          Pure display: every number here already exists in `futureMoney`, computed once above.
+          Debt Service is honestly empty — no adapter exists yet, nothing here estimates one. */}
+      <div style={{ ...card,marginBottom:12 }}>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:12 }}>YOUR FUTURE MONEY</div>
+
+        <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>Committed Spending</div>
+        {unpaidSpending.length===0 ? (
+          <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Nothing outstanding right now.</div>
+        ) : (
+          <div style={{ marginBottom:14 }}>
+            {unpaidSpending.map(c=>(
+              <div key={`${c.sourceType}_${c.sourceId}`} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                <span style={{ color:T.sub,fontSize:11 }}>{c.name||"—"}</span>
+                <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{c.amount!=null?`${sym}${fmt(c.amount)}`:"Amount not set"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>Committed Saving</div>
+        {committedSaving.length===0 ? (
+          <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>No active recurring investments.</div>
+        ) : (
+          <div style={{ marginBottom:14 }}>
+            {committedSaving.map(c=>(
+              <div key={`${c.sourceType}_${c.sourceId}`} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                <span style={{ color:T.sub,fontSize:11 }}>{c.name||"—"}</span>
+                <span style={{ color:T.success,fontSize:12,fontWeight:700 }}>{c.amount!=null?`${sym}${fmt(c.amount)}`:"Amount not set"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>Debt Service</div>
+        <div style={{ border:`1px dashed ${T.border}`,borderRadius:10,padding:"10px 12px" }}>
+          <div style={{ color:T.sub,fontSize:11,lineHeight:1.5 }}>Debt Service isn't available yet. Arth tracks your loan balance, but doesn't yet have enough information to establish the forward repayment schedule.</div>
+        </div>
       </div>
 
       {/* Protected Money — the cash-commitment question ("how much cash must I keep available?").
@@ -15185,9 +15252,9 @@ function AppContent({ onLock }) {
             {tab==="bills"&&<button onClick={()=>setShowAddBill(true)} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Nunito,sans-serif" }}>+ Add Bill</button>}
           </div>
           <div style={{ display:"flex",gap:8,alignItems:"center",marginTop:8,justifyContent:"space-between" }}>
-            {tab==="home"&&(
-              <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
-            )}
+            {/* Home's hamburger already renders in the greeting header above — this used to
+                render a second one here, duplicating it on Home specifically (every other tab
+                only ever had the one at line ~15168). Removed, not replaced. */}
             <div style={{ display:"flex",gap:8,alignItems:"center",justifyContent:"flex-end",flex:1 }}>
             <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Nunito,sans-serif" }}>💼{workTripMode?" ON":""}</button>
             <button onClick={()=>{ setShowSearch(true); setSearchQuery(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:14,color:T.sub }} title="Search">🔍</button>
