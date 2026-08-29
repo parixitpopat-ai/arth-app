@@ -23,8 +23,10 @@ import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/Go
 import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/EventsScreen";
 import { AddExpectedIncomeModal, ExpectedIncomeListModal } from "./screens/ExpectedIncomeScreen";
 import { AddInsurancePolicyModal, InsurancePolicyListModal, InsurancePolicyDetailModal } from "./screens/InsuranceScreen";
+import { SchoolFeeScheduleListModal, AddSchoolYearModal, SchoolFeeScheduleDetailModal, SettlePaymentModal, PeriodDetailModal, AdjustmentModal, CreditNoteModal } from "./screens/SchoolFeesScreen";
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
+import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { getCommitments } from "./domain/bills/commitments";
 import { remainingShare } from "./domain/shared/remainingShare";
@@ -722,6 +724,17 @@ function AppContent({ onLock }) {
   const [feeSchedules, setFeeSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_schedules")||"[]"));
   const [feePeriods, setFeePeriods] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_periods")||"[]"));
   const [schoolCreditNotes, setSchoolCreditNotes] = useState(()=>JSON.parse(localStorage.getItem("arth_school_credit_notes")||"[]"));
+  // School Fees UI state — screen-level only, no calculations live here.
+  const [showSchoolFeesList, setShowSchoolFeesList] = useState(false);
+  const [showAddSchoolYear, setShowAddSchoolYear] = useState(false);
+  const [viewingSchoolFeeSchedule, setViewingSchoolFeeSchedule] = useState(null);
+  const [viewingSchoolFeePeriod, setViewingSchoolFeePeriod] = useState(null);
+  const [showSettleSchoolFee, setShowSettleSchoolFee] = useState(false);
+  const [showAdjustSchoolFee, setShowAdjustSchoolFee] = useState(false);
+  const [adjustSchoolFeeKind, setAdjustSchoolFeeKind] = useState(null);
+  const [adjustSchoolFeeTargetPeriodId, setAdjustSchoolFeeTargetPeriodId] = useState(null);
+  const [showSchoolFeeCreditNote, setShowSchoolFeeCreditNote] = useState(false);
+  const [selectedSchoolFeePeriodIds, setSelectedSchoolFeePeriodIds] = useState([]);
   const [showInsuranceList, setShowInsuranceList] = useState(false);
   const [showAddPolicy, setShowAddPolicy] = useState(false);
   const [editingPolicy, setEditingPolicy] = useState(null);
@@ -4508,41 +4521,12 @@ function AppContent({ onLock }) {
         upsertTxn({ ...base, amount:amt, fromAccId, toAccId, catId:null, catIds:[], subId:null, subIds:[] });
         if(!isEditing){
           setAccounts(prev=>prev.map(a=>a.id===toAccId?{...a,outstanding:Math.max(0,(a.outstanding||0)-amt)}:a));
-          // Auto-reduce outstanding on CC-backed EMI loans linked to this card.
-          // Each cc_emi installment posted to this card reduces that plan's loan outstanding.
-          // When CC bill is paid, the installments are cleared — so we reduce loan outstanding accordingly.
-          setLoans(prev=>prev.map(loan=>{
-            if(loan.direction!=="taken") return loan;
-            if(!(loan.sourceType==="cc" || loan.ccLinked===true)) return loan;
-            if(loan.linkedCardId!==toAccId) return loan;
-            if(loan.status==="closed") return loan;
-            // Find cc_emi txns for this loan's plan that are dated on or before today and not yet accounted
-            const planId = loan.ccEmiPlanId;
-            if(!planId) return loan;
-            const installmentsPosted = txns.filter(t=>
-              t.type==="cc_emi" &&
-              t.ccEmiPlanId===planId &&
-              t.accId===toAccId &&
-              (!t.paidInBill) // not yet cleared by a bill payment
-            );
-            const totalInstallmentAmt = installmentsPosted.reduce((s,t)=>s+Number(t.amount||0),0);
-            if(totalInstallmentAmt<=0) return loan;
-            const newOutstanding = Math.max(0, Number(loan.outstanding||0) - totalInstallmentAmt);
-            return {
-              ...loan,
-              outstanding: newOutstanding,
-              status: newOutstanding<=0 ? "closed" : "active",
-              repayments: [
-                ...(loan.repayments||[]),
-                { id:genId(), date:date||todayStr(), amount:totalInstallmentAmt, note:`CC bill payment — ${installmentsPosted.length} EMI installment(s)` }
-              ]
-            };
-          }));
-          // Mark those cc_emi txns as cleared by this bill payment
-          setTxns(prev=>prev.map(t=>{
-            if(t.type!=="cc_emi" || t.accId!==toAccId || t.paidInBill) return t;
-            return { ...t, paidInBill:true };
-          }));
+          // CC EMI settlement fix: allocates only the actual payment amount
+          // across pending installments, oldest-first — never marks more
+          // paid than was actually paid. See domain/cards/emiSettlement.js.
+          const { updatedLoans, updatedTxns } = allocateCcPaymentToEmiInstallments(loans, txns, toAccId, amt, date||todayStr(), genId);
+          setLoans(updatedLoans);
+          setTxns(updatedTxns);
         }
       } else if(txnType==="investment"){
         const invId = (isEditing ? (sourceTxn?.linkedInvestmentId || linkedInvestment?.id) : null) || genId();
@@ -12328,6 +12312,7 @@ function AppContent({ onLock }) {
               duplication already cleaned up elsewhere. */}
           <Row icon="🧾" title="Billers" subtitle="Manage billers and biller accounts" onClick={()=>{ setTab("bills"); setShowSettings(false); }}/>
           <Row icon="🛡️" title="Insurance" subtitle={insurancePolicies.filter(p=>p.status!=="archived").length>0?`${insurancePolicies.filter(p=>p.status!=="archived").length} polic${insurancePolicies.filter(p=>p.status!=="archived").length===1?"y":"ies"}`:"Track premiums, renewals, and coverage"} onClick={()=>{ setShowInsuranceList(true); setShowSettings(false); }}/>
+          <Row icon="🎓" title="School Fees" subtitle={feeSchedules.length>0?`${feeSchedules.length} school year${feeSchedules.length===1?"":"s"}`:"Track tuition, periods, and payments"} onClick={()=>{ setShowSchoolFeesList(true); setShowSettings(false); }}/>
         </div>
 
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Data</div>
@@ -15309,6 +15294,65 @@ function AppContent({ onLock }) {
         {showExpectedIncome&&<ExpectedIncomeListModal onClose={()=>setShowExpectedIncome(false)} T={T} sym={sym} fmt={fmt} formatShortDate={formatShortDate} expectedIncome={expectedIncome} setExpectedIncome={setExpectedIncome} setTxns={setTxns} accounts={accounts} setToast={setToast} setEditingExpectedIncome={setEditingExpectedIncome} setShowAddExpectedIncome={setShowAddExpectedIncome}/>}
         {showInsuranceList&&<InsurancePolicyListModal onClose={()=>setShowInsuranceList(false)} T={T} sym={sym} fmt={fmt} insurancePolicies={insurancePolicies.filter(p=>p.status!=="archived")} setEditingPolicy={setEditingPolicy} setShowAddPolicy={setShowAddPolicy} setViewingPolicy={setViewingPolicy}/>}
         {showAddPolicy&&<AddInsurancePolicyModal existing={editingPolicy} onClose={()=>{ setShowAddPolicy(false); setEditingPolicy(null); }} T={T} inp={inp} lbl={lbl} setInsurancePolicies={setInsurancePolicies} setBills={setBills} billers={billers}/>}
+
+        {showSchoolFeesList&&<SchoolFeeScheduleListModal onClose={()=>setShowSchoolFeesList(false)} T={T} sym={sym} fmt={fmt} feeSchedules={feeSchedules} feePeriods={feePeriods} schoolCreditNotes={schoolCreditNotes} setShowAddSchedule={setShowAddSchoolYear} setViewingSchedule={(s)=>{ setViewingSchoolFeeSchedule(s); setShowSchoolFeesList(false); }}/>}
+        {showAddSchoolYear&&<AddSchoolYearModal onClose={()=>setShowAddSchoolYear(false)} T={T} inp={inp} lbl={lbl} setFeeSchedules={setFeeSchedules} setFeePeriods={setFeePeriods} billerAccountId={null} personId={null}/>}
+        {viewingSchoolFeeSchedule&&<SchoolFeeScheduleDetailModal
+          schedule={viewingSchoolFeeSchedule}
+          onClose={()=>{ setViewingSchoolFeeSchedule(null); setSelectedSchoolFeePeriodIds([]); }}
+          T={T} sym={sym} fmt={fmt}
+          feePeriods={feePeriods} setFeePeriods={setFeePeriods}
+          schoolCreditNotes={schoolCreditNotes} setSchoolCreditNotes={setSchoolCreditNotes}
+          setViewingPeriod={setViewingSchoolFeePeriod}
+          setShowSettle={setShowSettleSchoolFee}
+          setShowCreditNote={setShowSchoolFeeCreditNote}
+          selectedPeriodIds={selectedSchoolFeePeriodIds}
+          setSelectedPeriodIds={setSelectedSchoolFeePeriodIds}
+        />}
+        {showSettleSchoolFee&&<SettlePaymentModal
+          onClose={()=>setShowSettleSchoolFee(false)}
+          T={T} sym={sym} fmt={fmt}
+          feePeriods={feePeriods} setFeePeriods={setFeePeriods}
+          selectedPeriodIds={selectedSchoolFeePeriodIds} setSelectedPeriodIds={setSelectedSchoolFeePeriodIds}
+          accounts={accounts}
+          createRealTxn={(amount, accId)=>{
+            const txnId = genId();
+            setTxns(prev=>[{
+              id: txnId, type:"expense", amount, date: todayStr(),
+              merchant: viewingSchoolFeeSchedule?.schoolName || "School Fee",
+              desc: `School fee payment — ${viewingSchoolFeeSchedule?.schoolName || ""}`,
+              accId, catId:null, catIds:[], subId:null, subIds:[],
+              trackingMode:"none", people:{},
+              createdDate: todayStr(), createdAt: Date.now(),
+            }, ...prev]);
+            return txnId;
+          }}
+        />}
+        {viewingSchoolFeePeriod&&<PeriodDetailModal
+          period={viewingSchoolFeePeriod}
+          schedule={viewingSchoolFeeSchedule}
+          onClose={()=>setViewingSchoolFeePeriod(null)}
+          T={T} sym={sym} fmt={fmt}
+          feePeriods={feePeriods} setFeePeriods={setFeePeriods}
+          setShowAdjust={setShowAdjustSchoolFee}
+          setAdjustKind={setAdjustSchoolFeeKind}
+          setAdjustTargetPeriodId={setAdjustSchoolFeeTargetPeriodId}
+        />}
+        {showAdjustSchoolFee&&<AdjustmentModal
+          kind={adjustSchoolFeeKind}
+          targetPeriodId={adjustSchoolFeeTargetPeriodId}
+          feePeriods={feePeriods} setFeePeriods={setFeePeriods}
+          onClose={()=>{ setShowAdjustSchoolFee(false); setAdjustSchoolFeeKind(null); setAdjustSchoolFeeTargetPeriodId(null); }}
+          T={T} inp={inp} lbl={lbl}
+        />}
+        {showSchoolFeeCreditNote&&viewingSchoolFeeSchedule&&<CreditNoteModal
+          schedule={viewingSchoolFeeSchedule}
+          feePeriods={feePeriods} setFeePeriods={setFeePeriods}
+          schoolCreditNotes={schoolCreditNotes} setSchoolCreditNotes={setSchoolCreditNotes}
+          onClose={()=>setShowSchoolFeeCreditNote(false)}
+          T={T} inp={inp} lbl={lbl}
+        />}
+
         {viewingPolicy&&<InsurancePolicyDetailModal policy={viewingPolicy} onClose={()=>setViewingPolicy(null)} T={T} sym={sym} fmt={fmt} bills={bills} setEditingPolicy={setEditingPolicy} setShowAddPolicy={setShowAddPolicy} setInsurancePolicies={setInsurancePolicies} askConfirm={askConfirm}/>}
         {showAddExpectedIncome&&<AddExpectedIncomeModal existing={editingExpectedIncome} onClose={()=>{ setShowAddExpectedIncome(false); setEditingExpectedIncome(null); }} T={T} inp={inp} lbl={lbl} setExpectedIncome={setExpectedIncome}/>}
         {showFabSpeedMenu&&(
