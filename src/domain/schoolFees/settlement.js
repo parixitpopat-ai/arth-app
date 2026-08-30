@@ -62,6 +62,77 @@ export function calculateSelectedOutstandingTotal(periods, periodIds) {
 }
 
 /**
+ * Resolve the final per-period allocation for a settlement, without applying
+ * it — same validation as settleFeePeriods, extracted so the application
+ * layer can get the resolved {periodId, amount}[] BEFORE creating the real
+ * Transaction (needed to attach the correct reverse link on the transaction
+ * itself, including in the deterministic case where the caller doesn't
+ * already know the per-period split). settleFeePeriods calls this
+ * internally — behavior is identical, this is a pure extraction.
+ *
+ * @returns {Array<{periodId:string, amount:number}>} the resolved
+ *   allocation, one entry per selected period, in periodIds order (or
+ *   allocations order in the explicit case). May include zero-amount
+ *   entries for periods selected but given nothing — same as before.
+ * @throws {Error} identical conditions to settleFeePeriods.
+ */
+export function resolveSettlementAllocations(periods, periodIds, actualAmount, allocations = null) {
+  if (!Array.isArray(periodIds) || periodIds.length === 0) {
+    throw new Error("resolveSettlementAllocations: at least one periodId is required");
+  }
+  if (!Number.isFinite(actualAmount) || actualAmount <= 0) {
+    throw new Error("resolveSettlementAllocations: actualAmount must be a positive number");
+  }
+
+  const outstandingByPeriod = new Map();
+  for (const id of periodIds) {
+    const period = periods.find(p => p.id === id);
+    if (!period) throw new Error(`resolveSettlementAllocations: period ${id} not found`);
+    if (!period.startingStateDeclared) {
+      throw new Error(`resolveSettlementAllocations: period ${id} has not been declared yet (WP-3) — its status is unknown, it cannot be settled until declared`);
+    }
+    const out = calculateOutstanding(period);
+    if (out <= 0) throw new Error(`resolveSettlementAllocations: period ${id} has no outstanding balance — nothing to settle`);
+    outstandingByPeriod.set(id, out);
+  }
+  const selectedTotal = [...outstandingByPeriod.values()].reduce((s, v) => s + v, 0);
+
+  const EPS = 1e-9;
+
+  if (Math.abs(actualAmount - selectedTotal) < EPS) {
+    // Deterministic case — no prompt needed, no ambiguity. Each period
+    // receives exactly its own outstanding amount.
+    return periodIds.map(id => ({ periodId: id, amount: outstandingByPeriod.get(id) }));
+  }
+
+  if (!Array.isArray(allocations)) {
+    throw new Error(
+      `resolveSettlementAllocations: actualAmount (${actualAmount}) differs from the selected outstanding total (${selectedTotal}) — explicit per-period allocations are required, none were provided`
+    );
+  }
+  const allocIds = allocations.map(a => a.periodId).slice().sort();
+  const selectedIds = periodIds.slice().sort();
+  if (JSON.stringify(allocIds) !== JSON.stringify(selectedIds)) {
+    throw new Error("resolveSettlementAllocations: allocations must cover exactly the selected periods — no more, no less");
+  }
+  let allocSum = 0;
+  for (const a of allocations) {
+    if (!Number.isFinite(a.amount) || a.amount < 0) {
+      throw new Error(`resolveSettlementAllocations: allocation for ${a.periodId} must be a non-negative number`);
+    }
+    const cap = outstandingByPeriod.get(a.periodId);
+    if (a.amount - cap > EPS) {
+      throw new Error(`resolveSettlementAllocations: allocation for ${a.periodId} (${a.amount}) exceeds its outstanding balance (${cap}) — refusing to over-allocate`);
+    }
+    allocSum += a.amount;
+  }
+  if (Math.abs(allocSum - actualAmount) > EPS) {
+    throw new Error(`resolveSettlementAllocations: allocations sum to ${allocSum}, but actualAmount is ${actualAmount} — they must match exactly, nothing was auto-adjusted`);
+  }
+  return allocations;
+}
+
+/**
  * Settle one or more selected fee periods against a single actual payment.
  *
  * @param {Array} periods - the full feePeriods[] collection (only selected
@@ -81,64 +152,11 @@ export function calculateSelectedOutstandingTotal(periods, periodIds) {
  *   guesses its way to a valid result.
  */
 export function settleFeePeriods(periods, periodIds, actualAmount, txnId, allocations = null) {
-  if (!Array.isArray(periodIds) || periodIds.length === 0) {
-    throw new Error("settleFeePeriods: at least one periodId is required");
-  }
-  if (!Number.isFinite(actualAmount) || actualAmount <= 0) {
-    throw new Error("settleFeePeriods: actualAmount must be a positive number");
-  }
   if (!txnId) {
     throw new Error("settleFeePeriods: txnId is required — this module never creates a transaction, it links to one that already exists");
   }
 
-  const outstandingByPeriod = new Map();
-  for (const id of periodIds) {
-    const period = periods.find(p => p.id === id);
-    if (!period) throw new Error(`settleFeePeriods: period ${id} not found`);
-    if (!period.startingStateDeclared) {
-      throw new Error(`settleFeePeriods: period ${id} has not been declared yet (WP-3) — its status is unknown, it cannot be settled until declared`);
-    }
-    const out = calculateOutstanding(period);
-    if (out <= 0) throw new Error(`settleFeePeriods: period ${id} has no outstanding balance — nothing to settle`);
-    outstandingByPeriod.set(id, out);
-  }
-  const selectedTotal = [...outstandingByPeriod.values()].reduce((s, v) => s + v, 0);
-
-  let finalAllocations;
-  const EPS = 1e-9;
-
-  if (Math.abs(actualAmount - selectedTotal) < EPS) {
-    // Deterministic case — no prompt needed, no ambiguity. Each period
-    // receives exactly its own outstanding amount.
-    finalAllocations = periodIds.map(id => ({ periodId: id, amount: outstandingByPeriod.get(id) }));
-  } else {
-    if (!Array.isArray(allocations)) {
-      throw new Error(
-        `settleFeePeriods: actualAmount (${actualAmount}) differs from the selected outstanding total (${selectedTotal}) — explicit per-period allocations are required, none were provided`
-      );
-    }
-    const allocIds = allocations.map(a => a.periodId).slice().sort();
-    const selectedIds = periodIds.slice().sort();
-    if (JSON.stringify(allocIds) !== JSON.stringify(selectedIds)) {
-      throw new Error("settleFeePeriods: allocations must cover exactly the selected periods — no more, no less");
-    }
-    let allocSum = 0;
-    for (const a of allocations) {
-      if (!Number.isFinite(a.amount) || a.amount < 0) {
-        throw new Error(`settleFeePeriods: allocation for ${a.periodId} must be a non-negative number`);
-      }
-      const cap = outstandingByPeriod.get(a.periodId);
-      if (a.amount - cap > EPS) {
-        throw new Error(`settleFeePeriods: allocation for ${a.periodId} (${a.amount}) exceeds its outstanding balance (${cap}) — refusing to over-allocate`);
-      }
-      allocSum += a.amount;
-    }
-    if (Math.abs(allocSum - actualAmount) > EPS) {
-      throw new Error(`settleFeePeriods: allocations sum to ${allocSum}, but actualAmount is ${actualAmount} — they must match exactly, nothing was auto-adjusted`);
-    }
-    finalAllocations = allocations;
-  }
-
+  const finalAllocations = resolveSettlementAllocations(periods, periodIds, actualAmount, allocations);
   const allocByPeriod = new Map(finalAllocations.map(a => [a.periodId, a.amount]));
 
   return periods.map(period => {

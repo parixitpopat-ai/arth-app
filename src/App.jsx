@@ -15390,14 +15390,19 @@ function AppContent({ onLock }) {
           feePeriods={feePeriods} setFeePeriods={setFeePeriods}
           selectedPeriodIds={selectedSchoolFeePeriodIds} setSelectedPeriodIds={setSelectedSchoolFeePeriodIds}
           accounts={accounts}
-          createRealTxn={(amount, accId)=>{
+          cats={cats}
+          createRealTxn={(amount, accId, catId, linkedFeePeriods)=>{
             const txnId = genId();
             setTxns(prev=>[{
               id: txnId, type:"expense", amount, date: todayStr(),
               merchant: viewingSchoolFeeSchedule?.schoolName || "School Fee",
               desc: `School fee payment — ${viewingSchoolFeeSchedule?.schoolName || ""}`,
-              accId, catId:null, catIds:[], subId:null, subIds:[],
+              accId, catId, catIds:catId?[catId]:[], subId:null, subIds:[],
               trackingMode:"none", people:{},
+              // Reverse link, following the same linked*-field convention Insurance's Bill
+              // already uses (paidBillId/linkedPolicyId) — array-shaped here since one School
+              // Fee transaction can settle multiple periods, unlike a single Bill payment.
+              linkedFeePeriods: linkedFeePeriods || [],
               createdDate: todayStr(), createdAt: Date.now(),
             }, ...prev]);
             return txnId;
@@ -15412,6 +15417,9 @@ function AppContent({ onLock }) {
           setShowAdjust={setShowAdjustSchoolFee}
           setAdjustKind={setAdjustSchoolFeeKind}
           setAdjustTargetPeriodId={setAdjustSchoolFeeTargetPeriodId}
+          txns={txns}
+          accounts={accounts}
+          onViewTransaction={(txnId)=>{ setViewingSchoolFeePeriod(null); setTxnDetailId(txnId); }}
         />}
         {showAdjustSchoolFee&&<AdjustmentModal
           kind={adjustSchoolFeeKind}
@@ -16292,6 +16300,12 @@ function AppContent({ onLock }) {
                   {t.discount&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Discount applied</span><span style={{ color:T.success,fontSize:12,fontWeight:700 }}>-{sym}{fmt(t.discount)}</span></div>}
                   {t.investFolio&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Folio</span><span style={{ color:T.text,fontSize:12 }}>{t.investFolio}</span></div>}
                   {t.investNav&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>NAV</span><span style={{ color:T.text,fontSize:12 }}>{sym}{fmt(t.investNav)}</span></div>}
+                  {t.imageBase64&&(
+                    <div>
+                      <div style={{ color:T.sub,fontSize:10,fontWeight:700,marginBottom:6 }}>🧾 Receipt · tap to view</div>
+                      <img src={t.imageBase64} alt="receipt" onClick={()=>setImageViewSrc(t.imageBase64)} style={{ width:"100%",borderRadius:10,maxHeight:160,objectFit:"cover",cursor:"zoom-in" }} onError={e=>{ e.target.style.display="none"; }}/>
+                    </div>
+                  )}
                 </div>
                 <div style={{ display:"flex",gap:8,marginTop:16 }}>
                   <button onClick={()=>{ setTxnDetailId(null); setEditTxn(t); setShowAdd(true); }} style={{ flex:1,background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>

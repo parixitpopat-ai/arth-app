@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { calculateSelectedOutstandingTotal, settleFeePeriods } from "./settlement.js";
+import { calculateSelectedOutstandingTotal, settleFeePeriods, resolveSettlementAllocations } from "./settlement.js";
 
 function makePeriods() {
   return [
@@ -154,4 +154,40 @@ test("one settlement can span multiple periods while a third, unselected period 
   const result = settleFeePeriods(periods, ["sep", "oct"], 9000, "txn1");
   const nov = result.find(p => p.id === "nov");
   assert.deepEqual(nov, periods.find(p => p.id === "nov")); // identical to original, not even a new object needed
+});
+
+// --- resolveSettlementAllocations: the extraction used to build a
+// transaction's reverse link BEFORE the transaction exists ----------------
+
+test("resolveSettlementAllocations returns the same deterministic split settleFeePeriods would apply, without requiring a txnId at all", () => {
+  const periods = makePeriods();
+  const resolved = resolveSettlementAllocations(periods, ["sep", "oct"], 9000);
+  assert.deepEqual(resolved.sort((a,b)=>a.periodId.localeCompare(b.periodId)), [
+    { periodId: "oct", amount: 4500 },
+    { periodId: "sep", amount: 4500 },
+  ]);
+});
+
+test("resolveSettlementAllocations matches settleFeePeriods' own per-period amounts exactly, for a real multi-period partial payment", () => {
+  const periods = makePeriods();
+  const explicitAllocations = [{ periodId: "sep", amount: 4500 }, { periodId: "oct", amount: 2500 }];
+  const resolved = resolveSettlementAllocations(periods, ["sep", "oct"], 7000, explicitAllocations);
+  assert.deepEqual(resolved, explicitAllocations);
+
+  const settled = settleFeePeriods(periods, ["sep", "oct"], 7000, "txn1", explicitAllocations);
+  const sep = settled.find(p => p.id === "sep");
+  const oct = settled.find(p => p.id === "oct");
+  // The exact amounts a caller would use to build a transaction's reverse
+  // link match exactly what actually got applied to each period.
+  assert.equal(resolved.find(a=>a.periodId==="sep").amount, sep.paidAmount);
+  assert.equal(resolved.find(a=>a.periodId==="oct").amount, oct.paidAmount);
+});
+
+test("resolveSettlementAllocations enforces the same rejections as settleFeePeriods — over-allocation, mismatch, wrong period set, undeclared periods", () => {
+  const periods = makePeriods();
+  assert.throws(() => resolveSettlementAllocations(periods, ["sep"], 5000, [{ periodId: "sep", amount: 5000 }]), /exceeds its outstanding balance/);
+  assert.throws(() => resolveSettlementAllocations(periods, ["sep", "oct"], 7000, [{ periodId: "sep", amount: 4500 }, { periodId: "oct", amount: 3000 }]), /must match exactly/);
+  const undeclaredPeriods = makePeriods();
+  undeclaredPeriods[0].startingStateDeclared = false;
+  assert.throws(() => resolveSettlementAllocations(undeclaredPeriods, ["sep"], 4500), /has not been declared yet/);
 });

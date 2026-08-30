@@ -35,7 +35,7 @@ import {
   getPeriodsNeedingDeclaration,
   editFeePeriodObligationAmount,
 } from "./startingState.js";
-import { calculateSelectedOutstandingTotal, settleFeePeriods } from "./settlement.js";
+import { calculateSelectedOutstandingTotal, resolveSettlementAllocations, settleFeePeriods } from "./settlement.js";
 import { applyDiscount, applyWriteOff } from "./discountWriteOff.js";
 import { createSchoolCreditNote, applyCreditToPeriod } from "./creditNotes.js";
 import { calculateOutstanding } from "./outstanding.js";
@@ -103,6 +103,17 @@ export function editPeriodAmount(feePeriods, periodId, newAmount) {
 /** Thin passthrough — see settlement.js for the actual logic. */
 export function calculateSelectedTotal(feePeriods, periodIds) {
   return calculateSelectedOutstandingTotal(feePeriods, periodIds);
+}
+
+/**
+ * Resolve the final per-period allocation for a pending settlement, without
+ * applying it. Needed by the screen BEFORE creating the real transaction,
+ * so the transaction's reverse link (linkedFeePeriods) can be built with
+ * the correct amounts even in the deterministic (no-prompt) case, where
+ * the caller doesn't otherwise know the per-period split in advance.
+ */
+export function resolveAllocations(feePeriods, periodIds, actualAmount, allocations) {
+  return resolveSettlementAllocations(feePeriods, periodIds, actualAmount, allocations);
 }
 
 /**

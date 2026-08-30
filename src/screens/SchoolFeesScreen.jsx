@@ -298,7 +298,10 @@ export const SettlePaymentModal = ({
   onClose, T, sym, fmt,
   feePeriods, setFeePeriods, selectedPeriodIds, setSelectedPeriodIds,
   accounts, // real Arth accounts[], for the account picker — payment must record where it came from
-  createRealTxn, // (amount, accId) => txnId
+  cats, // real Arth cats[] (spending categories) — required so this transaction is a normal,
+        // categorized expense like any other, never Uncategorized. Never defaulted/guessed —
+        // the real category list is the only source of truth for what's appropriate here.
+  createRealTxn, // (amount, accId, catId, linkedFeePeriods) => txnId
 }) => {
   const selectedTotal = useMemo(()=>{
     try { return schoolFeesService.calculateSelectedTotal(feePeriods, selectedPeriodIds); } catch { return 0; }
@@ -306,6 +309,7 @@ export const SettlePaymentModal = ({
 
   const [payAmount, setPayAmount] = useState(String(selectedTotal));
   const [accId, setAccId] = useState("");
+  const [catId, setCatId] = useState("");
   const [alloc, setAlloc] = useState({});
   const [error, setError] = useState("");
 
@@ -328,16 +332,21 @@ export const SettlePaymentModal = ({
     setAlloc(next);
   };
 
-  const confirmDisabled = payNum<=0 || !accId || (needsAllocation && unalloc!==0);
+  const confirmDisabled = payNum<=0 || !accId || !catId || (needsAllocation && unalloc!==0);
 
   const confirm = () => {
     setError("");
     try {
-      const txnId = createRealTxn(payNum, accId); // real Transaction created via the normal expense flow
-      const allocations = needsAllocation
+      const explicitAllocations = needsAllocation
         ? selectedPeriodIds.map(id=>({ periodId:id, amount: parseInt(alloc[id]||"0",10)||0 }))
-        : undefined; // exact-match case: settlePeriods computes the deterministic split itself
-      const updated = schoolFeesService.settlePeriods(feePeriods, selectedPeriodIds, payNum, txnId, allocations);
+        : undefined; // exact-match case: resolved below, deterministically, same logic settlePeriods itself uses
+      // Resolve the FINAL per-period allocation before the transaction exists — this is what
+      // makes the reverse link (linkedFeePeriods) correct even in the deterministic case, where
+      // this screen doesn't otherwise know the per-period split until settlement runs it.
+      const resolved = schoolFeesService.resolveAllocations(feePeriods, selectedPeriodIds, payNum, explicitAllocations);
+      const linkedFeePeriods = resolved.filter(a=>a.amount>0); // symmetric with settlementLinks' own zero-skip
+      const txnId = createRealTxn(payNum, accId, catId, linkedFeePeriods); // real Transaction, real category, real reverse link
+      const updated = schoolFeesService.settlePeriods(feePeriods, selectedPeriodIds, payNum, txnId, explicitAllocations);
       setFeePeriods(updated);
       setSelectedPeriodIds([]);
       onClose();
@@ -371,6 +380,12 @@ export const SettlePaymentModal = ({
           <option value="">Select an account…</option>
           {(accounts||[]).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
+        <span style={{ display:"block",color:T.sub,fontSize:9.5,fontWeight:700,textTransform:"uppercase",margin:"12px 0 6px" }}>Category</span>
+        <select value={catId} onChange={e=>setCatId(e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
+          <option value="">Select a category…</option>
+          {(cats||[]).map(c=><option key={c.id} value={c.id}>{c.name||c.id}</option>)}
+        </select>
+        <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>This makes the payment a normal expense — it'll show up in Budget and Insights like any other spend.</div>
       </div>
 
       {needsAllocation && (
@@ -415,7 +430,7 @@ export const SettlePaymentModal = ({
 // and the Future Money projection this period contributes (or doesn't).
 // ============================================================================
 
-export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setFeePeriods, feePeriods, setShowAdjust, setAdjustKind, setAdjustTargetPeriodId }) => {
+export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setFeePeriods, feePeriods, setShowAdjust, setAdjustKind, setAdjustTargetPeriodId, txns, accounts, onViewTransaction }) => {
   const [feeDraft, setFeeDraft] = useState(String(period.obligationAmount));
   const [error, setError] = useState("");
 
@@ -445,6 +460,21 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
   // Read-only projection preview — proves WP-8's real adapter, never a
   // second calculation of its own.
   const projected = schoolFeesService.getSchoolFeeCommitments([period])[0] || null;
+
+  // Payment provenance — the core of this correction. A period's paidAmount
+  // can come from two fundamentally different facts:
+  //   1. settlementLinks[] entries — each backed by a REAL transaction,
+  //      looked up here, never re-derived or duplicated.
+  //   2. paidAmount>0 with EMPTY settlementLinks — the historical
+  //      starting-state declaration (WP-3). Arth has no transaction for
+  //      this, and must never present it as if it did.
+  const paymentEvents = (period.settlementLinks||[]).map(link=>{
+    const txn = (txns||[]).find(t=>t.id===link.txnId);
+    const acc = txn ? (accounts||[]).find(a=>a.id===txn.accId) : null;
+    return { link, txn, acc };
+  });
+  const hasRealPayments = paymentEvents.length>0;
+  const isHistoricalOnly = !hasRealPayments && period.paidAmount>0;
 
   const ledger = [
     { label:"Fee", value: `${sym}${fmt(period.obligationAmount)}`, color:T.text },
@@ -506,6 +536,41 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
           </div>
         ))}
       </div>
+
+      {hasRealPayments && (
+        <div style={{ marginBottom:12 }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",padding:"2px 2px 8px" }}>Payment record</div>
+          {paymentEvents.map(({ link, txn, acc }, i)=>(
+            <div key={i} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"12px 14px",marginBottom:8 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4 }}>
+                <span style={{ color:GREEN_TEXT,fontSize:13,fontWeight:700 }}>Paid {sym}{fmt(link.amount)}</span>
+              </div>
+              {txn ? (
+                <>
+                  <div style={{ color:T.sub,fontSize:11 }}>Paid on {txn.date || "—"}{acc ? ` · ${acc.name}` : ""}</div>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8 }}>
+                    <span style={{ color:T.sub,fontSize:10.5,fontFamily:"monospace" }}>TXN-{String(txn.id).slice(-8).toUpperCase()}</span>
+                    {onViewTransaction && (
+                      <button onClick={()=>onViewTransaction(txn.id)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>View transaction →</button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                // A settlementLinks entry exists but its transaction can't be found (e.g.
+                // deleted elsewhere in Money). Say so plainly — do not fabricate a date/account.
+                <div style={{ color:T.warn,fontSize:11 }}>Linked transaction not found — it may have been deleted or edited elsewhere.</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isHistoricalOnly && (
+        <div style={{ border:`1px dashed ${T.border}`,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
+          <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:3 }}>Paid historically</div>
+          <div style={{ color:T.sub,fontSize:11,lineHeight:1.5 }}>Marked paid at setup · No transaction on file. Arth has no record of the original payment — this is what you told Arth when this schedule was created, not something Arth witnessed.</div>
+        </div>
+      )}
 
       {!und && out>0 && (
         <div style={{ display:"flex",gap:8,marginBottom:12 }}>
