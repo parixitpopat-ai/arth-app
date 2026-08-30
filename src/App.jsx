@@ -27,6 +27,7 @@ import { SchoolFeeScheduleListModal, AddSchoolYearModal, SchoolFeeScheduleDetail
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
+import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
 import { createMembershipRelationship, pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
@@ -7643,7 +7644,14 @@ function AppContent({ onLock }) {
   // questions" comment already in this file. Safe to Spend is not modified anywhere.
   const futureMoneyToday = new Date(); futureMoneyToday.setHours(0,0,0,0);
   const rawCommitments = getCommitments(bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill, futureMoneyToday);
-  const futureMoney = composeFutureMoneyCommitments(rawCommitments, [getSchoolFeeCommitments(feePeriods)]);
+  // Debt Service — the release-critical check (does getCardSummary's currentDue already include
+  // this cycle's cc_emi installment?) came back YES, so the adapter itself checks txns[] for an
+  // already-logged installment before deciding whether to project the current cycle's due date
+  // or the following one — see src/domain/debt/futureMoney.js for exactly how. Real loans[],
+  // accounts[], txns[], and toDateOnly passed through unmodified; nothing here recomputes
+  // anything the adapter doesn't already own.
+  const debtServiceEvents = projectLoansToDebtServiceEvents(loans, accounts, txns, toDateOnly, futureMoneyToday);
+  const futureMoney = composeFutureMoneyCommitments(rawCommitments, [getSchoolFeeCommitments(feePeriods), debtServiceEvents]);
 
   const Home = () => {
     // Safe to Spend / Protected Money — same calculations as OutlookPage (ADR-024), duplicated
@@ -10798,9 +10806,28 @@ function AppContent({ onLock }) {
         )}
 
         <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>Debt Service</div>
-        <div style={{ border:`1px dashed ${T.border}`,borderRadius:10,padding:"10px 12px" }}>
-          <div style={{ color:T.sub,fontSize:11,lineHeight:1.5 }}>Debt Service isn't available yet. Arth tracks your loan balance, but doesn't yet have enough information to establish the forward repayment schedule.</div>
-        </div>
+        {futureMoney.debtService.length===0 ? (
+          <div style={{ border:`1px dashed ${T.border}`,borderRadius:10,padding:"10px 12px" }}>
+            <div style={{ color:T.sub,fontSize:11,lineHeight:1.5 }}>No active EMI obligations found. Arth tracks your loan balance and, where a recurring EMI amount is on record, its upcoming repayment here.</div>
+          </div>
+        ) : (
+          <div>
+            {futureMoney.debtService.map(d=>(
+              <div key={`${d.sourceType}_${d.sourceId}`} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0" }}>
+                <div>
+                  <div style={{ color:T.text,fontSize:11.5,fontWeight:700 }}>{d.name||"—"}</div>
+                  {/* The release rule: a null date must read as genuinely unknown, never quietly
+                      turned into "next month" or any other inferred date. This is the only
+                      place that distinction is made — nothing upstream fills it in. */}
+                  {d.date!=null
+                    ? <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>Due {formatShortDate(d.date)||d.date}</div>
+                    : <div style={{ color:T.warn,fontSize:10,marginTop:1 }}>Date not established</div>}
+                </div>
+                <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{d.amount!=null?`${sym}${fmt(d.amount)}`:"Amount not set"}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Protected Money — the cash-commitment question ("how much cash must I keep available?").
