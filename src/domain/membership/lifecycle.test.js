@@ -2,107 +2,116 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { pauseMembership, resumeMembership, endMembership } from "./lifecycle.js";
 
-function makeMembership(overrides = {}) {
-  return { id: "m1", billerAccountId: "ba1", amount: 1000, status: "active", ...overrides };
-}
+const active = () => ({ status: "active", statusHistory: [] });
+const paused = () => ({ status: "paused", statusHistory: [{ status: "paused", effectiveDate: "2026-01-01", timestamp: 1 }] });
+const ended = () => ({ status: "ended", statusHistory: [{ status: "ended", effectiveDate: "2026-01-01", timestamp: 1, reason: "cancelled" }] });
 
-// --- pause ------------------------------------------------------------
-
-test("pauses an active membership, records reason and history", () => {
-  const m = makeMembership();
-  const result = pauseMembership(m, "Traveling for 2 months");
-  assert.equal(result.status, "paused");
-  assert.equal(result.statusHistory.length, 1);
-  assert.equal(result.statusHistory[0].action, "paused");
-  assert.equal(result.statusHistory[0].reason, "Traveling for 2 months");
+test("pauses an active membership, records reason and effective date", () => {
+  const r = pauseMembership(active(), "Traveling abroad", "2026-08-15");
+  assert.equal(r.status, "paused");
+  assert.equal(r.statusHistory.length, 1);
+  assert.equal(r.statusHistory[0].status, "paused");
+  assert.equal(r.statusHistory[0].effectiveDate, "2026-08-15");
+  assert.equal(r.statusHistory[0].reason, "Traveling abroad");
+  assert.ok(typeof r.statusHistory[0].timestamp === "number");
 });
 
 test("treats a membership with no status field as active by default", () => {
-  const m = { id: "m1" }; // no status field at all
-  const result = pauseMembership(m, "reason");
-  assert.equal(result.status, "paused");
+  const r = pauseMembership({ statusHistory: [] }, "reason", "2026-08-15");
+  assert.equal(r.status, "paused");
 });
 
 test("rejects pausing an already-paused membership", () => {
-  const m = makeMembership({ status: "paused" });
-  assert.throws(() => pauseMembership(m, "reason"), /already paused/);
+  assert.throws(() => pauseMembership(paused(), "reason", "2026-08-15"), /already paused/);
 });
 
 test("rejects pausing an ended membership", () => {
-  const m = makeMembership({ status: "ended" });
-  assert.throws(() => pauseMembership(m, "reason"), /cannot pause an ended membership/);
+  assert.throws(() => pauseMembership(ended(), "reason", "2026-08-15"), /cannot pause an ended/);
 });
 
 test("rejects pausing with no reason", () => {
-  const m = makeMembership();
-  assert.throws(() => pauseMembership(m, ""), /reason is required/);
-  assert.throws(() => pauseMembership(m, undefined), /reason is required/);
+  assert.throws(() => pauseMembership(active(), "", "2026-08-15"), /reason is required/);
 });
 
-// --- resume -------------------------------------------------------------
+test("rejects pausing with no effective date", () => {
+  assert.throws(() => pauseMembership(active(), "reason", ""), /effectiveDate/);
+});
 
 test("resumes a paused membership back to active", () => {
-  const m = makeMembership({ status: "paused" });
-  const result = resumeMembership(m);
-  assert.equal(result.status, "active");
-  assert.equal(result.statusHistory[0].action, "resumed");
+  const r = resumeMembership(paused(), "2026-09-01");
+  assert.equal(r.status, "active");
+  assert.equal(r.statusHistory.length, 2);
+  assert.equal(r.statusHistory[1].status, "active");
+  assert.equal(r.statusHistory[1].effectiveDate, "2026-09-01");
 });
 
 test("resume requires no reason", () => {
-  const m = makeMembership({ status: "paused" });
-  assert.doesNotThrow(() => resumeMembership(m));
+  const r = resumeMembership(paused(), "2026-09-01");
+  assert.equal(r.statusHistory[1].reason, undefined);
+});
+
+test("resume requires an effective date", () => {
+  assert.throws(() => resumeMembership(paused(), ""), /effectiveDate/);
 });
 
 test("rejects resuming a membership that isn't paused", () => {
-  const active = makeMembership({ status: "active" });
-  assert.throws(() => resumeMembership(active), /can only resume a paused membership/);
+  assert.throws(() => resumeMembership(active(), "2026-09-01"), /can only resume a paused/);
 });
 
 test("rejects resuming an ended membership — no un-cancel", () => {
-  const ended = makeMembership({ status: "ended" });
-  assert.throws(() => resumeMembership(ended), /can only resume a paused membership/);
+  assert.throws(() => resumeMembership(ended(), "2026-09-01"), /can only resume a paused/);
 });
 
-// --- end ------------------------------------------------------------------
-
 test("ends an active membership", () => {
-  const m = makeMembership({ status: "active" });
-  const result = endMembership(m, "Cancelled by user");
-  assert.equal(result.status, "ended");
-  assert.equal(result.statusHistory[0].reason, "Cancelled by user");
+  const r = endMembership(active(), "Moved away", "2026-10-01");
+  assert.equal(r.status, "ended");
+  assert.equal(r.statusHistory[0].status, "ended");
+  assert.equal(r.statusHistory[0].effectiveDate, "2026-10-01");
+  assert.equal(r.statusHistory[0].reason, "Moved away");
 });
 
 test("ends a paused membership directly", () => {
-  const m = makeMembership({ status: "paused" });
-  const result = endMembership(m, "No longer needed");
-  assert.equal(result.status, "ended");
+  const r = endMembership(paused(), "No longer needed", "2026-10-01");
+  assert.equal(r.status, "ended");
 });
 
 test("rejects ending an already-ended membership", () => {
-  const m = makeMembership({ status: "ended" });
-  assert.throws(() => endMembership(m, "reason"), /already ended/);
+  assert.throws(() => endMembership(ended(), "reason", "2026-10-01"), /already ended/);
 });
 
 test("rejects ending with no reason", () => {
-  const m = makeMembership();
-  assert.throws(() => endMembership(m, ""), /reason is required/);
+  assert.throws(() => endMembership(active(), "", "2026-10-01"), /reason is required/);
 });
 
-// --- history / immutability -----------------------------------------------
+test("rejects ending with no effective date", () => {
+  assert.throws(() => endMembership(active(), "reason", ""), /effectiveDate/);
+});
 
 test("multiple transitions accumulate in statusHistory in order", () => {
-  let m = makeMembership();
-  m = pauseMembership(m, "vacation");
-  m = resumeMembership(m);
-  m = pauseMembership(m, "vacation again");
-  m = endMembership(m, "moved away");
-  assert.equal(m.statusHistory.length, 4);
-  assert.deepEqual(m.statusHistory.map(h => h.action), ["paused", "resumed", "paused", "ended"]);
+  let m = active();
+  m = pauseMembership(m, "r1", "2026-01-01");
+  m = resumeMembership(m, "2026-02-01");
+  m = pauseMembership(m, "r2", "2026-03-01");
+  m = endMembership(m, "r3", "2026-04-01");
+  assert.deepEqual(m.statusHistory.map(h => h.status), ["paused", "active", "paused", "ended"]);
+  assert.equal(m.status, "ended");
 });
 
-test("never mutates the input membership object", () => {
-  const m = makeMembership();
-  const snapshot = JSON.parse(JSON.stringify(m));
-  pauseMembership(m, "reason");
-  assert.deepEqual(m, snapshot);
+test("never mutates the input entity object", () => {
+  const m = active();
+  const before = JSON.stringify(m);
+  pauseMembership(m, "reason", "2026-08-15");
+  assert.equal(JSON.stringify(m), before);
+});
+
+test("ended cannot pause", () => {
+  assert.throws(() => pauseMembership(ended(), "reason", "2026-08-15"));
+});
+
+test("ended cannot resume", () => {
+  assert.throws(() => resumeMembership(ended(), "2026-08-15"));
+});
+
+test("ended cannot end again", () => {
+  assert.throws(() => endMembership(ended(), "reason", "2026-08-15"));
 });

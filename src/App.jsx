@@ -27,6 +27,7 @@ import { SchoolFeeScheduleListModal, AddSchoolYearModal, SchoolFeeScheduleDetail
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
+import { createMembershipRelationship, pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
@@ -746,6 +747,10 @@ function AppContent({ onLock }) {
   const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
   const [billers, setBillers] = useState(()=>JSON.parse(localStorage.getItem("arth_billers")||"[]"));
   const [memberships, setMemberships] = useState(()=>JSON.parse(localStorage.getItem("arth_memberships")||"[]"));
+  // The persistent Provider->Person relationship, separate from the payment/coverage records
+  // above. Carries lifecycle state (active/paused/ended) that belongs to the relationship, not
+  // to any one payment. See src/domain/membership/relationship.js.
+  const [membershipRelationships, setMembershipRelationships] = useState(()=>JSON.parse(localStorage.getItem("arth_membership_relationships")||"[]"));
   const [feePayments, setFeePayments] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_payments")||"[]"));
   const [showAddMembership, setShowAddMembership] = useState(false);
   const [editingMembership, setEditingMembership] = useState(null);
@@ -908,6 +913,20 @@ function AppContent({ onLock }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
   useEffect(()=>safeSetLocalStorage("arth_memberships",JSON.stringify(memberships)),[memberships]);
+  useEffect(()=>safeSetLocalStorage("arth_membership_relationships",JSON.stringify(membershipRelationships)),[membershipRelationships]);
+  // One-time backfill for payment records that predate the relationship entity. Idempotent —
+  // migrateMembershipRelationships() skips anything already linked — but run once at mount only,
+  // since every payment created going forward links to a relationship at creation time directly
+  // (see AddMembershipModal.handleSave). See src/domain/membership/relationship.js for exactly
+  // what this does and doesn't fabricate.
+  useEffect(()=>{
+    const hasUnlinked = memberships.some(m=>!m.membershipRelationshipId);
+    if(!hasUnlinked) return;
+    const { relationships, updatedMemberships } = migrateMembershipRelationships(memberships, membershipRelationships, getMembershipPeriods, genId);
+    setMembershipRelationships(relationships);
+    setMemberships(updatedMemberships);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
   useEffect(()=>safeSetLocalStorage("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
   // One-time migration: Fee Payment was a separate, simpler mechanism (no grace days, no person,
   // no exact-date concept) that's now merged into the single Membership mechanism. Convert each
@@ -14184,7 +14203,7 @@ function AppContent({ onLock }) {
     );
   };
 
-  const MembershipDetailModal = ({ membership, onClose }) => {
+  const MembershipDetailModal = ({ membership, onClose, onViewTransaction }) => {
     const m = membership;
     const person = m.personId==="self" ? null : people.find(p=>String(p.id)===String(m.personId));
     const acc = accounts.find(a=>a.id===m.accId);
@@ -14192,6 +14211,45 @@ function AppContent({ onLock }) {
     const linkedTxn = m.linkedTxnId ? txns.find(t=>t.id===m.linkedTxnId) : null;
     const periods = getMembershipPeriods(m);
     const today = todayStr();
+    const relationship = m.membershipRelationshipId ? membershipRelationships.find(r=>r.id===m.membershipRelationshipId) : null;
+
+    const [pendingAction, setPendingAction] = useState(null); // 'pause' | 'resume' | 'end' | null
+    const [actionReason, setActionReason] = useState("");
+    const [actionEffectiveDate, setActionEffectiveDate] = useState(today);
+    const [actionError, setActionError] = useState("");
+
+    const openAction = (kind) => { setPendingAction(kind); setActionReason(""); setActionEffectiveDate(today); setActionError(""); };
+    const cancelAction = () => { setPendingAction(null); setActionError(""); };
+
+    const commitAction = () => {
+      if(!relationship || !pendingAction) return;
+      try {
+        let updated;
+        if(pendingAction==="pause") updated = pauseRelationship(relationship, actionReason, actionEffectiveDate);
+        else if(pendingAction==="resume") updated = resumeRelationship(relationship, actionEffectiveDate);
+        else if(pendingAction==="end") updated = endRelationship(relationship, actionReason, actionEffectiveDate);
+        setMembershipRelationships(prev=>prev.map(r=>r.id===relationship.id?updated:r));
+        setPendingAction(null);
+        setActionReason("");
+        setActionError("");
+      } catch(e) {
+        setActionError(e.message || "Could not complete this action.");
+      }
+    };
+
+    const statusMeta = {
+      active:  { label:"Active",  color:T.success, icon:"🟢" },
+      paused:  { label:"Paused",  color:T.warn,    icon:"⏸️" },
+      ended:   { label:"Ended",   color:T.danger,  icon:"⏹️" },
+    };
+    const currentStatus = relationship?.status || null;
+
+    const actionCopy = {
+      pause:  { title:"Pause this membership", body:"The relationship stays on record, but future periods won't count as active coverage until you resume. Nothing about past payments changes.", needsReason:true },
+      resume: { title:"Resume this membership", body:"Marks the relationship active again from the date you choose. No payment or charge is created.", needsReason:false },
+      end:    { title:"End this membership", body:"This is permanent — an ended membership can't be resumed or reactivated. If you rejoin later, that becomes a new membership. Past payments and history are kept exactly as they are.", needsReason:true },
+    };
+
     return (
       <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:330,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
@@ -14199,6 +14257,56 @@ function AppContent({ onLock }) {
             <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{person?.emoji||"🧑"} {person?.name||"Me"}</div>
             <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
           </div>
+
+          {pendingAction ? (
+            <div>
+              <div style={{ color:T.text,fontSize:15,fontWeight:900,marginBottom:6 }}>{actionCopy[pendingAction].title}</div>
+              <div style={{ color:T.sub,fontSize:12,lineHeight:1.5,marginBottom:14 }}>{actionCopy[pendingAction].body}</div>
+              <span style={lbl}>Effective date</span>
+              <input style={inp} type="date" value={actionEffectiveDate} onChange={e=>setActionEffectiveDate(e.target.value)}/>
+              {actionCopy[pendingAction].needsReason&&(
+                <div style={{ marginTop:10 }}>
+                  <span style={lbl}>Reason</span>
+                  <input style={inp} value={actionReason} onChange={e=>setActionReason(e.target.value)} placeholder={pendingAction==="pause"?"e.g. Traveling, gym closed for renovation…":"e.g. Moved away, no longer needed…"}/>
+                </div>
+              )}
+              {actionError&&<div style={{ color:T.danger,fontSize:11,marginTop:8 }}>{actionError}</div>}
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:16 }}>
+                <button onClick={cancelAction} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"12px 4px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
+                <button onClick={commitAction} style={{ background:pendingAction==="end"?T.danger+"22":T.accentSoft,border:`1px solid ${pendingAction==="end"?T.danger:T.accent}44`,borderRadius:14,padding:"12px 4px",cursor:"pointer",fontSize:12,fontWeight:800,color:pendingAction==="end"?T.danger:T.accent,fontFamily:"Nunito,sans-serif" }}>Confirm {actionCopy[pendingAction].title.split(" ")[0]}</button>
+              </div>
+            </div>
+          ) : (
+          <>
+
+          {relationship&&(
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.input,borderRadius:14,padding:"10px 14px",marginBottom:14 }}>
+              <span style={{ color:statusMeta[currentStatus]?.color||T.sub,fontSize:13,fontWeight:800 }}>{statusMeta[currentStatus]?.icon} {statusMeta[currentStatus]?.label||"Unknown"}</span>
+              <div style={{ display:"flex",gap:6 }}>
+                {currentStatus==="active"&&(<>
+                  <button onClick={()=>openAction("pause")} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.text,fontFamily:"Nunito,sans-serif" }}>Pause</button>
+                  <button onClick={()=>openAction("end")} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>End</button>
+                </>)}
+                {currentStatus==="paused"&&(<>
+                  <button onClick={()=>openAction("resume")} style={{ background:"none",border:`1px solid ${T.accent}44`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Resume</button>
+                  <button onClick={()=>openAction("end")} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>End</button>
+                </>)}
+                {currentStatus==="ended"&&<span style={{ color:T.sub,fontSize:11 }}>No further action</span>}
+              </div>
+            </div>
+          )}
+
+          {relationship&&relationship.statusHistory?.length>0&&(
+            <div style={{ marginBottom:14 }}>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>HISTORY</div>
+              {relationship.statusHistory.slice().reverse().map((h,i)=>(
+                <div key={i} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",fontSize:11 }}>
+                  <span style={{ color:T.text,fontWeight:700 }}>{statusMeta[h.status]?.icon} {statusMeta[h.status]?.label||h.status}{h.reason?` — ${h.reason}`:""}</span>
+                  <span style={{ color:T.sub }}>{formatShortDate(h.effectiveDate)||h.effectiveDate}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div style={{ textAlign:"center",marginBottom:16 }}>
             <div style={{ color:T.accent,fontSize:26,fontWeight:900 }}>{sym}{fmt(m.amount)}</div>
@@ -14211,20 +14319,47 @@ function AppContent({ onLock }) {
             <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Member</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{person?.name||"Me"}</span></div>
             {m.paidDate&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Payment Date</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{formatShortDate(m.paidDate)||m.paidDate}</span></div>}
             {acc&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Payment Account</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{acc.name}</span></div>}
-            {linkedTxn&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Linked Transaction</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{sym}{fmt(linkedTxn.amount)} · {formatShortDate(linkedTxn.date)||linkedTxn.date}</span></div>}
             {m.note&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Note</span><span style={{ color:T.text,fontSize:12 }}>{m.note}</span></div>}
           </div>
+
+          {linkedTxn?(
+            <div style={{ marginBottom:16 }}>
+              <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>PAYMENT RECORD</div>
+              <div style={{ background:T.input,borderRadius:14,padding:"10px 14px" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
+                  <span style={{ color:T.sub,fontSize:12 }}>Paid</span>
+                  <span style={{ color:T.success,fontSize:13,fontWeight:800 }}>{sym}{fmt(linkedTxn.amount)}</span>
+                </div>
+                <div style={{ color:T.sub,fontSize:11 }}>{formatShortDate(linkedTxn.date)||linkedTxn.date}{acc?` · ${acc.name}`:""}</div>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8 }}>
+                  <span style={{ color:T.sub,fontSize:10.5,fontFamily:"monospace" }}>TXN-{String(linkedTxn.id).slice(-8).toUpperCase()}</span>
+                  {onViewTransaction&&<button onClick={()=>onViewTransaction(linkedTxn.id)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>View transaction →</button>}
+                </div>
+              </div>
+            </div>
+          ):(
+            <div style={{ border:`1px dashed ${T.border}`,borderRadius:14,padding:"12px 14px",marginBottom:16 }}>
+              <div style={{ color:T.sub,fontSize:11,lineHeight:1.5 }}>No transaction on file for this payment yet — editing and saving this record will create one.</div>
+            </div>
+          )}
 
           <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>PAYMENT ALLOCATION</div>
           <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
             {periods.map(p=>{
               const effEnd = getPeriodEffectiveEnd(p);
-              const isCurrent = p.from<=today && today<=effEnd;
+              const dateCurrent = p.from<=today && today<=effEnd;
               const isPast = effEnd<today;
+              // A date-current period only counts as ACTIVE coverage if the relationship's
+              // lifecycle was also active as of today — pausing stops future dates within an
+              // already-paid period from counting as active coverage, without altering the
+              // period/payment record itself in any way.
+              const lifecycleActiveToday = relationship ? isDateActiveMembershipCoverage(today, relationship.statusHistory) : true;
+              const isCurrent = dateCurrent && lifecycleActiveToday;
+              const isPausedCoverage = dateCurrent && !isPast && !lifecycleActiveToday;
               return (
                 <div key={p.id} style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                    <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{isPast?"✅":isCurrent?"🟢":"⏳"} {p.label}{p.graceDays>0?` (+${p.graceDays}d grace)`:""}</span>
+                    <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{isPast?"✅":isCurrent?"🟢":isPausedCoverage?"⏸️":"⏳"} {p.label}{p.graceDays>0?` (+${p.graceDays}d grace)`:""}{isPausedCoverage?" (not active — membership paused)":""}</span>
                     <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(p.amount)}</span>
                   </div>
                   <div style={{ color:T.sub,fontSize:10,marginTop:3 }}>{formatShortDate(p.from)||p.from} → {formatShortDate(p.to)||p.to}</div>
@@ -14242,6 +14377,8 @@ function AppContent({ onLock }) {
             <button onClick={()=>askConfirm(`Delete this payment (${sym}${fmt(m.amount)})? This removes it and all its allocated periods.`,()=>{ setMemberships(prev=>prev.filter(x=>x.id!==m.id)); onClose(); })} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"12px 4px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
             <button onClick={onClose} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"12px 4px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
           </div>
+          </>
+          )}
         </div>
       </div>
     );
@@ -14574,6 +14711,7 @@ function AppContent({ onLock }) {
     const [graceDays, setGraceDays] = useState((existingPeriods?.length===1 ? existingPeriods[0]?.graceDays : 0) || 0);
     const [note, setNote] = useState(existing?.note||"");
     const [linkedTxnId, setLinkedTxnId] = useState(existing?.linkedTxnId||"");
+    const [catId, setCatId] = useState(existing?.catId||"");
     const recentTxnsForBiller = txns.filter(t=>t.type==="expense" && t.billerLinkId===billerAccount.id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,15);
 
     const planMonths = { monthly:1, quarterly:3, annual:12 };
@@ -14594,25 +14732,65 @@ function AppContent({ onLock }) {
     const updatePeriod = (id,field,val) => setPeriods(prev=>prev.map(p=>p.id===id?{...p,[field]:val}:p));
     const removePeriod = (id) => setPeriods(prev=>prev.filter(p=>p.id!==id));
 
-    const canSave = totalAmount>0 && accId && (coverageMode==="one" ? (startsOn&&endsOn) : (periods.length>0 && Math.abs(remaining)<0.5 && periods.every(p=>p.from&&p.to)));
+    const canSave = totalAmount>0 && accId && catId && (coverageMode==="one" ? (startsOn&&endsOn) : (periods.length>0 && Math.abs(remaining)<0.5 && periods.every(p=>p.from&&p.to)));
 
     const handleSave = () => {
       if(!canSave) return;
       const finalPeriods = coverageMode==="one"
         ? [{ id:existingPeriods?.length===1?existingPeriods[0].id:genId(), label:plan.charAt(0).toUpperCase()+plan.slice(1), from:startsOn, to:endsOn, amount:totalAmount, graceDays:Number(graceDays||0) }]
         : periods.map(p=>({ ...p, amount:parseFloat(p.amount)||0, graceDays:Number(p.graceDays||0) }));
+      const recordId = existing?.id||genId();
+
+      // Payment integrity: this record's amount/account fields represent a real payment.
+      // If the user hasn't linked an existing transaction, create the real one now — no more
+      // "Amount Paid" that only ever lived on the membership record itself.
+      let finalTxnId = linkedTxnId || null;
+      if(!finalTxnId){
+        finalTxnId = genId();
+        setTxns(prev=>[{
+          id: finalTxnId, type:"expense", amount:totalAmount, date: todayStr(),
+          merchant: billerAccount.name || "Membership",
+          desc: `Membership payment — ${billerAccount.name || ""}`,
+          accId, catId, catIds:[catId], subId:null, subIds:[],
+          trackingMode:"none", people:{},
+          billerLinkId: billerAccount.id,
+          // Reverse link, same linked*-field convention as Insurance's paidBillId and School
+          // Fees' linkedFeePeriods — lets the canonical transaction be traced back to what it paid for.
+          linkedMembershipId: recordId,
+          createdDate: todayStr(), createdAt: Date.now(),
+        }, ...prev]);
+      }
+
+      // Establish or reuse the persistent relationship for this (billerAccount, person) pair —
+      // the relationship is separate from this payment record and owns lifecycle state.
+      let relationshipId = existing?.membershipRelationshipId || null;
+      if(!relationshipId){
+        const existingRel = membershipRelationships.find(r=>r.billerAccountId===billerAccount.id && r.personId===memberPersonId);
+        if(existingRel){
+          relationshipId = existingRel.id;
+        } else {
+          const newRel = createMembershipRelationship({ billerAccountId:billerAccount.id, personId:memberPersonId, startDate:finalPeriods[0]?.from||todayStr(), genId });
+          setMembershipRelationships(prev=>[...prev, newRel]);
+          relationshipId = newRel.id;
+        }
+      }
+
       const record = {
-        id: existing?.id||genId(),
+        id: recordId,
         billerAccountId: billerAccount.id,
         personId: memberPersonId,
+        membershipRelationshipId: relationshipId,
         amount: totalAmount,
         accId,
+        catId,
         periods: finalPeriods,
         note: note.trim(),
-        linkedTxnId: linkedTxnId||null,
+        linkedTxnId: finalTxnId,
         paidDate: existing?.paidDate||todayStr(),
         createdAt: existing?.createdAt||Date.now(),
-        status: "active",
+        // status intentionally not written here anymore — it was hardcoded on every save
+        // (including edits) and never read anywhere in the app. Lifecycle now genuinely lives
+        // on the relationship (membershipRelationshipId above), not on this payment record.
       };
       setMemberships(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[...prev,record]);
       onClose();
@@ -14660,6 +14838,14 @@ function AppContent({ onLock }) {
                   {paidViaAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </div>
+            </div>
+
+            <div>
+              <span style={lbl}>Category</span>
+              <select style={inp} value={catId} onChange={e=>setCatId(e.target.value)}>
+                <option value="">Select a category…</option>
+                {cats.map(c=><option key={c.id} value={c.id}>{c.name||c.id}</option>)}
+              </select>
             </div>
 
             <div style={{ background:T.input,borderRadius:10,padding:"8px 12px" }}>
@@ -15473,7 +15659,7 @@ function AppContent({ onLock }) {
         {editingBillerAccount&&<BillerAccountModal existing={editingBillerAccount} onClose={()=>setEditingBillerAccount(null)}/>}
         {attachExpensesFor&&<AttachExpensesModal ba={attachExpensesFor} onClose={()=>setAttachExpensesFor(null)}/>}
         {showAddYouOwe&&<AddYouOweModal personId={showAddYouOwe} onClose={()=>setShowAddYouOwe(null)}/>}
-        {viewingMembership&&<MembershipDetailModal membership={viewingMembership} onClose={()=>setViewingMembership(null)}/>}
+        {viewingMembership&&<MembershipDetailModal membership={viewingMembership} onClose={()=>setViewingMembership(null)} onViewTransaction={(txnId)=>{ setViewingMembership(null); setTxnDetailId(txnId); }}/>}
         {showAddEvent&&<AddEventModal existing={editingEvent} onClose={()=>{ setShowAddEvent(false); setEditingEvent(null); }} T={T} inp={inp} lbl={lbl} people={people} setEvents={setEvents} EVENT_TYPES={EVENT_TYPES}/>}
         {showEventsList&&<EventsListModal onClose={()=>setShowEventsList(false)} T={T} sym={sym} fmt={fmt} events={events} txns={txns} formatShortDate={formatShortDate} setViewingEvent={setViewingEvent} setEditingEvent={setEditingEvent} setShowAddEvent={setShowAddEvent} EVENT_TYPES={EVENT_TYPES}/>}
         {showAddGoal&&<AddGoalModal existing={editingGoal} onClose={()=>{ setShowAddGoal(false); setEditingGoal(null); }} T={T} inp={inp} lbl={lbl} accounts={accounts} setGoals={setGoals}/>}
