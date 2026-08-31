@@ -31,11 +31,15 @@ Make the Relationship Ledger + Rich Person Profile + School Fees experience real
 **Tests:** same period, three sequential `settleFeePeriods` calls (₹10,000/txnA, ₹10,000/txnB, ₹10,000/txnC) → assert `paidAmount===30000`, `settlementLinks.length===3`, each entry's `txnId`/`amount` correct and in call order.
 **Acceptance criteria:** test passes against the existing, unmodified `settlement.js` — if it doesn't, this WP escalates to a real bug fix, not silently patched inside a test-only WP.
 
-### WP-A3 — Verify existing Person/Group transaction filters **[VERIFY]**
+### WP-A3 — Verify existing Person/Group transaction filters **[VERIFY]** — ⚠️ CORRECTED, see note below
 **Existing code:** `personFilterOptions` (`App.jsx` L8223/L8493) confirmed as a real Person-filtered Transactions mechanism.
 **New work:** confirm whether an equivalent Group filter already exists (RPP-002 §3/§9 flagged this as unconfirmed, not assumed absent).
 **Tests:** if found, a test confirming it filters correctly by `groupId`; if absent, this WP's output feeds directly into WP-D4 below rather than assuming WP-D4's scope in advance.
 **Acceptance criteria:** a definitive yes/no on Group-filtered Transactions, with the exact call site cited if yes.
+
+**⚠️ CORRECTION (post-implementation, WP-D4 trace):** WP-A3's original "absent" conclusion was based on an incomplete keyword-based trace (`groupFilterOptions|filterByGroup|groupId.*filter|txnHasGroup`) — name patterns modeled on `personFilterOptions`'s naming convention, which the real implementation never uses. **Direct structural tracing subsequently found the Group transaction filter already fully exists and is fully wired in the live `App.jsx`:** state (`txnGroupFilter`, L1081), filter application against the transaction list (L1889-1892, matching both `t.groupId` and `t.groupAllocations[]`), inclusion in the memoized filter's dependency array (L1955), UI chips with live per-group counts and an "All Groups" reset (L8503-8518), integration into `activeFilterCount`/`clearTxnFilters` (L8230/L8247), and — checked directly, not assumed — correct, non-exclusive coexistence with the Person filter (both are independent `if` conditions evaluated back-to-back in the same filter function, L1887 and L1889-1892). **Therefore WP-D4 is VOID — already satisfied by existing implementation.** No replacement was built; the existing implementation is the authority. This correction does not alter WP-D4's frozen scope or product intent — it corrects the factual verification record only, per the lesson below.
+
+**Lesson for all future `[VERIFY]` gates in this brief:** the failure mode here was the verification method, not the architecture. The first trace asked "can I find something *named* like a Group filter?" The second asked "where does `txnGroupFilter` actually enter state, rendering, filtering, the dependency array, reset logic, and UI?" The second is the standard going forward for every remaining `[VERIFY]` gate in this document (WP-A4, WP-A5 already used structural tracing and their findings stand; any future gate should default to this method, not a keyword search).
 
 ### WP-A4 — Verify Budget's person-scoped adapter shape **[VERIFY]**
 **Existing code:** `App.jsx` L1781 confirms *a* person-scoped Budget filter (`getPersonModules(p).includes("budget")`) exists.
@@ -123,21 +127,34 @@ Make the Relationship Ledger + Rich Person Profile + School Fees experience real
 
 ## Phase D — Groups
 
+**Status, confirmed by trace (not implementation from the ARTH track — see each WP):**
+
+| WP | Status |
+|---|---|
+| D1 | Already exists / no work |
+| D2 | Deferred → PPL-002 WP-3 |
+| D3 | Deferred → PPL-002 WP-3 |
+| D4 | Void — already satisfied by existing implementation |
+
+**Nothing in Phase D requires code from the ARTH track.** D2/D3 belong to PPL-002's own execution, not this brief — building them here would duplicate a computation PPL-002 already specifies and owns. D4 needed no code because the target already existed, once correctly traced (see WP-A3's correction above).
+
 ### WP-D1 — Person ↔ Group navigation **[REUSE]**
 Already exists (PPL-000 §6, PPL-001). No new work — referenced here only so the combined brief's navigation map (Phase-I diagram below) is complete.
 
-### WP-D2 — Group-scoped payable (`iOwe`) **[NEW]**
-This is **PPL-002 WP-3, unchanged, referenced not restated.** Sequenced here to confirm it still gates WP-B3's Groups card showing both directions correctly, and gates WP-D3.
+### WP-D2 — Group-scoped payable (`iOwe`) **[NEW]** — DEFERRED TO PPL-002
+This is **PPL-002 WP-3, unchanged, referenced not restated.** Sequenced here to confirm it still gates WP-B3's Groups card showing both directions correctly, and gates WP-D3. **Confirmed by direct trace (not this session's implementation): `getGroupMemberIOwe` does not exist anywhere in the live `App.jsx`.** This is real, unstarted PPL-002 work — it must be implemented as part of the PPL track, not duplicated here.
 
-### WP-D3 — Group balance display in Person Overview **[REUSE, depends on WP-D2]**
+### WP-D3 — Group balance display in Person Overview **[REUSE, depends on WP-D2]** — BLOCKED ON PPL-002
 **New work:** Person Overview's Groups entries show group-scoped balance (PPL-001 §5/§6, RPP-002 §3) — both directions, once WP-D2 ships.
 **Depends on:** PPL-002 WP-3.
 **Tests:** matches PPL-002 WP-3's own reconciliation test.
 **Acceptance criteria:** never collapses group-scoped figures into the person's overall net (PPL-001 §5, locked).
+**Status:** blocked until PPL-002 WP-3 lands on `origin/main` — not started, not to be started from this track.
 
-### WP-D4 — Group transaction filter, if absent **[NEW, conditional on WP-A3]**
+### WP-D4 — Group transaction filter, if absent **[NEW, conditional on WP-A3]** — VOID, ALREADY SATISFIED
 **Depends on:** WP-A3's finding. If a Group filter already exists, this WP is void — folded into WP-B5's equivalent for Groups. If absent, smallest possible addition to the existing Transactions screen, mirroring `personFilterOptions`'s exact pattern.
 **Acceptance criteria:** no Group-specific transaction screen created under any circumstance (RPP-002 §9, locked) regardless of which branch this WP takes.
+**Resolution:** WP-A3's corrected finding (see above) confirms the Group filter already exists, fully wired, in production — state, filter logic, UI, reset behavior, and correct coexistence with the Person filter. **This WP is void.** No code was written to satisfy it; the existing implementation is the authority. Do not build a replacement or duplicate implementation absent an actual, separately-identified defect in the existing one.
 
 ---
 
