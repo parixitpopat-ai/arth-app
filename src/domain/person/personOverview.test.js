@@ -4,6 +4,14 @@ import { getPersonSpendingSummary, getPersonActiveConnections } from "./personOv
 
 // --- getPersonSpendingSummary ---------------------------------------------
 
+// Mirrors the REAL App.jsx getCat(id) shape and fallback exactly (~L1216):
+// {name,color,icon,subs}, with {name:"?",color:"#888",icon:"❓",subs:[]}
+// for an unknown id — this is what the corrected adapter signature
+// actually receives in production, not a categoriesById map.
+function fakeGetCat(catsById) {
+  return (id) => catsById[id] || { name: "?", color: "#888", icon: "❓", subs: [] };
+}
+
 test("sums attributed amounts per category, uses the injected getPersonAttributedAmount — never reimplements attribution", () => {
   const txns = [
     { id: "t1", type: "expense" },
@@ -16,9 +24,9 @@ test("sums attributed amounts per category, uses the injected getPersonAttribute
     return 0;
   };
   const getTxnCategoryIds = (t) => (t.id === "t1" ? ["education"] : ["food"]);
-  const categoriesById = { education: { name: "Education", icon: "🎓" }, food: { name: "Food", icon: "🍽️" } };
+  const getCat = fakeGetCat({ education: { name: "Education", icon: "🎓" }, food: { name: "Food", icon: "🍽️" } });
 
-  const summary = getPersonSpendingSummary("vyom_id", txns, getPersonAttributedAmount, getTxnCategoryIds, categoriesById);
+  const summary = getPersonSpendingSummary("vyom_id", txns, getPersonAttributedAmount, getTxnCategoryIds, getCat);
   assert.equal(summary.total, 13400);
   assert.deepEqual(summary.byCategory.map(r => r.catId), ["education", "food"]); // sorted descending
   assert.equal(summary.byCategory[0].amount, 8000);
@@ -29,7 +37,7 @@ test("zero-attributed transactions (person not involved) are excluded entirely, 
   const txns = [{ id: "t1", type: "expense" }];
   const getPersonAttributedAmount = () => 0;
   const getTxnCategoryIds = () => ["food"];
-  const summary = getPersonSpendingSummary("vyom_id", txns, getPersonAttributedAmount, getTxnCategoryIds, {});
+  const summary = getPersonSpendingSummary("vyom_id", txns, getPersonAttributedAmount, getTxnCategoryIds, fakeGetCat({}));
   assert.equal(summary.total, 0);
   assert.deepEqual(summary.byCategory, []);
 });
@@ -38,7 +46,7 @@ test("a multi-category transaction attributes its full share to each category it
   const txns = [{ id: "t1", type: "expense" }];
   const getPersonAttributedAmount = () => 1000;
   const getTxnCategoryIds = () => ["food", "travel"];
-  const summary = getPersonSpendingSummary("vyom_id", txns, getPersonAttributedAmount, getTxnCategoryIds, {});
+  const summary = getPersonSpendingSummary("vyom_id", txns, getPersonAttributedAmount, getTxnCategoryIds, fakeGetCat({}));
   assert.equal(summary.byCategory.find(r => r.catId === "food").amount, 1000);
   assert.equal(summary.byCategory.find(r => r.catId === "travel").amount, 1000);
 });
@@ -47,22 +55,46 @@ test("a transaction with no category falls into 'uncategorized', not silently dr
   const txns = [{ id: "t1", type: "expense" }];
   const getPersonAttributedAmount = () => 500;
   const getTxnCategoryIds = () => [];
-  const summary = getPersonSpendingSummary("vyom_id", txns, getPersonAttributedAmount, getTxnCategoryIds, {});
+  const summary = getPersonSpendingSummary("vyom_id", txns, getPersonAttributedAmount, getTxnCategoryIds, fakeGetCat({}));
   assert.equal(summary.byCategory[0].catId, "uncategorized");
   assert.equal(summary.byCategory[0].name, "Uncategorized");
+});
+
+test("the 'uncategorized' sentinel is never passed through getCat() — it must not surface getCat's own '?' unknown-id fallback", () => {
+  let calledWith = [];
+  const getCat = (id) => { calledWith.push(id); return { name: "?", color: "#888", icon: "❓", subs: [] }; };
+  const txns = [{ id: "t1", type: "expense" }];
+  const summary = getPersonSpendingSummary("vyom_id", txns, () => 500, () => [], getCat);
+  assert.equal(summary.byCategory[0].name, "Uncategorized"); // not "?"
+  assert.equal(calledWith.includes("uncategorized"), false); // getCat never called with the sentinel
+});
+
+test("a real category id is resolved through the injected getCat function, exactly matching its real name/icon fields", () => {
+  const getCat = fakeGetCat({ health: { name: "Health", icon: "💊" } });
+  const txns = [{ id: "t1", type: "expense" }];
+  const summary = getPersonSpendingSummary("vyom_id", txns, () => 5000, () => ["health"], getCat);
+  assert.equal(summary.byCategory[0].name, "Health");
+  assert.equal(summary.byCategory[0].icon, "💊");
+});
+
+test("an unknown (non-sentinel) category id correctly surfaces getCat's own '?' fallback, unmodified — this adapter never invents its own fallback for a real, unresolvable id", () => {
+  const getCat = fakeGetCat({}); // "ghost_cat" not in the map
+  const txns = [{ id: "t1", type: "expense" }];
+  const summary = getPersonSpendingSummary("vyom_id", txns, () => 500, () => ["ghost_cat"], getCat);
+  assert.equal(summary.byCategory[0].name, "?"); // getCat's real fallback, not "Uncategorized"
 });
 
 test("non-expense transaction types (income, transfer, investment) never contribute to the summary", () => {
   const txns = [{ id: "t1", type: "income" }, { id: "t2", type: "transfer" }];
   const getPersonAttributedAmount = () => 5000; // would be huge if counted
-  const summary = getPersonSpendingSummary("vyom_id", txns, getPersonAttributedAmount, () => ["food"], {});
+  const summary = getPersonSpendingSummary("vyom_id", txns, getPersonAttributedAmount, () => ["food"], fakeGetCat({}));
   assert.equal(summary.total, 0);
 });
 
 test("empty/missing transaction list returns a valid empty summary, never throws", () => {
-  const summary = getPersonSpendingSummary("vyom_id", [], () => 0, () => [], {});
+  const summary = getPersonSpendingSummary("vyom_id", [], () => 0, () => [], fakeGetCat({}));
   assert.deepEqual(summary, { total: 0, byCategory: [] });
-  const summary2 = getPersonSpendingSummary("vyom_id", undefined, () => 0, () => [], {});
+  const summary2 = getPersonSpendingSummary("vyom_id", undefined, () => 0, () => [], fakeGetCat({}));
   assert.deepEqual(summary2, { total: 0, byCategory: [] });
 });
 

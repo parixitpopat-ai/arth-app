@@ -37,13 +37,19 @@
  *   txnCategoryFilter logic uses an equivalent) — injected so this
  *   adapter can't drift from however the app actually derives a
  *   transaction's category
- * @param {Object} categoriesById - { [catId]: { name, icon } }, for
- *   display labels only — this function does no category-taxonomy work
+ * @param {Function} getCat - injected, the real existing function
+ *   (App.jsx ~L1216) that resolves a category id to its display record —
+ *   `getCat(id) => {name, color, icon, subs}`, with its own graceful
+ *   `{name:"?",...}` fallback for an unknown id. Deliberately a function,
+ *   matching the app's real shape — there is no categoriesById map
+ *   anywhere in the live app; every category lookup goes through this
+ *   function, and this adapter does the same rather than assuming a map
+ *   that doesn't exist.
  * @returns {{ total: number, byCategory: Array<{catId, name, icon, amount}> }}
  *   byCategory sorted descending by amount; categories with zero
  *   attributed spend are omitted, never shown as a zero row
  */
-export function getPersonSpendingSummary(personId, monthTxns, getPersonAttributedAmount, getTxnCategoryIds, categoriesById) {
+export function getPersonSpendingSummary(personId, monthTxns, getPersonAttributedAmount, getTxnCategoryIds, getCat) {
   const byCategory = new Map();
   let total = 0;
 
@@ -65,12 +71,17 @@ export function getPersonSpendingSummary(personId, monthTxns, getPersonAttribute
   }
 
   const rows = [...byCategory.entries()]
-    .map(([catId, amount]) => ({
-      catId,
-      name: categoriesById?.[catId]?.name || "Uncategorized",
-      icon: categoriesById?.[catId]?.icon || "📦",
-      amount,
-    }))
+    .map(([catId, amount]) => {
+      if (catId === "uncategorized") {
+        // Sentinel value this function itself introduces (see targets
+        // above) — never a real category id, so it must not be run
+        // through getCat(), which would return getCat's own "?" fallback
+        // instead of a genuinely meaningful "Uncategorized" label.
+        return { catId, name: "Uncategorized", icon: "📦", amount };
+      }
+      const cat = getCat(catId);
+      return { catId, name: cat.name, icon: cat.icon, amount };
+    })
     .sort((a, b) => b.amount - a.amount);
 
   return { total, byCategory: rows };
