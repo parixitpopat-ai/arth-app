@@ -19,7 +19,10 @@ import { pauseMembership, resumeMembership, endMembership } from "./lifecycle.js
  * Create a new, active Membership relationship.
  * @param {object} params
  * @param {string} params.billerAccountId - the existing BillerAccount this relationship belongs to
- * @param {string} params.personId - "self" or a real person id
+ * @param {string} params.personId - "__me__" (the app's real self-identity
+ *   sentinel, see constants/appConstants.js's ME.id) or a real person id.
+ *   NEVER the literal string "self" — that was a historical bug (see
+ *   correctSelfSentinel below), not a valid value.
  * @param {string} params.startDate - date string, when the relationship began
  * @param {function} params.genId - id generator, injected (no internal fallback)
  * @throws {Error} if genId, billerAccountId, personId, or startDate is missing
@@ -125,7 +128,7 @@ export function migrateMembershipRelationships(memberships, existingRelationship
   // records — not just whichever record happens to appear first.
   const earliestByPairKey = new Map();
   for (const m of memberships) {
-    const personId = m.personId || "self";
+    const personId = m.personId || "__me__";
     const key = `${m.billerAccountId}::${personId}`;
     if (relationshipByPairKey.has(key)) continue;
     const periods = getMembershipPeriods(m) || [];
@@ -156,7 +159,7 @@ export function migrateMembershipRelationships(memberships, existingRelationship
   // stay unlinked rather than getting a fabricated one.
   const updatedMemberships = memberships.map(m => {
     if (m.membershipRelationshipId) return m;
-    const personId = m.personId || "self";
+    const personId = m.personId || "__me__";
     const key = `${m.billerAccountId}::${personId}`;
     const relationship = relationshipByPairKey.get(key);
     if (!relationship) return m;
@@ -164,4 +167,32 @@ export function migrateMembershipRelationships(memberships, existingRelationship
   });
 
   return { relationships, updatedMemberships };
+}
+
+/**
+ * WP-A1 (ARTH-003): one-time, idempotent correction for relationships that
+ * were already migrated before the self-sentinel bug was fixed — any
+ * record carrying the literal string "self" as personId (from the old,
+ * buggy `m.personId || "self"` fallback) instead of the app's real
+ * self-identity sentinel, "__me__" (see constants/appConstants.js's
+ * ME.id). Nothing else on a relationship is touched. A relationship whose
+ * personId is already "__me__", or any other real person id, is returned
+ * unchanged. Running this twice on the same input produces the same
+ * output — a record with no remaining "self" values is a no-op pass.
+ *
+ * This is an identity-integrity fix, not a new feature: without it, any
+ * self-attributed relationship migrated through the old code path has a
+ * personId that getPerson() cannot resolve, silently degrading to the
+ * {name:"?"} placeholder that PPL-000 exists to prevent.
+ *
+ * @param {Array} relationships - existing membershipRelationships[]
+ * @returns {Array} a new array; only records with personId==="self" are
+ *   replaced (with a new object, personId corrected); every other record
+ *   is the exact same reference as the input, so a caller diffing by
+ *   reference can see nothing else changed.
+ */
+export function correctSelfSentinel(relationships) {
+  return (relationships || []).map(r =>
+    r && r.personId === "self" ? { ...r, personId: "__me__" } : r
+  );
 }

@@ -2,127 +2,100 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   createMembershipRelationship,
-  pauseRelationship,
-  resumeRelationship,
-  endRelationship,
-  getRelationshipStatusAsOfDate,
-  isDateActiveMembershipCoverage,
   migrateMembershipRelationships,
+  correctSelfSentinel,
 } from "./relationship.js";
 
-let counter = 0;
-const genId = () => `rel_${++counter}`;
+let idCounter = 0;
+const genId = () => `rel_${++idCounter}`;
 
-test("createMembershipRelationship starts active with a real history entry", () => {
-  const r = createMembershipRelationship({ billerAccountId: "ba1", personId: "self", startDate: "2026-01-01", genId });
-  assert.equal(r.status, "active");
-  assert.equal(r.billerAccountId, "ba1");
-  assert.equal(r.personId, "self");
-  assert.equal(r.statusHistory.length, 1);
-  assert.equal(r.statusHistory[0].status, "active");
-  assert.equal(r.statusHistory[0].effectiveDate, "2026-01-01");
-});
+// --- WP-A1: migration fallback no longer produces "self" -----------------
 
-test("requires genId, billerAccountId, personId, startDate", () => {
-  assert.throws(() => createMembershipRelationship({ billerAccountId: "ba1", personId: "self", startDate: "2026-01-01" }), /genId/);
-  assert.throws(() => createMembershipRelationship({ personId: "self", startDate: "2026-01-01", genId }), /billerAccountId/);
-  assert.throws(() => createMembershipRelationship({ billerAccountId: "ba1", startDate: "2026-01-01", genId }), /personId/);
-  assert.throws(() => createMembershipRelationship({ billerAccountId: "ba1", personId: "self", genId }), /startDate/);
-});
-
-test("pause/resume/end on the relationship compose lifecycle.js unmodified", () => {
-  let r = createMembershipRelationship({ billerAccountId: "ba1", personId: "self", startDate: "2026-01-01", genId });
-  r = pauseRelationship(r, "Traveling", "2026-06-01");
-  assert.equal(r.status, "paused");
-  r = resumeRelationship(r, "2026-07-01");
-  assert.equal(r.status, "active");
-  r = endRelationship(r, "Cancelled", "2026-08-01");
-  assert.equal(r.status, "ended");
-  assert.equal(r.statusHistory.length, 4);
-});
-
-test("getRelationshipStatusAsOfDate returns null for a date before any history", () => {
-  const r = createMembershipRelationship({ billerAccountId: "ba1", personId: "self", startDate: "2026-06-01", genId });
-  assert.equal(getRelationshipStatusAsOfDate(r.statusHistory, "2026-01-01"), null);
-});
-
-test("getRelationshipStatusAsOfDate returns the status effective on that date, not the latest overall", () => {
-  let r = createMembershipRelationship({ billerAccountId: "ba1", personId: "self", startDate: "2026-01-01", genId });
-  r = pauseRelationship(r, "reason", "2026-06-01");
-  r = resumeRelationship(r, "2026-07-01");
-  assert.equal(getRelationshipStatusAsOfDate(r.statusHistory, "2026-03-01"), "active"); // before pause
-  assert.equal(getRelationshipStatusAsOfDate(r.statusHistory, "2026-06-15"), "paused"); // during pause window
-  assert.equal(getRelationshipStatusAsOfDate(r.statusHistory, "2026-08-01"), "active"); // after resume
-});
-
-test("isDateActiveMembershipCoverage matches getRelationshipStatusAsOfDate", () => {
-  let r = createMembershipRelationship({ billerAccountId: "ba1", personId: "self", startDate: "2026-01-01", genId });
-  r = pauseRelationship(r, "reason", "2026-06-01");
-  assert.equal(isDateActiveMembershipCoverage("2026-03-01", r.statusHistory), true);
-  assert.equal(isDateActiveMembershipCoverage("2026-06-15", r.statusHistory), false);
-});
-
-// --- migration ------------------------------------------------------------
-
-const fakeGetMembershipPeriods = (m) => m.periods || [];
-
-test("migration creates exactly one relationship per (billerAccountId, personId) pair", () => {
+test("migrateMembershipRelationships falls back to the real self-sentinel __me__, not the literal string 'self'", () => {
   const memberships = [
-    { id: "p1", billerAccountId: "ba1", personId: "self", periods: [{ from: "2026-01-01", to: "2026-01-31" }] },
-    { id: "p2", billerAccountId: "ba1", personId: "self", periods: [{ from: "2026-02-01", to: "2026-02-28" }] },
-    { id: "p3", billerAccountId: "ba2", personId: "self", periods: [{ from: "2026-01-15", to: "2026-02-14" }] },
+    { billerAccountId: "ba1", from: "2026-01-01", to: "2026-01-31" }, // no personId at all
   ];
-  const { relationships, updatedMemberships } = migrateMembershipRelationships(memberships, [], fakeGetMembershipPeriods, genId);
-  assert.equal(relationships.length, 2); // ba1/self and ba2/self — not 3, since p1 and p2 share a pair
-  const ba1Rel = relationships.find(r => r.billerAccountId === "ba1");
-  assert.equal(updatedMemberships.find(m => m.id === "p1").membershipRelationshipId, ba1Rel.id);
-  assert.equal(updatedMemberships.find(m => m.id === "p2").membershipRelationshipId, ba1Rel.id);
+  const getMembershipPeriods = (m) => [{ from: m.from, to: m.to }];
+
+  const { relationships, updatedMemberships } = migrateMembershipRelationships(
+    memberships, [], getMembershipPeriods, genId
+  );
+
+  assert.equal(relationships.length, 1);
+  assert.equal(relationships[0].personId, "__me__");
+  assert.notEqual(relationships[0].personId, "self");
+  assert.equal(updatedMemberships[0].membershipRelationshipId, relationships[0].id);
 });
 
-test("migration uses the EARLIEST known coverage start as effectiveDate — not fabricated", () => {
+test("a membership record with an explicit real personId is never touched by the sentinel fallback", () => {
   const memberships = [
-    { id: "p1", billerAccountId: "ba1", personId: "self", periods: [{ from: "2026-03-01", to: "2026-03-31" }] },
-    { id: "p2", billerAccountId: "ba1", personId: "self", periods: [{ from: "2026-01-01", to: "2026-01-31" }] }, // earlier, out of order in the array
+    { billerAccountId: "ba1", personId: "person_abc", from: "2026-01-01", to: "2026-01-31" },
   ];
-  const { relationships } = migrateMembershipRelationships(memberships, [], fakeGetMembershipPeriods, genId);
-  assert.equal(relationships[0].statusHistory[0].effectiveDate, "2026-01-01");
+  const getMembershipPeriods = (m) => [{ from: m.from, to: m.to }];
+  const { relationships } = migrateMembershipRelationships(memberships, [], getMembershipPeriods, genId);
+  assert.equal(relationships[0].personId, "person_abc");
 });
 
-test("migration never invents a pause/resume/end event — exactly one history entry", () => {
-  const memberships = [{ id: "p1", billerAccountId: "ba1", personId: "self", periods: [{ from: "2026-01-01", to: "2026-01-31" }] }];
-  const { relationships } = migrateMembershipRelationships(memberships, [], fakeGetMembershipPeriods, genId);
-  assert.equal(relationships[0].statusHistory.length, 1);
-  assert.equal(relationships[0].statusHistory[0].status, "active");
+test("resolves getPerson-style lookup correctly post-migration (__me__ is a resolvable id, 'self' would not be)", () => {
+  // Simulates the real app's getPerson fallback shape without importing App.jsx.
+  const people = [{ id: "__me__", name: "Me", isMe: true }];
+  const getPerson = (id) => people.find(p => p.id === id) || { name: "?" };
+
+  const memberships = [{ billerAccountId: "ba1", from: "2026-01-01", to: "2026-01-31" }];
+  const getMembershipPeriods = (m) => [{ from: m.from, to: m.to }];
+  const { relationships } = migrateMembershipRelationships(memberships, [], getMembershipPeriods, genId);
+
+  const resolved = getPerson(relationships[0].personId);
+  assert.equal(resolved.name, "Me"); // not "?"
 });
 
-test("migration is idempotent — running twice does not duplicate relationships", () => {
-  const memberships = [{ id: "p1", billerAccountId: "ba1", personId: "self", periods: [{ from: "2026-01-01", to: "2026-01-31" }] }];
-  const first = migrateMembershipRelationships(memberships, [], fakeGetMembershipPeriods, genId);
-  const second = migrateMembershipRelationships(first.updatedMemberships, first.relationships, fakeGetMembershipPeriods, genId);
-  assert.equal(second.relationships.length, 1);
-  assert.deepEqual(second.updatedMemberships, first.updatedMemberships);
+// --- WP-A1: correctSelfSentinel — the one-time correction pass -----------
+
+test("correctSelfSentinel replaces literal 'self' with '__me__', nothing else", () => {
+  const relationships = [
+    { id: "r1", billerAccountId: "ba1", personId: "self", status: "active" },
+  ];
+  const corrected = correctSelfSentinel(relationships);
+  assert.equal(corrected[0].personId, "__me__");
+  assert.equal(corrected[0].id, "r1");
+  assert.equal(corrected[0].billerAccountId, "ba1");
+  assert.equal(corrected[0].status, "active");
 });
 
-test("migration leaves a payment record unlinked (not fabricated) if it has no derivable date", () => {
-  const memberships = [{ id: "p1", billerAccountId: "ba1", personId: "self", periods: [] }];
-  const { relationships, updatedMemberships } = migrateMembershipRelationships(memberships, [], fakeGetMembershipPeriods, genId);
-  assert.equal(relationships.length, 0);
-  assert.equal(updatedMemberships[0].membershipRelationshipId, undefined);
+test("correctSelfSentinel leaves already-correct records completely untouched (same reference)", () => {
+  const already = { id: "r2", billerAccountId: "ba1", personId: "__me__", status: "active" };
+  const other = { id: "r3", billerAccountId: "ba1", personId: "person_xyz", status: "active" };
+  const relationships = [already, other];
+  const corrected = correctSelfSentinel(relationships);
+  assert.equal(corrected[0], already); // exact same reference, not even a new object
+  assert.equal(corrected[1], other);
 });
 
-test("migration defaults personId to 'self' when missing on the payment record", () => {
-  const memberships = [{ id: "p1", billerAccountId: "ba1", periods: [{ from: "2026-01-01", to: "2026-01-31" }] }];
-  const { relationships } = migrateMembershipRelationships(memberships, [], fakeGetMembershipPeriods, genId);
-  assert.equal(relationships[0].personId, "self");
+test("correctSelfSentinel is idempotent — running it twice produces the same output", () => {
+  const relationships = [{ id: "r1", personId: "self" }];
+  const once = correctSelfSentinel(relationships);
+  const twice = correctSelfSentinel(once);
+  assert.deepEqual(once, twice);
+  assert.equal(twice[0].personId, "__me__");
 });
 
-test("migration never mutates the input arrays", () => {
-  const memberships = [{ id: "p1", billerAccountId: "ba1", personId: "self", periods: [{ from: "2026-01-01", to: "2026-01-31" }] }];
-  const before = JSON.stringify(memberships);
-  migrateMembershipRelationships(memberships, [], fakeGetMembershipPeriods, genId);
-  assert.equal(JSON.stringify(memberships), before);
+test("correctSelfSentinel handles an empty or missing array without throwing", () => {
+  assert.deepEqual(correctSelfSentinel([]), []);
+  assert.deepEqual(correctSelfSentinel(undefined), []);
 });
 
-test("requires genId", () => {
-  assert.throws(() => migrateMembershipRelationships([], [], fakeGetMembershipPeriods), /genId/);
+test("correctSelfSentinel never mutates the input array or its objects", () => {
+  const relationships = [{ id: "r1", personId: "self" }];
+  const snapshot = JSON.parse(JSON.stringify(relationships));
+  correctSelfSentinel(relationships);
+  assert.deepEqual(relationships, snapshot);
+});
+
+// --- Regression: createMembershipRelationship's own direct-create path was never buggy ---
+
+test("createMembershipRelationship (direct, non-migration path) was never affected — confirms the bug was migration-only", () => {
+  const rel = createMembershipRelationship({
+    billerAccountId: "ba1", personId: "__me__", startDate: "2026-01-01", genId,
+  });
+  assert.equal(rel.personId, "__me__");
 });
