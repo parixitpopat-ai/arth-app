@@ -13,7 +13,16 @@
 // It composes with lifecycle.js (unmodified) rather than duplicating its
 // transition logic.
 
-import { pauseMembership, resumeMembership, endMembership } from "./lifecycle.js";
+import { pauseMembership, resumeMembership, endMembership, getRelationshipStatusAsOfDate, isDateActiveMembershipCoverage } from "./lifecycle.js";
+
+// WP-C1 Step 1 (approved, option b): getRelationshipStatusAsOfDate and
+// isDateActiveMembershipCoverage now live in lifecycle.js — they were
+// already purely status/statusHistory-based, zero coupling to
+// billerAccountId or anything else Membership-specific. Re-exported here,
+// unchanged in behavior, so the existing App.jsx import
+// (`import { ..., isDateActiveMembershipCoverage, ... } from
+// "./domain/membership/relationship"`) keeps working with zero changes.
+export { getRelationshipStatusAsOfDate, isDateActiveMembershipCoverage };
 
 /**
  * Create a new, active Membership relationship.
@@ -55,36 +64,6 @@ export function resumeRelationship(relationship, effectiveDate) {
 
 export function endRelationship(relationship, reason, effectiveDate) {
   return endMembership(relationship, reason, effectiveDate);
-}
-
-/**
- * What was this relationship's status as of a given date? Walks
- * statusHistory and returns whichever entry's effectiveDate is the latest
- * one on or before `date`. If every entry is after `date` (asking about a
- * time before the relationship existed), returns null — not "active" by
- * default, since that would fabricate coverage that was never granted.
- */
-export function getRelationshipStatusAsOfDate(statusHistory, date) {
-  if (!Array.isArray(statusHistory) || statusHistory.length === 0) return null;
-  const applicable = statusHistory
-    .filter(h => h.effectiveDate && h.effectiveDate <= date)
-    .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate) || a.timestamp - b.timestamp);
-  if (applicable.length === 0) return null;
-  return applicable[applicable.length - 1].status;
-}
-
-/**
- * Does a given date count as active membership coverage? This is the
- * compound question: a date must BOTH fall within a paid coverage period
- * (a fact getMembershipPeriods() already establishes, untouched here) AND
- * the relationship's lifecycle status must have been "active" as of that
- * date. Pausing a membership means dates after the pause no longer count
- * as active coverage, even if a payment record's period technically still
- * spans them — the historical payment record itself is never altered;
- * this only changes how a date within it is *interpreted*.
- */
-export function isDateActiveMembershipCoverage(date, statusHistory) {
-  return getRelationshipStatusAsOfDate(statusHistory, date) === "active";
 }
 
 /**

@@ -25,6 +25,18 @@
 // - End: status -> "ended". Valid from "active" OR "paused". Requires a
 //   reason. Terminal — cannot be paused, resumed, or ended again.
 // - Every transition is appended to statusHistory[], never rewritten.
+//
+// ARTH-003 WP-C1 Step 1 (approved, option b): getRelationshipStatusAsOfDate
+// and isDateActiveMembershipCoverage moved here from relationship.js. Both
+// were already purely {status, statusHistory}-based with zero reference to
+// billerAccountId or anything Membership-specific — this move is a pure
+// relocation, not a behavior change. It makes this file the single generic
+// lifecycle authority any managed relationship (Membership, and eventually
+// School) can share, without School needing Membership's persisted shape
+// or relationship.js needing to know School exists. relationship.js
+// re-exports both functions so its one existing consumer (App.jsx's import)
+// needs no change. No persisted membershipRelationships[] record is
+// touched or migrated by this move.
 
 function assertReason(reason, label) {
   if (!reason || typeof reason !== "string" || !reason.trim()) {
@@ -118,4 +130,46 @@ export function endMembership(entity, reason, effectiveDate) {
     status: "ended",
     statusHistory: appendHistory(entity, "ended", effectiveDate, reason),
   };
+}
+
+/**
+ * What was this relationship's status as of a given date? Walks
+ * statusHistory and returns whichever entry's effectiveDate is the latest
+ * one on or before `date`. If every entry is after `date` (asking about a
+ * time before the relationship existed), returns null — not "active" by
+ * default, since that would fabricate coverage that was never granted.
+ *
+ * Moved here (WP-C1 Step 1) from relationship.js, unchanged — this
+ * function only ever read {status, statusHistory}. It has no idea what
+ * kind of relationship it's being asked about, by design.
+ */
+export function getRelationshipStatusAsOfDate(statusHistory, date) {
+  if (!Array.isArray(statusHistory) || statusHistory.length === 0) return null;
+  const applicable = statusHistory
+    .filter(h => h.effectiveDate && h.effectiveDate <= date)
+    .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate) || a.timestamp - b.timestamp);
+  if (applicable.length === 0) return null;
+  return applicable[applicable.length - 1].status;
+}
+
+/**
+ * Does a given date count as active membership coverage? This is the
+ * compound question: a date must BOTH fall within a paid coverage period
+ * (a fact getMembershipPeriods() already establishes, untouched here) AND
+ * the relationship's lifecycle status must have been "active" as of that
+ * date. Pausing a membership means dates after the pause no longer count
+ * as active coverage, even if a payment record's period technically still
+ * spans them — the historical payment record itself is never altered;
+ * this only changes how a date within it is *interpreted*.
+ *
+ * Moved here (WP-C1 Step 1) from relationship.js, unchanged. The name is
+ * Membership-flavored ("MembershipCoverage") because that's still its only
+ * real caller today — School's own as-of-date question ("is this the
+ * current school") is answered directly by getRelationshipStatusAsOfDate
+ * above, which is the actually domain-neutral primitive. This function is
+ * kept as-is, not renamed, so the existing Membership call site and its
+ * tests are untouched by this move.
+ */
+export function isDateActiveMembershipCoverage(date, statusHistory) {
+  return getRelationshipStatusAsOfDate(statusHistory, date) === "active";
 }
