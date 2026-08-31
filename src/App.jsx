@@ -31,6 +31,8 @@ import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
 import { createMembershipRelationship, pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
+import { getPersonSpendingSummary, getPersonActiveConnections } from "./domain/person/personOverview";
+import { isSchoolRelationshipCurrent } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { getCommitments } from "./domain/bills/commitments";
 import { remainingShare } from "./domain/shared/remainingShare";
@@ -8816,6 +8818,14 @@ function AppContent({ onLock }) {
         : txns.filter(t=>t.type==="expense"&&t.forPerson===p.id&&personMonthFilter(t))
       ).sort((a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a) || new Date(b.date||0)-new Date(a.date||0));
       const settlementTxns=txns.filter(t=>t.type==="settlement_in"&&t.fromPersonId===p.id&&personMonthFilter(t)).sort((a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a) || new Date(b.date||0)-new Date(a.date||0));
+      // WP-B1 Option A — additive only, existing computations above are untouched.
+      const activeConnections = getPersonActiveConnections(
+        p.id, { groups, membershipRelationships },
+        isDateActiveMembershipCoverage, isSchoolRelationshipCurrent, todayStr()
+      );
+      const spendingSummary = getPersonSpendingSummary(
+        p.id, thisMonthTxns, getPersonAttributedAmount, getTxnCategoryIds, getCat
+      );
       return (
         <div style={{ padding:"14px 16px 0" }}>
           <button onClick={()=>setSelectedPerson(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:13,fontWeight:700,marginBottom:16,fontFamily:"Nunito,sans-serif" }}>← People</button>
@@ -8830,6 +8840,37 @@ function AppContent({ onLock }) {
               </div>
               {!p.isMe&&<button onClick={e=>{ e.stopPropagation(); toggleFavorite(p); }} style={{ background:p.favorite?T.accentSoft:"none",border:`1px solid ${p.favorite?T.accent:T.border}`,borderRadius:10,padding:"7px 10px",cursor:"pointer",fontSize:13,fontWeight:800,color:p.favorite?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.favorite?"★ Fav":"☆ Fav"}</button>}
             </div>
+
+            {/* Active — WP-B1 Option A, additive, presence-based (RPP-002 §5/§6) */}
+            {activeConnections.length>0 && (
+              <div style={{ ...card }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:8 }}>ACTIVE</div>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                  {activeConnections.map(conn=>(
+                    <div key={`${conn.type}_${conn.id}`} style={{ background:T.input,borderRadius:10,padding:"6px 10px",display:"flex",alignItems:"center",gap:6 }}>
+                      <span>{conn.type==="group"?(conn.icon||"👨‍👩‍👦"):conn.type==="school"?"🏫":"🏋️"}</span>
+                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{conn.label||"Membership"}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Spending this month — WP-B1 Option A, additive */}
+            {spendingSummary.total>0 && (
+              <div style={{ ...card }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>SPENDING THIS MONTH</div>
+                  <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{sym}{fmt(spendingSummary.total)}</div>
+                </div>
+                {spendingSummary.byCategory.slice(0,5).map(row=>(
+                  <div key={row.catId} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}>
+                    <span style={{ color:T.sub,fontSize:12 }}>{row.icon} {row.name}</span>
+                    <span style={{ color:T.sub,fontSize:12 }}>{sym}{fmt(row.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Relationship module — settlement figures apply regardless of borrowMoney module (that
                 module only gates whether a credit LIMIT can be set, not whether money can be owed) */}
