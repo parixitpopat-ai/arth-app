@@ -32,6 +32,8 @@ import { createMembershipRelationship, pauseRelationship, resumeRelationship, en
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { getPersonSpendingSummary, getPersonActiveConnections } from "./domain/person/personOverview";
+import { archivePerson, unarchivePerson, isPersonArchived, getActivePeople } from "./domain/person/archive";
+import { getPersonAboutFields } from "./domain/person/about";
 import { isSchoolRelationshipCurrent } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { getCommitments } from "./domain/bills/commitments";
@@ -3148,7 +3150,7 @@ function AppContent({ onLock }) {
                 <button onClick={()=>setShowSplitPicker(false)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>Done</button>
               </div>
               <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-                {people.filter(p=>!p.isMe).map(p=>{
+                {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=>{
                   const selected = qaSplitWith.includes(p.id);
                   return (
                     <button key={p.id} onClick={()=>setQaSplitWith(prev=>selected?prev.filter(x=>x!==p.id):[...prev,p.id])} style={{ display:"flex",alignItems:"center",gap:10,background:selected?T.accentSoft:T.input,border:`1px solid ${selected?T.accent:T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
@@ -3158,7 +3160,7 @@ function AppContent({ onLock }) {
                     </button>
                   );
                 })}
-                {people.filter(p=>!p.isMe).length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No people added yet — add someone in People first.</div>}
+                {people.filter(p=>!p.isMe && !isPersonArchived(p)).length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No people added yet — add someone in People first.</div>}
               </div>
             </div>
           </div>
@@ -5288,7 +5290,7 @@ function AppContent({ onLock }) {
                   <span style={lbl}>Person (optional)</span>
                   <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
                     <button onClick={()=>{ setTagPerson(""); setSettlementTagGroup(""); setSettlementKind("refund"); }} style={{ background:(!tagPerson&&!settlementTagGroup)?"#88888822":"none",border:`1px solid ${(!tagPerson&&!settlementTagGroup)?"#888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>No contact</button>
-                    {people.filter(p=>!p.isMe).map(p=><button key={p.id} onClick={()=>{ setTagPerson(tagPerson===p.id?"":p.id); setSettlementKind("repayment"); setRepaymentTouched(false); if(!who.trim()) setWho(p.name); }} style={{ background:tagPerson===p.id?p.color+"22":"none",border:`1px solid ${tagPerson===p.id?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagPerson===p.id?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+                    {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><button key={p.id} onClick={()=>{ setTagPerson(tagPerson===p.id?"":p.id); setSettlementKind("repayment"); setRepaymentTouched(false); if(!who.trim()) setWho(p.name); }} style={{ background:tagPerson===p.id?p.color+"22":"none",border:`1px solid ${tagPerson===p.id?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagPerson===p.id?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
                   </div>
                 </div>}
                 {settlementKind!=="reimbursement"&&<div>
@@ -5614,7 +5616,7 @@ function AppContent({ onLock }) {
                 {showAttributionSearch&&<input autoFocus style={inp} placeholder="Search person or group..." value={attributionSearch} onChange={e=>setAttributionSearch(e.target.value)}/>}
                 {showAttributionSearch&&(()=>{
                   const q = attributionSearch.trim().toLowerCase();
-                  const peopleOpts = people.filter(p=>!p.isMe).map(p=>({ type:"person", id:p.id, name:p.name, icon:p.emoji, color:p.color }));
+                  const peopleOpts = people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=>({ type:"person", id:p.id, name:p.name, icon:p.emoji, color:p.color }));
                   const groupOpts = groups.map(g=>({ type:"group", id:g.id, name:g.name, icon:g.icon||"👥", color:g.color }));
                   const all = [...peopleOpts, ...groupOpts];
                   let list;
@@ -6410,7 +6412,7 @@ function AppContent({ onLock }) {
                 </div>
                 <select style={inp} value={accAttributedTo} onChange={e=>setAccAttributedTo(e.target.value)}>
                   <option value="">None (personal account)</option>
-                  {accAttributeType==="person" && people.filter(p=>!p.isMe).map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
+                  {accAttributeType==="person" && people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
                   {accAttributeType==="group" && groups.map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
                 </select>
               </div>
@@ -6624,7 +6626,7 @@ function AppContent({ onLock }) {
               <div style={{ marginBottom:6 }}>
                 <div style={{ color:T.sub,fontSize:10,marginBottom:4 }}>Person</div>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                  {people.filter(p=>!p.isMe).map(p=>(
+                  {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=>(
                     <button key={p.id} onClick={()=>setTagPersonId(tagPersonId===p.id?"":p.id)} style={{ background:tagPersonId===p.id?p.color+"22":"none",border:`1px solid ${tagPersonId===p.id?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagPersonId===p.id?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
                   ))}
                 </div>
@@ -8847,6 +8849,7 @@ function AppContent({ onLock }) {
       const spendingSummary = getPersonSpendingSummary(
         p.id, thisMonthTxns, getPersonAttributedAmount, getTxnCategoryIds, getCat
       );
+      const aboutFields = getPersonAboutFields(p); // WP-1
       return (
         <div style={{ padding:"14px 16px 0" }}>
           <button onClick={()=>setSelectedPerson(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:13,fontWeight:700,marginBottom:16,fontFamily:"Nunito,sans-serif" }}>← People</button>
@@ -8862,7 +8865,32 @@ function AppContent({ onLock }) {
               {!p.isMe&&<button onClick={e=>{ e.stopPropagation(); toggleFavorite(p); }} style={{ background:p.favorite?T.accentSoft:"none",border:`1px solid ${p.favorite?T.accent:T.border}`,borderRadius:10,padding:"7px 10px",cursor:"pointer",fontSize:13,fontWeight:800,color:p.favorite?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.favorite?"★ Fav":"☆ Fav"}</button>}
             </div>
 
-            {/* Active — WP-B1 Option A, additive, presence-based (RPP-002 §5/§6) */}
+            {/* About / Personal Details — WP-1, additive. Renders nothing at all
+              if the person has no real stored values (RPP-002's "don't show empty
+              forms/cards" principle). Reuses the existing expandedSection state
+              (same convention as the Unsettled drill-down above) rather than a
+              new hook — a new useState here would violate hook-ordering rules
+              since this whole block is inside a conditional (if(selectedPerson)). */}
+          {aboutFields.length>0 && (
+            <div style={{ ...card }}>
+              <div onClick={()=>setExpandedSection(prev=>prev===("about_"+p.id)?null:("about_"+p.id))} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>ABOUT</div>
+                <span style={{ color:T.sub,fontSize:12 }}>{expandedSection===("about_"+p.id)?"▾":"▸"}</span>
+              </div>
+              {expandedSection===("about_"+p.id) && (
+                <div style={{ marginTop:8 }}>
+                  {aboutFields.map(f=>(
+                    <div key={f.key} style={{ display:"flex",gap:8,padding:"4px 0" }}>
+                      <span>{f.icon}</span>
+                      <span style={{ color:T.text,fontSize:13 }}>{f.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Active — WP-B1 Option A, additive, presence-based (RPP-002 §5/§6) */}
             {activeConnections.length>0 && (
               <div style={{ ...card }}>
                 <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:8 }}>ACTIVE</div>
@@ -9218,7 +9246,11 @@ function AppContent({ onLock }) {
             }} style={{ ...btnP,marginBottom:10,background:T.accentSoft,border:`1px solid ${T.accent}55`,color:T.accent }}>📤 Request ₹{fmt(s.owesMe)} from {p.name}</button>}
             <div style={{ display:"flex",gap:10 }}>
               <button onClick={()=>setEditingPerson(p)} style={{ ...btnP,background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,flex:1 }}>{p.isMe?"🎯 Edit My Budget":"✏️ Edit Profile"}</button>
-              {!p.isMe&&<button onClick={()=>{ setPeople(prev=>prev.filter(x=>x.id!==p.id)); setSelectedPerson(null); }} style={{ ...btnP,background:"transparent",border:`1px solid ${T.danger}`,color:T.danger,flex:1 }}>🗑️ Remove</button>}
+              {!p.isMe&&<button onClick={()=>{
+                if(!window.confirm(`Archive ${p.name}? They'll be hidden from active lists and can't be selected for new transactions/groups/bills — but every existing transaction, settlement, group membership, and relationship stays exactly as it is and remains fully visible in history.`)) return;
+                setPeople(prev=>prev.map(x=>x.id===p.id?archivePerson(x):x));
+                setSelectedPerson(null);
+              }} style={{ ...btnP,background:"transparent",border:`1px solid ${T.danger}`,color:T.danger,flex:1 }}>🗄️ Archive</button>}
             </div>
             {p.isMe&&<div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"8px 0" }}>This is you — you can edit your monthly self budget here</div>}
           </div>
@@ -10045,7 +10077,7 @@ function AppContent({ onLock }) {
                 <span style={lbl}>Members</span>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6,marginBottom:16 }}>
                   <button onClick={()=>setNewGroupIncludeMe(v=>!v)} style={{ background:newGroupIncludeMe?"#16a34a18":"none",border:`1px solid ${newGroupIncludeMe?"#16a34a":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupIncludeMe?"#16a34a":T.sub,fontFamily:"Nunito,sans-serif" }}>🧑 Me {newGroupIncludeMe?"✓":"+"}</button>
-                  {people.filter(p=>!p.isMe).map(p=><button key={p.id} onClick={()=>setNewGroupMembers(prev=>prev.includes(p.id)?prev.filter(x=>x!==p.id):[...prev,p.id])} style={{ background:newGroupMembers.includes(p.id)?"#16a34a18":"none",border:`1px solid ${newGroupMembers.includes(p.id)?"#16a34a":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupMembers.includes(p.id)?"#16a34a":T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+                  {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><button key={p.id} onClick={()=>setNewGroupMembers(prev=>prev.includes(p.id)?prev.filter(x=>x!==p.id):[...prev,p.id])} style={{ background:newGroupMembers.includes(p.id)?"#16a34a18":"none",border:`1px solid ${newGroupMembers.includes(p.id)?"#16a34a":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupMembers.includes(p.id)?"#16a34a":T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
                 </div>
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
                   <button onClick={()=>setAddGroupStep(1)} style={btnG}>← Back</button>
@@ -10370,7 +10402,7 @@ function AppContent({ onLock }) {
               <div>
                 <span style={lbl}>Select Person</span>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:6 }}>
-                  {people.filter(p=>!p.isMe).map(p=>(
+                  {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=>(
                     <button key={p.id} onClick={()=>{ setLoanPersonId(p.id); setName(p.name); }} style={{ background:loanPersonId===p.id?p.color+"22":"none",border:`1px solid ${loanPersonId===p.id?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:loanPersonId===p.id?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>
                       {p.emoji} {p.name}
                     </button>
@@ -13282,7 +13314,7 @@ function AppContent({ onLock }) {
                 {groups.map(g=><button key={g.id} onClick={()=>{setEditGroup(editGroup===g.id?"":g.id); setEditSplitPeople({});}} style={{ background:editGroup===g.id?g.color+"22":"none",border:`1px solid ${editGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>)}
               </div>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:editSelectedPids.length>0?10:0 }}>
-                {(editGroup ? people.filter(p=>!p.isMe && (getGroup(editGroup)?.members||[]).includes(p.id)) : people.filter(p=>!p.isMe)).map(p=><button key={p.id} onClick={()=>setEditSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:editSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${editSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+                {(editGroup ? people.filter(p=>!p.isMe && !isPersonArchived(p) && (getGroup(editGroup)?.members||[]).includes(p.id)) : people.filter(p=>!p.isMe && !isPersonArchived(p))).map(p=><button key={p.id} onClick={()=>setEditSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:editSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${editSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
               </div>
               {editSelectedPids.length>0&&<>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
@@ -14743,7 +14775,7 @@ function AppContent({ onLock }) {
                   if(!baName.trim()){ const p=people.find(x=>String(x.id)===pid); if(p) setBaName(p.name); }
                 }}>
                   <option value="">Select person</option>
-                  {people.map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
+                  {getActivePeople(people).map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
                 </select>
               )}
               {baAttributeType==="group"&&(
@@ -14901,7 +14933,7 @@ function AppContent({ onLock }) {
               <span style={lbl}>For</span>
               <select style={inp} value={memberPersonId} onChange={e=>setMemberPersonId(e.target.value)}>
                 <option value="__me__">Me</option>
-                {people.filter(p=>!p.isMe).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
 
@@ -15272,7 +15304,7 @@ function AppContent({ onLock }) {
                 {groups.map(g=><button key={g.id} onClick={()=>handleGroupSelect(billGroup===g.id?"":g.id)} style={{ background:billGroup===g.id?g.color+"22":"none",border:`1px solid ${billGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>)}
               </div>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:selectedPids.length>0?10:0 }}>
-                {(billGroup ? people.filter(p=>!p.isMe && (getGroup(billGroup)?.members||[]).includes(p.id)) : people.filter(p=>!p.isMe)).map(p=><button key={p.id} onClick={()=>setBillSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:billSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${billSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+                {(billGroup ? people.filter(p=>!p.isMe && !isPersonArchived(p) && (getGroup(billGroup)?.members||[]).includes(p.id)) : people.filter(p=>!p.isMe && !isPersonArchived(p))).map(p=><button key={p.id} onClick={()=>setBillSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:billSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${billSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
               </div>
 
               {selectedPids.length>0&&<>
