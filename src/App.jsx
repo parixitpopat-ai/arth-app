@@ -948,7 +948,8 @@ function AppContent({ onLock }) {
       return {
         id: f.id,
         billerAccountId: f.billerAccountId,
-        personId: "self",
+        personId: "__me__", // WP-1 fix: was "self" — same bug class as WP-A1's
+                             // relationship.js fix; ME.id is "__me__", not "self".
         amount: f.amount,
         cycle: "monthly",
         bulkMonths: f.monthCount||1,
@@ -15323,11 +15324,16 @@ function AppContent({ onLock }) {
     const [creditLimit,setCreditLimit]=useState(String(p.creditLimit||""));
     const [spendBudget,setSpendBudget]=useState(String(p.spendBudget||""));
     const [favorite,setFavorite]=useState(Boolean(p.favorite));
+    const [phone,setPhone]=useState(p.phone||"");
+    const [email,setEmail]=useState(p.email||"");
+    const [dob,setDob]=useState(p.dob||"");
+    const [anniversary,setAnniversary]=useState(p.anniversary||"");
+    const [notes,setNotes]=useState(p.notes||"");
     const [modules,setModules]=useState(getPersonModules(p));
     const toggleModule = (id) => setModules(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
     const save=()=>{
-      setPeople(prev=>prev.map(x=>x.id===p.id?{...x,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules}:x));
-      setSelectedPerson(prev=>prev?{...prev,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules}:null);
+      setPeople(prev=>prev.map(x=>x.id===p.id?{...x,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules,phone:phone.trim(),email:email.trim(),dob,anniversary,notes:notes.trim()}:x));
+      setSelectedPerson(prev=>prev?{...prev,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules,phone:phone.trim(),email:email.trim(),dob,anniversary,notes:notes.trim()}:null);
       onClose();
     };
     return (
@@ -15341,6 +15347,26 @@ function AppContent({ onLock }) {
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
               <input style={inp} placeholder="Name" value={name} onChange={e=>setName(e.target.value)}/>
               <input style={inp} placeholder="Relation" value={relation} onChange={e=>setRelation(e.target.value)}/>
+            </div>
+            {/* WP-2 — additive contact/profile fields. Optional, "where present"
+                per RPP-002 §1 — no field here is required to save. */}
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+              <input style={inp} placeholder="Phone (optional)" value={phone} onChange={e=>setPhone(e.target.value)}/>
+              <input style={inp} placeholder="Email (optional)" value={email} onChange={e=>setEmail(e.target.value)}/>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+              <div>
+                <span style={lbl}>Date of birth</span>
+                <input style={inp} type="date" value={dob} onChange={e=>setDob(e.target.value)}/>
+              </div>
+              <div>
+                <span style={lbl}>Anniversary</span>
+                <input style={inp} type="date" value={anniversary} onChange={e=>setAnniversary(e.target.value)}/>
+              </div>
+            </div>
+            <div>
+              <span style={lbl}>Notes</span>
+              <textarea style={{ ...inp,minHeight:60,resize:"vertical",fontFamily:"Nunito,sans-serif" }} placeholder="Notes (optional)" value={notes} onChange={e=>setNotes(e.target.value)}/>
             </div>
             <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
               <div style={{ display:"flex",alignItems:"center",gap:10 }}>
