@@ -3282,14 +3282,14 @@ function AppContent({ onLock }) {
     const [linkCycle, setLinkCycle] = useState("monthly");
     const [linkBulkMonths, setLinkBulkMonths] = useState("1");
     const [linkGraceDays, setLinkGraceDays] = useState("0");
-    const [linkMemberPersonId, setLinkMemberPersonId] = useState("self");
+    const [linkMemberPersonId, setLinkMemberPersonId] = useState("__me__"); // WP-4 fix: was "self"
     const linkedBA = billerLinkId ? billerAccounts.find(b=>b.id===billerLinkId) : null;
     const linkedBAType = linkedBA ? getBillerActionType(linkedBA.type) : null;
     useEffect(()=>{
       // No separate picker shown anymore — auto-derive from whichever account gets linked, since the
       // account's own Attribute To already identifies who this is for.
       if(linkedBA?.attributeType==="person" && linkedBA?.attributedTo) setLinkMemberPersonId(String(linkedBA.attributedTo));
-      else setLinkMemberPersonId("self");
+      else setLinkMemberPersonId("__me__"); // WP-4 fix: was "self"
     },[linkedBA?.id]);
     const cycleMonthsMap = { monthly:1, quarterly:3, halfyearly:6, annual:12 };
     // Grace days are no longer baked into this date — they're applied separately via
@@ -14764,7 +14764,7 @@ function AppContent({ onLock }) {
   // -- ADD MEMBERSHIP MODAL --------------------------------------------------
   const AddMembershipModal = ({ billerAccount, existing, onClose }) => {
     const isEdit = !!existing;
-    const derivedPersonId = (billerAccount.attributeType==="person" && billerAccount.attributedTo) ? String(billerAccount.attributedTo) : "self";
+    const derivedPersonId = (billerAccount.attributeType==="person" && billerAccount.attributedTo) ? String(billerAccount.attributedTo) : "__me__"; // WP-4 fix: was "self" — ME.id is "__me__", same bug class as WP-1/WP-A1
     const [memberPersonId, setMemberPersonId] = useState(existing?.personId||derivedPersonId);
     const existingPeriods = existing?.periods || (existing ? [{ id:genId(), label:existing.cycle||"Period", from:existing.validFrom, to:existing.validUntil, amount:existing.amount, graceDays: existing.graceAppliedSeparately ? Number(existing.graceDays||0) : 0 }] : null);
 
@@ -14880,7 +14880,7 @@ function AppContent({ onLock }) {
             <div>
               <span style={lbl}>For</span>
               <select style={inp} value={memberPersonId} onChange={e=>setMemberPersonId(e.target.value)}>
-                <option value="self">Me</option>
+                <option value="__me__">Me</option>
                 {people.filter(p=>!p.isMe).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
