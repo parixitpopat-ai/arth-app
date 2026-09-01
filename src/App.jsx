@@ -28,7 +28,7 @@ import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVa
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
-import { createMembershipRelationship, pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships } from "./domain/membership/relationship";
+import { createMembershipRelationship, pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { getPersonSpendingSummary, getPersonActiveConnections } from "./domain/person/personOverview";
@@ -928,6 +928,26 @@ function AppContent({ onLock }) {
     const { relationships, updatedMemberships } = migrateMembershipRelationships(memberships, membershipRelationships, getMembershipPeriods, genId);
     setMembershipRelationships(relationships);
     setMemberships(updatedMemberships);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+  // WP-5: one-time self-sentinel data correction — fixes any existing records
+  // (created before the WP-1/WP-4 fixes) whose personId is still the literal
+  // "self" instead of the real ME.id ("__me__"). Reuses correctSelfSentinel
+  // as-is (domain/membership/relationship.js) — no new logic. Runs once at
+  // mount; idempotent — a clean pass on already-correct data is a true no-op
+  // (correctSelfSentinel returns the exact same array/object references),
+  // so this effect only actually calls a setter when something real changed.
+  useEffect(()=>{
+    const correctedMemberships = correctSelfSentinel(memberships);
+    const correctedRelationships = correctSelfSentinel(membershipRelationships);
+    const membershipsChanged = correctedMemberships.some((m,i)=>m!==memberships[i]);
+    const relationshipsChanged = correctedRelationships.some((r,i)=>r!==membershipRelationships[i]);
+    if(!membershipsChanged && !relationshipsChanged) return;
+    const correctedCount = correctedMemberships.filter((m,i)=>m!==memberships[i]).length
+      + correctedRelationships.filter((r,i)=>r!==membershipRelationships[i]).length;
+    console.log(`WP-5: corrected ${correctedCount} legacy record(s) with personId:"self" -> "__me__".`);
+    if(membershipsChanged) setMemberships(correctedMemberships);
+    if(relationshipsChanged) setMembershipRelationships(correctedRelationships);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
   useEffect(()=>safeSetLocalStorage("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
