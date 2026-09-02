@@ -50,6 +50,7 @@ import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategor
    Home/Insights IA split. (removed placeholder JSX fragments) */
 import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./domain/transactions/legacy/settlePersonShareOnBill";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
+import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import StatCard from "./components/StatCard";
 import PeriodSelector from "./components/PeriodSelector";
 import EmptyState from "./components/EmptyState";
@@ -15892,27 +15893,52 @@ function AppContent({ onLock }) {
                     <button onClick={()=>setActiveBillerShell(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
                   </div>
                 </div>
-                <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:2 }}>PROVIDER: {(shell.provider||shell.name).toUpperCase()}</div>
-                <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>ACCOUNTS ({accs.length})</div>
-                <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
-                  {accs.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No one added yet. Tap below to add Self, family, or anyone else.</div>}
-                  {accs.map(ba=>{
-                    const baBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
-                    const unpaidCount = baBills.filter(b=>b.status==="unpaid").length;
-                    const lastBill = [...baBills].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
+                {(()=>{
+                  const linkedCcAccount = resolveCreditCardAccount(shell, billerAccounts, accounts);
+                  if(shell.type==="Credit Card" && linkedCcAccount){
+                    const outstanding = cardOutstanding(linkedCcAccount);
                     return (
-                      <div key={ba.id} onClick={()=>{ setActiveBillerForAction(ba); setActiveBillerShell(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}` }}>
-                        <div>
-                          <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{ba.name}</div>
-                          <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{ba.consumerNo?`#${ba.consumerNo}`:"No account number set"}</div>
-                          {lastBill&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Last: {sym}{fmt(lastBill.amount)} · {formatShortDate(lastBill.date)||lastBill.date}</div>}
+                      <>
+                        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>STATEMENT</div>
+                        <div style={{ background:T.input,borderRadius:14,padding:"16px 14px",marginBottom:14,textAlign:"center" }}>
+                          <div style={{ color:T.sub,fontSize:11,marginBottom:4 }}>Current outstanding</div>
+                          <div style={{ color:outstanding>0?T.danger:T.success,fontSize:22,fontWeight:900 }}>{sym}{fmt(outstanding)}</div>
                         </div>
-                        {unpaidCount>0&&<div style={{ background:T.danger,color:"#fff",borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:800 }}>{unpaidCount} unpaid</div>}
-                      </div>
+                        <button onClick={()=>{
+                          setAddPrefill({ toAccId:linkedCcAccount.id });
+                          setDefaultAddType("cc_payment");
+                          setShowAdd(true);
+                          setActiveBillerShell(null);
+                        }} style={{ width:"100%",background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>💳 Pay Statement / Settle Balance</button>
+                      </>
                     );
-                  })}
-                </div>
-                <button onClick={()=>{ setShowAddBillerAccount(true); setPreselectedBillerType(shell.type); setPreselectedBillerProvider(shell.provider||shell.name); setPreselectedBillerId(shell.id); setActiveBillerShell(null); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add Person / Account</button>
+                  }
+                  return (
+                    <>
+                      <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:2 }}>PROVIDER: {(shell.provider||shell.name).toUpperCase()}</div>
+                      <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>ACCOUNTS ({accs.length})</div>
+                      <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
+                        {accs.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No one added yet. Tap below to add Self, family, or anyone else.</div>}
+                        {accs.map(ba=>{
+                          const baBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
+                          const unpaidCount = baBills.filter(b=>b.status==="unpaid").length;
+                          const lastBill = [...baBills].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
+                          return (
+                            <div key={ba.id} onClick={()=>{ setActiveBillerForAction(ba); setActiveBillerShell(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}` }}>
+                              <div>
+                                <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{ba.name}</div>
+                                <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{ba.consumerNo?`#${ba.consumerNo}`:"No account number set"}</div>
+                                {lastBill&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Last: {sym}{fmt(lastBill.amount)} · {formatShortDate(lastBill.date)||lastBill.date}</div>}
+                              </div>
+                              {unpaidCount>0&&<div style={{ background:T.danger,color:"#fff",borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:800 }}>{unpaidCount} unpaid</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <button onClick={()=>{ setShowAddBillerAccount(true); setPreselectedBillerType(shell.type); setPreselectedBillerProvider(shell.provider||shell.name); setPreselectedBillerId(shell.id); setActiveBillerShell(null); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add Person / Account</button>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           );
