@@ -148,7 +148,7 @@ export function getPersonActiveConnections(personId, sources, isDateActiveMember
   for (const rel of schoolRelationships) {
     if (!rel || rel.personId !== personId) continue;
     if (!isSchoolRelationshipCurrent(rel.statusHistory, today)) continue; // ended — not Active, shows under history instead
-    connections.push({ type: "school", id: rel.id, schoolId: rel.schoolId });
+    connections.push({ type: "school", id: rel.id, billerAccountId: rel.billerAccountId });
   }
 
   return connections;

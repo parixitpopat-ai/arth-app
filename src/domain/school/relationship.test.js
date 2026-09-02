@@ -15,8 +15,8 @@ const genId = () => `srel_${++idCounter}`;
 // --- Creation --------------------------------------------------------------
 
 test("createSchoolRelationship produces a new, active relationship referencing the real personId", () => {
-  const rel = createSchoolRelationship({ schoolId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
-  assert.equal(rel.schoolId, "dps");
+  const rel = createSchoolRelationship({ billerAccountId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
+  assert.equal(rel.billerAccountId, "dps");
   assert.equal(rel.personId, "vyom_id");
   assert.equal(rel.status, "active");
   assert.equal(rel.statusHistory.length, 1);
@@ -24,22 +24,22 @@ test("createSchoolRelationship produces a new, active relationship referencing t
   assert.equal(rel.statusHistory[0].effectiveDate, "2025-06-01");
 });
 
-test("createSchoolRelationship requires schoolId, personId, startDate, and genId — same discipline as Membership's equivalent", () => {
-  assert.throws(() => createSchoolRelationship({ personId: "p1", startDate: "2025-06-01", genId }), /schoolId is required/);
-  assert.throws(() => createSchoolRelationship({ schoolId: "dps", startDate: "2025-06-01", genId }), /personId is required/);
-  assert.throws(() => createSchoolRelationship({ schoolId: "dps", personId: "p1", genId }), /startDate is required/);
-  assert.throws(() => createSchoolRelationship({ schoolId: "dps", personId: "p1", startDate: "2025-06-01" }), /genId is required/);
+test("createSchoolRelationship requires billerAccountId, personId, startDate, and genId — same discipline as Membership's equivalent", () => {
+  assert.throws(() => createSchoolRelationship({ personId: "p1", startDate: "2025-06-01", genId }), /billerAccountId is required/);
+  assert.throws(() => createSchoolRelationship({ billerAccountId: "dps", startDate: "2025-06-01", genId }), /personId is required/);
+  assert.throws(() => createSchoolRelationship({ billerAccountId: "dps", personId: "p1", genId }), /startDate is required/);
+  assert.throws(() => createSchoolRelationship({ billerAccountId: "dps", personId: "p1", startDate: "2025-06-01" }), /genId is required/);
 });
 
 test("createSchoolRelationship works correctly for a self-attributed relationship, using the real __me__ sentinel — not the historical 'self' bug", () => {
-  const rel = createSchoolRelationship({ schoolId: "dps", personId: "__me__", startDate: "2025-06-01", genId });
+  const rel = createSchoolRelationship({ billerAccountId: "dps", personId: "__me__", startDate: "2025-06-01", genId });
   assert.equal(rel.personId, "__me__");
 });
 
 // --- Reuses lifecycle.js directly, no reimplementation ----------------------
 
 test("endSchoolRelationship IS lifecycle.js's endMembership — proven by behavioral equivalence, confirming no School-specific transition logic exists", () => {
-  const rel = createSchoolRelationship({ schoolId: "dps", personId: "p1", startDate: "2025-06-01", genId });
+  const rel = createSchoolRelationship({ billerAccountId: "dps", personId: "p1", startDate: "2025-06-01", genId });
   const viaWrapper = endSchoolRelationship(rel, "Left the school", "2027-04-30");
   const viaDirect = endMembership(rel, "Left the school", "2027-04-30");
   assert.deepEqual(viaWrapper, viaDirect);
@@ -48,7 +48,7 @@ test("endSchoolRelationship IS lifecycle.js's endMembership — proven by behavi
 // --- Continuous relationship across academic years --------------------------
 
 test("same school across multiple academic years is ONE continuous relationship — id and startDate never change just because a year passed", () => {
-  const rel = createSchoolRelationship({ schoolId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const rel = createSchoolRelationship({ billerAccountId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
   // Nothing in this module has any concept of "advance to next year" — the
   // relationship simply continues to exist, unchanged, id and startDate
   // intact, regardless of how many academic years pass. This test's real
@@ -66,13 +66,13 @@ test("same school across multiple academic years is ONE continuous relationship 
 // --- School change: end old + create new, never edit ------------------------
 
 test("school change is end-old + create-new — two genuinely distinct relationships, old history intact", () => {
-  const oldRel = createSchoolRelationship({ schoolId: "school_a", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const oldRel = createSchoolRelationship({ billerAccountId: "school_a", personId: "vyom_id", startDate: "2025-06-01", genId });
   const endedOldRel = endSchoolRelationship(oldRel, "Changed schools", "2026-04-15");
-  const newRel = createSchoolRelationship({ schoolId: "school_b", personId: "vyom_id", startDate: "2026-04-16", genId });
+  const newRel = createSchoolRelationship({ billerAccountId: "school_b", personId: "vyom_id", startDate: "2026-04-16", genId });
 
   assert.notEqual(endedOldRel.id, newRel.id); // genuinely distinct records
-  assert.equal(endedOldRel.schoolId, "school_a"); // old school's identity never overwritten
-  assert.equal(newRel.schoolId, "school_b");
+  assert.equal(endedOldRel.billerAccountId, "school_a"); // old school's identity never overwritten
+  assert.equal(newRel.billerAccountId, "school_b");
   assert.equal(endedOldRel.status, "ended");
   assert.equal(newRel.status, "active");
   // Old relationship's full history remains exactly as it was.
@@ -82,7 +82,7 @@ test("school change is end-old + create-new — two genuinely distinct relations
 });
 
 test("ending a relationship never mutates the original object — old and new stay independently valid", () => {
-  const oldRel = createSchoolRelationship({ schoolId: "school_a", personId: "p1", startDate: "2025-06-01", genId });
+  const oldRel = createSchoolRelationship({ billerAccountId: "school_a", personId: "p1", startDate: "2025-06-01", genId });
   const snapshot = JSON.parse(JSON.stringify(oldRel));
   endSchoolRelationship(oldRel, "Changed schools", "2026-04-15");
   assert.deepEqual(oldRel, snapshot);
@@ -92,14 +92,14 @@ test("ending a relationship never mutates the original object — old and new st
 
 test("getCurrentSchoolRelationship finds the active one among a mix of ended and active relationships for the same person", () => {
   const schoolA = endSchoolRelationship(
-    createSchoolRelationship({ schoolId: "school_a", personId: "vyom_id", startDate: "2024-06-01", genId }),
+    createSchoolRelationship({ billerAccountId: "school_a", personId: "vyom_id", startDate: "2024-06-01", genId }),
     "Changed schools", "2025-04-30"
   );
-  const schoolB = createSchoolRelationship({ schoolId: "school_b", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const schoolB = createSchoolRelationship({ billerAccountId: "school_b", personId: "vyom_id", startDate: "2025-06-01", genId });
   const relationships = [schoolA, schoolB];
 
   const current = getCurrentSchoolRelationship(relationships, "vyom_id", "2026-01-01");
-  assert.equal(current.schoolId, "school_b");
+  assert.equal(current.billerAccountId, "school_b");
 });
 
 test("getCurrentSchoolRelationship returns null when a person has no active school relationship — a real state, not an error", () => {
@@ -108,30 +108,30 @@ test("getCurrentSchoolRelationship returns null when a person has no active scho
 });
 
 test("getCurrentSchoolRelationship never mixes up two different people's relationships", () => {
-  const vyomRel = createSchoolRelationship({ schoolId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
-  const rahulRel = createSchoolRelationship({ schoolId: "some_other_school", personId: "rahul_id", startDate: "2025-06-01", genId });
+  const vyomRel = createSchoolRelationship({ billerAccountId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const rahulRel = createSchoolRelationship({ billerAccountId: "some_other_school", personId: "rahul_id", startDate: "2025-06-01", genId });
   const relationships = [vyomRel, rahulRel];
 
   const current = getCurrentSchoolRelationship(relationships, "vyom_id", "2026-01-01");
-  assert.equal(current.schoolId, "dps");
+  assert.equal(current.billerAccountId, "dps");
   assert.notEqual(current.personId, "rahul_id");
 });
 
 test("getHistoricalSchoolRelationships returns past schools, excludes the current one — historical data remains accessible", () => {
   const schoolA = endSchoolRelationship(
-    createSchoolRelationship({ schoolId: "school_a", personId: "vyom_id", startDate: "2024-06-01", genId }),
+    createSchoolRelationship({ billerAccountId: "school_a", personId: "vyom_id", startDate: "2024-06-01", genId }),
     "Changed schools", "2025-04-30"
   );
-  const schoolB = createSchoolRelationship({ schoolId: "school_b", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const schoolB = createSchoolRelationship({ billerAccountId: "school_b", personId: "vyom_id", startDate: "2025-06-01", genId });
   const relationships = [schoolA, schoolB];
 
   const historical = getHistoricalSchoolRelationships(relationships, "vyom_id", "2026-01-01");
   assert.equal(historical.length, 1);
-  assert.equal(historical[0].schoolId, "school_a");
+  assert.equal(historical[0].billerAccountId, "school_a");
 });
 
 test("isSchoolRelationshipCurrent answers correctly across a relationship's full active->ended timeline", () => {
-  const created = createSchoolRelationship({ schoolId: "dps", personId: "p1", startDate: "2025-06-01", genId });
+  const created = createSchoolRelationship({ billerAccountId: "dps", personId: "p1", startDate: "2025-06-01", genId });
   const ended = endSchoolRelationship(created, "Left", "2026-04-30");
 
   assert.equal(isSchoolRelationshipCurrent(created.statusHistory, "2025-12-01"), true);
@@ -142,14 +142,14 @@ test("isSchoolRelationshipCurrent answers correctly across a relationship's full
 
 // --- Person/School identity separation --------------------------------------
 
-test("School identity (schoolId) and Person identity (personId) are independent — neither field is ever derived from or overwrites the other", () => {
-  const rel = createSchoolRelationship({ schoolId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
+test("School identity (billerAccountId) and Person identity (personId) are independent — neither field is ever derived from or overwrites the other", () => {
+  const rel = createSchoolRelationship({ billerAccountId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
   const ended = endSchoolRelationship(rel, "Left", "2026-04-30");
   // Ending the relationship (a lifecycle/School-relationship-level action)
   // never touches personId — the Person's own identity is completely
   // outside this module's authority, exactly as PPL-000 requires.
   assert.equal(ended.personId, "vyom_id");
-  assert.equal(ended.schoolId, "dps");
+  assert.equal(ended.billerAccountId, "dps");
 });
 
 test("this module never creates, edits, or archives a Person record — it has no function capable of doing so", () => {

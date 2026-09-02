@@ -135,7 +135,7 @@ test("School: called with NO schoolRelationships argument at all (today's real A
 });
 
 test("School: once real schoolRelationships[] exists (future Phase E), an active one appears and an ended one does not — zero changes needed to this function when that day comes", () => {
-  const rel = { id: "sr1", personId: "vyom_id", schoolId: "dps", statusHistory: [] };
+  const rel = { id: "sr1", personId: "vyom_id", billerAccountId: "dps", statusHistory: [] };
   const active = getPersonActiveConnections("vyom_id", { schoolRelationships: [rel] }, alwaysActive, alwaysActive, "2026-08-31");
   assert.equal(active.filter(c => c.type === "school").length, 1);
 
@@ -156,7 +156,7 @@ test("a Contact with zero relationships of any kind returns an empty array, not 
 test("a person can have Groups + Membership + School simultaneously — all three appear, correctly attributed only to that person", () => {
   const groups = [{ id: "g1", name: "Family", members: ["vyom_id"] }];
   const membershipRelationships = [{ id: "m1", personId: "vyom_id", billerAccountId: "ba1", statusHistory: [] }];
-  const schoolRelationships = [{ id: "sr1", personId: "vyom_id", schoolId: "dps", statusHistory: [] }];
+  const schoolRelationships = [{ id: "sr1", personId: "vyom_id", billerAccountId: "dps", statusHistory: [] }];
   const connections = getPersonActiveConnections("vyom_id", { groups, membershipRelationships, schoolRelationships }, alwaysActive, alwaysActive, "2026-08-31");
   assert.equal(connections.length, 3);
   assert.deepEqual(connections.map(c => c.type).sort(), ["group", "membership", "school"]);

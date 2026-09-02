@@ -6,12 +6,24 @@
 // own thin module here, sharing lifecycle.js's create/end machinery
 // without touching or knowing anything about membershipRelationships[].
 //
-// Deliberately separate from feeSchedule.personId (domain/schoolFees/
-// service.js) — that field already exists on fee-schedule records,
-// currently always null in production (per the SFE-000 trace), and this
-// module does not read, write, or migrate it. Whether/how a School
-// relationship's id should eventually connect to a fee schedule is an
-// open question for a later work package, not resolved here.
+// PPL-006 (2026-09-02) — School identity revision: this module previously
+// used a standalone, opaque `schoolId` field. Per PPL-006 Decision D/E/F,
+// School has no separate School entity and never will — the identity of
+// "which school" is the same `billerAccounts[].id` every other biller-based
+// domain already uses. This module now takes `billerAccountId` in exactly
+// the shape membershipRelationships already does
+// (domain/membership/relationship.js's createMembershipRelationship), so
+// School converges onto the same canonical pattern rather than remaining a
+// one-off. `schoolId` is retired, not renamed-in-place-and-kept — a second
+// parallel identity field would recreate the exact reconciliation problem
+// this change exists to remove (see feeScheduleLink.js's own documented
+// limitation, which this directly resolves).
+//
+// Still deliberately separate from feeSchedule.personId
+// (domain/schoolFees/service.js) as its own storage — this module does not
+// read, write, or migrate feeSchedules directly. feeScheduleLink.js is the
+// join layer; PPL-006 WP-2 updates it to join on billerAccountId (now that
+// one exists here) instead of personId alone.
 //
 // Only create + end are exposed — per RPP-002 §4/SFE-001 §2, School has no
 // product need for pause/resume (a school relationship doesn't "pause,"
@@ -19,13 +31,6 @@
 // underlying lifecycle.js still supports pause/resume if a future need
 // ever arises; this module simply doesn't expose School-specific wrappers
 // for them, keeping this WP's scope to exactly what's needed.
-//
-// School identity (name, and whatever else a School record eventually
-// carries) is intentionally NOT built here. `schoolId` is treated as an
-// opaque reference — this WP is the relationship/lifecycle foundation
-// only, per the explicit scope boundary: "implement only the relationship
-// foundation specified by ARTH-003," not a School entity or School Fees
-// redesign.
 
 import { endMembership, getRelationshipStatusAsOfDate } from "../membership/lifecycle.js";
 
@@ -39,27 +44,29 @@ import { endMembership, getRelationshipStatusAsOfDate } from "../membership/life
  * relationship's id, not the other way around.
  *
  * @param {object} params
- * @param {string} params.schoolId - opaque reference to a School record
- *   (School entity storage itself is out of scope for this WP)
+ * @param {string} params.billerAccountId - the biller account (type
+ *   "School Fees") that IS this school's identity — same role
+ *   billerAccountId plays in createMembershipRelationship. Not a School
+ *   entity id; there is no separate School entity.
  * @param {string} params.personId - the existing Person's id (PPL-000's
  *   real identity — "__me__" for self, or a real person id). This module
  *   never creates, edits, or archives a Person — it only references the
  *   id, exactly as Membership's relationship.js already does.
  * @param {string} params.startDate - date string, when the relationship began
  * @param {function} params.genId - id generator, injected (no internal fallback)
- * @throws {Error} if genId, schoolId, personId, or startDate is missing
+ * @throws {Error} if genId, billerAccountId, personId, or startDate is missing
  */
-export function createSchoolRelationship({ schoolId, personId, startDate, genId }) {
+export function createSchoolRelationship({ billerAccountId, personId, startDate, genId }) {
   if (typeof genId !== "function") {
     throw new Error("createSchoolRelationship: genId is required");
   }
-  if (!schoolId) throw new Error("createSchoolRelationship: schoolId is required");
+  if (!billerAccountId) throw new Error("createSchoolRelationship: billerAccountId is required");
   if (!personId) throw new Error("createSchoolRelationship: personId is required");
   if (!startDate) throw new Error("createSchoolRelationship: startDate is required");
 
   return {
     id: genId(),
-    schoolId,
+    billerAccountId,
     personId,
     status: "active",
     statusHistory: [{ status: "active", effectiveDate: startDate, timestamp: Date.now() }],

@@ -128,7 +128,7 @@ export function PersonOverviewScreen({
               <span style={{ fontSize: 18 }}>
                 {conn.type === "group" ? (conn.icon || "👨‍👩‍👦") : conn.type === "school" ? "🏫" : "🏋️"}
               </span>
-              <span style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{conn.label || conn.schoolId || "Membership"}</span>
+              <span style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{conn.label || conn.billerAccountId || "Membership"}</span>
             </div>
           ))}
         </div>

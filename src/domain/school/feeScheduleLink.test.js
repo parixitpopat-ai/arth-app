@@ -23,7 +23,7 @@ function makeFeeSchedule(overrides = {}) {
 // --- The actual connection ---------------------------------------------
 
 test("getFeeSchedulesForRelationship connects a fee schedule to a relationship via the shared personId", () => {
-  const rel = createSchoolRelationship({ schoolId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const rel = createSchoolRelationship({ billerAccountId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
   const schedule = makeFeeSchedule({ personId: "vyom_id" });
   const connected = getFeeSchedulesForRelationship(rel, [schedule]);
   assert.equal(connected.length, 1);
@@ -31,7 +31,7 @@ test("getFeeSchedulesForRelationship connects a fee schedule to a relationship v
 });
 
 test("getFeeSchedulesForRelationship excludes fee schedules belonging to a different person", () => {
-  const rel = createSchoolRelationship({ schoolId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const rel = createSchoolRelationship({ billerAccountId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
   const schedule = makeFeeSchedule({ personId: "rahul_id" });
   assert.deepEqual(getFeeSchedulesForRelationship(rel, [schedule]), []);
 });
@@ -55,7 +55,7 @@ test("isFeeScheduleLinkedToPerson — the smallest single-schedule check", () =>
 // --- Current production state: dormant, confirmed, not a bug in this WP -
 
 test("CURRENT PRODUCTION STATE: a fee schedule with personId===null (today's real, only-ever-created shape) connects to NOTHING — confirmed dormant, per the live re-trace", () => {
-  const rel = createSchoolRelationship({ schoolId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const rel = createSchoolRelationship({ billerAccountId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
   const realProductionShapedSchedule = makeFeeSchedule({ personId: null }); // exactly what AddSchoolYearModal produces today
   assert.deepEqual(getFeeSchedulesForRelationship(rel, [realProductionShapedSchedule]), []);
   assert.deepEqual(getPersonFeeSchedules("vyom_id", [realProductionShapedSchedule]), []);
@@ -63,7 +63,7 @@ test("CURRENT PRODUCTION STATE: a fee schedule with personId===null (today's rea
 });
 
 test("a relationship with no personId (should never happen given createSchoolRelationship's own validation, but defended against anyway) connects to nothing rather than matching every null-personId schedule", () => {
-  const relWithNoPersonId = { id: "rel1", schoolId: "dps", personId: null, status: "active", statusHistory: [] };
+  const relWithNoPersonId = { id: "rel1", billerAccountId: "dps", personId: null, status: "active", statusHistory: [] };
   const nullPersonSchedule = makeFeeSchedule({ personId: null });
   // Explicitly must NOT connect null-to-null — that would silently link
   // every unattributed schedule to every unattributed relationship.
@@ -73,7 +73,7 @@ test("a relationship with no personId (should never happen given createSchoolRel
 // --- Historical-ID preservation -----------------------------------------
 
 test("the connection never mutates the fee schedule — id, schoolName, schoolYearStart/End, rateRules all untouched", () => {
-  const rel = createSchoolRelationship({ schoolId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const rel = createSchoolRelationship({ billerAccountId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
   const schedule = makeFeeSchedule({ personId: "vyom_id" });
   const snapshot = JSON.parse(JSON.stringify(schedule));
   getFeeSchedulesForRelationship(rel, [schedule]);
@@ -81,14 +81,14 @@ test("the connection never mutates the fee schedule — id, schoolName, schoolYe
 });
 
 test("the connection never mutates the relationship", () => {
-  const rel = createSchoolRelationship({ schoolId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const rel = createSchoolRelationship({ billerAccountId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
   const snapshot = JSON.parse(JSON.stringify(rel));
   getFeeSchedulesForRelationship(rel, [makeFeeSchedule({ personId: "vyom_id" })]);
   assert.deepEqual(rel, snapshot);
 });
 
 test("connected fee schedule objects are returned BY REFERENCE, not copies — proving no silent field gets added or altered in transit", () => {
-  const rel = createSchoolRelationship({ schoolId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const rel = createSchoolRelationship({ billerAccountId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
   const schedule = makeFeeSchedule({ personId: "vyom_id" });
   const connected = getFeeSchedulesForRelationship(rel, [schedule]);
   assert.equal(connected[0], schedule); // exact same object reference
@@ -104,10 +104,10 @@ test("historical transactions are never touched by this module — it has no fun
 
 test("KNOWN LIMITATION, proven directly: when a person has TWO school relationships (a school change), personId-only matching cannot distinguish which schedule belongs to which school", () => {
   const oldRel = endSchoolRelationship(
-    createSchoolRelationship({ schoolId: "school_a", personId: "vyom_id", startDate: "2024-06-01", genId }),
+    createSchoolRelationship({ billerAccountId: "school_a", personId: "vyom_id", startDate: "2024-06-01", genId }),
     "Changed schools", "2025-04-30"
   );
-  const newRel = createSchoolRelationship({ schoolId: "school_b", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const newRel = createSchoolRelationship({ billerAccountId: "school_b", personId: "vyom_id", startDate: "2025-06-01", genId });
 
   const scheduleForSchoolA = makeFeeSchedule({ id: "sched_a", personId: "vyom_id", schoolName: "School A" });
   const scheduleForSchoolB = makeFeeSchedule({ id: "sched_b", personId: "vyom_id", schoolName: "School B" });
