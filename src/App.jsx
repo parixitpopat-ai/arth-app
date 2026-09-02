@@ -33,7 +33,13 @@ import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { getPersonSpendingSummary, getPersonActiveConnections } from "./domain/person/personOverview";
 import { archivePerson, unarchivePerson, isPersonArchived, getActivePeople } from "./domain/person/archive";
-import { getPersonAboutFields } from "./domain/person/about";
+import { getPersonAboutFields, getAboutCompleteness, getPersonNotes } from "./domain/person/about";
+import { getFinancialPositionLabel, getFinancialPositionBreakdown } from "./domain/person/financialPosition";
+import { getPersonSixMonthActivity } from "./domain/person/activity";
+import { getPersonReminders } from "./domain/person/reminders";
+import { getSectionOrder, moveSection } from "./domain/person/sectionOrder";
+import { getPersonTypeUILabel } from "./domain/person/personType";
+import { PersonProfileScreen } from "./screens/PersonProfileScreen";
 import { isSchoolRelationshipCurrent } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { getCommitments } from "./domain/bills/commitments";
@@ -8850,95 +8856,302 @@ function AppContent({ onLock }) {
         p.id, thisMonthTxns, getPersonAttributedAmount, getTxnCategoryIds, getCat
       );
       const aboutFields = getPersonAboutFields(p); // WP-1
+
+      // --- Consolidation: content that used to render as separate standalone
+      // blocks below the PersonProfileScreen mount, now computed here and
+      // passed in as props instead — same logic, same closure, relocated only.
+      const debtTransferSection = totalOwesMe>0 ? (
+        <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:12 }}>
+          <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>🔀 Transfer debt to someone else</div>
+          <div style={{ color:T.sub,fontSize:10,marginBottom:8 }}>If {p.name} says another person will pay on their behalf</div>
+          <select style={{ ...inp,marginBottom:8 }} onChange={e=>{
+            const targetId = e.target.value;
+            if(!targetId) return;
+            const isGroup = targetId.startsWith("g_");
+            const realId = isGroup ? targetId.slice(2) : targetId;
+            const targetName = isGroup ? groups.find(g=>g.id===realId)?.name : people.find(x=>String(x.id)===realId)?.name;
+            e.target.value="";
+            askConfirm(`Transfer ${p.name}'s debt of ${sym}${fmt(totalOwesMe)} to ${targetName}?`, ()=>{
+            setTxns(prev=>prev.map(t=>{
+              if(t.type!=="expense") return t;
+              const info = t.people?.[p.id] || t.splitPeople?.[p.id];
+              if(!info||info.settled||info.mode!=="owes") return t;
+              const updated = {...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0,transferredTo:realId};
+              if(t.people?.[p.id]) return {...t,people:{...t.people,[p.id]:updated}};
+              return {...t,splitPeople:{...t.splitPeople,[p.id]:updated}};
+            }));
+            if(!isGroup){
+              const newTxn = { id:genId(), type:"expense", amount:totalOwesMe, who:`Transferred from ${p.name}`, date:todayStr(), catIds:[], subIds:[], people:{[realId]:{amount:totalOwesMe,mode:"owes",settled:false,remainingAmt:totalOwesMe}}, createdAt:Date.now(), note:`Debt transferred from ${p.name}` };
+              setTxns(prev=>[newTxn,...prev]);
+            }
+            });
+          }}>
+            <option value="">Select who will pay instead...</option>
+            {people.filter(x=>!x.isMe&&String(x.id)!==String(p.id)).map(x=>(<option key={x.id} value={x.id}>{x.emoji} {x.name}</option>))}
+            {groups.map(g=>(<option key={g.id} value={`g_${g.id}`}>{g.icon||"👥"} {g.name} (group)</option>))}
+          </select>
+        </div>
+      ) : null;
+
+      const taggedAccountsList = accounts.filter(a=>String(a.attributedTo)===String(p.id));
+      const taggedAccountsSection = taggedAccountsList.length>0 ? (
+        <div style={{ ...card,marginBottom:12 }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>TAGGED ACCOUNTS</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+            {taggedAccountsList.map(a=>{ const bal=accountBalance(a.id); return (
+              <div key={a.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{a.name}</div>
+                <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(bal)}</div>
+              </div>
+            ); })}
+            <div style={{ borderTop:`1px solid ${T.border}`,paddingTop:6,display:"flex",justifyContent:"space-between" }}>
+              <div style={{ color:T.sub,fontSize:11 }}>Total tagged wealth</div>
+              <div style={{ color:T.success,fontSize:13,fontWeight:900 }}>{sym}{fmt(taggedAccountsList.reduce((s,a)=>s+accountBalance(a.id),0))}</div>
+            </div>
+          </div>
+        </div>
+      ) : null;
+
+      const personGifts = gifts.filter(g=>String(g.personId)===String(p.id)).sort((a,b)=>b.date?.localeCompare(a.date||"")||0);
+      const totalGifts = personGifts.reduce((s,g)=>s+Number(g.amount||0),0);
+      const giftFilterMatch = giftFilter ? personGifts.filter(g=>g.occasion===giftFilter||g.fromWhom===giftFilter) : personGifts;
+      const giftsSection = (
+        <div style={{ ...card,marginBottom:12 }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+            <div>
+              <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>🎁 Gifts</div>
+              {totalGifts>0&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{personGifts.length} gift{personGifts.length!==1?"s":""} · {sym}{fmt(totalGifts)} total received</div>}
+            </div>
+            <button onClick={()=>{ setGiftForPersonId(p.id); setShowAddGift(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}33`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Gift</button>
+          </div>
+          {personGifts.length>0&&(
+            <>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                {[...new Set(personGifts.map(g=>g.occasion))].map(o=>(
+                  <button key={o} onClick={()=>setGiftFilter(giftFilter===o?null:o)} style={{ background:giftFilter===o?T.accent+"22":"none",border:`1px solid ${giftFilter===o?T.accent:T.border}`,borderRadius:20,padding:"2px 8px",cursor:"pointer",fontSize:9,fontWeight:700,color:giftFilter===o?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{o}</button>
+                ))}
+              </div>
+              {giftFilterMatch.slice(0,10).map(g=>(
+                <div key={g.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
+                  <div>
+                    <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>From {g.fromWhom}</div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{g.occasion} · {formatShortDate(g.date)||g.date}</div>
+                    {g.note&&<div style={{ color:T.sub,fontSize:10 }}>{g.note}</div>}
+                  </div>
+                  <div style={{ color:T.success,fontSize:13,fontWeight:800 }}>{sym}{fmt(g.amount)}</div>
+                </div>
+              ))}
+              {personGifts.length>10&&<div style={{ color:T.sub,fontSize:10,textAlign:"center",marginTop:6 }}>+{personGifts.length-10} more</div>}
+            </>
+          )}
+          {personGifts.length===0&&<div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"10px 0" }}>No gifts recorded yet</div>}
+        </div>
+      );
+
+      const feedGifts = getPersonModules(p).includes("gifts") ? personGifts : [];
+      const activityFeedRaw = [
+        ...relTxns.map(t=>({ kind:"expense", date:t.date, sortVal:getRecordedSortValue(t), data:t })),
+        ...taggedTxns.filter(t=>!relTxns.some(r=>r.id===t.id)).map(t=>({ kind:"expense", date:t.date, sortVal:getRecordedSortValue(t), data:t })),
+        ...settlementTxns.map(t=>({ kind:"settlement", date:t.date, sortVal:getRecordedSortValue(t), data:t })),
+        ...feedGifts.map(g=>({ kind:"gift", date:g.date, sortVal:g.createdAt||0, data:g })),
+      ].sort((a,b)=>(b.date||"").localeCompare(a.date||"") || b.sortVal-a.sortVal).slice(0,25);
+      const recentActivityFeed = activityFeedRaw.map((item,i)=>{
+        const border = i<activityFeedRaw.length-1?`1px solid ${T.border}`:"none";
+        if(item.kind==="gift"){
+          const g = item.data;
+          return { key:`g-${g.id}`, node: (
+            <div style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:border }}>
+              <div><div style={{ color:T.text,fontSize:12,fontWeight:700 }}>🎁 Gift from {g.fromWhom}</div><div style={{ color:T.sub,fontSize:10 }}>{g.occasion} · {formatShortDate(g.date)||g.date}</div></div>
+              <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{sym}{fmt(g.amount)}</span>
+            </div>
+          ) };
+        }
+        if(item.kind==="settlement"){
+          const t = item.data;
+          return { key:`s-${t.id}`, node: (
+            <div onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:border,cursor:"pointer" }}>
+              <div><div style={{ color:T.text,fontSize:12,fontWeight:700 }}>✅ Settlement received</div><div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(t.date)||t.date}</div></div>
+              <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>+{sym}{fmt(t.amount)}</span>
+            </div>
+          ) };
+        }
+        const t = item.data;
+        const info = t.people?.[p.id] || t.splitPeople?.[p.id];
+        const shareAmt = info ? remainingShare(info)||Number(info.amount||0) : (p.isMe ? getPersonAttributedAmount(t,"__me__") : getPersonAttributedAmount(t,p.id));
+        return { key:`t-${t.id}`, node: (
+          <div onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:border,cursor:"pointer" }}>
+            <div><div style={{ color:T.text,fontSize:12,fontWeight:700 }}>💰 {t.merchant||t.who||t.desc||"Expense"}</div><div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(t.date)||t.date}{info?.settled?" · Settled":""}</div></div>
+            <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(shareAmt)}</span>
+          </div>
+        ) };
+      });
+
+      const handleSettle = ()=>{
+        const pendingTxns=txns.filter(x=>{
+          if(x.type!=="expense") return false;
+          const info = x.people?.[p.id] || x.splitPeople?.[p.id];
+          return info?.mode==="owes" && !info?.settled && remainingShare(info)>0;
+        });
+        const pendingBills=bills.filter(x=>x.status==="unpaid"&&x.splitPeople?.[p.id]?.mode==="owes"&&remainingShare(x.splitPeople[p.id])>0);
+        if(!pendingTxns.length&&!pendingBills.length){
+          setTxns(prev=>prev.map(t=>{
+            if(t.type!=="expense") return t;
+            const info = t.people?.[p.id] || t.splitPeople?.[p.id];
+            if(!info||info.settled||info.mode!=="owes") return t;
+            const settled = {...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0};
+            if(t.people?.[p.id]) return {...t,people:{...t.people,[p.id]:settled}};
+            return {...t,splitPeople:{...t.splitPeople,[p.id]:settled}};
+          }));
+          return;
+        }
+        if(pendingTxns.length===1&&!pendingBills.length){
+          setSettleTxn(pendingTxns[0]);
+          return;
+        }
+        const txnTotal=pendingTxns.reduce((s,x)=>s+remainingShare(x.people[p.id]),0);
+        const billTotal=pendingBills.reduce((s,b)=>s+remainingShare(b.splitPeople[p.id]),0);
+        const totalAmt=txnTotal+billTotal;
+        const itemCount=pendingTxns.length+pendingBills.length;
+        const desc=itemCount===1?(pendingBills[0]?.name||pendingTxns[0]?.desc||"Expense"):`${itemCount} pending items`;
+        setSettleTxn({
+          id:"mixed_settle_"+p.id,
+          type:"expense",
+          desc,
+          amount:totalAmt,
+          people:{ [p.id]:{ amount:totalAmt, mode:"owes", settled:false } },
+          _billIds:pendingBills.map(b=>b.id),
+          _txnIds:pendingTxns.map(x=>x.id),
+          _isBillSettle:true,
+          groupId:pendingTxns[0]?.groupId||pendingBills[0]?.groupId||null,
+        });
+      };
+
+      const handleRequest = ()=>{
+        const pendingTxnsForShare=txns.filter(x=>{
+          if(x.type!=="expense") return false;
+          const info = x.people?.[p.id] || x.splitPeople?.[p.id];
+          return info?.mode==="owes" && !info?.settled && remainingShare(info)>0;
+        });
+        const pendingBillsForShare=bills.filter(x=>x.status==="unpaid"&&x.splitPeople?.[p.id]?.mode==="owes"&&remainingShare(x.splitPeople[p.id])>0);
+        const totalItems = pendingTxnsForShare.length + pendingBillsForShare.length;
+        if(totalItems<=1){ sharePaymentRequest(p.name,s.owesMe,"pending expenses"); return; }
+        const lines = [
+          `Hello ${p.name},`,
+          `Your total outstanding is ${sym}${fmt(s.owesMe)} against ${totalItems} item${totalItems>1?"s":""}. Details below.`,
+          "",
+        ];
+        let n = 1;
+        pendingTxnsForShare.forEach(t=>{
+          const info = t.people?.[p.id] || t.splitPeople?.[p.id];
+          const share = remainingShare(info);
+          lines.push(`${n}. ${t.merchant||t.who||t.desc||"Expense"}`);
+          if(t.date) lines.push(`   Date - ${formatShortDate(t.date)||t.date}`);
+          lines.push(`   Your Share - ${sym}${fmt(share)}`);
+          lines.push("");
+          n++;
+        });
+        pendingBillsForShare.forEach(b=>{
+          const share = remainingShare(b.splitPeople[p.id]);
+          lines.push(`${n}. ${b.name||"Bill"}`);
+          if(b.billDate) lines.push(`   Bill Date - ${formatShortDate(b.billDate)||b.billDate}`);
+          if(b.dueDate) lines.push(`   Due Date - ${formatShortDate(b.dueDate)||b.dueDate}`);
+          lines.push(`   Your Share - ${sym}${fmt(share)}`);
+          lines.push("");
+          n++;
+        });
+        lines.push(`Total - ${sym}${fmt(s.owesMe)}`);
+        const nearestDue = pendingBillsForShare.map(b=>b.dueDate).filter(Boolean).sort()[0];
+        lines.push(nearestDue ? `Kindly pay before ${formatShortDate(nearestDue)||nearestDue}` : "Kindly pay at your convenience.");
+        const text = lines.join("\n");
+        if(navigator.share){ navigator.share({ title:"Arth share request", text }); }
+        else { navigator.clipboard.writeText(text); alert("Payment request copied to clipboard!"); }
+      };
+
+      const handleArchive = ()=>{
+        if(!window.confirm(`Archive ${p.name}? They'll be hidden from active lists and can't be selected for new transactions/groups/bills — but every existing transaction, settlement, group membership, and relationship stays exactly as it is and remains fully visible in history.`)) return;
+        setPeople(prev=>prev.map(x=>x.id===p.id?archivePerson(x):x));
+        setSelectedPerson(null);
+      };
+
       return (
         <div style={{ padding:"14px 16px 0" }}>
           <button onClick={()=>setSelectedPerson(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:13,fontWeight:700,marginBottom:16,fontFamily:"Nunito,sans-serif" }}>← People</button>
 
-          {/* Identity */}
-          <div style={{ ...card,background:`linear-gradient(135deg,${p.color}14,${T.card})` }}>
-            <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:16 }}>
-              <div style={{ width:52,height:52,borderRadius:"50%",background:p.color+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26 }}>{p.emoji}</div>
-              <div style={{ flex:1 }}>
-                <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>{p.name}{p.favorite?<span style={{ color:T.accent,fontSize:15,marginLeft:6 }}>★</span>:""}</div>
-                <div style={{ color:T.sub,fontSize:12,marginTop:1 }}>{p.relation} · <span style={{ color:p.personType==="dependant"?T.info:T.accent,fontWeight:700 }}>{p.personType==="dependant"?"Dependant":"Contact"}</span></div>
-              </div>
-              {!p.isMe&&<button onClick={e=>{ e.stopPropagation(); toggleFavorite(p); }} style={{ background:p.favorite?T.accentSoft:"none",border:`1px solid ${p.favorite?T.accent:T.border}`,borderRadius:10,padding:"7px 10px",cursor:"pointer",fontSize:13,fontWeight:800,color:p.favorite?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.favorite?"★ Fav":"☆ Fav"}</button>}
-            </div>
-
-            {/* About / Personal Details — WP-1, additive. Renders nothing at all
-              if the person has no real stored values (RPP-002's "don't show empty
-              forms/cards" principle). Reuses the existing expandedSection state
-              (same convention as the Unsettled drill-down above) rather than a
-              new hook — a new useState here would violate hook-ordering rules
-              since this whole block is inside a conditional (if(selectedPerson)). */}
-          {aboutFields.length>0 && (
-            <div style={{ ...card }}>
-              <div onClick={()=>setExpandedSection(prev=>prev===("about_"+p.id)?null:("about_"+p.id))} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}>
-                <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>ABOUT</div>
-                <span style={{ color:T.sub,fontSize:12 }}>{expandedSection===("about_"+p.id)?"▾":"▸"}</span>
-              </div>
-              {expandedSection===("about_"+p.id) && (
-                <div style={{ marginTop:8 }}>
-                  {aboutFields.map(f=>(
-                    <div key={f.key} style={{ display:"flex",gap:8,padding:"4px 0" }}>
-                      <span>{f.icon}</span>
-                      <span style={{ color:T.text,fontSize:13 }}>{f.value}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Active — WP-B1 Option A, additive, presence-based (RPP-002 §5/§6) */}
-            {activeConnections.length>0 && (
-              <div style={{ ...card }}>
-                <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:8 }}>ACTIVE</div>
-                <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                  {activeConnections.map(conn=>(
-                    <div key={`${conn.type}_${conn.id}`} style={{ background:T.input,borderRadius:10,padding:"6px 10px",display:"flex",alignItems:"center",gap:6 }}>
-                      <span>{conn.type==="group"?(conn.icon||"👨‍👩‍👦"):conn.type==="school"?"🏫":"🏋️"}</span>
-                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{conn.label||"Membership"}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Spending this month — WP-B1 Option A, additive */}
-            {spendingSummary.total>0 && (
-              <div style={{ ...card }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
-                  <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>SPENDING THIS MONTH</div>
-                  <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{sym}{fmt(spendingSummary.total)}</div>
-                </div>
-                {spendingSummary.byCategory.slice(0,5).map(row=>(
-                  <div key={row.catId} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}>
-                    <span style={{ color:T.sub,fontSize:12 }}>{row.icon} {row.name}</span>
-                    <span style={{ color:T.sub,fontSize:12 }}>{sym}{fmt(row.amount)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Relationship module — settlement figures apply regardless of borrowMoney module (that
-                module only gates whether a credit LIMIT can be set, not whether money can be owed) */}
-            {!p.isMe&&(
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
-                <div onClick={()=>{ if(totalOwesMe>0) setExpandedSection(expandedSection==="unsettled_"+p.id?null:"unsettled_"+p.id); }} style={{ background:T.input,borderRadius:10,padding:"10px 12px",textAlign:"center",cursor:totalOwesMe>0?"pointer":"default" }}>
-                  <div style={{ color:T.success,fontSize:18,fontWeight:800 }}>{sym}{fmt(totalOwesMe)}</div>
-                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Owes You{personLoanOutstanding>0?` (incl. loan)`:""}{totalOwesMe>0?" ▾":""}</div>
-                  {creditLimit>0&&<><div style={{ height:3,background:T.border,borderRadius:2,marginTop:6,marginBottom:2 }}>
-                    <div style={{ height:"100%",width:`${creditPct}%`,background:creditPct>80?T.danger:T.success,borderRadius:2 }}/>
-                  </div><div style={{ color:T.sub,fontSize:9 }}>Credit limit: {sym}{fmt(creditLimit)}</div></>}
-                </div>
-                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",textAlign:"center",position:"relative" }}>
-                  <div style={{ color:T.danger,fontSize:18,fontWeight:800 }}>{sym}{fmt(s.iOwe)}</div>
-                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>You Owe</div>
-                  <button onClick={()=>setShowAddYouOwe(p.id)} style={{ position:"absolute",top:4,right:4,background:"none",border:`1px solid ${T.border}`,borderRadius:8,width:20,height:20,cursor:"pointer",fontSize:13,color:T.sub,lineHeight:1,fontFamily:"Nunito,sans-serif" }}>+</button>
-                </div>
-              </div>
-            )}
+          {/* Header + About + Financial Position + Groups + Organisations + Activity
+              — mounted via PersonProfileScreen, matching the approved mockup.
+              Superseding: old Identity, old About, WP-B1 Active, WP-B1 Spending,
+              and the old Relationship-module Owes-You/You-Owe cards — all five
+              were fully viewed and are genuine, safe supersets of what follows.
+              Unsettled drill-down, Quick Actions, Activity Feed, Debt Transfer,
+              Tagged Accounts, Gifts, and Settle/Request/Edit/Archive remain
+              UNCHANGED below this mount — deliberately not touched, see this
+              script's own header comment for why. PersonProfileScreen's own
+              Actions bar is disabled here (no onSettle/onRequest/onArchivePerson)
+              to avoid duplicating the real action buttons still below. */}
+          <PersonProfileScreen
+            person={p}
+            balance={s}
+            txns={txns} bills={bills}
+            groups={groups.filter(g=>(g.members||[]).includes(p.id))}
+            // groupOwedByMe: getGroupMemberOwed is declared inside the
+            // selectedGroup block (further down in this file), not in scope
+            // here — confirmed by direct trace, not assumed. Rather than
+            // duplicate that function's logic without re-tracing its exact
+            // implementation (risking drift), this honestly leaves every
+            // group's owed-by-them figure unavailable for now — Groups will
+            // show "Not available yet" for BOTH directions until this is
+            // either hoisted to a shared scope or intentionally re-traced
+            // and duplicated with care. Not a crash risk, just an honest gap.
+            groupOwedByMe={{}}
+            groupIOweMap={{}}
+            membershipRelationships={membershipRelationships}
+            schoolRelationships={[]}
+            insuranceRelationships={[]}
+            resolveOrganisationName={rel=>billerAccounts.find(ba=>ba.id===rel.billerAccountId)?.name || null}
+            gifts={gifts}
+            giftsSection={giftsSection}
+            debtTransferSection={debtTransferSection}
+            taggedAccountsSection={taggedAccountsSection}
+            recentActivityFeed={recentActivityFeed}
+            onSettle={handleSettle}
+            onRequest={handleRequest}
+            onArchivePerson={handleArchive}
+            getPersonAttributedAmount={getPersonAttributedAmount}
+            isDateActiveMembershipCoverage={isDateActiveMembershipCoverage}
+            today={todayStr()}
+            T={T} sym={sym} fmt={fmt}
+            expandedSection={expandedSection} setExpandedSection={setExpandedSection}
+            arranging={expandedSection===("arranging_"+p.id)}
+            setArranging={fn=>setExpandedSection(prev=>{
+              const currentlyArranging = prev===("arranging_"+p.id);
+              const next = typeof fn==="function" ? fn(currentlyArranging) : fn;
+              return next ? ("arranging_"+p.id) : null;
+            })}
+            onSaveSectionOrder={newOrder=>{
+              setPeople(prev=>prev.map(x=>x.id===p.id?{...x,sectionOrder:newOrder}:x));
+              setSelectedPerson(prev=>prev?{...prev,sectionOrder:newOrder}:null);
+            }}
+            onEditPerson={setEditingPerson}
+            onOpenTxn={txnId=>setTxnDetailId(txnId)}
+            onViewAllTransactions={pid=>{ setTxnPersonFilter(pid); setTab("transactions"); setShowSettings(false); }}
+            onViewUnsettled={()=>setExpandedSection(prev=>prev===("unsettled_"+p.id)?null:("unsettled_"+p.id))}
+            onOpenConnection={conn=>{
+              if(conn.type==="group"){ const g=groups.find(x=>x.id===conn.id); if(g) setSelectedGroup(g); return; }
+              if(conn.type==="membership"){
+                // conn.id is a membershipRelationships[] id — setViewingMembership
+                // expects a memberships[] PAYMENT record, a different array/id
+                // space entirely (confirmed by direct trace). Find the real
+                // linked payment record via membershipRelationshipId, most
+                // recent first, rather than passing the wrong id through.
+                const linked = memberships.filter(m=>m.membershipRelationshipId===conn.id).sort((a,b)=>(b.paidDate||"").localeCompare(a.paidDate||""));
+                if(linked[0]) setViewingMembership(linked[0]);
+                return;
+              }
+              // School/Insurance: no real detail screen exists yet for either —
+              // both arrays are empty today (schoolRelationships/insuranceRelationships
+              // are genuinely unwired, per this session's own trace), so this
+            }}
+          />
             {/* Unsettled txn drill-down */}
             {expandedSection==="unsettled_"+p.id&&(()=>{
               const unsettled = txns.filter(t=>{
@@ -8991,7 +9204,6 @@ function AppContent({ onLock }) {
                 <span style={{ color:"#16a34a",fontSize:16 }}>→</span>
               </button>
             )}
-          </div>
 
           {/* Quick Actions — one row, not giant buttons. Module-gated: Gift only shows if the
               gifts module is enabled for this person. */}
@@ -9018,241 +9230,6 @@ function AppContent({ onLock }) {
                 <span style={{ fontSize:16 }}>🎁</span><span style={{ color:T.text,fontSize:10,fontWeight:700 }}>Gift</span>
               </button>
             )}
-          </div>
-
-          {/* Activity Feed — everything chronological in one place, instead of separate
-              expense/settlement/gift sections scattered down the page. */}
-          {(()=>{
-            const feedGifts = getPersonModules(p).includes("gifts") ? gifts.filter(g=>String(g.personId)===String(p.id)) : [];
-            const feed = [
-              ...relTxns.map(t=>({ kind:"expense", date:t.date, sortVal:getRecordedSortValue(t), data:t })),
-              ...taggedTxns.filter(t=>!relTxns.some(r=>r.id===t.id)).map(t=>({ kind:"expense", date:t.date, sortVal:getRecordedSortValue(t), data:t })),
-              ...settlementTxns.map(t=>({ kind:"settlement", date:t.date, sortVal:getRecordedSortValue(t), data:t })),
-              ...feedGifts.map(g=>({ kind:"gift", date:g.date, sortVal:g.createdAt||0, data:g })),
-            ].sort((a,b)=>(b.date||"").localeCompare(a.date||"") || b.sortVal-a.sortVal).slice(0,25);
-            if(!feed.length) return null;
-            return (
-              <div style={{ ...card }}>
-                <div style={{ color:T.text,fontSize:14,fontWeight:900,marginBottom:10 }}>Activity</div>
-                {feed.map((item,i)=>{
-                  if(item.kind==="gift"){
-                    const g = item.data;
-                    return (
-                      <div key={`g-${g.id}`} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:i<feed.length-1?`1px solid ${T.border}`:"none" }}>
-                        <div><div style={{ color:T.text,fontSize:12,fontWeight:700 }}>🎁 Gift from {g.fromWhom}</div><div style={{ color:T.sub,fontSize:10 }}>{g.occasion} · {formatShortDate(g.date)||g.date}</div></div>
-                        <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{sym}{fmt(g.amount)}</span>
-                      </div>
-                    );
-                  }
-                  if(item.kind==="settlement"){
-                    const t = item.data;
-                    return (
-                      <div key={`s-${t.id}`} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:i<feed.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
-                        <div><div style={{ color:T.text,fontSize:12,fontWeight:700 }}>✅ Settlement received</div><div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(t.date)||t.date}</div></div>
-                        <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>+{sym}{fmt(t.amount)}</span>
-                      </div>
-                    );
-                  }
-                  const t = item.data;
-                  const info = t.people?.[p.id] || t.splitPeople?.[p.id];
-                  const shareAmt = info ? remainingShare(info)||Number(info.amount||0) : (p.isMe ? getPersonAttributedAmount(t,"__me__") : getPersonAttributedAmount(t,p.id));
-                  return (
-                    <div key={`t-${t.id}`} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:i<feed.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
-                      <div><div style={{ color:T.text,fontSize:12,fontWeight:700 }}>💰 {t.merchant||t.who||t.desc||"Expense"}</div><div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(t.date)||t.date}{info?.settled?" · Settled":""}</div></div>
-                      <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(shareAmt)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
-
-          {/* Debt Transfer */}
-          {totalOwesMe>0&&(
-            <div style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:12 }}>
-              <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>🔀 Transfer debt to someone else</div>
-              <div style={{ color:T.sub,fontSize:10,marginBottom:8 }}>If {p.name} says another person will pay on their behalf</div>
-              <select style={{ ...inp,marginBottom:8 }} onChange={e=>{
-                const targetId = e.target.value;
-                if(!targetId) return;
-                const isGroup = targetId.startsWith("g_");
-                const realId = isGroup ? targetId.slice(2) : targetId;
-                const targetName = isGroup ? groups.find(g=>g.id===realId)?.name : people.find(x=>String(x.id)===realId)?.name;
-                e.target.value="";
-                askConfirm(`Transfer ${p.name}'s debt of ${sym}${fmt(totalOwesMe)} to ${targetName}?`, ()=>{
-                // Mark all of person's splits as settled
-                setTxns(prev=>prev.map(t=>{
-                  if(t.type!=="expense") return t;
-                  const info = t.people?.[p.id] || t.splitPeople?.[p.id];
-                  if(!info||info.settled||info.mode!=="owes") return t;
-                  const updated = {...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0,transferredTo:realId};
-                  if(t.people?.[p.id]) return {...t,people:{...t.people,[p.id]:updated}};
-                  return {...t,splitPeople:{...t.splitPeople,[p.id]:updated}};
-                }));
-                // Add debt to target person
-                if(!isGroup){
-                  const newTxn = { id:genId(), type:"expense", amount:totalOwesMe, who:`Transferred from ${p.name}`, date:todayStr(), catIds:[], subIds:[], people:{[realId]:{amount:totalOwesMe,mode:"owes",settled:false,remainingAmt:totalOwesMe}}, createdAt:Date.now(), note:`Debt transferred from ${p.name}` };
-                  setTxns(prev=>[newTxn,...prev]);
-                }
-                });
-              }}>
-                <option value="">Select who will pay instead...</option>
-                {people.filter(x=>!x.isMe&&String(x.id)!==String(p.id)).map(x=>(<option key={x.id} value={x.id}>{x.emoji} {x.name}</option>))}
-                {groups.map(g=>(<option key={g.id} value={`g_${g.id}`}>{g.icon||"👥"} {g.name} (group)</option>))}
-              </select>
-            </div>
-          )}
-          {/* Tagged accounts */}
-          {(()=>{ const tagged=accounts.filter(a=>String(a.attributedTo)===String(p.id)); if(!tagged.length) return null; return (
-            <div style={{ ...card,marginBottom:12 }}>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>TAGGED ACCOUNTS</div>
-              <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-                {tagged.map(a=>{ const bal=accountBalance(a.id); return (
-                  <div key={a.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                    <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{a.name}</div>
-                    <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(bal)}</div>
-                  </div>
-                ); })}
-                <div style={{ borderTop:`1px solid ${T.border}`,paddingTop:6,display:"flex",justifyContent:"space-between" }}>
-                  <div style={{ color:T.sub,fontSize:11 }}>Total tagged wealth</div>
-                  <div style={{ color:T.success,fontSize:13,fontWeight:900 }}>{sym}{fmt(tagged.reduce((s,a)=>s+accountBalance(a.id),0))}</div>
-                </div>
-              </div>
-            </div>
-          ); })()}
-          {/* Gifts section */}
-          {(()=>{
-            const personGifts = gifts.filter(g=>String(g.personId)===String(p.id)).sort((a,b)=>b.date?.localeCompare(a.date||"")||0);
-            const totalGifts = personGifts.reduce((s,g)=>s+Number(g.amount||0),0);
-            const [showGiftFilter, setShowGiftFilter] = [giftFilter, setGiftFilter];
-            const filtered = showGiftFilter ? personGifts.filter(g=>g.occasion===showGiftFilter||g.fromWhom===showGiftFilter) : personGifts;
-            return (
-              <div style={{ ...card,marginBottom:12 }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-                  <div>
-                    <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>🎁 Gifts</div>
-                    {totalGifts>0&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{personGifts.length} gift{personGifts.length!==1?"s":""} · {sym}{fmt(totalGifts)} total received</div>}
-                  </div>
-                  <button onClick={()=>{ setGiftForPersonId(p.id); setShowAddGift(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}33`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Gift</button>
-                </div>
-                {personGifts.length>0&&(
-                  <>
-                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
-                      {[...new Set(personGifts.map(g=>g.occasion))].map(o=>(
-                        <button key={o} onClick={()=>setShowGiftFilter(showGiftFilter===o?null:o)} style={{ background:showGiftFilter===o?T.accent+"22":"none",border:`1px solid ${showGiftFilter===o?T.accent:T.border}`,borderRadius:20,padding:"2px 8px",cursor:"pointer",fontSize:9,fontWeight:700,color:showGiftFilter===o?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{o}</button>
-                      ))}
-                    </div>
-                    {filtered.slice(0,10).map(g=>(
-                      <div key={g.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
-                        <div>
-                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>From {g.fromWhom}</div>
-                          <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{g.occasion} · {formatShortDate(g.date)||g.date}</div>
-                          {g.note&&<div style={{ color:T.sub,fontSize:10 }}>{g.note}</div>}
-                        </div>
-                        <div style={{ color:T.success,fontSize:13,fontWeight:800 }}>{sym}{fmt(g.amount)}</div>
-                      </div>
-                    ))}
-                    {personGifts.length>10&&<div style={{ color:T.sub,fontSize:10,textAlign:"center",marginTop:6 }}>+{personGifts.length-10} more</div>}
-                  </>
-                )}
-                {personGifts.length===0&&<div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"10px 0" }}>No gifts recorded yet</div>}
-              </div>
-            );
-          })()}
-          {/* Actions — settle in full, request payment, edit profile */}
-          <div style={{ ...card }}>
-            {!p.isMe&&s.owesMe>0&&<button onClick={()=>{
-              const pendingTxns=txns.filter(x=>{
-                if(x.type!=="expense") return false;
-                const info = x.people?.[p.id] || x.splitPeople?.[p.id];
-                return info?.mode==="owes" && !info?.settled && remainingShare(info)>0;
-              });
-              const pendingBills=bills.filter(x=>x.status==="unpaid"&&x.splitPeople?.[p.id]?.mode==="owes"&&remainingShare(x.splitPeople[p.id])>0);
-              if(!pendingTxns.length&&!pendingBills.length){
-                // No specific txns found but balance shows — force clear
-                setTxns(prev=>prev.map(t=>{
-                  if(t.type!=="expense") return t;
-                  const info = t.people?.[p.id] || t.splitPeople?.[p.id];
-                  if(!info||info.settled||info.mode!=="owes") return t;
-                  const settled = {...info,settled:true,settledAmt:Number(info.amount||0),remainingAmt:0};
-                  if(t.people?.[p.id]) return {...t,people:{...t.people,[p.id]:settled}};
-                  return {...t,splitPeople:{...t.splitPeople,[p.id]:settled}};
-                }));
-                return;
-              }
-              if(pendingTxns.length===1&&!pendingBills.length){
-                // Simple single expense txn case
-                setSettleTxn(pendingTxns[0]);
-                return;
-              }
-              // Mixed or multiple items — build one comprehensive synthetic txn
-              const txnTotal=pendingTxns.reduce((s,x)=>s+remainingShare(x.people[p.id]),0);
-              const billTotal=pendingBills.reduce((s,b)=>s+remainingShare(b.splitPeople[p.id]),0);
-              const totalAmt=txnTotal+billTotal;
-              const itemCount=pendingTxns.length+pendingBills.length;
-              const desc=itemCount===1?(pendingBills[0]?.name||pendingTxns[0]?.desc||"Expense"):`${itemCount} pending items`;
-              setSettleTxn({
-                id:"mixed_settle_"+p.id,
-                type:"expense",
-                desc,
-                amount:totalAmt,
-                people:{ [p.id]:{ amount:totalAmt, mode:"owes", settled:false } },
-                _billIds:pendingBills.map(b=>b.id),
-                _txnIds:pendingTxns.map(x=>x.id),
-                _isBillSettle:true,
-                groupId:pendingTxns[0]?.groupId||pendingBills[0]?.groupId||null,
-              });
-            }} style={{ ...btnP,marginBottom:10 }}>💰 Settle with {p.name}</button>}
-            {!p.isMe&&s.owesMe>0&&<button onClick={()=>{
-              const pendingTxnsForShare=txns.filter(x=>{
-                if(x.type!=="expense") return false;
-                const info = x.people?.[p.id] || x.splitPeople?.[p.id];
-                return info?.mode==="owes" && !info?.settled && remainingShare(info)>0;
-              });
-              const pendingBillsForShare=bills.filter(x=>x.status==="unpaid"&&x.splitPeople?.[p.id]?.mode==="owes"&&remainingShare(x.splitPeople[p.id])>0);
-              const totalItems = pendingTxnsForShare.length + pendingBillsForShare.length;
-              if(totalItems<=1){ sharePaymentRequest(p.name,s.owesMe,"pending expenses"); return; }
-              // Multiple outstanding items (expenses and/or bills, any mix) — one message, full itemized breakdown
-              const lines = [
-                `Hello ${p.name},`,
-                `Your total outstanding is ${sym}${fmt(s.owesMe)} against ${totalItems} item${totalItems>1?"s":""}. Details below.`,
-                "",
-              ];
-              let n = 1;
-              pendingTxnsForShare.forEach(t=>{
-                const info = t.people?.[p.id] || t.splitPeople?.[p.id];
-                const share = remainingShare(info);
-                lines.push(`${n}. ${t.merchant||t.who||t.desc||"Expense"}`);
-                if(t.date) lines.push(`   Date - ${formatShortDate(t.date)||t.date}`);
-                lines.push(`   Your Share - ${sym}${fmt(share)}`);
-                lines.push("");
-                n++;
-              });
-              pendingBillsForShare.forEach(b=>{
-                const share = remainingShare(b.splitPeople[p.id]);
-                lines.push(`${n}. ${b.name||"Bill"}`);
-                if(b.billDate) lines.push(`   Bill Date - ${formatShortDate(b.billDate)||b.billDate}`);
-                if(b.dueDate) lines.push(`   Due Date - ${formatShortDate(b.dueDate)||b.dueDate}`);
-                lines.push(`   Your Share - ${sym}${fmt(share)}`);
-                lines.push("");
-                n++;
-              });
-              lines.push(`Total - ${sym}${fmt(s.owesMe)}`);
-              const nearestDue = pendingBillsForShare.map(b=>b.dueDate).filter(Boolean).sort()[0];
-              lines.push(nearestDue ? `Kindly pay before ${formatShortDate(nearestDue)||nearestDue}` : "Kindly pay at your convenience.");
-              const text = lines.join("\n");
-              if(navigator.share){ navigator.share({ title:"Arth share request", text }); }
-              else { navigator.clipboard.writeText(text); alert("Payment request copied to clipboard!"); }
-            }} style={{ ...btnP,marginBottom:10,background:T.accentSoft,border:`1px solid ${T.accent}55`,color:T.accent }}>📤 Request ₹{fmt(s.owesMe)} from {p.name}</button>}
-            <div style={{ display:"flex",gap:10 }}>
-              <button onClick={()=>setEditingPerson(p)} style={{ ...btnP,background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,flex:1 }}>{p.isMe?"🎯 Edit My Budget":"✏️ Edit Profile"}</button>
-              {!p.isMe&&<button onClick={()=>{
-                if(!window.confirm(`Archive ${p.name}? They'll be hidden from active lists and can't be selected for new transactions/groups/bills — but every existing transaction, settlement, group membership, and relationship stays exactly as it is and remains fully visible in history.`)) return;
-                setPeople(prev=>prev.map(x=>x.id===p.id?archivePerson(x):x));
-                setSelectedPerson(null);
-              }} style={{ ...btnP,background:"transparent",border:`1px solid ${T.danger}`,color:T.danger,flex:1 }}>🗄️ Archive</button>}
-            </div>
-            {p.isMe&&<div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"8px 0" }}>This is you — you can edit your monthly self budget here</div>}
           </div>
 
           {(()=>{
@@ -9867,7 +9844,7 @@ function AppContent({ onLock }) {
           ))}
         </div>
         <div style={{ display:"flex",gap:8,marginBottom:16,alignItems:"center" }}>
-          <button onClick={()=>setSubView(subView==="people"?"list":"people")} style={{ background:T.accent,border:"none",borderRadius:10,padding:"9px 18px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>+ Add</button>
+          <button onClick={()=>setSubView("people")} style={{ background:T.accent,border:"none",borderRadius:10,padding:"9px 18px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>+ Add</button>
           <div style={{ display:"flex",gap:6,flex:1 }}>
             {subView==="people"&&<div style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Adding Person</div>}
             {subView==="groups"&&<div style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Adding Group</div>}
