@@ -9108,7 +9108,17 @@ function AppContent({ onLock }) {
             membershipRelationships={membershipRelationships}
             schoolRelationships={[]}
             insuranceRelationships={[]}
-            resolveOrganisationName={rel=>billerAccounts.find(ba=>ba.id===rel.billerAccountId)?.name || null}
+            resolveOrganisationInfo={rel=>{
+              const ba = billerAccounts.find(x=>x.id===rel.billerAccountId);
+              if(!ba) return null;
+              const ICON_BY_TYPE = {
+                "Gym / Fitness": "🏋️", "Club Membership": "🎫", "School Fees": "🏫",
+                "Education Fees": "🎓", "Other Subscription": "📦", "Insurance": "🛡️",
+                "Society Maintenance": "🏢", "Rental": "🏠",
+              };
+              const statusLabel = rel.status==="active" ? "Active" : rel.status==="paused" ? "Paused" : rel.status==="ended" ? "Ended" : null;
+              return { name: ba.name, icon: ICON_BY_TYPE[ba.type] || "🔖", statusLabel };
+            }}
             gifts={gifts}
             giftsSection={giftsSection}
             debtTransferSection={debtTransferSection}
@@ -15903,6 +15913,9 @@ function AppContent({ onLock }) {
                         <div style={{ background:T.input,borderRadius:14,padding:"16px 14px",marginBottom:14,textAlign:"center" }}>
                           <div style={{ color:T.sub,fontSize:11,marginBottom:4 }}>Current outstanding</div>
                           <div style={{ color:outstanding>0?T.danger:T.success,fontSize:22,fontWeight:900 }}>{sym}{fmt(outstanding)}</div>
+                          {(()=>{ const { prevStatementDate, lastStatementDate } = getCardCycleDates(linkedCcAccount, new Date()); return (
+                            <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>Statement period: {formatShortDate(prevStatementDate)||prevStatementDate} – {formatShortDate(lastStatementDate)||lastStatementDate}</div>
+                          ); })()}
                         </div>
                         <button onClick={()=>{
                           setAddPrefill({ toAccId:linkedCcAccount.id });

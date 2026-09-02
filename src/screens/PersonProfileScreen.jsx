@@ -79,7 +79,13 @@ export function PersonProfileScreen({
   membershipRelationships = [],
   schoolRelationships = [], // real, only ever non-empty once Phase E wires real state — empty today, by design
   insuranceRelationships = [], // real, only non-empty once Insurance gets a personId field — empty today
-  resolveOrganisationName,  // (relationship) => string|null — real name resolver, injected
+  resolveOrganisationInfo,  // (relationship) => {name, icon, statusLabel}|null — real
+                            // name/icon/status resolver, injected. Resolves each
+                            // relationship's ACTUAL biller type (Gym/Insurance/School
+                            // Fees/etc.) rather than assuming what it is — fixes a real
+                            // bug where every Membership entry showed a hardcoded gym
+                            // icon regardless of what it actually was (an Insurance
+                            // policy showed as "Membership 🏋️" until this was caught).
   gifts = [],
   giftsSection,          // full existing Gifts block (list, filters, +Gift button), passed through as-is
   debtTransferSection,      // existing rendered content/handler, passed through as-is
@@ -116,7 +122,11 @@ export function PersonProfileScreen({
   const reminders = getPersonReminders(person, today);
   const uiTypeLabel = getPersonTypeUILabel(person.personType);
 
-  const activeMemberships = membershipRelationships.filter(r => r.personId === person.id && isDateActiveMembershipCoverage(today, r.statusHistory));
+  // Shows every real relationship, any status — resolveOrganisationInfo
+  // returns a real statusLabel (Active/Paused/Ended) per entry, rather
+  // than filtering to active-only and hardcoding "Active" for everything.
+  const allMemberships = membershipRelationships.filter(r => r.personId === person.id);
+  const activeMemberships = allMemberships; // kept name for organisationCount below
   const activeSchool = schoolRelationships.filter(r => r.personId === person.id && isDateActiveMembershipCoverage(today, r.statusHistory));
   const activeInsurance = insuranceRelationships.filter(r => r.personId === person.id);
   const organisationCount = activeMemberships.length + activeSchool.length + activeInsurance.length;
@@ -215,27 +225,36 @@ export function PersonProfileScreen({
         arranging={arranging} onMoveUp={() => onSaveSectionOrder(moveSection(sectionOrder, "organisations", "up"))} onMoveDown={() => onSaveSectionOrder(moveSection(sectionOrder, "organisations", "down"))}
         canMoveUp={sectionOrder.indexOf("organisations") > 0} canMoveDown={sectionOrder.indexOf("organisations") < sectionOrder.length - 1}>
         {organisationCount === 0 && <div style={{ color: T.sub, fontSize: 12 }}>None recorded.</div>}
-        {activeMemberships.map(rel => (
-          <div key={rel.id} onClick={() => onOpenConnection?.({ type: "membership", id: rel.id })} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.border}`, cursor: "pointer" }}>
-            <span style={{ fontSize: 18 }}>🏋️</span>
-            <div>
-              <div style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{resolveOrganisationName?.(rel) || "Membership"}</div>
-              <span style={{ color: T.success, fontSize: 11 }}>Active</span>
+        {activeMemberships.map(rel => {
+          const info = resolveOrganisationInfo?.(rel) || { name: "Membership", icon: "🔖", statusLabel: null };
+          return (
+            <div key={rel.id} onClick={() => onOpenConnection?.({ type: "membership", id: rel.id })} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.border}`, cursor: "pointer" }}>
+              <span style={{ fontSize: 18 }}>{info.icon}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{info.name}</div>
+              </div>
+              {info.statusLabel && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, borderRadius: 10, padding: "2px 8px",
+                  background: info.statusLabel === "Active" ? T.success + "22" : info.statusLabel === "Paused" ? (T.warn || T.accent) + "22" : T.border,
+                  color: info.statusLabel === "Active" ? T.success : info.statusLabel === "Paused" ? (T.warn || T.accent) : T.sub,
+                }}>{info.statusLabel}</span>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
         {/* School/Insurance ONLY render if the caller actually passed real, active
             relationship records — no placeholder card, ever, per explicit instruction. */}
         {activeSchool.map(rel => (
           <div key={rel.id} onClick={() => onOpenConnection?.({ type: "school", id: rel.id })} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.border}`, cursor: "pointer" }}>
             <span style={{ fontSize: 18 }}>🏫</span>
-            <div style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{resolveOrganisationName?.(rel) || "School"}</div>
+            <div style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{resolveOrganisationInfo?.(rel)?.name || "School"}</div>
           </div>
         ))}
         {activeInsurance.map(rel => (
           <div key={rel.id} onClick={() => onOpenConnection?.({ type: "insurance", id: rel.id })} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.border}`, cursor: "pointer" }}>
             <span style={{ fontSize: 18 }}>🛡️</span>
-            <div style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{resolveOrganisationName?.(rel) || "Insurance"}</div>
+            <div style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{resolveOrganisationInfo?.(rel)?.name || "Insurance"}</div>
           </div>
         ))}
       </SectionShell>
