@@ -9896,7 +9896,7 @@ function AppContent({ onLock }) {
                 <div style={{ display:"flex",flexDirection:"column",gap:6,marginBottom:16 }}>
                   {[["contact","Contact","They may owe you"],["dependant","Dependant","Family, you cover them"],["vendor","Vendor","You pay them for goods/services"],["employee","Employee","Reimbursements, payroll"],["tenant","Tenant","Rent, deposits"],["other","Other",""]].map(([v,l,sub])=>(
                     <button key={v} onClick={()=>{ setNewPersonType(v); setNewModules(null); }} style={{ background:newPersonType===v?"#16a34a18":"none",border:`1px solid ${newPersonType===v?"#16a34a":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
-                      <div style={{ fontSize:12,fontWeight:700,color:newPersonType===v?"#16a34a":T.text }}>{l}</div>
+                      <div style={{ fontSize:12,fontWeight:700,color:newPersonType===v?"#16a34a":T.text }}>{getPersonTypeUILabel(v) || l}</div>
                       {sub&&<div style={{ fontSize:10,color:T.sub,marginTop:2 }}>{sub}</div>}
                     </button>
                   ))}
@@ -15409,7 +15409,7 @@ function AppContent({ onLock }) {
             <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
               {[["contact","Contact","They may owe you"],["dependant","Dependant","Family, you cover them"],["vendor","Vendor","You pay them for goods/services"],["employee","Employee","Reimbursements, payroll"],["tenant","Tenant","Rent, deposits"],["other","Other",""]].map(([v,l,sub])=>(
                 <button key={v} onClick={()=>setPersonType(v)} style={{ background:personType===v?T.accentSoft:"none",border:`1px solid ${personType===v?T.accent:T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
-                  <div style={{ fontSize:12,fontWeight:700,color:personType===v?T.accent:T.text }}>{l}</div>
+                  <div style={{ fontSize:12,fontWeight:700,color:personType===v?T.accent:T.text }}>{getPersonTypeUILabel(v) || l}</div>
                   {sub&&<div style={{ fontSize:10,color:T.sub,marginTop:2 }}>{sub}</div>}
                 </button>
               ))}
