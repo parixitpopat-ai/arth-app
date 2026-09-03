@@ -24,7 +24,7 @@ import * as schoolFeesService from "../domain/schoolFees/service";
 import { calculateOutstanding } from "../domain/schoolFees/outstanding";
 import { calculateAnnualSummary } from "../domain/schoolFees/annualSummary";
 import { isPersonArchived } from "../domain/person/archive";
-import { resolveSchoolAttribution } from "./SchoolFeesScreen.helpers";
+import { resolveSchoolAttribution, attemptSchoolAttributionChange } from "./SchoolFeesScreen.helpers";
 
 const TEAL = "oklch(58% 0.14 195)";
 const TEAL_TEXT = "oklch(38% 0.1 195)";
@@ -204,6 +204,8 @@ export const SchoolFeeScheduleDetailModal = ({
   setViewingPeriod, setShowSettle, setShowCreditNote,
   selectedPeriodIds, setSelectedPeriodIds,
   createRealTxn, // injected: (amount) => txnId — the real expense-transaction flow, App.jsx's own
+  people, billerAccounts, setBillerAccounts, feeSchedules, setFeeSchedules,
+  schoolRelationships, setSchoolRelationships,
 }) => {
   const periods = useMemo(()=>feePeriods.filter(p=>p.scheduleId===schedule.id), [feePeriods, schedule.id]);
   const creditNotes = useMemo(()=>schoolCreditNotes.filter(n=>n.scheduleId===schedule.id), [schoolCreditNotes, schedule.id]);
@@ -213,6 +215,50 @@ export const SchoolFeeScheduleDetailModal = ({
   );
   const needingDeclaration = useMemo(()=>schoolFeesService.getPeriodsNeedingDeclaration(periods), [periods]);
   const availableCredit = summary.availableCredit;
+
+  // PPL-006 WP-6, Guard 1 — the intended, School-specific edit path.
+  const [changingPerson, setChangingPerson] = useState(false);
+  const [pendingPersonId, setPendingPersonId] = useState(schedule.personId||"");
+  const [attributionError, setAttributionError] = useState("");
+  const currentBillerAccount = useMemo(()=>(billerAccounts||[]).find(ba=>ba.id===schedule.billerAccountId)||null, [billerAccounts, schedule.billerAccountId]);
+  const currentPersonName = useMemo(()=>{
+    if(!schedule.personId) return "Not linked to a saved person";
+    if(schedule.personId==="__me__") return "Me";
+    return (people||[]).find(p=>p.id===schedule.personId)?.name || "Unknown person";
+  }, [people, schedule.personId]);
+  const savePersonChange = () => {
+    setAttributionError("");
+    const target = pendingPersonId || null;
+    if(!schedule.billerAccountId){
+      // No biller account exists yet for this schedule at all — this is the
+      // "was created before WP-4/never had a person picker used" case.
+      // Linking for the first time here follows the same create-if-needed
+      // logic AddSchoolYearModal already uses (resolveSchoolAttribution),
+      // not attemptSchoolAttributionChange (which only edits an EXISTING
+      // account's attribution — it never creates one).
+      if(!target){ setChangingPerson(false); return; } // nothing to do — already unlinked
+      const result = resolveSchoolAttribution({
+        personId: target, schoolName: schedule.schoolName, startDate: schedule.schoolYearStart||todayStr(),
+        billerAccounts, schoolRelationships, genId,
+      });
+      if(result.newBillerAccount) setBillerAccounts(prev=>[...prev, result.newBillerAccount]);
+      if(result.newRelationship) setSchoolRelationships(prev=>[...prev, result.newRelationship]);
+      setFeeSchedules(prev=>prev.map(fs=>fs.id===schedule.id?{...fs, billerAccountId: result.billerAccountId, personId: target}:fs));
+      setChangingPerson(false);
+      return;
+    }
+    const result = attemptSchoolAttributionChange({
+      billerAccountId: schedule.billerAccountId, currentPersonId: schedule.personId||null, targetPersonId: target,
+      excludeScheduleId: schedule.id, startDate: schedule.schoolYearStart||todayStr(),
+      feeSchedules, schoolRelationships, genId,
+    });
+    if(!result.ok){ setAttributionError(result.error); return; }
+    if(currentBillerAccount) setBillerAccounts(prev=>prev.map(ba=>ba.id===currentBillerAccount.id?{...ba, attributedTo: result.attributedTo||"", attributeType: result.attributedTo?"person":ba.attributeType}:ba));
+    if(result.endedRelationship) setSchoolRelationships(prev=>prev.map(r=>r.id===result.endedRelationship.id?result.endedRelationship:r));
+    if(result.newOrReusedRelationship) setSchoolRelationships(prev=>[...prev, result.newOrReusedRelationship]);
+    setFeeSchedules(prev=>prev.map(fs=>fs.id===schedule.id?{...fs, personId: result.attributedTo}:fs));
+    setChangingPerson(false);
+  };
 
   const toggleSelect = (periodId) => setSelectedPeriodIds(prev=>prev.includes(periodId) ? prev.filter(id=>id!==periodId) : [...prev, periodId]);
 
@@ -244,6 +290,33 @@ export const SchoolFeeScheduleDetailModal = ({
           <div style={{ color:T.text,fontSize:18,fontWeight:900,wordBreak:"break-word" }}>{schedule.schoolName}</div>
         </div>
         <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+      </div>
+
+      {/* PPL-006 WP-6 — the intended School-specific edit path. */}
+      <div style={{ background:T.input,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
+        {!changingPerson ? (
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <div>
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>For</div>
+              <div style={{ color:T.text,fontSize:13,fontWeight:700,marginTop:2 }}>{currentPersonName}</div>
+            </div>
+            <button onClick={()=>{ setPendingPersonId(schedule.personId||""); setAttributionError(""); setChangingPerson(true); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Change</button>
+          </div>
+        ) : (
+          <div>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",marginBottom:6 }}>For</div>
+            <select style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }} value={pendingPersonId} onChange={e=>setPendingPersonId(e.target.value)}>
+              <option value="">Not linked to a saved person</option>
+              <option value="__me__">Me</option>
+              {(people||[]).filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            {attributionError&&<div style={{ color:T.danger,fontSize:11,marginTop:8 }}>{attributionError}</div>}
+            <div style={{ display:"flex",gap:8,marginTop:10 }}>
+              <button onClick={savePersonChange} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Save</button>
+              <button onClick={()=>{ setChangingPerson(false); setAttributionError(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Annual commitment card */}

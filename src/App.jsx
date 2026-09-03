@@ -24,6 +24,7 @@ import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/Even
 import { AddExpectedIncomeModal, ExpectedIncomeListModal } from "./screens/ExpectedIncomeScreen";
 import { AddInsurancePolicyModal, InsurancePolicyListModal, InsurancePolicyDetailModal } from "./screens/InsuranceScreen";
 import { SchoolFeeScheduleListModal, AddSchoolYearModal, SchoolFeeScheduleDetailModal, SettlePaymentModal, PeriodDetailModal, AdjustmentModal, CreditNoteModal } from "./screens/SchoolFeesScreen";
+import { attemptSchoolAttributionChange } from "./screens/SchoolFeesScreen.helpers";
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
@@ -5827,7 +5828,8 @@ function AppContent({ onLock }) {
                     setBillerLinkId(id);
                     setShowBillPicker(false);
                     const ba=billerAccounts.find(b=>b.id===id);
-                    if(ba && getBillerActionType(ba.type)==="membership") setShowMembershipPanel(true);
+                    const baIsSchoolLinked = ba && ba.type==="School Fees" && schoolRelationships.some(r=>r.billerAccountId===ba.id && isSchoolRelationshipCurrent(r.statusHistory, todayStr()));
+                    if(ba && getBillerActionType(ba.type)==="membership" && !baIsSchoolLinked) setShowMembershipPanel(true);
                     // Auto-attribute from the biller account's own "Attributed To" setting — but only if
                     // nothing has been manually chosen yet in "Who is this for?", so this never overwrites
                     // a deliberate choice the person already made.
@@ -14728,6 +14730,30 @@ function AppContent({ onLock }) {
       }
       setDuplicateError("");
       const record = { id:existing?.id||genId(), billerId:existing?.billerId||preselectedBillerId||null, name:baName.trim(), type:baType, consumerNo:trimmedConsumerNo, provider:baProvider.trim(), attributedTo:baAttributedTo, attributeType:baAttributeType, note:baNote.trim(), createdAt:existing?.createdAt||Date.now() };
+      // PPL-006 WP-6, Guard 2 — the generic escape hatch this WP closes: this
+      // modal edits ANY biller type, including School Fees. Without this
+      // branch, changing attribution here would silently desync
+      // schoolRelationships[] from billerAccounts[] — the exact hazard
+      // WP-6's trace found. Every other biller type is completely
+      // unaffected — this only activates for an EXISTING School Fees
+      // account whose attribution is actually changing.
+      if(isEdit && existing?.type==="School Fees"){
+        const oldPersonId = existing.attributeType==="person" ? existing.attributedTo||null : null;
+        const newPersonId = baAttributeType==="person" ? baAttributedTo||null : null;
+        if(oldPersonId!==newPersonId){
+          const result = attemptSchoolAttributionChange({
+            billerAccountId: existing.id, currentPersonId: oldPersonId, targetPersonId: newPersonId,
+            startDate: todayStr(), feeSchedules, schoolRelationships, genId,
+          });
+          if(!result.ok){ setDuplicateError(result.error); return; }
+          record.attributedTo = result.attributedTo||"";
+          record.attributeType = result.attributedTo ? "person" : baAttributeType;
+          if(result.endedRelationship) setSchoolRelationships(prev=>prev.map(r=>r.id===result.endedRelationship.id?result.endedRelationship:r));
+          if(result.newOrReusedRelationship) setSchoolRelationships(prev=>[...prev, result.newOrReusedRelationship]);
+          setFeeSchedules(prev=>prev.map(fs=>fs.billerAccountId===existing.id?{...fs,personId:result.attributedTo}:fs));
+        }
+      }
+      setDuplicateError("");
       setBillerAccounts(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[...prev,record]);
       onClose();
     };
@@ -14871,9 +14897,19 @@ function AppContent({ onLock }) {
     const removePeriod = (id) => setPeriods(prev=>prev.filter(p=>p.id!==id));
 
     const canSave = totalAmount>0 && accId && catId && (coverageMode==="one" ? (startsOn&&endsOn) : (periods.length>0 && Math.abs(remaining)<0.5 && periods.every(p=>p.from&&p.to)));
+    // PPL-006 WP-6, Guard 3 (save level) — defense in depth alongside the
+    // gating-level suppression of the "Add Membership" button. This exists
+    // in case the button is ever reached through a stale UI state or a
+    // future refactor bypasses the gate — the save itself must also refuse.
+    const [schoolGuardError, setSchoolGuardError] = useState("");
 
     const handleSave = () => {
       if(!canSave) return;
+      if(billerAccount.type==="School Fees" && schoolRelationships.some(r=>r.billerAccountId===billerAccount.id && isSchoolRelationshipCurrent(r.statusHistory, todayStr()))){
+        setSchoolGuardError("This account is already linked as a School relationship — Membership records can't be added for it. Use the School Fees screen instead.");
+        return;
+      }
+      setSchoolGuardError("");
       const finalPeriods = coverageMode==="one"
         ? [{ id:existingPeriods?.length===1?existingPeriods[0].id:genId(), label:plan.charAt(0).toUpperCase()+plan.slice(1), from:startsOn, to:endsOn, amount:totalAmount, graceDays:Number(graceDays||0) }]
         : periods.map(p=>({ ...p, amount:parseFloat(p.amount)||0, graceDays:Number(p.graceDays||0) }));
@@ -15044,6 +15080,7 @@ function AppContent({ onLock }) {
               <input style={inp} placeholder="e.g. Paid in cash, or any other detail worth remembering" value={note} onChange={e=>setNote(e.target.value)}/>
             </div>
 
+            {schoolGuardError&&<div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",color:T.danger,fontSize:11,fontWeight:700 }}>{schoolGuardError}</div>}
             <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Membership"}</button>
           </div>
         </div>
@@ -15732,6 +15769,9 @@ function AppContent({ onLock }) {
           setShowCreditNote={setShowSchoolFeeCreditNote}
           selectedPeriodIds={selectedSchoolFeePeriodIds}
           setSelectedPeriodIds={setSelectedSchoolFeePeriodIds}
+          people={people} billerAccounts={billerAccounts} setBillerAccounts={setBillerAccounts}
+          feeSchedules={feeSchedules} setFeeSchedules={setFeeSchedules}
+          schoolRelationships={schoolRelationships} setSchoolRelationships={setSchoolRelationships}
         />}
         {showSettleSchoolFee&&<SettlePaymentModal
           onClose={()=>setShowSettleSchoolFee(false)}
@@ -15990,6 +16030,17 @@ function AppContent({ onLock }) {
         {activeBillerForAction&&!showAddMembership&&!showAddBill&&(()=>{
           const ba = activeBillerForAction;
           const actionType = getBillerActionType(ba.type);
+          // PPL-006 WP-6, Guard 3 (gating level) — "School Fees" sits in
+          // MEMBERSHIP_TYPES for legacy reasons (see WP-6 trace: the
+          // classification predates the School Fees financial engine and
+          // nothing legitimate depends on it). Once a School Fees account
+          // has a real schoolRelationships entry, the generic Membership
+          // flow must not be offered for it — creating a
+          // membershipRelationships entry for the same billerAccountId
+          // would be a second, competing relationship system for one
+          // identity. An account with NO relationship yet is unaffected —
+          // only an already-School-governed one is blocked here.
+          const isSchoolLinkedAccount = ba.type==="School Fees" && schoolRelationships.some(r=>r.billerAccountId===ba.id && isSchoolRelationshipCurrent(r.statusHistory, todayStr()));
           const baMemberships = memberships.filter(m=>m.billerAccountId===ba.id);
           const baBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
           return (
@@ -16082,7 +16133,7 @@ function AppContent({ onLock }) {
                     history for the card already lives on the account itself in Wealth. */}
                 {!ba.accId&&(
                 <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
-                  {(actionType==="membership"||actionType==="hybrid")&&(
+                  {(actionType==="membership"||actionType==="hybrid")&&!isSchoolLinkedAccount&&(
                     <button onClick={()=>setShowAddMembership(true)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>💪 Add Membership / Renew</button>
                   )}
                   {(actionType==="bill"||actionType==="hybrid")&&(
