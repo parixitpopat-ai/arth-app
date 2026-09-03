@@ -8875,7 +8875,7 @@ function AppContent({ onLock }) {
       const settlementTxns=txns.filter(t=>t.type==="settlement_in"&&t.fromPersonId===p.id&&personMonthFilter(t)).sort((a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a) || new Date(b.date||0)-new Date(a.date||0));
       // WP-B1 Option A — additive only, existing computations above are untouched.
       const activeConnections = getPersonActiveConnections(
-        p.id, { groups, membershipRelationships },
+        p.id, { groups, membershipRelationships, schoolRelationships },
         isDateActiveMembershipCoverage, isSchoolRelationshipCurrent, todayStr()
       );
       const spendingSummary = getPersonSpendingSummary(
@@ -9131,7 +9131,7 @@ function AppContent({ onLock }) {
             groupOwedByMe={{}}
             groupIOweMap={{}}
             membershipRelationships={membershipRelationships}
-            schoolRelationships={[]}
+            schoolRelationships={schoolRelationships}
             insuranceRelationships={[]}
             resolveOrganisationInfo={rel=>{
               const ba = billerAccounts.find(x=>x.id===rel.billerAccountId);
@@ -9183,9 +9183,13 @@ function AppContent({ onLock }) {
                 if(linked[0]) setViewingMembership(linked[0]);
                 return;
               }
-              // School/Insurance: no real detail screen exists yet for either —
-              // both arrays are empty today (schoolRelationships/insuranceRelationships
-              // are genuinely unwired, per this session's own trace), so this
+              // School: real data now flows here (PPL-006 WP-1 through WP-5)
+              // and shows correctly in the Organisations list above — what's
+              // still missing is a click-through detail screen for a School
+              // entry specifically, which is a separate, narrower gap than
+              // "unwired" and out of PPL-006's scope. Insurance remains
+              // genuinely unwired (insuranceRelationships={[]} above,
+              // untouched — a later, separate stream, not this one).
             }}
           />
             {/* Unsettled txn drill-down */}
