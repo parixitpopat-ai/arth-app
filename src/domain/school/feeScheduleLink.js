@@ -1,77 +1,74 @@
 // domain/school/feeScheduleLink.js
 //
-// WP-C3 (ARTH-003) — connects the School Relationship foundation (WP-C2,
-// domain/school/relationship.js) to the EXISTING School Fees domain
-// (domain/schoolFees/*), using the existing feeSchedule.personId field as
-// the join point, per the explicit scope: "establish exactly how Person ->
-// School Relationship -> existing School Fees should connect using the
-// existing feeSchedule.personId hook."
+// WP-C3 (ARTH-003), revised by PPL-006 WP-2 (2026-09-02) — connects the
+// School Relationship foundation (domain/school/relationship.js) to the
+// EXISTING School Fees domain (domain/schoolFees/*).
 //
-// This module changes NOTHING about feeSchedule's shape. It does not add
-// a field, does not touch domain/schoolFees/*.js, does not create a
-// transaction, and does not read or write App.jsx's feeSchedules[] state
-// directly — it's a pure function operating on whatever collections a
-// caller passes in, same discipline as every other domain module in this
-// codebase.
+// THE CONNECTION (revised): a feeSchedule "belongs to" a School
+// Relationship when feeSchedule.billerAccountId === relationship.billerAccountId
+// — per PPL-006 Decision D/E/F, billerAccounts[].id is now the sole
+// canonical School identity (relationship.js no longer has a separate
+// schoolId; see PPL-006 WP-1). This replaces the original personId-only
+// join, which is what caused the limitation below. This module still
+// changes NOTHING about feeSchedule's shape — feeSchedule.billerAccountId
+// already existed (domain/schoolFees/service.js's createSchoolFeeSchedule
+// has always accepted it), it simply wasn't the join key before now. No
+// new field is introduced anywhere by this change.
 //
-// THE CONNECTION: a feeSchedule "belongs to" a School Relationship when
-// feeSchedule.personId === relationship.personId — the shared Person is
-// the join key. This is the ONLY connection this WP establishes. School
-// identity is NOT duplicated: feeSchedule keeps its existing schoolName
-// string field exactly as-is; this module does not attempt to reconcile
-// schoolName against relationship.schoolId, and does not add a schoolId
-// (or schoolRelationshipId) field to feeSchedule. That reconciliation is
-// explicitly out of scope here — see the REAL LIMITATION note below.
+// LIMITATION RESOLVED, not just documented: the original version of this
+// module could not distinguish which of a person's multiple School
+// Relationships (e.g. after a school change) a given fee schedule belonged
+// to, because personId alone is shared across all of a person's
+// relationships. billerAccountId is unique per school/biller account, so
+// joining on it resolves this directly — proven by this file's own test
+// suite (feeScheduleLink.test.js), which previously asserted the ambiguity
+// as expected behavior and now asserts the correct, disambiguated result.
 //
-// REAL LIMITATION, discovered by this trace, not assumed away: feeSchedule
-// has no field referencing WHICH school (or which specific relationship)
-// it belongs to — only personId. If a Person has more than one School
-// Relationship over time (a school change, WP-C2's own core scenario),
-// filtering fee schedules by personId alone cannot distinguish which
-// relationship/school a given schedule belongs to — every schedule for
-// that person matches every one of their relationships equally. This is
-// not a bug in this module; it's an honest structural gap between what
-// exists today (feeSchedule.personId, feeSchedule.schoolName as a plain
-// string) and what the full target chain (Person -> School Relationship ->
-// Academic Year -> Fee Structure) eventually needs. Resolving it — most
-// likely by giving a future Fee Structure record a real reference to its
-// owning School Relationship, per RPP-002 §5/§10.1's Academic-Year-owns-
-// the-year decision — is explicitly a LATER work package, not this one.
+// getPersonFeeSchedules and isFeeScheduleLinkedToPerson are UNCHANGED and
+// deliberately still personId-based — they answer a genuinely different
+// question ("all of this person's schedules, regardless of which school")
+// than getFeeSchedulesForRelationship's per-relationship precision, and
+// were never the source of the ambiguity this WP resolves. Do not conflate
+// the two query shapes.
 //
 // CURRENT PRODUCTION STATE, confirmed by direct re-trace before writing
 // this file: App.jsx's one call site (AddSchoolYearModal) still hardcodes
-// personId={null}. This means, in production TODAY, every existing real
-// feeSchedule has personId===null, and every function in this module will
-// correctly find ZERO connections for real data until that changes — a
-// separate, later WP (wiring a real Person picker into AddSchoolYearModal,
-// per ARTH-003's own Phase E scoping), not this one.
+// both billerAccountId={null} and personId={null}. Every real feeSchedule
+// in production today has both fields null, so every function in this
+// module still correctly finds ZERO connections for real data until WP-3/4
+// wire a real Person/biller-account picker into that modal — unaffected by
+// this WP.
 
 /**
  * Which of a person's existing fee schedules connect to a given School
- * Relationship, via the shared personId join. Per the REAL LIMITATION
- * above, this cannot yet distinguish between two different relationships
- * for the same person — it returns every fee schedule for that person,
- * regardless of which school it was actually for.
+ * Relationship, via the shared billerAccountId — the canonical School
+ * identity (PPL-006). Unlike the original personId-only join, this
+ * correctly distinguishes between two different relationships for the
+ * same person (e.g. before and after a school change): each relationship
+ * only connects to fee schedules sharing its own billerAccountId.
  *
  * @param {Object} relationship - a School Relationship record (domain/school/relationship.js)
  * @param {Array} feeSchedules - the existing feeSchedules[] collection, untouched
- * @returns {Array} the subset of feeSchedules whose personId matches the
- *   relationship's personId — a NEW array; feeSchedules itself and every
- *   individual schedule object are returned by reference, never copied or
- *   altered.
+ * @returns {Array} the subset of feeSchedules whose billerAccountId matches
+ *   the relationship's billerAccountId — a NEW array; feeSchedules itself
+ *   and every individual schedule object are returned by reference, never
+ *   copied or altered.
  */
 export function getFeeSchedulesForRelationship(relationship, feeSchedules) {
-  if (!relationship || !relationship.personId) return [];
-  return (feeSchedules || []).filter(fs => fs && fs.personId === relationship.personId);
+  if (!relationship || !relationship.billerAccountId) return [];
+  return (feeSchedules || []).filter(fs => fs && fs.billerAccountId === relationship.billerAccountId);
 }
 
 /**
  * Which of a collection of fee schedules belong to a given Person, by the
- * same personId join — the more primitive version of the function above,
- * useful when a caller has a personId directly rather than a full
- * relationship record (e.g. a Person Overview screen listing all of a
- * person's fee schedules regardless of which specific school relationship
- * they came from).
+ * personId join — deliberately broader than getFeeSchedulesForRelationship:
+ * this answers "all of this person's schedules across every school they've
+ * ever had a relationship with," not "which schedule belongs to this one
+ * relationship." Useful when a caller has a personId directly rather than
+ * a full relationship record (e.g. a Person Overview screen listing every
+ * fee schedule for a person regardless of which specific school it came
+ * from). Unchanged by PPL-006 WP-2 — this was never the source of the
+ * ambiguity that WP resolves.
  *
  * @param {string} personId
  * @param {Array} feeSchedules
@@ -84,7 +81,9 @@ export function getPersonFeeSchedules(personId, feeSchedules) {
 
 /**
  * Does a specific fee schedule belong to a specific person? The smallest
- * possible version of the same join — a single boolean check.
+ * possible version of the same broader personId join — a single boolean
+ * check, unchanged by PPL-006 WP-2 for the same reason as
+ * getPersonFeeSchedules above.
  *
  * @param {Object} feeSchedule
  * @param {string} personId
