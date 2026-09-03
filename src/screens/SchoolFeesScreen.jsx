@@ -23,6 +23,8 @@ import EntityCard from "../components/EntityCard";
 import * as schoolFeesService from "../domain/schoolFees/service";
 import { calculateOutstanding } from "../domain/schoolFees/outstanding";
 import { calculateAnnualSummary } from "../domain/schoolFees/annualSummary";
+import { isPersonArchived } from "../domain/person/archive";
+import { resolveSchoolAttribution } from "./SchoolFeesScreen.helpers";
 
 const TEAL = "oklch(58% 0.14 195)";
 const TEAL_TEXT = "oklch(38% 0.1 195)";
@@ -71,7 +73,7 @@ export const SchoolFeeScheduleListModal = ({ onClose, T, sym, fmt, feeSchedules,
 // Add School Year — creates the schedule + generates its periods in one step
 // ============================================================================
 
-export const AddSchoolYearModal = ({ onClose, T, inp, lbl, setFeeSchedules, setFeePeriods, billerAccountId, personId }) => {
+export const AddSchoolYearModal = ({ onClose, T, inp, lbl, setFeeSchedules, setFeePeriods, people, billerAccounts, setBillerAccounts, schoolRelationships, setSchoolRelationships }) => {
   const [schoolName, setSchoolName] = useState("");
   const [schoolYearStart, setSchoolYearStart] = useState("");
   const [schoolYearEnd, setSchoolYearEnd] = useState("");
@@ -79,6 +81,17 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, setFeeSchedules, setF
   // Optional rate-rule overrides beyond the base rate, e.g. a mid-year fee change.
   const [extraRules, setExtraRules] = useState([]); // [{from, to, monthlyRate}]
   const [error, setError] = useState("");
+  // PPL-006 WP-4 — Person attribution, deliberately NOT required. "" means
+  // "not linked to a saved person": the schedule still gets created exactly
+  // as it always has (billerAccountId/personId both null) — the locked
+  // invariant (financial attribution != saved Person) means this must stay
+  // a fully legitimate, unpenalized choice, not a degraded fallback. This
+  // mirrors AddMembershipModal's "For" picker, with one deliberate
+  // difference: Membership always defaults to "__me__" (every membership
+  // belongs to someone); School does not, because unlike a membership
+  // payment, a School Fees schedule is routinely created before anyone has
+  // decided whether to track a Person relationship for it at all.
+  const [selectedPersonId, setSelectedPersonId] = useState("");
 
   const addExtraRule = () => setExtraRules(prev=>[...prev, { from:"", to:"", monthlyRate:"" }]);
   const updateExtraRule = (idx, field, value) => setExtraRules(prev=>prev.map((r,i)=>i===idx?{...r,[field]:value}:r));
@@ -96,12 +109,29 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, setFeeSchedules, setF
       ...extraRules.filter(r=>r.from && r.to && Number(r.monthlyRate)>0).map(r=>({ from:r.from, to:r.to, monthlyRate:Number(r.monthlyRate) })),
       { from: schoolYearStart.slice(0,7), to: schoolYearEnd.slice(0,7), monthlyRate: Number(baseRate) },
     ];
+    const trimmedName = schoolName.trim();
+
+    // PPL-006 WP-4 — resolve the canonical School identity (billerAccounts.id)
+    // via the extracted, tested helper. No person selected returns exactly
+    // today's pre-WP-4 behaviour unchanged (both ids null, nothing created).
+    const { billerAccountId: resolvedBillerAccountId, newBillerAccount, newRelationship } =
+      resolveSchoolAttribution({
+        personId: selectedPersonId || null,
+        schoolName: trimmedName,
+        startDate: schoolYearStart,
+        billerAccounts,
+        schoolRelationships,
+        genId,
+      });
+    if (newBillerAccount) setBillerAccounts(prev=>[...prev, newBillerAccount]);
+    if (newRelationship) setSchoolRelationships(prev=>[...prev, newRelationship]);
+
     try {
       const { schedule, periods } = schoolFeesService.createSchoolFeeSchedule(
-        { billerAccountId: billerAccountId||null, personId: personId||null, schoolYearStart, schoolYearEnd, rateRules },
+        { billerAccountId: resolvedBillerAccountId, personId: selectedPersonId||null, schoolYearStart, schoolYearEnd, rateRules },
         genId
       );
-      const scheduleWithName = { ...schedule, schoolName: schoolName.trim() };
+      const scheduleWithName = { ...schedule, schoolName: trimmedName };
       setFeeSchedules(prev=>[scheduleWithName, ...prev]);
       setFeePeriods(prev=>[...periods, ...prev]);
       onClose();
@@ -120,6 +150,15 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, setFeeSchedules, setF
         <div>
           <span style={lbl}>School Name *</span>
           <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. Springdale Academy" value={schoolName} onChange={e=>setSchoolName(e.target.value)} autoFocus/>
+        </div>
+        <div>
+          <span style={lbl}>For</span>
+          <select style={inp} value={selectedPersonId} onChange={e=>setSelectedPersonId(e.target.value)}>
+            <option value="">Not linked to a saved person</option>
+            <option value="__me__">Me</option>
+            {(people||[]).filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Optional — the schedule works either way. Link a person only if you want this school to show up on their profile.</div>
         </div>
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
           <div><span style={lbl}>School Year Start *</span><input style={inp} type="date" value={schoolYearStart} onChange={e=>setSchoolYearStart(e.target.value)}/></div>

@@ -766,22 +766,24 @@ function AppContent({ onLock }) {
   // The persistent School->Person relationship — School's own version of the
   // pattern above, built on the same lifecycle machinery. Carries only
   // active/ended (no pause; School has no product need for it — see
-  // src/domain/school/relationship.js). PPL-006 WP-3: state + persistence
-  // only. Nothing yet writes to this array — that's WP-4 (a real Person/
-  // biller-account picker in AddSchoolYearModal) and WP-5 (wiring the real
-  // array into Person Profile's Organisations section, replacing the two
-  // schoolRelationships={[]} hardcodes already in this file). Until then,
-  // this is intentionally always []  for every existing user — see
-  // PPL-006's own confirmed trace: the app has never had a way to populate
-  // this, so there is nothing to migrate.
+  // src/domain/school/relationship.js). PPL-006 WP-3 built state +
+  // persistence; PPL-006 WP-4 wired real creation through a Person picker in
+  // AddSchoolYearModal (SchoolFeesScreen.jsx) — a School relationship is now
+  // created only when a person is actually selected there, reusing an
+  // existing "School Fees" biller account + relationship for that person if
+  // one already exists, per the same reuse-before-create discipline
+  // AddMembershipModal already follows. Still not read anywhere — Person
+  // Profile's Organisations section still receives schoolRelationships={[]}
+  // (two hardcodes, unchanged) — that's WP-5, not this one.
   //
   // Financial attribution != saved Person (locked invariant, PPL-005/006):
   // this array exists to track a real, ongoing School relationship someone
   // has chosen to record against a saved Person. It must never become a
   // precondition for recording a School Fees payment itself --
-  // feeSchedules[] already works, and must keep working, with no person
-  // attributed at all (personId/billerAccountId both null, exactly as
-  // every real feeSchedule in production is today).
+  // feeSchedules[] still works, and still works with no person attributed
+  // at all (personId/billerAccountId both null) whenever "Not linked to a
+  // saved person" is chosen — the default, unpenalized option in WP-4's
+  // picker, not a degraded fallback.
   const [schoolRelationships, setSchoolRelationships] = useState(()=>JSON.parse(localStorage.getItem("arth_school_relationships")||"[]"));
   const [feePayments, setFeePayments] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_payments")||"[]"));
   const [showAddMembership, setShowAddMembership] = useState(false);
@@ -15714,7 +15716,7 @@ function AppContent({ onLock }) {
         {showAddPolicy&&<AddInsurancePolicyModal existing={editingPolicy} onClose={()=>{ setShowAddPolicy(false); setEditingPolicy(null); }} T={T} inp={inp} lbl={lbl} setInsurancePolicies={setInsurancePolicies} setBills={setBills} billers={billers}/>}
 
         {showSchoolFeesList&&<SchoolFeeScheduleListModal onClose={()=>setShowSchoolFeesList(false)} T={T} sym={sym} fmt={fmt} feeSchedules={feeSchedules} feePeriods={feePeriods} schoolCreditNotes={schoolCreditNotes} setShowAddSchedule={setShowAddSchoolYear} setViewingSchedule={(s)=>{ setViewingSchoolFeeSchedule(s); setShowSchoolFeesList(false); }}/>}
-        {showAddSchoolYear&&<AddSchoolYearModal onClose={()=>setShowAddSchoolYear(false)} T={T} inp={inp} lbl={lbl} setFeeSchedules={setFeeSchedules} setFeePeriods={setFeePeriods} billerAccountId={null} personId={null}/>}
+        {showAddSchoolYear&&<AddSchoolYearModal onClose={()=>setShowAddSchoolYear(false)} T={T} inp={inp} lbl={lbl} setFeeSchedules={setFeeSchedules} setFeePeriods={setFeePeriods} people={people} billerAccounts={billerAccounts} setBillerAccounts={setBillerAccounts} schoolRelationships={schoolRelationships} setSchoolRelationships={setSchoolRelationships}/>}
         {viewingSchoolFeeSchedule&&<SchoolFeeScheduleDetailModal
           schedule={viewingSchoolFeeSchedule}
           onClose={()=>{ setViewingSchoolFeeSchedule(null); setSelectedSchoolFeePeriodIds([]); }}
