@@ -763,6 +763,26 @@ function AppContent({ onLock }) {
   // above. Carries lifecycle state (active/paused/ended) that belongs to the relationship, not
   // to any one payment. See src/domain/membership/relationship.js.
   const [membershipRelationships, setMembershipRelationships] = useState(()=>JSON.parse(localStorage.getItem("arth_membership_relationships")||"[]"));
+  // The persistent School->Person relationship — School's own version of the
+  // pattern above, built on the same lifecycle machinery. Carries only
+  // active/ended (no pause; School has no product need for it — see
+  // src/domain/school/relationship.js). PPL-006 WP-3: state + persistence
+  // only. Nothing yet writes to this array — that's WP-4 (a real Person/
+  // biller-account picker in AddSchoolYearModal) and WP-5 (wiring the real
+  // array into Person Profile's Organisations section, replacing the two
+  // schoolRelationships={[]} hardcodes already in this file). Until then,
+  // this is intentionally always []  for every existing user — see
+  // PPL-006's own confirmed trace: the app has never had a way to populate
+  // this, so there is nothing to migrate.
+  //
+  // Financial attribution != saved Person (locked invariant, PPL-005/006):
+  // this array exists to track a real, ongoing School relationship someone
+  // has chosen to record against a saved Person. It must never become a
+  // precondition for recording a School Fees payment itself --
+  // feeSchedules[] already works, and must keep working, with no person
+  // attributed at all (personId/billerAccountId both null, exactly as
+  // every real feeSchedule in production is today).
+  const [schoolRelationships, setSchoolRelationships] = useState(()=>JSON.parse(localStorage.getItem("arth_school_relationships")||"[]"));
   const [feePayments, setFeePayments] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_payments")||"[]"));
   const [showAddMembership, setShowAddMembership] = useState(false);
   const [editingMembership, setEditingMembership] = useState(null);
@@ -926,6 +946,7 @@ function AppContent({ onLock }) {
   },[]);
   useEffect(()=>safeSetLocalStorage("arth_memberships",JSON.stringify(memberships)),[memberships]);
   useEffect(()=>safeSetLocalStorage("arth_membership_relationships",JSON.stringify(membershipRelationships)),[membershipRelationships]);
+  useEffect(()=>safeSetLocalStorage("arth_school_relationships",JSON.stringify(schoolRelationships)),[schoolRelationships]);
   // One-time backfill for payment records that predate the relationship entity. Idempotent —
   // migrateMembershipRelationships() skips anything already linked — but run once at mount only,
   // since every payment created going forward links to a relationship at creation time directly
@@ -7231,13 +7252,14 @@ function AppContent({ onLock }) {
     feeSchedules,
     feePeriods,
     schoolCreditNotes,
+    schoolRelationships,
     trackedAssets,
     loans,
     annualBudget,
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, schoolCreditNotes, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -7281,6 +7303,7 @@ function AppContent({ onLock }) {
     if(Array.isArray(snapshot.feeSchedules)) setFeeSchedules(snapshot.feeSchedules);
     if(Array.isArray(snapshot.feePeriods)) setFeePeriods(snapshot.feePeriods);
     if(Array.isArray(snapshot.schoolCreditNotes)) setSchoolCreditNotes(snapshot.schoolCreditNotes);
+    if(Array.isArray(snapshot.schoolRelationships)) setSchoolRelationships(snapshot.schoolRelationships);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
@@ -7640,7 +7663,7 @@ function AppContent({ onLock }) {
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, schoolCreditNotes, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
