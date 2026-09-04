@@ -374,7 +374,7 @@ export const SchoolFeeScheduleDetailModal = ({
           <div style={{ color:T.accent,fontSize:10,fontWeight:800,letterSpacing:0.5,textTransform:"uppercase" }}>School fee schedule</div>
           <div style={{ color:T.text,fontSize:18,fontWeight:900,wordBreak:"break-word" }}>{schedule.schoolName}</div>
         </div>
-        <button onClick={()=>setEditingSchoolSchedule(schedule)} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>✏️ Edit</button>
+        <button onClick={()=>{ setEditingSchoolSchedule(schedule); onClose(); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>✏️ Edit</button>
         <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
       </div>
 
