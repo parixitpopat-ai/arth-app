@@ -163,3 +163,24 @@ test("applyCredit reports a clear error for an unknown note or period id, rather
   const note = schoolFeesService.createCreditNote("sched1", 300, "reason", genId);
   assert.throws(() => schoolFeesService.applyCredit([note], [], note.id, "ghost-period", 100), /period ghost-period not found/);
 });
+
+test("P1: correctStartingState targets only the named period within the array, propagating the domain function's own errors unchanged", () => {
+  const { schedule, periods } = schoolFeesService.createSchoolFeeSchedule({
+    schoolYearStart: "2026-06-01", schoolYearEnd: "2026-08-31",
+    rateRules: [{ from: "2026-06", to: "2026-08", monthlyRate: 3500 }],
+  }, genId);
+  let feePeriods = schoolFeesService.declareStartingState(periods, periods[0].id, true); // June: fake-paid
+  const corrected = schoolFeesService.correctStartingState(feePeriods, periods[0].id, false, "Marked paid by mistake");
+  const june = corrected.find(p => p.id === periods[0].id);
+  const july = corrected.find(p => p.id === periods[1].id);
+  assert.equal(june.paidAmount, 0);
+  assert.equal(june.startingStateCorrections.length, 1);
+  assert.equal(july.startingStateDeclared, false); // untouched sibling
+
+  // Same error propagation discipline as the settlePeriods test above —
+  // the wrapper adds no validation of its own beyond targeting the id.
+  assert.throws(
+    () => schoolFeesService.correctStartingState(corrected, periods[1].id, false, "reason"),
+    /no starting-state declaration/
+  );
+});

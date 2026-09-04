@@ -743,6 +743,10 @@ function AppContent({ onLock }) {
   // School Fees UI state — screen-level only, no calculations live here.
   const [showSchoolFeesList, setShowSchoolFeesList] = useState(false);
   const [showAddSchoolYear, setShowAddSchoolYear] = useState(false);
+  // P1 — holds the schedule being edited (or null), separate from the
+  // create-only showAddSchoolYear boolean. AddSchoolYearModal renders when
+  // either is truthy; existing={editingSchoolSchedule} switches it into edit mode.
+  const [editingSchoolSchedule, setEditingSchoolSchedule] = useState(null);
   const [viewingSchoolFeeSchedule, setViewingSchoolFeeSchedule] = useState(null);
   const [viewingSchoolFeePeriod, setViewingSchoolFeePeriod] = useState(null);
   const [showSettleSchoolFee, setShowSettleSchoolFee] = useState(false);
@@ -15757,7 +15761,15 @@ function AppContent({ onLock }) {
         {showAddPolicy&&<AddInsurancePolicyModal existing={editingPolicy} onClose={()=>{ setShowAddPolicy(false); setEditingPolicy(null); }} T={T} inp={inp} lbl={lbl} setInsurancePolicies={setInsurancePolicies} setBills={setBills} billers={billers}/>}
 
         {showSchoolFeesList&&<SchoolFeeScheduleListModal onClose={()=>setShowSchoolFeesList(false)} T={T} sym={sym} fmt={fmt} feeSchedules={feeSchedules} feePeriods={feePeriods} schoolCreditNotes={schoolCreditNotes} setShowAddSchedule={setShowAddSchoolYear} setViewingSchedule={(s)=>{ setViewingSchoolFeeSchedule(s); setShowSchoolFeesList(false); }}/>}
-        {showAddSchoolYear&&<AddSchoolYearModal onClose={()=>setShowAddSchoolYear(false)} T={T} inp={inp} lbl={lbl} setFeeSchedules={setFeeSchedules} setFeePeriods={setFeePeriods} people={people} billerAccounts={billerAccounts} setBillerAccounts={setBillerAccounts} schoolRelationships={schoolRelationships} setSchoolRelationships={setSchoolRelationships}/>}
+        {(showAddSchoolYear||editingSchoolSchedule)&&<AddSchoolYearModal
+          existing={editingSchoolSchedule}
+          onClose={()=>{ setShowAddSchoolYear(false); setEditingSchoolSchedule(null); }}
+          T={T} inp={inp} lbl={lbl}
+          feePeriods={feePeriods} feeSchedules={feeSchedules}
+          setFeeSchedules={setFeeSchedules} setFeePeriods={setFeePeriods}
+          people={people} billerAccounts={billerAccounts} setBillerAccounts={setBillerAccounts}
+          schoolRelationships={schoolRelationships} setSchoolRelationships={setSchoolRelationships}
+        />}
         {viewingSchoolFeeSchedule&&<SchoolFeeScheduleDetailModal
           schedule={viewingSchoolFeeSchedule}
           onClose={()=>{ setViewingSchoolFeeSchedule(null); setSelectedSchoolFeePeriodIds([]); }}
@@ -15769,9 +15781,8 @@ function AppContent({ onLock }) {
           setShowCreditNote={setShowSchoolFeeCreditNote}
           selectedPeriodIds={selectedSchoolFeePeriodIds}
           setSelectedPeriodIds={setSelectedSchoolFeePeriodIds}
-          people={people} billerAccounts={billerAccounts} setBillerAccounts={setBillerAccounts}
-          feeSchedules={feeSchedules} setFeeSchedules={setFeeSchedules}
-          schoolRelationships={schoolRelationships} setSchoolRelationships={setSchoolRelationships}
+          people={people} billerAccounts={billerAccounts}
+          setEditingSchoolSchedule={setEditingSchoolSchedule}
         />}
         {showSettleSchoolFee&&<SettlePaymentModal
           onClose={()=>setShowSettleSchoolFee(false)}

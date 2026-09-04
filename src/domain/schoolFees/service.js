@@ -34,6 +34,7 @@ import {
   declareFeePeriodStartingState,
   getPeriodsNeedingDeclaration,
   editFeePeriodObligationAmount,
+  correctFeePeriodStartingState,
 } from "./startingState.js";
 import { calculateSelectedOutstandingTotal, resolveSettlementAllocations, settleFeePeriods } from "./settlement.js";
 import { applyDiscount, applyWriteOff } from "./discountWriteOff.js";
@@ -96,6 +97,13 @@ export function declareStartingState(feePeriods, periodId, wasPaid) {
 /** @returns {Array} a new feePeriods[] array, only the named period changed */
 export function editPeriodAmount(feePeriods, periodId, newAmount) {
   return (feePeriods || []).map(p => (p.id === periodId ? editFeePeriodObligationAmount(p, newAmount) : p));
+}
+
+// --- P1: correct an erroneous starting-state declaration --------------------
+
+/** @returns {Array} a new feePeriods[] array, only the named period changed */
+export function correctStartingState(feePeriods, periodId, newWasPaid, reason) {
+  return (feePeriods || []).map(p => (p.id === periodId ? correctFeePeriodStartingState(p, newWasPaid, reason) : p));
 }
 
 // --- Settlement (WP-5) -------------------------------------------------------

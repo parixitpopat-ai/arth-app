@@ -22,9 +22,11 @@ import EmptyState from "../components/EmptyState";
 import EntityCard from "../components/EntityCard";
 import * as schoolFeesService from "../domain/schoolFees/service";
 import { calculateOutstanding } from "../domain/schoolFees/outstanding";
+import { classifyPeriod } from "../domain/schoolFees/startingState";
 import { calculateAnnualSummary } from "../domain/schoolFees/annualSummary";
 import { isPersonArchived } from "../domain/person/archive";
 import { resolveSchoolAttribution, attemptSchoolAttributionChange } from "./SchoolFeesScreen.helpers";
+import { reconcileScheduleEdit } from "../domain/schoolFees/startingState";
 
 const TEAL = "oklch(58% 0.14 195)";
 const TEAL_TEXT = "oklch(38% 0.1 195)";
@@ -73,13 +75,20 @@ export const SchoolFeeScheduleListModal = ({ onClose, T, sym, fmt, feeSchedules,
 // Add School Year — creates the schedule + generates its periods in one step
 // ============================================================================
 
-export const AddSchoolYearModal = ({ onClose, T, inp, lbl, setFeeSchedules, setFeePeriods, people, billerAccounts, setBillerAccounts, schoolRelationships, setSchoolRelationships }) => {
-  const [schoolName, setSchoolName] = useState("");
-  const [schoolYearStart, setSchoolYearStart] = useState("");
-  const [schoolYearEnd, setSchoolYearEnd] = useState("");
-  const [baseRate, setBaseRate] = useState("");
+export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods, feeSchedules, setFeeSchedules, setFeePeriods, people, billerAccounts, setBillerAccounts, schoolRelationships, setSchoolRelationships }) => {
+  const isEdit = !!existing;
+  // P1 — reconstruct "base rate + overrides" for prefill from the schedule's
+  // flat rateRules array. The create flow always appends the base rule
+  // LAST (extraRules first) — reversing that ordering is the only evidence
+  // available for which entry was "the base," since rateRules itself makes
+  // no such distinction once saved.
+  const existingRules = existing?.rateRules || [];
+  const [schoolName, setSchoolName] = useState(existing?.schoolName || "");
+  const [schoolYearStart, setSchoolYearStart] = useState(existing?.schoolYearStart || "");
+  const [schoolYearEnd, setSchoolYearEnd] = useState(existing?.schoolYearEnd || "");
+  const [baseRate, setBaseRate] = useState(isEdit && existingRules.length ? String(existingRules[existingRules.length-1].monthlyRate) : "");
   // Optional rate-rule overrides beyond the base rate, e.g. a mid-year fee change.
-  const [extraRules, setExtraRules] = useState([]); // [{from, to, monthlyRate}]
+  const [extraRules, setExtraRules] = useState(isEdit ? existingRules.slice(0, -1).map(r=>({ from:r.from, to:r.to, monthlyRate:String(r.monthlyRate) })) : []);
   const [error, setError] = useState("");
   // PPL-006 WP-4 — Person attribution, deliberately NOT required. "" means
   // "not linked to a saved person": the schedule still gets created exactly
@@ -91,7 +100,11 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, setFeeSchedules, setF
   // belongs to someone); School does not, because unlike a membership
   // payment, a School Fees schedule is routinely created before anyone has
   // decided whether to track a Person relationship for it at all.
-  const [selectedPersonId, setSelectedPersonId] = useState("");
+  const [selectedPersonId, setSelectedPersonId] = useState(existing?.personId || "");
+
+  // P1 — impact-summary confirmation, shown only when reconcileScheduleEdit
+  // finds real impact (per your "never confirm a no-op" decision).
+  const [pendingImpact, setPendingImpact] = useState(null);
 
   const addExtraRule = () => setExtraRules(prev=>[...prev, { from:"", to:"", monthlyRate:"" }]);
   const updateExtraRule = (idx, field, value) => setExtraRules(prev=>prev.map((r,i)=>i===idx?{...r,[field]:value}:r));
@@ -99,17 +112,85 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, setFeeSchedules, setF
 
   const canSave = schoolName.trim() && schoolYearStart && schoolYearEnd && Number(baseRate)>0;
 
-  const save = () => {
-    setError("");
-    if(!canSave) return;
+  const buildRateRules = () => [
     // Base rate covers the whole range by default; extra rules layered on top
     // are placed AFTER the base rule so a real override (matching month) wins —
     // periodGeneration.js takes the FIRST matching rule, so overrides must come first.
-    const rateRules = [
-      ...extraRules.filter(r=>r.from && r.to && Number(r.monthlyRate)>0).map(r=>({ from:r.from, to:r.to, monthlyRate:Number(r.monthlyRate) })),
-      { from: schoolYearStart.slice(0,7), to: schoolYearEnd.slice(0,7), monthlyRate: Number(baseRate) },
-    ];
+    ...extraRules.filter(r=>r.from && r.to && Number(r.monthlyRate)>0).map(r=>({ from:r.from, to:r.to, monthlyRate:Number(r.monthlyRate) })),
+    { from: schoolYearStart.slice(0,7), to: schoolYearEnd.slice(0,7), monthlyRate: Number(baseRate) },
+  ];
+
+  // P1 — Person attribution save, structurally separate from schedule
+  // reconciliation, exactly as required: its own function call, its own
+  // result, applied independently. Never merged into the reconciliation
+  // path below, even though both are triggered by the same Save button.
+  const savePersonAttribution = () => {
+    const currentPersonId = existing.personId || null;
+    const targetPersonId = selectedPersonId || null;
+    if (currentPersonId === targetPersonId) return true; // no-op
+    const result = attemptSchoolAttributionChange({
+      billerAccountId: existing.billerAccountId, currentPersonId, targetPersonId,
+      startDate: schoolYearStart, feeSchedules, schoolRelationships, genId,
+    });
+    if (!result.ok) { setError(result.error); return false; }
+    if (existing.billerAccountId) {
+      setBillerAccounts(prev=>prev.map(ba=>ba.id===existing.billerAccountId?{...ba, attributedTo: result.attributedTo||"", attributeType: result.attributedTo?"person":ba.attributeType}:ba));
+    }
+    if (result.endedRelationship) setSchoolRelationships(prev=>prev.map(r=>r.id===result.endedRelationship.id?result.endedRelationship:r));
+    if (result.newOrReusedRelationship) setSchoolRelationships(prev=>[...prev, result.newOrReusedRelationship]);
+    setFeeSchedules(prev=>prev.map(s=>s.id===existing.id?{...s, personId: result.attributedTo}:s));
+    return true;
+  };
+
+  const applyScheduleReconciliation = (impact) => {
     const trimmedName = schoolName.trim();
+    setFeeSchedules(prev=>prev.map(s=>s.id===existing.id?{...s, schoolName: trimmedName, schoolYearStart, schoolYearEnd, rateRules: buildRateRules()}:s));
+    if (impact) {
+      const removeIds = new Set(impact.periodsToRemove.map(p=>p.id));
+      const updateMap = new Map(impact.periodsToUpdate.map(p=>[p.id, p]));
+      setFeePeriods(prev => {
+        const kept = prev
+          .filter(p => p.scheduleId!==existing.id || !removeIds.has(p.id))
+          .map(p => (p.scheduleId===existing.id && updateMap.has(p.id)) ? updateMap.get(p.id) : p);
+        const added = impact.periodsToAdd.map(p => ({ ...p, scheduleId: existing.id }));
+        return [...kept, ...added];
+      });
+    }
+  };
+
+  const save = () => {
+    setError("");
+    if(!canSave) return;
+    const trimmedName = schoolName.trim();
+
+    if (isEdit) {
+      const scheduleChanged = schoolYearStart!==existing.schoolYearStart || schoolYearEnd!==existing.schoolYearEnd
+        || JSON.stringify(buildRateRules())!==JSON.stringify(existing.rateRules||[]);
+      try {
+        if (scheduleChanged) {
+          const schedulePeriods = (feePeriods||[]).filter(p=>p.scheduleId===existing.id);
+          const impact = reconcileScheduleEdit({
+            feePeriods: schedulePeriods, newSchoolYearStart: schoolYearStart, newSchoolYearEnd: schoolYearEnd,
+            newRateRules: buildRateRules(), todayStr: todayStr(),
+          });
+          const hasRealImpact = impact.periodsToRemove.length>0 || impact.periodsToAdd.length>0
+            || impact.periodsToUpdate.length>0 || impact.protectedOutOfRange.length>0;
+          if (hasRealImpact) { setPendingImpact(impact); return; } // wait for explicit confirm — never a silent apply
+          applyScheduleReconciliation(null);
+        } else {
+          // Name-only change, or truly nothing changed — no reconciliation needed.
+          setFeeSchedules(prev=>prev.map(s=>s.id===existing.id?{...s, schoolName: trimmedName}:s));
+        }
+        if (!savePersonAttribution()) return; // error already set by the helper
+        onClose();
+      } catch(e) {
+        setError(e.message || "Could not save these changes.");
+      }
+      return;
+    }
+
+    // --- Create (unchanged from WP-4) ---
+    const rateRules = buildRateRules();
 
     // PPL-006 WP-4 — resolve the canonical School identity (billerAccounts.id)
     // via the extracted, tested helper. No person selected returns exactly
@@ -140,10 +221,48 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, setFeeSchedules, setF
     }
   };
 
+  const confirmImpactAndSave = () => {
+    applyScheduleReconciliation(pendingImpact);
+    setPendingImpact(null);
+    if (!savePersonAttribution()) return;
+    onClose();
+  };
+
+  if (pendingImpact) {
+    const fmtMonth = mk => { const [y,m]=mk.split("-"); return `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][Number(m)-1]} ${y}`; };
+    return (
+      <BottomSheet onClose={()=>setPendingImpact(null)} T={T} maxWidth={430} maxHeight="85vh" padding="20px 16px 48px" zIndex={341}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+          <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>This will:</div>
+          <button onClick={()=>setPendingImpact(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        </div>
+        <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
+          {pendingImpact.periodsToAdd.length>0 && (
+            <div style={{ color:T.text,fontSize:13 }}>+ Add {pendingImpact.periodsToAdd.length} period{pendingImpact.periodsToAdd.length===1?"":"s"}: {pendingImpact.periodsToAdd.map(p=>fmtMonth(p.periodStart.slice(0,7))).join(", ")}</div>
+          )}
+          {pendingImpact.periodsToUpdate.length>0 && (
+            <div style={{ color:T.text,fontSize:13 }}>~ Update {pendingImpact.periodsToUpdate.length} future period{pendingImpact.periodsToUpdate.length===1?"":"s"} to the new rate</div>
+          )}
+          {pendingImpact.periodsToRemove.length>0 && (
+            <div style={{ color:T.warn,fontSize:13 }}>- Remove {pendingImpact.periodsToRemove.length} unpaid period{pendingImpact.periodsToRemove.length===1?"":"s"} no longer in range: {pendingImpact.periodsToRemove.map(p=>fmtMonth(p.periodStart.slice(0,7))).join(", ")}</div>
+          )}
+          {pendingImpact.protectedOutOfRange.length>0 && (
+            <div style={{ color:T.sub,fontSize:13 }}>&bull; Keep {pendingImpact.protectedOutOfRange.length} period{pendingImpact.protectedOutOfRange.length===1?"":"s"} outside your new range unchanged, because they have real financial history: {pendingImpact.protectedOutOfRange.map(p=>fmtMonth(p.periodStart.slice(0,7))).join(", ")}</div>
+          )}
+        </div>
+        {error && <div style={{ color:T.warn,fontSize:11,marginBottom:10 }}>{error}</div>}
+        <div style={{ display:"flex",gap:8 }}>
+          <button onClick={()=>setPendingImpact(null)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
+          <button onClick={confirmImpactAndSave} style={{ flex:1,background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Confirm changes</button>
+        </div>
+      </BottomSheet>
+    );
+  }
+
   return (
     <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="85vh" padding="20px 16px 48px" zIndex={340}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-        <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Add School Year</div>
+        <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit School Fee Schedule":"Add School Year"}</div>
         <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
       </div>
       <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
@@ -186,8 +305,8 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, setFeeSchedules, setF
         <button onClick={addExtraRule} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Add a rate override for part of the year</button>
 
         {error && <div style={{ color:T.warn,fontSize:11 }}>{error}</div>}
-        <div style={{ color:T.sub,fontSize:10 }}>Saving generates one fee period per month in range. Each period can be individually corrected, discounted, or written off later — nothing here is final.</div>
-        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>Create Schedule</button>
+        <div style={{ color:T.sub,fontSize:10 }}>{isEdit?"Changes to dates or rates only affect future, unsettled periods — real payment history is never rewritten.":"Saving generates one fee period per month in range. Each period can be individually corrected, discounted, or written off later — nothing here is final."}</div>
+        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Schedule"}</button>
       </div>
     </BottomSheet>
   );
@@ -204,8 +323,7 @@ export const SchoolFeeScheduleDetailModal = ({
   setViewingPeriod, setShowSettle, setShowCreditNote,
   selectedPeriodIds, setSelectedPeriodIds,
   createRealTxn, // injected: (amount) => txnId — the real expense-transaction flow, App.jsx's own
-  people, billerAccounts, setBillerAccounts, feeSchedules, setFeeSchedules,
-  schoolRelationships, setSchoolRelationships,
+  people, billerAccounts, setEditingSchoolSchedule,
 }) => {
   const periods = useMemo(()=>feePeriods.filter(p=>p.scheduleId===schedule.id), [feePeriods, schedule.id]);
   const creditNotes = useMemo(()=>schoolCreditNotes.filter(n=>n.scheduleId===schedule.id), [schoolCreditNotes, schedule.id]);
@@ -216,49 +334,16 @@ export const SchoolFeeScheduleDetailModal = ({
   const needingDeclaration = useMemo(()=>schoolFeesService.getPeriodsNeedingDeclaration(periods), [periods]);
   const availableCredit = summary.availableCredit;
 
-  // PPL-006 WP-6, Guard 1 — the intended, School-specific edit path.
-  const [changingPerson, setChangingPerson] = useState(false);
-  const [pendingPersonId, setPendingPersonId] = useState(schedule.personId||"");
-  const [attributionError, setAttributionError] = useState("");
-  const currentBillerAccount = useMemo(()=>(billerAccounts||[]).find(ba=>ba.id===schedule.billerAccountId)||null, [billerAccounts, schedule.billerAccountId]);
+  // P1 — Person attribution now lives inside the combined Edit screen
+  // (AddSchoolYearModal, existing=schedule). This box is read-only display
+  // only — the standalone "Change" flow WP-6 built here is superseded, not
+  // duplicated: attemptSchoolAttributionChange is still the only function
+  // that ever writes attribution, called from the Edit screen's save path.
   const currentPersonName = useMemo(()=>{
     if(!schedule.personId) return "Not linked to a saved person";
     if(schedule.personId==="__me__") return "Me";
     return (people||[]).find(p=>p.id===schedule.personId)?.name || "Unknown person";
   }, [people, schedule.personId]);
-  const savePersonChange = () => {
-    setAttributionError("");
-    const target = pendingPersonId || null;
-    if(!schedule.billerAccountId){
-      // No biller account exists yet for this schedule at all — this is the
-      // "was created before WP-4/never had a person picker used" case.
-      // Linking for the first time here follows the same create-if-needed
-      // logic AddSchoolYearModal already uses (resolveSchoolAttribution),
-      // not attemptSchoolAttributionChange (which only edits an EXISTING
-      // account's attribution — it never creates one).
-      if(!target){ setChangingPerson(false); return; } // nothing to do — already unlinked
-      const result = resolveSchoolAttribution({
-        personId: target, schoolName: schedule.schoolName, startDate: schedule.schoolYearStart||todayStr(),
-        billerAccounts, schoolRelationships, genId,
-      });
-      if(result.newBillerAccount) setBillerAccounts(prev=>[...prev, result.newBillerAccount]);
-      if(result.newRelationship) setSchoolRelationships(prev=>[...prev, result.newRelationship]);
-      setFeeSchedules(prev=>prev.map(fs=>fs.id===schedule.id?{...fs, billerAccountId: result.billerAccountId, personId: target}:fs));
-      setChangingPerson(false);
-      return;
-    }
-    const result = attemptSchoolAttributionChange({
-      billerAccountId: schedule.billerAccountId, currentPersonId: schedule.personId||null, targetPersonId: target,
-      excludeScheduleId: schedule.id, startDate: schedule.schoolYearStart||todayStr(),
-      feeSchedules, schoolRelationships, genId,
-    });
-    if(!result.ok){ setAttributionError(result.error); return; }
-    if(currentBillerAccount) setBillerAccounts(prev=>prev.map(ba=>ba.id===currentBillerAccount.id?{...ba, attributedTo: result.attributedTo||"", attributeType: result.attributedTo?"person":ba.attributeType}:ba));
-    if(result.endedRelationship) setSchoolRelationships(prev=>prev.map(r=>r.id===result.endedRelationship.id?result.endedRelationship:r));
-    if(result.newOrReusedRelationship) setSchoolRelationships(prev=>[...prev, result.newOrReusedRelationship]);
-    setFeeSchedules(prev=>prev.map(fs=>fs.id===schedule.id?{...fs, personId: result.attributedTo}:fs));
-    setChangingPerson(false);
-  };
 
   const toggleSelect = (periodId) => setSelectedPeriodIds(prev=>prev.includes(periodId) ? prev.filter(id=>id!==periodId) : [...prev, periodId]);
 
@@ -289,34 +374,17 @@ export const SchoolFeeScheduleDetailModal = ({
           <div style={{ color:T.accent,fontSize:10,fontWeight:800,letterSpacing:0.5,textTransform:"uppercase" }}>School fee schedule</div>
           <div style={{ color:T.text,fontSize:18,fontWeight:900,wordBreak:"break-word" }}>{schedule.schoolName}</div>
         </div>
+        <button onClick={()=>setEditingSchoolSchedule(schedule)} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>✏️ Edit</button>
         <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
       </div>
 
-      {/* PPL-006 WP-6 — the intended School-specific edit path. */}
+      {/* P1 — read-only display. Person attribution now edits through the
+          combined Edit screen (above), which calls attemptSchoolAttributionChange
+          as a separate operation on save — this box no longer has its own
+          edit state or save path. */}
       <div style={{ background:T.input,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
-        {!changingPerson ? (
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-            <div>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>For</div>
-              <div style={{ color:T.text,fontSize:13,fontWeight:700,marginTop:2 }}>{currentPersonName}</div>
-            </div>
-            <button onClick={()=>{ setPendingPersonId(schedule.personId||""); setAttributionError(""); setChangingPerson(true); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Change</button>
-          </div>
-        ) : (
-          <div>
-            <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",marginBottom:6 }}>For</div>
-            <select style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }} value={pendingPersonId} onChange={e=>setPendingPersonId(e.target.value)}>
-              <option value="">Not linked to a saved person</option>
-              <option value="__me__">Me</option>
-              {(people||[]).filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            {attributionError&&<div style={{ color:T.danger,fontSize:11,marginTop:8 }}>{attributionError}</div>}
-            <div style={{ display:"flex",gap:8,marginTop:10 }}>
-              <button onClick={savePersonChange} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Save</button>
-              <button onClick={()=>{ setChangingPerson(false); setAttributionError(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
-            </div>
-          </div>
-        )}
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>For</div>
+        <div style={{ color:T.text,fontSize:13,fontWeight:700,marginTop:2 }}>{currentPersonName}</div>
       </div>
 
       {/* Annual commitment card */}
@@ -545,15 +613,32 @@ export const SettlePaymentModal = ({
 export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setFeePeriods, feePeriods, setShowAdjust, setAdjustKind, setAdjustTargetPeriodId, txns, accounts, onViewTransaction }) => {
   const [feeDraft, setFeeDraft] = useState(String(period.obligationAmount));
   const [error, setError] = useState("");
+  const [correctionReason, setCorrectionReason] = useState("");
 
   const und = !period.startingStateDeclared;
   const out = calculateOutstanding(period);
-  const touched = period.paidAmount>0 || period.discountAmount>0 || period.writeOffAmount>0 || period.appliedCreditAmount>0;
-  const editable = !und && !touched;
+  // P1 — domain/UI boundary correction. This used to reimplement the
+  // touched/editable rule inline (a duplicate of editFeePeriodObligationAmount's
+  // own guard, which drifted out of sync with P0's fix). classifyPeriod is
+  // now the single source of truth: the domain decides "protected" /
+  // "correctable" / "historical-editable" / "future"; this component only
+  // decides how to present whichever one comes back. No boolean logic about
+  // what's editable is computed here anymore, anywhere.
+  const classification = classifyPeriod(period, todayStr());
 
   const setStatus = (wasPaid) => {
     try {
       const updated = schoolFeesService.declareStartingState(feePeriods, period.id, wasPaid);
+      setFeePeriods(updated);
+      onClose();
+    } catch(e) { setError(e.message); }
+  };
+
+  const correctPeriod = () => {
+    setError("");
+    if(!correctionReason.trim()){ setError("A reason is required to correct this."); return; }
+    try {
+      const updated = schoolFeesService.correctStartingState(feePeriods, period.id, false, correctionReason.trim());
       setFeePeriods(updated);
       onClose();
     } catch(e) { setError(e.message); }
@@ -625,16 +710,24 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
 
       {!und && (
         <div style={{ background:T.input,borderRadius:16,padding:15,marginBottom:12 }}>
-          {editable ? (
+          {classification==="correctable" ? (
+            <>
+              <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>Marked paid at setup — no transaction on file</div>
+              <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.5,marginBottom:12 }}>This period was marked paid when the schedule was set up, but Arth has no actual payment on record for it — this is a starting-balance claim, not a witnessed transaction. If that was entered incorrectly, you can correct it.</div>
+              <span style={{ display:"block",color:T.sub,fontSize:9.5,fontWeight:700,textTransform:"uppercase",marginBottom:6 }}>Reason for correction *</span>
+              <input value={correctionReason} onChange={e=>setCorrectionReason(e.target.value)} placeholder="e.g. Marked paid by mistake at setup" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none",marginBottom:11 }}/>
+              <button onClick={correctPeriod} disabled={!correctionReason.trim()} style={{ width:"100%",padding:12,borderRadius:12,background:correctionReason.trim()?T.accent:T.border,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:correctionReason.trim()?"pointer":"not-allowed",fontFamily:"Nunito,sans-serif" }}>Correct — mark as actually unpaid</button>
+            </>
+          ) : classification==="protected" ? (
+            <>
+              <div style={{ color:T.text,fontSize:26,fontWeight:800,fontFamily:"monospace" }}>{sym}{fmt(period.obligationAmount)}</div>
+              <div style={{ color:T.sub,fontSize:11,lineHeight:1.5,marginTop:8 }}>This period has been settled or adjusted. Editing the fee would rewrite history — use a discount, write-off, or credit note instead.</div>
+            </>
+          ) : (
             <>
               <input type="number" value={feeDraft} onChange={e=>setFeeDraft(e.target.value)} style={{ width:"100%",border:`1.5px solid ${T.accent}55`,background:T.bg,borderRadius:12,padding:"11px 14px",fontSize:22,fontWeight:700,color:T.text,fontFamily:"monospace",outline:"none",marginBottom:9 }}/>
               <div style={{ color:T.sub,fontSize:11,lineHeight:1.5,marginBottom:11 }}>Changes only this period. It does not touch any other period, and does not alter any payment already recorded — this is a future obligation, not history.</div>
               <button onClick={saveFee} style={{ width:"100%",padding:12,borderRadius:12,background:T.accent,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Save fee for {period.label}</button>
-            </>
-          ) : (
-            <>
-              <div style={{ color:T.text,fontSize:26,fontWeight:800,fontFamily:"monospace" }}>{sym}{fmt(period.obligationAmount)}</div>
-              <div style={{ color:T.sub,fontSize:11,lineHeight:1.5,marginTop:8 }}>This period has been settled or adjusted. Editing the fee would rewrite history — use a discount, write-off, or credit note instead.</div>
             </>
           )}
         </div>
