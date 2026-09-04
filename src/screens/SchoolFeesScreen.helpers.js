@@ -205,3 +205,22 @@ export function attemptSchoolAttributionChange({
 
   return { ok: true, error: null, attributedTo: normalizedTarget, attributeType: "person", endedRelationship, newOrReusedRelationship };
 }
+
+/**
+ * Person -> School click-through (final acceptance item). Given the
+ * schedules a relationship resolves to (via the already-tested
+ * getFeeSchedulesForRelationship), pick the "most recent/current" one when
+ * more than one matches — no picker, per explicit product decision. "Most
+ * recent" is defined as the latest schoolYearEnd, not createdAt — schedules
+ * for the same school are almost always sequential academic years, and
+ * schoolYearEnd is the more semantically correct measure of "current" than
+ * creation order (which could, in principle, differ from chronological
+ * order for backfilled/historical data).
+ *
+ * @param {Array} schedules - feeSchedules[] entries already filtered to one relationship
+ * @returns {Object|null} the schedule with the latest schoolYearEnd, or null if empty
+ */
+export function pickMostRecentSchedule(schedules) {
+  if (!schedules || schedules.length === 0) return null;
+  return schedules.slice().sort((a, b) => (b.schoolYearEnd || "").localeCompare(a.schoolYearEnd || ""))[0];
+}

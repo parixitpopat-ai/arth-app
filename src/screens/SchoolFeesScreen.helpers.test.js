@@ -7,7 +7,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveSchoolAttribution, isBillerAccountSharedAcrossSchedules, attemptSchoolAttributionChange } from "./SchoolFeesScreen.helpers.js";
+import { resolveSchoolAttribution, isBillerAccountSharedAcrossSchedules, attemptSchoolAttributionChange, pickMostRecentSchedule } from "./SchoolFeesScreen.helpers.js";
 
 let idCounter = 0;
 const genId = () => `id_${++idCounter}`;
@@ -258,4 +258,31 @@ test("attemptSchoolAttributionChange: never mutates the input collections", () =
   attemptSchoolAttributionChange({ billerAccountId: "ba1", currentPersonId: "vyom_id", targetPersonId: "rahul_id", startDate: "2026-06-01", feeSchedules, schoolRelationships, genId });
   assert.deepEqual(feeSchedules, fsSnapshot);
   assert.deepEqual(schoolRelationships, srSnapshot);
+});
+
+// --- Person -> School click-through: pickMostRecentSchedule ----------------
+
+test("pickMostRecentSchedule: empty array returns null, not an error", () => {
+  assert.equal(pickMostRecentSchedule([]), null);
+  assert.equal(pickMostRecentSchedule(null), null);
+  assert.equal(pickMostRecentSchedule(undefined), null);
+});
+
+test("pickMostRecentSchedule: a single schedule is returned as-is", () => {
+  const schedule = { id: "s1", schoolYearEnd: "2026-03-31" };
+  assert.equal(pickMostRecentSchedule([schedule]), schedule);
+});
+
+test("pickMostRecentSchedule: picks the schedule with the LATEST schoolYearEnd, not array order or createdAt", () => {
+  const older = { id: "s1", schoolYearEnd: "2025-03-31", createdAt: 999999 }; // created later, but an earlier academic year
+  const newer = { id: "s2", schoolYearEnd: "2027-03-31", createdAt: 1 };      // created first, but the current academic year
+  assert.equal(pickMostRecentSchedule([older, newer]).id, "s2");
+  assert.equal(pickMostRecentSchedule([newer, older]).id, "s2"); // order-independent
+});
+
+test("pickMostRecentSchedule: never mutates the input array", () => {
+  const schedules = [{ id: "s1", schoolYearEnd: "2025-03-31" }, { id: "s2", schoolYearEnd: "2027-03-31" }];
+  const snapshot = JSON.parse(JSON.stringify(schedules));
+  pickMostRecentSchedule(schedules);
+  assert.deepEqual(schedules, snapshot);
 });

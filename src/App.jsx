@@ -24,7 +24,8 @@ import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/Even
 import { AddExpectedIncomeModal, ExpectedIncomeListModal } from "./screens/ExpectedIncomeScreen";
 import { AddInsurancePolicyModal, InsurancePolicyListModal, InsurancePolicyDetailModal } from "./screens/InsuranceScreen";
 import { SchoolFeeScheduleListModal, AddSchoolYearModal, SchoolFeeScheduleDetailModal, SettlePaymentModal, PeriodDetailModal, AdjustmentModal, CreditNoteModal } from "./screens/SchoolFeesScreen";
-import { attemptSchoolAttributionChange } from "./screens/SchoolFeesScreen.helpers";
+import { attemptSchoolAttributionChange, pickMostRecentSchedule } from "./screens/SchoolFeesScreen.helpers";
+import { getFeeSchedulesForRelationship } from "./domain/school/feeScheduleLink";
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
@@ -9189,13 +9190,24 @@ function AppContent({ onLock }) {
                 if(linked[0]) setViewingMembership(linked[0]);
                 return;
               }
-              // School: real data now flows here (PPL-006 WP-1 through WP-5)
-              // and shows correctly in the Organisations list above — what's
-              // still missing is a click-through detail screen for a School
-              // entry specifically, which is a separate, narrower gap than
-              // "unwired" and out of PPL-006's scope. Insurance remains
-              // genuinely unwired (insuranceRelationships={[]} above,
-              // untouched — a later, separate stream, not this one).
+              // P2 (final School acceptance item) — School: closes the one
+              // remaining gap from PPL-006's own trace. conn.id is a
+              // schoolRelationships[] id; resolve the real relationship,
+              // then reuse getFeeSchedulesForRelationship (WP-2, unmodified)
+              // exactly as it already exists — no new domain logic. If more
+              // than one schedule matches (multiple academic years at the
+              // same school), open the one with the latest schoolYearEnd —
+              // "most recent/current," not a picker, per explicit decision.
+              if(conn.type==="school"){
+                const relationship = schoolRelationships.find(r=>r.id===conn.id);
+                if(!relationship) return;
+                const matches = getFeeSchedulesForRelationship(relationship, feeSchedules);
+                const mostRecent = pickMostRecentSchedule(matches);
+                if(mostRecent) setViewingSchoolFeeSchedule(mostRecent);
+                return;
+              }
+              // Insurance remains genuinely unwired (insuranceRelationships={[]}
+              // above, untouched — a later, separate stream, not this one).
             }}
           />
             {/* Unsettled txn drill-down */}
