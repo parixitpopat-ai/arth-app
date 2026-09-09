@@ -17,6 +17,10 @@ import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig
 import { normalizeVendorText } from "./helpers/textHelpers";
 import { sym, fmt, fmtK, accountBucketLabel, accIcon, accLabel, txnColor, txnLabel, txnEmoji, formatInvestmentMetric } from "./helpers/formatters";
 import { genId } from "./helpers/idGenerator";
+import { Account, AccountValidationError } from "./domain/accounts/Account.js";
+import { accountFromStoredShape } from "./domain/accounts/accountFromStoredShape.js";
+import { accountToStoredShape } from "./domain/accounts/accountToStoredShape.js";
+import { isResolvedBehavior } from "./domain/accounts/legacyTypeMapping.js";
 import { parseMoney, cleanMoneyInput, nearlyEqualMoney } from "./helpers/currency";
 import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/GoalsScreen";
@@ -183,7 +187,7 @@ const normalizeAccountTypes = (stored, extraBehaviors=[]) => {
     if(!label) return;
     const requestedId = String(entry.id ?? "").trim();
     if(requestedId && seenIds.has(requestedId)) return;
-    const baseType = allBaseBehaviors.some(item=>item.id===entry.baseType) ? entry.baseType : "bank";
+    const baseType = allBaseBehaviors.some(item=>item.id===entry.baseType) ? entry.baseType : null;
     let id = requestedId || normalizeIncomeTypeValue(label) || `account_type_${index+1}`;
     while(seenIds.has(id)) id = `${normalizeIncomeTypeValue(label) || "account_type"}_${index+1}`;
     seenIds.add(id);
@@ -6350,29 +6354,35 @@ function AppContent({ onLock }) {
     const [accAttributeType,setAccAttributeType]=useState("person");
     const [needsCalibration,setNeedsCalibration]=useState(aType==="cash");
     const selectedAccountType = accountTypeOptions.find(item=>item.id===aType) || ACC_TYPES.find(item=>item.id===aType) || ACC_TYPES[0];
-    const selectedAccountBaseType = selectedAccountType.baseType || selectedAccountType.id || "bank";
+    const selectedAccountBaseType = selectedAccountType.baseType;
     const selectedAccountBucket = selectedAccountType.bucket || defaultAccountTypeBucket(selectedAccountBaseType);
     const banks=accounts.filter(a=>a.type==="bank");
     const submit=()=>{
       if(!name.trim()){setError("Name required");return;}
-      if(selectedAccountBaseType==="debit"&&!linkedBank){setError("Please link a bank account — required for debit cards");return;}
+      if(!isResolvedBehavior(selectedAccountBaseType)){setError("This account type needs a behavior mapping before it can be used to create an account.");return;}
       const base={
         id:genId(),
-        type:selectedAccountBaseType,
-        accountTypeId:selectedAccountType.id,
-        typeLabel:selectedAccountType.label,
-        typeIcon:selectedAccountType.icon,
-        typeBucket:selectedAccountBucket,
         name:name.trim(),
         color,
+        classificationId:selectedAccountType.id,
+        classificationLabel:selectedAccountType.label,
+        icon:selectedAccountType.icon,
+        bucket:selectedAccountBucket,
         attributedTo:accAttributedTo||null,
         attributeType:accAttributedTo?accAttributeType:null,
       };
-      if(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cash") setAccounts(p=>[...p,{...base,last4,openingBalance:parseMoney(openingBalance)||0,openingBalanceDate:openingBalanceDate||todayStr(),needsCalibration}]);
-      else if(selectedAccountBaseType==="cc") setAccounts(p=>[...p,{...base,last4,limit:parseFloat(limit)||0,outstanding:0,statementDate:parseInt(statementDate)||15,dueDate:parseInt(dueDate)||5,alertPct:Math.max(0,parseFloat(alertPct)||0),billingCycle:billingCycle||`${statementDate}th`}]);
-      else if(selectedAccountBaseType==="debit") setAccounts(p=>[...p,{...base,last4,linkedBank}]);
-      else if(selectedAccountBaseType==="upi") setAccounts(p=>[...p,{...base,handle,linkedAccount:linkedUpiAccount||""}]);
-      else setAccounts(p=>[...p,base]);
+      let typeSpecific = {};
+      if(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cash") typeSpecific = {last4,openingBalance:parseMoney(openingBalance)||0,openingBalanceDate:openingBalanceDate||todayStr(),needsCalibration};
+      else if(selectedAccountBaseType==="cc") typeSpecific = {last4,limit:parseFloat(limit)||0,outstanding:0,statementDate:parseInt(statementDate)||15,dueDate:parseInt(dueDate)||5,alertPct:Math.max(0,parseFloat(alertPct)||0),billingCycle:billingCycle||`${statementDate}th`};
+      else if(selectedAccountBaseType==="debit") typeSpecific = {last4,linkedBank};
+      else if(selectedAccountBaseType==="upi") typeSpecific = {handle,linkedAccount:linkedUpiAccount||""};
+      try {
+        const account = Account.create({ ...base, behavior:selectedAccountBaseType, ...typeSpecific });
+        setAccounts(p=>[...p,accountToStoredShape(account)]);
+      } catch(err) {
+        if(err instanceof AccountValidationError){ setError(err.message); return; }
+        throw err;
+      }
       setShowAddAccount(false);
     };
     return (
@@ -6786,6 +6796,7 @@ function AppContent({ onLock }) {
   const AccDetailModal = () => {
     const a=showAccDetail;
     if(!a) return null;
+    const isUnresolvedType = accountFromStoredShape(a).status !== "hydrated";
 
     const linkedBankAcc = a.type==="debit" ? accounts.find(b=>b.id===a.linkedBank) : null;
     const linkedUpiAcc = a.type==="upi" && a.linkedAccount ? accounts.find(b=>b.id===a.linkedAccount) : null;
@@ -6877,6 +6888,7 @@ function AppContent({ onLock }) {
             <div>
               <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{accIcon(a.type)} {a.name}</div>
               <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{accLabel(a.type)}{a.last4?` · ···${a.last4}`:""}</div>
+              {isUnresolvedType&&<div style={{ color:T.danger,fontSize:11,fontWeight:700,marginTop:4 }}>⚠️ Account type needs to be fixed</div>}
             </div>
             <button onClick={()=>setShowAccDetail(null)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
           </div>
@@ -11945,7 +11957,7 @@ function AppContent({ onLock }) {
                   <span>{type.icon}</span>
                   <span>{type.label}</span>
                   <span style={{ color:T.sub,fontSize:10 }}>({count})</span>
-                  <span style={{ color:T.sub,fontSize:10 }}>{type.custom ? accLabel(type.baseType) : "default"}</span>
+                  <span style={{ color:T.sub,fontSize:10 }}>{type.custom ? (isResolvedBehavior(type.baseType) ? accLabel(type.baseType) : "Needs behavior") : "default"}</span>
                   <span style={{ color:T.sub,fontSize:10 }}>{accountBucketLabel(type.bucket)}</span>
                   {type.custom&&<button onClick={()=>setAccountTypes(prev=>prev.filter(item=>item.id!==type.id))} style={{ background:"none",border:"none",cursor:"pointer",color:T.sub,fontSize:10,padding:0 }}>✕</button>}
                 </span>
@@ -12610,17 +12622,40 @@ function AppContent({ onLock }) {
     const [accAttributedTo, setAccAttributedTo] = useState(a.attributedTo||"");
     const [accAttributeType, setAccAttributeType] = useState(a.attributeType||"person");
     const [needsCalibration, setNeedsCalibration] = useState(a.needsCalibration ?? (a.type==="cash"));
+    const [error, setError] = useState("");
     const banks = accounts.filter(x=>x.type==="bank"&&x.id!==a.id);
+    // Hydrated once per render, reused by save() and the persistent warning
+    // below — accountFromStoredShape() is a pure read, never mutates `a`.
+    const hydrationResult = accountFromStoredShape(a);
+    const isUnresolvedType = hydrationResult.status !== "hydrated";
 
     const save = () => {
       if(!name.trim()) return;
-      setAccounts(prev=>prev.map(x=>x.id===a.id?{
-        ...x, name:name.trim(), last4, color, excludeFromWealth, attributedTo:accAttributedTo||null, attributeType:accAttributedTo?accAttributeType:null,
-        ...(a.type==="cc"&&{ limit:parseFloat(limit)||0, statementDate:parseInt(statementDate)||15, dueDate:parseInt(dueDate)||5, alertPct:Math.max(0,parseFloat(alertPct)||0), billingCycle:billingCycle||`${statementDate}th–${dueDate}th` }),
-        ...((a.type==="bank"||a.type==="cash")&&{ openingBalance:parseMoney(openingBalance)||0, openingBalanceDate:openingBalanceDate||todayStr(), needsCalibration }),
-        ...(a.type==="upi"&&{ handle, linkedAccount:linkedUpiAccount||"" }),
-        ...(a.type==="debit"&&{ linkedBank }),
-      }:x));
+      if(hydrationResult.status === "hydrated"){
+        const changes = {
+          name:name.trim(), last4, color, excludeFromWealth,
+          attributedTo:accAttributedTo||null, attributeType:accAttributedTo?accAttributeType:null,
+          ...(a.type==="cc"&&{ limit:parseFloat(limit)||0, statementDate:parseInt(statementDate)||15, dueDate:parseInt(dueDate)||5, alertPct:Math.max(0,parseFloat(alertPct)||0), billingCycle:billingCycle||`${statementDate}th–${dueDate}th` }),
+          ...((a.type==="bank"||a.type==="cash")&&{ openingBalance:parseMoney(openingBalance)||0, openingBalanceDate:openingBalanceDate||todayStr(), needsCalibration }),
+          ...(a.type==="upi"&&{ handle, linkedAccount:linkedUpiAccount||"" }),
+          ...(a.type==="debit"&&{ linkedBank }),
+        };
+        try {
+          hydrationResult.account.update(changes);
+        } catch(err) {
+          if(err instanceof AccountValidationError){ setError(err.message); return; }
+          throw err;
+        }
+        setAccounts(prev=>prev.map(x=>x.id===a.id?accountToStoredShape(hydrationResult.account):x));
+      } else {
+        // Unresolved (NEEDS_BEHAVIOR or INVALID_DATA): preserve exactly the
+        // narrow field-only save this modal already performed before this
+        // wiring — type/behavior are never touched, Account.update() is
+        // never called. Resolution UX is out of scope for WP-02.
+        setAccounts(prev=>prev.map(x=>x.id===a.id?{
+          ...x, name:name.trim(), last4, color, excludeFromWealth, attributedTo:accAttributedTo||null, attributeType:accAttributedTo?accAttributeType:null,
+        }:x));
+      }
       onClose();
     };
 
@@ -12635,6 +12670,7 @@ function AppContent({ onLock }) {
             <div style={{ background:T.input,borderRadius:10,padding:"8px 14px" }}>
               <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Type: {a.typeLabel || accLabel(a)}</div>
             </div>
+            {isUnresolvedType&&<div style={{ color:T.danger,fontSize:12,fontWeight:700 }}>⚠️ This account's type needs to be fixed. Only name, last 4 digits, color, and attribution can be edited until then.</ddiv>}
             <input style={inp} placeholder="Account name *" value={name} onChange={e=>setName(e.target.value)}/>
             {(a.type==="bank"||a.type==="cc"||a.type==="debit")&&<input style={inp} placeholder="Last 4 digits" maxLength={4} value={last4} onChange={e=>setLast4(e.target.value)}/>}
             {(a.type==="bank"||a.type==="cash")&&<div style={{ display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:10 }}>
@@ -12684,6 +12720,7 @@ function AppContent({ onLock }) {
             <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
               {PALETTE.map(c=><div key={c} onClick={()=>setColor(c)} style={{ width:28,height:28,borderRadius:7,background:c,cursor:"pointer",border:color===c?"3px solid #fff":"3px solid transparent" }}/>)}
             </div>
+            {error&&<div style={{ color:T.danger,fontSize:12,fontWeight:700 }}>⚠️ {error}</div>}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={onClose} style={btnG}>Cancel</button>
               <button onClick={save} style={btnP}>Save Changes ✓</button>
