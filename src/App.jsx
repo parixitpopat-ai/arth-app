@@ -21,6 +21,7 @@ import { Account, AccountValidationError } from "./domain/accounts/Account.js";
 import { accountFromStoredShape } from "./domain/accounts/accountFromStoredShape.js";
 import { accountToStoredShape } from "./domain/accounts/accountToStoredShape.js";
 import { isResolvedBehavior } from "./domain/accounts/legacyTypeMapping.js";
+import { evaluateObservedBalance, OBSERVATION_OUTCOME } from "./domain/accounts/evaluateObservedBalance.js";
 import { parseMoney, cleanMoneyInput, nearlyEqualMoney } from "./helpers/currency";
 import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/GoalsScreen";
@@ -4035,18 +4036,22 @@ function AppContent({ onLock }) {
       if(parsedTxnRef) setTransactionRef(parsedTxnRef);
 
       let balanceAdjusted = false;
+      let reconciledDiscrepancy = false;
       let smsBalance = null;
       let balanceDiff = 0;
       if(options.adjustBalance && primaryAccount && primaryAccount.type!=="cc"){
         smsBalance = extractSmsBalance(txt);
         if(smsBalance !== null){
-          const appBal = accountBalance(primaryAccount.id);
-          balanceDiff = smsBalance - appBal;
+          const existingCheckpoint = balanceCheckpoints[primaryAccount.id] || null;
+          const evaluation = evaluateObservedBalance({ effectiveBalance: effectiveAccountBalance(primaryAccount.id), existingCheckpoint, observedBalance: smsBalance });
+          balanceDiff = evaluation.diff;
           // Don't auto-adjust balance during paste — it triggers full re-render
           // Only adjust when explicitly called from balance sync, not during SMS parse
-          if(Math.abs(balanceDiff) > 0.01 && options.forceAdjust){
+          if(evaluation.outcome===OBSERVATION_OUTCOME.NO_CHECKPOINT && options.forceAdjust){
             setAccounts(prev=>prev.map(a=>a.id===primaryAccount.id?{...a,openingBalance:Number(a.openingBalance||0)+balanceDiff}:a));
             balanceAdjusted = true;
+          } else if(evaluation.outcome===OBSERVATION_OUTCOME.RECONCILED_DISCREPANCY){
+            reconciledDiscrepancy = true;
           }
         }
       }
@@ -4058,6 +4063,7 @@ function AppContent({ onLock }) {
         last4: last4s[0] || "",
         smsBalance,
         balanceAdjusted,
+        reconciledDiscrepancy,
         balanceDiff,
       });
       // Try auto-link EMI loan
