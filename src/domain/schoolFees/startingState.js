@@ -230,6 +230,20 @@ export function classifyPeriod(period, todayStr) {
  * month: does a period already exist for it, and if so, is it safe to
  * touch?
  *
+ * P0 (School Fees corrective WP) — eligibility for a rate/date-driven
+ * update is FINANCIAL-PROTECTION-based, not calendar-based. A period is
+ * only ever excluded from receiving the new rate because classifyPeriod()
+ * says it is "protected" (a genuine settlementLinks entry, or a discount/
+ * write-off/applied-credit — i.e. real financial history) or "correctable"
+ * (a fake-paid claim, which is a separate thing to fix via
+ * correctFeePeriodStartingState, not something a structure-wide rate edit
+ * should silently ride along with). Being in the past, by itself, is never
+ * a reason to leave an otherwise-untouched period on the old rate — that
+ * was the previous (incorrect) rule this replaces. This directly mirrors
+ * editFeePeriodObligationAmount()'s own guard one level up (period-level
+ * edits have never had a date restriction; only this schedule-level path
+ * used to).
+ *
  * @param {Object} params
  * @param {Array} params.feePeriods - ALL periods for this one schedule (caller
  *   filters by scheduleId before calling — this function is schedule-agnostic)
@@ -271,7 +285,11 @@ export function reconcileScheduleEdit({ feePeriods, newSchoolYearStart, newSchoo
       periodsToRemove.push(period);
       continue;
     }
-    if (classification === "future") {
+    // P0: "future" and "historical-editable" are both eligible — neither
+    // has any genuine financial fact behind it, so calendar age alone must
+    // not decide this. Only classifyPeriod()'s "protected" case (handled
+    // above) shields a period from the new rate.
+    if (classification === "future" || classification === "historical-editable") {
       const newRate = proposedByMonth.get(monthKey).obligationAmount;
       if (newRate !== period.obligationAmount) {
         periodsToUpdate.push({ ...period, obligationAmount: newRate });
@@ -280,7 +298,11 @@ export function reconcileScheduleEdit({ feePeriods, newSchoolYearStart, newSchoo
       }
       continue;
     }
-    // "correctable" or "historical-editable", in range — actuals, kept as-is.
+    // "correctable", in range — a fake-paid claim, not a settled fact, but
+    // deliberately left untouched by a structure-wide rate change anyway:
+    // correcting a mistaken paid declaration is its own explicit action
+    // (correctFeePeriodStartingState), not something a rate edit should
+    // silently ride along with.
     periodsUnchanged.push(period);
   }
 

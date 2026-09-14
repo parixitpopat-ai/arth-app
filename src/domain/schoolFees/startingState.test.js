@@ -354,24 +354,83 @@ test("reconcileScheduleEdit: a CORRECTABLE (fake-paid) out-of-range period IS re
   assert.ok(result.periodsToRemove.some(p => p.periodStart === "2027-01-01"));
 });
 
-test("reconcileScheduleEdit: rate-only change recalculates only future, unprotected periods", () => {
+test("reconcileScheduleEdit: P0 — rate change updates BOTH future AND historical-editable (past, untouched, unpaid) periods", () => {
   const feePeriods = makeSchedulePeriods({ start: "2026-06-01", end: "2027-03-31", rate: 3500 });
   const result = reconcileScheduleEdit({
     feePeriods, newSchoolYearStart: "2026-06-01", newSchoolYearEnd: "2027-03-31",
     newRateRules: [{ from: "2026-06", to: "2027-03", monthlyRate: 4000 }], todayStr: "2026-09-15",
   });
-  // Sept 2026 onward = future; June/July/Aug = past, never touched.
-  assert.ok(result.periodsToUpdate.every(p => p.periodStart.slice(0, 7) >= "2026-09"));
+  // Every period in this fixture is untouched/unprotected — June through
+  // March should ALL update, past (Jun/Jul/Aug) and future (Sep+) alike.
+  // This is the corrective behavior change: financial protection, not
+  // calendar age, decides eligibility.
+  assert.equal(result.periodsToUpdate.length, feePeriods.length);
   assert.ok(result.periodsToUpdate.every(p => p.obligationAmount === 4000));
+  const june = feePeriods.find(p => p.periodStart === "2026-06-01");
+  assert.ok(result.periodsToUpdate.some(p => p.id === june.id));
   assert.equal(result.periodsToRemove.length, 0);
   assert.equal(result.periodsToAdd.length, 0);
 });
 
-test("reconcileScheduleEdit: rate change never touches a PAST period, even if untouched", () => {
-  const feePeriods = makeSchedulePeriods({ start: "2026-06-01", end: "2027-03-31", rate: 3500 });
+test("reconcileScheduleEdit: P0 — a genuinely protected past period (settlementLinks) is NEVER updated by a rate change; calendar age is irrelevant", () => {
+  const feePeriods = makeSchedulePeriods({ start: "2026-06-01", end: "2027-03-31", rate: 3500 })
+    .map(p => p.periodStart === "2026-06-01" ? { ...p, paidAmount: 3500, settlementLinks: [{ txnId: "t1", amount: 3500 }] } : p);
   const result = reconcileScheduleEdit({
     feePeriods, newSchoolYearStart: "2026-06-01", newSchoolYearEnd: "2027-03-31",
     newRateRules: [{ from: "2026-06", to: "2027-03", monthlyRate: 9999 }], todayStr: "2026-09-15",
+  });
+  const june = feePeriods.find(p => p.periodStart === "2026-06-01");
+  assert.ok(!result.periodsToUpdate.some(p => p.id === june.id));
+  assert.ok(result.periodsUnchanged.some(p => p.id === june.id && p.obligationAmount === 3500));
+});
+
+test("reconcileScheduleEdit: P0 — a partially-paid past period (settlementLinks present, paidAmount < obligationAmount) is protected — 'partial' does not mean unprotected", () => {
+  const feePeriods = makeSchedulePeriods({ start: "2026-06-01", end: "2027-03-31", rate: 4500 })
+    .map(p => p.periodStart === "2026-07-01" ? { ...p, paidAmount: 2000, settlementLinks: [{ txnId: "cash1", amount: 2000 }] } : p);
+  const result = reconcileScheduleEdit({
+    feePeriods, newSchoolYearStart: "2026-06-01", newSchoolYearEnd: "2027-03-31",
+    newRateRules: [{ from: "2026-06", to: "2027-03", monthlyRate: 5000 }], todayStr: "2026-09-15",
+  });
+  const july = feePeriods.find(p => p.periodStart === "2026-07-01");
+  assert.ok(!result.periodsToUpdate.some(p => p.id === july.id));
+  assert.ok(result.periodsUnchanged.some(p => p.id === july.id && p.obligationAmount === 4500 && p.paidAmount === 2000));
+  // Sibling untouched past period (June) DOES update, proving the guard is
+  // per-period protection, not a blanket freeze once any period is touched.
+  const june = feePeriods.find(p => p.periodStart === "2026-06-01");
+  assert.ok(result.periodsToUpdate.some(p => p.id === june.id && p.obligationAmount === 5000));
+});
+
+test("reconcileScheduleEdit: P0 — a fully-paid past period is protected and never updated", () => {
+  const feePeriods = makeSchedulePeriods({ start: "2026-06-01", end: "2027-03-31", rate: 3500 })
+    .map(p => p.periodStart === "2026-06-01" ? { ...p, paidAmount: 3500, settlementLinks: [{ txnId: "t1", amount: 3500 }] } : p);
+  const result = reconcileScheduleEdit({
+    feePeriods, newSchoolYearStart: "2026-06-01", newSchoolYearEnd: "2027-03-31",
+    newRateRules: [{ from: "2026-06", to: "2027-03", monthlyRate: 9999 }], todayStr: "2026-09-15",
+  });
+  const june = feePeriods.find(p => p.periodStart === "2026-06-01");
+  assert.ok(!result.periodsToUpdate.some(p => p.id === june.id));
+  assert.ok(result.periodsUnchanged.some(p => p.id === june.id && p.obligationAmount === 3500));
+});
+
+test("reconcileScheduleEdit: P0 — a past period with a discount, write-off, or applied credit is protected and never updated", () => {
+  const base = makeSchedulePeriods({ start: "2026-06-01", end: "2026-08-31", rate: 3500 });
+  for (const [field, value] of [["discountAmount", 500], ["writeOffAmount", 500], ["appliedCreditAmount", 500]]) {
+    const feePeriods = base.map(p => p.periodStart === "2026-06-01" ? { ...p, [field]: value } : p);
+    const result = reconcileScheduleEdit({
+      feePeriods, newSchoolYearStart: "2026-06-01", newSchoolYearEnd: "2026-08-31",
+      newRateRules: [{ from: "2026-06", to: "2026-08", monthlyRate: 9999 }], todayStr: "2026-09-15",
+    });
+    const june = feePeriods.find(p => p.periodStart === "2026-06-01");
+    assert.ok(!result.periodsToUpdate.some(p => p.id === june.id), `${field} should have protected the period from update`);
+  }
+});
+
+test("reconcileScheduleEdit: P0 — a correctable (fake-paid) in-range period is left unchanged by a rate change; correcting the claim is a separate, explicit action", () => {
+  const feePeriods = makeSchedulePeriods({ start: "2026-06-01", end: "2026-08-31", rate: 3500 })
+    .map(p => p.periodStart === "2026-06-01" ? { ...p, startingStateDeclared: true, paidAmount: 3500, settlementLinks: [] } : p);
+  const result = reconcileScheduleEdit({
+    feePeriods, newSchoolYearStart: "2026-06-01", newSchoolYearEnd: "2026-08-31",
+    newRateRules: [{ from: "2026-06", to: "2026-08", monthlyRate: 9999 }], todayStr: "2026-09-15",
   });
   const june = feePeriods.find(p => p.periodStart === "2026-06-01");
   assert.ok(!result.periodsToUpdate.some(p => p.id === june.id));
@@ -388,14 +447,17 @@ test("reconcileScheduleEdit: rate change never touches a transaction-backed FUTU
   assert.ok(!result.periodsToUpdate.some(p => p.periodStart === "2026-12-01"));
 });
 
-test("reconcileScheduleEdit: combined shrink + rate change produces the correct union of both effects", () => {
+test("reconcileScheduleEdit: combined shrink + rate change produces the correct union of both effects — P0: update set now includes past unprotected months too", () => {
   const feePeriods = makeSchedulePeriods({ start: "2026-06-01", end: "2027-03-31", rate: 3500 });
   const result = reconcileScheduleEdit({
     feePeriods, newSchoolYearStart: "2026-06-01", newSchoolYearEnd: "2026-11-30", // shrink, drop Dec-Mar
     newRateRules: [{ from: "2026-06", to: "2026-11", monthlyRate: 4000 }], todayStr: "2026-09-15",
   });
-  assert.ok(result.periodsToRemove.every(p => p.periodStart.slice(0, 7) > "2026-11")); // shrink effect
-  assert.ok(result.periodsToUpdate.every(p => p.periodStart.slice(0, 7) >= "2026-09" && p.periodStart.slice(0, 7) <= "2026-11")); // rate effect, future-only
+  assert.ok(result.periodsToRemove.every(p => p.periodStart.slice(0, 7) > "2026-11")); // shrink effect, unchanged
+  // Jun-Nov are ALL updated now (past unprotected Jun/Jul/Aug + future Sep-Nov),
+  // not just Sep-Nov as under the old calendar-only rule.
+  assert.equal(result.periodsToUpdate.length, 6);
+  assert.ok(result.periodsToUpdate.every(p => p.periodStart.slice(0, 7) >= "2026-06" && p.periodStart.slice(0, 7) <= "2026-11"));
   assert.ok(result.periodsToUpdate.every(p => p.obligationAmount === 4000));
 });
 

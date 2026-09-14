@@ -240,9 +240,23 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
           {pendingImpact.periodsToAdd.length>0 && (
             <div style={{ color:T.text,fontSize:13 }}>+ Add {pendingImpact.periodsToAdd.length} period{pendingImpact.periodsToAdd.length===1?"":"s"}: {pendingImpact.periodsToAdd.map(p=>fmtMonth(p.periodStart.slice(0,7))).join(", ")}</div>
           )}
-          {pendingImpact.periodsToUpdate.length>0 && (
-            <div style={{ color:T.text,fontSize:13 }}>~ Update {pendingImpact.periodsToUpdate.length} future period{pendingImpact.periodsToUpdate.length===1?"":"s"} to the new rate</div>
-          )}
+          {pendingImpact.periodsToUpdate.length>0 && (()=>{
+            // P0 — periodsToUpdate can now legitimately include past, unpaid
+            // months (financial-protection-based eligibility, not calendar
+            // age). Split purely for display — reconcileScheduleEdit's own
+            // return shape is untouched; this is a UI-only re-derivation
+            // using the same todayStr() comparison classifyPeriod already
+            // makes internally.
+            const today = todayStr();
+            const pastCount = pendingImpact.periodsToUpdate.filter(p=>p.periodStart<today).length;
+            const futureCount = pendingImpact.periodsToUpdate.length - pastCount;
+            return (
+              <div style={{ color:T.text,fontSize:13 }}>
+                ~ Update {pendingImpact.periodsToUpdate.length} period{pendingImpact.periodsToUpdate.length===1?"":"s"} to the new rate
+                {pastCount>0 && <span style={{ color:T.warn }}> — including {pastCount} already-past, unpaid month{pastCount===1?"":"s"}{futureCount>0?` (plus ${futureCount} upcoming)`:""}</span>}
+              </div>
+            );
+          })()}
           {pendingImpact.periodsToRemove.length>0 && (
             <div style={{ color:T.warn,fontSize:13 }}>- Remove {pendingImpact.periodsToRemove.length} unpaid period{pendingImpact.periodsToRemove.length===1?"":"s"} no longer in range: {pendingImpact.periodsToRemove.map(p=>fmtMonth(p.periodStart.slice(0,7))).join(", ")}</div>
           )}
@@ -305,7 +319,7 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
         <button onClick={addExtraRule} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Add a rate override for part of the year</button>
 
         {error && <div style={{ color:T.warn,fontSize:11 }}>{error}</div>}
-        <div style={{ color:T.sub,fontSize:10 }}>{isEdit?"Changes to dates or rates only affect future, unsettled periods — real payment history is never rewritten.":"Saving generates one fee period per month in range. Each period can be individually corrected, discounted, or written off later — nothing here is final."}</div>
+        <div style={{ color:T.sub,fontSize:10 }}>{isEdit?"Changes to dates or rates apply to every unpaid, unprotected period — including past months — but never rewrite a period that's already been paid, discounted, or written off.":"Saving generates one fee period per month in range. Each period can be individually corrected, discounted, or written off later — nothing here is final."}</div>
         <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Schedule"}</button>
       </div>
     </BottomSheet>
