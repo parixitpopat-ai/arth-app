@@ -151,3 +151,35 @@ test("generateMigrationReport(): does not leak account id/name into the summary 
   assert.equal(serialized.includes("My Private Wallet"), false);
 });
 
+// --- WP-02 Step 1 regression: shared mapping-table extraction must not change behavior ---
+
+test("regression (WP-02 Step 1): migrateLegacyAccount still raises AccountCreated via Account.create() after mapping-table extraction", () => {
+  const legacy = { id: "a1", type: "bank", accountTypeId: "savings", typeLabel: "Savings Account", name: "HDFC Savings" };
+  const result = migrateLegacyAccount(legacy);
+  assert.equal(result.status, "migrated");
+  const events = result.account.pullEvents();
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, "AccountCreated");
+});
+
+test("regression (WP-02 Step 1): all 5 built-in types still map identically after extraction", () => {
+  const cases = [
+    { id: "r1", type: "bank", name: "B" },
+    { id: "r2", type: "cash", name: "C" },
+    { id: "r3", type: "cc", name: "CC" },
+    { id: "r4", type: "debit", name: "D", linkedBank: "bank1" },
+    { id: "r5", type: "upi", name: "U" },
+  ];
+  for (const legacy of cases) {
+    const result = migrateLegacyAccount(legacy);
+    assert.equal(result.status, "migrated", `expected ${legacy.type} to migrate`);
+    assert.equal(result.account.behavior, legacy.type);
+  }
+});
+
+test("regression (WP-02 Step 1): unresolved custom type still never defaults to bank after extraction", () => {
+  const legacy = { id: "a9", type: "crypto", typeLabel: "Crypto Wallet", name: "My Crypto" };
+  const result = migrateLegacyAccount(legacy);
+  assert.equal(result.status, "unresolved");
+  assert.equal(result.migrationState, MIGRATION_STATE.NEEDS_BEHAVIOR);
+});

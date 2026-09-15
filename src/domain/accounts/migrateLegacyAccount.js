@@ -24,17 +24,7 @@
 //     which is WP-02b's job (resolution UX), not this module's.
 
 import { Account, AccountValidationError } from "./Account.js";
-
-// Deterministic mapping for the 5 built-in legacy `type` values — matches
-// ACC_TYPES exactly. Per the migration decision table: High confidence,
-// built-in types were always unambiguous 1:1.
-const BUILT_IN_TYPE_TO_BEHAVIOR = {
-  bank: "bank",
-  cash: "cash",
-  cc: "cc",
-  debit: "debit",
-  upi: "upi",
-};
+import { mapLegacyTypeToBehavior } from "./legacyTypeMapping.js";
 
 export const MIGRATION_STATE = {
   NEEDS_BEHAVIOR: "NEEDS_BEHAVIOR",
@@ -49,7 +39,7 @@ export const MIGRATION_STATE = {
  *   - { status: "unresolved", migrationState, legacy, ...details }
  */
 export function migrateLegacyAccount(legacy) {
-  const behavior = BUILT_IN_TYPE_TO_BEHAVIOR[legacy.type];
+  const behavior = mapLegacyTypeToBehavior(legacy.type);
 
   if (!behavior) {
     // Per ADR-035: do not guess. Not "everything becomes bank", not

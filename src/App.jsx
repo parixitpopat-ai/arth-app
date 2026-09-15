@@ -11814,7 +11814,7 @@ function AppContent({ onLock }) {
           bucket,
           custom:true,
         }))
-      ]));
+      ], customBaseBehaviors));
       setNewIncomeTypeInput("");
     };
     const parseIncomeTypeNames = value => Array.from(new Set(
@@ -12677,7 +12677,7 @@ function AppContent({ onLock }) {
             <div style={{ background:T.input,borderRadius:10,padding:"8px 14px" }}>
               <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Type: {a.typeLabel || accLabel(a)}</div>
             </div>
-            {isUnresolvedType&&<div style={{ color:T.danger,fontSize:12,fontWeight:700 }}>⚠️ This account's type needs to be fixed. Only name, last 4 digits, color, and attribution can be edited until then.</ddiv>}
+            {isUnresolvedType&&<div style={{ color:T.danger,fontSize:12,fontWeight:700 }}>⚠️ This account's type needs to be fixed. Only name, last 4 digits, color, and attribution can be edited until then.</div>}
             <input style={inp} placeholder="Account name *" value={name} onChange={e=>setName(e.target.value)}/>
             {(a.type==="bank"||a.type==="cc"||a.type==="debit")&&<input style={inp} placeholder="Last 4 digits" maxLength={4} value={last4} onChange={e=>setLast4(e.target.value)}/>}
             {(a.type==="bank"||a.type==="cash")&&<div style={{ display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:10 }}>
