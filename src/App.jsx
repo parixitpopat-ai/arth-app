@@ -3,7 +3,13 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 const _bt = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : new Date();
 const APP_VERSION = `V4.${String(_bt.getDate()).padStart(2,"0")}${String(_bt.getMonth()+1).padStart(2,"0")}${String(_bt.getFullYear()).slice(-2)}${String(_bt.getHours()).padStart(2,"0")}${String(_bt.getMinutes()).padStart(2,"0")}${String(_bt.getSeconds()).padStart(2,"0")}`;
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
-import { getCurrentCloudUser, isCloudSyncConfigured, loadCloudSnapshot, saveCloudSnapshot, signInWithPassword, signOutCloud, signUpWithPassword, supabase } from "./cloudSync";
+import { getCurrentCloudUser, isCloudSyncConfigured, loadCloudSnapshot, saveCloudSnapshot, signInWithPassword, signOutCloud, signUpWithPassword, supabase, hasEverAuthenticatedOnThisDevice } from "./cloudSync";
+import { hasMeaningfulData, isMasterUserSetupComplete, determineFirstAuthAction, FIRST_AUTH_ACTIONS, summarizeMeaningfulData, mergeMasterUserProfileFields } from "./domain/identity/masterUserSetup";
+import WelcomeScreen from "./screens/WelcomeScreen";
+import AuthGateScreen from "./screens/AuthGateScreen";
+import MasterUserProfileScreen from "./screens/MasterUserProfileScreen";
+import CloudConflictScreen from "./screens/CloudConflictScreen";
+import CloudStateUnknownScreen from "./screens/CloudStateUnknownScreen";
 // smsBridge — stub (native SMS not available in web PWA)
 const isNativeSmsAvailable = () => false;
 const readCopiedSms = async () => ({ text: "", error: "Not supported" });
@@ -510,7 +516,7 @@ async function hashPin(pin) {
 }
 
 // ─── PIN SCREEN ───────────────────────────────────────────────────────────────
-function PinScreen({ onUnlock, isSetup, onCancel }) {
+function PinScreen({ onUnlock, isSetup, onCancel, subtitle }) {
   const [pin, setPin] = useState("");
   const [confirm, setConfirm] = useState("");
   const [step, setStep] = useState("enter");
@@ -541,7 +547,7 @@ function PinScreen({ onUnlock, isSetup, onCancel }) {
       <input ref={hiddenInputRef} type="tel" inputMode="numeric" pattern="[0-9]*" style={{position:"absolute",opacity:0,width:1,height:1,pointerEvents:"none"}} onChange={e=>{ const v=e.target.value.replace(/\D/g,""); if(v) { handleKey(v[v.length-1]); e.target.value=""; } }} onKeyDown={e=>{ if(e.key==="Backspace") handleKey("del"); }}/>
       <div style={{fontSize:52,marginBottom:12,color:"#22c55e",fontWeight:900,fontFamily:"Nunito,sans-serif"}}>₹</div>
       <div style={{color:"#22c55e",fontSize:30,fontWeight:900,marginBottom:6}}>Arth</div>
-      <div style={{color:"#5a5a7a",fontSize:13,marginBottom:40,textAlign:"center"}}>{isSetup?step==="enter"?"Set your 4-digit PIN":"Confirm your PIN":"Enter your PIN"}</div>
+      <div style={{color:"#5a5a7a",fontSize:13,marginBottom:40,textAlign:"center"}}>{subtitle || (isSetup?step==="enter"?"Set your 4-digit PIN":"Confirm your PIN":"Enter your PIN")}</div>
       <div style={{display:"flex",gap:18,marginBottom:14}}>
         {[0,1,2,3].map(i=><div key={i} style={{width:18,height:18,borderRadius:"50%",background:cur.length>i?"#22c55e":"transparent",border:"2px solid",borderColor:cur.length>i?"#22c55e":"#2a2a3a",transition:"all 0.15s"}}/>)}
       </div>
@@ -590,6 +596,22 @@ export default function Arth() {
   const pinLockMinsLeft = pinIsLocked ? Math.ceil((pinLockedUntil-Date.now())/60000) : 0;
   const lock = useCallback(()=>{ setUnlocked(false); setShowIdleWarning(false); setIdleCountdown(120); },[]);
 
+  // P1 revision — root-level auth model. "Established" means this device
+  // has completed Supabase auth before (persisted session token present),
+  // checked once, synchronously, without duplicating any Supabase logic
+  // here (see cloudSync.hasEverAuthenticatedOnThisDevice). Arth() owns
+  // zero auth logic either way — it only decides WHEN to mount AppContent
+  // and in which mode; AppContent (unchanged single owner of cloud state)
+  // does all the actual auth/setup work.
+  const [deviceEstablished] = useState(()=>!isCloudSyncConfigured || hasEverAuthenticatedOnThisDevice());
+  // Established devices: PIN gate applies immediately, same as always.
+  // New devices: PIN is deferred until AppContent's own cloud/profile gate
+  // (Welcome -> Sign Up/In -> OTP -> Setup/Migration) reports done, via
+  // onCloudSetupComplete below — "Set PIN" then reuses the SAME PinScreen
+  // that follows, not a second PIN flow.
+  const [cloudReady, setCloudReady] = useState(deviceEstablished);
+
+
   // Two-phase idle timer: warn at 5 minutes, lock 2 minutes later (7 min total)
   useEffect(()=>{
     if(!unlocked) return;
@@ -633,7 +655,18 @@ export default function Arth() {
     return ()=>document.removeEventListener("visibilitychange",handle);
   },[unlocked]);
 
-  if(!appPin) return <PinScreen isSetup onUnlock={async pin=>{
+  // P1 revision: genuinely new device — no PIN gate yet. AppContent runs
+  // ONLY its existing cloud/profile gate (Welcome -> Sign Up/In -> OTP ->
+  // Setup/Migration/Conflict, all built and tested already) and never
+  // reaches its main app render while suppressMainApp is set; once that
+  // gate is satisfied it calls onCloudSetupComplete instead, which flips
+  // cloudReady and lets this component fall through to the PIN-setup
+  // check below on the next render — the SAME PinScreen every device uses.
+  if(!cloudReady){
+    return <ErrorBoundary><AppContent onLock={lock} suppressMainApp onCloudSetupComplete={()=>setCloudReady(true)}/></ErrorBoundary>;
+  }
+
+  if(!appPin) return <PinScreen isSetup subtitle="Create a PIN to keep your Arth account secure on this device." onUnlock={async pin=>{
     const hash = await hashPin(pin);
     safeSetLocalStorage("arth_pin",hash);
     setAppPin(hash);
@@ -688,7 +721,7 @@ export default function Arth() {
 }
 
 // ─── APP ──────────────────────────────────────────────────────────────────────
-function AppContent({ onLock }) {
+function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
   const [dark, setDark] = useState(()=>JSON.parse(localStorage.getItem("arth_dark")??"true"));
   const [autoDetectExpenseCategory, setAutoDetectExpenseCategory] = useState(()=>JSON.parse(localStorage.getItem("arth_auto_category")??"true"));
   const [workTripMode, setWorkTripMode] = useState(()=>JSON.parse(localStorage.getItem("arth_work_trip")??"false"));
@@ -7220,6 +7253,33 @@ function AppContent({ onLock }) {
   const applyingCloudSnapshotRef = useRef(false);
   const cloudSnapshotRef = useRef(null);
   const syncConflictPendingRef = useRef(false); // set when "local looks newer than cloud" fires in
+  // P1 — Master User / Signup. masterUserSetupComplete is explicit, snapshot-side
+  // state (P1-002 §3) — deliberately never inferred from name/emoji/relation.
+  const [masterUserSetupComplete, setMasterUserSetupComplete] = useState(()=>JSON.parse(localStorage.getItem("arth_master_user_setup_complete") ?? "false"));
+  // P1 revision: null until the Welcome screen's Sign Up/Sign In choice is
+  // made — only relevant while !cloudUser. Reset is unnecessary since a
+  // successful auth moves past this entirely.
+  const [authMode, setAuthMode] = useState(null); // null | 'signup' | 'signin'
+  // 'checking' | 'needs-setup' | 'conflict' | 'blocked-offline' | 'ready' | null.
+  // Only meaningful on a first-auth-on-this-device path (see sessionRestoredOnBootRef).
+  const [firstAuthState, setFirstAuthState] = useState(null);
+  const [firstAuthError, setFirstAuthError] = useState("");
+  // Populated only when firstAuthState==='conflict': { localSummary, cloudSummary, cloudSnapshot, cloudSavedAt }
+  const [conflictData, setConflictData] = useState(null);
+  // True if a Supabase session already existed on this device BEFORE this
+  // app load ran any code (i.e. restored from the SDK's own persisted
+  // token) — set once, in the mount-time getCurrentCloudUser().then() below.
+  // This is the load-bearing signal that distinguishes "returning device,
+  // use the existing unmodified offline-capable path" from "this device is
+  // authenticating against this account for the first time, run the
+  // first-auth migration matrix." Deliberately NOT a persisted flag: a
+  // persisted "have I ever authenticated" flag would default to false for
+  // every already-synced existing account (including the one live account)
+  // on their first load after this ships, wrongly triggering the matrix
+  // for a normal returning user. A ref reset every load is exactly right
+  // for "was there already a session when THIS load started."
+  const sessionRestoredOnBootRef = useRef(false);
+  const firstAuthRanRef = useRef(false); // guards against re-running the matrix twice for one session
   // pullCloudSnapshot - blocks auto-push until the user explicitly resolves the conflict, since
   // cloudHydrated alone isn't a safe enough signal (that flag used to double as "safe to push",
   // which is exactly how a fresh device's own just-computed timestamp could silently overwrite
@@ -7228,6 +7288,9 @@ function AppContent({ onLock }) {
   useEffect(() => {
     safeSetLocalStorage("arth_card_order", JSON.stringify(cardOrder));
   }, [cardOrder]);
+  useEffect(() => {
+    safeSetLocalStorage("arth_master_user_setup_complete", JSON.stringify(masterUserSetupComplete));
+  }, [masterUserSetupComplete]);
   useEffect(() => {
     safeSetLocalStorage("arth_auto_backup_enabled", JSON.stringify(autoBackupEnabled));
   }, [autoBackupEnabled]);
@@ -7247,6 +7310,7 @@ function AppContent({ onLock }) {
     version: CLOUD_SCHEMA_VERSION,
     savedAt: new Date().toISOString(),
     dark,
+    masterUserSetupComplete,
     autoDetectExpenseCategory,
     workTripMode,
     autoBackupEnabled,
@@ -7287,7 +7351,7 @@ function AppContent({ onLock }) {
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -7297,6 +7361,7 @@ function AppContent({ onLock }) {
     if(!snapshot || typeof snapshot !== "object") return;
     applyingCloudSnapshotRef.current = true;
     setDark(Boolean(snapshot.dark ?? true));
+    setMasterUserSetupComplete(Boolean(snapshot.masterUserSetupComplete ?? false));
     setAutoDetectExpenseCategory(Boolean(snapshot.autoDetectExpenseCategory ?? true));
     setWorkTripMode(Boolean(snapshot.workTripMode ?? false));
     setAutoBackupEnabled(Boolean(snapshot.autoBackupEnabled ?? true));
@@ -7570,6 +7635,156 @@ function AppContent({ onLock }) {
     }
   }, [cloudUser, applyCloudSnapshot]);
 
+  // --- P1 — Master User / Signup: first-auth migration orchestration -----
+  // Writes directly to localStorage and reads back before trusting the
+  // write, per final review rule #2 ("create AND VERIFY a recoverable
+  // backup... before any destructive overwrite") — setAutoBackups alone is
+  // an async React state update with no confirmation the write landed.
+  const createVerifiedBackup = useCallback((snapshotToBackup, backupType, label) => {
+    if(!snapshotToBackup) return true; // nothing to back up is not a failure
+    const exportedAt = new Date().toISOString();
+    const item = { id:`${backupType}_${Date.now()}`, backupType, exportedAt, label, snapshot:{ ...snapshotToBackup, savedAt:snapshotToBackup.savedAt||exportedAt } };
+    let nextList;
+    try{
+      const current = JSON.parse(localStorage.getItem("arth_auto_backups") || "[]");
+      nextList = [...(Array.isArray(current) ? current : []), item].slice(-20);
+      localStorage.setItem("arth_auto_backups", JSON.stringify(nextList));
+    }catch(err){
+      console.error("createVerifiedBackup: write failed", err);
+      return false;
+    }
+    try{
+      const readBack = JSON.parse(localStorage.getItem("arth_auto_backups") || "[]");
+      const verified = Array.isArray(readBack) && readBack.some(b=>b.id===item.id);
+      if(!verified) return false;
+    }catch(err){
+      console.error("createVerifiedBackup: verification read failed", err);
+      return false;
+    }
+    setAutoBackups(nextList);
+    return true;
+  }, []);
+
+  // Runs once per session, only on a first-auth-on-this-device path
+  // (sessionRestoredOnBootRef.current === false). Never called for a
+  // returning/session-restored device — that path is untouched and uses
+  // the existing pullCloudSnapshot/offline-capable behavior instead.
+  const runFirstAuthMigration = useCallback(async () => {
+    if(!cloudUser?.id || !isCloudSyncConfigured) return;
+    setFirstAuthState("checking");
+    setFirstAuthError("");
+    const localMeaningful = hasMeaningfulData(cloudSnapshotRef.current || {});
+    let record = null;
+    let networkOk = true;
+    try{
+      record = await loadCloudSnapshot(cloudUser.id);
+    }catch(err){
+      networkOk = false;
+      setFirstAuthError(err.message || "Couldn't reach your Arth account.");
+    }
+    const cloudRowExists = Boolean(record?.snapshot);
+    const cloudMeaningful = cloudRowExists && hasMeaningfulData(record.snapshot);
+    const action = determineFirstAuthAction({ networkOk, cloudRowExists, cloudMeaningful, localMeaningful });
+
+    if(action === FIRST_AUTH_ACTIONS.BLOCKED_OFFLINE){
+      setFirstAuthState("blocked-offline");
+      return;
+    }
+    if(action === FIRST_AUTH_ACTIONS.CONFLICT){
+      setConflictData({
+        localSummary: summarizeMeaningfulData(cloudSnapshotRef.current || {}),
+        cloudSummary: summarizeMeaningfulData(record.snapshot),
+        cloudSnapshot: record.snapshot,
+        cloudSavedAt: record.updated_at || record.snapshot?.savedAt || "",
+      });
+      setFirstAuthState("conflict");
+      return;
+    }
+    if(action === FIRST_AUTH_ACTIONS.PULL_CLOUD_THEN_CHECK){
+      // Local isn't meaningful — safe to bypass the ordinary "Sync Now"
+      // timestamp heuristic entirely (force=true) rather than reusing it,
+      // per final review: mandatory first-auth is not an ordinary sync.
+      await pullCloudSnapshot(true);
+      setFirstAuthState(isMasterUserSetupComplete(record.snapshot) ? "ready" : "needs-setup");
+      firstAuthRanRef.current = true;
+      return;
+    }
+    // SETUP: both sides empty — nothing to lose either way; still route
+    // through an explicit push (not pullCloudSnapshot) for one consistent,
+    // auditable code path rather than two.
+    // PUSH_LOCAL_THEN_SETUP: local has real data. This must NEVER call
+    // pullCloudSnapshot here — that function's push-local-to-cloud
+    // behavior only fires in its "no row exists at all" branch. A cloud
+    // row that exists but happens to be empty (cloudRowExists=true,
+    // cloudMeaningful=false — a real, reachable case, e.g. a signup that
+    // never entered data) would instead hit pullCloudSnapshot's OTHER
+    // branch and call applyCloudSnapshot on that empty snapshot, silently
+    // overwriting this device's real local data. Caught during
+    // implementation review before shipping — pushing directly here
+    // instead, unconditionally, regardless of whether a row already
+    // exists (saveCloudSnapshot upserts either way).
+    try{
+      const pushed = await saveCloudSnapshot(cloudUser.id, cloudSnapshotRef.current || {});
+      setLastSyncedAt(pushed?.updated_at || cloudSnapshotRef.current?.savedAt || new Date().toISOString());
+      setCloudStatus(action === FIRST_AUTH_ACTIONS.PUSH_LOCAL_THEN_SETUP ? "This device's data is now backing up to the cloud." : "Cloud account ready.");
+    }catch(err){
+      setFirstAuthError(err.message || "Couldn't set up your cloud account. Please try again.");
+      setFirstAuthState("blocked-offline");
+      return;
+    }
+    setFirstAuthState(masterUserSetupComplete ? "ready" : "needs-setup");
+    firstAuthRanRef.current = true;
+  }, [cloudUser, isCloudSyncConfigured, masterUserSetupComplete]);
+
+  // Explicit source-of-truth selection, never a merge (final review rule #2).
+  const resolveConflict = useCallback(async (choice) => {
+    if(!conflictData || !cloudUser?.id) return;
+    setCloudBusy(true);
+    setFirstAuthError("");
+    if(choice === "keep-local"){
+      const backedUp = createVerifiedBackup(conflictData.cloudSnapshot, "pre-conflict-cloud", "cloud version replaced by this device");
+      if(!backedUp){
+        setFirstAuthError("Couldn't verify a backup of your cloud data — nothing was changed. Please try again.");
+        setCloudBusy(false);
+        return;
+      }
+      try{
+        await saveCloudSnapshot(cloudUser.id, cloudSnapshotRef.current);
+      }catch(err){
+        setFirstAuthError(err.message || "Couldn't push this device's data to the cloud. Please try again.");
+        setCloudBusy(false);
+        return;
+      }
+    } else if(choice === "keep-cloud"){
+      const backedUp = createVerifiedBackup(cloudSnapshotRef.current, "pre-conflict-local", "this device's version replaced by cloud");
+      if(!backedUp){
+        setFirstAuthError("Couldn't verify a backup of this device's data — nothing was changed. Please try again.");
+        setCloudBusy(false);
+        return;
+      }
+      applyCloudSnapshot(conflictData.cloudSnapshot);
+    } else {
+      setCloudBusy(false);
+      return;
+    }
+    setCloudBusy(false);
+    setConflictData(null);
+    firstAuthRanRef.current = true;
+    setFirstAuthState(isMasterUserSetupComplete(choice === "keep-cloud" ? conflictData.cloudSnapshot : cloudSnapshotRef.current) ? "ready" : "needs-setup");
+  }, [conflictData, cloudUser, createVerifiedBackup, applyCloudSnapshot]);
+
+  // Partial merge onto __me__ only (name/emoji/phone/dob) — every other
+  // existing field on the record, and every other domain array, untouched.
+  const completeMasterUserSetup = useCallback((fields) => {
+    setPeople(prev => {
+      const existing = prev.find(p => p.isMe) || ME;
+      const next = mergeMasterUserProfileFields(existing, fields);
+      return prev.some(p => p.isMe) ? prev.map(p => p.isMe ? next : p) : [next, ...prev];
+    });
+    setMasterUserSetupComplete(true);
+    setFirstAuthState("ready");
+  }, []);
+
   const handleCloudAuth = useCallback(async (mode = "signin") => {
     if(!isCloudSyncConfigured) return;
     if(!syncEmail.trim() || !syncPassword.trim()){
@@ -7620,6 +7835,11 @@ function AppContent({ onLock }) {
     getCurrentCloudUser()
       .then(user => {
         if(!mounted) return;
+        // A session found here was restored from the SDK's own persisted
+        // token — it existed before this code ran. That's the "returning
+        // device" signal; a session that shows up later via the auth
+        // listener below (after an explicit OTP verify) leaves this false.
+        sessionRestoredOnBootRef.current = Boolean(user);
         setCloudUser(user);
         setCloudHydrated(!user);
         if(user?.email) setSyncEmail(user.email);
@@ -7652,10 +7872,41 @@ function AppContent({ onLock }) {
 
   useEffect(() => {
     if(!cloudUser?.id || !isCloudSyncConfigured) return;
+    // P1: a first-auth-on-this-device session is handled by
+    // runFirstAuthMigration below instead — that path deliberately does not
+    // reuse this ordinary pull/heuristic route (final review: mandatory
+    // first-auth is not an ordinary "Sync Now").
+    if(!sessionRestoredOnBootRef.current) return;
     setCloudHydrated(false);
     setCloudStatus("Loading cloud data...");
     pullCloudSnapshot();
   }, [cloudUser?.id, pullCloudSnapshot]);
+
+  // P1 — first-auth-on-this-device path only (see sessionRestoredOnBootRef).
+  useEffect(() => {
+    if(!cloudUser?.id || !isCloudSyncConfigured) return;
+    if(sessionRestoredOnBootRef.current) return;
+    if(firstAuthRanRef.current || firstAuthState) return;
+    runFirstAuthMigration();
+  }, [cloudUser?.id, isCloudSyncConfigured, firstAuthState, runFirstAuthMigration]);
+
+  // P1 revision: true once the cloud/profile gate below would otherwise
+  // fall through to the main app — computed once here so both the effect
+  // and the render-time gate check use the identical condition, not two
+  // hand-copied versions of the same logic.
+  const cloudSetupSatisfied = !isCloudSyncConfigured || (
+    Boolean(cloudUser) && (
+      (!sessionRestoredOnBootRef.current && firstAuthState === "ready") ||
+      (sessionRestoredOnBootRef.current && cloudHydrated && masterUserSetupComplete)
+    )
+  );
+  // Only relevant on the setup-only mount (Arth() renders AppContent with
+  // suppressMainApp while a new device hasn't set a PIN yet) — fires once,
+  // handing control back to Arth() to show the PIN-setup screen using the
+  // SAME PinScreen every device uses, not a second PIN flow.
+  useEffect(() => {
+    if(suppressMainApp && cloudSetupSatisfied) onCloudSetupComplete?.();
+  }, [suppressMainApp, cloudSetupSatisfied, onCloudSetupComplete]);
 
   // A tab left open for days never otherwise re-checks the cloud — it would keep operating on
   // whatever it loaded at sign-in, and its own auto-push could then overwrite newer changes made
@@ -7691,7 +7942,7 @@ function AppContent({ onLock }) {
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
@@ -12277,6 +12528,17 @@ function AppContent({ onLock }) {
       </div>
     );
 
+    if(settingsSection==="myprofile") return (
+      <MasterUserProfileScreen
+        T={T}
+        isFirstRun={false}
+        mePerson={people.find(p=>p.isMe)}
+        accountEmail={cloudUser?.email}
+        onClose={()=>setSettingsSection(null)}
+        onSave={(fields)=>{ completeMasterUserSetup(fields); setSettingsSection(null); }}
+      />
+    );
+
     if(settingsSection==="backup") return (
       <div style={{ padding:"14px 16px 0" }}>
         <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
@@ -12582,6 +12844,7 @@ function AppContent({ onLock }) {
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
           {/* Import intentionally not listed — confirmed not built anywhere in the app today
               (per the Screen Inventory). Export exists via CSV, listed below under Backup. */}
+          <Row icon="🙂" title="My Profile" subtitle={(people.find(p=>p.isMe)?.name)||"Set up your identity in Arth"} onClick={()=>setSettingsSection("myprofile")}/>
           <Row icon="🔑" title="Cloud Sync & Account" subtitle={cloudUser?.email ? `Signed in as ${cloudUser.email}${lastSyncedAt ? " · synced" : ""}` : "Sign in to sync across devices"} onClick={()=>setSettingsSection("cloudsync")}/>
           <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
         </div>
@@ -15641,6 +15904,71 @@ function AppContent({ onLock }) {
   };
 
   const isTabActive=t=>t==="settings_tab"?showSettings:(tab===t&&!showSettings);
+
+  // ─── P1 — Master User / Signup: top-level auth/setup/conflict gate ────────
+  // New control flow — confirmed via trace that no hooks are called anywhere
+  // after this point in the component, so an early return here is safe with
+  // respect to the Rules of Hooks. Deliberately sits in front of the render
+  // only; nothing below this block (tab/settings navigation, all domain
+  // state) is touched.
+  if(isCloudSyncConfigured){
+    if(!cloudUser){
+      // P1 revision: Welcome (Sign Up / Sign In choice) shown first — no
+      // more single "Continue with email" entry point (reverses P1-001,
+      // by explicit later instruction).
+      if(!authMode){
+        return <WelcomeScreen T={T} onChoose={setAuthMode}/>;
+      }
+      return <AuthGateScreen T={T} mode={authMode} onBack={()=>setAuthMode(null)}/>;
+    }
+    if(!sessionRestoredOnBootRef.current){
+      // First-auth-on-this-device path (P1-002 §5 matrix).
+      if(firstAuthState==="blocked-offline"){
+        return <CloudStateUnknownScreen T={T} busy={cloudBusy} error={firstAuthError} onRetry={runFirstAuthMigration}/>;
+      }
+      if(firstAuthState==="conflict" && conflictData){
+        return <CloudConflictScreen
+          T={T}
+          localSummary={conflictData.localSummary}
+          cloudSummary={conflictData.cloudSummary}
+          cloudSavedAt={formatBackupStamp(conflictData.cloudSavedAt)}
+          busy={cloudBusy}
+          error={firstAuthError}
+          onKeepLocal={()=>resolveConflict("keep-local")}
+          onKeepCloud={()=>resolveConflict("keep-cloud")}
+        />;
+      }
+      if(firstAuthState==="needs-setup"){
+        return <MasterUserProfileScreen T={T} isFirstRun mePerson={people.find(p=>p.isMe)} accountEmail={cloudUser.email} onSave={completeMasterUserSetup}/>;
+      }
+      if(firstAuthState!=="ready"){
+        // 'checking' or null — brief moment while runFirstAuthMigration runs.
+        return <div style={{ background:T.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:T.sub,fontSize:13,fontFamily:"Nunito,sans-serif" }}>Checking your account…</div>;
+      }
+    } else {
+      // Returning/session-restored device — existing offline-capable
+      // pullCloudSnapshot path handles hydration unchanged. Only new gate:
+      // route to setup if this account has never completed it (covers the
+      // one existing live account, whose Master User record predates this
+      // flag entirely).
+      if(!cloudHydrated){
+        return <div style={{ background:T.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:T.sub,fontSize:13,fontFamily:"Nunito,sans-serif" }}>Loading your data…</div>;
+      }
+      if(!masterUserSetupComplete){
+        return <MasterUserProfileScreen T={T} isFirstRun mePerson={people.find(p=>p.isMe)} accountEmail={cloudUser.email} onSave={completeMasterUserSetup}/>;
+      }
+    }
+  }
+
+  // P1 revision: on the setup-only mount (Arth() withholds PIN until this
+  // resolves for a new device), the cloud/profile gate above is now fully
+  // satisfied — hand back to Arth() via the effect above instead of
+  // rendering the main app. The effect has already fired by the time this
+  // is reached; this is just what renders in the single-tick gap.
+  if(suppressMainApp){
+    return <div style={{ background:T.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:T.sub,fontSize:13,fontFamily:"Nunito,sans-serif" }}>Setting up your device…</div>;
+  }
+
 
   return (
     <div style={{ background:T.bg,minHeight:"100vh",transition:"background 0.3s" }}>

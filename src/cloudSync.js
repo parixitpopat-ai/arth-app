@@ -26,6 +26,47 @@ export const signInWithPassword = async (email, password) => {
   return data;
 };
 
+// P1 revision — root-level check for whether THIS device has ever completed
+// Supabase auth before, without waiting on the async SDK. Derives the same
+// localStorage key the SDK itself uses by default (confirmed against the
+// installed @supabase/supabase-js source: `sb-${hostname.split('.')[0]}-auth-token`)
+// rather than hardcoding the project ref, so it stays correct if the URL
+// ever changes. Presence-only check — doesn't validate the token is still
+// live; a stale/expired token is a rare edge case handled by AppContent's
+// existing fallback screens, not by this synchronous check.
+export const hasEverAuthenticatedOnThisDevice = () => {
+  if (typeof window === "undefined" || !window.localStorage) return false;
+  try {
+    const ref = new URL(SUPABASE_URL).hostname.split(".")[0];
+    return Boolean(localStorage.getItem(`sb-${ref}-auth-token`));
+  } catch {
+    return false;
+  }
+};
+
+// P1 — Master User / Signup: single "Continue with email" OTP flow.
+// Canonical entry point going forward; signUpWithPassword/signInWithPassword
+// above are kept as-is (unused by the new top-level auth gate, but not
+// removed — the old Settings > Cloud Sync & Account form still calls them
+// and is harmless leftover now that auth happens before that screen is
+// ever reachable; removing it is cleanup, not P1 scope).
+export const requestEmailOtp = async (email, shouldCreateUser = true) => {
+  if (!supabase) throw new Error("Supabase not configured");
+  // shouldCreateUser now explicit per call site (revised P1 decision: Sign
+  // Up and Sign In are separate again — Sign In passes false so an
+  // unrecognized email errors instead of silently creating an account).
+  const { data, error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser } });
+  if (error) throw error;
+  return data;
+};
+
+export const verifyEmailOtp = async (email, token) => {
+  if (!supabase) throw new Error("Supabase not configured");
+  const { data, error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+  if (error) throw error;
+  return data;
+};
+
 export const signOutCloud = async () => {
   if (!supabase) return;
   const { error } = await supabase.auth.signOut();
