@@ -5934,6 +5934,7 @@ function AppContent({ onLock }) {
                   }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0,alignSelf:"stretch" }}>📋<br/>Paste</button>
                 </div>
                 {smsParseMeta?.balanceAdjusted&&<div style={{ color:T.success,fontSize:11,fontWeight:700 }}>✅ Balance synced ({smsParseMeta.balanceDiff>0?"+":""}{sym}{fmt(smsParseMeta.balanceDiff)})</div>}
+                {smsParseMeta?.reconciledDiscrepancy&&<div style={{ color:T.warn,fontSize:11,fontWeight:700 }}>⚠️ SMS shows a balance {smsParseMeta.balanceDiff>0?"+":""}{sym}{fmt(smsParseMeta.balanceDiff)} different from your reconciled balance. Use Balance Check to review.</div>}
                 {smsParseMeta?.emiLoanId&&<div style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:10,padding:"6px 10px",display:"flex",justifyContent:"space-between",alignItems:"center" }}><span style={{ color:T.warn,fontSize:11,fontWeight:700 }}>🔗 EMI match: {smsParseMeta.emiLoanName}</span><button onClick={()=>{ setExpensePaymentMode("emi"); }} style={{ background:T.warn+"22",border:`1px solid ${T.warn}`,borderRadius:20,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>Link</button></div>}
               </div>}
             </div>
