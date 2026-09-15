@@ -27,6 +27,49 @@ until that's complete.
 
 \---
 
+## ADR-035 — Ownership of Safe to Spend
+
+`Proposed 2026-08-07` · **Status: ✅ Approved (Frozen)** — signed off 2026-08-07
+
+**Exception to Architecture Freeze:** This ADR is permitted under the Architecture Freeze Notice above (frozen as of ADR-021) because it resolves a fundamental architectural invariant. Without this decision, the Safe to Spend metric would violate Home's Governance Rule 2 ("Every metric has exactly one owning module") by remaining ownerless. This ADR establishes the ownership constraint only; it does not introduce or redesign product architecture.
+
+This exception differs from ADR-032's evidentiary trigger. ADR-032 addressed an ownership gap demonstrated by repository evidence and confirmed production defects. ADR-035 records an ownership invariant identified during architectural specification before implementation. It is approved as a preventive architectural safeguard rather than a corrective response to shipped behavior.
+
+## Context
+
+Home (see `H001-H004-home-freeze-spec.md`) presents Safe to Spend as its primary decision metric — the sole full-width Hero element on the Home screen. Per that document's Governance Rule 2, every metric has exactly one owning module. At present, the owning module for Safe to Spend's underlying calculation has not been formally specified anywhere in this repository.
+
+## Decision
+
+**Safe to Spend shall not be owned by Home.** An owning domain/service will be designated before implementation of H002 (Safe to Spend Detail). The owner will be responsible for:
+
+* Computing Safe to Spend.
+* Explaining its derivation.
+* Exposing a read-only presentation model (conforming to Home's Interface Contract).
+* Maintaining calculation consistency across the application.
+
+Home remains responsible only for presentation and navigation.
+
+## Consequences
+
+* H001 (Home) remains valid regardless of which module is eventually assigned as owner.
+* H002 can reference a stable ownership contract rather than a named implementation.
+* Future implementation may assign ownership to the appropriate domain without requiring H001 to change.
+
+This ADR locks the *constraint* (Safe to Spend must have exactly one owner, and it isn't Home), not the *solution* (which module that owner is).
+
+## What this does not decide
+
+* The actual owning module or its implementation — deferred to a future ADR once designated.
+* Any change to Home's shipped layout or card order (see `H001-H004-home-freeze-spec.md`, Home UI Revision v2).
+
+## Sign-off
+
+Approved and Frozen 2026-08-07.
+Exception to the Architecture Freeze approved under the precedent established by ADR-032, applied here as a preventive rather than corrective case (see Exception note above).
+
+\---
+
 ## ADR-034 — Transition from State-Centric to Command-Centric Architecture
 
 `Proposed 2026-08-03` · **Status: ✅ Approved (Frozen)** — signed off 2026-08-03

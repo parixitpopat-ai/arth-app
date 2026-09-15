@@ -117,4 +117,6 @@ Confirmed compliance gap, not a defect in what shipped: PR-1's adapter functions
 
 ### Status change
 
-CR-ACC-BUD-001 moves from **Open** to **Partially Resolved** — Planning Allocation's aggregate need is settled; Category Attribution has a recommended-but-undecided path; Person Attribution is blocked on one product-level confirmation (`mode` semantics). WP-3 remains paused until the two open items above are closed.
+CR-ACC-BUD-001 moves from **Open** to **Resolved**, matching the header. Correction to an earlier draft of this section: it previously described Person Attribution as still blocked on a "product-level confirmation" — that was stale text left over from before this document's own Person Attribution section (above) was completed. As that section states, Person Attribution's `mode` semantics are fully resolved directly against repository evidence and no longer block anything, pending only the one-line `getPersonAttributedTotal` fix already noted.
+
+**Net effect on WP-3:** Planning Allocation's aggregate need is settled (design direction fixed, not yet built). Person Attribution is resolved. Category Attribution has a recommended-but-undecided implementation path — explicitly non-blocking per this document's own scope discipline (Section 1): WP-3 may proceed on the recommended path (extend `Transaction` with a `categoryAllocations` array), revisited only if Transaction's domain owner decides differently before that portion is built. **WP-3 may resume.**

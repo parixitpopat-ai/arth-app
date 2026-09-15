@@ -6,6 +6,16 @@
 
 ---
 
+## Amendment (post-BUD-000-freeze review) — three decisions recorded
+
+A review of this plan against the now-frozen BUD-000 found three places where a genuine product/architecture decision had gone silent — either never stated, or stated without acknowledging it reversed BUD-000's own recommendation. Resolved directly, not left for implementation to decide by default:
+
+1. **Explicit-zero budget override (`??` vs `||`)** — decided: **`??`**. An explicit `0` is meaningful data (a deliberately zero budget), not an absent value that should silently fall through to a default. `||` would erase that distinction. See Section 3.
+2. **Cash-only exclusion rule ownership (SIP/CC-statement/Credit-Card)** — decided: **Bills**, per BUD-000 Section 6's original recommendation. This plan's first draft stated the opposite (kept it in Budget/Outlook) without acknowledging the disagreement. Corrected, and marked as a correction rather than presented as if the two documents always agreed. See Section 2 (Dependency Map).
+3. **Budget Snapshot** — decided: **explicitly deferred**, not built in this release and not silently dropped either. BUD-000 named it as a candidate object; this plan simply never mentioned it. Recorded as a deliberate non-decision-for-now, with a stated condition for revisiting it. See Section 8 (Out of Scope).
+
+---
+
 ## 1. Executive Summary
 
 **Current state:** Budget is not one module — it's five independently-built mechanisms (household, person, group, category, event) sharing a UI page, backed by fields bolted onto Person/Group/Category objects, a household budget living as global app-shell state, six duplicate implementations of the same monthly-value formula, two dead modals, and two entirely orphaned mechanisms (legacy `monthBudget`, `perPersonBudgets`). None of this was discovered as a plan going in — it's what BUD-000's Repository Audit through ADR Review found and confirmed, phase by phase, against the actual source.
@@ -35,7 +45,7 @@ Budget
 ├── People                             — dimension identity; p.spendBudget field removed once migrated
 ├── Groups                             — dimension identity; g.manualLimit field removed once migrated
 ├── Accounts                           — Financial Calendar's Billing Cycle period type reads this; Budget itself doesn't touch Accounts directly
-├── Bills                              — isCashOnlyNotBudget classification (ADR-024 compliance, confirmed clean in BUD-000A) stays a Budget/Outlook concern, unaffected by this migration
+├── Bills                              — **Ownership corrected (amendment, see below): the cash-only exclusion classification (SIP/CC-statement/Credit-Card) moves to Bills, not Budget/Outlook.** This plan's original Dependency Map stated the rule "stays a Budget/Outlook concern, unaffected by this migration" — that was a silent reversal of BUD-000 Section 6's explicit recommendation ("its natural home is arguably Bills... not reimplemented a second time inside the new Budget domain"), made without stating a reason. Corrected: Budget/Outlook consume the classification from Bills; they do not own or reproduce it.
 ├── Notifications                      — Budget Alert's shared boundary (threshold logic stays Budget-owned, delivery/dismissal stays Notifications-owned, per Aggregate Identification)
 ├── Home                               — consumes Budget's read-models (Safe-to-Spend, Variance, Health); Home's own duplicate monthBudget calculations are removed as part of this migration, not left in place
 ├── Goals (future)                     — will consume Allocation Engine directly once GOAL-000 runs; not a Budget dependency
@@ -55,7 +65,7 @@ Every current mechanism, mapped. Nothing left unmapped.
 | `annualBudget` (App.jsx ~761) | Planning Allocation, Household dimension, Fiscal Year period |
 | `lastFYTarget` (~764) | Planning Allocation, Household dimension, previous Fiscal Year period |
 | `monthOverrides` (~766) | Planning Allocation, Household dimension, Calendar Month period |
-| `budgetCarryForward` (~763) | **Stays Budget-owned** — a computation rule Budget applies across Planning Allocations from consecutive periods, not itself an Allocation Engine concept. Currently duplicated (Home ~7660, BudgetPage ~12528); collapses to one implementation inside Budget's read-model layer. |
+| `budgetCarryForward` (~763) | **Stays Budget-owned** — a computation rule Budget applies across Planning Allocations from consecutive periods, not itself an Allocation Engine concept. Currently duplicated (Home ~7660, BudgetPage ~12528); collapses to one implementation inside Budget's read-model layer. **Null-handling decided (amendment, see below): the canonical resolver uses `??`, not `||`** — an explicit `0` override is meaningful data (deliberately zero budget), not an absent value that should fall through to a default. This resolves the household-vs-person/group inconsistency BUD-000 flagged as a business-rule decision, not a refactor detail. |
 | `p.spendBudget` | Planning Allocation, Person dimension |
 | `p.spendBudgetOverrides[month]` | Planning Allocation, Person dimension, Calendar Month period |
 | `g.manualLimit` | Planning Allocation, Group dimension |
@@ -68,6 +78,7 @@ Every current mechanism, mapped. Nothing left unmapped.
 | Two dead modals (`editingMonthBudget`, `budgetOverrideMonth`) | **Deleted**, replaced by one new Planning Allocation editor (WP-4). Not resurrected in their current form. |
 | Six duplicate monthly-value reads (AppContent ×2, Home ×2, OutlookPage, BudgetPage ×2) | Collapse to one Allocation Engine query (`getPlanningAllocation`/`getAttributedTotal`, per ADR-035 §7) |
 | `budgetAlerts` generator (AppContent ~1732) | Threshold logic stays Budget-owned, reads from Planning Allocations via Allocation Engine instead of directly from `p.spendBudgetOverrides`/`p.spendBudget`; delivery/dismissal unchanged (Notifications) |
+| `isCashOnlyNotBudget` classification (OutlookPage only) | **Relocated to Bills (amendment, see above).** Currently the only place this rule exists at all. Budget/Outlook consume the classification from Bills going forward; they stop reproducing it inline. Not an Allocation Engine migration — a straight ownership move of existing logic. |
 
 **Not migrated, carried as an explicit BUD-001A decision item:** `ev.budget` (Event budget) and `t.vehicleId` (vehicle attribution) exist in the repository but **Event and Vehicle are not in ADR-035's frozen dimension list** (Category, Person, Group, Trip, Goal, Project, Liability, Account). This is not treated as an ADR-035 gap to be quietly closed — the repository evidence available (a field exists; a field is populated) doesn't establish whether Event/Vehicle are genuine long-term analytical dimensions or module-local metadata that only looks like a dimension because it shares a shape with `cat.budget`. That's a different, harder question than what this plan can answer. If Event/Vehicle are ever promoted to Allocation dimensions, that happens through an **ADR-035A Addendum** — a deliberate, separate decision — never by editing ADR-035 directly. Until then, WP-3 does not migrate `ev.budget` or vehicle attribution; both remain in their current, module-local form.
 
@@ -77,7 +88,7 @@ Every current mechanism, mapped. Nothing left unmapped.
 
 - **WP-1 — Allocation Engine** (ADR-035 implementation). Build the Planning Allocation and Analytical Attribution storage/query/event layer. Blocks everything else.
 - **WP-2 — Financial Calendar** (ADR-036 implementation). Build Period definitions, Fiscal Year configuration, Calendar Month wrapping of existing string keys. Blocks WP-3.
-- **WP-3 — Budget Storage Migration.** Execute the Section 3 mapping against live, cloud-synced user data: move `cat.budget`/`p.spendBudget`/`g.manualLimit`/`annualBudget`/`monthOverrides` into Planning Allocations; move `catAllocations`/`t.people` into Analytical Attributions; delete the two dead mechanisms and two dead modals. Highest-risk package — see Risk Register and Rollback.
+- **WP-3 — Budget Storage Migration.** Execute the Section 3 mapping against live, cloud-synced user data: move `cat.budget`/`p.spendBudget`/`g.manualLimit`/`annualBudget`/`monthOverrides` into Planning Allocations; move `catAllocations`/`t.people` into Analytical Attributions; delete the two dead mechanisms and two dead modals; **relocate `isCashOnlyNotBudget` from `OutlookPage` into Bills (amendment), with Budget/Outlook repointed to consume it rather than reproduce it.** Highest-risk package — see Risk Register and Rollback.
 - **WP-4 — Budget UI.** Rebuild BudgetPage on top of WP-1/WP-3: single Planning Allocation editor (replacing the two dead modals with one working implementation), Variance/Health/Forecast read-models computed against the Allocation Engine instead of BudgetPage's own inline duplicate logic.
 - **Deferred Stream DS-1 — Reports Integration** and **Deferred Stream DS-2 — AI Integration** — out of scope for this plan (Section 8), listed here only to show where they attach once they exist. Not numbered as work packages — WP-x is reserved for executable Release 1 engineering work (canonical list in BUD-003); DS-x is reserved for approved future work intentionally excluded from the current release. Never reused across documents.
 
@@ -94,6 +105,7 @@ Every current mechanism, mapped. Nothing left unmapped.
 | **Legacy compatibility during rollout** | Users on an old build and users on the new build may have the same account mid-rollout. `catAllocations`/`t.people` need to keep working for read purposes until every client is migrated, per ADR-035 Section 8's phased approach. |
 | **Performance** | Collapsing six duplicate reads into one Allocation Engine query changes render-path performance characteristics (fewer redundant `useMemo` recomputations, but a new query layer's own cost is unmeasured). Needs benchmarking before/after, not assumed to be net-positive by design alone. |
 | **Duplicate reads during transition** | If WP-4 (Budget UI) ships before WP-3 (storage migration) is fully rolled out to all users, BudgetPage would need to read from both the old fields and the new Allocation Engine simultaneously — a real risk of reintroducing exactly the duplication this whole program exists to remove, if the sequencing isn't respected. |
+| **Behavioral change for explicit-zero-override users (amendment)** | The `??` decision (Amendment §1) means any household account with an explicit-zero budget override will see a different resolved number after migration — this is the intended fix, not a bug, but it's a real, user-visible behavior change for a specific subset of existing users. Phase 4's validation gate already carves this case out (Section 7), but the change itself needs its own user-facing communication or monitoring, not just a validation exception — silently changing what a user sees, even correctly, is worth flagging on its own. |
 | **Rollback capability** | Addressed by Section 6's seven-phase approach — WP-3 does not start without this sequence already agreed, not worked out mid-migration. |
 | **Dimension-list gap (Event/Vehicle)** | Flagged in Section 3. If WP-3 proceeds without resolving this, `ev.budget` and vehicle attribution either get silently dropped (data loss) or migrated against an unapproved dimension addition (governance violation). Needs resolution before WP-3, not during. |
 
@@ -138,7 +150,7 @@ Short, and binding on every phase in Section 6:
 
 - **WP-1 (Allocation Engine):** Planning Allocation and Analytical Attribution can be created, queried, and updated per ADR-035's conceptual API; automated tests cover the invariants in ADR-035 Section 6 (reconciliation, non-reconciliation, orthogonality), following the TRX-002A precedent of automated tests being a real deliverable, not optional.
 - **WP-2 (Financial Calendar):** Fiscal Year, Calendar Month, and Quarter period types return correct boundaries against known dates; existing `"YYYY-MM"` string keys resolve correctly through the new wrapper without behavior change.
-- **WP-3 (Storage Migration):** Each of the seven phases in Section 6 has its own pass/fail gate before the next phase begins; Phase 4 (Validate) confirms pre-migration and post-migration Variance calculations produce identical numbers for a real sample of user accounts; Phase 6 (Freeze legacy) is observable and dated, not inferred; Phase 7 (Delete legacy) requires its own explicit sign-off separate from Phase 4's validation passing.
+- **WP-3 (Storage Migration):** Each of the seven phases in Section 6 has its own pass/fail gate before the next phase begins; Phase 4 (Validate) confirms pre-migration and post-migration Variance calculations produce identical numbers for a real sample of user accounts — **except for accounts with an explicit-zero household budget override, where a changed number is the correct, intended result of the `??` decision (Amendment §1), not a validation failure.** Phase 6 (Freeze legacy) is observable and dated, not inferred; Phase 7 (Delete legacy) requires its own explicit sign-off separate from Phase 4's validation passing. **`isCashOnlyNotBudget` (amendment) is fully removed from `OutlookPage` and implemented once, in Bills; Budget/Outlook consume it, no duplicate copy remains anywhere.**
 - **WP-4 (Budget UI):** The two previously-dead month-override modals are fully removed from the codebase; a single working Planning Allocation editor replaces them and is reachable from the UI (closing the "unreachable dead modal" finding from BUD-000 Phase 3 for real, not just architecturally); Home's and OutlookPage's duplicate monthBudget-formula code is deleted, not left alongside the new query.
 - **Deploy verification:** per established project discipline, `grep -n` confirmation post-replace, brace-balance/duplicate-state/hooks-order checks before delivery, same as every prior modernization stream.
 
@@ -155,6 +167,7 @@ Explicit, per your instruction:
 - Tax planning
 - Investment planning
 - Resolving the Event/Vehicle dimension-list gap's underlying ADR question (this plan surfaces it; a separate lightweight decision resolves it — see Section 3)
+- **Budget Snapshot** (amendment, see below) — BUD-000 Section 4 identified this as a candidate domain object; it appeared in no prior draft of this plan's scope, in or out. **Explicitly deferred, not silently dropped and not built by default**: not required for the current modernization scope; revisit when a concrete consumer/use case requires a historical budget-state object.
 
 These consume ADR-035/036 later, on their own schedule, once their own module audits (or lightweight scoping) determine how. None of them block Budget's own migration, and Budget's migration should not be gated on any of them being ready first.
 
