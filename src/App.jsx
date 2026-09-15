@@ -46,6 +46,9 @@ import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { getPersonSpendingSummary, getPersonActiveConnections } from "./domain/person/personOverview";
 import { archivePerson, unarchivePerson, isPersonArchived, getActivePeople } from "./domain/person/archive";
+import { archiveGroup, isGroupArchived, getActiveGroups } from "./domain/group/archive";
+import { writeOffGroupTxns, writeOffGroupBills, groupHasOutstandingBalance } from "./domain/group/writeOff";
+import { getGroupMemberOwed as getGroupMemberOwedPure, getGroupMemberIOwe as getGroupMemberIOwePure } from "./domain/group/balances";
 import { getPersonAboutFields, getAboutCompleteness, getPersonNotes } from "./domain/person/about";
 import { getFinancialPositionLabel, getFinancialPositionBreakdown } from "./domain/person/financialPosition";
 import { getPersonSixMonthActivity } from "./domain/person/activity";
@@ -2267,6 +2270,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     return txnOwed + billOwed + memberIndividualOwed;
   },[txns,bills,loans,groups,getGroupCollectiveDue]);
 
+  // PGRP-001 WP2 — relocated from inside People's if(selectedGroup) block
+  // (where it was previously only reachable by toggleMember) to this
+  // top-level component scope, so it's also reachable from wherever
+  // PersonProfileScreen is rendered. The actual arithmetic now lives in
+  // the tested pure function domain/group/balances.js — this is a thin
+  // wrapper supplying live txns/bills, not a second copy of the logic.
+  const getGroupMemberOwed = useCallback((groupId,pid)=>getGroupMemberOwedPure(txns,bills,groupId,pid),[txns,bills]);
+  // PGRP-001 WP2 — symmetric reverse calculation. See domain/group/balances.js
+  // for why this is transaction-only (matches the unscoped iOwe reality,
+  // no invented bill path).
+  const getGroupMemberIOwe = useCallback((groupId,pid)=>getGroupMemberIOwePure(txns,groupId,pid),[txns]);
+
   const getPersonReceivableItems = useCallback(personId=>{
     if(!personId) return [];
     const txnItems = txns
@@ -3248,7 +3263,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                 <button onClick={()=>setShowGroupPicker(false)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
               </div>
               <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
-                {groups.map(g=>(
+                {getActiveGroups(groups).map(g=>(
                   <button key={g.id} onClick={()=>{ setQaGroupId(g.id); setShowGroupPicker(false); }} style={{ display:"flex",alignItems:"center",gap:10,background:String(qaGroupId)===String(g.id)?T.accentSoft:T.input,border:`1px solid ${String(qaGroupId)===String(g.id)?T.accent:T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                     <span style={{ fontSize:16 }}>{g.icon||"👥"}</span>
                     <span style={{ color:T.text,fontSize:13,fontWeight:700,flex:1 }}>{g.name}</span>
@@ -5376,7 +5391,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                   <span style={lbl}>Group (optional)</span>
                   <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
                     {groups.length===0&&<span style={{ color:T.sub,fontSize:11 }}>No groups created yet.</span>}
-                    {groups.map(g=><button key={g.id} onClick={()=>{ setSettlementTagGroup(settlementTagGroup===g.id?"":g.id); setSettlementKind("repayment"); setRepaymentTouched(false); if(!who.trim()) setWho(g.name); }} style={{ background:settlementTagGroup===g.id?g.color+"22":"none",border:`1px solid ${settlementTagGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:settlementTagGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon||"👥"} {g.name}</button>)}
+                    {getActiveGroups(groups).map(g=><button key={g.id} onClick={()=>{ setSettlementTagGroup(settlementTagGroup===g.id?"":g.id); setSettlementKind("repayment"); setRepaymentTouched(false); if(!who.trim()) setWho(g.name); }} style={{ background:settlementTagGroup===g.id?g.color+"22":"none",border:`1px solid ${settlementTagGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:settlementTagGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon||"👥"} {g.name}</button>)}
                   </div>
                 </div>}
                 {settlementKind==="repayment"&&(tagPerson||settlementTagGroup)&&(
@@ -5696,7 +5711,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                 {showAttributionSearch&&(()=>{
                   const q = attributionSearch.trim().toLowerCase();
                   const peopleOpts = people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=>({ type:"person", id:p.id, name:p.name, icon:p.emoji, color:p.color }));
-                  const groupOpts = groups.map(g=>({ type:"group", id:g.id, name:g.name, icon:g.icon||"👥", color:g.color }));
+                  const groupOpts = getActiveGroups(groups).map(g=>({ type:"group", id:g.id, name:g.name, icon:g.icon||"👥", color:g.color }));
                   const all = [...peopleOpts, ...groupOpts];
                   let list;
                   if(q){
@@ -6500,7 +6515,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                 <select style={inp} value={accAttributedTo} onChange={e=>setAccAttributedTo(e.target.value)}>
                   <option value="">None (personal account)</option>
                   {accAttributeType==="person" && people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
-                  {accAttributeType==="group" && groups.map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
+                  {accAttributeType==="group" && getActiveGroups(groups).map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
                 </select>
               </div>
               <button onClick={submit} style={btnP}>Save Account</button>
@@ -6721,7 +6736,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               <div>
                 <div style={{ color:T.sub,fontSize:10,marginBottom:4 }}>Group</div>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                  {groups.map(g=>(
+                  {getActiveGroups(groups).map(g=>(
                     <button key={g.id} onClick={()=>setTagGroupId(tagGroupId===g.id?"":g.id)} style={{ background:tagGroupId===g.id?g.color+"22":"none",border:`1px solid ${tagGroupId===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagGroupId===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>
                   ))}
                 </div>
@@ -9013,6 +9028,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     const [editingGroupBudget,setEditingGroupBudget]=useState("");
     const [editingGroupMembers,setEditingGroupMembers]=useState([]);
     const [editingGroupIncludeMe,setEditingGroupIncludeMe]=useState(true);
+    const [editingGroupColor,setEditingGroupColor]=useState("");
     const [isEditingGroup,setIsEditingGroup]=useState(false);
   const [editingGroupTypeId,setEditingGroupTypeId]=useState("");
     const [newColor,setNewColor]=useState(PALETTE[1]);
@@ -9052,6 +9068,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     const [shareMonth,setShareMonth]=useState(()=>{ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
     const [showUpiPicker,setShowUpiPicker]=useState(false);
     const [pendingShareBase,setPendingShareBase]=useState("");
+    // PGRP-001 WP1 — Group archive write-off confirmation. Shown only
+    // when the group being archived has an outstanding balance in either
+    // direction; archiving with no outstanding balance skips this and
+    // archives immediately.
+    const [showGroupArchiveConfirm,setShowGroupArchiveConfirm]=useState(false);
     const mePerson = people.find(p=>p.isMe) || ME;
     const sortedPeople = people
       .filter(p=>!p.isMe)
@@ -9094,9 +9115,25 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         setEditingGroupBudget(String(selectedGroup.manualLimit||""));
         setEditingGroupMembers([...(selectedGroup.members||[])]);
         setEditingGroupIncludeMe(selectedGroup.includeMe !== false);
+        setEditingGroupColor(selectedGroup.color||"");
         setIsEditingGroup(false);
       }
     },[selectedGroup]);
+
+    // PGRP-001 WP1 — root-cause fix for the stale-selectedGroup bug.
+    // selectedGroup was previously a captured object, never re-checked
+    // against live `groups` state, so an archived (or, formerly,
+    // hard-deleted) group could remain "selected" and rendered
+    // indefinitely, including staying actionable enough to mutate real
+    // txns/bills against its orphaned id. This effect closes that at the
+    // source: the instant `groups` no longer contains a live,
+    // non-archived record for the selected id, the selection itself is
+    // cleared — independent of which action caused the change.
+    useEffect(()=>{
+      if(!selectedGroup) return;
+      const live = groups.find(x=>x.id===selectedGroup.id);
+      if(!live || isGroupArchived(live)) setSelectedGroup(null);
+    },[selectedGroup, groups]);
 
     const toggleFavorite = person => {
       const nextFavorite = !person.favorite;
@@ -9191,7 +9228,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
           }}>
             <option value="">Select who will pay instead...</option>
             {people.filter(x=>!x.isMe&&String(x.id)!==String(p.id)).map(x=>(<option key={x.id} value={x.id}>{x.emoji} {x.name}</option>))}
-            {groups.map(g=>(<option key={g.id} value={`g_${g.id}`}>{g.icon||"👥"} {g.name} (group)</option>))}
+            {getActiveGroups(groups).map(g=>(<option key={g.id} value={`g_${g.id}`}>{g.icon||"👥"} {g.name} (group)</option>))}
           </select>
         </div>
       ) : null;
@@ -9391,22 +9428,30 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               script's own header comment for why. PersonProfileScreen's own
               Actions bar is disabled here (no onSettle/onRequest/onArchivePerson)
               to avoid duplicating the real action buttons still below. */}
+          {(() => {
+            // PGRP-001 WP2 — getGroupMemberOwed now lives at component
+            // top-level scope (relocated, logic unchanged — see near
+            // groupReceivableTotal), so it's reachable here via closure.
+            // Scoped to exactly the groups this person belongs to, same
+            // filter already used for the `groups` prop below.
+            const personGroupsForBalance = groups.filter(g=>(g.members||[]).includes(p.id));
+            const groupOwedByMe = Object.fromEntries(
+              personGroupsForBalance.map(g=>[g.id, getGroupMemberOwed(g.id, p.id)])
+            );
+            // PGRP-001 WP2 — groupIOweMap, now real. Transaction-only, per
+            // the explicit decision recorded in domain/group/balances.js —
+            // no bill-based "I owe" path exists in the current data model.
+            const groupIOweMap = Object.fromEntries(
+              personGroupsForBalance.map(g=>[g.id, getGroupMemberIOwe(g.id, p.id)])
+            );
+            return (
           <PersonProfileScreen
             person={p}
             balance={s}
             txns={txns} bills={bills}
-            groups={groups.filter(g=>(g.members||[]).includes(p.id))}
-            // groupOwedByMe: getGroupMemberOwed is declared inside the
-            // selectedGroup block (further down in this file), not in scope
-            // here — confirmed by direct trace, not assumed. Rather than
-            // duplicate that function's logic without re-tracing its exact
-            // implementation (risking drift), this honestly leaves every
-            // group's owed-by-them figure unavailable for now — Groups will
-            // show "Not available yet" for BOTH directions until this is
-            // either hoisted to a shared scope or intentionally re-traced
-            // and duplicated with care. Not a crash risk, just an honest gap.
-            groupOwedByMe={{}}
-            groupIOweMap={{}}
+            groups={personGroupsForBalance}
+            groupOwedByMe={groupOwedByMe}
+            groupIOweMap={groupIOweMap}
             membershipRelationships={membershipRelationships}
             schoolRelationships={schoolRelationships}
             insuranceRelationships={[]}
@@ -9480,6 +9525,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               // above, untouched — a later, separate stream, not this one).
             }}
           />
+            );
+          })()}
             {/* Unsettled txn drill-down */}
             {expandedSection==="unsettled_"+p.id&&(()=>{
               const unsettled = txns.filter(t=>{
@@ -9684,8 +9731,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       );
     }
 
-    if(selectedGroup){
-      const g=selectedGroup;
+    const liveSelectedGroup = selectedGroup ? groups.find(x=>x.id===selectedGroup.id) : null;
+    if(liveSelectedGroup && !isGroupArchived(liveSelectedGroup)){
+      const g=liveSelectedGroup;
       // gTxns: include transactions directly tagged to this group OR
       // where this group appears in Txn breakup allocations (any mode)
       const gTxns=txns.filter(t=>
@@ -9755,11 +9803,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       },0);
       const groupOwesMe = total;
 
-      const getGroupMemberOwed = (groupId,pid)=>{
-        const txnOwed = txns.filter(t=>t.groupId===groupId&&t.type==="expense"&&t.people&&t.people[pid]&&t.people[pid].mode==="owes"&&!t.people[pid].settled).reduce((sum,t)=>sum + remainingShare(t.people[pid]),0);
-        const billOwed = bills.filter(b=>b.groupId===groupId&&b.status==="unpaid"&&b.splitPeople&&b.splitPeople[pid]&&b.splitPeople[pid].mode==="owes"&&!b.splitPeople[pid].settled).reduce((sum,b)=>sum + remainingShare(b.splitPeople[pid]),0);
-        return txnOwed + billOwed;
-      };
+      // getGroupMemberOwed is now defined at component top-level scope
+      // (see near groupReceivableTotal) — reused here via closure, not
+      // redefined, so this block and PersonProfileScreen consume the
+      // exact same function.
 
       const toggleMember=(pid)=>{
         const isMember=currentMembers.includes(pid);
@@ -9791,12 +9838,40 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         }
       };
 
+      // PGRP-001 WP1 — Group Archive with financial-integrity gating.
+      // No silent write-off, ever: if there's an outstanding balance in
+      // either direction, this only opens the confirmation sheet — the
+      // actual write-off + archive only happens from confirmGroupArchiveWriteOff,
+      // which requires an explicit user tap.
+      const requestArchiveGroup = () => {
+        if(groupHasOutstandingBalance(total, groupIOwe)){
+          setShowGroupArchiveConfirm(true);
+          return;
+        }
+        setGroups(prev=>prev.map(x=>x.id===g.id?archiveGroup(x):x));
+        setSelectedGroup(null);
+      };
+
+      // Explicit user confirmation path only — never called automatically.
+      // Writes off (settled:true, never deletes/rewrites) every unsettled
+      // "owes" entry tied to this group, in both directions, then archives.
+      const confirmGroupArchiveWriteOff = () => {
+        setTxns(prev=>writeOffGroupTxns(prev, g.id));
+        setBills(prev=>writeOffGroupBills(prev, g.id));
+        setGroups(prev=>prev.map(x=>x.id===g.id?archiveGroup(x):x));
+        setShowGroupArchiveConfirm(false);
+        setSelectedGroup(null);
+      };
+
+      const cancelGroupArchive = () => setShowGroupArchiveConfirm(false);
+
       const startEditingGroup = () => {
         setEditingGroupName(g.name||"");
         setEditingGroupBudget(String(g.manualLimit||""));
         setEditingGroupMembers([...(g.members||[])]);
         setEditingGroupIncludeMe(g.includeMe !== false);
         setEditingGroupTypeId(g.typeId||"other");
+        setEditingGroupColor(g.color||"");
         setIsEditingGroup(true);
       };
 
@@ -9806,6 +9881,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         setEditingGroupMembers([...(g.members||[])]);
         setEditingGroupIncludeMe(g.includeMe !== false);
         setEditingGroupTypeId(g.typeId||"other");
+        setEditingGroupColor(g.color||"");
         setIsEditingGroup(false);
       };
 
@@ -9823,6 +9899,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
           type:gtMeta?.label||g.type,
           icon:gtMeta?.icon||g.icon,
           defaultIntent:gtMeta?.default||g.defaultIntent||"split",
+          color:editingGroupColor||g.color,
         };
         setGroups(prev=>prev.map(x=>x.id===g.id?updated:x));
         setSelectedGroup(updated);
@@ -9866,6 +9943,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                           <div style={{ fontSize:9,color:T.sub }}>{gt.desc}</div>
                         </button>
                       ))}
+                    </div>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                      {PALETTE.map(c=><div key={c} onClick={()=>setEditingGroupColor(c)} style={{ width:24,height:24,borderRadius:6,background:c,cursor:"pointer",border:editingGroupColor===c?"3px solid #fff":"3px solid transparent" }}/>)}
                     </div>
                     <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
                       <button onClick={saveGroupEdits} style={{ background:T.accent,border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#000",fontFamily:"Nunito,sans-serif" }}>Save</button>
@@ -10068,7 +10148,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                   </>);
                 })()}
               </div>
-              <button onClick={()=>setGroups(prev=>prev.filter(x=>x.id!==g.id))&&setSelectedGroup(null)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:20 }}>🗑</button>
+              <button onClick={requestArchiveGroup} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:20 }} title="Archive group">🗄️</button>
+              {showGroupArchiveConfirm&&<div style={{ position:"fixed",inset:0,background:"#0009",zIndex:900,display:"flex",alignItems:"flex-end",justifyContent:"center" }} onClick={cancelGroupArchive}>
+                <div style={{ background:T.card,borderRadius:"18px 18px 0 0",padding:24,width:"100%",maxWidth:480 }} onClick={e=>e.stopPropagation()}>
+                  <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:8 }}>Archive "{g.name}"?</div>
+                  <div style={{ color:T.sub,fontSize:12,marginBottom:14,lineHeight:1.5 }}>
+                    This group has an outstanding balance{total>0&&groupIOwe>0?" in both directions":""}:
+                    {total>0&&<div style={{ marginTop:6 }}>They owe you: <b style={{ color:T.text }}>{sym}{fmt(total)}</b></div>}
+                    {groupIOwe>0&&<div style={{ marginTop:4 }}>You owe them: <b style={{ color:T.text }}>{sym}{fmt(groupIOwe)}</b></div>}
+                    <div style={{ marginTop:10 }}>Archiving will write off this balance as settled. This does not delete any past transaction or bill — it only marks the outstanding amount as resolved. This cannot be undone automatically.</div>
+                  </div>
+                  <button onClick={confirmGroupArchiveWriteOff} style={{ ...btnP,width:"100%",background:T.danger,marginBottom:8 }}>Write off {sym}{fmt(total+groupIOwe)} and archive</button>
+                  <button onClick={cancelGroupArchive} style={{ ...btnP,width:"100%",background:"none",border:`1px solid ${T.border}`,color:T.text }}>Cancel</button>
+                </div>
+              </div>}
             </div>
 
             <div style={{ marginBottom:12 }}>
@@ -10088,9 +10181,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                     {p.emoji} {p.name} <span style={{ fontSize:10,opacity:0.7 }}>✕</span>
                   </button>
                 ) : (
-                  <div key={pid} style={{ background:p.color+"18",border:`1px solid ${p.color}44`,borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700,color:p.color,fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>
+                  <button key={pid} onClick={()=>setSelectedPerson(p)} style={{ background:p.color+"18",border:`1px solid ${p.color}44`,borderRadius:20,padding:"4px 12px",fontSize:12,fontWeight:700,color:p.color,cursor:"pointer",fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>
                     {p.emoji} {p.name}
-                  </div>
+                  </button>
                 ); })}
               </div>
             </div>
@@ -10423,8 +10516,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             })()}
           </div>
 
-          {[...new Set(groups.map(g=>g.type||"Group"))].map(gtype=>{
-            const grps=groups.filter(g=>(g.type||"Group")===gtype);
+          {[...new Set(getActiveGroups(groups).map(g=>g.type||"Group"))].map(gtype=>{
+            const grps=getActiveGroups(groups).filter(g=>(g.type||"Group")===gtype);
             if(!grps.length) return null;
             return (
               <div key={gtype} style={{ marginBottom:16 }}>
@@ -13241,7 +13334,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
           <div style={{ color:T.sub,fontSize:10,marginBottom:10 }}>Auto-tag all new expenses to this group (e.g. UG-2 for household costs). You can still override per transaction.</div>
           <select style={inp} value={defaultGroupId} onChange={e=>setDefaultGroupId(e.target.value)}>
             <option value="">None — tag manually each time</option>
-            {groups.map(g=><option key={g.id} value={g.id}>{g.icon||"👥"} {g.name}</option>)}
+            {getActiveGroups(groups).map(g=><option key={g.id} value={g.id}>{g.icon||"👥"} {g.name}</option>)}
           </select>
           {defaultGroupId&&<div style={{ color:T.success,fontSize:10,marginTop:6 }}>✅ New expenses auto-tagged to {groups.find(g=>g.id===defaultGroupId)?.name}</div>}
         </div>
@@ -13653,7 +13746,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               <span style={lbl}>Split with (optional)</span>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
                 <button onClick={()=>{setEditSplitPeople({});setEditGroup("");}} style={{ background:editSelectedPids.length===0&&!editGroup?"#88888822":"none",border:`1px solid ${editSelectedPids.length===0&&!editGroup?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>None</button>
-                {groups.map(g=><button key={g.id} onClick={()=>{setEditGroup(editGroup===g.id?"":g.id); setEditSplitPeople({});}} style={{ background:editGroup===g.id?g.color+"22":"none",border:`1px solid ${editGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>)}
+                {getActiveGroups(groups).map(g=><button key={g.id} onClick={()=>{setEditGroup(editGroup===g.id?"":g.id); setEditSplitPeople({});}} style={{ background:editGroup===g.id?g.color+"22":"none",border:`1px solid ${editGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>)}
               </div>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:editSelectedPids.length>0?10:0 }}>
                 {(editGroup ? people.filter(p=>!p.isMe && !isPersonArchived(p) && (getGroup(editGroup)?.members||[]).includes(p.id)) : people.filter(p=>!p.isMe && !isPersonArchived(p))).map(p=><button key={p.id} onClick={()=>setEditSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:editSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${editSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
@@ -15151,7 +15244,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                   if(!baName.trim()){ const g=groups.find(x=>x.id===gid); if(g) setBaName(g.name); }
                 }}>
                   <option value="">Select group</option>
-                  {groups.map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
+                  {getActiveGroups(groups).map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
                 </select>
               )}
               {baAttributeType==="vehicle"&&(
@@ -15678,7 +15771,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               <span style={lbl}>Split with (optional)</span>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
                 <button onClick={()=>{setBillSplitPeople({});setBillGroup("");}} style={{ background:selectedPids.length===0&&!billGroup?"#88888822":"none",border:`1px solid ${selectedPids.length===0&&!billGroup?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>None — just me</button>
-                {groups.map(g=><button key={g.id} onClick={()=>handleGroupSelect(billGroup===g.id?"":g.id)} style={{ background:billGroup===g.id?g.color+"22":"none",border:`1px solid ${billGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>)}
+                {getActiveGroups(groups).map(g=><button key={g.id} onClick={()=>handleGroupSelect(billGroup===g.id?"":g.id)} style={{ background:billGroup===g.id?g.color+"22":"none",border:`1px solid ${billGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>)}
               </div>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:selectedPids.length>0?10:0 }}>
                 {(billGroup ? people.filter(p=>!p.isMe && !isPersonArchived(p) && (getGroup(billGroup)?.members||[]).includes(p.id)) : people.filter(p=>!p.isMe && !isPersonArchived(p))).map(p=><button key={p.id} onClick={()=>setBillSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:billSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${billSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
@@ -15759,10 +15852,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     const [anniversary,setAnniversary]=useState(p.anniversary||"");
     const [notes,setNotes]=useState(p.notes||"");
     const [modules,setModules]=useState(getPersonModules(p));
+    // PGRP-001 WP3 — defaultSettlement edit state. Same default ("UPI")
+    // as the creation-time picker uses when nothing is set yet.
+    const [defaultSettlement,setDefaultSettlement]=useState(p.defaultSettlement||"UPI");
     const toggleModule = (id) => setModules(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
     const save=()=>{
-      setPeople(prev=>prev.map(x=>x.id===p.id?{...x,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules,phone:phone.trim(),email:email.trim(),dob,anniversary,notes:notes.trim()}:x));
-      setSelectedPerson(prev=>prev?{...prev,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules,phone:phone.trim(),email:email.trim(),dob,anniversary,notes:notes.trim()}:null);
+      setPeople(prev=>prev.map(x=>x.id===p.id?{...x,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules,phone:phone.trim(),email:email.trim(),dob,anniversary,notes:notes.trim(),defaultSettlement}:x));
+      setSelectedPerson(prev=>prev?{...prev,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules,phone:phone.trim(),email:email.trim(),dob,anniversary,notes:notes.trim(),defaultSettlement}:null);
       onClose();
     };
     return (
@@ -15806,14 +15902,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             <div style={{ display:"flex",gap:8 }}>
               {["👤","👨","👩","👶","👴","👵","🐕"].map(em=><button key={em} onClick={()=>setEmoji(em)} style={{ background:emoji===em?T.accentSoft:"none",border:`1px solid ${emoji===em?T.accent:T.border}`,borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:18 }}>{em}</button>)}
             </div>
-            <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+            {/* PGRP-001 WP3 — personType is not part of the Master User's
+                edit surface: MasterUserProfileScreen deliberately exposes
+                only name/emoji/phone/dob for __me__, and personType has no
+                dedicated meaning for the account owner. Hiding the picker
+                here closes the previously-unprotected path where __me__'s
+                personType could be changed through this modal instead.
+                The stored value itself is untouched — state is still
+                seeded from p.personType above and still saved unchanged
+                below; only the interactive control is removed for isMe. */}
+            {!p.isMe && <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
               {[["contact","Contact","They may owe you"],["dependant","Dependant","Family, you cover them"],["vendor","Vendor","You pay them for goods/services"],["employee","Employee","Reimbursements, payroll"],["tenant","Tenant","Rent, deposits"],["other","Other",""]].map(([v,l,sub])=>(
                 <button key={v} onClick={()=>setPersonType(v)} style={{ background:personType===v?T.accentSoft:"none",border:`1px solid ${personType===v?T.accent:T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                   <div style={{ fontSize:12,fontWeight:700,color:personType===v?T.accent:T.text }}>{getPersonTypeUILabel(v) || l}</div>
                   {sub&&<div style={{ fontSize:10,color:T.sub,marginTop:2 }}>{sub}</div>}
                 </button>
               ))}
-            </div>
+            </div>}
             <div>
               <span style={lbl}>Capabilities</span>
               <div style={{ display:"flex",flexDirection:"column",gap:6,marginTop:6 }}>
@@ -15829,6 +15934,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             {modules.includes("borrowMoney")&&<div>
               <span style={lbl}>Credit limit (max they can owe you)</span>
               <input style={inp} type="number" placeholder="0 = unlimited" value={creditLimit} onChange={e=>setCreditLimit(e.target.value)}/>
+              <div style={{ marginTop:10 }}>
+                <span style={lbl}>Default Settlement Method</span>
+                <div style={{ display:"flex",gap:6 }}>
+                  {["UPI","Cash","Bank"].map(m=>(
+                    <button key={m} onClick={()=>setDefaultSettlement(m)} style={{ flex:1,background:defaultSettlement===m?"#16a34a18":"none",border:`1px solid ${defaultSettlement===m?"#16a34a":T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:700,color:defaultSettlement===m?"#16a34a":T.text,fontFamily:"Nunito,sans-serif" }}>{m}</button>
+                  ))}
+                </div>
+              </div>
             </div>}
             {modules.includes("budget")&&(
               <button onClick={()=>{ onClose(); if(!p.isMe) setBudgetFocusPersonId(p.id); setTab("budget"); setShowSettings(false); }} style={{ width:"100%",background:"#f0fdf4",border:"1px solid #16a34a44",borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}>
