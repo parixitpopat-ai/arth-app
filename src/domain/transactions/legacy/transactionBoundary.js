@@ -21,8 +21,13 @@ import { transactionFromStoredShape, storedDraftToEditChanges } from "./transact
  * @param {object|null} priorStoredRecord - required for "edit"; the record's current stored shape
  * @param {{dispatch: Function}} dispatcher - the CommandDispatcher
  * @param {(draft: object) => void} legacyUpsert - the existing upsertTxn closure, called untouched on NOT_YET_REPRESENTABLE
+ * @param {{setPendingCreateSourceDraft: Function}|null} repository - WP-TXN-02,
+ *   optional, used only on the create path — when provided, the draft is
+ *   registered as this create's passthrough source immediately before
+ *   dispatch (see TxnsStateRepository.save()). Omitted entirely for edit,
+ *   which is untouched by WP-TXN-02.
  */
-export async function submitTransactionThroughBoundary({ operation, draft, priorStoredRecord = null, dispatcher, legacyUpsert }) {
+export async function submitTransactionThroughBoundary({ operation, draft, priorStoredRecord = null, dispatcher, legacyUpsert, repository = null }) {
   const check = checkRepresentability({ operation, draft, priorStoredRecord });
 
   if (!check.representable) {
@@ -31,6 +36,7 @@ export async function submitTransactionThroughBoundary({ operation, draft, prior
   }
 
   if (operation === "create") {
+    if (repository) repository.setPendingCreateSourceDraft(draft);
     const result = await dispatcher.dispatch({
       type: "PostTransaction",
       payload: transactionFromStoredShape(draft),

@@ -32,10 +32,16 @@ function personSharesToStoredPeople(personShares) {
  * @param {Transaction} txn - the aggregate after post()/edit()
  * @param {object|null} priorStoredRecord - the record's previous stored
  *   shape, or null on create
+ * @param {object|null} createSourceDraft - WP-TXN-02: on create only, the
+ *   caller's own raw legacy-shaped draft object (e.g. AddModal's `newTxn`),
+ *   used as the passthrough base instead of `priorStoredRecord` (which is
+ *   necessarily null on create — nothing to look up yet). Symmetric with
+ *   how `priorStoredRecord` already preserves unmodeled fields on edit.
+ *   Ignored whenever `priorStoredRecord` is present (edit always wins).
  */
-export function transactionToStoredShape(txn, priorStoredRecord = null) {
+export function transactionToStoredShape(txn, priorStoredRecord = null, createSourceDraft = null) {
   const stored = {
-    ...(priorStoredRecord || {}),
+    ...(priorStoredRecord || createSourceDraft || {}),
     id: txn.id,
     type: txn.type,
     date: txn.date,

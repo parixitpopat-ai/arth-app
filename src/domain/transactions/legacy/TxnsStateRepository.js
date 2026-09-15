@@ -26,6 +26,17 @@ export class TxnsStateRepository extends Repository {
       throw new Error("TxnsStateRepository requires a statePort with getAll() and upsert()");
     }
     this._statePort = statePort;
+    // WP-TXN-02 — single-shot side-channel, set by the boundary immediately
+    // before dispatch on the create path only, consumed and cleared by the
+    // very next save(). Exists so PostTransactionHandler/EditTransactionHandler
+    // never need to change at all, staying fully outside this WP's scope.
+    this._pendingCreateSourceDraft = null;
+  }
+
+  // WP-TXN-02 — called by transactionBoundary.js right before dispatching a
+  // "create" command, only when this repository was passed to it.
+  setPendingCreateSourceDraft(draft) {
+    this._pendingCreateSourceDraft = draft;
   }
 
   async load(id) {
@@ -40,7 +51,12 @@ export class TxnsStateRepository extends Repository {
 
   async save(aggregate) {
     const priorStoredRecord = this._findStored(aggregate.id);
-    const stored = transactionToStoredShape(aggregate, priorStoredRecord);
+    // WP-TXN-02 — consume-and-clear: only relevant when priorStoredRecord is
+    // null (create); a real prior record always wins over a stale pending
+    // draft, matching transactionToStoredShape's own precedence.
+    const createSourceDraft = this._pendingCreateSourceDraft;
+    this._pendingCreateSourceDraft = null;
+    const stored = transactionToStoredShape(aggregate, priorStoredRecord, createSourceDraft);
     this._statePort.upsert(stored);
     return aggregate;
   }

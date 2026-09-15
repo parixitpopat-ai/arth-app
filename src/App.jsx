@@ -49,6 +49,8 @@ import { archivePerson, unarchivePerson, isPersonArchived, getActivePeople } fro
 import { archiveGroup, isGroupArchived, getActiveGroups } from "./domain/group/archive";
 import { writeOffGroupTxns, writeOffGroupBills, groupHasOutstandingBalance } from "./domain/group/writeOff";
 import { getGroupMemberOwed as getGroupMemberOwedPure, getGroupMemberIOwe as getGroupMemberIOwePure } from "./domain/group/balances";
+import { wireTransactionApplication } from "./application/transactions/wiring";
+import { submitTransactionThroughBoundary } from "./domain/transactions/legacy/transactionBoundary";
 import { getPersonAboutFields, getAboutCompleteness, getPersonNotes } from "./domain/person/about";
 import { getFinancialPositionLabel, getFinancialPositionBreakdown } from "./domain/person/financialPosition";
 import { getPersonSixMonthActivity } from "./domain/person/activity";
@@ -4194,6 +4196,35 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         );
       };
 
+      // WP-TXN-02 — CREATE only, routed through the WP-TXN-01 Transaction
+      // boundary. Constructed fresh per call (cheap, avoids any stale-closure
+      // risk across renders) rather than memoized at component scope.
+      // Fire-and-forget: checkRepresentability() runs synchronously inside
+      // submitTransactionThroughBoundary before any await, so the common
+      // NOT_YET_REPRESENTABLE case (complex splits, category splits,
+      // unrepresentable person-share modes) still calls legacyUpsert
+      // (upsertTxn) synchronously, identical to today's behavior. Only the
+      // rare fully-representable simple case defers to the async dispatch —
+      // matching the existing setTxns() calls elsewhere in this function,
+      // which are already fire-and-forget with no callers awaiting them.
+      const submitCreateThroughBoundary = draft => {
+        const statePort = {
+          getAll: () => txns,
+          upsert: record => setTxns(prev => prev.some(t => String(t.id)===String(record.id))
+            ? prev.map(t => String(t.id)===String(record.id) ? record : t)
+            : [record, ...prev]
+          ),
+        };
+        const { dispatcher, repository } = wireTransactionApplication({ statePort });
+        submitTransactionThroughBoundary({
+          operation: "create",
+          draft,
+          dispatcher,
+          repository,
+          legacyUpsert: upsertTxn,
+        });
+      };
+
       // Duplicate transaction warning — non-blocking (window.confirm() has the same silent-failure risk as
       // alert() did: if it doesn't render in some WebViews, it auto-resolves to false and would silently
       // cancel the save). Warn inline instead, and let the save proceed.
@@ -4567,7 +4598,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
           priceInterestAmt:showPriceBreakdown&&priceInterestAmt>0?priceInterestAmt:null,
           priceGstAmt:showPriceBreakdown&&priceGstAmt>0?priceGstAmt:null,
         };
-        upsertTxn(newTxn);
+        if(!isEditing) submitCreateThroughBoundary(newTxn); else upsertTxn(newTxn);
         if(!isEditing && getAcc(accId).type==="cc") setAccounts(prev=>prev.map(a=>a.id===accId?{...a,outstanding:(a.outstanding||0)+amt}:a));
 
         if(isBillPayment){
@@ -4602,7 +4633,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
           setBillMatchSuggestion({bill:matchedBill,txn:newTxn});
         }
       } else if(txnType==="income"){
-        upsertTxn({ ...base, amount:amt, accId, catId:null, catIds:[], subId:null, subIds:[], incomeType:normalizeIncomeTypeValue(incomeType)||"salary" });
+        const incomeTxn = { ...base, amount:amt, accId, catId:null, catIds:[], subId:null, subIds:[], incomeType:normalizeIncomeTypeValue(incomeType)||"salary" };
+        if(!isEditing) submitCreateThroughBoundary(incomeTxn); else upsertTxn(incomeTxn);
         if(!isEditing){
           const pending = txns.filter(t=>t.type==="expense" && t.reimbursable && !t.reimbursedByTxnId);
           if(pending.length>0) setReimbursementMatchSuggestion({ incomeTxnId:resolvedTxnId, pending });
