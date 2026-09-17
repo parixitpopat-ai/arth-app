@@ -4594,7 +4594,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
           tagPersonAmount:tagAmt,
           tagGroupAmount:tagGrpAmt,
           tagItems:savedTagItems,
-          vehicleId:vehicleId||null,
+          // HOTFIX: only carry vehicleId through when this transaction actually qualifies for
+          // the vehicle picker (expense + Transport category) — matches the picker's own render
+          // condition exactly. Previously written unconditionally, which silently perpetuated a
+          // stale vehicleId on any transaction type (e.g. investment) with no UI path to see or
+          // clear it, since the picker never renders for non-qualifying types.
+          vehicleId:(txnType==="expense"&&catIds.includes("transport"))?(vehicleId||null):null,
           people:(()=>{
             // Multi-person attribution with custom per-person amounts — checked first since it's a
             // separate selection path from the single-person tag flow below.
