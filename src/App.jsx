@@ -68,6 +68,7 @@ import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategor
    Home/Insights IA split. (removed placeholder JSX fragments) */
 import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./domain/transactions/legacy/settlePersonShareOnBill";
 import { mergeEditedSplitPeople } from "./domain/bills/mergeEditedSplitPeople";
+import { withNewContribution, withoutContribution, getContributionsForObligation, getContributionsForTransaction, getTotalContributed, hasProtectedContributions } from "./domain/obligations/contribution";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import StatCard from "./components/StatCard";
@@ -784,6 +785,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
   // I-5 WP-1: School Fees domain persistence — mirrors insurancePolicies' pattern exactly.
   const [feeSchedules, setFeeSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_schedules")||"[]"));
   const [feePeriods, setFeePeriods] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_periods")||"[]"));
+  // WP-OBL-03: live, persisted Contribution array (OBL-001/OBL-002 canonical model). Not yet
+  // written to or read from by any screen — this WP is persistence plumbing only.
+  const [contributions, setContributions] = useState(()=>JSON.parse(localStorage.getItem("arth_contributions")||"[]"));
   const [schoolCreditNotes, setSchoolCreditNotes] = useState(()=>JSON.parse(localStorage.getItem("arth_school_credit_notes")||"[]"));
   // School Fees UI state — screen-level only, no calculations live here.
   const [showSchoolFeesList, setShowSchoolFeesList] = useState(false);
@@ -902,6 +906,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
   useEffect(()=>safeSetLocalStorage("arth_insurance_policies",JSON.stringify(insurancePolicies)),[insurancePolicies]);
   useEffect(()=>safeSetLocalStorage("arth_fee_schedules",JSON.stringify(feeSchedules)),[feeSchedules]);
   useEffect(()=>safeSetLocalStorage("arth_fee_periods",JSON.stringify(feePeriods)),[feePeriods]);
+  useEffect(()=>safeSetLocalStorage("arth_contributions",JSON.stringify(contributions)),[contributions]);
   useEffect(()=>safeSetLocalStorage("arth_school_credit_notes",JSON.stringify(schoolCreditNotes)),[schoolCreditNotes]);
   useEffect(()=>safeSetLocalStorage("arth_dismissed_alerts",JSON.stringify(dismissedAlerts)),[dismissedAlerts]);
   useEffect(()=>safeSetLocalStorage("arth_budget",monthBudget),[monthBudget]);
@@ -7439,6 +7444,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     insurancePolicies,
     feeSchedules,
     feePeriods,
+    contributions,
     schoolCreditNotes,
     schoolRelationships,
     trackedAssets,
@@ -7447,7 +7453,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -7491,6 +7497,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     if(Array.isArray(snapshot.insurancePolicies)) setInsurancePolicies(snapshot.insurancePolicies);
     if(Array.isArray(snapshot.feeSchedules)) setFeeSchedules(snapshot.feeSchedules);
     if(Array.isArray(snapshot.feePeriods)) setFeePeriods(snapshot.feePeriods);
+    if(Array.isArray(snapshot.contributions)) setContributions(snapshot.contributions);
     if(Array.isArray(snapshot.schoolCreditNotes)) setSchoolCreditNotes(snapshot.schoolCreditNotes);
     if(Array.isArray(snapshot.schoolRelationships)) setSchoolRelationships(snapshot.schoolRelationships);
     setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
@@ -8038,7 +8045,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
