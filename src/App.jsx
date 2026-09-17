@@ -4688,6 +4688,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             ? prev.map(b=>b.id===linkedBillId?{...b,...billRecord}:b)
             : [billRecord,...prev]
           );
+          // WP-OBL-04a: dual-write — also record a real Contribution for this payment,
+          // alongside the legacy billRecord write above. billRecord.amount is this bill's full
+          // core amount (this path has no partial-payment concept yet); resolvedTxnId is the
+          // transaction that made this payment.
+          setContributions(prev=>withNewContribution(prev, { obligationType:"bill", obligationId:linkedBillId, txnId:String(resolvedTxnId), amount:Number(billRecord.amount||0), txnAmount:Number(billRecord.amount||0) }, genId));
         } else if(matchedBill && !isEditing){
           setBillMatchSuggestion({bill:matchedBill,txn:newTxn});
         }
@@ -14303,6 +14308,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                       const paymentDate = todayStr();
                       setTxns(p=>[{id:paymentTxnId,type:"expense",desc:b.name,merchant:b.merchant||"",date:paymentDate,note:"Bill payment",catId:b.catId,catIds:b.catIds||[b.catId],subId:b.subId||null,accId:payAccId,people:b.splitPeople||{},forPerson:"",groupId:b.groupId||null,groupCollectiveAmount:Number(b.groupCollectiveAmount||0),amount:b.amount||0,isBillPayment:true,billInvoiceNo:b.invoiceNo||null,paidBillId:b.id,paidBillName:b.name,imageBase64:b.imageBase64||null,paymentImageBase64:b.paymentImageBase64||null},...p]);
                       setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:paymentDate,paidByTxnId:paymentTxnId,lastPaidAmount:b.amount,lastPaidDate:paymentDate}:x));
+                      // WP-OBL-04a: dual-write — also record a real Contribution alongside the
+                      // legacy paidByTxnId/status write above. Full amount, since this path has
+                      // no partial-payment concept yet.
+                      setContributions(prev=>withNewContribution(prev, { obligationType:"bill", obligationId:b.id, txnId:String(paymentTxnId), amount:Number(b.amount||0), txnAmount:Number(b.amount||0) }, genId));
                       if(b.recurring && b.autoGenerate!==false){
                         const nextDue = computeNextDueDate(b, paymentDate);
                         const nextPeriod = computeNextPeriod(b, paymentDate);
@@ -17036,6 +17045,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               <button onClick={()=>{
                 const b=billMatchSuggestion.bill;
                 setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:billMatchSuggestion.txn.date || todayStr(),paidByTxnId:billMatchSuggestion.txn.id}:x));
+                // WP-OBL-04a: dual-write — also record a real Contribution for this match,
+                // alongside the legacy paidByTxnId/status write above. Full amount — this path
+                // (like the other two) has no partial-payment concept yet.
+                setContributions(prev=>withNewContribution(prev, { obligationType:"bill", obligationId:b.id, txnId:String(billMatchSuggestion.txn.id), amount:Number(b.amount||0), txnAmount:Number(b.amount||0) }, genId));
                 setTxns(p=>p.map(x=>x.id===billMatchSuggestion.txn.id?{...x,isBillPayment:true,billInvoiceNo:b.invoiceNo||"",paidBillId:b.id,paidBillName:b.name}:x));
                 if(b.recurring){ const next=new Date(b.dueDate); if(b.frequency==="monthly") next.setMonth(next.getMonth()+1); else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3); else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6); else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
                 setBillMatchSuggestion(null);
