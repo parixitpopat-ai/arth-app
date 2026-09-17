@@ -1,10 +1,12 @@
-// Arth theme tokens — merged 2026-09-17: adds every new role/scale from arth-tokens.js
-// (Design Direction handoff, typeface B — Instrument Sans + IBM Plex Mono) while keeping every
-// existing exported name so nothing that already imports from here breaks. TYPE.label and
-// TYPE.body take the NEW values on purpose — the design intentionally supersedes those two.
-// Old TYPE.micro/strong/h3/h2/h1 and old SPACE.xs/sm/md/lg/xl/xxl are kept as-is alongside the
-// new SPACE 1/2/3/4/6/8/10 scale — new components should prefer the new scale; nothing old
-// needs to change to get the contrast/type-floor fixes.
+// Arth theme tokens — split 2026-09-17 per designer's compatibility correction.
+// Old TYPE and SPACE are restored to their EXACT original names and shapes — nothing that
+// already reads TYPE.h1/strong/h3/h2/label/body or SPACE.xs/sm/md/lg/xl/xxl changes behaviour.
+// The new scales from the Design Direction handoff (typeface B — Instrument Sans + IBM Plex
+// Mono) are exposed under DISTINCT names, TYPE_SCALE and SPACE_SCALE, per the designer's own
+// note: "keep the old TYPE/SPACE exports under their original names and shapes, and expose the
+// new scales below under distinct names... migrate call sites deliberately in one commit."
+// New components should import TYPE_SCALE / SPACE_SCALE. No existing call site uses either name
+// yet, so this is a clean rename with zero migration debt as of this commit.
 
 export const FONT = {
   sans: "'Instrument Sans', system-ui, sans-serif",
@@ -40,18 +42,25 @@ export const LIGHT = {
 
 export const PALETTE = ["#f0a500","#22c55e","#3b82f6","#ef4444","#a855f7","#06b6d4","#f97316","#ec4899","#84cc16","#14b8a6","#8b5cf6","#f43f5e","#0ea5e9","#10b981","#f59e0b"];
 
-// Spacing — BOTH scales kept. Prefer the new numeric one going forward.
-export const SPACE = { xs:4, sm:8, md:12, lg:16, xl:24, xxl:32, 1:4, 2:8, 3:12, 4:16, 6:24, 8:32, 10:40 };
+// --- ORIGINAL, UNCHANGED (do not add new keys here — use SPACE_SCALE / TYPE_SCALE) ---
+export const SPACE = { xs:4, sm:8, md:12, lg:16, xl:24, xxl:32 };
+
+export const TYPE = {
+  micro:  { fontSize:9,  fontWeight:700 }, // badges, tiny labels
+  label:  { fontSize:11, fontWeight:700 }, // field labels, section headers
+  body:   { fontSize:13, fontWeight:600 }, // default body text
+  strong: { fontSize:14, fontWeight:800 }, // emphasized body, card titles
+  h3:     { fontSize:16, fontWeight:900 }, // sheet/modal titles
+  h2:     { fontSize:20, fontWeight:900 }, // section headers
+  h1:     { fontSize:26, fontWeight:900 }, // screen-level headers, big numbers
+};
+
+// --- NEW, per Design Direction handoff (typeface B). Use these in new components. ---
+export const SPACE_SCALE = { 1: 4, 2: 8, 3: 12, 4: 16, 6: 24, 8: 32, 10: 40 };
 export const RADIUS = { sm: 8, md: 12, lg: 14, pill: 999 };
 export const TOUCH = { min: 48, icon: 48 };
 
-// Typography — old keys kept; label/body use the NEW values on purpose (the actual fix).
-export const TYPE = {
-  micro:  { fontSize:9,  fontWeight:700 },
-  strong: { fontSize:14, fontWeight:800 },
-  h3:     { fontSize:16, fontWeight:900 },
-  h2:     { fontSize:20, fontWeight:900 },
-  h1:     { fontSize:26, fontWeight:900 },
+export const TYPE_SCALE = {
   heroAmount: { fontFamily: FONT.mono, fontSize: 34, fontWeight: 600, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" },
   title:      { fontFamily: FONT.sans, fontSize: 26, fontWeight: 600, letterSpacing: "-0.01em" },
   section:    { fontFamily: FONT.sans, fontSize: 20, fontWeight: 600, letterSpacing: "-0.01em" },
