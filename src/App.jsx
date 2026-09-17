@@ -1603,6 +1603,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         return { ...b, status:"unpaid", paidDate:null, ...(b.groupCollectiveAmount>0 ? { groupCollectiveSettledAmt:nextGrp } : {}) };
       }));
     }
+    // WP-BILLS-2C: deleting a transaction that IS a bill's direct core payment (paidBillId)
+    // must not leave the bill falsely marked paid, pointing at a transaction that no longer
+    // exists. Confirmed gap: nothing above this line (or anywhere else in the codebase) handled
+    // this. Reset the bill back to unpaid using the same restoration shape the settlementLinks
+    // branch above already uses (status:"unpaid", paidDate:null). The symmetric guard
+    // (bl.paidByTxnId === txn.id) matches how all 3 confirmed writer paths always set both
+    // sides together, so this only resets the bill that was genuinely pointing back at this txn.
+    //
+    // Deliberately NOT handled here (see apply script header for full reasoning): splitPeople
+    // settlement progress on this bill is left as-is — whether it should also reverse when the
+    // CORE payment (not a settlement_in transaction) is deleted is a separate, unresolved
+    // question, distinct from the settlementLinks branch above (which only fires for
+    // settlement_in deletions). Also not handled: transaction EDIT reconciliation for
+    // bill-linked transactions — no existing precedent decides this (OBL-001 Section 10, OPEN).
+    if(txn.paidBillId){
+      setBills(prev=>prev.map(bl=>String(bl.id)===String(txn.paidBillId) && String(bl.paidByTxnId)===String(txn.id)
+        ? {...bl, status:"unpaid", paidDate:null, paidByTxnId:null}
+        : bl
+      ));
+    }
     setTxns(prev=>prev.filter(x=>String(x.id)!==String(txn.id)));
     if(txn.type==="investment"){
       setInvestments(prev=>prev.filter(x=>String(x.id)!==String(txn.linkedInvestmentId||"") && String(x.linkedTxnId)!==String(txn.id)));
