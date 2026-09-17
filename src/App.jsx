@@ -14678,7 +14678,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
           </div>
           <div style={{ padding:"10px 8px",display:"flex",flexDirection:"column",gap:2 }}>
             {[
-              { icon:"👤", label:"User Profile", onClick:()=>{ setTab("home"); setShowSettings(false); onClose(); } },
+              { icon:"👤", label:"User Profile", onClick:()=>{ setShowSettings(true); setSettingsSection("myprofile"); onClose(); } },
               { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"🧾", label:"Payments", onClick:()=>goToTab("bills") },
               { icon:"👥", label:"People & Groups", onClick:()=>goToTab("people") },
