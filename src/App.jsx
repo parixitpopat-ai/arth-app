@@ -67,6 +67,7 @@ import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategor
 /* Vertical-slice additions (this session) - Observe-level only, per BUD-002's
    Home/Insights IA split. (removed placeholder JSX fragments) */
 import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./domain/transactions/legacy/settlePersonShareOnBill";
+import { mergeEditedSplitPeople } from "./domain/bills/mergeEditedSplitPeople";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import StatCard from "./components/StatCard";
@@ -13702,12 +13703,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     const save=()=>{
       if(duplicateInvoiceBill) return;
       const shares=calcEditShares();
-      const peopleSplit={};
-      Object.entries(shares).forEach(([pid,sh])=>{ const p=getPerson(pid); peopleSplit[pid]={amount:sh,mode:p.personType!=="dependant"?"owes":"spent_on"}; });
-      const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
-      const myShare=editIncludeMe ? Math.max(0, editAmt-owedByOthers) : 0;
-      const groupCollectiveAmount = editGroup ? Math.max(0, editAmt-owedByOthers-myShare) : 0;
-      setBills(prev=>prev.map(x=>x.id===b.id?{...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null}:x));
+      // WP-BILLS-2A: peopleSplit is built inside the functional updater, against the LIVE
+      // previous bill (x.splitPeople) rather than the possibly-stale `b` prop, and merged via
+      // mergeEditedSplitPeople so existing settledAmt/remainingAmt/settled progress survives an
+      // ordinary Bill edit instead of being silently overwritten.
+      setBills(prev=>prev.map(x=>{
+        if(x.id!==b.id) return x;
+        const peopleSplit=mergeEditedSplitPeople(x.splitPeople, shares, getPerson);
+        const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
+        const myShare=editIncludeMe ? Math.max(0, editAmt-owedByOthers) : 0;
+        const groupCollectiveAmount = editGroup ? Math.max(0, editAmt-owedByOthers-myShare) : 0;
+        return {...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null};
+      }));
       onClose();
     };
 
