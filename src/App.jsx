@@ -3777,29 +3777,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       if(["split","tag","allocate"].includes(splitMode)) setShowAdvancedTracking(true);
     },[splitMode]);
 
-    // WP-BILLS-2B: seed split/group state from a matched unpaid Bill, once, the first time a
-    // match appears for THIS bill id — before the user has necessarily touched the split UI.
-    // Guarded so it fires at most once per matched bill (seededBillIdRef) and never overwrites a
-    // deliberate user choice: it only acts while nothing has been selected yet (splitMode is
-    // still its untouched default AND no person/group is already chosen).
-    const seededBillIdRef = useRef(null);
-    useEffect(()=>{
-      if(!renderMatchedBill || isEditing) return;
-      if(seededBillIdRef.current === renderMatchedBill.id) return; // already seeded for this bill
-      const untouched = splitMode==="unified" && !splitGroup && selectedPids.length===0;
-      if(!untouched) return; // user already interacted — never overwrite
-      seededBillIdRef.current = renderMatchedBill.id;
-      const bp = renderMatchedBill.splitPeople || {};
-      if(Object.keys(bp).length>0){
-        setSplitMode("split");
-        setSplitPeople(Object.fromEntries(Object.keys(bp).map(pid=>[pid,true])));
-        setSplitCustom(Object.fromEntries(Object.entries(bp).map(([pid,info])=>[pid,String(info?.amount ?? "")])));
-        setCollectMap(Object.fromEntries(Object.entries(bp).map(([pid,info])=>[pid, info?.mode !== "spent_on"])));
-        setSplitCalc("amount");
-      }
-      if(renderMatchedBill.groupId) setSplitGroup(renderMatchedBill.groupId);
-    },[renderMatchedBill, isEditing, splitMode, splitGroup, selectedPids.length]);
-
     const validCatIds = catIds.filter(cid=>getCat(cid));
     const validSubIds = subIds.filter(sid=>validCatIds.some(cid=>getCat(cid)?.subs?.some(sub=>sub.id===sid)));
     const catId = validCatIds[0]||null;  // primary cat for backward compat
@@ -3819,6 +3796,27 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     // seed effect below can react to a match as soon as it becomes true — not just at submit
     // time. submit()'s own local matchedBill (unchanged) is the one actually used for the write.
     const renderMatchedBill = isBillPayment ? bills.find(bl=>bl.status==="unpaid"&&bl.catId===catId&&bl.amount>0&&bl.amount===amt) : null;
+
+    // HOTFIX (TDZ): this effect was originally placed BEFORE renderMatchedBill/selectedPids were
+    // declared, causing a ReferenceError on every render of this component. Relocated here —
+    // same guard conditions, same seed logic, no behavior change beyond fixing the crash.
+    const seededBillIdRef = useRef(null);
+    useEffect(()=>{
+      if(!renderMatchedBill || isEditing) return;
+      if(seededBillIdRef.current === renderMatchedBill.id) return; // already seeded for this bill
+      const untouched = splitMode==="unified" && !splitGroup && selectedPids.length===0;
+      if(!untouched) return; // user already interacted — never overwrite
+      seededBillIdRef.current = renderMatchedBill.id;
+      const bp = renderMatchedBill.splitPeople || {};
+      if(Object.keys(bp).length>0){
+        setSplitMode("split");
+        setSplitPeople(Object.fromEntries(Object.keys(bp).map(pid=>[pid,true])));
+        setSplitCustom(Object.fromEntries(Object.entries(bp).map(([pid,info])=>[pid,String(info?.amount ?? "")])));
+        setCollectMap(Object.fromEntries(Object.entries(bp).map(([pid,info])=>[pid, info?.mode !== "spent_on"])));
+        setSplitCalc("amount");
+      }
+      if(renderMatchedBill.groupId) setSplitGroup(renderMatchedBill.groupId);
+    },[renderMatchedBill, isEditing, splitMode, splitGroup, selectedPids.length]);
     const repaymentCandidates = useMemo(()=>{
       if(settlementKind!=="repayment") return [];
       const personItems = tagPerson ? getPersonReceivableItems(tagPerson) : [];
