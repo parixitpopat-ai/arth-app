@@ -3425,10 +3425,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     const [showMembershipPanel, setShowMembershipPanel] = useState(false);
     const [showBillPicker, setShowBillPicker] = useState(false);
     const [showTripPicker, setShowTripPicker] = useState(false);
-    const [linkValidFrom, setLinkValidFrom] = useState(todayStr());
-    const [linkCycle, setLinkCycle] = useState("monthly");
-    const [linkBulkMonths, setLinkBulkMonths] = useState("1");
-    const [linkGraceDays, setLinkGraceDays] = useState("0");
+    // Fix: on edit, populate these from the ACTUAL linked membership record instead of always
+    // resetting to today/monthly/1/0. Two link directions exist across the two membership-
+    // creation paths in this codebase (this panel writes txnId on the membership record; the
+    // dedicated AddMembershipModal writes linkedTxnId on the transaction side instead) — check
+    // both rather than assume one.
+    const linkedMembershipRecord = isEditing && sourceTxn
+      ? memberships.find(m=>String(m.txnId)===String(sourceTxn.id) || String(m.linkedTxnId)===String(sourceTxn.id))
+      : null;
+    const linkedMembershipPeriod = linkedMembershipRecord?.periods?.[0] || null;
+    const [linkValidFrom, setLinkValidFrom] = useState(linkedMembershipRecord?.validFrom || linkedMembershipPeriod?.from || todayStr());
+    const [linkCycle, setLinkCycle] = useState(linkedMembershipRecord?.cycle || "monthly");
+    // No. of Cycles has no equivalent stored field once a record uses the periods[] shape (the
+    // dedicated modal's own path) — left at its original default in that case, a real, honest
+    // gap rather than a guessed value. Only the panel's own bulkMonths field, when present, is
+    // trustworthy here.
+    const [linkBulkMonths, setLinkBulkMonths] = useState(linkedMembershipRecord?.bulkMonths ? String(linkedMembershipRecord.bulkMonths) : "1");
+    const [linkGraceDays, setLinkGraceDays] = useState(String(linkedMembershipRecord?.graceDays ?? linkedMembershipPeriod?.graceDays ?? 0));
     const [linkMemberPersonId, setLinkMemberPersonId] = useState("__me__"); // WP-4 fix: was "self"
     const linkedBA = billerLinkId ? billerAccounts.find(b=>b.id===billerLinkId) : null;
     const linkedBAType = linkedBA ? getBillerActionType(linkedBA.type) : null;
@@ -15407,7 +15420,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     const [graceDays, setGraceDays] = useState((existingPeriods?.length===1 ? existingPeriods[0]?.graceDays : 0) || 0);
     const [note, setNote] = useState(existing?.note||"");
     const [linkedTxnId, setLinkedTxnId] = useState(existing?.linkedTxnId||"");
-    const [catId, setCatId] = useState(existing?.catId||"");
+    // Fix: default Category from this biller's own most recent prior membership payment,
+    // instead of always starting empty and forcing a re-pick on every renewal — the same
+    // "don't ask what Arth can infer" principle already applied to Add Bill's biller auto-fill.
+    const priorMembershipForBA = existing ? null : memberships
+      .filter(m=>m.billerAccountId===billerAccount.id)
+      .sort((a,b)=>(b.createdAt||0)-(a.createdAt||0))[0];
+    const [catId, setCatId] = useState(existing?.catId || priorMembershipForBA?.catId || "");
     const recentTxnsForBiller = txns.filter(t=>t.type==="expense" && t.billerLinkId===billerAccount.id).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,15);
 
     const planMonths = { monthly:1, quarterly:3, annual:12 };
