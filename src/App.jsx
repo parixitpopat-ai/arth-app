@@ -16,7 +16,7 @@ const readCopiedSms = async () => ({ text: "", error: "Not supported" });
 const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
-import { DARK, LIGHT, PALETTE } from "./constants/theme";
+import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT } from "./constants/theme";
 import { todayStr, addDaysToDateStr, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
 import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
 import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
@@ -2630,11 +2630,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
 
   // ── STYLES ─────────────────────────────────────────────────────────────────
   const card = { background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:16, marginBottom:12, boxShadow:`0 2px 8px ${T.sh}` };
-  const lbl = { color:T.sub, fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.2, display:"block", marginBottom:6 };
-  const inp = { background:T.input, border:`1px solid ${T.border}`, borderRadius:10, padding:"11px 14px", color:T.text, fontSize:16, width:"100%", outline:"none", fontFamily:"Nunito,sans-serif", boxSizing:"border-box" };
+  // WP-UI-2B-1: label + input upgraded to Design Language tokens. TYPE.label's exact values
+  // (11px/600/uppercase) are inlined here rather than importing TYPE, since TYPE/TYPE_SCALE's
+  // split (per the designer's own compatibility correction) makes TYPE_SCALE the "new" scale to
+  // import going forward — done as a direct follow-up import addition when that sweep happens;
+  // inlining the two label values here keeps this edit minimal and self-contained today.
+  const lbl = { color:T.sub, fontSize:11, fontWeight:600, textTransform:"uppercase", letterSpacing:"0.08em", display:"block", marginBottom:6 };
+  const inp = { background:T.input, border:`1px solid ${T.border}`, borderRadius:RADIUS.md, minHeight:TOUCH.min, padding:"0 14px", color:T.text, fontSize:15, width:"100%", outline:"none", fontFamily:FONT.sans, boxSizing:"border-box" };
   const inpSm = { background:T.input, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px 10px", color:T.text, fontSize:16, outline:"none", fontFamily:"Nunito,sans-serif" };
-  const btnP = { background:T.accent, color:"#000", border:"none", borderRadius:12, padding:13, cursor:"pointer", fontSize:14, fontWeight:800, width:"100%", fontFamily:"Nunito,sans-serif" };
-  const btnG = { background:"none", border:`1px solid ${T.border}`, color:T.sub, borderRadius:12, padding:13, cursor:"pointer", fontSize:14, fontWeight:700, fontFamily:"Nunito,sans-serif" };
+  // WP-UI-2B-1: btnP/btnG now delegate to the already-committed BUTTON() token function
+  // (primary/secondary variants) rather than hand-rolled values — same object shape at each
+  // call site (spread with style={btnP}/style={{...btnP, ...}}), so no call site needs to change.
+  const btnP = { ...BUTTON("primary", T), width:"100%" };
+  const btnG = { ...BUTTON("secondary", T) };
   const ttStyle = { background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px 12px", fontSize:12, color:T.text };
   const lightSelect = { ...inp, background:"#fff", color:"#111" };
 
