@@ -72,6 +72,7 @@ import { withNewContribution, withoutContribution, getContributionsForObligation
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import StatCard from "./components/StatCard";
+import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
 import EmptyState from "./components/EmptyState";
 import Toast from "./components/Toast";
@@ -6027,9 +6028,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                     <div>
                       <div style={{ color:T.sub,fontSize:11 }}>For <span style={{ color:T.text,fontWeight:800 }}>{linkMemberPersonId==="self"?"Me":(getPerson(linkMemberPersonId)?.name||linkedBA?.name)}</span> — {linkedBA?.name}</div>
                     </div>
-                    <div style={{ display:"flex",gap:6 }}>
-                      {["monthly","quarterly","halfyearly","annual"].map(c=>(<button key={c} onClick={()=>setLinkCycle(c)} style={{ flex:1,background:linkCycle===c?T.accent+"22":"none",border:`1px solid ${linkCycle===c?T.accent:T.border}`,borderRadius:10,padding:"5px 2px",cursor:"pointer",fontSize:9,fontWeight:700,color:linkCycle===c?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.charAt(0).toUpperCase()+c.slice(1)}</button>))}
-                    </div>
+                    {/* WP-UI-2B-2 pilot: first of 78 confirmed hand-rolled pill-toggle sites
+                        converted to the new Segmented component. Same values, same behavior. */}
+                    <Segmented options={["monthly","quarterly","halfyearly","annual"]} value={linkCycle} onChange={setLinkCycle} T={T}/>
                     <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
                       <div><span style={lbl}>Valid From</span><input style={inp} type="date" value={linkValidFrom} onChange={e=>setLinkValidFrom(e.target.value)}/></div>
                       <div><span style={lbl}>No. of cycles</span><input style={inp} type="number" min="1" value={linkBulkMonths} onChange={e=>setLinkBulkMonths(e.target.value)}/></div>
