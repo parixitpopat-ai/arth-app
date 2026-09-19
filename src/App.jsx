@@ -6194,17 +6194,25 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       if(!iSubId && match.subId) setISubId(match.subId);
       if(iUnit==="nos" && match.unit) setIUnit(match.unit);
     };
+    // WP-A: locked policy — "explicit learning, not silent overwrite." This live lookup only
+    // tells us whether an entry with this name currently exists, not whether it was used to
+    // prefill the fields above.
+    const catalogMatch = iName.trim() ? itemCatalog.find(it=>it.name.toLowerCase()===iName.trim().toLowerCase()) : null;
+    const [rememberForFuture, setRememberForFuture] = useState(false);
     const handleSave = () => {
       if(!iName.trim()) return;
       onSave({ id: editingItemId||genId(), label:iName.trim(), qty:iQty, unit:iUnit, unitPrice:iPrice, catId:iCatId||null, subId:iSubId||null });
-      // Remember this item's category/sub-category/unit for next time, keyed by name (case-insensitive).
+      // WP-A: the TRANSACTION's own lineItem above always gets whatever was chosen — unconditional,
+      // unchanged. The CATALOG (Arth's future suggestion for this item name) is a separate
+      // decision: a brand-new item is still auto-learned (no friction for genuinely new items,
+      // per the locked spec); an EXISTING catalog entry is left untouched unless the user
+      // explicitly opted in via the "Remember for future" checkbox below.
       const nameKey = iName.trim();
-      setItemCatalog(prev=>{
-        const idx = prev.findIndex(it=>it.name.toLowerCase()===nameKey.toLowerCase());
-        const entry = { id: idx>=0?prev[idx].id:genId(), name:nameKey, unit:iUnit||"nos", catId:iCatId||"", subId:iSubId||"" };
-        if(idx>=0){ const next=[...prev]; next[idx]=entry; return next; }
-        return [...prev, entry];
-      });
+      if(!catalogMatch){
+        setItemCatalog(prev=>[...prev, { id: genId(), name:nameKey, unit:iUnit||"nos", catId:iCatId||"", subId:iSubId||"" }]);
+      } else if(rememberForFuture){
+        setItemCatalog(prev=>prev.map(it=>it.id===catalogMatch.id ? { ...it, unit:iUnit||"nos", catId:iCatId||"", subId:iSubId||"" } : it));
+      }
       onClose();
     };
     return (
@@ -6232,6 +6240,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               <div><span style={lbl}>Category</span><select style={inp} value={iCatId} onChange={e=>{setICatId(e.target.value);setISubId("");}}><option value="">Select</option>{(cats||[]).map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}</select></div>
               <div><span style={lbl}>Sub-category</span><select style={inp} value={iSubId} onChange={e=>setISubId(e.target.value)}><option value="">Select</option>{(iCat?.subs||[]).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
             </div>
+            {/* WP-A: only shown for an item Arth already knows — a brand-new item is auto-learned
+                on save with no checkbox needed. Default unchecked: this purchase's classification
+                never silently rewrites Arth's existing suggestion for this item name. */}
+            {catalogMatch&&(
+              <label style={{ display:"flex",alignItems:"center",gap:8,cursor:"pointer" }}>
+                <input type="checkbox" checked={rememberForFuture} onChange={e=>setRememberForFuture(e.target.checked)} style={{ width:16,height:16,accentColor:T.accent,cursor:"pointer" }}/>
+                <span style={{ color:T.sub,fontSize:12 }}>Remember this for future {iName.trim()} purchases</span>
+              </label>
+            )}
             <button onClick={handleSave} disabled={!iName.trim()} style={{ background:iName.trim()?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:iName.trim()?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{editingItemId?"Save Changes ✓":"Add Item ✓"}</button>
           </div>
         </div>
