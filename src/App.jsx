@@ -3564,7 +3564,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                 }))
               : [],
           }))
-        : [{ id:genId(), label:"", qty:"1", unit:"nos", unitPrice:"", catId:"", subId:"", splits:[] }]
+        // FIX: previously seeded one blank item by default for every new transaction,
+        // unconditionally — not draft recovery, not addLineItem (confirmed dead code, never
+        // called) — this literal default value. Now starts empty; "+ Add item" (ItemSheetModal,
+        // which gates its own Save button on a non-empty name) is the only real way to add one.
+        : []
     );
     const [billInvoiceNo, setBillInvoiceNo] = useState(isEditing ? (sourceTxn?.billInvoiceNo || "") : "");
     const [settlementKind, setSettlementKind] = useState(initialSettlementKind);
@@ -5149,10 +5153,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                     so flipping it ON hid Category with nothing visible taking its place. */}
                 {useItemizedLines&&(
                   <div style={{ background:T.input,borderRadius:10,padding:10 }}>
-                    {/* TEMPORARY DEBUG - remove once the bug is found */}
-                    <div style={{ background:"#ff000022",border:"1px solid red",borderRadius:6,padding:6,marginBottom:6,fontSize:9,color:"red",fontFamily:"monospace" }}>
-                      DEBUG lineItems.length={lineItems.length} | raw={JSON.stringify(lineItems)}
-                    </div>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                       <div style={{ display:"flex",alignItems:"center",gap:8 }}>
                         <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>ITEMS</div>
