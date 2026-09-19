@@ -6375,6 +6375,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               <div><span style={lbl}>Category</span><select style={inp} value={iCatId} onChange={e=>{setICatId(e.target.value);setISubId("");}}><option value="">Select</option>{(cats||[]).map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}</select></div>
               <div><span style={lbl}>Sub-category</span><select style={inp} value={iSubId} onChange={e=>setISubId(e.target.value)}><option value="">Select</option>{(iCat?.subs||[]).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
             </div>
+            {/* WP-C: makes applyItemMemory's pre-fill VISIBLE, matching QuickAdd's item-first
+                "Suggested:" line (WP-B-2) for consistency across both entry paths. Shown even if
+                the user has since changed the dropdowns away from it, so the "Remember for
+                future" checkbox's effect below stays legible. */}
+            {catalogMatch&&(()=>{
+              const suggestedCat = getCat(catalogMatch.catId);
+              const suggestedSub = suggestedCat?.subs?.find(s=>s.id===catalogMatch.subId);
+              if(!suggestedCat) return null;
+              return (
+                <div style={{ color:T.accent,fontSize:11,fontWeight:700,marginTop:-4 }}>
+                  Suggested from your item history: {suggestedCat.icon} {suggestedCat.name}{suggestedSub?` → ${suggestedSub.name}`:""}
+                </div>
+              );
+            })()}
             {/* WP-A: only shown for an item Arth already knows — a brand-new item is auto-learned
                 on save with no checkbox needed. Default unchecked: this purchase's classification
                 never silently rewrites Arth's existing suggestion for this item name. */}
