@@ -4039,19 +4039,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       const parts = splitEvenAmounts(Math.max(0,total||0), ids.length);
       return Object.fromEntries(ids.map((id,idx)=>[id, String(parts[idx]||0)]));
     },[splitEvenAmounts]);
+    // FIX: previously clamped any typed value to "total minus the OTHER category's current
+    // (unchanged) value" -- starting from an equal split, this made it IMPOSSIBLE to raise one
+    // category above its equal share without first manually lowering the other, since the clamp
+    // used the other field's stale value as a ceiling. Typing an unequal amount visibly snapped
+    // back to equal, silently. Now: type any non-negative amount freely; the save-time warning
+    // (added separately) and the live remaining-balance indicator below handle the rest.
     const updateCategoryAllocation = useCallback((ids, changedId, rawValue, total, current)=>{
       if(!Array.isArray(ids) || ids.length<=1) return current||{};
-      const totalAmt = Math.max(0, Number(total||0));
       const next = { ...(current||{}) };
       ids.forEach(id=>{ if(next[id]===undefined) next[id] = "0"; });
-      const othersTotal = ids.filter(id=>id!==changedId).reduce((sum,id)=>sum+(parseFloat(next[id])||0),0);
-      const maxForChanged = Math.max(0, totalAmt-othersTotal);
       if(rawValue===""){
         next[changedId] = "";
         return next;
       }
       const parsed = parseFloat(rawValue);
-      const safe = Number.isFinite(parsed) ? Math.max(0, Math.min(maxForChanged, parsed)) : 0;
+      const safe = Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
       next[changedId] = String(Math.round(safe*100)/100);
       return next;
     },[]);
@@ -4661,28 +4664,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         const groupIdVal = splitMode==="split" ? (splitGroup||null)
           : (splitMode==="allocate" || splitMode==="unified") ? (groupAllocationsVal[0]?.groupId||null)
           : (splitMode==="tag" && (tagMode==="group"||tagMode==="both"||tagMode==="attribute") ? (tagGroup||null) : null);
+        // FIX: this used to force-inject the (amt - typed total) shortfall into whichever
+        // category was last edited, silently overwriting the user's actual typed values to make
+        // the sum come out exact. That's the real root cause of tonight's "my custom split keeps
+        // reverting to equal" bug -- it ran BEFORE the save-time warning check, so by the time
+        // that check saw the numbers, they'd already been force-balanced and there was nothing
+        // left to warn about. Removed entirely: catAllocNumeric is now exactly what was typed,
+        // parsed to numbers, nothing added or adjusted. The save-time warning still fires
+        // correctly if the total doesn't match -- for real, this time.
         let catAllocNumeric = Object.fromEntries(Object.entries(catAllocations||{}).map(([cid,val])=>[cid,parseFloat(val)||0]));
-        if(catIds.length>1){
-          const baseMap = Object.fromEntries(catIds.map(cid=>[cid,Math.max(0,Number(catAllocNumeric[cid]||0))]));
-          const currentTotal = Object.values(baseMap).reduce((s,v)=>s+v,0);
-          const diff = Math.round((amt-currentTotal)*100)/100;
-          if(Math.abs(diff)>=0.01){
-            const targetId = (lastEditedCatId && catIds.includes(lastEditedCatId)) ? lastEditedCatId : catIds[catIds.length-1];
-            baseMap[targetId] = Math.max(0, Math.round((Number(baseMap[targetId]||0)+diff)*100)/100);
-          }
-          const adjustedTotal = Object.values(baseMap).reduce((s,v)=>s+v,0);
-          const finalDiff = Math.round((amt-adjustedTotal)*100)/100;
-          if(Math.abs(finalDiff)>=0.01){
-            const fallbackId = catIds[catIds.length-1];
-            baseMap[fallbackId] = Math.max(0, Math.round((Number(baseMap[fallbackId]||0)+finalDiff)*100)/100);
-          }
-          catAllocNumeric = baseMap;
-          setCatAllocations(prev=>{
-            const next = { ...prev };
-            catIds.forEach(cid=>{ next[cid] = String(catAllocNumeric[cid]||0); });
-            return next;
-          });
-        }
         const categorySplitTotal = Object.values(catAllocNumeric).reduce((s,v)=>s+v,0);
         const hasCategorySplit = catIds.length>1 && Math.abs(categorySplitTotal - amt) < 0.01;
         // FIX: previously, a category split that didn't sum exactly to the transaction total was
@@ -5934,7 +5924,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                         </div>
                       );
                     })}
-                    <div style={{ color:T.sub, fontSize:10 }}>Total must equal transaction amount to enforce exact split.</div>
+                    {/* FIX: replaces the static "must equal exactly" message with a live
+                        indicator of what's left uncategorized -- asks about the remaining
+                        balance rather than imposing the breakdown while typing. */}
+                    {(()=>{
+                      const allocatedTotal = catIds.reduce((s,cid)=>s+(parseFloat(catAllocations[cid])||0),0);
+                      const remaining = Math.round((amt-allocatedTotal)*100)/100;
+                      if(Math.abs(remaining)<0.01) return <div style={{ color:T.success, fontSize:10, fontWeight:700 }}>✓ Fully allocated</div>;
+                      return <div style={{ color:remaining>0?T.sub:T.danger, fontSize:10, fontWeight:700 }}>{remaining>0?`${sym}${fmt(remaining)} not yet categorised`:`${sym}${fmt(Math.abs(remaining))} over-allocated`}</div>;
+                    })()}
                   </div>
                 )}
 
