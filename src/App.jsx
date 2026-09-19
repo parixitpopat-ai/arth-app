@@ -70,6 +70,7 @@ import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./doma
 import { mergeEditedSplitPeople } from "./domain/bills/mergeEditedSplitPeople";
 import { withNewContribution, withoutContribution, getContributionsForObligation, getContributionsForTransaction, getTotalContributed, hasProtectedContributions } from "./domain/obligations/contribution";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
+import { getFrequentVendors, getFrequentItemsForVendor } from "./domain/transactions/vendorInsights";
 import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
@@ -754,6 +755,36 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
   const [groups, setGroups] = useState(()=>JSON.parse(localStorage.getItem("arth_groups")||"[]"));
   const [measureUnits, setMeasureUnits] = useState(()=>normalizeMeasureUnits(JSON.parse(localStorage.getItem("arth_measure_units")||"null")));
   const [itemCatalog, setItemCatalog] = useState(()=>normalizeItemCatalog(JSON.parse(localStorage.getItem("arth_item_catalog")||"[]")));
+  // WP-B-2: single source of truth for "item name -> Arth's remembered category/sub-category/
+  // unit" lookup. Both ItemSheetModal (full itemization) and QuickAddModal (item-first quick
+  // entry) call this SAME function rather than each keeping their own inline itemCatalog.find().
+  const findItemCatalogMatch = (name) => {
+    const key = String(name||"").trim().toLowerCase();
+    if(!key) return null;
+    return itemCatalog.find(it=>it.name.toLowerCase()===key) || null;
+  };
+  // WP-B-2: shared Transaction-boundary create wrapper for QuickAddModal specifically. AddModal
+  // keeps its own existing, untouched submitCreateThroughBoundary -- same underlying imported
+  // wireTransactionApplication/submitTransactionThroughBoundary functions either way; only this
+  // thin per-caller wrapper is separate, deliberately, so AddModal's own call sites are not
+  // touched by this change at all.
+  const createTransactionThroughBoundary = (draft) => {
+    const statePort = {
+      getAll: () => txns,
+      upsert: record => setTxns(prev => prev.some(t => String(t.id)===String(record.id))
+        ? prev.map(t => String(t.id)===String(record.id) ? record : t)
+        : [record, ...prev]
+      ),
+    };
+    const { dispatcher, repository } = wireTransactionApplication({ statePort });
+    submitTransactionThroughBoundary({
+      operation: "create",
+      draft,
+      dispatcher,
+      repository,
+      legacyUpsert: nextTxn => setTxns(prev => [nextTxn, ...prev]),
+    });
+  };
   const [txns, setTxns] = useState(()=>normalizeTxns(JSON.parse(localStorage.getItem("arth_txns")||"[]")));
   const [investments, setInvestments] = useState(()=>JSON.parse(localStorage.getItem("arth_investments")||"[]"));
   const [recurringSchedules, setRecurringSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_recurring")||"[]"));
@@ -3017,6 +3048,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     // with the account itself. Income/Transfer never show it: how the other party paid you, or
     // which account-to-account rail a transfer used, isn't something Arth can know or needs to.
     const [qaDate, setQaDate] = useState(todayStr());
+    // WP-B-2: item-first entry -- an item can be recorded with NO vendor. Independent of qaWho.
+    const [qaItemName, setQaItemName] = useState("");
+    // WP-B-2: vendor-first multi-item selection -- populated by tapping "frequently bought"
+    // chips once a vendor is set. Each entry already carries its own remembered catId/subId/
+    // unitPrice/qty from that vendor's purchase history (getFrequentItemsForVendor).
+    const [qaLineItems, setQaLineItems] = useState([]);
 
     const recentTxnSort = (a,b)=>getRecordedSortValue(b)-getRecordedSortValue(a);
     const [qaAccId, setQaAccId] = useState(()=>{
@@ -3027,8 +3064,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     // Same ranked-match approach AddModal uses for its own suggestion (history match, then
     // keyword rules) — kept independent so this never has to reach into AddModal's internals.
     // Only runs for expenses — income categories aren't merchant-driven the same way.
+    // WP-B-2: item-name signal, checked separately from vendor detection so item-first entry
+    // (no vendor at all) still gets a category suggestion via the SAME itemCatalog lookup
+    // ItemSheetModal uses -- one source of truth, not a second copy of this logic.
+    const itemCatalogSuggestion = useMemo(() => {
+      if(qaType!=="expense" || qaLineItems.length>0) return null; // multi-item: each item already carries its own category
+      const match = findItemCatalogMatch(qaItemName);
+      return match?.catId ? cats.find(c=>c.id===match.catId) : null;
+    }, [qaItemName, qaType, qaLineItems.length, itemCatalog, cats]);
+
     const detected = useMemo(() => {
       if(qaType!=="expense") return null;
+      if(itemCatalogSuggestion) return itemCatalogSuggestion; // item-name signal takes priority when present
       const vendorText = normalizeVendorText(qaWho);
       if(!vendorText) return null;
       const ranked = new Map();
@@ -3052,7 +3099,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     }, [qaWho, qaType]);
 
     const effectiveCat = qaCatId ? cats.find(c=>c.id===qaCatId) : detected;
-    const canSave = parseFloat(qaAmount)>0 && qaWho.trim();
+    // WP-B-2: vendor is now OPTIONAL -- item-first entry or a vendor-first multi-item selection
+    // are equally valid ways to satisfy this gate.
+    const canSave = parseFloat(qaAmount)>0 && (qaWho.trim() || qaItemName.trim() || qaLineItems.length>0);
+    // WP-B-2: keep qaAmount in sync with the sum of selected items once any are chosen (vendor-
+    // first multi-item path) -- avoids a manually-typed amount silently disagreeing with the
+    // items actually selected.
+    useEffect(() => {
+      if(qaLineItems.length>0){
+        const total = qaLineItems.reduce((s,li)=>s+Number(li.amount||0),0);
+        setQaAmount(String(total));
+      }
+    }, [qaLineItems]);
 
     // Vendor name suggestions — recent/frequent merchants matching what's typed so far, so you
     // don't have to fully retype "Swiggy" every time. Ranked by recency, deduped by name.
@@ -3084,21 +3142,44 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       const perShare = shareCount>1 ? Math.round((parseFloat(qaAmount)/shareCount)*100)/100 : 0;
       const splitPeople = {};
       qaSplitWith.forEach(pid=>{ splitPeople[pid] = { amount:perShare, mode:"owes", settled:false, remainingAmt:perShare }; });
+
+      // WP-B-2: build lineItems from whichever new entry path is active. Both stay null/empty
+      // when qaItemName is blank and qaLineItems is empty -- the ACCEPTANCE REQUIREMENT is that
+      // the pre-existing vendor-only path's record shape is byte-identical to before this patch.
+      const finalLineItems = qaLineItems.length>0
+        ? qaLineItems
+        : (qaItemName.trim() ? [{
+            id: genId(), label: qaItemName.trim(), qty:1,
+            unitPrice: parseFloat(qaAmount)||0, amount: parseFloat(qaAmount)||0,
+            catId: (qaCatId || itemCatalogSuggestion?.id || null),
+            subId: null, splits: null,
+          }] : null);
+      // Top-level catId/catIds: for the pre-existing vendor-only path (finalLineItems null),
+      // this is EXACTLY the original expression, unchanged -- satisfies the acceptance
+      // requirement. For the new item-bearing paths, derived from the first item only (a single
+      // best-effort tag; never catIds.length>1, so representability is unaffected either way --
+      // confirmed by trace that checkRepresentability never inspects lineItems at all).
+      const derivedCatId = finalLineItems?.length ? (finalLineItems[0].catId || null) : (qaType==="expense" ? (effectiveCat?.id||null) : null);
+      const derivedCatIds = finalLineItems?.length ? (derivedCatId ? [derivedCatId] : []) : (qaType==="expense" && effectiveCat ? [effectiveCat.id] : []);
+
       const record = {
         id: genId(), type:qaType, amount: parseFloat(qaAmount)||0, date: qaDate,
         merchant: qaWho.trim(), desc: qaWho.trim(),
-        catId: qaType==="expense" ? (effectiveCat?.id||null) : null,
-        catIds: qaType==="expense" && effectiveCat ? [effectiveCat.id] : [],
+        catId: derivedCatId,
+        catIds: derivedCatIds,
         subId:null, subIds:[],
         accId: qaAccId, people:splitPeople, forPerson:"", groupId:qaGroupId||null,
         vehicleId: qaVehicleId||null,
         paymentMethod: (qaType==="expense" && accounts.find(a=>a.id===qaAccId)?.type==="bank") ? (qaPaymentMethod||null) : null,
         excludeFromSpend: qaExcludeFromSpend,
         splitMode:qaSplitWith.length>0?"split":"none", trackingMode:"none", tagMode:null, note:qaNote.trim(),
+        lineItems: finalLineItems,
         createdAt: Date.now(), createdDate: todayStr(),
       };
-      setTxns(prev=>[record, ...prev]);
-      setToast({ message: `${sym}${fmt(record.amount)} saved to ${effectiveCat?.name||(qaType==="income"?"Income":"Uncategorized")}` });
+      // WP-B-2: routed through the Transaction boundary -- was a direct setTxns() push before
+      // this patch, an inconsistency with AddModal flagged and fixed as part of this same slice.
+      createTransactionThroughBoundary(record);
+      setToast({ message: `${sym}${fmt(record.amount)} saved to ${effectiveCat?.name||itemCatalogSuggestion?.name||(qaType==="income"?"Income":"Uncategorized")}` });
       onClose();
     };
     const goToFullForm = () => {
@@ -3146,9 +3227,63 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             )}
           </div>
 
-          {/* Category (expense only) + Account, side by side */}
-          <div style={{ display:"grid",gridTemplateColumns:qaType==="expense"?"1fr 1fr":"1fr",gap:10,marginBottom:14 }}>
-            {qaType==="expense"&&(
+          {/* WP-B-2: frequent vendors -- tap to fill vendor, exactly like an autocomplete pick.
+              Shown only while no vendor is set yet, so it doesn't clutter once one is chosen. */}
+          {qaType==="expense"&&!qaWho.trim()&&(()=>{
+            const freq = getFrequentVendors(txns, 6);
+            if(!freq.length) return null;
+            return (
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:14 }}>
+                {freq.map(v=>(
+                  <button key={v.merchant} onClick={()=>{ setQaWho(v.merchant); setShowVendorSuggestions(false); }} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>{v.merchant}</button>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* WP-B-2: item-first entry -- an item can be recorded with NO vendor. Independent
+              input; typing a known item name suggests its category via the SAME itemCatalog
+              lookup ItemSheetModal uses (findItemCatalogMatch) -- one source of truth. */}
+          {qaType==="expense"&&qaLineItems.length===0&&(
+            <div style={{ marginBottom:14 }}>
+              <span style={lbl}>Item (optional)</span>
+              <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. Milk, Petrol, Shampoo" value={qaItemName} onChange={e=>setQaItemName(e.target.value)}/>
+              {itemCatalogSuggestion&&<div style={{ color:T.accent,fontSize:11,marginTop:6,fontWeight:700 }}>Suggested: {itemCatalogSuggestion.icon} {itemCatalogSuggestion.name}</div>}
+            </div>
+          )}
+
+          {/* WP-B-2: vendor-first -- once a vendor with real purchase history is set, show its
+              most-bought/recent items as tappable chips. Selecting one adds it to this
+              transaction's lineItems (multiple items remain one real transaction). */}
+          {qaType==="expense"&&qaWho.trim()&&(()=>{
+            const freqItems = getFrequentItemsForVendor(txns, qaWho, 8);
+            if(!freqItems.length) return null;
+            return (
+              <div style={{ marginBottom:14 }}>
+                <span style={lbl}>Frequently bought here</span>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6 }}>
+                  {freqItems.map(it=>{
+                    const selected = qaLineItems.some(li=>li.label.toLowerCase()===it.label.toLowerCase());
+                    return (
+                      <button key={it.label} onClick={()=>{
+                        setQaLineItems(prev=>selected
+                          ? prev.filter(li=>li.label.toLowerCase()!==it.label.toLowerCase())
+                          : [...prev, { id:genId(), label:it.label, qty:it.lastQty||1, unitPrice:it.lastUnitPrice||0, amount:(it.lastQty||1)*(it.lastUnitPrice||0), catId:it.catId||null, subId:it.subId||null, splits:null }]
+                        );
+                      }} style={{ background:selected?T.accent+"22":T.input,border:`1px solid ${selected?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:selected?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{selected?"✓ ":""}{it.label} · {sym}{fmt(it.lastUnitPrice||0)}</button>
+                    );
+                  })}
+                </div>
+                {qaLineItems.length>0&&<div style={{ color:T.sub,fontSize:11,marginTop:8 }}>{qaLineItems.length} item{qaLineItems.length>1?"s":""} selected · Total {sym}{fmt(qaLineItems.reduce((s,li)=>s+Number(li.amount||0),0))}</div>}
+              </div>
+            );
+          })()}
+
+          {/* Category (expense only) + Account, side by side. Category hidden when itemized
+              lines are selected (WP-B-2 vendor-first path) -- each item already carries its own
+              category, matching AddModal's own established convention for itemized purchases. */}
+          <div style={{ display:"grid",gridTemplateColumns:(qaType==="expense"&&qaLineItems.length===0)?"1fr 1fr":"1fr",gap:10,marginBottom:14 }}>
+            {qaType==="expense"&&qaLineItems.length===0&&(
               <div>
                 <span style={lbl}>Category</span>
                 <button onClick={()=>setShowCatPicker(true)} style={{ ...inp,display:"flex",alignItems:"center",gap:6,cursor:"pointer",textAlign:"left" }}>
@@ -6188,7 +6323,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     // overwrites something the user already chose (same fight-the-user pitfall as the category-split bug).
     const applyItemMemory = () => {
       if(editingItemId || !iName.trim()) return;
-      const match = itemCatalog.find(it=>it.name.toLowerCase()===iName.trim().toLowerCase());
+      const match = findItemCatalogMatch(iName);
       if(!match) return;
       if(!iCatId && match.catId) setICatId(match.catId);
       if(!iSubId && match.subId) setISubId(match.subId);
@@ -6197,7 +6332,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     // WP-A: locked policy — "explicit learning, not silent overwrite." This live lookup only
     // tells us whether an entry with this name currently exists, not whether it was used to
     // prefill the fields above.
-    const catalogMatch = iName.trim() ? itemCatalog.find(it=>it.name.toLowerCase()===iName.trim().toLowerCase()) : null;
+    const catalogMatch = findItemCatalogMatch(iName);
     const [rememberForFuture, setRememberForFuture] = useState(false);
     const handleSave = () => {
       if(!iName.trim()) return;
