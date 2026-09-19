@@ -4685,6 +4685,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         }
         const categorySplitTotal = Object.values(catAllocNumeric).reduce((s,v)=>s+v,0);
         const hasCategorySplit = catIds.length>1 && Math.abs(categorySplitTotal - amt) < 0.01;
+        // FIX: previously, a category split that didn't sum exactly to the transaction total was
+        // silently discarded entirely (saved as null) -- no warning, and reopening the
+        // transaction showed a fresh equal split, looking exactly like the edit never applied.
+        // Now: always save whatever was actually entered; only warn (non-blocking) when it
+        // doesn't add up, matching the itemized-lines quantity-mismatch warning just below.
+        if(catIds.length>1 && Math.abs(categorySplitTotal - amt) >= 0.01){
+          setRefDupWarning(`Note: category split totals ${sym}${fmt(categorySplitTotal)}, not ${sym}${fmt(amt)} -- saved anyway, but double-check the split.`);
+        }
         const normalizedLineItems = useItemizedLines
           ? lineItems
               .map(item=>{
@@ -4803,7 +4811,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             return { id:r.id, targetType:r.targetType, targetId:r.targetId, amount:effAmt, mode:r.mode, items:normalizedItems };
           }).filter(r=>r.amount>0):null,
           groupAllocations:(splitMode==="allocate" || splitMode==="unified")&&groupAllocationsVal.length?groupAllocationsVal:null,
-          catAllocations:hasCategorySplit?catAllocNumeric:null,
+          // FIX: was hasCategorySplit?catAllocNumeric:null -- silently discarded the user's
+          // custom split on any rounding/imbalance. Now always saved when categories are split
+          // at all, regardless of whether it sums exactly (warned above, never blocked).
+          catAllocations:catIds.length>1?catAllocNumeric:null,
           lineItems:normalizedLineItems?.length ? normalizedLineItems : null,
           reimbursable:reimbursable||false,
           reimbursableAmount:(reimbursable && reimbursableAmount && Number(reimbursableAmount)>0) ? Number(reimbursableAmount) : null,
