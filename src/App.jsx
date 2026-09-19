@@ -9100,34 +9100,37 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         <div style={card}>
           {filteredTxns.length===0?<div style={{ textAlign:"center",padding:40,color:T.sub }}>No transactions match the selected filters</div>
             :(()=>{
-              const todayStrV = todayStr();
-              const yestStr = addDaysToDateStr(todayStrV,-1);
-              const weekAgoStr = addDaysToDateStr(todayStrV,-7);
-              const monthAgoStr = addDaysToDateStr(todayStrV,-30);
-              const bucketFor = d => {
-                if(!d) return "Older";
-                if(d===todayStrV) return "Today";
-                if(d===yestStr) return "Yesterday";
-                if(d>weekAgoStr) return "Earlier This Week";
-                if(d>monthAgoStr) return "This Month";
-                return "Older";
+              // WP-UI-2B-TXN-1: real calendar-date grouping (mockup: "THU 11 SEPTEMBER"),
+              // replacing the old relative-bucket grouping. Groups preserve filteredTxns' own
+              // sort order (already applied by txnSort upstream), so date headers come out
+              // correctly ordered for both date_desc and date_asc without a separate re-sort.
+              const bucketLabel = d => {
+                if(!d) return "NO DATE";
+                const [y,m,day] = d.split("-").map(Number);
+                return new Date(y, m-1, day).toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"long"}).toUpperCase();
               };
-              const order = ["Today","Yesterday","Earlier This Week","This Month","Older"];
               const groups = [];
+              const byDate = new Map();
               filteredTxns.forEach(t=>{
-                const bucket = bucketFor(t.date);
-                let g = groups.find(x=>x.bucket===bucket);
-                if(!g){ g={bucket,items:[]}; groups.push(g); }
+                const key = t.date || "";
+                let g = byDate.get(key);
+                if(!g){ g={date:key,items:[]}; byDate.set(key,g); groups.push(g); }
                 g.items.push(t);
               });
-              groups.sort((a,b)=>order.indexOf(a.bucket)-order.indexOf(b.bucket));
               return groups.map(g=>{
-                const spent = g.items.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
+                // Net for the day — expense/income only. Transfers and investments are
+                // deliberately excluded (they move or grow money rather than spend it) — same
+                // scope the prior "spent" total used, kept rather than silently widened.
+                const dayNet = g.items.reduce((s,t)=>{
+                  if(t.type==="expense") return s - getMyExpenseAmount(t);
+                  if(t.type==="income") return s + Number(t.amount||0);
+                  return s;
+                },0);
                 return (
-                  <div key={g.bucket}>
+                  <div key={g.date||"no-date"}>
                     <div style={{ position:"sticky",top:0,zIndex:5,background:T.card,padding:"10px 0 6px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`1px solid ${T.border}`,marginBottom:4 }}>
-                      <span style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>{g.bucket}</span>
-                      {spent>0&&<span style={{ color:T.danger,fontSize:11,fontWeight:700 }}>-{sym}{fmt(spent)}</span>}
+                      <span style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>{bucketLabel(g.date)}</span>
+                      {dayNet!==0&&<span style={{ color:dayNet<0?T.danger:T.success,fontSize:11,fontWeight:700 }}>{dayNet<0?"-":"+"}{sym}{fmt(Math.abs(dayNet))}</span>}
                     </div>
                     {g.items.map((t,i)=><SwipeableTxnRow key={t.id} t={t} last={i===g.items.length-1} bulkMode={bulkMode} selected={bulkSelected.includes(t.id)} onToggleSelect={toggleSelect}/>)}
                   </div>
