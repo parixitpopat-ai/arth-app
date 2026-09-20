@@ -70,7 +70,7 @@ import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./doma
 import { mergeEditedSplitPeople } from "./domain/bills/mergeEditedSplitPeople";
 import { withNewContribution, withoutContribution, getContributionsForObligation, getContributionsForTransaction, getTotalContributed, hasProtectedContributions } from "./domain/obligations/contribution";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
-import { getFrequentVendors, getFrequentItemsForVendor } from "./domain/transactions/vendorInsights";
+import { getFrequentVendors, getFrequentItemsForVendor, getVendorAggregate } from "./domain/transactions/vendorInsights";
 import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
@@ -1196,6 +1196,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
   const [fType, setFType] = useState("All");
   const [txnSearch, setTxnSearch] = useState("");
   const [txnDetailId, setTxnDetailId] = useState(null);
+  // Surfaces getVendorAggregate (WP-B-1) -- which vendor's detail sheet, if any, is open.
+  const [viewingVendor, setViewingVendor] = useState(null);
   const [maskMode, setMaskMode] = useState(false);
   const [maskRevealActive, setMaskRevealActive] = useState(false);
   const [maskRevealTimer, setMaskRevealTimer] = useState(null);
@@ -6417,6 +6419,65 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             )}
             <button onClick={handleSave} disabled={!iName.trim()} style={{ background:iName.trim()?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:iName.trim()?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{editingItemId?"Save Changes ✓":"Add Item ✓"}</button>
           </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── VENDOR DETAIL MODAL ────────────────────────────────────────────────────
+  // Surfaces getVendorAggregate/getFrequentItemsForVendor (WP-B-1) -- opened by tapping a
+  // merchant name in the transaction detail sheet. No new persistence; everything here is
+  // derived live from txns[] each time it opens.
+  const VendorDetailModal = ({ merchant, onClose }) => {
+    const agg = useMemo(()=>getVendorAggregate(txns, merchant), [txns, merchant]);
+    const topItems = useMemo(()=>getFrequentItemsForVendor(txns, merchant, 8), [txns, merchant]);
+    const categoryRows = Object.entries(agg.categorySpend)
+      .map(([catId, amount])=>({ cat: cats.find(c=>c.id===catId), amount }))
+      .filter(r=>r.cat)
+      .sort((a,b)=>b.amount-a.amount);
+    return (
+      <div onClick={onClose} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:310,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 44px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16 }}>
+            <div>
+              <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{agg.merchant}</div>
+              <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>{agg.transactionCount} transaction{agg.transactionCount!==1?"s":""}</div>
+            </div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <div style={{ background:T.input,borderRadius:12,padding:14,marginBottom:16 }}>
+            <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase" }}>Total spend</div>
+            <div style={{ color:T.accent,fontSize:28,fontWeight:900,marginTop:4 }}>{sym}{fmt(agg.totalSpend)}</div>
+          </div>
+          {categoryRows.length>0&&(
+            <div style={{ marginBottom:16 }}>
+              <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:8 }}>BY CATEGORY</div>
+              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                {categoryRows.map(({cat,amount})=>(
+                  <div key={cat.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <span style={{ color:T.text,fontSize:13 }}>{cat.icon} {cat.name}</span>
+                    <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{sym}{fmt(amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {topItems.length>0&&(
+            <div>
+              <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:8 }}>MOST BOUGHT</div>
+              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                {topItems.map(item=>(
+                  <div key={item.label} style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                    <span style={{ color:T.text,fontSize:13 }}>{item.label} <span style={{ color:T.sub,fontSize:11 }}>× {item.count}</span></span>
+                    <span style={{ color:T.sub,fontSize:12 }}>{sym}{fmt(item.lastUnitPrice)} each</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {categoryRows.length===0 && topItems.length===0 && (
+            <div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:20 }}>No itemized history yet for this vendor.</div>
+          )}
         </div>
       </div>
     );
@@ -17504,6 +17565,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         {(showAddLoan||editingLoan)&&<LoanModal item={editingLoan} onClose={()=>{ setShowAddLoan(false); setEditingLoan(null); }}/>}        
         {repaymentLoan&&<LoanRepaymentModal item={repaymentLoan} onClose={()=>setRepaymentLoan(null)}/>}
         {/* Transaction Detail */}
+        {viewingVendor&&<VendorDetailModal merchant={viewingVendor} onClose={()=>setViewingVendor(null)}/>}
         {txnDetailId&&(()=>{
           const t = txns.find(x=>x.id===txnDetailId);
           if(!t) return null;
@@ -17534,7 +17596,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16 }}>
                   <div>
-                    <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{t.merchant||t.who||t.desc||"Transaction"}</div>
+                    {/* Surfaces getVendorAggregate -- tappable only when there's a real merchant to look up. */}
+                    <div onClick={t.merchant?(e)=>{ e.stopPropagation(); setViewingVendor(t.merchant); }:undefined} style={{ color:T.text,fontSize:18,fontWeight:900,cursor:t.merchant?"pointer":"default",textDecoration:t.merchant?"underline":"none",textDecorationColor:t.merchant?T.border:"transparent",textUnderlineOffset:3 }}>{t.merchant||t.who||t.desc||"Transaction"}</div>
                     <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>{formatShortDate(t.date)||t.date} · {acc?.name||"Account"}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
