@@ -439,8 +439,16 @@ const dedupeSettlementTxns = txns => {
 const CAT_MAP = {"food":"food","grocery":"groceries","groceries":"groceries","transport":"transport","bills":"utilities","utilities":"utilities","health":"health","shopping":"lifestyle","household":"housing","selfcare":"lifestyle","baby":"family","entertainment":"entertainment","financial":"financial","fitness":"fitness","travel":"travel","misc":"misc","donations":"donations","professional":"professional","taxes":"taxes","emergency":"emergency","personaldev":"personaldev","family":"family","lifestyle":"lifestyle","housing":"housing"};
 const normalizeCats = stored => {
   const list = Array.isArray(stored) ? stored : null;
-  const hasLatestDefaults = list?.some(c=>c.id==="housing"||c.id==="utilities"||c.id==="financial");
-  return hasLatestDefaults ? list : DEFAULT_CATS;
+  // FIX: previously replaced the ENTIRE stored array with DEFAULT_CATS whenever the user had
+  // deleted or renamed any ONE of housing/utilities/financial -- silently discarding every other
+  // customization (renames, custom subs, budgets, user-created categories). Now: a genuinely
+  // empty/first-ever load still seeds the full default set (correct, not a bug); otherwise, only
+  // whichever DEFAULT_CATS entries are actually missing get appended -- everything the user
+  // already has is kept untouched, regardless of which specific categories they've changed.
+  if(!list || !list.length) return DEFAULT_CATS;
+  const existingIds = new Set(list.map(c=>c.id));
+  const missingDefaults = DEFAULT_CATS.filter(c=>!existingIds.has(c.id));
+  return missingDefaults.length ? [...list, ...missingDefaults] : list;
 };
 const normalizeAccounts = stored => (Array.isArray(stored) && stored.length ? stored : DEFAULT_ACCOUNTS).map(acc=>{
   const baseType = ACC_TYPES.some(item=>item.id===acc?.type) ? acc.type : "bank";
