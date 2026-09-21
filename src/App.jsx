@@ -3865,6 +3865,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     // WP-T2: Account Picker sheet visibility + "recent" derivation, same read-only pattern as
     // T1's recentCategoryIds -- no new persistence.
     const [showAccountSheet, setShowAccountSheet] = useState(false);
+    // T3 slice 1: DetailsCard collapse state (Paid Via + Date only this slice -- see script
+    // header for what's deliberately deferred and why).
+    const [showDetailsCard, setShowDetailsCard] = useState(false);
     const recentAccountIds = useMemo(() => {
       const seen = new Set();
       const result = [];
@@ -5241,16 +5244,60 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             {(txnType==="cc_payment"||txnType==="transfer")&&<input style={inp} placeholder="Note (optional)" value={who} onChange={e=>setWho(e.target.value)}/>}
 
 
-            <div style={{ display:"grid",gridTemplateColumns:"1.2fr 1fr",gap:10 }}>
-              <div>
-                <span style={lbl}>Amount ({sym}) *</span>
-                <input style={{ ...inp,fontSize:22,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} onChange={e=>setAmount(cleanMoneyInput(e.target.value))}/>
+            <div>
+              <span style={lbl}>Amount ({sym}) *</span>
+              <input style={{ ...inp,fontSize:22,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} onChange={e=>setAmount(cleanMoneyInput(e.target.value))}/>
+            </div>
+            {/* T3 slice 1: DetailsCard, per Arth UI-2B T3 Expense Shell.dc.html (T3-3/T3-4).
+                This slice: Paid Via + Date only. Collapsed row always shows the current value
+                per T3-3's rule ("a collapsed row always states its current value"); tapping
+                pushes an expanded view rather than an in-place accordion. */}
+            {txnType==="expense"&&!showDetailsCard&&(
+              <button onClick={()=>setShowDetailsCard(true)} style={{ ...inp,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left" }}>
+                <span style={{ color:T.sub,fontSize:12,fontWeight:700 }}>Details</span>
+                <span style={{ color:T.text,fontSize:12,display:"flex",alignItems:"center",gap:6 }}>
+                  {(() => { const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
+                  <span style={{ color:T.sub }}>·</span>
+                  {formatShortDate(date)||date}
+                  <span style={{ color:T.sub,marginLeft:2 }}>▾</span>
+                </span>
+              </button>
+            )}
+            {txnType==="expense"&&showDetailsCard&&(
+              <div style={{ background:T.input,borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:10 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <button onClick={()=>setShowDetailsCard(false)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"Nunito,sans-serif",padding:0 }}>← Details</button>
+                </div>
+                <div>
+                  <span style={lbl}>Paid via</span>
+                  <button onClick={()=>setShowAccountSheet(true)} style={{ ...inp,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left" }}>
+                    <span style={{ color:T.text }}>
+                      {(() => { const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
+                    </span>
+                    <span style={{ color:T.sub }}>▾</span>
+                  </button>
+                  {showAccountSheet&&(
+                    <AccountPickerSheet
+                      selectedId={accId}
+                      accountList={paidViaAccounts}
+                      recentIds={recentAccountIds}
+                      onSelect={setAccId}
+                      onClose={()=>setShowAccountSheet(false)}
+                    />
+                  )}
+                </div>
+                <div>
+                  <span style={lbl}>Date</span>
+                  <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+                </div>
               </div>
+            )}
+            {txnType!=="expense"&&(
               <div>
                 <span style={lbl}>Date</span>
                 <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
               </div>
-            </div>
+            )}
 
             {/* Advanced (optional) - real collapsible wrapper, using showAdvancedTracking which
                 existed as declared state but was never actually wired to anything (confirmed by
@@ -5320,27 +5367,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             {/* STEP 3 — PAYMENT METHOD */}
             {txnType==="expense"&&(
               <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
-                <div>
-                  <span style={lbl}>Paid via</span>
-                  {/* WP-T2: Picker trigger, per Arth Component Spec.dc.html. accId/setAccId
-                      semantics unchanged -- identical to the removed <select>, just presented
-                      via the sheet instead. */}
-                  <button onClick={()=>setShowAccountSheet(true)} style={{ ...inp,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left" }}>
-                    <span style={{ color:T.text }}>
-                      {(() => { const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
-                    </span>
-                    <span style={{ color:T.sub }}>▾</span>
-                  </button>
-                  {showAccountSheet&&(
-                    <AccountPickerSheet
-                      selectedId={accId}
-                      accountList={paidViaAccounts}
-                      recentIds={recentAccountIds}
-                      onSelect={setAccId}
-                      onClose={()=>setShowAccountSheet(false)}
-                    />
-                  )}
-                </div>
+                {/* T3 slice 1: standalone Paid via block removed -- DetailsCard (added just
+                    above, in STEP 2) is now the sole account picker for Expense. Leaving both
+                    was a real bug: the account picker appeared twice on screen. */}
                 {/* Itemise Purchase toggle moved here per WF-TXN001 - same real useItemizedLines
                     state as the existing Items section below, so both stay in sync. Category
                     section above is now hidden when this is ON (single-condition change). */}
@@ -17754,7 +17783,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
           const attrPersonId = !allocDisplayRows ? (t.forPerson || t.taggedPersonId || Object.keys(t.people||{}).find(pid=>pid!=="__me__") || null) : null;
           const attrPerson = attrPersonId ? getPerson(attrPersonId) : null;
           const attrPersonInfo = attrPersonId ? (t.people?.[attrPersonId] || t.splitPeople?.[attrPersonId]) : null;
-          const attrPersonLabel = attrPersonInfo?.mode==="owes" ? "Owes you" : attrPersonInfo?.mode==="spent_on" ? "Attributed to" : null;
+          // FIX: previously this label reflected only the share's MODE, never whether it was
+          // actually settled -- confirmed real bug (a person genuinely repaid, via a linked
+          // settlement_in transaction, still showed "Owes you"). Now checks both settlement
+          // signals: the direct settled flag, and a linked settlement_in transaction pointing
+          // back via againstTxnId+fromPersonId (the path used when settling manually, outside
+          // the Bill's own inline Settle button). Read-only -- no mutation logic changed.
+          const linkedSettlementForAttrPerson = attrPersonId ? txns.find(x=>x.type==="settlement_in" && String(x.againstTxnId)===String(t.id) && String(x.fromPersonId)===String(attrPersonId)) : null;
+          const attrPersonSettled = Boolean(attrPersonInfo?.settled) || Boolean(linkedSettlementForAttrPerson);
+          const attrPersonLabel = attrPersonSettled ? "Settled" : attrPersonInfo?.mode==="owes" ? "Owes you" : attrPersonInfo?.mode==="spent_on" ? "Attributed to" : null;
           return (
             <div onClick={()=>setTxnDetailId(null)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
               <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
