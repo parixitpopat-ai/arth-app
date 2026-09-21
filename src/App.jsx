@@ -3862,6 +3862,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     // ("optional search (past 8 options)"). Read-only derivation from existing txns[] -- no new
     // persistence, matches the spec's own wording exactly rather than inventing a counter.
     const [showCategorySheet, setShowCategorySheet] = useState(false);
+    // WP-T2: Account Picker sheet visibility + "recent" derivation, same read-only pattern as
+    // T1's recentCategoryIds -- no new persistence.
+    const [showAccountSheet, setShowAccountSheet] = useState(false);
+    const recentAccountIds = useMemo(() => {
+      const seen = new Set();
+      const result = [];
+      const sorted = [...txns].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+      for (const t of sorted) {
+        if (t.accId && !seen.has(t.accId)) { seen.add(t.accId); result.push(t.accId); if (result.length>=8) break; }
+      }
+      return result;
+    }, [txns]);
     const recentCategoryIds = useMemo(() => {
       const seen = new Set();
       const result = [];
@@ -5310,9 +5322,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
                 <div>
                   <span style={lbl}>Paid via</span>
-                  <select style={inp} value={accId} onChange={e=>setAccId(e.target.value)}>
-                    {paidViaAccounts.map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}
-                  </select>
+                  {/* WP-T2: Picker trigger, per Arth Component Spec.dc.html. accId/setAccId
+                      semantics unchanged -- identical to the removed <select>, just presented
+                      via the sheet instead. */}
+                  <button onClick={()=>setShowAccountSheet(true)} style={{ ...inp,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left" }}>
+                    <span style={{ color:T.text }}>
+                      {(() => { const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
+                    </span>
+                    <span style={{ color:T.sub }}>▾</span>
+                  </button>
+                  {showAccountSheet&&(
+                    <AccountPickerSheet
+                      selectedId={accId}
+                      accountList={paidViaAccounts}
+                      recentIds={recentAccountIds}
+                      onSelect={setAccId}
+                      onClose={()=>setShowAccountSheet(false)}
+                    />
+                  )}
                 </div>
                 {/* Itemise Purchase toggle moved here per WF-TXN001 - same real useItemizedLines
                     state as the existing Items section below, so both stay in sync. Category
@@ -6574,6 +6601,47 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             {filtered.length===0 && <div style={{ ...TYPE_SCALE.meta, color:T.sub,textAlign:"center",padding:20 }}>No categories match "{search}"</div>}
           </div>
           <button onClick={onClose} style={{ ...BUTTON("primary", T), marginTop:14 }}>Done</button>
+        </div>
+      </div>
+    );
+  };
+
+  // ── ACCOUNT PICKER SHEET (WP-T2) ───────────────────────────────────────────
+  // Per Arth Component Spec.dc.html: sheet variant, single-select (default -- not multi). Title
+  // + optional search (recalls last 8 used) + option rows (icon, name, balance as secondary/
+  // amount via the existing accountBalance()) + tap-to-select-and-close, no separate Done button.
+  const AccountPickerSheet = ({ selectedId, accountList, recentIds, onSelect, onClose }) => {
+    const [search, setSearch] = useState("");
+    const q = search.trim().toLowerCase();
+    const filtered = q ? accountList.filter(a=>a.name.toLowerCase().includes(q)) : accountList;
+    const recentAccs = !q ? recentIds.map(id=>accountList.find(a=>a.id===id)).filter(Boolean) : [];
+    const rowStyle = { display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",minHeight:TOUCH.min,background:"none",border:"none",borderBottom:`1px solid ${T.border}`,padding:"0 4px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" };
+    const renderRow = (a) => {
+      const selected = a.id===selectedId;
+      let balance = null;
+      try { balance = accountBalance(a.id); } catch { balance = null; }
+      return (
+        <button key={a.id} onClick={()=>{ onSelect(a.id); onClose(); }} style={rowStyle}>
+          <span style={{ ...TYPE_SCALE.rowTitle, color: selected?T.accent:T.text }}>{accIcon(a.type)} {a.name}</span>
+          <span style={{ display:"flex",alignItems:"center",gap:8 }}>
+            {typeof balance==="number" && <span style={{ ...MONEY.meta, color:T.sub }}>{sym}{fmt(balance)}</span>}
+            {selected && <span style={{ color:T.accent,fontWeight:700 }}>✓</span>}
+          </span>
+        </button>
+      );
+    };
+    return (
+      <div onClick={onClose} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:340,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 44px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto",display:"flex",flexDirection:"column" }}>
+          <div style={{ ...TYPE_SCALE.cardTitle, color:T.text, marginBottom:14 }}>Select Account</div>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search accounts…" style={{ ...inp, marginBottom:14 }}/>
+          <div style={{ flex:1,overflowY:"auto" }}>
+            {recentAccs.length>0 && <div style={{ ...TYPE_SCALE.label, color:T.sub, padding:"0 4px 6px" }}>RECENT</div>}
+            {recentAccs.map(renderRow)}
+            {recentAccs.length>0 && <div style={{ ...TYPE_SCALE.label, color:T.sub, padding:"12px 4px 6px" }}>ALL ACCOUNTS</div>}
+            {filtered.map(renderRow)}
+            {filtered.length===0 && <div style={{ ...TYPE_SCALE.meta, color:T.sub,textAlign:"center",padding:20 }}>No accounts match "{search}"</div>}
+          </div>
         </div>
       </div>
     );
