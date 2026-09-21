@@ -10214,15 +10214,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
           {relTxns.length>0&&(
             <div style={card}>
               <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>Shared expenses</div>
-              {relTxns.map((t,idx,arr)=>{ const info=t.people[p.id]; return (
+              {relTxns.map((t,idx,arr)=>{
+                const info=t.people[p.id];
+                // FIX: same bug/same fix as the txnDetailId modal -- info.settled alone missed
+                // settlements recorded via a separately-created settlement_in transaction
+                // (linked back through againstTxnId+fromPersonId). Read-only, no mutation logic
+                // changed.
+                const linkedSettlement = txns.find(x=>x.type==="settlement_in" && String(x.againstTxnId)===String(t.id) && String(x.fromPersonId)===String(p.id));
+                const isSettled = Boolean(info.settled) || Boolean(linkedSettlement);
+                return (
                 <div key={t.id} onClick={()=>{ setTab("transactions"); setTimeout(()=>setExpandedTxn(t.id),80); }} style={{ display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:idx<arr.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
                   <div>
                     <div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{t.desc}</div>
                     <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(t.date) || t.date} · tap to open</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ color:info.mode==="owes"&&!info.settled?T.accent:T.sub,fontSize:13,fontWeight:700,textDecoration:info.settled?"line-through":"none" }}>{sym}{fmt(info.settled ? info.amount : remainingShare(info))}</div>
-                    <div style={{ color:T.sub,fontSize:10 }}>{info.settled?"paid":info.mode==="owes"?"owes you":"on you"}</div>
+                    <div style={{ color:info.mode==="owes"&&!isSettled?T.accent:T.sub,fontSize:13,fontWeight:700,textDecoration:isSettled?"line-through":"none" }}>{sym}{fmt(isSettled ? info.amount : remainingShare(info))}</div>
+                    <div style={{ color:T.sub,fontSize:10 }}>{isSettled?"paid":info.mode==="owes"?"owes you":"on you"}</div>
                   </div>
                 </div>
               );})}
