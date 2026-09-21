@@ -16,7 +16,7 @@ const readCopiedSms = async () => ({ text: "", error: "Not supported" });
 const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
-import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT } from "./constants/theme";
+import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY } from "./constants/theme";
 import { todayStr, addDaysToDateStr, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
 import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
 import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
@@ -3568,7 +3568,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     const [showGuestPerson, setShowGuestPerson] = useState(false);
     const [attributionSearch, setAttributionSearch] = useState("");
     const [showAttributionSearch, setShowAttributionSearch] = useState(false);
-    const [showMembershipPanel, setShowMembershipPanel] = useState(false);
+    // FIX: previously hardcoded false regardless of isEditing, even though billerLinkId itself
+    // correctly restores from sourceTxn on edit. Reopening an already-linked-to-a-membership
+    // transaction never showed the panel at all -- computed here the same way the render already
+    // checks membership type, just once at mount for the edit case.
+    const [showMembershipPanel, setShowMembershipPanel] = useState(() => {
+      if(!isEditing || !sourceTxn?.billerLinkId) return false;
+      const linkedBA = billerAccounts.find(b=>b.id===sourceTxn.billerLinkId);
+      return linkedBA ? getBillerActionType(linkedBA.type)==="membership" : false;
+    });
     const [showBillPicker, setShowBillPicker] = useState(false);
     const [showTripPicker, setShowTripPicker] = useState(false);
     // Fix: on edit, populate these from the ACTUAL linked membership record instead of always
@@ -3581,7 +3589,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       : null;
     const linkedMembershipPeriod = linkedMembershipRecord?.periods?.[0] || null;
     const [linkValidFrom, setLinkValidFrom] = useState(linkedMembershipRecord?.validFrom || linkedMembershipPeriod?.from || todayStr());
-    const [linkCycle, setLinkCycle] = useState(linkedMembershipRecord?.cycle || "monthly");
+    // FIX: previously only checked linkedMembershipRecord?.cycle, which is always undefined for
+    // any record created via AddMembershipModal (the dedicated Renew flow) -- that path only
+    // ever writes periods:[{label:"Quarterly",...}], never a top-level cycle field. Silently fell
+    // back to "monthly" even when the real saved plan was Quarterly/Halfyearly/Annual. Now also
+    // checks periods[0]?.label (lowercased to match Segmented's raw values) as a fallback source.
+    const [linkCycle, setLinkCycle] = useState(linkedMembershipRecord?.cycle || linkedMembershipPeriod?.label?.toLowerCase() || "monthly");
     // No. of Cycles has no equivalent stored field once a record uses the periods[] shape (the
     // dedicated modal's own path) — left at its original default in that case, a real, honest
     // gap rather than a guessed value. Only the panel's own bulkMonths field, when present, is
@@ -3845,6 +3858,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [categoryTouched, setCategoryTouched] = useState(isEditing);
     const [showQuickCategoryAdd, setShowQuickCategoryAdd] = useState(false);
+    // WP-T1: Category Picker sheet visibility, and its "recent" row per the approved spec
+    // ("optional search (past 8 options)"). Read-only derivation from existing txns[] -- no new
+    // persistence, matches the spec's own wording exactly rather than inventing a counter.
+    const [showCategorySheet, setShowCategorySheet] = useState(false);
+    const recentCategoryIds = useMemo(() => {
+      const seen = new Set();
+      const result = [];
+      const sorted = [...txns].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+      for (const t of sorted) {
+        const ids = t.catIds?.length ? t.catIds : (t.catId ? [t.catId] : []);
+        for (const id of ids) {
+          if (!seen.has(id)) { seen.add(id); result.push(id); if (result.length>=8) return result; }
+        }
+      }
+      return result;
+    }, [txns]);
     const [quickCatName, setQuickCatName] = useState("");
     const [quickSubName, setQuickSubName] = useState("");
     const txnsSnapshot = txns;
@@ -5854,12 +5883,32 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                     +
                   </button>
                 </div>
-                <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                  <button onClick={()=>{ setCategoryTouched(true); setCatIds([]); setSubIds([]); setCatAllocations({}); }} style={{ background:!catId?"#88888822":"none",border:`1px solid ${!catId?"#888888":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:!catId?"#888888":T.sub,fontFamily:"Nunito,sans-serif" }}>❓ None</button>
-                  {cats.map(c=>(
-                    <button key={c.id} onClick={()=>{ setCategoryTouched(true); const existingValidIds=catIds.filter(id=>getCat(id)); const newIds=existingValidIds.includes(c.id)?existingValidIds.filter(x=>x!==c.id):[...existingValidIds,c.id]; setCatIds(newIds); setSubIds(prev=>prev.filter(sid=>newIds.some(cid=>getCat(cid)?.subs?.find(s=>s.id===sid)))); setCatAllocations(prev=>({ ...buildEqualCategoryAllocations(newIds, amt), ...prev })); }} style={{ background:catIds.includes(c.id)?c.color+"22":"none",border:`1px solid ${catIds.includes(c.id)?c.color:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:catIds.includes(c.id)?c.color:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>{c.icon} {c.name.split(" ")[0]}</button>
-                  ))}
-                </div>
+                {/* WP-T1: Picker trigger, per Arth Component Spec.dc.html ("Trigger = Input's
+                    box exactly"). Selection semantics (catIds/subIds/catAllocations) unchanged
+                    -- identical logic to the removed chip-wall, moved into onToggle/onClear
+                    below rather than reimplemented. */}
+                <button onClick={()=>setShowCategorySheet(true)} style={{ ...inp,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left" }}>
+                  <span style={{ color: catIds.length>0 ? T.text : T.sub }}>
+                    {catIds.length===0 ? "❓ None" : cats.filter(c=>catIds.includes(c.id)).map(c=>`${c.icon} ${c.name}`).join(", ")}
+                  </span>
+                  <span style={{ color:T.sub }}>▾</span>
+                </button>
+                {showCategorySheet&&(
+                  <CategoryPickerSheet
+                    selectedIds={catIds}
+                    recentIds={recentCategoryIds}
+                    onToggle={(cid)=>{
+                      setCategoryTouched(true);
+                      const existingValidIds = catIds.filter(id=>getCat(id));
+                      const newIds = existingValidIds.includes(cid) ? existingValidIds.filter(x=>x!==cid) : [...existingValidIds, cid];
+                      setCatIds(newIds);
+                      setSubIds(prev=>prev.filter(sid=>newIds.some(cid2=>getCat(cid2)?.subs?.find(s=>s.id===sid))));
+                      setCatAllocations(prev=>({ ...buildEqualCategoryAllocations(newIds, amt), ...prev }));
+                    }}
+                    onClear={()=>{ setCategoryTouched(true); setCatIds([]); setSubIds([]); setCatAllocations({}); }}
+                    onClose={()=>setShowCategorySheet(false)}
+                  />
+                )}
                 {showQuickCategoryAdd && (
                   <div style={{ marginTop:10,background:T.input,border:`1px dashed ${T.border}`,borderRadius:10,padding:10 }}>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8 }}>
@@ -6478,6 +6527,53 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
           {categoryRows.length===0 && topItems.length===0 && (
             <div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:20 }}>No itemized history yet for this vendor.</div>
           )}
+        </div>
+      </div>
+    );
+  };
+
+  // ── CATEGORY PICKER SHEET (WP-T1) ──────────────────────────────────────────
+  // Per Arth Component Spec.dc.html: sheet variant, multi (checkboxes). Title + optional search
+  // (recalls last 8 used) + option rows (icon, name, accent check on selected) + Done.
+  const CategoryPickerSheet = ({ selectedIds, recentIds, onToggle, onClear, onClose }) => {
+    const [search, setSearch] = useState("");
+    const q = search.trim().toLowerCase();
+    const filtered = q ? cats.filter(c=>c.name.toLowerCase().includes(q)) : cats;
+    const recentCats = !q ? recentIds.map(id=>cats.find(c=>c.id===id)).filter(Boolean) : [];
+    const rowStyle = { display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",minHeight:TOUCH.min,background:"none",border:"none",borderBottom:`1px solid ${T.border}`,padding:"0 4px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" };
+    return (
+      <div onClick={onClose} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:340,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 44px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto",display:"flex",flexDirection:"column" }}>
+          <div style={{ ...TYPE_SCALE.cardTitle, color:T.text, marginBottom:14 }}>Select Categories</div>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search categories…" style={{ ...inp, marginBottom:14 }}/>
+          <div style={{ flex:1,overflowY:"auto" }}>
+            <button onClick={onClear} style={rowStyle}>
+              <span style={{ ...TYPE_SCALE.rowTitle, color: selectedIds.length===0 ? T.accent : T.text }}>❓ None</span>
+              {selectedIds.length===0 && <span style={{ color:T.accent,fontWeight:700 }}>✓</span>}
+            </button>
+            {recentCats.length>0 && <div style={{ ...TYPE_SCALE.label, color:T.sub, padding:"12px 4px 6px" }}>RECENT</div>}
+            {recentCats.map(c=>{
+              const selected = selectedIds.includes(c.id);
+              return (
+                <button key={"recent-"+c.id} onClick={()=>onToggle(c.id)} style={rowStyle}>
+                  <span style={{ ...TYPE_SCALE.rowTitle, color: selected?T.accent:T.text }}>{c.icon} {c.name}</span>
+                  {selected && <span style={{ color:T.accent,fontWeight:700 }}>✓</span>}
+                </button>
+              );
+            })}
+            {recentCats.length>0 && <div style={{ ...TYPE_SCALE.label, color:T.sub, padding:"12px 4px 6px" }}>ALL CATEGORIES</div>}
+            {filtered.map(c=>{
+              const selected = selectedIds.includes(c.id);
+              return (
+                <button key={c.id} onClick={()=>onToggle(c.id)} style={rowStyle}>
+                  <span style={{ ...TYPE_SCALE.rowTitle, color: selected?T.accent:T.text }}>{c.icon} {c.name}</span>
+                  {selected && <span style={{ color:T.accent,fontWeight:700 }}>✓</span>}
+                </button>
+              );
+            })}
+            {filtered.length===0 && <div style={{ ...TYPE_SCALE.meta, color:T.sub,textAlign:"center",padding:20 }}>No categories match "{search}"</div>}
+          </div>
+          <button onClick={onClose} style={{ ...BUTTON("primary", T), marginTop:14 }}>Done</button>
         </div>
       </div>
     );
