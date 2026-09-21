@@ -2889,9 +2889,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                 {Object.entries(t.people).filter(([p])=>p!=="__me__").map(([pid,info])=>{
                   const p=getPerson(pid);
                   const left = remainingShare(info);
-                  const canShare = info.mode==="owes" && !info.settled && left>0;
-                  return <div key={pid} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:11,color:info.settled?T.sub:info.mode==="owes"?T.accent:T.sub,textDecoration:info.settled?"line-through":"none",marginBottom:4 }}>
-                    {p.emoji} {p.name}: {sym}{fmt(info.settled ? info.amount : remainingShare(info))} {info.mode==="owes"?info.settled?"✅ paid":"owes you":"on me"}
+                  // FIX: THIRD confirmed occurrence of the same bug (see txnDetailId modal and
+                  // Person Detail's Shared Expenses fixes earlier this session) -- info.settled
+                  // alone missed settlements recorded via a separately-created settlement_in
+                  // transaction. Same fix: check both signals.
+                  const linkedSettlement = txns.find(x=>x.type==="settlement_in" && String(x.againstTxnId)===String(t.id) && String(x.fromPersonId)===String(pid));
+                  const isSettled = Boolean(info.settled) || Boolean(linkedSettlement);
+                  const canShare = info.mode==="owes" && !isSettled && left>0;
+                  return <div key={pid} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:11,color:isSettled?T.sub:info.mode==="owes"?T.accent:T.sub,textDecoration:isSettled?"line-through":"none",marginBottom:4 }}>
+                    {p.emoji} {p.name}: {sym}{fmt(isSettled ? info.amount : remainingShare(info))} {info.mode==="owes"?isSettled?"✅ paid":"owes you":"on me"}
                     {canShare&&<button onClick={e=>{ e.stopPropagation(); sharePaymentRequest(p.name,left,txnTitle,{ dueDate:t.dueDate||t.date, imageBase64:t.imageBase64||t.paymentImageBase64||null, shareTitle:txnTitle }); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Share</button>}
                   </div>;
                 })}
