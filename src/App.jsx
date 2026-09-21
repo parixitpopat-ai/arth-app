@@ -4625,7 +4625,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         const psplit = {};
         Object.entries(shares).forEach(([pid,sh])=>{
           const collect = collectMap[pid]!==undefined ? collectMap[pid] : getPerson(pid).personType!=="dependant";
-          psplit[pid] = { amount:sh, mode:collect?"owes":"spent_on" };
+          // FIX: preserve an already-settled share exactly on edit, instead of silently
+          // rebuilding it unsettled. See script header for full context -- confirmed real bug.
+          const priorInfo = isEditing ? (sourceTxn?.splitPeople?.[pid] || sourceTxn?.people?.[pid]) : null;
+          psplit[pid] = priorInfo?.settled ? { ...priorInfo } : { amount:sh, mode:collect?"owes":"spent_on" };
         });
         const lineItemUnitPriceById = Object.fromEntries(
           (lineItems||[]).map(item=>{
@@ -4652,7 +4655,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               : parseFloat(row.amount)||0;
             if(!(rowAmt>0)) return;
             if(row.targetType==="person"){
-              psplit[row.targetId] = { amount:rowAmt, mode:row.mode==="i_owe"?"owes_by_me":row.mode };
+              // FIX: same preservation as the split-mode site above -- see script header.
+              const priorInfo = isEditing ? (sourceTxn?.splitPeople?.[row.targetId] || sourceTxn?.people?.[row.targetId]) : null;
+              psplit[row.targetId] = priorInfo?.settled ? { ...priorInfo } : { amount:rowAmt, mode:row.mode==="i_owe"?"owes_by_me":row.mode };
             } else {
               groupAllocationsVal.push({ groupId:row.targetId, amount:rowAmt, mode:row.mode });
             }
