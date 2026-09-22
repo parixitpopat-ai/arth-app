@@ -6446,13 +6446,21 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
   const ItemSheetModal = ({ editingItemId, lineItems, onClose, onSave, cats, getCat, measureUnits, formatMeasureUnitLabel, sym, fmt, T, inp, lbl }) => {
     const editItem = editingItemId ? lineItems.find(x=>x.id===editingItemId) : null;
     const [iName, setIName] = useState(editItem?.label||"");
+    // FIX (direct product decision): quantity no longer has its own visible input during entry
+    // -- always defaults to 1. Real, deliberate behavior change, not hidden: an item genuinely
+    // bought in multiples now needs a later edit to correct quantity, in exchange for a
+    // genuinely simpler add flow (Name, Price/unit, Unit only, as specified).
     const [iQty, setIQty] = useState(String(editItem?.qty||"1"));
     const [iUnit, setIUnit] = useState(editItem?.unit||"nos");
     const [iPrice, setIPrice] = useState(String(editItem?.unitPrice||""));
     const [iCatId, setICatId] = useState(editItem?.catId||"");
     const [iSubId, setISubId] = useState(editItem?.subId||"");
-    const iTotal = (parseFloat(iQty)||0) * (parseFloat(iPrice)||0);
+    // FIX: Category/Sub-category are no longer always-visible dropdowns. A known item (catalog
+    // match) auto-applies its category silently and shows a compact one-line summary; this
+    // state only opens the override, or the picker for a genuinely new/unmatched item.
+    const [showCategoryPicker, setShowCategoryPicker] = useState(false);
     const iCat = iCatId ? getCat(iCatId) : null;
+    const iSub = iCat?.subs?.find(s=>s.id===iSubId) || null;
     // Item memory: look up a previously-used item by name (case-insensitive) and auto-fill its
     // remembered category/sub-category/unit — but only into fields still empty, so it never
     // overwrites something the user already chose (same fight-the-user pitfall as the category-split bug).
@@ -6483,7 +6491,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       } else if(rememberForFuture){
         setItemCatalog(prev=>prev.map(it=>it.id===catalogMatch.id ? { ...it, unit:iUnit||"nos", catId:iCatId||"", subId:iSubId||"" } : it));
       }
-      onClose();
+      // Stay open for continuous multi-item entry on a genuinely new item; edit mode still
+      // closes as a single deliberate action.
+      if(editingItemId){
+        onClose();
+      } else {
+        setIName(""); setIQty("1"); setIPrice(""); setICatId(""); setISubId(""); setRememberForFuture(false); setShowCategoryPicker(false);
+      }
     };
     return (
       <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:350,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
@@ -6493,47 +6507,77 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
           </div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
-            <div>
-              <span style={lbl}>Item Name *</span>
-              <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. Milk, Petrol, Shampoo" value={iName} onChange={e=>setIName(e.target.value)} onBlur={applyItemMemory} autoFocus/>
-            </div>
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
-              <div><span style={lbl}>Qty</span><input style={{ ...inp,textAlign:"center" }} type="number" min="0" placeholder="1" value={iQty} onChange={e=>setIQty(e.target.value)}/></div>
-              <div><span style={lbl}>Unit</span><select style={inp} value={iUnit} onChange={e=>setIUnit(e.target.value)}>{(measureUnits||[]).map(u=><option key={u} value={u}>{formatMeasureUnitLabel?formatMeasureUnitLabel(u):u}</option>)}</select></div>
-              <div><span style={lbl}>Price/unit</span><input style={{ ...inp,textAlign:"right" }} type="number" min="0" placeholder="0" value={iPrice} onChange={e=>setIPrice(e.target.value)}/></div>
-            </div>
-            {iQty&&iPrice&&<div style={{ background:T.input,borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-              <span style={{ color:T.sub,fontSize:12 }}>Item total</span>
-              <span style={{ color:T.accent,fontSize:14,fontWeight:800 }}>{sym}{fmt(iTotal)}</span>
-            </div>}
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-              <div><span style={lbl}>Category</span><select style={inp} value={iCatId} onChange={e=>{setICatId(e.target.value);setISubId("");}}><option value="">Select</option>{(cats||[]).map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}</select></div>
-              <div><span style={lbl}>Sub-category</span><select style={inp} value={iSubId} onChange={e=>setISubId(e.target.value)}><option value="">Select</option>{(iCat?.subs||[]).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
-            </div>
-            {/* WP-C: makes applyItemMemory's pre-fill VISIBLE, matching QuickAdd's item-first
-                "Suggested:" line (WP-B-2) for consistency across both entry paths. Shown even if
-                the user has since changed the dropdowns away from it, so the "Remember for
-                future" checkbox's effect below stays legible. */}
-            {catalogMatch&&(()=>{
-              const suggestedCat = getCat(catalogMatch.catId);
-              const suggestedSub = suggestedCat?.subs?.find(s=>s.id===catalogMatch.subId);
-              if(!suggestedCat) return null;
-              return (
-                <div style={{ color:T.accent,fontSize:11,fontWeight:700,marginTop:-4 }}>
-                  Suggested from your item history: {suggestedCat.icon} {suggestedCat.name}{suggestedSub?` → ${suggestedSub.name}`:""}
+            {/* Already-added items, using lineItems (already passed to this component) -- so
+                progress stays visible during continuous multi-item entry without closing the
+                sheet. */}
+            {lineItems.length>0&&(
+              <div style={{ background:T.input,borderRadius:10,padding:"8px 10px" }}>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6 }}>ALREADY ADDED ({lineItems.length})</div>
+                <div style={{ display:"flex",flexDirection:"column",gap:4,maxHeight:110,overflowY:"auto" }}>
+                  {lineItems.map(li=>(
+                    <div key={li.id} style={{ display:"flex",justifyContent:"space-between",fontSize:12 }}>
+                      <span style={{ color:T.text }}>{li.label}</span>
+                      <span style={{ color:T.sub }}>{sym}{fmt((parseFloat(li.qty)||0)*(parseFloat(li.unitPrice)||0))}</span>
+                    </div>
+                  ))}
                 </div>
-              );
-            })()}
-            {/* WP-A: only shown for an item Arth already knows — a brand-new item is auto-learned
-                on save with no checkbox needed. Default unchecked: this purchase's classification
-                never silently rewrites Arth's existing suggestion for this item name. */}
-            {catalogMatch&&(
-              <label style={{ display:"flex",alignItems:"center",gap:8,cursor:"pointer" }}>
-                <input type="checkbox" checked={rememberForFuture} onChange={e=>setRememberForFuture(e.target.checked)} style={{ width:16,height:16,accentColor:T.accent,cursor:"pointer" }}/>
-                <span style={{ color:T.sub,fontSize:12 }}>Remember this for future {iName.trim()} purchases</span>
-              </label>
+              </div>
             )}
-            <button onClick={handleSave} disabled={!iName.trim()} style={{ background:iName.trim()?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:iName.trim()?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{editingItemId?"Save Changes ✓":"Add Item ✓"}</button>
+            {/* Layout: Row 1 = Name (wide) + Unit (narrow), per direct instruction -- 2 rows
+                instead of 3+. No logic changed, purely rearranged. */}
+            <div style={{ display:"flex",gap:8 }}>
+              <div style={{ flex:1 }}>
+                <span style={lbl}>Item Name *</span>
+                <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. Milk, Petrol, Shampoo" value={iName} onChange={e=>setIName(e.target.value)} onBlur={applyItemMemory} autoFocus/>
+              </div>
+              <div style={{ width:56 }}>
+                <span style={lbl}>Qty</span>
+                <input style={{ ...inp,textAlign:"center" }} type="number" min="0" placeholder="1" value={iQty} onChange={e=>setIQty(e.target.value)}/>
+              </div>
+              <div style={{ width:82 }}>
+                <span style={lbl}>Unit</span>
+                <select style={inp} value={iUnit} onChange={e=>setIUnit(e.target.value)}>{(measureUnits||[]).map(u=><option key={u} value={u}>{formatMeasureUnitLabel?formatMeasureUnitLabel(u):u}</option>)}</select>
+              </div>
+            </div>
+            {/* FIX: Category auto-applied silently for a known item -- compact one-line summary,
+                tap to override. A genuinely new/unmatched item shows a "Define category" prompt
+                instead of a dropdown, matching the approved compact-line design. */}
+            {iCat ? (
+              <button onClick={()=>setShowCategoryPicker(v=>!v)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                <span style={{ color:T.sub,fontSize:12 }}>📁 {iCat.icon} {iCat.name}{iSub?` → ${iSub.name}`:""}</span>
+                <span style={{ color:T.accent,fontSize:11,fontWeight:700 }}>Change</span>
+              </button>
+            ) : (
+              <button onClick={()=>setShowCategoryPicker(v=>!v)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                <span style={{ color:T.warn,fontSize:12,fontWeight:700 }}>⚠️ Needs a category</span>
+                <span style={{ color:T.accent,fontSize:11,fontWeight:700,textDecoration:"underline" }}>Define category</span>
+              </button>
+            )}
+            {showCategoryPicker&&(
+              <div style={{ display:"flex",flexDirection:"column",gap:8,background:T.input,borderRadius:10,padding:10 }}>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                  <div><span style={lbl}>Category</span><select style={inp} value={iCatId} onChange={e=>{setICatId(e.target.value);setISubId("");}}><option value="">Select</option>{(cats||[]).map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}</select></div>
+                  <div><span style={lbl}>Sub-category</span><select style={inp} value={iSubId} onChange={e=>setISubId(e.target.value)}><option value="">Select</option>{(iCat?.subs||[]).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+                </div>
+                {/* WP-A: only shown for an item Arth already knows — a brand-new item is
+                    auto-learned on save with no checkbox needed. */}
+                {catalogMatch&&(
+                  <label style={{ display:"flex",alignItems:"center",gap:8,cursor:"pointer" }}>
+                    <input type="checkbox" checked={rememberForFuture} onChange={e=>setRememberForFuture(e.target.checked)} style={{ width:16,height:16,accentColor:T.accent,cursor:"pointer" }}/>
+                    <span style={{ color:T.sub,fontSize:12 }}>Remember this for future {iName.trim()} purchases</span>
+                  </label>
+                )}
+                <button onClick={()=>setShowCategoryPicker(false)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Done</button>
+              </div>
+            )}
+            {/* Layout: Row 2 = Price/unit + the Add Item button, side by side. */}
+            <div style={{ display:"flex",gap:8,alignItems:"flex-end" }}>
+              <div style={{ flex:1 }}>
+                <span style={lbl}>Price/unit</span>
+                <input style={{ ...inp,textAlign:"right" }} type="number" min="0" placeholder="0" value={iPrice} onChange={e=>setIPrice(e.target.value)}/>
+              </div>
+              <button onClick={handleSave} disabled={!iName.trim()} style={{ flex:1,background:iName.trim()?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:iName.trim()?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",height:48 }}>{editingItemId?"Save Changes ✓":"Add Item ✓"}</button>
+            </div>
           </div>
         </div>
       </div>
