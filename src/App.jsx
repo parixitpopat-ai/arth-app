@@ -3637,7 +3637,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     const [priceProcessingFee, setPriceProcessingFee] = useState(isEditing ? String(sourceTxn?.priceProcessingFee||"") : "");
     const [priceInterestRate, setPriceInterestRate] = useState(isEditing ? String(sourceTxn?.priceInterestRate||"") : "");
     const [splitMode, setSplitMode] = useState(initialTrackingMode); // none | split | tag | allocate | unified
-    const [showAdvancedTracking, setShowAdvancedTracking] = useState(isEditing && ["split","tag","allocate"].includes(initialTrackingMode));
     const [splitGroup, setSplitGroup] = useState(isEditing && sourceTxn?.type==="expense" && initialTrackingMode==="split" ? (sourceTxn.groupId || "") : "");
     // Apply default group for new expenses
     useEffect(()=>{
@@ -5255,24 +5254,38 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             {(txnType==="cc_payment"||txnType==="transfer")&&<input style={inp} placeholder="Note (optional)" value={who} onChange={e=>setWho(e.target.value)}/>}
 
 
-            <div>
-              <span style={lbl}>Amount ({sym}) *</span>
-              <input style={{ ...inp,fontSize:22,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} onChange={e=>setAmount(cleanMoneyInput(e.target.value))}/>
-            </div>
+            {/* Amount + collapsed Details trigger combined into one row to save a line, per
+                direct request. Only when Details is collapsed -- expanded Details stays
+                full-width below, with Amount on its own row above it. Full/EMI moved to render
+                AFTER this combined row (it used to sit between Amount and Details; now that
+                those two share a row, Full/EMI can't sit between them anymore). */}
+            <div style={{ display:"flex",gap:8 }}>
+              <div style={{ flex: (txnType==="expense"&&!showDetailsCard) ? 1 : "unset", width: (txnType==="expense"&&!showDetailsCard) ? "auto" : "100%" }}>
+                <span style={lbl}>Amount ({sym}) *</span>
+                <input style={{ ...inp,fontSize:22,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} onChange={e=>setAmount(cleanMoneyInput(e.target.value))}/>
+              </div>
             {/* T3 slice 1: DetailsCard, per Arth UI-2B T3 Expense Shell.dc.html (T3-3/T3-4).
                 This slice: Paid Via + Date only. Collapsed row always shows the current value
                 per T3-3's rule ("a collapsed row always states its current value"); tapping
                 pushes an expanded view rather than an in-place accordion. */}
             {txnType==="expense"&&!showDetailsCard&&(
-              <button onClick={()=>setShowDetailsCard(true)} style={{ ...inp,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left" }}>
-                <span style={{ color:T.sub,fontSize:12,fontWeight:700 }}>Details</span>
-                <span style={{ color:T.text,fontSize:12,display:"flex",alignItems:"center",gap:6 }}>
-                  {(() => { const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
-                  <span style={{ color:T.sub }}>·</span>
-                  {formatShortDate(date)||date}
-                  <span style={{ color:T.sub,marginLeft:2 }}>▾</span>
-                </span>
-              </button>
+                <button onClick={()=>setShowDetailsCard(true)} style={{ ...inp,flex:1,display:"flex",flexDirection:"column",alignItems:"flex-start",justifyContent:"center",cursor:"pointer",textAlign:"left",gap:2 }}>
+                  <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Details ▾</span>
+                  <span style={{ color:T.text,fontSize:12,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap" }}>
+                    {(() => { const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
+                    <span style={{ color:T.sub }}>·</span>
+                    {formatShortDate(date)||date}
+                  </span>
+                </button>
+              )}
+            </div>
+            {/* Full/EMI, moved here (after the combined Amount+Details row) -- still a MODE
+                toggle, same pattern as Itemise Purchase, not bundled with Reference. */}
+            {txnType==="expense"&&(
+              <div style={{ display:"flex",gap:4,justifyContent:"flex-end" }}>
+                <Chip color={T.success} active={expensePaymentMode==="full"} onClick={()=>setExpensePaymentMode("full")}>✅ Full</Chip>
+                <Chip color={T.warn} active={expensePaymentMode==="emi"} onClick={()=>setExpensePaymentMode("emi")}>🧾 EMI</Chip>
+              </div>
             )}
             {txnType==="expense"&&showDetailsCard&&(
               <div style={{ background:T.input,borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:10 }}>
@@ -5301,6 +5314,53 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                   <span style={lbl}>Date</span>
                   <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
                 </div>
+                {/* T3-3/T3-4: Note and Reference as Details rows. */}
+                <div>
+                  <span style={lbl}>Note</span>
+                  <input style={inp} placeholder="Optional note" value={note} onChange={e=>setNote(e.target.value)}/>
+                </div>
+                <div>
+                  <span style={lbl}>Reference</span>
+                  <input style={inp} type="text" placeholder="e.g. UPI / bank reference" value={transactionRef} onChange={e=>setTransactionRef(e.target.value.toUpperCase())}/>
+                </div>
+                {/* T3-3/T3-4 resolution: price-breakdown moved here from the retired "Advanced
+                    (optional)" wrapper -- it's fundamentally about HOW you're paying, so it
+                    belongs beside Paid Via, shown only when that account is a CC. */}
+                {getAcc(accId)?.type==="cc"&&(
+                  <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                    <button onClick={()=>setShowPriceBreakdown(v=>!v)} style={{ background:"none",border:`1px dashed ${showPriceBreakdown?T.accent:T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,color:showPriceBreakdown?T.accent:T.sub,fontFamily:"Nunito,sans-serif",fontWeight:700,textAlign:"left" }}>
+                      {showPriceBreakdown?"▲ Hide price breakdown":"▼ Price breakdown (MRP · discount · fees · interest · GST)"}
+                    </button>
+                    {showPriceBreakdown&&(
+                      <div style={{ background:T.card,borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:8 }}>
+                        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                          <div><span style={lbl}>MRP ({sym})</span><input style={inp} type="text" inputMode="decimal" placeholder="0" value={priceMrp} onChange={e=>setPriceMrp(cleanMoneyInput(e.target.value))}/></div>
+                          <div><span style={lbl}>Discount ({sym})</span><input style={inp} type="text" inputMode="decimal" placeholder="0" value={priceDiscount} onChange={e=>setPriceDiscount(cleanMoneyInput(e.target.value))}/></div>
+                          <div><span style={lbl}>Processing Fee ({sym})</span><input style={inp} type="text" inputMode="decimal" placeholder="0" value={priceProcessingFee} onChange={e=>setPriceProcessingFee(cleanMoneyInput(e.target.value))}/></div>
+                          <div><span style={lbl}>Interest Rate (% p.a.)</span><input style={inp} type="text" inputMode="decimal" placeholder="e.g. 24" value={priceInterestRate} onChange={e=>setPriceInterestRate(cleanMoneyInput(e.target.value))}/></div>
+                        </div>
+                        {priceInterestAmt > 0 && (
+                          <div style={{ display:"flex",flexDirection:"column",gap:4,borderTop:`1px dashed ${T.border}`,paddingTop:8,marginTop:4 }}>
+                            <div style={{ display:"flex",justifyContent:"space-between",fontSize:11 }}>
+                              <span style={{ color:T.sub }}>Monthly interest ({priceInterestRate}% ÷ 12 on {sym}{fmt(priceNet)})</span>
+                              <span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(priceInterestAmt)}</span>
+                            </div>
+                            <div style={{ display:"flex",justifyContent:"space-between",fontSize:11 }}>
+                              <span style={{ color:T.sub }}>GST on interest (18%)</span>
+                              <span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(priceGstAmt)}</span>
+                            </div>
+                          </div>
+                        )}
+                        {computedBreakdownTotal!==null&&(
+                          <div style={{ display:"flex",justifyContent:"space-between",borderTop:`1px solid ${T.border}`,paddingTop:8,marginTop:4 }}>
+                            <span style={{ color:T.sub,fontSize:12,fontWeight:700 }}>Computed total</span>
+                            <span style={{ color:T.accent,fontSize:14,fontWeight:800 }}>{sym}{fmt(computedBreakdownTotal)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             {txnType!=="expense"&&(
@@ -5310,67 +5370,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               </div>
             )}
 
-            {/* Advanced (optional) - real collapsible wrapper, using showAdvancedTracking which
-                existed as declared state but was never actually wired to anything (confirmed by
-                checking - zero conditional renders referenced it). This is the first section
-                moved inside; Guest Person/Trip/Membership/Category Allocation follow in later
-                increments, not all moved at once per the incremental-refactor rule. */}
-            {txnType==="expense"&&(
-              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-                <button onClick={()=>setShowAdvancedTracking(v=>!v)} style={{ background:"none",border:`1px dashed ${showAdvancedTracking?T.accent:T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,color:showAdvancedTracking?T.accent:T.sub,fontFamily:"Nunito,sans-serif",fontWeight:700,textAlign:"left" }}>
-                  {showAdvancedTracking?"▲ Hide Advanced":"▼ Advanced (optional)"}
-                </button>
-                {/* Guest Person / Trip Link shortcuts removed from here per real feedback - having
-                    them both here AND in their original location (near Who is this for?) was
-                    genuine, confusing duplication, not a helpful shortcut. Kept only in their one
-                    real location now. */}
-                {showAdvancedTracking&&getAcc(accId)?.type==="cc"&&(
-              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-                <button onClick={()=>setShowPriceBreakdown(v=>!v)} style={{ background:"none",border:`1px dashed ${showPriceBreakdown?T.accent:T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,color:showPriceBreakdown?T.accent:T.sub,fontFamily:"Nunito,sans-serif",fontWeight:700,textAlign:"left" }}>
-                  {showPriceBreakdown?"▲ Hide price breakdown":"▼ Price breakdown (MRP · discount · fees · interest · GST)"}
-                </button>
-                {showPriceBreakdown&&(
-                  <div style={{ background:T.input,borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:8 }}>
-                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-                      <div><span style={lbl}>MRP ({sym})</span><input style={inp} type="text" inputMode="decimal" placeholder="0" value={priceMrp} onChange={e=>setPriceMrp(cleanMoneyInput(e.target.value))}/></div>
-                      <div><span style={lbl}>Discount ({sym})</span><input style={inp} type="text" inputMode="decimal" placeholder="0" value={priceDiscount} onChange={e=>setPriceDiscount(cleanMoneyInput(e.target.value))}/></div>
-                      <div><span style={lbl}>Processing Fee ({sym})</span><input style={inp} type="text" inputMode="decimal" placeholder="0" value={priceProcessingFee} onChange={e=>setPriceProcessingFee(cleanMoneyInput(e.target.value))}/></div>
-                      <div><span style={lbl}>Interest Rate (% p.a.)</span><input style={inp} type="text" inputMode="decimal" placeholder="e.g. 24" value={priceInterestRate} onChange={e=>setPriceInterestRate(cleanMoneyInput(e.target.value))}/></div>
-                    </div>
-                    {priceInterestAmt > 0 && (
-                      <div style={{ display:"flex",flexDirection:"column",gap:4,borderTop:`1px dashed ${T.border}`,paddingTop:8,marginTop:4 }}>
-                        <div style={{ display:"flex",justifyContent:"space-between",fontSize:11 }}>
-                          <span style={{ color:T.sub }}>Monthly interest ({priceInterestRate}% ÷ 12 on {sym}{fmt(priceNet)})</span>
-                          <span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(priceInterestAmt)}</span>
-                        </div>
-                        <div style={{ display:"flex",justifyContent:"space-between",fontSize:11 }}>
-                          <span style={{ color:T.sub }}>GST on interest (18%)</span>
-                          <span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(priceGstAmt)}</span>
-                        </div>
-                      </div>
-                    )}
-                    {computedBreakdownTotal!==null&&(
-                      <div style={{ display:"flex",justifyContent:"space-between",borderTop:`1px solid ${T.border}`,paddingTop:8,marginTop:4 }}>
-                        <span style={{ color:T.sub,fontSize:12,fontWeight:700 }}>Computed total</span>
-                        <span style={{ color:T.accent,fontSize:14,fontWeight:800 }}>{sym}{fmt(computedBreakdownTotal)}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-                )}
-              </div>
-            )}
-
-            {(txnType!=="income")&&(
+            {/* T3-3/T3-4: "Advanced (optional)" retired -- price-breakdown moved into
+                DetailsCard above; Full/EMI moved to its own row after Amount; Reference moved
+                into DetailsCard for expense. Non-expense, non-income types keep their own plain
+                Reference field below, unchanged. */}
+            {(txnType!=="income"&&txnType!=="expense")&&(
               <div>
-                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4 }}>
-                  <span style={{ ...lbl,marginBottom:0 }}>Transaction ID / Ref (optional)</span>
-                  {txnType==="expense"&&<div style={{ display:"flex",gap:4 }}>
-                    <Chip color={T.success} active={expensePaymentMode==="full"} onClick={()=>setExpensePaymentMode("full")}>✅ Full</Chip>
-                    <Chip color={T.warn} active={expensePaymentMode==="emi"} onClick={()=>setExpensePaymentMode("emi")}>🧾 EMI</Chip>
-                  </div>}
-                </div>
+                <span style={{ ...lbl,marginBottom:4 }}>Transaction ID / Ref (optional)</span>
                 <input style={inp} type="text" placeholder="e.g. UPI / bank reference" value={transactionRef} onChange={e=>setTransactionRef(e.target.value.toUpperCase())}/>
               </div>
             )}
