@@ -3998,10 +3998,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       if(!sameCat || !sameSub) applySuggestedExpenseCategory(vendorCategorySuggestion);
     }, [vendorCategorySuggestion, txnType, categoryTouched, catIds, subIds, applySuggestedExpenseCategory]);
 
-    useEffect(()=>{
-      if(["split","tag","allocate"].includes(splitMode)) setShowAdvancedTracking(true);
-    },[splitMode]);
-
     const validCatIds = catIds.filter(cid=>getCat(cid));
     const validSubIds = subIds.filter(sid=>validCatIds.some(cid=>getCat(cid)?.subs?.some(sub=>sub.id===sid)));
     const catId = validCatIds[0]||null;  // primary cat for backward compat
@@ -4801,11 +4797,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         const normalizedTrackingMode = splitMode==="unified" ? "allocate" : splitMode;
         const linkedBillId = isBillPayment ? ((isEditing && sourceTxn?.paidBillId) || matchedBill?.id || genId()) : null;
         const linkedBillName = isBillPayment ? (matchedBill?.name || who.trim() || note.trim() || "Bill payment") : null;
+        // T3-9b: itemized Expense uses the deterministic rollup instead of the raw (possibly
+        // stale, since the Category picker is hidden once itemized) top-level catId/catIds.
+        // Falls back to the exact original expressions when not itemized -- non-itemized
+        // behavior is completely unchanged.
+        const effectiveCatId = itemCategoryRollup ? itemCategoryRollup.catId : catId;
+        const effectiveCatIds = itemCategoryRollup ? itemCategoryRollup.catIds : (validCatIds.length ? validCatIds : (catId ? [catId] : []));
         const newTxn = {
           ...base,
           amount:amt,
-          catId,
-          catIds:validCatIds.length ? validCatIds : (catId ? [catId] : []),
+          catId:effectiveCatId,
+          catIds:effectiveCatIds,
           subIds:validSubIds,
           subId:validSubIds[0]||null,
           accId,
@@ -4822,7 +4824,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
           // condition exactly. Previously written unconditionally, which silently perpetuated a
           // stale vehicleId on any transaction type (e.g. investment) with no UI path to see or
           // clear it, since the picker never renders for non-qualifying types.
-          vehicleId:(txnType==="expense"&&catIds.includes("transport"))?(vehicleId||null):null,
+          vehicleId:(txnType==="expense"&&effectiveCatIds.includes("transport"))?(vehicleId||null):null,
           people:(()=>{
             // Multi-person attribution with custom per-person amounts — checked first since it's a
             // separate selection path from the single-person tag flow below.
@@ -5166,7 +5168,29 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       closeModal();
     };
 
-    const canSubmit = hasTxnSubject && amt>0;
+    // T3-9b: deterministic transaction-level category projection from lineItems, itemized
+    // Expense only. catIds ordered by summed item amount descending; catId = the largest
+    // share. Live-recomputed (not just at save), no new fields -- existing catId/catIds/
+    // lineItems[].catId are the only representations used.
+    const itemCategoryRollup = useMemo(() => {
+      if(!(txnType==="expense" && useItemizedLines && lineItems.length>0)) return null;
+      const sums = {};
+      for(const item of lineItems){
+        if(!item.catId) continue;
+        const itemAmt = (parseFloat(item.qty)||0) * (parseFloat(item.unitPrice)||0);
+        sums[item.catId] = (sums[item.catId]||0) + itemAmt;
+      }
+      const orderedCatIds = Object.keys(sums).sort((a,b)=>sums[b]-sums[a]);
+      const uncategorized = lineItems.filter(item=>!item.catId);
+      return {
+        catId: orderedCatIds[0]||null,
+        catIds: orderedCatIds,
+        uncategorizedCount: uncategorized.length,
+        uncategorizedLabels: uncategorized.map(i=>i.label||"Unnamed item"),
+      };
+    }, [txnType, useItemizedLines, lineItems]);
+
+    const canSubmit = hasTxnSubject && amt>0 && !(itemCategoryRollup && itemCategoryRollup.uncategorizedCount>0);
 
     return (
       <>
@@ -5405,6 +5429,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                       <div style={{ display:"flex",alignItems:"center",gap:8 }}>
                         <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>ITEMS</div>
                         {lineItems.length>0&&<span style={{ background:T.accent+"22",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>{lineItems.length} item{lineItems.length>1?"s":""}</span>}
+                        {/* T3-9b: summary count, so blocking Save has an immediate, visible
+                            reason without scrolling every item. */}
+                        {itemCategoryRollup&&itemCategoryRollup.uncategorizedCount>0&&<span style={{ background:T.warn+"22",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>⚠️ {itemCategoryRollup.uncategorizedCount} need{itemCategoryRollup.uncategorizedCount>1?"":"s"} a category</span>}
                       </div>
                       <button onClick={()=>{setEditingItemId(null);setShowItemSheet(true);}} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add item</button>
                     </div>
@@ -5418,6 +5445,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                               <div style={{ flex:1,minWidth:0 }}>
                                 <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.label||"Unnamed item"}</div>
                                 <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{item.qty||1} {item.unit||"nos"} @ {sym}{fmt(item.unitPrice||0)} each</div>
+                                {/* T3-9b: identifies which item(s) block Save. */}
+                                {!item.catId&&<div style={{ color:T.warn,fontSize:10,marginTop:2,fontWeight:700 }}>⚠️ Needs a category</div>}
                               </div>
                               <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(itemTotal)}</div>
                               <button onClick={()=>{setEditingItemId(item.id);setShowItemSheet(true);}} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:11,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Edit</button>
