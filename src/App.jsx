@@ -3867,6 +3867,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     // ("optional search (past 8 options)"). Read-only derivation from existing txns[] -- no new
     // persistence, matches the spec's own wording exactly rather than inventing a counter.
     const [showCategorySheet, setShowCategorySheet] = useState(false);
+    // T3.1 Part A: S-5's confirm-before-losing-items dialog, and S-3's prefill for "Start with
+    // one item at <amount>".
+    const [showStandardSwitchConfirm, setShowStandardSwitchConfirm] = useState(false);
+    const [itemPrefill, setItemPrefill] = useState(null);
     // WP-T2: Account Picker sheet visibility + "recent" derivation, same read-only pattern as
     // T1's recentCategoryIds -- no new persistence.
     const [showAccountSheet, setShowAccountSheet] = useState(false);
@@ -5175,16 +5179,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     const itemCategoryRollup = useMemo(() => {
       if(!(txnType==="expense" && useItemizedLines && lineItems.length>0)) return null;
       const sums = {};
+      const subSums = {};
       for(const item of lineItems){
         if(!item.catId) continue;
         const itemAmt = (parseFloat(item.qty)||0) * (parseFloat(item.unitPrice)||0);
         sums[item.catId] = (sums[item.catId]||0) + itemAmt;
+        // T3.1 Part A follow-up: sub-categories preserved on switch-back, using the SAME
+        // amount-ordering principle as catIds above -- distinct subIds by summed item amount.
+        if(item.subId) subSums[item.subId] = (subSums[item.subId]||0) + itemAmt;
       }
       const orderedCatIds = Object.keys(sums).sort((a,b)=>sums[b]-sums[a]);
+      const orderedSubIds = Object.keys(subSums).sort((a,b)=>subSums[b]-subSums[a]);
       const uncategorized = lineItems.filter(item=>!item.catId);
       return {
         catId: orderedCatIds[0]||null,
         catIds: orderedCatIds,
+        subIds: orderedSubIds,
+        catAmounts: sums,
         uncategorizedCount: uncategorized.length,
         uncategorizedLabels: uncategorized.map(i=>i.label||"Unnamed item"),
       };
@@ -5411,15 +5422,47 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                 {/* T3 slice 1: standalone Paid via block removed -- DetailsCard (added just
                     above, in STEP 2) is now the sole account picker for Expense. Leaving both
                     was a real bug: the account picker appeared twice on screen. */}
-                {/* Itemise Purchase toggle moved here per WF-TXN001 - same real useItemizedLines
-                    state as the existing Items section below, so both stay in sync. Category
-                    section above is now hidden when this is ON (single-condition change). */}
-                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.input,borderRadius:10,padding:"8px 12px" }}>
-                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>📦 Itemise Purchase</span>
-                  <button onClick={()=>setUseItemizedLines(v=>!v)} style={{ background:useItemizedLines?T.accent:T.border,border:"none",borderRadius:20,width:40,height:22,position:"relative",cursor:"pointer" }}>
-                    <div style={{ position:"absolute",top:2,left:useItemizedLines?20:2,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left 0.15s" }}/>
-                  </button>
+                {/* T3.1 Part A: Segmented control replaces the boolean switch one-for-one,
+                    driving the SAME useItemizedLines state -- no new mechanism. */}
+                <div>
+                  <span style={lbl}>Purchase type</span>
+                  <Segmented
+                    options={[{value:"standard",label:"Standard"},{value:"itemised",label:"Itemised"}]}
+                    value={useItemizedLines?"itemised":"standard"}
+                    onChange={(val)=>{
+                      if(val==="itemised"){
+                        // Standard -> Itemised: instant, never blocked, never asks.
+                        setUseItemizedLines(true);
+                      } else if(lineItems.length===0){
+                        // Itemised -> Standard, no items: instant.
+                        setUseItemizedLines(false);
+                      } else {
+                        // Itemised -> Standard, with items: the one confirm in the flow (S-5).
+                        setShowStandardSwitchConfirm(true);
+                      }
+                    }}
+                    T={T}
+                  />
+                  <div style={{ color:T.sub,fontSize:11,marginTop:6 }}>
+                    {useItemizedLines ? "Total is the sum of the items. Each item has its own category." : "One amount for the whole expense."}
+                  </div>
                 </div>
+                {/* T3.1 Part A, S-3: Standard -> Itemised with a typed amount and no items yet
+                    offers that amount back as a starting item, rather than losing it silently. */}
+                {useItemizedLines && lineItems.length===0 && parseFloat(amount)>0 && (
+                  <div style={{ background:T.input,borderRadius:10,padding:10,display:"flex",flexDirection:"column",gap:8 }}>
+                    <div style={{ color:T.sub,fontSize:11 }}>You entered {sym}{fmt(amount)} as the amount. In Itemised, the total comes from items.</div>
+                    <button onClick={()=>{
+                      setItemPrefill({ unitPrice:amount, catId:catIds[0]||null });
+                      setEditingItemId(null);
+                      setShowItemSheet(true);
+                    }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:10,padding:"10px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                      Start with one item at {sym}{fmt(amount)}
+                      {catIds[0]&&getCat(catIds[0])&&<div style={{ fontSize:10,fontWeight:400,marginTop:2,color:T.sub }}>Category: {getCat(catIds[0]).name}, from what you picked</div>}
+                    </button>
+                    <button onClick={()=>{ setEditingItemId(null); setShowItemSheet(true); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",textAlign:"left" }}>Add items from the receipt</button>
+                  </div>
+                )}
                 {/* Items list moved here directly - real bug fix: previously the actual item
                     entry UI stayed far below in the form while this toggle lived up here,
                     so flipping it ON hid Category with nothing visible taking its place. */}
@@ -6455,11 +6498,57 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
           </div>
         </div>
       </div>
+      {/* T3.1 Part A, S-5: the one confirm in the Standard<->Itemised flow, because it is the
+          only lossy step. Amount becomes the item total; Categories become the T3-9b rollup's
+          catIds (already-built mechanism, reused exactly). The amber per-item-people line is
+          real, correctly-wired logic per spec -- but cannot trigger in today's live app, since
+          no current UI path populates item.splits (T4 scope, not yet built). Documented, not
+          silently dropped. */}
+      {showStandardSwitchConfirm&&(
+        <div onClick={()=>setShowStandardSwitchConfirm(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:360,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900,marginBottom:4 }}>Switch to Standard?</div>
+            <div style={{ color:T.sub,fontSize:12,marginBottom:14 }}>The {lineItems.length} item{lineItems.length>1?"s":""} will be removed. This expense keeps:</div>
+            <div style={{ background:T.input,borderRadius:10,padding:12,marginBottom:10,display:"flex",flexDirection:"column",gap:6 }}>
+              <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Amount</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(lineItemsTotal)}</span></div>
+              <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Categories</span><span style={{ color:T.text,fontSize:12,fontWeight:700,textAlign:"right" }}>{(itemCategoryRollup?.catIds||[]).map(cid=>getCat(cid)?.name).filter(Boolean).join(", ")||"None"}</span></div>
+              <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Vendor, details, links</span><span style={{ color:T.sub,fontSize:12 }}>Unchanged</span></div>
+            </div>
+            {lineItems.some(item=>item.splits?.length>0)&&(
+              <div style={{ color:T.warn,fontSize:11,marginBottom:10 }}>People set per item will be cleared. Who is this for goes back to Just you.</div>
+            )}
+            <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+              <button onClick={()=>setShowStandardSwitchConfirm(false)} style={{ background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Keep Itemised</button>
+              <button onClick={()=>{
+                const rollupCatIds = itemCategoryRollup?.catIds||[];
+                const rollupSubIds = itemCategoryRollup?.subIds||[];
+                // FIX: explicitly set the REAL per-category amounts (from the items themselves,
+                // already computed by the rollup) instead of leaving catAllocations for the
+                // existing equal-split effect to silently fill in. Only meaningful when 2+
+                // categories -- matches buildEqualCategoryAllocations's own single-category
+                // no-op behavior for consistency.
+                const rollupAmounts = itemCategoryRollup?.catAmounts||{};
+                const realAllocations = rollupCatIds.length>1
+                  ? Object.fromEntries(rollupCatIds.map(cid=>[cid, String(Math.round((rollupAmounts[cid]||0)*100)/100)]))
+                  : {};
+                setAmount(String(Math.round(lineItemsTotal*100)/100));
+                setCatIds(rollupCatIds);
+                setSubIds(rollupSubIds);
+                setCatAllocations(realAllocations);
+                setLineItems([]);
+                setUseItemizedLines(false);
+                setShowStandardSwitchConfirm(false);
+              }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Remove items and switch</button>
+            </div>
+          </div>
+        </div>
+      )}
       {showItemSheet&&useItemizedLines&&(
         <ItemSheetModal
           editingItemId={editingItemId}
           lineItems={lineItems}
-          onClose={()=>{ setShowItemSheet(false); setEditingItemId(null); }}
+          prefill={itemPrefill}
+          onClose={()=>{ setShowItemSheet(false); setEditingItemId(null); setItemPrefill(null); }}
           onSave={item=>{
             if(editingItemId){
               setLineItems(prev=>prev.map(x=>x.id===editingItemId?{...x,...item}:x));
@@ -6478,7 +6567,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
   };
 
   // ── ITEM SHEET MODAL (B3) ───────────────────────────────────────────────────────
-  const ItemSheetModal = ({ editingItemId, lineItems, onClose, onSave, cats, getCat, measureUnits, formatMeasureUnitLabel, sym, fmt, T, inp, lbl }) => {
+  const ItemSheetModal = ({ editingItemId, lineItems, prefill, onClose, onSave, cats, getCat, measureUnits, formatMeasureUnitLabel, sym, fmt, T, inp, lbl }) => {
     const editItem = editingItemId ? lineItems.find(x=>x.id===editingItemId) : null;
     const [iName, setIName] = useState(editItem?.label||"");
     // FIX (direct product decision): quantity no longer has its own visible input during entry
@@ -6487,8 +6576,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     // genuinely simpler add flow (Name, Price/unit, Unit only, as specified).
     const [iQty, setIQty] = useState(String(editItem?.qty||"1"));
     const [iUnit, setIUnit] = useState(editItem?.unit||"nos");
-    const [iPrice, setIPrice] = useState(String(editItem?.unitPrice||""));
-    const [iCatId, setICatId] = useState(editItem?.catId||"");
+    // T3.1 Part A, S-3: prefill only applies to a genuinely NEW item (editItem, when set,
+    // always takes priority -- editing an existing item is completely unaffected).
+    const [iPrice, setIPrice] = useState(String(editItem?.unitPrice || (!editItem && prefill?.unitPrice) || ""));
+    const [iCatId, setICatId] = useState(editItem?.catId || (!editItem && prefill?.catId) || "");
     const [iSubId, setISubId] = useState(editItem?.subId||"");
     // FIX: Category/Sub-category are no longer always-visible dropdowns. A known item (catalog
     // match) auto-applies its category silently and shows a compact one-line summary; this
