@@ -75,6 +75,7 @@ import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVersion, migrateLegacyBillingHistory } from "./domain/cards/billingConfig";
 import { generateDueStatements } from "./domain/cards/statementBills";
 import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
+import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
@@ -841,7 +842,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       return;
     }
     const newBills = ccAccounts.flatMap(card=>generateDueStatements({ card, accounts, txns, bills, toDateOnly }));
-    if(newBills.length>0) setBills(prev=>[...prev, ...newBills]);
+    if(newBills.length>0){ setBills(prev=>[...prev, ...newBills]); return; }
+    // Rule 10/test I: a cc_payment transaction pays a card regardless of a statement's
+    // verification status — this reflects that payment onto the specific Bill record it closed,
+    // oldest statement first, so it stops appearing as unpaid in Payments once genuinely paid.
+    const paidAllocations = ccAccounts.flatMap(card=>allocateCcPaymentsToStatements(card, bills, txns));
+    if(paidAllocations.length>0){
+      setBills(prev=>prev.map(b=>{
+        const alloc = paidAllocations.find(x=>x.billId===b.id);
+        return alloc ? { ...b, status:"paid", paidByTxnId:alloc.paidByTxnId, paidDate:alloc.paidDate } : b;
+      }));
+    }
   },[accounts, txns, bills]);
   // Expected Income — first piece of the Financial Engine work (ADR-016/ADR-017). Deliberately
   // self-contained: doesn't touch Bills, Recognition, or Cash Flow, since those don't exist yet
