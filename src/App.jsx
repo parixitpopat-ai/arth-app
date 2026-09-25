@@ -4029,10 +4029,40 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       ? Math.max(0, priceNet + (parseFloat(priceProcessingFee)||0) + priceInterestAmt + priceGstAmt)
       : null;
     const amt = computedBreakdownTotal!==null ? computedBreakdownTotal : (parseFloat(amount)||0);
-    // WP-BILLS-2B: render-scope copy of submit()'s own matchedBill lookup, so the split/group
-    // seed effect below can react to a match as soon as it becomes true — not just at submit
-    // time. submit()'s own local matchedBill (unchanged) is the one actually used for the write.
-    const renderMatchedBill = isBillPayment ? bills.find(bl=>bl.status==="unpaid"&&bl.catId===catId&&bl.amount>0&&bl.amount===amt) : null;
+    // T3-SAFE-1 (fix A): this used to be a single blind bills.find(amount+category), applied
+    // SILENTLY on Save — never rendered anywhere, no confirmation. A same-amount bill from a
+    // different month in the same category would get marked paid instead of the right one, with
+    // no way to notice. Now: candidates require amount+category AND a due/bill date within ~45
+    // days of this transaction's date, shown to the user below the "Bill payment" toggle,
+    // defaulting to the closest match but changeable or dismissible before Save — what's shown
+    // here is exactly what gets written, not a separate blind lookup at submit time.
+    const billMatchCandidates = useMemo(() => {
+      if(!isBillPayment || !catId || !amt) return [];
+      return bills
+        .filter(b=>b.status==="unpaid" && b.catId===catId && b.amount>0 && b.amount===amt)
+        .map(b=>{
+          const bd = toDateOnly(b.dueDate||b.billDate);
+          const td = toDateOnly(date);
+          const dayGap = (bd && td) ? Math.abs(Math.round((bd-td)/86400000)) : Infinity;
+          return { bill:b, dayGap };
+        })
+        .filter(x=>x.dayGap<=45)
+        .sort((a,b)=>a.dayGap-b.dayGap)
+        .map(x=>x.bill);
+    },[isBillPayment, catId, amt, date, bills]);
+    // "" = no confirmed match, "__new__" = explicitly dismissed ("not any of these"), else a bill id.
+    const [billMatchChoice, setBillMatchChoice] = useState(isEditing ? (sourceTxn?.paidBillId||"") : "");
+    const billMatchCandidateIdsKey = billMatchCandidates.map(b=>b.id).join(",");
+    const lastBillMatchKeyRef = useRef(null);
+    useEffect(()=>{
+      if(isEditing) return; // never re-prompt/override an already-linked payment
+      if(lastBillMatchKeyRef.current === billMatchCandidateIdsKey) return; // same candidate set already handled
+      lastBillMatchKeyRef.current = billMatchCandidateIdsKey;
+      // Pre-selects the closest-dated candidate — still visible and changeable below, never
+      // applied silently. An empty set clears any stale choice from a prior amount/category.
+      setBillMatchChoice(billMatchCandidates[0]?.id || "");
+    },[billMatchCandidateIdsKey, isEditing]);
+    const renderMatchedBill = (billMatchChoice && billMatchChoice!=="__new__") ? bills.find(b=>b.id===billMatchChoice) : null;
 
     // HOTFIX (TDZ): this effect was originally placed BEFORE renderMatchedBill/selectedPids were
     // declared, causing a ReferenceError on every render of this component. Relocated here —
@@ -4802,7 +4832,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
             setRefDupWarning(`Note: "${qtyOverAllocated.label||"Unnamed item"}" has more split quantity assigned than the item's own quantity — saved anyway, but double-check that item's split.`);
           }
         }
-        const matchedBill = bills.find(b=>b.status==="unpaid"&&b.catId===catId&&b.amount>0&&b.amount===amt);
+        // T3-SAFE-1 (fix A): uses the SAME confirmed choice the UI above shows and lets you
+        // change/dismiss — no separate blind bills.find() at submit time anymore. "__new__"
+        // (explicitly dismissed) and "" (no candidate) both correctly fall through to matchedBill
+        // undefined below, same as "no match" always did.
+        const matchedBill = renderMatchedBill;
         const owedByOthers = (splitMode==="allocate" || splitMode==="unified")
           ? Object.values(psplit).reduce((s,info)=>s+(info.mode==="owes"?Number(info.amount||0):0),0)
           : Object.entries(psplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
@@ -6490,6 +6524,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                   </div>
                 )}
                 {isBillPayment&&<input style={{ ...inp,marginTop:4 }} placeholder="Invoice / Bill Number (optional) e.g. MSEB/2026/04/001" value={billInvoiceNo} onChange={e=>setBillInvoiceNo(e.target.value)}/>}
+                {/* T3-SAFE-1 (fix A): matched bill is confirmed here, never applied silently. */}
+                {isBillPayment&&billMatchCandidates.length>0&&(
+                  <div style={{ marginTop:10 }}>
+                    <span style={lbl}>{billMatchCandidates.length===1?"This looks like a payment for":`${billMatchCandidates.length} unpaid bills match this amount`}</span>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:4 }}>
+                      {billMatchCandidates.map(b=>(
+                        <button key={b.id} onClick={()=>setBillMatchChoice(b.id)} style={{ background:billMatchChoice===b.id?T.accent+"22":"none",border:`1px solid ${billMatchChoice===b.id?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billMatchChoice===b.id?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>
+                          {billMatchChoice===b.id?"✓ ":""}{b.name||b.merchant||"Bill"} · due {formatShortDate(b.dueDate||b.billDate)||b.dueDate||b.billDate}
+                        </button>
+                      ))}
+                      <button onClick={()=>setBillMatchChoice("__new__")} style={{ background:billMatchChoice==="__new__"?T.danger+"18":"none",border:`1px solid ${billMatchChoice==="__new__"?T.danger:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billMatchChoice==="__new__"?T.danger:T.sub,fontFamily:"Nunito,sans-serif" }}>
+                        {billMatchChoice==="__new__"?"✓ ":""}Not these — new bill
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
