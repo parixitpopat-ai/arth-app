@@ -6996,86 +6996,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         if(newKey && prev.some(x=>linkedSettlementKey(x)===newKey)) return prev;
         return [newSettleTxn,...prev];
       };
-      if(t._isBillSettle){
-        // Settle against bills (and any explicit _txnIds from mixed settle)
-        let remaining=appliedAmt;
-        setTxns(prev=>{
-          const withSettlement = upsertSettlement(prev);
-          return withSettlement.map(x=>{
-            // Settle explicit _txnIds (mixed txn+bill settle)
-            if(t._txnIds?.includes(x.id) && x.people?.[pid]) {
-              const origAmt = Number(x.people[pid]?.amount||0);
-              const prevP = Number(x.people[pid]?.settledAmt||0);
-              const txnAmt = remainingShare(x.people[pid]);
-              const paidNow = Math.min(remaining, txnAmt);
-              const nextP = Math.min(origAmt, prevP + paidNow);
-              const nextPRem = Math.max(0, origAmt - nextP);
-              const groupCap = Number(x.groupCollectiveAmount||0);
-              const nextGrp = groupCap > 0 ? Math.min(groupCap, Number(x.groupCollectiveSettledAmt||0) + paidNow) : x.groupCollectiveSettledAmt;
-              remaining -= paidNow;
-              return { ...x, people:{ ...x.people, [pid]:{ ...x.people[pid], settled:nextPRem<=0, settledAmt:nextP, remainingAmt:nextPRem } }, ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGrp } : {}) };
-            }
-            // If this txn is the paidByTxnId for one of the bills, also clear its people split
-            const billForTxn = (t._billIds||[]).map(id=>bills.find(b=>b.id===id)).find(b=>b?.paidByTxnId && String(b.paidByTxnId)===String(x.id));
-            if(!billForTxn || !x.people?.[pid]) return x;
-            const origAmt = Number(x.people[pid]?.amount||0);
-            const prevP = Number(x.people[pid]?.settledAmt||0);
-            const nextP = Math.min(origAmt, prevP + appliedAmt);
-            const nextPRem = Math.max(0, origAmt - nextP);
-            const addedP = nextP - prevP;
-            const groupCap = Number(x.groupCollectiveAmount||0);
-            const nextGrp = groupCap > 0 ? Math.min(groupCap, Number(x.groupCollectiveSettledAmt||0) + addedP) : x.groupCollectiveSettledAmt;
-            return { ...x, people:{ ...x.people, [pid]:{ ...x.people[pid], settled:nextPRem<=0, settledAmt:nextP, remainingAmt:nextPRem } }, ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGrp } : {}) };
-          });
-        });
-        if(t._billIds){
-          // TRX-002C4c (CR-001): bill-kind person-share settlement in SettleModal
-          // now routes through the shared TransactionPersonShare value object (per
-          // AQ-002) via settlePersonShareOnBill — same adapter proven for
-          // applyRepaymentAllocations (TRX-002C4b), second call site. Proven
-          // equivalent for all currently-reachable bill-settlement cases by
-          // settle-branch-bill-equivalence.test.js before this repoint was made.
-          // Mirroring deliberately NOT added here: this branch never mirrored onto
-          // a linked transaction before this repoint either — that gap is tracked
-          // separately, explicitly out of C4c scope.
-          setBills(prev=>prev.map(b=>{
-            const link = settlementLinks.find(l=>l.kind==="bill"&&String(l.id)===String(b.id));
-            if(!link||!b.splitPeople?.[pid]||link.amount<=0) return b;
-            const { bill:updatedBill } = settlePersonShareOnBill({ bill:b, personId:pid, amount:link.amount, todayStr });
-            return updatedBill;
-          }));
-        }
-      } else {
-        // TRX-002C4 (CR-001, step 2): reuses the same settlePersonShareOnTransaction
-        // adapter proven for applyRepaymentAllocations (TRX-002C3) — identical
-        // formula, second call site. Proven equivalent by
-        // settle-branch-equivalence.test.js before this repoint was made.
-        setTxns(prev=>[
-          ...upsertSettlement([]),
-          ...prev.map(x=>{
-            if(x.id!==t.id) return x;
-            return settlePersonShareOnTransaction({ txn:x, personId:pid, amount:appliedAmt, todayStr });
-          })
-        ]);
-        // Update any bill that mirrors this person's split
-        // Covers: (a) bills linked via paidBillId, (b) bills whose splitPeople mirrors the txn split
-        setBills(prev=>prev.map(b=>{
-          const isPaidBillLink = t.paidBillId && String(b.id)===String(t.paidBillId);
-          const isMirroredSplit = !t.paidBillId && b.splitPeople?.[pid] && b.splitPeople[pid].mode==="owes" && !b.splitPeople[pid].settled && remainingShare(b.splitPeople[pid])>0;
-          if(!isPaidBillLink && !isMirroredSplit) return b;
-          if(!b.splitPeople?.[pid]) return b;
-          const origAmt = Number(b.splitPeople[pid].amount||0);
-          const prevP = Number(b.splitPeople[pid].settledAmt||0);
-          const nextP = Math.min(origAmt, prevP + appliedAmt);
-          const nextPRem = Math.max(0, origAmt - nextP);
-          const addedP = nextP - prevP;
-          const groupCap = Number(b.groupCollectiveAmount||0);
-          const nextGrp = groupCap > 0 ? Math.min(groupCap, Number(b.groupCollectiveSettledAmt||0) + addedP) : b.groupCollectiveSettledAmt;
-          const updatedSplit = { ...b.splitPeople, [pid]:{ ...b.splitPeople[pid], settled:nextPRem<=0, settledAmt:nextP, remainingAmt:nextPRem } };
-          const allOwedSettled = Object.values(updatedSplit).filter(i=>i.mode==="owes").every(i=>i.settled);
-          return { ...b, splitPeople:updatedSplit, ...(groupCap > 0 ? { groupCollectiveSettledAmt:nextGrp } : {}), ...(allOwedSettled ? { status:"paid", paidDate:todayStr() } : {}) };
-        }));
-      }
+      // Settlement effects (reduce owed amounts, recompute settled/bill status,
+      // mirror a bill-settle onto its linked transaction) now route through the
+      // same applyRepaymentAllocations() the Settlement-tab flow already uses —
+      // one implementation for both entry points, instead of this modal keeping
+      // its own hand-written copy (which, notably, never actually applied the
+      // bill→transaction mirror the other path did; that gap closes here too).
+      // settlementLinks (built above) is already exactly the shape
+      // applyRepaymentAllocations expects — kind:"bill" for _billIds, kind:"txn"
+      // for both the plain single-transaction case and _txnIds mixed settle.
+      setTxns(prev=>upsertSettlement(prev));
+      applyRepaymentAllocations(pid, settlementLinks);
     };
 
     const settleAll = () => {
