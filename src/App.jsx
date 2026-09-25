@@ -4504,6 +4504,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(submittingRef.current) return;
       if(!hasTxnSubject){ setRefDupWarning("Enter a vendor/note before saving."); return; }
       if(!amt){ setRefDupWarning("Enter an amount before saving."); return; }
+      // Credit Card WP: "Add missing transaction" from a statement's reconciliation carries the
+      // statement's period as dateMin/dateMax — enforced here too, not just via the date input's
+      // min/max, since a typed date can bypass that.
+      if(safePrefill.dateMin && date < safePrefill.dateMin){ setRefDupWarning(`Date must be on or after ${safePrefill.dateMin} — within the statement period.`); return; }
+      if(safePrefill.dateMax && date > safePrefill.dateMax){ setRefDupWarning(`Date must be on or before ${safePrefill.dateMax} — within the statement period.`); return; }
       setRefDupWarning("");
       // Real gap found via a live report: a passive banner (never blocking, by deliberate design
       // to avoid alert()'s WebView reliability issue) was too easy to miss for entries made days
@@ -5429,7 +5434,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
                 <div>
                   <span style={lbl}>Date</span>
-                  <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+                  <input style={inp} type="date" value={date} min={safePrefill.dateMin||undefined} max={safePrefill.dateMax||undefined} onChange={e=>setDate(e.target.value)}/>
+                  {/* Credit Card WP rule: "Add missing transaction" from a statement's reconciliation
+                      bounds the date to that statement's period — enforced here via the native date
+                      input's min/max, only when the caller actually supplied period bounds. */}
+                  {(safePrefill.dateMin||safePrefill.dateMax)&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Within the statement period: {safePrefill.dateMin} – {safePrefill.dateMax}</div>}
                 </div>
                 {/* T3-3/T3-4: Note and Reference as Details rows. */}
                 <div>
@@ -5483,7 +5492,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {txnType!=="expense"&&(
               <div>
                 <span style={lbl}>Date</span>
-                <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+                <input style={inp} type="date" value={date} min={safePrefill.dateMin||undefined} max={safePrefill.dateMax||undefined} onChange={e=>setDate(e.target.value)}/>
               </div>
             )}
 
@@ -7223,6 +7232,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [alertPct,setAlertPct]=useState("30");
     const [billingCycle,setBillingCycle]=useState("");
     const [handle,setHandle]=useState("");
+    // Credit Card WP, CC-2/CC-3: two-step wizard (card info, then billing) instead of one flat
+    // form. issuer/network/variant are new static fields (rule 2); ccPayFromAccId feeds the
+    // account's v1 billingHistory version, created effective from today (rule 3).
+    const [ccStep,setCcStep]=useState(1);
+    const [issuer,setIssuer]=useState("");
+    const [network,setNetwork]=useState("");
+    const [variant,setVariant]=useState("");
+    const [ccPayFromAccId,setCcPayFromAccId]=useState("");
     const [linkedBank,setLinkedBank]=useState(accounts.find(a=>a.type==="bank")?.id||"");
     const [linkedUpiAccount,setLinkedUpiAccount]=useState("");
     const [openingBalance,setOpeningBalance]=useState("");
@@ -7250,13 +7267,27 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         attributeType:accAttributedTo?accAttributeType:null,
       };
       let typeSpecific = {};
+      // Credit Card WP: issuer/network/variant/billingHistory aren't part of
+      // the Account aggregate's closed field set (Account.js) — merged onto the stored shape
+      // afterward, same pattern the billing-config migration effect already uses, rather than
+      // widening that aggregate for this WP.
+      let ccExtraFields = null;
       if(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cash") typeSpecific = {last4,openingBalance:parseMoney(openingBalance)||0,openingBalanceDate:openingBalanceDate||todayStr(),needsCalibration};
-      else if(selectedAccountBaseType==="cc") typeSpecific = {last4,limit:parseFloat(limit)||0,outstanding:0,statementDate:parseInt(statementDate)||15,dueDate:parseInt(dueDate)||5,alertPct:Math.max(0,parseFloat(alertPct)||0),billingCycle:billingCycle||`${statementDate}th`};
+      else if(selectedAccountBaseType==="cc"){
+        const sDay=Math.max(1,Math.min(31,parseInt(statementDate,10)||15));
+        const dDay=Math.max(1,Math.min(31,parseInt(dueDate,10)||5));
+        typeSpecific = {last4,limit:parseFloat(limit)||0,outstanding:0,statementDate:sDay,dueDate:dDay,alertPct:Math.max(0,parseFloat(alertPct)||0),billingCycle:billingCycle||`${sDay}th–${dDay}th`};
+        ccExtraFields = {
+          issuer:issuer.trim()||null,network:network||null,variant:variant.trim()||null,
+          // v1 billing config, effective from creation (rule 3) — never a flat overwrite-only field.
+          billingHistory:[{ effectiveFrom:todayStr(), statementDay:sDay, dueDay:dDay, payFromAccId:ccPayFromAccId||null, createdAt:todayStr() }],
+        };
+      }
       else if(selectedAccountBaseType==="debit") typeSpecific = {last4,linkedBank};
       else if(selectedAccountBaseType==="upi") typeSpecific = {handle,linkedAccount:linkedUpiAccount||""};
       try {
         const account = Account.create({ ...base, behavior:selectedAccountBaseType, ...typeSpecific });
-        setAccounts(p=>[...p,accountToStoredShape(account)]);
+        setAccounts(p=>[...p,{ ...accountToStoredShape(account), ...(ccExtraFields||{}) }]);
       } catch(err) {
         if(err instanceof AccountValidationError){ setError(err.message); return; }
         throw err;
@@ -7272,11 +7303,84 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
             <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-              {accountTypeOptions.map(at=><button key={at.id} onClick={()=>setAType(at.id)} style={{ background:aType===at.id?color+"22":"none",border:`1px solid ${aType===at.id?color:T.border}`,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:aType===at.id?color:T.sub,fontFamily:"Nunito,sans-serif" }}>{at.icon} {at.label}</button>)}
+              {accountTypeOptions.map(at=><button key={at.id} onClick={()=>{ setAType(at.id); setCcStep(1); setError(""); }} style={{ background:aType===at.id?color+"22":"none",border:`1px solid ${aType===at.id?color:T.border}`,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:aType===at.id?color:T.sub,fontFamily:"Nunito,sans-serif" }}>{at.icon} {at.label}</button>)}
             </div>
             {selectedAccountBucket==="investment"&&<div style={{ color:T.sub,fontSize:10 }}>This account will show under Investments in Wealth. Fund it using `Transfer` from your bank, and record annual PF interest as `Income` into this same account.</div>}
+            {selectedAccountBaseType==="cc"&&(
+              // Credit Card WP, CC-2/CC-3: two-step wizard — card info, then billing — instead of
+              // one flat form, matching the designer package exactly for this account type only.
+              <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{ccStep} of 2 · {ccStep===1?"Card information":"Billing"}</div>
+                {ccStep===1 ? (<>
+                  <input style={inp} placeholder="Card name e.g. HDFC Regalia" value={name} onChange={e=>setName(e.target.value)}/>
+                  <input style={inp} placeholder="Issuer e.g. HDFC Bank" value={issuer} onChange={e=>setIssuer(e.target.value)}/>
+                  <input style={inp} placeholder="Last 4 digits" maxLength={4} value={last4} onChange={e=>setLast4(e.target.value)}/>
+                  <div>
+                    <span style={lbl}>Network</span>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:4 }}>
+                      {["Visa","Mastercard","RuPay","Other"].map(n=><button key={n} onClick={()=>setNetwork(n)} style={{ background:network===n?T.accent+"22":"none",border:`1px solid ${network===n?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:network===n?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{n}</button>)}
+                    </div>
+                  </div>
+                  <input style={inp} placeholder="Variant (optional) e.g. Regalia Gold" value={variant} onChange={e=>setVariant(e.target.value)}/>
+                  <input style={inp} type="number" placeholder={`Credit limit (${sym})`} value={limit} onChange={e=>setLimit(e.target.value)}/>
+                  <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                    {PALETTE.map(c=><div key={c} onClick={()=>setColor(c)} style={{ width:28,height:28,borderRadius:7,background:c,cursor:"pointer",border:color===c?"3px solid #fff":"3px solid transparent" }}/>)}
+                  </div>
+                  {error&&<div style={{ color:T.danger,fontSize:12,fontWeight:700 }}>⚠️ {error}</div>}
+                  <button onClick={()=>{ if(!name.trim()){ setError("Card name required"); return; } if(!last4.trim()){ setError("Last 4 digits required"); return; } if(!parseFloat(limit)){ setError("Credit limit required"); return; } setError(""); setCcStep(2); }} style={btnP}>Next: billing</button>
+                </>) : (<>
+                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                    <div><span style={lbl}>Statement day</span><input style={inp} type="number" min="1" max="31" value={statementDate} onChange={e=>setStatementDate(e.target.value)}/></div>
+                    <div><span style={lbl}>Payment due day</span><input style={inp} type="number" min="1" max="31" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
+                  </div>
+                  {banks.length>0&&(
+                    <div>
+                      <span style={lbl}>Pay from</span>
+                      <select style={inp} value={ccPayFromAccId} onChange={e=>setCcPayFromAccId(e.target.value)}>
+                        <option value="">Not set</option>
+                        {banks.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <div><span style={lbl}>Spend alert (% of limit)</span><input style={inp} type="number" min="0" max="100" value={alertPct} onChange={e=>setAlertPct(e.target.value)}/></div>
+                  {(()=>{
+                    const sDay=Math.max(1,Math.min(31,parseInt(statementDate,10)||15));
+                    const dDay=Math.max(1,Math.min(31,parseInt(dueDate,10)||5));
+                    const { lastStatementDate, nextStatementDate } = getCardCycleDates({ statementDate:sDay, dueDate:dDay }, new Date());
+                    let previewDueOn = dateAtDay(nextStatementDate.getFullYear(), nextStatementDate.getMonth(), dDay);
+                    if(previewDueOn <= nextStatementDate) previewDueOn = dateAtDay(nextStatementDate.getFullYear(), nextStatementDate.getMonth()+1, dDay);
+                    return (
+                      <div style={{ background:T.input,borderRadius:12,padding:"12px 14px",display:"flex",flexDirection:"column",gap:6 }}>
+                        <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>Your first statement</div>
+                        <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Period</span><span style={{ color:T.text,fontSize:11,fontWeight:700 }}>{formatShortDate(lastStatementDate)} – {formatShortDate(nextStatementDate)}</span></div>
+                        <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Bill appears in Payments</span><span style={{ color:T.text,fontSize:11,fontWeight:700 }}>{formatShortDate(nextStatementDate)}</span></div>
+                        <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Due</span><span style={{ color:T.text,fontSize:11,fontWeight:700 }}>{formatShortDate(previewDueOn)}</span></div>
+                      </div>
+                    );
+                  })()}
+                  <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+                    <div style={{ color:T.text,fontSize:12,fontWeight:700,marginBottom:8 }}>Tag to Person or Group (optional)</div>
+                    <div style={{ display:"flex",gap:6,marginBottom:8 }}>
+                      <button onClick={()=>setAccAttributeType("person")} style={{ flex:1,background:accAttributeType==="person"?T.accent+"22":"none",border:`1px solid ${accAttributeType==="person"?T.accent:T.border}`,borderRadius:10,padding:"6px",cursor:"pointer",fontSize:11,fontWeight:700,color:accAttributeType==="person"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 Person</button>
+                      <button onClick={()=>setAccAttributeType("group")} style={{ flex:1,background:accAttributeType==="group"?T.accent+"22":"none",border:`1px solid ${accAttributeType==="group"?T.accent:T.border}`,borderRadius:10,padding:"6px",cursor:"pointer",fontSize:11,fontWeight:700,color:accAttributeType==="group"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👥 Group</button>
+                    </div>
+                    <select style={inp} value={accAttributedTo} onChange={e=>setAccAttributedTo(e.target.value)}>
+                      <option value="">None (personal account)</option>
+                      {accAttributeType==="person" && people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><option key={p.id} value={p.id}>{p.emoji} {p.name}</option>)}
+                      {accAttributeType==="group" && getActiveGroups(groups).map(g=><option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
+                    </select>
+                  </div>
+                  {error&&<div style={{ color:T.danger,fontSize:12,fontWeight:700 }}>⚠️ {error}</div>}
+                  <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
+                    <button onClick={()=>setCcStep(1)} style={btnG}>Back</button>
+                    <button onClick={submit} style={btnP}>Save credit card</button>
+                  </div>
+                </>)}
+              </div>
+            )}
+            {selectedAccountBaseType!=="cc"&&<>
             <input style={inp} placeholder="Name" value={name} onChange={e=>setName(e.target.value)}/>
-            {(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cc"||selectedAccountBaseType==="debit")&&<input style={inp} placeholder="Last 4 digits" maxLength={4} value={last4} onChange={e=>setLast4(e.target.value)}/>}
+            {(selectedAccountBaseType==="bank"||selectedAccountBaseType==="debit")&&<input style={inp} placeholder="Last 4 digits" maxLength={4} value={last4} onChange={e=>setLast4(e.target.value)}/>}
             {(selectedAccountBaseType==="bank"||selectedAccountBaseType==="cash")&&<div style={{ display:"grid",gridTemplateColumns:"1.3fr 1fr",gap:10 }}>
               <input style={inp} type="text" inputMode="decimal" placeholder={selectedAccountBaseType==="cash"?`Cash in hand (${sym})`:`Opening balance (${sym})`} value={openingBalance||""} onChange={e=>setOpeningBalance(cleanMoneyInput(e.target.value))}/>
               <div>
@@ -7293,15 +7397,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <button onClick={()=>setNeedsCalibration(v=>!v)} style={{ background:needsCalibration?T.accent+"22":"none",border:`1px solid ${needsCalibration?T.accent:T.border}`,borderRadius:20,padding:"5px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:needsCalibration?T.accent:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>{needsCalibration?"Yes":"No"}</button>
               </div>
             )}
-            {selectedAccountBaseType==="cc"&&<>
-              <input style={inp} type="number" placeholder={`Credit limit (${sym})`} value={limit} onChange={e=>setLimit(e.target.value)}/>
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-                <div><span style={lbl}>Statement Date</span><input style={inp} type="number" min="1" max="31" value={statementDate} onChange={e=>setStatementDate(e.target.value)}/></div>
-                <div><span style={lbl}>Due Date</span><input style={inp} type="number" min="1" max="31" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
-              </div>
-              <div><span style={lbl}>Spend alert (% of limit)</span><input style={inp} type="number" min="0" max="100" value={alertPct} onChange={e=>setAlertPct(e.target.value)}/></div>
-              <input style={inp} placeholder="Billing cycle e.g. 15th–14th" value={billingCycle} onChange={e=>setBillingCycle(e.target.value)}/>
-            </>}
             {selectedAccountBaseType==="debit"&&<div>
               <span style={lbl}>Linked Bank Account *</span>
               {banks.length===0?<div style={{ color:T.danger,fontSize:12 }}>Add a bank account first</div>:
@@ -7343,6 +7438,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
               <button onClick={submit} style={btnP}>Save Account</button>
             </div>
+            </>}
           </div>
         </div>
       </div>
@@ -17295,7 +17391,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               setBills={setBills}
               onClose={()=>setViewingCcStatement(null)}
               onRecordPayment={()=>{ setAddPrefill({ toAccId:stmtCard?.id }); setDefaultAddType("cc_payment"); setShowAdd(true); setViewingCcStatement(null); }}
-              onAddMissingTxn={()=>{ setAddPrefill({ accId:stmtCard?.id, date:viewingCcStatement.periodTo }); setDefaultAddType("expense"); setShowAdd(true); setViewingCcStatement(null); }}
+              onAddMissingTxn={()=>{
+                // periodFrom is the exclusive lower boundary (the statement-cycle convention used
+                // throughout statementBills.js/reconciliation.js: a period covers (from, to]) — the
+                // first day actually IN this statement is the day after periodFrom.
+                const periodStartInclusive = addDaysToDateStr(viewingCcStatement.periodFrom, 1);
+                setAddPrefill({ accId:stmtCard?.id, date:viewingCcStatement.periodTo, dateMin:periodStartInclusive, dateMax:viewingCcStatement.periodTo });
+                setDefaultAddType("expense"); setShowAdd(true); setViewingCcStatement(null);
+              }}
               onReviewTxn={txn=>{ setEditingTxn(txn); setViewingCcStatement(null); }}
               onViewTransactions={()=>{ setShowAccDetail(stmtCard); setViewingCcStatement(null); }}
             />
@@ -17529,30 +17632,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     });
                   }} style={{ flex:1,background:"none",border:`1px solid ${T.danger}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete Account</button>
                 </div>
-                {/* Current Bill / Last Bill / Average — the at-a-glance summary from the Connection
-                    Dashboard spec. Bill-type accounts only; memberships have their own Hero Card
-                    below which already covers this ground (current period, renewal, lifetime cost).
-                    CC-linked connections get their own branch — statement data comes from the
-                    account's real billing cycle (getCardSummary), not the bills array, since card
-                    statements were never stored as Bill records. */}
+                {/* Credit Card WP, rule 13: this connection-detail sheet is still the Biller —
+                    Statement Due / Unbilled / Days-to-Due are Money/Bills figures (getCardSummary),
+                    so this resolves and links to them instead of repeating them here, same as the
+                    shell-level Credit Card biller screen above it. */}
                 {ba.accId&&(()=>{
                   const ccAcc = accounts.find(a=>a.id===ba.accId);
                   if(!ccAcc) return null;
-                  const summary = getCardSummary(ccAcc, accounts, txns, toDateOnly);
+                  const cardBills = bills.filter(b=>b.isCcStatement && b.accId===ccAcc.id);
+                  const needsAttentionBill = cardBills.find(b=>b.verification!=="matched" && b.status==="unpaid") || cardBills.filter(b=>b.status==="unpaid").sort((a,b2)=>String(a.dueDate).localeCompare(String(b2.dueDate)))[0] || null;
                   return (
-                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16 }}>
-                      <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
-                        <div style={{ color:summary.currentDue>0?T.warn:T.sub,fontSize:14,fontWeight:900 }}>{summary.currentDue>0?`${sym}${fmt(summary.currentDue)}`:"—"}</div>
-                        <div style={{ color:T.sub,fontSize:8,marginTop:2 }}>STATEMENT DUE</div>
-                        {summary.dueOn&&<div style={{ color:T.sub,fontSize:8 }}>{formatShortDate(summary.dueOn)||summary.dueOn}</div>}
+                    <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
+                      <div onClick={()=>{ setActiveBillerForAction(null); if(needsAttentionBill) setViewingCcStatement(needsAttentionBill); else setTab("bills"); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"11px 14px",cursor:"pointer" }}>
+                        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>Statements</span>
+                        <span style={{ color:T.sub,fontSize:11 }}>{cardBills.length} in Payments ›</span>
                       </div>
-                      <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
-                        <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{sym}{fmt(summary.currentCycleSpend||0)}</div>
-                        <div style={{ color:T.sub,fontSize:8,marginTop:2 }}>THIS CYCLE (UNBILLED)</div>
-                      </div>
-                      <div style={{ background:T.input,borderRadius:12,padding:"10px 8px",textAlign:"center" }}>
-                        <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{summary.daysToDue!=null?summary.daysToDue:"—"}</div>
-                        <div style={{ color:T.sub,fontSize:8,marginTop:2 }}>DAYS TO DUE</div>
+                      <div onClick={()=>{ setActiveBillerForAction(null); setTab("wealth"); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"11px 14px",cursor:"pointer" }}>
+                        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>Financial position</span>
+                        <span style={{ color:T.sub,fontSize:11 }}>Money ›</span>
                       </div>
                     </div>
                   );

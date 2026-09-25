@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import BottomSheet from "./BottomSheet";
 import { RADIUS, TOUCH, FONT } from "../constants/theme";
+import { dateAtDay } from "../helpers/dateHelpers";
 import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVersion, migrateLegacyBillingHistory } from "../domain/cards/billingConfig";
 
 // Credit Card WP, deliverable 5 (CC-5/CC-6). A billing change is a new dated version, never an
@@ -10,13 +11,32 @@ import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVer
 export default function ChangeBillingModal({ account, bills, accounts, todayStr, setAccounts, T, onClose }) {
   const migrated = migrateLegacyBillingHistory(account);
   const current = getEffectiveBillingConfig(migrated, todayStr());
+  const currentStatementDay = current.statementDay;
   const earliestEligible = getEarliestEligibleChangeDate(account.id, bills) || todayStr();
 
   const [statementDay, setStatementDay] = useState(String(current.statementDay));
   const [dueDay, setDueDay] = useState(String(current.dueDay));
   const [payFromAccId, setPayFromAccId] = useState(current.payFromAccId || "");
+  const [applyMode, setApplyMode] = useState("next"); // "next" | "later"
   const [effectiveFrom, setEffectiveFrom] = useState(earliestEligible);
   const [error, setError] = useState("");
+
+  // CC-5 "A later statement -> Pick a month": candidate effective-from dates beyond the
+  // immediate next eligible one, walking forward under the CURRENT (pre-change) statement day —
+  // those are the only period boundaries the current config actually produces, so they're the
+  // only ones a "later statement" can honestly mean.
+  const laterCandidates = (() => {
+    const out = [];
+    let cursor = (() => { const [y, m, d] = earliestEligible.split("-").map(Number); return new Date(y, m - 1, d, 12, 0, 0, 0); })();
+    for (let i = 0; i < 6; i++) {
+      let next = dateAtDay(cursor.getFullYear(), cursor.getMonth() + 1, currentStatementDay);
+      if (next <= cursor) next = dateAtDay(cursor.getFullYear(), cursor.getMonth() + 2, currentStatementDay);
+      const nextDay = new Date(next); nextDay.setDate(nextDay.getDate() + 1);
+      out.push(nextDay.toISOString().slice(0, 10));
+      cursor = next;
+    }
+    return out;
+  })();
 
   const lbl = { color: T.sub, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" };
   const inp = { minHeight: TOUCH.min, background: T.input, border: `1px solid ${T.borderStrong}`, borderRadius: RADIUS.md, padding: "0 12px", color: T.text, fontSize: 15, width: "100%", boxSizing: "border-box", fontFamily: FONT.sans };
@@ -37,6 +57,17 @@ export default function ChangeBillingModal({ account, bills, accounts, todayStr,
   };
 
   const payFromOptions = (accounts || []).filter(a => a.id !== account.id && a.type !== "cc");
+  const payFromName = id => (accounts || []).find(a => a.id === id)?.name;
+  const todayS = todayStr();
+
+  // CC-6: "A scheduled change can be edited or removed until its first statement is generated."
+  // A version with 0 statements generated under it, and a still-future effectiveFrom, is exactly
+  // that scheduled-not-yet-active case — removable. The version currently in effect, and any
+  // version that already produced a real statement, never can be (rule 3).
+  const removeVersion = effectiveFrom => {
+    const next = migrated.billingHistory.filter(v => v.effectiveFrom !== effectiveFrom);
+    setAccounts(prev => prev.map(x => (x.id === account.id ? { ...x, billingHistory: next } : x)));
+  };
 
   return (
     <BottomSheet onClose={onClose} T={T} maxHeight="88vh">
@@ -60,8 +91,18 @@ export default function ChangeBillingModal({ account, bills, accounts, todayStr,
         )}
         <div>
           <span style={lbl}>Applies from</span>
-          <input style={inp} type="date" min={earliestEligible} value={effectiveFrom} onChange={e => setEffectiveFrom(e.target.value)} />
-          <div style={{ color: T.sub, fontSize: 11, marginTop: 4, lineHeight: 1.5 }}>
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <button onClick={() => { setApplyMode("next"); setEffectiveFrom(earliestEligible); }} style={{ flex: 1, minHeight: TOUCH.min, background: applyMode === "next" ? T.accentSoft : "none", border: `1px solid ${applyMode === "next" ? T.accent : T.border}`, color: applyMode === "next" ? T.accent : T.text, borderRadius: RADIUS.md, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT.sans }}>Next statement</button>
+            <button onClick={() => { setApplyMode("later"); setEffectiveFrom(laterCandidates[0] || earliestEligible); }} style={{ flex: 1, minHeight: TOUCH.min, background: applyMode === "later" ? T.accentSoft : "none", border: `1px solid ${applyMode === "later" ? T.accent : T.border}`, color: applyMode === "later" ? T.accent : T.text, borderRadius: RADIUS.md, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT.sans }}>A later statement</button>
+          </div>
+          {applyMode === "next" ? (
+            <div style={{ color: T.sub, fontSize: 11, marginTop: 6 }}>Period starting {earliestEligible}</div>
+          ) : (
+            <select style={{ ...inp, marginTop: 6 }} value={effectiveFrom} onChange={e => setEffectiveFrom(e.target.value)}>
+              {laterCandidates.map(d => <option key={d} value={d}>Period starting {d}</option>)}
+            </select>
+          )}
+          <div style={{ color: T.sub, fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
             Statements already generated stay exactly as they were — this can only apply from {earliestEligible} onward, the first period with no generated statement yet.
           </div>
         </div>
@@ -74,10 +115,14 @@ export default function ChangeBillingModal({ account, bills, accounts, todayStr,
             <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
               {[...migrated.billingHistory].sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom)).map(v => {
                 const stmtCount = (bills || []).filter(b => b.isCcStatement && b.accId === account.id && b.billingConfigVersion === v.effectiveFrom).length;
+                const isRemovable = stmtCount === 0 && v.effectiveFrom > todayS && migrated.billingHistory.length > 1;
                 return (
-                  <div key={v.effectiveFrom} style={{ background: T.input, borderRadius: 10, padding: "8px 10px", fontSize: 11, color: T.sub, display: "flex", justifyContent: "space-between" }}>
-                    <span>From {v.effectiveFrom === "2000-01-01" ? "the start" : v.effectiveFrom} · {v.statementDay}th / due {v.dueDay}th</span>
-                    <span>{stmtCount} statement{stmtCount === 1 ? "" : "s"}</span>
+                  <div key={v.effectiveFrom} style={{ background: T.input, borderRadius: 10, padding: "8px 10px", fontSize: 11, color: T.sub, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <span>From {v.effectiveFrom === "2000-01-01" ? "the start" : v.effectiveFrom} · {v.statementDay}th / due {v.dueDay}th{payFromName(v.payFromAccId) ? ` · ${payFromName(v.payFromAccId)}` : ""}</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                      <span>{stmtCount} statement{stmtCount === 1 ? "" : "s"}</span>
+                      {isRemovable && <button onClick={() => removeVersion(v.effectiveFrom)} style={{ background: "none", border: "none", color: T.danger, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: FONT.sans, padding: 0 }}>Remove</button>}
+                    </span>
                   </div>
                 );
               })}
