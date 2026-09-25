@@ -17,7 +17,7 @@ const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
 import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY } from "./constants/theme";
-import { todayStr, addDaysToDateStr, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
+import { todayStr, addDaysToDateStr, dateAtDay, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
 import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
 import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
 import { normalizeVendorText } from "./helpers/textHelpers";
@@ -683,7 +683,7 @@ export default function Arth() {
   // cloudReady and lets this component fall through to the PIN-setup
   // check below on the next render — the SAME PinScreen every device uses.
   if(!cloudReady){
-    return <ErrorBoundary><AppContent onLock={lock} suppressMainApp onCloudSetupComplete={()=>setCloudReady(true)}/></ErrorBoundary>;
+    return <ErrorBoundary><AppContent onLock={lock} appPin={appPin} setAppPin={setAppPin} suppressMainApp onCloudSetupComplete={()=>setCloudReady(true)}/></ErrorBoundary>;
   }
 
   if(!appPin) return <PinScreen isSetup subtitle="Create a PIN to keep your Arth account secure on this device." onUnlock={async pin=>{
@@ -730,7 +730,7 @@ export default function Arth() {
   );
 
   return <>
-    <ErrorBoundary><AppContent onLock={lock}/></ErrorBoundary>
+    <ErrorBoundary><AppContent onLock={lock} appPin={appPin} setAppPin={setAppPin}/></ErrorBoundary>
     {showIdleWarning && (
       <div onClick={()=>resetIdleRef.current?.()} style={{position:"fixed",bottom:0,left:0,right:0,zIndex:99999,background:"#1a1a1aee",backdropFilter:"blur(8px)",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:"2px solid #f0a500",cursor:"pointer"}}>
         <span style={{color:"#fff",fontSize:13,fontWeight:700}}>🔒 Locking in {idleCountdown}s due to inactivity</span>
@@ -741,7 +741,7 @@ export default function Arth() {
 }
 
 // ─── APP ──────────────────────────────────────────────────────────────────────
-function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
+function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, setAppPin }) {
   const [dark, setDark] = useState(()=>JSON.parse(localStorage.getItem("arth_dark")??"true"));
   const [autoDetectExpenseCategory, setAutoDetectExpenseCategory] = useState(()=>JSON.parse(localStorage.getItem("arth_auto_category")??"true"));
   const [workTripMode, setWorkTripMode] = useState(()=>JSON.parse(localStorage.getItem("arth_work_trip")??"false"));
@@ -4433,6 +4433,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         balanceDiff,
       });
       // Try auto-link EMI loan
+      const parsedAmt = amtM ? Number(amtM[1].replace(/,/g,"")) : 0;
       if(parsedAmt && parsedType==="expense") tryAutoLinkEmi(parsedAmt, merchant);
     };
 
@@ -10816,7 +10817,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                                 <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{item.subtitle}</div>
                               </div>
                               <div style={{ color:T.success,fontSize:13,fontWeight:800,flexShrink:0 }}>{sym}{fmt(item.amount)}</div>
-                              <button onClick={()=>{ setShowGroupOwesBreakdown(false); if(item.kind==="group-txn"){ const t=txns.find(x=>String(x.id)===String(item.id)); if(t) handleEditTxn(t); } else if(item.kind==="group-bill"){ const b=bills.find(x=>String(x.id)===String(item.id)); if(b) setEditingBill(b); } }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Edit ›</button>
+                              <button onClick={()=>{ setShowGroupOwesBreakdown(false); if(item.kind==="group-txn"){ const t=txns.find(x=>String(x.id)===String(item.id)); if(t) setEditingTxn(t); } else if(item.kind==="group-bill"){ const b=bills.find(x=>String(x.id)===String(item.id)); if(b) setEditingBill(b); } }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Edit ›</button>
                             </div>
                           ))
                         }
