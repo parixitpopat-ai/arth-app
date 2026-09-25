@@ -53,7 +53,7 @@ const mapBillToCommittedSpending = (b, groups, refundTotalsByBill) => ({
   sourceType: "bill",
   sourceId: b.id,
   category: "committedSpending",
-  subCategory: isRechargeBiller(b.billerCategory) ? "recharge" : "scheduledObligation",
+  subCategory: b.isCcStatement ? "ccStatement" : (isRechargeBiller(b.billerCategory) ? "recharge" : "scheduledObligation"),
   name: b.name || "Bill",
   amount: getMyBillShare(b, groups, refundTotalsByBill),
   date: b.dueDate || null,
@@ -66,9 +66,19 @@ const mapBillToCommittedSpending = (b, groups, refundTotalsByBill) => ({
  * Spending entry. Synthetic — never stored, computed fresh each call via the
  * supplied getCardSummary function (injected, not imported directly, so this
  * module stays a pure function of its explicit inputs).
+ *
+ * Credit Card WP (rule 17, "one coherent ownership model"): once a real
+ * Statement Bill has been generated for this card (statementBills.js,
+ * `isCcStatement`), that Bill already flows into `committedSpending` via
+ * mapBillToCommittedSpending above. Synthesizing a second entry here for the
+ * same obligation would be exactly the "two competing sources of truth" the
+ * WP forbids — so this only fires while a card has no generated statement
+ * Bill at all yet (a legacy/newly-added card mid-migration).
  */
-const mapCcAccountToCommittedSpending = (account, accounts, txns, toDateOnly, getCardSummary) => {
+const mapCcAccountToCommittedSpending = (account, accounts, txns, toDateOnly, getCardSummary, bills) => {
   if (account.type !== "cc") return null;
+  const hasGeneratedStatement = (bills || []).some(b => b.isCcStatement && b.accId === account.id);
+  if (hasGeneratedStatement) return null;
   const summary = getCardSummary(account, accounts, txns, toDateOnly);
   if (!summary?.currentDue || summary.currentDue <= 0) return null;
   return {
@@ -153,7 +163,7 @@ const mapScheduleToCommittedSaving = (r, refDate) => ({
 export const getCommitments = (bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill = {}, refDate = new Date()) => {
   const billEntries = (bills || []).map(b => mapBillToCommittedSpending(b, groups, refundTotalsByBill));
   const ccEntries = (accounts || [])
-    .map(a => mapCcAccountToCommittedSpending(a, accounts, txns, toDateOnly, getCardSummary))
+    .map(a => mapCcAccountToCommittedSpending(a, accounts, txns, toDateOnly, getCardSummary, bills))
     .filter(Boolean);
   const scheduleEntries = (recurringSchedules || [])
     .filter(r => r.active !== false)

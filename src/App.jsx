@@ -72,6 +72,9 @@ import { withNewContribution, withoutContribution, getContributionsForObligation
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import { getFrequentVendors, getFrequentItemsForVendor, getVendorAggregate } from "./domain/transactions/vendorInsights";
 import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
+import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVersion, migrateLegacyBillingHistory } from "./domain/cards/billingConfig";
+import { generateDueStatements } from "./domain/cards/statementBills";
+import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
@@ -80,6 +83,7 @@ import Toast from "./components/Toast";
 import ConfirmDialog from "./components/ConfirmDialog";
 import LinkToSheet from "./components/LinkToSheet";
 import AddVehicleModal from "./components/AddVehicleModal";
+import CreditCardStatementSheet from "./components/CreditCardStatementSheet";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
@@ -820,6 +824,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [defaultGroupId, setDefaultGroupId] = useState(()=>localStorage.getItem("arth_default_group")||"");
   const [editingRecurring, setEditingRecurring] = useState(null);
   const [bills, setBills] = useState(()=>JSON.parse(localStorage.getItem("arth_bills")||"[]"));
+  // Credit Card WP (rules 4 + 16): lazily materialize every closed statement
+  // cycle into a real, persisted Bill record (statementBills.js), and seed
+  // billingHistory for any `cc` account that predates the effective-dated
+  // billing model (billingConfig.js). Both steps are idempotent by
+  // construction — migrateLegacyBillingHistory is a no-op once history
+  // exists, generateDueStatements is a no-op once a cycle's Bill exists — so
+  // this settles after at most one extra render per change, never loops.
+  useEffect(()=>{
+    const ccAccounts = accounts.filter(a=>a.type==="cc");
+    if(ccAccounts.length===0) return;
+    const needsMigration = ccAccounts.some(a=>!Array.isArray(a.billingHistory)||a.billingHistory.length===0);
+    if(needsMigration){
+      setAccounts(prev=>prev.map(a=>a.type==="cc" ? migrateLegacyBillingHistory(a) : a));
+      return;
+    }
+    const newBills = ccAccounts.flatMap(card=>generateDueStatements({ card, accounts, txns, bills, toDateOnly }));
+    if(newBills.length>0) setBills(prev=>[...prev, ...newBills]);
+  },[accounts, txns, bills]);
   // Expected Income — first piece of the Financial Engine work (ADR-016/ADR-017). Deliberately
   // self-contained: doesn't touch Bills, Recognition, or Cash Flow, since those don't exist yet
   // and this needs to be buildable/verifiable entirely on its own.
@@ -1159,6 +1181,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [editingOpeningBalanceVal, setEditingOpeningBalanceVal] = useState("");
   const [editingOpeningBalanceDate, setEditingOpeningBalanceDate] = useState(todayStr());
   const [editingBill, setEditingBill] = useState(null);
+  const [viewingCcStatement, setViewingCcStatement] = useState(null); // a `bills` record with isCcStatement:true
   const [editingPerson, setEditingPerson] = useState(null);
   const [editingTxn, setEditingTxn] = useState(null);
   const [showAddAccount, setShowAddAccount] = useState(false);
@@ -12035,11 +12058,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const BillRow = ({ b }) => {
       // Badge now derived from sourceType (canonical) instead of the old synthetic `type`/id-
       // prefix check — reproduces the exact same visual badge (Step 4 Proof confirmed the
-      // mapping is equivalent). Only real Bills are clickable, same as before.
+      // mapping is equivalent). Only real Bills are clickable, same as before. A generated
+      // Credit Card statement IS a real Bill (sourceType "bill", per the CC WP) — it opens the
+      // reconciliation sheet instead of the plain bill editor.
       const isSynthetic = b.sourceType !== "bill";
+      const isCcStatement = Boolean(b._originalBill?.isCcStatement);
+      const openRow = () => {
+        if(isSynthetic || !b._originalBill) return;
+        if(isCcStatement) setViewingCcStatement(b._originalBill);
+        else setEditingBill(b._originalBill);
+      };
       return (
-      <div onClick={()=>{ if(!isSynthetic && b._originalBill) setEditingBill(b._originalBill); }} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:isSynthetic?"default":"pointer" }}>
-        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name}{b.sourceType==="recurringSchedule"&&<span style={{ color:T.sub,fontWeight:400 }}> · SIP</span>}{b.sourceType==="ccStatement"&&<span style={{ color:T.sub,fontWeight:400 }}> · Card</span>}</span>
+      <div onClick={openRow} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:isSynthetic?"default":"pointer" }}>
+        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name}{b.sourceType==="recurringSchedule"&&<span style={{ color:T.sub,fontWeight:400 }}> · SIP</span>}{isCcStatement&&<span style={{ color:T.sub,fontWeight:400 }}> · Card</span>}</span>
         <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(b.amount)}</span>
       </div>
       );
@@ -14694,12 +14725,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         return dueA - dueB || billB - billA;
       });
     const totalUnpaid = bills.filter(b=>b.status==="unpaid").reduce((s,b)=>s+getNetBillAmount(b, refundTotalsByBill),0);
-    const ccBillsDue = accounts.filter(a=>a.type==="cc").map(a=>{
-      const summary = getCardSummary(a, accounts, txns, toDateOnly);
-      if(!summary?.currentDue||summary.currentDue<=0) return null;
-      return { _isCC:true,id:`cc_due_${a.id}`,name:`${a.name} CC Bill`,type:"Credit Card",amount:summary.currentDue,dueDate:a.dueDate||"",accId:a.id,status:"unpaid" };
-    }).filter(Boolean);
-    const allUnpaid = [...ccBillsDue,...bills.filter(b=>b.status==="unpaid")];
     return (
       <div style={{ padding:"0 0 120px" }}>
         {/* Tab bar */}
@@ -14912,6 +14937,28 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const isExpanded = expandedBillId===b.id;
           const linkedBA = billerAccounts.find(ba=>String(ba.id)===String(b.billerAccountId));
           const attributedPerson = linkedBA?.attributeType==="person" && linkedBA.attributedTo ? getPerson(linkedBA.attributedTo) : null;
+          // Credit Card WP (CC-9): a generated statement Bill sits in this same sorted list, but
+          // its detail is the reconciliation sheet, not the generic split/settle expand-in-place
+          // card below (statements never carry splitPeople) — a dedicated, simpler row instead of
+          // threading CC-only branches through that markup.
+          if(b.isCcStatement){
+            const pill = b.verification==="matched" ? { l:"Matched with bank", c:T.success } : b.verification==="mismatch" ? { l:"Doesn't match", c:T.danger } : { l:"Needs verification", c:T.warn };
+            return (
+              <div key={b.id} onClick={()=>setViewingCcStatement(b)} style={{ ...card,border:`1px solid ${isOverdue?T.danger+"44":T.border}`,cursor:"pointer" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10 }}>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>💳 {b.name}</div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(b.periodFrom)||b.periodFrom} – {formatShortDate(b.periodTo)||b.periodTo}</div>
+                  </div>
+                  <div style={{ color:T.text,fontSize:15,fontWeight:800,whiteSpace:"nowrap" }}>{sym}{fmt(b.amount)}</div>
+                </div>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:8 }}>
+                  <span style={{ background:pill.c+"18",color:pill.c,borderRadius:20,padding:"3px 10px",fontSize:10,fontWeight:800 }}>{pill.l}</span>
+                  <span style={{ color:isOverdue?T.danger:T.sub,fontSize:10,fontWeight:700 }}>{b.status==="paid"?`✅ Paid`:isOverdue?`⚠️ ${Math.abs(daysUntil)}d overdue`:`Due ${formatShortDate(b.dueDate)||b.dueDate}`}</span>
+                </div>
+              </div>
+            );
+          }
           return (
             <div key={b.id} style={{ ...card,border:`1px solid ${isOverdue?T.danger+"44":T.border}` }}>
               <div onClick={()=>setExpandedBillId(prev=>prev===b.id?null:b.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,cursor:"pointer" }}>
@@ -17182,6 +17229,28 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
         )}
         {showAddBill&&<AddBillModal/>}
+        {viewingCcStatement&&(()=>{
+          const stmtCard = accounts.find(a=>a.id===viewingCcStatement.accId);
+          return (
+            <CreditCardStatementSheet
+              bill={viewingCcStatement}
+              card={stmtCard}
+              accounts={accounts}
+              txns={txns}
+              T={T}
+              sym={sym}
+              fmt={fmt}
+              formatShortDate={formatShortDate}
+              toDateOnly={toDateOnly}
+              setBills={setBills}
+              onClose={()=>setViewingCcStatement(null)}
+              onRecordPayment={()=>{ setAddPrefill({ toAccId:stmtCard?.id }); setDefaultAddType("cc_payment"); setShowAdd(true); setViewingCcStatement(null); }}
+              onAddMissingTxn={()=>{ setAddPrefill({ accId:stmtCard?.id, date:viewingCcStatement.periodTo }); setDefaultAddType("expense"); setShowAdd(true); setViewingCcStatement(null); }}
+              onReviewTxn={txn=>{ setEditingTxn(txn); setViewingCcStatement(null); }}
+              onViewTransactions={()=>{ setShowAccDetail(stmtCard); setViewingCcStatement(null); }}
+            />
+          );
+        })()}
         {showAddGift&&giftForPersonId&&<AddGiftModal personId={giftForPersonId} onClose={()=>{ setShowAddGift(false); setGiftForPersonId(null); }}/>}
         {editingBillerAccount&&<BillerAccountModal existing={editingBillerAccount} onClose={()=>setEditingBillerAccount(null)}/>}
         {attachExpensesFor&&<AttachExpensesModal ba={attachExpensesFor} onClose={()=>setAttachExpensesFor(null)}/>}
