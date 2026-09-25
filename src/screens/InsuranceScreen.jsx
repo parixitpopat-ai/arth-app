@@ -16,10 +16,14 @@ import EntityCard from "../components/EntityCard";
 
 const POLICY_TYPE_SUGGESTIONS = ["Life","Health","Vehicle","Bike","Travel","Home","Business","Gadget","Pet"];
 
-export const AddInsurancePolicyModal = ({ existing, onClose, T, inp, lbl, setInsurancePolicies, setBills, billers }) => {
+// `prefill` (name/policyType/vehicleId) seeds a NEW policy only — e.g. opened from a Vehicle
+// profile's "Add insurance policy". Ignored whenever `existing` is set; editing an existing
+// policy never has its fields silently overridden by a leftover prefill.
+export const AddInsurancePolicyModal = ({ existing, prefill, onClose, T, inp, lbl, setInsurancePolicies, setBills, billers }) => {
   const isEdit = Boolean(existing);
-  const [name, setName] = useState(existing?.name||"");
-  const [policyType, setPolicyType] = useState(existing?.policyType||"");
+  const seed = isEdit ? existing : (prefill || {});
+  const [name, setName] = useState(seed?.name||"");
+  const [policyType, setPolicyType] = useState(seed?.policyType||"");
   const [provider, setProvider] = useState(existing?.provider||"");
   const [policyNumber, setPolicyNumber] = useState(existing?.policyNumber||"");
   const [insuredPerson, setInsuredPerson] = useState(existing?.insuredPerson||"");
@@ -42,6 +46,10 @@ export const AddInsurancePolicyModal = ({ existing, onClose, T, inp, lbl, setIns
       premiumFrequency, renewalDate, autopay, status:"active",
       linkedBillId: existing?.linkedBillId||null,
       documentIds: existing?.documentIds||[],
+      // Optional link back to the Vehicle it insures (Vehicle Experience brief). Preserves the
+      // existing record's vehicleId edits never touch, and only a NEW policy's prefill sets it —
+      // a policy is never silently vehicle-linked any other way.
+      vehicleId: existing?.vehicleId ?? prefill?.vehicleId ?? null,
       createdAt: existing?.createdAt||Date.now(),
     };
 

@@ -79,6 +79,8 @@ import EmptyState from "./components/EmptyState";
 import Toast from "./components/Toast";
 import ConfirmDialog from "./components/ConfirmDialog";
 import LinkToSheet from "./components/LinkToSheet";
+import AddVehicleModal from "./components/AddVehicleModal";
+import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
 import BudgetInsights from "./screens/BudgetInsights";
@@ -847,6 +849,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
   const [selectedSchoolFeePeriodIds, setSelectedSchoolFeePeriodIds] = useState([]);
   const [showInsuranceList, setShowInsuranceList] = useState(false);
   const [showAddPolicy, setShowAddPolicy] = useState(false);
+  // Prefill for "Add insurance policy" opened from a Vehicle profile (policyType/name/vehicleId).
+  // Only applies to a NEW policy — existing (edit) always wins when both are set.
+  const [addPolicyPrefill, setAddPolicyPrefill] = useState(null);
   const [editingPolicy, setEditingPolicy] = useState(null);
   const [viewingPolicy, setViewingPolicy] = useState(null);
   const [showAddExpectedIncome, setShowAddExpectedIncome] = useState(false);
@@ -3705,7 +3710,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     const [emiInterestWaiver, setEmiInterestWaiver] = useState("");
     const [emiGstOnInterest, setEmiGstOnInterest] = useState("");
     const [isBillPayment, setIsBillPayment] = useState(isEditing ? Boolean(sourceTxn?.isBillPayment) : false);
-    const [vehicleId, setVehicleId] = useState(isEditing ? (sourceTxn?.vehicleId||"") : "");
+    const [vehicleId, setVehicleId] = useState(isEditing ? (sourceTxn?.vehicleId||"") : (safePrefill.vehicleId||""));
+    const [showAddVehicleInline, setShowAddVehicleInline] = useState(false);
     const [tagPersonAmount, setTagPersonAmount] = useState(isEditing && sourceTxn?.tagPersonAmount ? String(sourceTxn.tagPersonAmount) : "");
     const [tagGroupAmount, setTagGroupAmount] = useState(isEditing && sourceTxn?.tagGroupAmount ? String(sourceTxn.tagGroupAmount) : "");
     const [tagItems, setTagItems] = useState(isEditing && sourceTxn?.tagItems?.length ? sourceTxn.tagItems.map(item=>({...item,amount:String(item.amount)})) : [{id:genId(),targetType:"person",targetId:"",amount:""}]);
@@ -6102,12 +6108,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                   </div>
                 )}
 
-                {txnType==="expense"&&catIds.includes("transport")&&vehicles.length>0&&(
+                {txnType==="expense"&&catIds.includes("transport")&&(
                   <div style={{ marginTop:10,background:T.input,borderRadius:10,padding:"10px 12px" }}>
                     <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Vehicle</div>
                     <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
                       <button onClick={()=>setVehicleId("")} style={{ background:!vehicleId?"#88888822":"none",border:`1px solid ${!vehicleId?"#888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>None</button>
-                      {vehicles.map(v=>{
+                      {vehicles.filter(v=>!v.archived).map(v=>{
                         const vIcon=v.type==="bike"?"🏍️":v.type==="truck"?"🚛":v.type==="auto"?"🛺":"🚗";
                         const last4=(v.number||"").replace(/\s/g,"").slice(-4)||v.number||"";
                         return (
@@ -6116,8 +6122,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                           </button>
                         );
                       })}
+                      {/* T3.1 B2 prerequisite (Vehicle Experience brief §9): create-and-return
+                          through the SAME reusable AddVehicleModal used by Manage → Vehicles —
+                          never a second, temporary vehicle-creation flow inside the transaction
+                          form. */}
+                      <button onClick={()=>setShowAddVehicleInline(true)} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ New Vehicle</button>
                     </div>
                   </div>
+                )}
+                {showAddVehicleInline&&(
+                  <AddVehicleModal
+                    vehicles={vehicles}
+                    setVehicles={setVehicles}
+                    onClose={()=>setShowAddVehicleInline(false)}
+                    onCreated={v=>{ setVehicleId(v.id); setShowAddVehicleInline(false); }}
+                    T={T}
+                  />
                 )}
 
                 {catIds.length>1 && (
@@ -6354,7 +6374,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                     onClose={()=>setShowLinkToSheet(false)}
                     billerLinkId={billerLinkId}
                     eventLinkId={eventLinkId}
-                    showVehicle={txnType==="expense"&&catIds.includes("transport")&&vehicles.length>0}
+                    showVehicle={txnType==="expense"&&catIds.includes("transport")}
                     onSelectBiller={()=>setShowBillPicker(true)}
                     onSelectTrip={()=>setShowTripPicker(true)}
                     onSelectVehicle={()=>{}}
@@ -12882,11 +12902,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     // component, but living at the top level meant every keystroke re-rendered the entire
     // AppContent, which recreates Settings as a brand-new function reference each time,
     // causing React to fully unmount/remount it (and lose input focus) on every character typed.
-    const [editingVehicle, setEditingVehicle] = useState(null);
-    const [vType, setVType] = useState("car");
-    const [vNumber, setVNumber] = useState("");
-    const [vName, setVName] = useState("");
-    const [vColor, setVColor] = useState(PALETTE[2]);
+    // Reusable AddVehicleModal (Vehicle Experience brief) replaced the old inline
+    // vType/vNumber/vName/vColor form fields — the modal owns its own field state now.
+    const [showAddVehicle, setShowAddVehicle] = useState(false);
+    const [editingVehicleObj, setEditingVehicleObj] = useState(null);
+    const [selectedVehicle, setSelectedVehicle] = useState(null);
     const [addSubTo,setAddSubTo]=useState(null);
     const [subInput,setSubInput]=useState("");
     const [newCatName,setNewCatName]=useState("");
@@ -13154,71 +13174,70 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     );
 
     if(settingsSection==="vehicles") return (()=>{
-      const VEHICLE_TYPES=[{id:"car",label:"Car",icon:"🚗"},{id:"bike",label:"Bike",icon:"🏍️"},{id:"truck",label:"Truck",icon:"🚛"},{id:"auto",label:"Auto",icon:"🛺"},{id:"other",label:"Other",icon:"🚘"}];
-      const openNew=()=>{ setEditingVehicle("new"); setVType("car"); setVNumber(""); setVName(""); setVColor(PALETTE[2]); };
-      const openEdit=v=>{ setEditingVehicle(v.id); setVType(v.type||"car"); setVNumber(v.number||""); setVName(v.name||""); setVColor(v.color||PALETTE[2]); };
-      const saveVehicle=()=>{
-        if(!vNumber.trim()) return;
-        if(editingVehicle==="new"){
-          setVehicles(prev=>[...prev,{id:genId(),type:vType,number:vNumber.trim().toUpperCase(),name:vName.trim(),color:vColor}]);
-        } else {
-          setVehicles(prev=>prev.map(v=>v.id===editingVehicle?{...v,type:vType,number:vNumber.trim().toUpperCase(),name:vName.trim(),color:vColor}:v));
-        }
-        setEditingVehicle(null);
-      };
-      return (
+      const VEHICLE_TYPE_META={car:{label:"Car",icon:"🚗"},bike:{label:"Bike",icon:"🏍️"},truck:{label:"Truck",icon:"🚛"},auto:{label:"Auto",icon:"🛺"},other:{label:"Other",icon:"🚘"}};
+      const activeVehicles=vehicles.filter(v=>!v.archived);
+
+      // Shared modals: rendered on top of either the list or the profile, since "Edit" on the
+      // profile itself needs to open the same reusable AddVehicleModal without leaving the
+      // profile behind it.
+      const modals = (<>
+        {showAddVehicle&&<AddVehicleModal vehicles={vehicles} setVehicles={setVehicles} onClose={()=>setShowAddVehicle(false)} onCreated={v=>setSelectedVehicle(v)} T={T}/>}
+        {editingVehicleObj&&<AddVehicleModal existing={editingVehicleObj} vehicles={vehicles} setVehicles={setVehicles} linkedTxnCount={txns.filter(t=>t.vehicleId===editingVehicleObj.id).length} onClose={()=>{ setEditingVehicleObj(null); setSelectedVehicle(null); }} T={T}/>}
+      </>);
+
+      if(selectedVehicle){
+        const live=vehicles.find(x=>x.id===selectedVehicle.id)||selectedVehicle;
+        return (<>
+          <VehicleProfileScreen
+            vehicle={live}
+            txns={txns}
+            insurancePolicies={insurancePolicies}
+            T={T} sym={sym} fmt={fmt} formatShortDate={formatShortDate}
+            onClose={()=>setSelectedVehicle(null)}
+            onEdit={()=>setEditingVehicleObj(live)}
+            onAddExpense={()=>{ setAddPrefill({ catId:"transport", vehicleId:live.id }); setShowAdd(true); }}
+            onOpenTxn={t=>setEditingTxn(t)}
+            onBulkLink={(ids,vId)=>setTxns(prev=>prev.map(t=>ids.map(String).includes(String(t.id))?{...t,vehicleId:vId}:t))}
+            onAddInsurancePolicy={prefill=>{ setAddPolicyPrefill(prefill); setShowAddPolicy(true); }}
+            onOpenPolicy={policy=>setViewingPolicy(policy)}
+          />
+          {modals}
+        </>);
+      }
+
+      return (<>
         <div style={{ padding:"14px 16px 0" }}>
           <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
             <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
             <div style={{ color:T.text,fontSize:18,fontWeight:900,flex:1 }}>Vehicles</div>
-            <button onClick={openNew} style={{ background:T.accent,border:"none",color:"#000",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>+ Add</button>
+            <button onClick={()=>setShowAddVehicle(true)} style={{ background:T.accent,border:"none",color:"#000",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>+ Add</button>
           </div>
-          {editingVehicle&&(
-            <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:14,marginBottom:16 }}>
-              <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:12 }}>{editingVehicle==="new"?"New Vehicle":"Edit Vehicle"}</div>
-              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
-                {VEHICLE_TYPES.map(vt=>(
-                  <button key={vt.id} onClick={()=>setVType(vt.id)} style={{ background:vType===vt.id?T.accent+"22":"none",border:`1px solid ${vType===vt.id?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:vType===vt.id?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{vt.icon} {vt.label}</button>
-                ))}
-              </div>
-              <input style={inp} placeholder="Registration number e.g. KA 05 AB 1234" value={vNumber} onChange={e=>setVNumber(e.target.value.toUpperCase())}/>
-              <input style={inp} placeholder="Nickname (optional)" value={vName} onChange={e=>setVName(e.target.value)}/>
-              <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>Colour</div>
-              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
-                {PALETTE.map(c=><button key={c} onClick={()=>setVColor(c)} style={{ width:24,height:24,borderRadius:"50%",background:c,border:`2px solid ${vColor===c?T.text:"transparent"}`,cursor:"pointer" }}/>)}
-              </div>
-              <div style={{ display:"flex",gap:8 }}>
-                <button onClick={saveVehicle} style={{ background:T.accent,border:"none",color:"#000",borderRadius:8,padding:"8px 18px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif",flex:1 }}>Save</button>
-                <button onClick={()=>setEditingVehicle(null)} style={{ background:"none",border:`1px solid ${T.border}`,color:T.sub,borderRadius:8,padding:"8px 14px",cursor:"pointer",fontSize:13,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
-              </div>
-            </div>
+          {activeVehicles.length===0&&(
+            <EmptyState icon="🚗" title="No vehicles yet" subtitle="Add a car or bike to see what it costs you. Fuel, service and insurance payments you link to it add up here." T={T}
+              action={<button onClick={()=>setShowAddVehicle(true)} style={{ background:T.accent,border:"none",color:"#000",borderRadius:12,padding:"12px 24px",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>Add vehicle</button>}
+            />
           )}
-          {vehicles.length===0&&!editingVehicle&&(
-            <EmptyState icon="🚗" title="No vehicles yet" subtitle="Add a vehicle to tag fuel, PUC and insurance expenses." T={T}/>
-          )}
-          {vehicles.map(v=>{
-            const vt=VEHICLE_TYPES.find(x=>x.id===v.type)||VEHICLE_TYPES[0];
-            const txnCount=txns.filter(t=>t.vehicleId===v.id).length;
+          {activeVehicles.map(v=>{
+            const vt=VEHICLE_TYPE_META[v.type]||VEHICLE_TYPE_META.car;
+            const linkedTxns=txns.filter(t=>t.vehicleId===v.id);
+            const running=linkedTxns.reduce((s,t)=>s+(Number(t.amount)||0),0);
             return (
               <div key={v.id} style={{ marginBottom:10 }}>
                 <EntityCard
                   icon={vt.icon}
                   accentColor={v.color}
-                  title={v.number}
-                  subtitle={`${v.name?v.name+" · ":""}${vt.label} · ${txnCount} txn${txnCount===1?"":"s"}`}
+                  title={v.name||v.number}
+                  subtitle={`${vt.label} · ${v.number}${linkedTxns.length?` · Last 12 months · ${linkedTxns.length} transaction${linkedTxns.length===1?"":"s"}`:" · No spending linked yet"}`}
                   T={T}
-                  trailing={
-                    <div style={{ display:"flex",gap:6 }}>
-                      <button onClick={()=>openEdit(v)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:12,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Edit</button>
-                      <button onClick={()=>setVehicles(prev=>prev.filter(x=>x.id!==v.id))} style={{ background:"none",border:`1px solid ${T.danger}`,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:12,color:T.danger,fontFamily:"Nunito,sans-serif" }}>✕</button>
-                    </div>
-                  }
+                  onClick={()=>setSelectedVehicle(v)}
+                  trailing={linkedTxns.length>0?<span style={{ color:T.text,fontSize:14,fontWeight:800,fontFamily:"IBM Plex Mono,monospace" }}>{sym}{fmt(running)}</span>:null}
                 />
               </div>
             );
           })}
         </div>
-      );
+        {modals}
+      </>);
     })();
 
     if(settingsSection==="accounts") return (
@@ -17047,7 +17066,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
         {showDuplicateFinder&&<DuplicateFinderModal onClose={()=>setShowDuplicateFinder(false)}/>}
         {showExpectedIncome&&<ExpectedIncomeListModal onClose={()=>setShowExpectedIncome(false)} T={T} sym={sym} fmt={fmt} formatShortDate={formatShortDate} expectedIncome={expectedIncome} setExpectedIncome={setExpectedIncome} setTxns={setTxns} accounts={accounts} setToast={setToast} setEditingExpectedIncome={setEditingExpectedIncome} setShowAddExpectedIncome={setShowAddExpectedIncome}/>}
         {showInsuranceList&&<InsurancePolicyListModal onClose={()=>setShowInsuranceList(false)} T={T} sym={sym} fmt={fmt} insurancePolicies={insurancePolicies.filter(p=>p.status!=="archived")} setEditingPolicy={setEditingPolicy} setShowAddPolicy={setShowAddPolicy} setViewingPolicy={setViewingPolicy}/>}
-        {showAddPolicy&&<AddInsurancePolicyModal existing={editingPolicy} onClose={()=>{ setShowAddPolicy(false); setEditingPolicy(null); }} T={T} inp={inp} lbl={lbl} setInsurancePolicies={setInsurancePolicies} setBills={setBills} billers={billers}/>}
+        {showAddPolicy&&<AddInsurancePolicyModal existing={editingPolicy} prefill={addPolicyPrefill} onClose={()=>{ setShowAddPolicy(false); setEditingPolicy(null); setAddPolicyPrefill(null); }} T={T} inp={inp} lbl={lbl} setInsurancePolicies={setInsurancePolicies} setBills={setBills} billers={billers}/>}
 
         {showSchoolFeesList&&<SchoolFeeScheduleListModal onClose={()=>setShowSchoolFeesList(false)} T={T} sym={sym} fmt={fmt} feeSchedules={feeSchedules} feePeriods={feePeriods} schoolCreditNotes={schoolCreditNotes} setShowAddSchedule={setShowAddSchoolYear} setViewingSchedule={(s)=>{ setViewingSchoolFeeSchedule(s); setShowSchoolFeesList(false); }}/>}
         {(showAddSchoolYear||editingSchoolSchedule)&&<AddSchoolYearModal
