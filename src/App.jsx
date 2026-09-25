@@ -3589,11 +3589,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
       const linkedBA = billerAccounts.find(b=>b.id===sourceTxn.billerLinkId);
       return linkedBA ? getBillerActionType(linkedBA.type)==="membership" : false;
     });
-    const [showBillPicker, setShowBillPicker] = useState(false);
-    const [showTripPicker, setShowTripPicker] = useState(false);
-    // T3.1 Part B (B1): single "Link to…" entry point sheet, replacing the separate
-    // "Link Bill" / "Link Trip" buttons. Interim adapter only — see LinkToSheet.
+    // T3.1 Part B2: "Link to…" sheet — type list + the real per-type LinkPicker, replacing
+    // B1's interim <select> mechanisms (showBillPicker/showTripPicker, now gone).
     const [showLinkToSheet, setShowLinkToSheet] = useState(false);
+    // Which stage the sheet opens on: "types" for the generic "Link to…" row, or a specific
+    // type key when reopening an already-linked row (Section R — skips the type list).
+    const [linkToInitialStage, setLinkToInitialStage] = useState("types");
     // Fix: on edit, populate these from the ACTUAL linked membership record instead of always
     // resetting to today/monthly/1/0. Two link directions exist across the two membership-
     // creation paths in this codebase (this panel writes txnId on the membership record; the
@@ -3619,6 +3620,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     const [linkMemberPersonId, setLinkMemberPersonId] = useState("__me__"); // WP-4 fix: was "self"
     const linkedBA = billerLinkId ? billerAccounts.find(b=>b.id===billerLinkId) : null;
     const linkedBAType = linkedBA ? getBillerActionType(linkedBA.type) : null;
+    const linkedIsSchoolBiller = linkedBA ? (linkedBA.type==="School Fees" || linkedBA.type==="Education Fees") : false;
     useEffect(()=>{
       // No separate picker shown anymore — auto-derive from whichever account gets linked, since the
       // account's own Attribute To already identifies who this is for.
@@ -6348,105 +6350,126 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               </div>
             )}
 
-            {/* LINK TO — T3.1 Part B (B1): single collapsed entry point row, matching the
-                Details row's style, replacing the separate "Link Bill" / "Link Trip" buttons.
-                Tapping opens LinkToSheet; the linked-biller/linked-trip chips below are
-                unchanged. Interim adapter — see LinkToSheet for routing. */}
-            {txnType==="expense"&&(
-              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-                <button onClick={()=>setShowLinkToSheet(true)} style={{ ...inp,display:"flex",flexDirection:"column",alignItems:"flex-start",justifyContent:"center",cursor:"pointer",textAlign:"left",gap:2 }}>
-                  <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Link to ▾</span>
-                  <span style={{ color:T.text,fontSize:12,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap" }}>
-                    {(() => {
-                      const parts = [];
-                      if(linkedBA) parts.push(`${getBillerIcon(linkedBA.type)} ${linkedBA.name}`);
-                      if(eventLinkId){
-                        const ev=events.find(x=>x.id===eventLinkId);
-                        if(ev){ const et=EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1]; parts.push(`${et.icon} ${ev.name}`); }
-                      }
-                      return parts.length ? parts.join("  ·  ") : "Bill, membership, trip…";
-                    })()}
-                  </span>
-                </button>
-                {showLinkToSheet&&(
-                  <LinkToSheet
-                    T={T}
-                    onClose={()=>setShowLinkToSheet(false)}
-                    billerLinkId={billerLinkId}
-                    eventLinkId={eventLinkId}
-                    showVehicle={txnType==="expense"&&catIds.includes("transport")}
-                    onSelectBiller={()=>setShowBillPicker(true)}
-                    onSelectTrip={()=>setShowTripPicker(true)}
-                    onSelectVehicle={()=>{}}
-                  />
-                )}
-                <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
-                  {linkedBA&&(
-                    <div style={{ display:"flex",alignItems:"center",gap:6,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:20,padding:"5px 12px" }}>
-                      <span style={{ fontSize:14 }}>{getBillerIcon(linkedBA.type)}</span>
-                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{linkedBA.name}</span>
-                      {linkedBAType==="membership"&&<button onClick={()=>setShowMembershipPanel(v=>!v)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{showMembershipPanel?"hide dates":"+dates"}</button>}
-                      <button onClick={()=>{ setBillerLinkId(""); setShowMembershipPanel(false); }} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:13,fontFamily:"Nunito,sans-serif" }}>×</button>
-                    </div>
-                  )}
-                  {eventLinkId&&(()=>{ const ev=events.find(x=>x.id===eventLinkId); if(!ev) return null; const et=EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1]; return (
-                    <div style={{ display:"flex",alignItems:"center",gap:6,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:20,padding:"5px 12px" }}>
-                      <span style={{ fontSize:14 }}>{et.icon}</span>
-                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{ev.name}</span>
-                      <button onClick={()=>setEventLinkId("")} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:13,fontFamily:"Nunito,sans-serif" }}>×</button>
-                    </div>
-                  ); })()}
-                </div>
-                {showBillPicker&&!billerLinkId&&(
-                  <select style={inp} value="" onChange={e=>{
-                    const id=e.target.value;
-                    if(!id) return;
-                    setBillerLinkId(id);
-                    setShowBillPicker(false);
-                    const ba=billerAccounts.find(b=>b.id===id);
-                    const baIsSchoolLinked = ba && ba.type==="School Fees" && schoolRelationships.some(r=>r.billerAccountId===ba.id && isSchoolRelationshipCurrent(r.statusHistory, todayStr()));
-                    if(ba && getBillerActionType(ba.type)==="membership" && !baIsSchoolLinked) setShowMembershipPanel(true);
-                    // Auto-attribute from the biller account's own "Attributed To" setting — but only if
-                    // nothing has been manually chosen yet in "Who is this for?", so this never overwrites
-                    // a deliberate choice the person already made.
-                    if(ba && ba.attributedTo && allocRows.length===0){
-                      if(ba.attributeType==="person"){ setSplitMode("allocate"); setAllocRows([{ id:genId(), targetType:"person", targetId:String(ba.attributedTo), mode:"spent_on", amount:"", items:[] }]); }
-                      else if(ba.attributeType==="group"){ setSplitMode("allocate"); setAllocRows([{ id:genId(), targetType:"group", targetId:String(ba.attributedTo), mode:"spent_on", amount:"", items:[] }]); }
-                    }
-                  }}>
-                    <option value="">Select biller account...</option>
-                    {billerAccounts.map(ba=>(<option key={ba.id} value={ba.id}>{getBillerIcon(ba.type)} {ba.name}{ba.provider?` — ${ba.provider}`:""}</option>))}
-                  </select>
-                )}
-                {showMembershipPanel&&linkedBAType==="membership"&&(
-                  <div style={{ display:"flex",flexDirection:"column",gap:10,background:T.input,borderRadius:10,padding:"10px" }}>
-                    <div>
-                      <div style={{ color:T.sub,fontSize:11 }}>For <span style={{ color:T.text,fontWeight:800 }}>{linkMemberPersonId==="self"?"Me":(getPerson(linkMemberPersonId)?.name||linkedBA?.name)}</span> — {linkedBA?.name}</div>
-                    </div>
-                    {/* WP-UI-2B-2 pilot: first of 78 confirmed hand-rolled pill-toggle sites
-                        converted to the new Segmented component. Same values, same behavior. */}
-                    <Segmented options={["monthly","quarterly","halfyearly","annual"]} value={linkCycle} onChange={setLinkCycle} T={T}/>
-                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
-                      <div><span style={lbl}>Valid From</span><input style={inp} type="date" value={linkValidFrom} onChange={e=>setLinkValidFrom(e.target.value)}/></div>
-                      <div><span style={lbl}>No. of cycles</span><input style={inp} type="number" min="1" value={linkBulkMonths} onChange={e=>setLinkBulkMonths(e.target.value)}/></div>
-                      <div><span style={lbl}>Grace days</span><input style={inp} type="number" min="0" value={linkGraceDays} onChange={e=>setLinkGraceDays(e.target.value)}/></div>
-                    </div>
-                    {linkValidUntil&&(
-                      <div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",flexDirection:"column",gap:4 }}>
-                        <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Plan Ends</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(linkValidUntil)||linkValidUntil}</span></div>
-                        {Number(linkGraceDays||0)>0&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Active Until (+{linkGraceDays}d grace)</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(addDaysToDateStr(linkValidUntil,linkGraceDays))||linkValidUntil}</span></div>}
+            {/* LINK TO — T3.1 Part B2: Section R row (one row per filled slot, fixed order:
+                biller slot / Trip / Vehicle) + the real per-type LinkPicker experience,
+                replacing B1's single summary row and the interim <select> mechanisms. */}
+            {txnType==="expense"&&(()=>{
+              const vehicleEligible = catIds.includes("transport");
+              const vehicleObj = vehicleId ? vehicles.find(v=>v.id===vehicleId) : null;
+              const vehicleStillEligible = vehicleObj && vehicleEligible;
+              const vehicleOrphaned = vehicleObj && !vehicleEligible; // R-3: linked, category moved away
+              const anySlotOpen = !billerLinkId || !eventLinkId || (vehicleEligible && !vehicleId);
+              const openPicker = stage=>{ setLinkToInitialStage(stage); setShowLinkToSheet(true); };
+
+              const commitBillerLink = ba => {
+                if(!ba) return;
+                setBillerLinkId(ba.id);
+                const baIsSchoolLinked = ba.type==="School Fees" && schoolRelationships.some(r=>r.billerAccountId===ba.id && isSchoolRelationshipCurrent(r.statusHistory, todayStr()));
+                if(getBillerActionType(ba.type)==="membership" && !baIsSchoolLinked) setShowMembershipPanel(true);
+                // Auto-attribute from the biller account's own "Attributed To" setting — but only if
+                // nothing has been manually chosen yet in "Who is this for?", so this never overwrites
+                // a deliberate choice the person already made. Centralized here so Bill, Membership
+                // and School fees all share this one write path instead of three copies.
+                if(ba.attributedTo && allocRows.length===0){
+                  if(ba.attributeType==="person"){ setSplitMode("allocate"); setAllocRows([{ id:genId(), targetType:"person", targetId:String(ba.attributedTo), mode:"spent_on", amount:"", items:[] }]); }
+                  else if(ba.attributeType==="group"){ setSplitMode("allocate"); setAllocRows([{ id:genId(), targetType:"group", targetId:String(ba.attributedTo), mode:"spent_on", amount:"", items:[] }]); }
+                }
+                setShowLinkToSheet(false);
+              };
+
+              const rowStyle={ minHeight:60,padding:"8px 0",display:"flex",alignItems:"center",gap:12,borderBottom:`1px solid ${T.border}`,cursor:"pointer" };
+              return (
+                <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                  <div style={{ background:T.input,borderRadius:12,padding:"0 14px" }}>
+                    {linkedBA&&(
+                      <div onClick={()=>openPicker(linkedIsSchoolBiller?"school":linkedBAType==="membership"?"membership":"bill")} style={rowStyle}>
+                        <span style={{ width:36,height:36,borderRadius:12,background:T.pill,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flex:"none" }}>{getBillerIcon(linkedBA.type)}</span>
+                        <span style={{ flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2 }}>
+                          <span style={{ color:T.sub,fontSize:12 }}>{linkedIsSchoolBiller?"School fees":linkedBAType==="membership"?"Membership":"Bill"}</span>
+                          <span style={{ color:T.text,fontSize:15,fontWeight:500 }}>{linkedBA.name}</span>
+                        </span>
+                        <span style={{ color:T.sub,fontSize:18 }}>›</span>
+                      </div>
+                    )}
+                    {eventLinkId&&(()=>{ const ev=events.find(x=>x.id===eventLinkId); if(!ev) return null; const et=EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1]; return (
+                      <div onClick={()=>openPicker("trip")} style={rowStyle}>
+                        <span style={{ width:36,height:36,borderRadius:12,background:T.pill,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flex:"none" }}>{et.icon}</span>
+                        <span style={{ flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2 }}>
+                          <span style={{ color:T.sub,fontSize:12 }}>Trip · {formatShortDate(ev.date)||ev.date}</span>
+                          <span style={{ color:T.text,fontSize:15,fontWeight:500 }}>{ev.name}</span>
+                        </span>
+                        <span style={{ color:T.sub,fontSize:18 }}>›</span>
+                      </div>
+                    ); })()}
+                    {vehicleStillEligible&&(
+                      <div onClick={()=>openPicker("vehicle")} style={rowStyle}>
+                        <span style={{ width:36,height:36,borderRadius:12,background:T.pill,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flex:"none" }}>🚗</span>
+                        <span style={{ flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2 }}>
+                          <span style={{ color:T.sub,fontSize:12 }}>Vehicle · {vehicleObj.number}</span>
+                          <span style={{ color:T.text,fontSize:15,fontWeight:500 }}>{vehicleObj.name||vehicleObj.number}</span>
+                        </span>
+                        <span style={{ color:T.sub,fontSize:18 }}>›</span>
+                      </div>
+                    )}
+                    {/* R-3: existing save guard (T3.1), now surfaced on the row itself instead of
+                        silently dropping the link — value stays in form state so it reappears if
+                        the category is restored, exactly as it already did before B2. */}
+                    {vehicleOrphaned&&(
+                      <div style={{ ...rowStyle,cursor:"default",borderBottom:anySlotOpen?`1px solid ${T.border}`:"none" }}>
+                        <span style={{ width:36,height:36,borderRadius:12,background:T.pill,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flex:"none",opacity:0.5 }}>🚗</span>
+                        <span style={{ flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:2 }}>
+                          <span style={{ color:T.warn,fontSize:12 }}>Will not be saved — category is no longer Transport</span>
+                          <span style={{ color:T.mutedText||T.sub,fontSize:15,fontWeight:500 }}>{vehicleObj.name||vehicleObj.number}</span>
+                        </span>
+                      </div>
+                    )}
+                    {anySlotOpen&&(
+                      <div onClick={()=>openPicker("types")} style={{ ...rowStyle,borderBottom:"none",color:T.accent,fontWeight:500 }}>
+                        <span style={{ fontSize:20,width:36,textAlign:"center" }}>+</span>Link to…
                       </div>
                     )}
                   </div>
-                )}
-                {showTripPicker&&!eventLinkId&&(
-                  <select style={inp} value="" onChange={e=>{ setEventLinkId(e.target.value); setShowTripPicker(false); }}>
-                    <option value="">Select trip / outing...</option>
-                    {events.map(ev=>{ const et=EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1]; return <option key={ev.id} value={ev.id}>{et.icon} {ev.name} — {formatShortDate(ev.date)||ev.date}</option>; })}
-                  </select>
-                )}
-              </div>
-            )}
+                  {showLinkToSheet&&(
+                    <LinkToSheet
+                      T={T}
+                      onClose={()=>setShowLinkToSheet(false)}
+                      initialStage={linkToInitialStage}
+                      billerAccounts={billerAccounts}
+                      schoolRelationships={schoolRelationships}
+                      events={events}
+                      vehicles={vehicles}
+                      txns={txns}
+                      billerLinkId={billerLinkId}
+                      eventLinkId={eventLinkId}
+                      vehicleId={vehicleId}
+                      showVehicle={vehicleEligible}
+                      detailsDate={date}
+                      getBillerIcon={getBillerIcon}
+                      getBillerActionType={getBillerActionType}
+                      isSchoolRelationshipCurrent={isSchoolRelationshipCurrent}
+                      todayStr={todayStr}
+                      formatShortDate={formatShortDate}
+                      EVENT_TYPES={EVENT_TYPES}
+                      getPerson={getPerson}
+                      getGroup={getGroup}
+                      linkMemberPersonId={linkMemberPersonId}
+                      linkCycle={linkCycle} setLinkCycle={setLinkCycle}
+                      linkValidFrom={linkValidFrom} setLinkValidFrom={setLinkValidFrom}
+                      linkBulkMonths={linkBulkMonths} setLinkBulkMonths={setLinkBulkMonths}
+                      linkGraceDays={linkGraceDays} setLinkGraceDays={setLinkGraceDays}
+                      linkValidUntil={linkValidUntil}
+                      Segmented={Segmented} lbl={lbl} inp={inp}
+                      onCommitBiller={commitBillerLink}
+                      onCommitTrip={id=>{ setEventLinkId(id); setShowLinkToSheet(false); }}
+                      onCommitVehicle={id=>{ setVehicleId(id); setShowLinkToSheet(false); }}
+                      setVehicles={setVehicles}
+                      onNewBillerType={presetType=>{ setPreselectedBillerType(presetType||""); setShowAddBillerAccount(true); }}
+                      onNewTrip={()=>setShowAddEvent(true)}
+                    />
+                  )}
+                </div>
+              );
+            })()}
             {txnType==="expense"&&(
               <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
                 <div style={{ display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:isBillPayment?10:0 }}>
