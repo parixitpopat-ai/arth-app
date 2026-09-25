@@ -78,6 +78,7 @@ import PeriodSelector from "./components/PeriodSelector";
 import EmptyState from "./components/EmptyState";
 import Toast from "./components/Toast";
 import ConfirmDialog from "./components/ConfirmDialog";
+import LinkToSheet from "./components/LinkToSheet";
 import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
 import BudgetInsights from "./screens/BudgetInsights";
@@ -3585,6 +3586,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
     });
     const [showBillPicker, setShowBillPicker] = useState(false);
     const [showTripPicker, setShowTripPicker] = useState(false);
+    // T3.1 Part B (B1): single "Link to…" entry point sheet, replacing the separate
+    // "Link Bill" / "Link Trip" buttons. Interim adapter only — see LinkToSheet.
+    const [showLinkToSheet, setShowLinkToSheet] = useState(false);
     // Fix: on edit, populate these from the ACTUAL linked membership record instead of always
     // resetting to today/monthly/1/0. Two link directions exist across the two membership-
     // creation paths in this codebase (this panel writes txnId on the membership record; the
@@ -6324,13 +6328,39 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
               </div>
             )}
 
-            {/* LINK TO BILL + TRIP — compact combined row, expands inline only when tapped */}
+            {/* LINK TO — T3.1 Part B (B1): single collapsed entry point row, matching the
+                Details row's style, replacing the separate "Link Bill" / "Link Trip" buttons.
+                Tapping opens LinkToSheet; the linked-biller/linked-trip chips below are
+                unchanged. Interim adapter — see LinkToSheet for routing. */}
             {txnType==="expense"&&(
               <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                <button onClick={()=>setShowLinkToSheet(true)} style={{ ...inp,display:"flex",flexDirection:"column",alignItems:"flex-start",justifyContent:"center",cursor:"pointer",textAlign:"left",gap:2 }}>
+                  <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Link to ▾</span>
+                  <span style={{ color:T.text,fontSize:12,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap" }}>
+                    {(() => {
+                      const parts = [];
+                      if(linkedBA) parts.push(`${getBillerIcon(linkedBA.type)} ${linkedBA.name}`);
+                      if(eventLinkId){
+                        const ev=events.find(x=>x.id===eventLinkId);
+                        if(ev){ const et=EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1]; parts.push(`${et.icon} ${ev.name}`); }
+                      }
+                      return parts.length ? parts.join("  ·  ") : "Bill, membership, trip…";
+                    })()}
+                  </span>
+                </button>
+                {showLinkToSheet&&(
+                  <LinkToSheet
+                    T={T}
+                    onClose={()=>setShowLinkToSheet(false)}
+                    billerLinkId={billerLinkId}
+                    eventLinkId={eventLinkId}
+                    showVehicle={txnType==="expense"&&catIds.includes("transport")&&vehicles.length>0}
+                    onSelectBiller={()=>setShowBillPicker(true)}
+                    onSelectTrip={()=>setShowTripPicker(true)}
+                    onSelectVehicle={()=>{}}
+                  />
+                )}
                 <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
-                  {!billerLinkId&&(
-                    <button onClick={()=>setShowBillPicker(v=>!v)} style={{ background:showBillPicker?T.accent+"22":"none",border:`1px solid ${showBillPicker?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showBillPicker?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>📎 Link Bill</button>
-                  )}
                   {linkedBA&&(
                     <div style={{ display:"flex",alignItems:"center",gap:6,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:20,padding:"5px 12px" }}>
                       <span style={{ fontSize:14 }}>{getBillerIcon(linkedBA.type)}</span>
@@ -6338,9 +6368,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete }) {
                       {linkedBAType==="membership"&&<button onClick={()=>setShowMembershipPanel(v=>!v)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>{showMembershipPanel?"hide dates":"+dates"}</button>}
                       <button onClick={()=>{ setBillerLinkId(""); setShowMembershipPanel(false); }} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:13,fontFamily:"Nunito,sans-serif" }}>×</button>
                     </div>
-                  )}
-                  {!eventLinkId&&(
-                    <button onClick={()=>setShowTripPicker(v=>!v)} style={{ background:showTripPicker?T.accent+"22":"none",border:`1px solid ${showTripPicker?T.accent:T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:showTripPicker?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>✈️ Link Trip</button>
                   )}
                   {eventLinkId&&(()=>{ const ev=events.find(x=>x.id===eventLinkId); if(!ev) return null; const et=EVENT_TYPES.find(x=>x.id===ev.occasionType)||EVENT_TYPES[EVENT_TYPES.length-1]; return (
                     <div style={{ display:"flex",alignItems:"center",gap:6,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:20,padding:"5px 12px" }}>
