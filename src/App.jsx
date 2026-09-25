@@ -16579,6 +16579,27 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               );
             })()}
 
+            {/* Credit Card WP, rule 12 (CC-8): Credit Card bills are never manually created here —
+                they're generated from a Credit Card Account. Picking a Credit Card biller redirects
+                instead of continuing into the rest of this form. */}
+            {(()=>{
+              const selectedBiller = selectedBillerId ? billers.find(b=>b.id===selectedBillerId) : null;
+              if(!selectedBiller || selectedBiller.type!=="Credit Card") return null;
+              const linkedCcAccount = resolveCreditCardAccount(selectedBiller, billerAccounts, accounts);
+              return (
+                <div style={{ background:T.input,borderRadius:RADIUS.lg,padding:"14px",display:"flex",flexDirection:"column",gap:8 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>Credit Card bills are created from a Credit Card Account.</div>
+                  <div style={{ color:T.sub,fontSize:11,lineHeight:1.5 }}>Arth builds each statement from the card's transactions and billing dates, then adds it here for you to verify.</div>
+                  {linkedCcAccount ? (
+                    <button onClick={()=>{ setShowAddBill(false); setShowAccDetail(linkedCcAccount); }} style={{ minHeight:TOUCH.min,background:T.accent,border:"none",color:T.accentInk,borderRadius:RADIUS.md,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Open {linkedCcAccount.name}</button>
+                  ) : (
+                    <button onClick={()=>{ setShowAddBill(false); setShowSettings(true); }} style={{ minHeight:TOUCH.min,background:T.accent,border:"none",color:T.accentInk,borderRadius:RADIUS.md,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Go to Accounts</button>
+                  )}
+                </div>
+              );
+            })()}
+            {(selectedBillerId && billers.find(b=>b.id===selectedBillerId)?.type==="Credit Card") ? null : (<>
+
             <input style={{ ...inp,fontSize:17,fontWeight:700,border:`1px solid ${!name.trim()?T.danger+"66":T.border}` }} placeholder="Bill name * e.g. Common Meter Electric" value={name} onChange={e=>setName(e.target.value)}/>
             <input style={inp} placeholder="Biller / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
             <input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>
@@ -16693,6 +16714,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <button onClick={()=>setShowAddBill(false)} style={btnG}>Cancel</button>
               <button onClick={submit} disabled={!name.trim()||!parseFloat(amount)||!dueDate} style={{ ...btnP,opacity:(name.trim()&&parseFloat(amount)&&dueDate)?1:0.5 }}>{!dueDate&&name.trim()&&parseFloat(amount)?"Enter a due date":"Add Bill"}</button>
             </div>
+            </>)}
           </div>
         </div>
       </div>
@@ -17368,16 +17390,27 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {(()=>{
                   const linkedCcAccount = resolveCreditCardAccount(shell, billerAccounts, accounts);
                   if(shell.type==="Credit Card" && linkedCcAccount){
-                    const outstanding = cardOutstanding(linkedCcAccount);
+                    // Credit Card WP, rule 13: the Biller is the payment-provider relationship
+                    // only. Outstanding/statement-period figures live in Money and Payments/Bills
+                    // respectively — this resolves and links to them, it never repeats them here.
+                    const cardBills = bills.filter(b=>b.isCcStatement && b.accId===linkedCcAccount.id);
+                    const needsAttentionBill = cardBills.find(b=>b.verification!=="matched" && b.status==="unpaid") || cardBills.filter(b=>b.status==="unpaid").sort((a,b2)=>String(a.dueDate).localeCompare(String(b2.dueDate)))[0] || null;
                     return (
                       <>
-                        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>STATEMENT</div>
-                        <div style={{ background:T.input,borderRadius:14,padding:"16px 14px",marginBottom:14,textAlign:"center" }}>
-                          <div style={{ color:T.sub,fontSize:11,marginBottom:4 }}>Current outstanding</div>
-                          <div style={{ color:outstanding>0?T.danger:T.success,fontSize:22,fontWeight:900 }}>{sym}{fmt(outstanding)}</div>
-                          {(()=>{ const { prevStatementDate, lastStatementDate } = getCardCycleDates(linkedCcAccount, new Date()); return (
-                            <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>Statement period: {formatShortDate(prevStatementDate)||prevStatementDate} – {formatShortDate(lastStatementDate)||lastStatementDate}</div>
-                          ); })()}
+                        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>LINKED ACCOUNT</div>
+                        <div style={{ background:T.input,borderRadius:14,padding:"14px",marginBottom:14 }}>
+                          <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{linkedCcAccount.name}</div>
+                          <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{linkedCcAccount.last4?`••${linkedCcAccount.last4} · `:""}Settings → Accounts</div>
+                        </div>
+                        <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
+                          <div onClick={()=>{ setActiveBillerShell(null); if(needsAttentionBill) setViewingCcStatement(needsAttentionBill); else setTab("bills"); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"11px 14px",cursor:"pointer" }}>
+                            <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>Statements</span>
+                            <span style={{ color:T.sub,fontSize:11 }}>{cardBills.length} in Payments ›</span>
+                          </div>
+                          <div onClick={()=>{ setActiveBillerShell(null); setTab("wealth"); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"11px 14px",cursor:"pointer" }}>
+                            <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>Financial position</span>
+                            <span style={{ color:T.sub,fontSize:11 }}>Money ›</span>
+                          </div>
                         </div>
                         <button onClick={()=>{
                           setAddPrefill({ toAccId:linkedCcAccount.id });
