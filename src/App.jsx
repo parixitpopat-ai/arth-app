@@ -84,6 +84,7 @@ import ConfirmDialog from "./components/ConfirmDialog";
 import LinkToSheet from "./components/LinkToSheet";
 import AddVehicleModal from "./components/AddVehicleModal";
 import CreditCardStatementSheet from "./components/CreditCardStatementSheet";
+import ChangeBillingModal from "./components/ChangeBillingModal";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
@@ -12494,6 +12495,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               const hasLimit = a.limit && a.limit>0;
               const availableLimit = hasLimit ? Math.max(0, a.limit - Math.abs(bal)) : null;
               const utilPct = hasLimit ? Math.min(100, Math.round((Math.abs(bal)/a.limit)*100)) : null;
+              // Credit Card WP, rule 14: Money links to the relevant Bill in Payments — it never
+              // hosts verification itself. "Relevant" = the nearest unpaid generated statement.
+              const relevantBill = bills.filter(b=>b.isCcStatement && b.accId===a.id && b.status==="unpaid").sort((x,y)=>String(x.dueDate).localeCompare(String(y.dueDate)))[0] || null;
               return (
                 <div key={a.id} style={{ padding:"10px 0",borderBottom:`1px solid ${T.border}` }}>
                   <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>{a.name}</div>
@@ -12503,6 +12507,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div><span style={{ color:T.sub }}>Utilisation: </span><span style={{ color:hasLimit?(utilPct>80?T.danger:utilPct>50?T.warn:T.success):T.sub,fontWeight:hasLimit?800:400 }}>{hasLimit?`${utilPct}%`:"—"}</span></div>
                     <div><span style={{ color:T.sub }}>Total Exposure: </span><span style={{ color:T.danger,fontWeight:800 }}>{sym}{fmt(Math.abs(bal))}</span></div>
                   </div>
+                  {relevantBill&&<div onClick={()=>setViewingCcStatement(relevantBill)} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>View statement in Payments ›</div>}
                 </div>
               );
             })}
@@ -13803,10 +13808,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [last4, setLast4] = useState(a.last4||"");
     const [color, setColor] = useState(a.color||PALETTE[0]);
     const [limit, setLimit] = useState(String(a.limit||""));
-    const [statementDate, setStatementDate] = useState(String(a.statementDate||"15"));
-    const [dueDate, setDueDate] = useState(String(a.dueDate||"5"));
     const [alertPct, setAlertPct] = useState(String(a.alertPct ?? "30"));
-    const [billingCycle, setBillingCycle] = useState(a.billingCycle||"");
+    const [showChangeBilling, setShowChangeBilling] = useState(false);
     const [handle, setHandle] = useState(a.handle||"");
     const [openingBalance, setOpeningBalance] = useState(String(a.openingBalance||"0"));
     const [openingBalanceDate, setOpeningBalanceDate] = useState(a.openingBalanceDate||todayStr());
@@ -13829,7 +13832,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const changes = {
           name:name.trim(), last4, color, excludeFromWealth,
           attributedTo:accAttributedTo||null, attributeType:accAttributedTo?accAttributeType:null,
-          ...(a.type==="cc"&&{ limit:parseFloat(limit)||0, statementDate:parseInt(statementDate)||15, dueDate:parseInt(dueDate)||5, alertPct:Math.max(0,parseFloat(alertPct)||0), billingCycle:billingCycle||`${statementDate}th–${dueDate}th` }),
+          // Credit Card WP (rule 3): statement day / due day / pay-from account are
+          // effective-dated (billingHistory), never overwritten in place here — that's the
+          // "Change billing" flow below. Only limit and the spend-alert threshold are plain,
+          // undated fields.
+          ...(a.type==="cc"&&{ limit:parseFloat(limit)||0, alertPct:Math.max(0,parseFloat(alertPct)||0) }),
           ...((a.type==="bank"||a.type==="cash")&&{ openingBalance:parseMoney(openingBalance)||0, openingBalanceDate:openingBalanceDate||todayStr(), needsCalibration }),
           ...(a.type==="upi"&&{ handle, linkedAccount:linkedUpiAccount||"" }),
           ...(a.type==="debit"&&{ linkedBank }),
@@ -13854,6 +13861,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     };
 
     return (
+      <>
       <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
@@ -13885,12 +13893,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             )}
             {a.type==="cc"&&<>
               <div><span style={lbl}>Credit limit ({sym})</span><input style={inp} type="number" value={limit} onChange={e=>setLimit(e.target.value)}/></div>
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-                <div><span style={lbl}>Statement Date</span><input style={inp} type="number" min="1" max="31" value={statementDate} onChange={e=>setStatementDate(e.target.value)}/></div>
-                <div><span style={lbl}>Due Date</span><input style={inp} type="number" min="1" max="31" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
-              </div>
               <div><span style={lbl}>Spend alert (% of limit)</span><input style={inp} type="number" min="0" max="100" value={alertPct} onChange={e=>setAlertPct(e.target.value)}/></div>
-              <div><span style={lbl}>Billing Cycle (e.g. 15th–14th)</span><input style={inp} placeholder="e.g. 15th–14th" value={billingCycle} onChange={e=>setBillingCycle(e.target.value)}/></div>
+              {(()=>{
+                const cfg = getEffectiveBillingConfig(migrateLegacyBillingHistory(a), todayStr());
+                const payFromAcc = cfg.payFromAccId ? accounts.find(x=>x.id===cfg.payFromAccId) : null;
+                return (
+                  <div style={{ background:T.input,borderRadius:12,padding:"12px 14px",display:"flex",flexDirection:"column",gap:6 }}>
+                    <div style={{ display:"flex",justifyContent:"space-between" }}><span style={lbl}>Statement day</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{cfg.statementDay}th</span></div>
+                    <div style={{ display:"flex",justifyContent:"space-between" }}><span style={lbl}>Payment due day</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{cfg.dueDay}th</span></div>
+                    <div style={{ display:"flex",justifyContent:"space-between" }}><span style={lbl}>Pay from</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{payFromAcc?.name||"Not set"}</span></div>
+                    <button onClick={()=>{ setShowChangeBilling(true); }} style={{ marginTop:6,background:"none",border:`1px solid ${T.accent}44`,color:T.accent,borderRadius:10,padding:"7px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Change billing</button>
+                  </div>
+                );
+              })()}
             </>}
             {a.type==="upi"&&<input style={inp} placeholder="UPI handle" value={handle} onChange={e=>setHandle(e.target.value)}/>}
             {/* Was completely missing - a real gap, not intentional. linkedAccount existed on the
@@ -13922,6 +13937,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
         </div>
       </div>
+      {showChangeBilling&&<ChangeBillingModal account={a} bills={bills} accounts={accounts} todayStr={todayStr} setAccounts={setAccounts} T={T} onClose={()=>setShowChangeBilling(false)}/>}
+      </>
     );
   };
 
