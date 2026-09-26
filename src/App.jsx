@@ -1089,26 +1089,29 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   useEffect(()=>safeSetLocalStorage("arth_memberships",JSON.stringify(memberships)),[memberships]);
   useEffect(()=>safeSetLocalStorage("arth_membership_relationships",JSON.stringify(membershipRelationships)),[membershipRelationships]);
   useEffect(()=>safeSetLocalStorage("arth_school_relationships",JSON.stringify(schoolRelationships)),[schoolRelationships]);
-  // One-time backfill for payment records that predate the relationship entity. Idempotent —
-  // migrateMembershipRelationships() skips anything already linked — but run once at mount only,
-  // since every payment created going forward links to a relationship at creation time directly
-  // (see AddMembershipModal.handleSave). See src/domain/membership/relationship.js for exactly
-  // what this does and doesn't fabricate.
+  // Backfill for payment records that predate the relationship entity, not one-time — same bug
+  // class as the Credit Card Biller reconciliation (App.jsx's `[]`-gated migrations run once at
+  // mount, before applyCloudSnapshot's async setMemberships/setMembershipRelationships land, and
+  // then never re-fire; any membership that only existed in the cloud snapshot was permanently
+  // missed). Idempotent — migrateMembershipRelationships() skips anything already linked — so
+  // depending on the real data instead of `[]` just makes it actually reconcile once that data
+  // exists, the same fix applied to the Credit Card migration. See
+  // src/domain/membership/relationship.js for exactly what this does and doesn't fabricate.
   useEffect(()=>{
     const hasUnlinked = memberships.some(m=>!m.membershipRelationshipId);
     if(!hasUnlinked) return;
     const { relationships, updatedMemberships } = migrateMembershipRelationships(memberships, membershipRelationships, getMembershipPeriods, genId);
     setMembershipRelationships(relationships);
     setMemberships(updatedMemberships);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
-  // WP-5: one-time self-sentinel data correction — fixes any existing records
-  // (created before the WP-1/WP-4 fixes) whose personId is still the literal
-  // "self" instead of the real ME.id ("__me__"). Reuses correctSelfSentinel
-  // as-is (domain/membership/relationship.js) — no new logic. Runs once at
-  // mount; idempotent — a clean pass on already-correct data is a true no-op
-  // (correctSelfSentinel returns the exact same array/object references),
-  // so this effect only actually calls a setter when something real changed.
+  },[memberships, membershipRelationships]);
+  // WP-5 self-sentinel data correction — fixes any existing records (created before the
+  // WP-1/WP-4 fixes) whose personId is still the literal "self" instead of the real ME.id
+  // ("__me__"). Reuses correctSelfSentinel as-is (domain/membership/relationship.js) — no new
+  // logic. Same cloud-sync-timing fix as above: depends on the real data instead of `[]`, so a
+  // legacy record that only existed in a cloud snapshot loaded after mount still gets corrected.
+  // Idempotent — a clean pass on already-correct data is a true no-op (correctSelfSentinel
+  // returns the exact same array/object references), so this only ever calls a setter when
+  // something real changed.
   useEffect(()=>{
     const correctedMemberships = correctSelfSentinel(memberships);
     const correctedRelationships = correctSelfSentinel(membershipRelationships);
@@ -1120,14 +1123,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     console.log(`WP-5: corrected ${correctedCount} legacy record(s) with personId:"self" -> "__me__".`);
     if(membershipsChanged) setMemberships(correctedMemberships);
     if(relationshipsChanged) setMembershipRelationships(correctedRelationships);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
+  },[memberships, membershipRelationships]);
   useEffect(()=>safeSetLocalStorage("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
-  // One-time migration: Fee Payment was a separate, simpler mechanism (no grace days, no person,
-  // no exact-date concept) that's now merged into the single Membership mechanism. Convert each
-  // existing fee payment into an equivalent membership record (exact dates, since fee payments were
-  // always whole-calendar-months), then clear the legacy collection. Idempotent — once feePayments
-  // is empty, this becomes a no-op on every subsequent load.
+  // Fee Payment was a separate, simpler mechanism (no grace days, no person, no exact-date
+  // concept) that's now merged into the single Membership mechanism. Converts each existing fee
+  // payment into an equivalent membership record (exact dates, since fee payments were always
+  // whole-calendar-months), then clears the legacy collection. Not one-time — same cloud-sync-
+  // timing fix as the two effects above: depends on `feePayments` instead of `[]`, so a legacy
+  // fee payment that only existed in a cloud snapshot loaded after mount still gets migrated.
+  // Idempotent either way — once feePayments is empty, this is a no-op on every later run.
   useEffect(()=>{
     if(feePayments.length===0) return;
     const migrated = feePayments.map(f=>{
@@ -1161,8 +1165,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     });
     setMemberships(prev=>[...prev, ...migrated]);
     setFeePayments([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
+  },[feePayments]);
   useEffect(()=>safeSetLocalStorage("arth_liabilities",JSON.stringify(liabilities)),[liabilities]);
   useEffect(()=>safeSetLocalStorage("arth_assets",JSON.stringify(trackedAssets)),[trackedAssets]);
   useEffect(()=>safeSetLocalStorage("arth_vehicles",JSON.stringify(vehicles)),[vehicles]);
