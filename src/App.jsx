@@ -76,6 +76,7 @@ import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVer
 import { generateDueStatements } from "./domain/cards/statementBills";
 import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
+import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
@@ -86,6 +87,7 @@ import LinkToSheet from "./components/LinkToSheet";
 import AddVehicleModal from "./components/AddVehicleModal";
 import CreditCardStatementSheet from "./components/CreditCardStatementSheet";
 import ChangeBillingModal from "./components/ChangeBillingModal";
+import CreditCardsListScreen from "./components/CreditCardsListScreen";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
@@ -882,6 +884,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [showSchoolFeeCreditNote, setShowSchoolFeeCreditNote] = useState(false);
   const [selectedSchoolFeePeriodIds, setSelectedSchoolFeePeriodIds] = useState([]);
   const [showInsuranceList, setShowInsuranceList] = useState(false);
+  const [showCreditCardsList, setShowCreditCardsList] = useState(false);
   const [showAddPolicy, setShowAddPolicy] = useState(false);
   // Prefill for "Add insurance policy" opened from a Vehicle profile (policyType/name/vehicleId).
   // Only applies to a NEW policy — existing (edit) always wins when both are set.
@@ -1031,12 +1034,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const shellId = resolvedShellFor[key];
       return shellId ? {...ba, billerId:shellId} : ba;
     }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
-  // One-time cleanup: merge any duplicate shells the bug above already created (same type+provider)
-  // into a single shell, reassigning every account that pointed to a duplicate over to the keeper.
-  // Keeper = whichever duplicate actually has accounts linked to it (or the oldest, if none do).
-  // Naturally idempotent — once there's nothing left to merge, this is a no-op on every later load.
+    // Was `[]` (mount-once) despite this comment already saying "safe to leave running on every
+    // load" — the intent was always continuous reconciliation, the deps array just never matched
+    // it. Fixed for the same reason as the Credit Card migration below: cloud-synced data
+    // (applyCloudSnapshot) arrives after mount, so a mount-once effect could permanently miss it.
+  },[billerAccounts, billers]);
+  // Cleanup, not one-time: merges any duplicate shells the migration above can still produce
+  // mid-reconciliation (same type+provider) into a single shell, reassigning every account that
+  // pointed to a duplicate over to the keeper. Keeper = whichever duplicate actually has accounts
+  // linked to it (or the oldest, if none do). Naturally idempotent — once there's nothing left to
+  // merge, this is a no-op on every later run, so — like the two effects around it — it runs on
+  // real data changes now instead of only once before cloud data has loaded.
   useEffect(()=>{
     const groupsMap = {};
     billers.forEach(b=>{
@@ -1056,31 +1064,28 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(idsToRemove.size===0) return;
     setBillerAccounts(prev=>prev.map(ba=>ba.billerId && remap[ba.billerId] ? {...ba,billerId:remap[ba.billerId]} : ba));
     setBillers(prev=>prev.filter(b=>!idsToRemove.has(b.id)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
-  // One-time migration: fold Credit Card accounts into the same Biller hierarchy every other
-  // recurring service uses, so they show up in Bills Home, Due Soon, and category browse instead
-  // of living in a separate parallel system. Arth doesn't track a bank name separate from the
-  // card's own name (e.g. "HDFC Regalia" is one string, not Bank="HDFC"+Card="Regalia") — so each
-  // card gets its own shell for now rather than guessing at a Provider grouping that isn't real
-  // data. Idempotent: only touches cc accounts that don't already have a linked billerAccount.
+  },[billers, billerAccounts]);
+  // Reconciliation, not a one-time migration: folds Credit Card accounts into the same Biller
+  // hierarchy every other recurring service uses, so a card's Biller always resolves to its real
+  // Account (Credit Card WP, rule 13). Root cause this fixes (confirmed by tracing
+  // applyCloudSnapshot, ~L8295+): this used to run with `[]` deps — once, immediately after
+  // mount — but cloud-synced accounts/billers/billerAccounts (setAccounts/setBillers/
+  // setBillerAccounts inside applyCloudSnapshot) arrive ASYNCHRONOUSLY, after that first render.
+  // A `[]` effect never fires again, so any account that existed only in the not-yet-loaded cloud
+  // snapshot was permanently missed — exactly why real Credit Card Accounts could sit next to a
+  // same-named Biller showing "0 accounts" indefinitely. Now depends on the actual data, so it
+  // re-evaluates whenever accounts/billers/billerAccounts change (including the cloud snapshot
+  // landing) and self-heals. Reuses an existing same-name Credit Card shell instead of always
+  // creating a new one (mirrors the billerAccounts-missing-billerId migration just above, which
+  // already had to solve this same cloud-race problem) — this is what makes an already-existing,
+  // hand-made "Coral RuPay 8004" Biller resolve to the real Account of the same name instead of
+  // getting a duplicate, ledger-less sibling. Idempotent either way: only touches cc accounts that
+  // don't already have a linked billerAccount.
   useEffect(()=>{
-    const ccAccounts = accounts.filter(a=>a.type==="cc");
-    if(ccAccounts.length===0) return;
-    const alreadyLinked = new Set(billerAccounts.filter(ba=>ba.accId).map(ba=>ba.accId));
-    const unlinked = ccAccounts.filter(a=>!alreadyLinked.has(a.id));
-    if(unlinked.length===0) return;
-    const newShells = [];
-    const newAccounts = [];
-    unlinked.forEach(acc=>{
-      const shell = { id:genId(), name:acc.name, type:"Credit Card", provider:acc.name, createdAt:Date.now() };
-      newShells.push(shell);
-      newAccounts.push({ id:genId(), billerId:shell.id, accId:acc.id, name:acc.name, type:"Credit Card", consumerNo:null, createdAt:Date.now() });
-    });
-    setBillers(prev=>[...prev, ...newShells]);
-    setBillerAccounts(prev=>[...prev, ...newAccounts]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
+    const { newBillers, newBillerAccounts } = reconcileCreditCardBillers({ accounts, billers, billerAccounts, genId });
+    if(newBillers.length>0) setBillers(prev=>[...prev, ...newBillers]);
+    if(newBillerAccounts.length>0) setBillerAccounts(prev=>[...prev, ...newBillerAccounts]);
+  },[accounts, billers, billerAccounts]);
   useEffect(()=>safeSetLocalStorage("arth_memberships",JSON.stringify(memberships)),[memberships]);
   useEffect(()=>safeSetLocalStorage("arth_membership_relationships",JSON.stringify(membershipRelationships)),[membershipRelationships]);
   useEffect(()=>safeSetLocalStorage("arth_school_relationships",JSON.stringify(schoolRelationships)),[schoolRelationships]);
@@ -15010,6 +15015,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           // Route straight to their real, domain-specific screens instead.
                           if(type==="Insurance"){ setShowInsuranceList(true); return; }
                           if(type==="School Fees" || type==="Education Fees"){ setShowSchoolFeesList(true); return; }
+                          // Credit Card WP: a card is an Account first (rule 1) — this category
+                          // must resolve to the real Credit Card Accounts and their statement
+                          // state, never the generic Biller-list flow every recurring-payment type
+                          // below uses, same reasoning as the Insurance/School Fees routes above.
+                          if(type==="Credit Card"){ setShowCreditCardsList(true); return; }
                           if(billersOfType.length===0){
                             setAddBillerPresetType(type);
                             setShowAddBillerModal(true);
@@ -17264,6 +17274,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {showDuplicateFinder&&<DuplicateFinderModal onClose={()=>setShowDuplicateFinder(false)}/>}
         {showExpectedIncome&&<ExpectedIncomeListModal onClose={()=>setShowExpectedIncome(false)} T={T} sym={sym} fmt={fmt} formatShortDate={formatShortDate} expectedIncome={expectedIncome} setExpectedIncome={setExpectedIncome} setTxns={setTxns} accounts={accounts} setToast={setToast} setEditingExpectedIncome={setEditingExpectedIncome} setShowAddExpectedIncome={setShowAddExpectedIncome}/>}
         {showInsuranceList&&<InsurancePolicyListModal onClose={()=>setShowInsuranceList(false)} T={T} sym={sym} fmt={fmt} insurancePolicies={insurancePolicies.filter(p=>p.status!=="archived")} setEditingPolicy={setEditingPolicy} setShowAddPolicy={setShowAddPolicy} setViewingPolicy={setViewingPolicy}/>}
+        {showCreditCardsList&&(
+          <CreditCardsListScreen
+            accounts={accounts}
+            bills={bills}
+            txns={txns}
+            T={T}
+            sym={sym}
+            fmt={fmt}
+            formatShortDate={formatShortDate}
+            toDateOnly={toDateOnly}
+            getCardSummary={getCardSummary}
+            onClose={()=>setShowCreditCardsList(false)}
+            onViewStatement={bill=>{ setShowCreditCardsList(false); setViewingCcStatement(bill); }}
+            onPay={card=>{ setShowCreditCardsList(false); setAddPrefill({ toAccId:card.id }); setDefaultAddType("cc_payment"); setShowAdd(true); }}
+          />
+        )}
         {showAddPolicy&&<AddInsurancePolicyModal existing={editingPolicy} prefill={addPolicyPrefill} onClose={()=>{ setShowAddPolicy(false); setEditingPolicy(null); setAddPolicyPrefill(null); }} T={T} inp={inp} lbl={lbl} setInsurancePolicies={setInsurancePolicies} setBills={setBills} billers={billers}/>}
 
         {showSchoolFeesList&&<SchoolFeeScheduleListModal onClose={()=>setShowSchoolFeesList(false)} T={T} sym={sym} fmt={fmt} feeSchedules={feeSchedules} feePeriods={feePeriods} schoolCreditNotes={schoolCreditNotes} setShowAddSchedule={setShowAddSchoolYear} setViewingSchedule={(s)=>{ setViewingSchoolFeeSchedule(s); setShowSchoolFeesList(false); }}/>}
@@ -17521,68 +17547,36 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {(()=>{
                   const linkedCcAccount = resolveCreditCardAccount(shell, billerAccounts, accounts);
                   if(shell.type==="Credit Card" && linkedCcAccount){
-                    // Credit Card WP, rule 13: the Biller is the payment-provider relationship
-                    // only. Outstanding/statement-period figures live in Money and Payments/Bills
-                    // respectively — this resolves and links to them, it never repeats them here.
-                    const cardBills = bills.filter(b=>b.isCcStatement && b.accId===linkedCcAccount.id);
-                    const needsAttentionBill = cardBills.find(b=>b.verification!=="matched" && b.status==="unpaid") || cardBills.filter(b=>b.status==="unpaid").sort((a,b2)=>String(a.dueDate).localeCompare(String(b2.dueDate)))[0] || null;
+                    // Credit Card WP, rule 13: "A Biller should essentially say: [provider] /
+                    // Linked account: [card] / Used for: Credit Card payments. That's it." No
+                    // outstanding, statement, verification, or Pay action here — those are
+                    // Payments -> Credit Cards' job (CreditCardsListScreen) and Money's, never
+                    // duplicated or re-hosted on the Biller.
                     return (
                       <>
-                        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>LINKED ACCOUNT</div>
-                        <div style={{ background:T.input,borderRadius:14,padding:"14px",marginBottom:14 }}>
+                        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:2 }}>PROVIDER: {(shell.provider||shell.name).toUpperCase()}</div>
+                        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>LINKED CREDIT CARD ACCOUNT</div>
+                        <div style={{ background:T.input,borderRadius:14,padding:"14px",marginBottom:6 }}>
                           <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{linkedCcAccount.name}</div>
                           <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{linkedCcAccount.last4?`••${linkedCcAccount.last4} · `:""}Settings → Accounts</div>
                         </div>
-                        <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
-                          <div onClick={()=>{ setActiveBillerShell(null); if(needsAttentionBill) setViewingCcStatement(needsAttentionBill); else setTab("bills"); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"11px 14px",cursor:"pointer" }}>
-                            <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>Statements</span>
-                            <span style={{ color:T.sub,fontSize:11 }}>{cardBills.length} in Payments ›</span>
-                          </div>
-                          <div onClick={()=>{ setActiveBillerShell(null); setTab("wealth"); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"11px 14px",cursor:"pointer" }}>
-                            <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>Financial position</span>
-                            <span style={{ color:T.sub,fontSize:11 }}>Money ›</span>
-                          </div>
-                        </div>
-                        <button onClick={()=>{
-                          setAddPrefill({ toAccId:linkedCcAccount.id });
-                          setDefaultAddType("cc_payment");
-                          setShowAdd(true);
-                          setActiveBillerShell(null);
-                        }} style={{ width:"100%",background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>💳 Pay Statement / Settle Balance</button>
+                        <div style={{ color:T.sub,fontSize:11 }}>Used for Credit Card payments. Statements and balance are managed on the account itself — see Payments → Credit Cards.</div>
                       </>
                     );
                   }
                   if(shell.type==="Credit Card" && !linkedCcAccount){
                     // Credit Card WP, rule 13 (last line): "If an existing Credit Card Biller is
                     // currently functioning as both Biller and Account identity, reconcile it to
-                    // the canonical Account relationship instead of creating another entity." This
-                    // is exactly that case — a Credit Card shell with no resolvable linked account
-                    // (predates the auto-shell-creation migration, or was added by hand). It must
+                    // the canonical Account relationship instead of creating another entity." The
+                    // reconciliation itself now happens automatically (the Credit Card migration
+                    // effect above, keyed off accounts/billers/billerAccounts, matches this shell
+                    // to a same-named Account the moment one exists) — this screen only needs to
+                    // handle the genuine remainder: no matching Account exists yet at all. It must
                     // never fall through to the generic multi-connection "+Add Person/Account" flow
                     // below, which would create a second, ledger-less identity for the same card.
-                    const linkedAccIds = new Set(billerAccounts.filter(ba=>ba.accId).map(ba=>ba.accId));
-                    const unlinkedCcAccounts = accounts.filter(a=>a.type==="cc" && !linkedAccIds.has(a.id));
-                    const linkExisting = acc=>{
-                      setBillerAccounts(prev=>[...prev, { id:genId(), billerId:shell.id, accId:acc.id, name:acc.name, type:"Credit Card", consumerNo:null, createdAt:Date.now() }]);
-                      setActiveBillerShell(null);
-                    };
                     return (
                       <>
-                        <div style={{ color:T.sub,fontSize:12,lineHeight:1.5,marginBottom:14 }}>Credit Card billers are linked to a Credit Card Account. "{shell.name}" isn't connected to one yet — statements, outstanding and utilisation all live on that account, not here.</div>
-                        {unlinkedCcAccounts.length>0&&(
-                          <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
-                            <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>LINK TO AN EXISTING CREDIT CARD ACCOUNT</div>
-                            {unlinkedCcAccounts.map(acc=>(
-                              <div key={acc.id} onClick={()=>linkExisting(acc)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer" }}>
-                                <div>
-                                  <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{acc.name}</div>
-                                  {acc.last4&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>••{acc.last4}</div>}
-                                </div>
-                                <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Link</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <div style={{ color:T.sub,fontSize:12,lineHeight:1.5,marginBottom:14 }}>Credit Card billers are linked to a Credit Card Account. "{shell.name}" isn't connected to one yet.</div>
                         <button onClick={()=>{ setActiveBillerShell(null); setShowSettings(true); setSettingsSection("accounts"); }} style={{ width:"100%",background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add Credit Card Account</button>
                       </>
                     );
@@ -17667,25 +17661,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     });
                   }} style={{ flex:1,background:"none",border:`1px solid ${T.danger}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete Account</button>
                 </div>
-                {/* Credit Card WP, rule 13: this connection-detail sheet is still the Biller —
-                    Statement Due / Unbilled / Days-to-Due are Money/Bills figures (getCardSummary),
-                    so this resolves and links to them instead of repeating them here, same as the
-                    shell-level Credit Card biller screen above it. */}
+                {/* Credit Card WP, rule 13: this connection-detail sheet is still the Biller — it
+                    names the linked Account and says what it's used for, nothing else. Statement/
+                    payment state lives in Payments -> Credit Cards, not here. */}
                 {ba.accId&&(()=>{
                   const ccAcc = accounts.find(a=>a.id===ba.accId);
                   if(!ccAcc) return null;
-                  const cardBills = bills.filter(b=>b.isCcStatement && b.accId===ccAcc.id);
-                  const needsAttentionBill = cardBills.find(b=>b.verification!=="matched" && b.status==="unpaid") || cardBills.filter(b=>b.status==="unpaid").sort((a,b2)=>String(a.dueDate).localeCompare(String(b2.dueDate)))[0] || null;
                   return (
-                    <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
-                      <div onClick={()=>{ setActiveBillerForAction(null); if(needsAttentionBill) setViewingCcStatement(needsAttentionBill); else setTab("bills"); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"11px 14px",cursor:"pointer" }}>
-                        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>Statements</span>
-                        <span style={{ color:T.sub,fontSize:11 }}>{cardBills.length} in Payments ›</span>
-                      </div>
-                      <div onClick={()=>{ setActiveBillerForAction(null); setTab("wealth"); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"11px 14px",cursor:"pointer" }}>
-                        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>Financial position</span>
-                        <span style={{ color:T.sub,fontSize:11 }}>Money ›</span>
-                      </div>
+                    <div style={{ background:T.input,borderRadius:14,padding:"14px",marginBottom:16 }}>
+                      <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:4 }}>LINKED CREDIT CARD ACCOUNT</div>
+                      <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{ccAcc.name}</div>
+                      <div style={{ color:T.sub,fontSize:11,marginTop:6 }}>Used for Credit Card payments. Statements and balance: Payments → Credit Cards.</div>
                     </div>
                   );
                 })()}
