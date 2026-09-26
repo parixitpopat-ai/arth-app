@@ -78,6 +78,7 @@ import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirecti
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
 import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
+import { getGroupDefaultIntent } from "./domain/group/defaultIntent";
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
@@ -3749,7 +3750,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(!isEditing && defaultGroupId && txnType==="expense" && !tagGroup && !splitGroup){
         const g = groups.find(x=>x.id===defaultGroupId);
         if(g){
-          const di = g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
+          const di = getGroupDefaultIntent(g);
           if(di==="attributed"){ setTagGroup(defaultGroupId); setSplitMode("tag"); }
           else { setSplitGroup(defaultGroupId); setSplitMode("split"); }
         }
@@ -6373,7 +6374,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                               if(x.type==="person"){ setSplitMode("allocate"); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:x.id, mode:"owes", amount:"", items:[] }]); }
                               else {
                                 const g = groups.find(gr=>gr.id===x.id);
-                                const di = g?.defaultIntent||(g?.typeId==="family"||g?.typeId==="business"?"attributed":"split");
+                                const di = getGroupDefaultIntent(g);
                                 setSplitMode("allocate");
                                 setAllocRows(prev=>[...prev,{ id:genId(), targetType:"group", targetId:x.id, mode:di==="attributed"?"spent_on":"owes", amount:"", items:[] }]);
                               }
@@ -10895,7 +10896,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           typeId:editingGroupTypeId||g.typeId||"other",
           type:gtMeta?.label||g.type,
           icon:gtMeta?.icon||g.icon,
-          defaultIntent:gtMeta?.default||g.defaultIntent||"split",
+          // QW-4: type is descriptive only — keep the group's effective intent, never derive it from the new type.
+          defaultIntent:getGroupDefaultIntent(g),
           color:editingGroupColor||g.color,
         };
         setGroups(prev=>prev.map(x=>x.id===g.id?updated:x));
@@ -10933,11 +10935,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <input value={editingGroupName} onChange={e=>setEditingGroupName(e.target.value)} style={{ ...inp, padding:"8px 10px", fontSize:16, fontWeight:700, width:"100%" }} placeholder="Group name" />
                     <input value={editingGroupBudget} onChange={e=>setEditingGroupBudget(e.target.value)} style={{ ...inp, padding:"8px 10px", fontSize:14, width:"100%" }} type="text" inputMode="decimal" placeholder="Group budget (0 = no budget)" />
                     <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:4 }}>Group Type</div>
+                    {/* QW-4: type no longer changes how expenses split, so the per-type split descriptions are not shown here. */}
+                    <div style={{ color:T.sub,fontSize:12,marginBottom:4 }}>A label only. Changing it doesn't change how this group's expenses split.</div>
                     <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6 }}>
                       {GROUP_TYPES.map(gt=>(
                         <button key={gt.id} onClick={()=>setEditingGroupTypeId(gt.id)} style={{ background:editingGroupTypeId===gt.id?T.accent+"22":"none",border:`1px solid ${editingGroupTypeId===gt.id?T.accent:T.border}`,borderRadius:10,padding:"6px 8px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
                           <div style={{ fontSize:11,fontWeight:700,color:editingGroupTypeId===gt.id?T.accent:T.text }}>{gt.icon} {gt.label}</div>
-                          <div style={{ fontSize:9,color:T.sub }}>{gt.desc}</div>
                         </button>
                       ))}
                     </div>
