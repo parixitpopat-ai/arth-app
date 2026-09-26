@@ -2,53 +2,80 @@ import React, { useState } from "react";
 import BottomSheet from "./BottomSheet";
 import { RADIUS, TOUCH, FONT } from "../constants/theme";
 
-// Fixes 3 confirmed gaps in the old one-tap "Mark as Paid" flow: it silently guessed the paying
-// account (first non-CC account, never asked), never collected a payment/bank reference at all,
-// and dropped the biller's person attribution onto the created transaction. This sheet asks for
-// the two things that genuinely need a human decision (account, optional reference) before the
-// transaction is created — the attribution carry-over itself needs no UI, it's just a bug fix in
-// the caller (App.jsx passes the biller account's attributedTo straight through now).
-export default function MarkBillPaidModal({ bill, accounts, defaultAccId, T, sym, fmt, formatShortDate, onClose, onConfirm }) {
+// UI-2C M2 PY-25 / PY-25b — Record payment. Replaces the old "Mark as Paid" sheet and keeps
+// everything it fixed: the paying account is chosen explicitly (never guessed) and an optional
+// payment reference is collected. New in M2 (ADR-038): the amount can be less than the balance
+// (the Bill becomes Partially paid) or more (the extra is shown as Unallocated — an amount, not a
+// status, with nothing to resolve here). The date defaults to today and can be changed.
+// Credit-card statements keep their own payment rules, so their amount stays the statement amount.
+//
+// `balance` is the Bill's remaining balance (billBalance.js); `forLabel` is the Bill's own For.
+export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, defaultAccId, today, T, sym, fmt, formatShortDate, onClose, onConfirm }) {
+  const remaining = Number(balance ?? bill.amount ?? 0);
+  const isCard = Boolean(bill.isCcStatement);
   const [accId, setAccId] = useState(defaultAccId || "");
   const [transactionRef, setTransactionRef] = useState("");
+  const [amountText, setAmountText] = useState(String(remaining || ""));
+  const [date, setDate] = useState(today);
+
+  const amount = isCard ? remaining : Math.round((parseFloat(amountText) || 0) * 100) / 100;
+  const applied = Math.min(amount, remaining);
+  const unallocated = Math.max(0, Math.round((amount - remaining) * 100) / 100);
+  const canSave = Boolean(accId) && amount > 0 && Boolean(date);
 
   const eligibleAccounts = (accounts || []).filter(a => a.type !== "cc");
-  const lbl = { color: T.sub, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" };
-  const inp = { width: "100%", boxSizing: "border-box", minHeight: TOUCH.min, background: T.input, border: `1px solid ${T.borderStrong}`, borderRadius: RADIUS.md, padding: "0 12px", color: T.text, fontSize: 15, fontFamily: FONT.sans, marginTop: 6 };
+  const lbl = { color: T.sub, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", display: "block", marginBottom: 6 };
+  const inp = { width: "100%", boxSizing: "border-box", minHeight: TOUCH.min, background: T.input, border: `1px solid ${T.borderStrong}`, borderRadius: RADIUS.md, padding: "0 12px", color: T.text, fontSize: 15, fontFamily: FONT.sans, outline: "none" };
+  const subtitle = [bill.name, forLabel ? `for ${forLabel}` : null, `balance ${sym}${fmt(remaining)}`].filter(Boolean).join(" · ");
 
   return (
-    <BottomSheet onClose={onClose} T={T} maxHeight="70vh">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div style={{ color: T.text, fontSize: 16, fontWeight: 900 }}>Mark as Paid</div>
-        <button onClick={onClose} style={{ background: T.pill, border: "none", color: T.sub, borderRadius: 8, padding: "5px 11px", cursor: "pointer", fontSize: 16, fontFamily: FONT.sans }}>✕</button>
-      </div>
-
-      <div style={{ background: T.input, borderRadius: RADIUS.lg, padding: 14, marginBottom: 14, textAlign: "center" }}>
-        <div style={{ color: T.sub, fontSize: 11 }}>{bill.name}</div>
-        <div style={{ color: T.text, fontSize: 22, fontWeight: 900, marginTop: 2 }}>{sym}{fmt(bill.amount)}</div>
-        {bill.dueDate && <div style={{ color: T.sub, fontSize: 11, marginTop: 4 }}>Due {formatShortDate(bill.dueDate) || bill.dueDate}</div>}
+    <BottomSheet onClose={onClose} T={T} maxHeight="85vh">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, gap: 12 }}>
+        <div>
+          <div style={{ color: T.text, fontSize: 17, fontWeight: 800 }}>Record payment</div>
+          <div data-testid="record-payment-subtitle" style={{ color: T.sub, fontSize: 12, marginTop: 3 }}>{subtitle}</div>
+          {bill.dueDate && <div style={{ color: T.sub, fontSize: 11, marginTop: 2 }}>Due {formatShortDate(bill.dueDate) || bill.dueDate}</div>}
+        </div>
+        <button onClick={onClose} aria-label="Close" style={{ background: T.pill, border: "none", color: T.sub, borderRadius: 8, padding: "5px 11px", cursor: "pointer", fontSize: 16, fontFamily: FONT.sans }}>✕</button>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div>
+        <label>
+          <span style={lbl}>Amount</span>
+          <input data-testid="record-payment-amount" type="number" inputMode="decimal" min="0" disabled={isCard} value={isCard ? String(remaining) : amountText} onChange={e => setAmountText(e.target.value)} style={{ ...inp, fontFamily: FONT.mono, fontSize: 18, opacity: isCard ? 0.7 : 1 }} />
+          {!isCard && unallocated > 0 && (
+            <div data-testid="record-payment-unallocated" style={{ color: T.attention, fontSize: 12, fontWeight: 600, marginTop: 6 }}>
+              {sym}{fmt(applied)} will be applied · {sym}{fmt(unallocated)} Unallocated
+            </div>
+          )}
+          {!isCard && amount > 0 && amount < remaining && (
+            <div style={{ color: T.sub, fontSize: 12, marginTop: 6 }}>Partially paid · {sym}{fmt(Math.round((remaining - amount) * 100) / 100)} will remain</div>
+          )}
+        </label>
+        <label>
           <span style={lbl}>Paid from</span>
-          <select value={accId} onChange={e => setAccId(e.target.value)} style={inp}>
+          <select data-testid="record-payment-account" value={accId} onChange={e => setAccId(e.target.value)} style={inp}>
             <option value="">Select an account…</option>
             {eligibleAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
-        </div>
-        <div>
-          <span style={lbl}>Payment reference · optional</span>
-          <input value={transactionRef} onChange={e => setTransactionRef(e.target.value.toUpperCase())} placeholder="e.g. UPI / bank reference" style={inp} />
-        </div>
+        </label>
+        <label>
+          <span style={lbl}>Date</span>
+          <input data-testid="record-payment-date" type="date" value={date} max={today} onChange={e => setDate(e.target.value)} style={inp} />
+        </label>
+        <label>
+          <span style={lbl}>Reference · optional</span>
+          <input value={transactionRef} onChange={e => setTransactionRef(e.target.value.toUpperCase())} placeholder="UTR or note" style={inp} />
+        </label>
       </div>
 
       <button
-        onClick={() => onConfirm(accId, transactionRef.trim())}
-        disabled={!accId}
-        style={{ marginTop: 16, width: "100%", minHeight: TOUCH.min, background: accId ? T.accent : T.border, border: "none", borderRadius: RADIUS.md, color: "#fff", fontWeight: 700, fontSize: 15, cursor: accId ? "pointer" : "not-allowed", fontFamily: FONT.sans }}
+        data-testid="record-payment-confirm"
+        onClick={() => canSave && onConfirm(accId, transactionRef.trim(), { amount, date })}
+        disabled={!canSave}
+        style={{ marginTop: 16, width: "100%", minHeight: TOUCH.min, background: canSave ? T.accent : T.border, border: "none", borderRadius: RADIUS.md, color: T.accentInk || "#fff", fontWeight: 700, fontSize: 15, cursor: canSave ? "pointer" : "not-allowed", fontFamily: FONT.sans }}
       >
-        Confirm payment
+        Record payment {sym}{fmt(amount || 0)}
       </button>
     </BottomSheet>
   );

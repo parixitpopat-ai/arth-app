@@ -9,7 +9,7 @@
 // extractDateFromText). Passing it as a parameter keeps this pass contained to exactly what was
 // scoped: Cards.
 
-import { dateAtDay, toLocalDateStr } from "../../helpers/dateHelpers";
+import { dateAtDay, toLocalDateStr } from "../../helpers/dateHelpers.js";
 
 export const getCardCycleDates = (card, refDate = new Date()) => {
   const statementDay = Math.max(1, Math.min(31, parseInt(card?.statementDate || 15, 10)));

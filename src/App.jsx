@@ -92,6 +92,7 @@ import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirecti
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
 import { withBillForSnapshots } from "./domain/bills/billFor";
+import { getBillBalance, planBillPayment, withProjectedBillStatuses, getPartialRemainingByBill } from "./domain/obligations/billBalance";
 import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
 import { getGroupDefaultIntent } from "./domain/group/defaultIntent";
 import { withBillContributionForTxn, withoutBillContributionsForTxn, withoutBillContributionsForTxns, reopenBillsPaidByDeletedTxns } from "./domain/obligations/billContributionSync";
@@ -1154,6 +1155,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const next = withBillForSnapshots(bills, { billerAccounts, people, groups });
     if(next!==bills) setBills(next);
   },[bills, billerAccounts, people, groups]);
+  // ADR-038 §6 — stored Bill status follows its Contributions, in one place, whichever path
+  // recorded, edited, unlinked or deleted a payment. Same-array no-op when nothing changes.
+  useEffect(()=>{
+    const next = withProjectedBillStatuses(bills, contributions, txns);
+    if(next!==bills) setBills(next);
+  },[bills, contributions, txns]);
   useEffect(()=>safeSetLocalStorage("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
   // Fee Payment was a separate, simpler mechanism (no grace days, no person, no exact-date
   // concept) that's now merged into the single Membership mechanism. Converts each existing fee
@@ -1401,18 +1408,32 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // recurring-regeneration behavior the old inline handler had, byte-for-byte, plus one real fix:
   // forPerson now carries over from the biller account's own attribution instead of always being
   // blank, so "who this bill belongs to" survives onto the payment transaction.
-  const confirmMarkBillPaid = useCallback((bill, accId, transactionRef) => {
+  // M2 PY-25 — Record payment (replaces Mark as paid; account and reference kept). ADR-038: the
+  // payment applies at most the Bill's remaining balance and the rest is Unallocated; the Bill is
+  // paid, and a recurring Bill regenerates, only once its balance reaches 0. The first payment
+  // carries the Bill's split (people / group collective), exactly as the one-payment flow did;
+  // later payments don't, so the split is never counted twice.
+  const confirmMarkBillPaid = useCallback((bill, accId, transactionRef, payment = {}) => {
     const linkedBA = billerAccounts.find(ba=>String(ba.id)===String(bill.billerAccountId));
     const attributedPersonId = linkedBA?.attributeType==="person" && linkedBA.attributedTo ? linkedBA.attributedTo : "";
     const paymentTxnId = Date.now();
-    const paymentDate = todayStr();
-    setTxns(p=>[{id:paymentTxnId,type:"expense",desc:bill.name,merchant:bill.merchant||"",date:paymentDate,note:"Bill payment",catId:bill.catId,catIds:bill.catIds||[bill.catId],subId:bill.subId||null,accId,people:bill.splitPeople||{},forPerson:attributedPersonId,groupId:bill.groupId||null,groupCollectiveAmount:Number(bill.groupCollectiveAmount||0),amount:bill.amount||0,isBillPayment:true,billInvoiceNo:bill.invoiceNo||null,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null,imageBase64:bill.imageBase64||null,paymentImageBase64:bill.paymentImageBase64||null},...p]);
-    setBills(p=>p.map(x=>x.id===bill.id?{...x,status:"paid",paidDate:paymentDate,paidByTxnId:paymentTxnId,lastPaidAmount:bill.amount,lastPaidDate:paymentDate}:x));
+    const paymentDate = payment.date || todayStr();
+    const priorPaymentCount = contributions.filter(c=>c?.obligationType==="bill" && String(c.obligationId)===String(bill.id)).length;
+    const isFirstPayment = priorPaymentCount===0;
+    const balanceBefore = getBillBalance(bill, contributions);
+    const paidAmount = payment.amount!==undefined ? Number(payment.amount||0) : balanceBefore.remaining;
+    const { applied } = planBillPayment(bill, contributions, paidAmount);
+    const becomesPaid = bill.isCcStatement ? true : applied >= balanceBefore.remaining - 0.005;
+    setTxns(p=>[{id:paymentTxnId,type:"expense",desc:bill.name,merchant:bill.merchant||"",date:paymentDate,note:"Bill payment",catId:bill.catId,catIds:bill.catIds||[bill.catId],subId:bill.subId||null,accId,people:isFirstPayment?(bill.splitPeople||{}):{},forPerson:attributedPersonId,groupId:bill.groupId||null,groupCollectiveAmount:isFirstPayment?Number(bill.groupCollectiveAmount||0):0,amount:paidAmount,isBillPayment:true,billInvoiceNo:bill.invoiceNo||null,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null,imageBase64:bill.imageBase64||null,paymentImageBase64:bill.paymentImageBase64||null},...p]);
+    setBills(p=>p.map(x=>x.id===bill.id?{...x,
+      ...(becomesPaid?{status:"paid",paidDate:paymentDate}:{}),
+      ...(isFirstPayment?{paidByTxnId:paymentTxnId}:{}),
+      lastPaidAmount:paidAmount,lastPaidDate:paymentDate}:x));
     // WP-OBL-04a: dual-write — also record a real Contribution alongside the
     // legacy paidByTxnId/status write above. Full amount, since this path has
     // no partial-payment concept yet.
-    setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:paymentTxnId, amount:Number(bill.amount||0), txnAmount:Number(bill.amount||0) }, genId));
-    if(bill.recurring && bill.autoGenerate!==false){
+    setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:paymentTxnId, amount:applied, txnAmount:paidAmount }, genId));
+    if(becomesPaid && bill.recurring && bill.autoGenerate!==false){
       const nextDue = computeNextDueDate(bill, paymentDate);
       const nextPeriod = computeNextPeriod(bill, paymentDate);
       const nextValidFrom = bill.billingModel==="prorata" ? nextDue : null;
@@ -1435,7 +1456,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       },...p]);
     }
     setMarkingBillPaid(null);
-  }, [billerAccounts]);
+  }, [billerAccounts, contributions]);
 
   const sharePaymentRequest = useCallback((recipientName, amount, contextLabel, details = {}) => {
     const safeAmount = Number(amount||0);
@@ -1513,6 +1534,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // paying, so this can't drift into 6 separate copies of the same filter.
   const paidViaAccounts = useMemo(()=>accounts.filter(a=>a.type!=="debit"&&a.type!=="upi"),[accounts]);
   const getPerson = useCallback(id=>people.find(p=>p.id===id)||{name:"?",emoji:"👤",color:"#888",relation:"",personType:"contact"},[people]);
+  // UI-2C D-3 — a Bill's own For as display text: the person or group it was created for, or
+  // "Unassigned". Never derived from bill.groupId (that is the split context).
+  const getBillForLabel = useCallback(bill=>{
+    if(bill?.forType==="person") return bill.forId==="__me__" ? "Me" : (people.find(p=>String(p.id)===String(bill.forId))?.name || "Unassigned");
+    if(bill?.forType==="group") return groups.find(g=>String(g.id)===String(bill.forId))?.name || "Unassigned";
+    return "Unassigned";
+  },[people, groups]);
   const getGroup = useCallback(id=>groups.find(g=>g.id===id)||null,[groups]);
   const getRefundCandidates = useCallback((refundTxn, excludeRefundId = null)=>{
     if(!refundTxn || refundTxn.type!=="settlement_in" || !refundTxn.isRefund) return [];
@@ -2678,8 +2706,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const nextPRemaining = Math.max(0, origAmt - nextPSettled);
           updatedSplitPeople = { ...bill.splitPeople, [linkPersonId]:{ ...info, settled:nextPRemaining<=0, settledAmt:nextPSettled, remainingAmt:nextPRemaining } };
         }
-        const allOwedSettled = Object.entries(updatedSplitPeople||{}).filter(([p])=>p!=="__me__").every(([,i])=>i.settled||i.mode!=="owes");
-        return { ...bill, ...(cap>0?{groupCollectiveSettledAmt:nextGroupSettled}:{}), splitPeople:updatedSplitPeople, ...(allOwedSettled?{status:"paid",paidDate:todayStr()}:{}) };
+        // ADR-038 (product owner, 26 Sep): settling split shares is progress between you and
+        // them, not a payment to the provider, so it never marks the Bill paid.
+        return { ...bill, ...(cap>0?{groupCollectiveSettledAmt:nextGroupSettled}:{}), splitPeople:updatedSplitPeople };
       }));
     }
 
@@ -4198,7 +4227,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // QW-1: the chosen bill stays listed even when it no longer matches, and an amount
     // mismatch is shown (and blocks Save) instead of the link silently dropping.
     const billChoicesToShow = getBillChoicesToShow(billMatchCandidates, renderMatchedBill);
-    const billLinkMismatch = isBillPayment ? getBillLinkAmountMismatch(renderMatchedBill, amt) : null;
+    // M2 / ADR-038: a payment is compared with what is still owed on the Bill, not its full amount,
+    // so the remaining balance of a partially paid Bill can be paid from here.
+    const renderMatchedBalance = renderMatchedBill ? getBillBalance(renderMatchedBill, contributions.filter(c=>!(isEditing && String(c.txnId)===String(sourceTxn?.id)))) : null;
+    const billLinkMismatch = isBillPayment ? getBillLinkAmountMismatch(renderMatchedBill && renderMatchedBalance && !renderMatchedBalance.historical ? { ...renderMatchedBill, amount:renderMatchedBalance.remaining } : renderMatchedBill, amt) : null;
 
     // HOTFIX (TDZ): this effect was originally placed BEFORE renderMatchedBill/selectedPids were
     // declared, causing a ReferenceError on every render of this component. Relocated here —
@@ -4614,7 +4646,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const unchosen = getRowsNeedingSplitChoice(allocRows);
         if(unchosen.length){ setRefDupWarning(`Choose A (I pay), O (I owe) or C (they owe) for ${unchosen.map(r=>getPerson(r.targetId).name).join(", ")}.`); return; }
       }
-      if(txnType==="expense" && billLinkMismatch){ setRefDupWarning(`This payment is ${sym}${fmt(billLinkMismatch.paymentAmount)} but the linked bill is ${sym}${fmt(billLinkMismatch.billAmount)}. Change the amount or the bill before saving.`); return; }
+      if(txnType==="expense" && billLinkMismatch){ setRefDupWarning(`This payment is ${sym}${fmt(billLinkMismatch.paymentAmount)} but the bill's balance is ${sym}${fmt(billLinkMismatch.billAmount)}. Change the amount or the bill before saving.`); return; }
       // Credit Card WP: "Add missing transaction" from a statement's reconciliation carries the
       // statement's period as dateMin/dateMax — enforced here too, not just via the date input's
       // min/max, since a typed date can bypass that.
@@ -5124,7 +5156,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // core amount (this path has no partial-payment concept yet); resolvedTxnId is the
           // transaction that made this payment.
           // QW-2: upsert — editing this transaction replaces its Contribution instead of adding another.
-          setContributions(prev=>withBillContributionForTxn(prev, { billId:linkedBillId, txnId:resolvedTxnId, amount:Number(billRecord.amount||0), txnAmount:Number(billRecord.amount||0) }, genId));
+          // M2 / ADR-038: apply at most what is still owed (this transaction's own earlier payment excluded).
+          setContributions(prev=>{
+            const others = prev.filter(c=>String(c.txnId)!==String(resolvedTxnId));
+            const target = bills.find(b=>b.id===linkedBillId);
+            const applied = target ? planBillPayment({ ...target, status:"unpaid" }, others, amt).applied : amt;
+            return withBillContributionForTxn(prev, { billId:linkedBillId, txnId:resolvedTxnId, amount:applied, txnAmount:amt }, genId);
+          });
         } else if(isEditing && sourceTxn?.paidBillId){
           // QW-2: "Bill payment" was switched off on an edit. The transaction stops paying its
           // bill: reopen that bill only if it points back at this transaction (same guard as
@@ -9065,7 +9103,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // is a deliberately separate, pure-budget concept per the existing "two genuinely different
   // questions" comment already in this file. Safe to Spend is not modified anywhere.
   const futureMoneyToday = new Date(); futureMoneyToday.setHours(0,0,0,0);
-  const rawCommitments = getCommitments(bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill, futureMoneyToday);
+  const rawCommitments = getCommitments(bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill, futureMoneyToday, getPartialRemainingByBill(bills, contributions));
   // Debt Service — the release-critical check (does getCardSummary's currentDue already include
   // this cycle's cc_emi installment?) came back YES, so the adapter itself checks txns[] for an
   // already-logged installment before deciding whether to project the current cycle's due date
@@ -14852,7 +14890,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         if(bFilter==="paid") return paidB - paidA || dueA - dueB || billB - billA;
         return dueA - dueB || billB - billA;
       });
-    const totalUnpaid = bills.filter(b=>b.status==="unpaid").reduce((s,b)=>s+getNetBillAmount(b, refundTotalsByBill),0);
+    // ADR-038: what is still owed — a partially paid Bill counts only its remaining balance.
+    const totalUnpaid = bills.filter(b=>b.status==="unpaid").reduce((s,b)=>{ const bal=getBillBalance(b, contributions); return s+(bal.status==="partial" ? bal.remaining : getNetBillAmount(b, refundTotalsByBill)); },0);
     return (
       <div style={{ padding:"0 0 120px" }}>
         {/* Tab bar */}
@@ -15183,7 +15222,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     </div>
                   )}
                   <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
-                    {b.status==="unpaid"&&<button onClick={(e)=>{ e.stopPropagation(); setMarkingBillPaid(b); }} style={{ ...btnP,flex:1,padding:"9px" }}>✅ Mark as Paid</button>}
+                    {b.status==="unpaid"&&<button onClick={(e)=>{ e.stopPropagation(); setMarkingBillPaid(b); }} style={{ ...btnP,flex:1,padding:"9px" }}>Record payment {sym}{fmt(getBillBalance(b, contributions).remaining)}</button>}
                     <button onClick={(e)=>{ e.stopPropagation(); setEditingBill(b); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
                     {b.recurring&&b.status==="unpaid"&&<button onClick={(e)=>{
                       e.stopPropagation();
@@ -17987,6 +18026,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {markingBillPaid&&(
           <MarkBillPaidModal
             bill={markingBillPaid}
+            balance={getBillBalance(markingBillPaid, contributions).remaining}
+            forLabel={getBillForLabel(markingBillPaid)}
+            today={todayStr()}
             accounts={accounts}
             defaultAccId={accounts.find(a=>a.type!=="cc")?.id||""}
             T={T}
@@ -17994,7 +18036,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             fmt={fmt}
             formatShortDate={formatShortDate}
             onClose={()=>setMarkingBillPaid(null)}
-            onConfirm={(accId,transactionRef)=>confirmMarkBillPaid(markingBillPaid,accId,transactionRef)}
+            onConfirm={(accId,transactionRef,payment)=>confirmMarkBillPaid(markingBillPaid,accId,transactionRef,payment)}
           />
         )}
         {billMatchSuggestion&&(
@@ -18005,13 +18047,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <button onClick={()=>setBillMatchSuggestion(null)} style={{ ...btnG,flex:1,padding:"8px" }}>Skip</button>
               <button onClick={()=>{
                 const b=billMatchSuggestion.bill;
-                setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:billMatchSuggestion.txn.date || todayStr(),paidByTxnId:billMatchSuggestion.txn.id}:x));
+                // M2 / ADR-038: apply at most the remaining balance; status follows Contributions.
+                const matchBalance = getBillBalance(b, contributions);
+                const matchApplied = planBillPayment(b, contributions, Number(billMatchSuggestion.txn.amount||0)).applied;
+                const matchBecomesPaid = matchApplied >= matchBalance.remaining - 0.005;
+                const matchIsFirst = !contributions.some(c=>c?.obligationType==="bill" && String(c.obligationId)===String(b.id));
+                setBills(p=>p.map(x=>x.id===b.id?{...x,...(matchBecomesPaid?{status:"paid",paidDate:billMatchSuggestion.txn.date || todayStr()}:{}),...(matchIsFirst?{paidByTxnId:billMatchSuggestion.txn.id}:{})}:x));
                 // WP-OBL-04a: dual-write — also record a real Contribution for this match,
                 // alongside the legacy paidByTxnId/status write above. Full amount — this path
                 // (like the other two) has no partial-payment concept yet.
-                setContributions(prev=>withBillContributionForTxn(prev, { billId:b.id, txnId:billMatchSuggestion.txn.id, amount:Number(b.amount||0), txnAmount:Number(b.amount||0) }, genId));
+                setContributions(prev=>withBillContributionForTxn(prev, { billId:b.id, txnId:billMatchSuggestion.txn.id, amount:matchApplied, txnAmount:Number(billMatchSuggestion.txn.amount||0) }, genId));
                 setTxns(p=>p.map(x=>x.id===billMatchSuggestion.txn.id?{...x,isBillPayment:true,billInvoiceNo:b.invoiceNo||"",paidBillId:b.id,paidBillName:b.name}:x));
-                if(b.recurring){ const next=new Date(b.dueDate); if(b.frequency==="monthly") next.setMonth(next.getMonth()+1); else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3); else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6); else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
+                if(matchBecomesPaid && b.recurring){ const next=new Date(b.dueDate); if(b.frequency==="monthly") next.setMonth(next.getMonth()+1); else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3); else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6); else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
                 setBillMatchSuggestion(null);
               }} style={{ ...btnP,flex:2,padding:"8px",background:T.success }}>✅ Yes, mark paid</button>
             </div>

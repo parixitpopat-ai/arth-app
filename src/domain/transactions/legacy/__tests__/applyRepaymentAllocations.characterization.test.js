@@ -52,7 +52,7 @@ test("characterization: partial settlement on a transaction leaves settled=false
   assert.equal(share.settled, false);
 });
 
-test("characterization: settling a bill share recomputes bill.status to paid once ALL owed shares are settled (this session's fix)", () => {
+test("characterization (ADR-038): settling every owed share updates the split but leaves bill.status open — settlement is not a payment", () => {
   const bills = [{
     id: "b1",
     splitPeople: {
@@ -66,8 +66,9 @@ test("characterization: settling a bill share recomputes bill.status to paid onc
     settlementLinks: [{ kind: "bill", id: "b1", amount: 858.40 }],
     todayStr,
   });
-  assert.equal(result[0].status, "paid", "bill should flip to paid once every owed share is settled");
-  assert.equal(result[0].paidDate, "2026-08-03");
+  assert.equal(result[0].status, "unpaid", "ADR-038: settling shares never marks the Bill paid");
+  assert.equal(result[0].paidDate, undefined, "no paid date is invented");
+  assert.equal(result[0].splitPeople.p1.settled, true, "the share itself is settled");
 });
 
 test("characterization: settling ONE of several unsettled bill shares does NOT flip status to paid", () => {
@@ -103,7 +104,7 @@ test("characterization: bill settlement mirrors onto the linked source transacti
     settlementLinks: [{ kind: "bill", id: "b1", amount: 858.40 }],
     todayStr,
   });
-  assert.equal(result.bills[0].status, "paid");
+  assert.equal(result.bills[0].status, "unpaid", "ADR-038: settling shares never marks the Bill paid");
   const mirroredShare = result.txns[0].people.p1;
   assert.equal(mirroredShare.settled, true, "the linked transaction's own share must reflect the settlement too — this was the exact bug found and fixed this session");
   assert.equal(mirroredShare.remainingAmt, 0);

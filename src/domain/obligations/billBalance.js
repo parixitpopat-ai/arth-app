@@ -148,3 +148,46 @@ export function getTxnUnallocated(txn, contributions) {
 export function getBillRemaining(bill, contributions) {
   return getBillBalance(bill, contributions).remaining;
 }
+
+/**
+ * The single place stored Bill status follows Contributions (ADR-038 §6).
+ * For every non-card, non-cancelled Bill that has Contributions: status
+ * becomes "paid" when they cover the amount, otherwise "unpaid" (open,
+ * possibly partially paid). When a Bill becomes paid, paidDate is the
+ * latest payment's date; paidByTxnId keeps the first payment (the one that
+ * carries the Bill's split). Bills without Contributions are left alone
+ * (legacy paid Bills stay paid; the delete/unlink paths reopen those).
+ * Returns the same array when nothing changes.
+ */
+export function withProjectedBillStatuses(bills, contributions, txns) {
+  const list = Array.isArray(bills) ? bills : [];
+  let changed = false;
+  const next = list.map(bill => {
+    if (!bill || bill.isCcStatement || bill.status === "cancelled") return bill;
+    const own = getBillContributions(bill, contributions);
+    if (!own.length) return bill;
+    const target = projectStoredBillStatus(bill, contributions);
+    const dates = own.map(cn => (txns || []).find(t => sameId(t.id, cn.txnId))?.date).filter(Boolean).sort();
+    const firstTxnId = bill.paidByTxnId && own.some(cn => sameId(cn.txnId, bill.paidByTxnId)) ? bill.paidByTxnId : own[0].txnId;
+    let out = bill;
+    if (target === "paid") {
+      const paidDate = bill.status === "paid" && bill.paidDate ? bill.paidDate : (dates[dates.length - 1] || bill.paidDate || null);
+      if (bill.status !== "paid" || bill.paidDate !== paidDate || !sameId(bill.paidByTxnId, firstTxnId)) out = { ...bill, status: "paid", paidDate, paidByTxnId: firstTxnId };
+    } else if (bill.status !== "unpaid" || bill.paidDate || !sameId(bill.paidByTxnId, firstTxnId)) {
+      out = { ...bill, status: "unpaid", paidDate: null, paidByTxnId: firstTxnId };
+    }
+    if (out !== bill) changed = true;
+    return out;
+  });
+  return changed ? next : bills;
+}
+
+/** { [billId]: remaining } for open Bills that are partially paid (for committed-spending reads). */
+export function getPartialRemainingByBill(bills, contributions) {
+  const out = {};
+  (bills || []).forEach(b => {
+    const bal = getBillBalance(b, contributions);
+    if (bal.status === "partial") out[String(b.id)] = bal.remaining;
+  });
+  return out;
+}

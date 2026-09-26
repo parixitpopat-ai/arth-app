@@ -1,3 +1,6 @@
+// ADR-038 (product owner, 26 Sep 2026): the live code no longer marks a Bill paid when every
+// split share is settled — settlement is not a payment to the provider. This characterization
+// copy follows the live behaviour so the equivalence tests keep comparing like with like.
 // TRX-002C2 — Characterization extraction of `applyRepaymentAllocations`.
 //
 // THIS IS NOT A REWRITE. Every line of logic below is copied byte-for-byte from
@@ -69,13 +72,11 @@ export function applyRepaymentAllocationsCharacterization({ txns, bills, personI
         ? Math.min(groupCap, Number(bill.groupCollectiveSettledAmt || 0) + addedAmt)
         : bill.groupCollectiveSettledAmt;
       const updatedSplitPeople = { ...bill.splitPeople, [personId]: { ...info, settled: nextRemaining <= 0, settledAmt: nextSettled, remainingAmt: nextRemaining } };
-      const allOwedSettled = Object.entries(updatedSplitPeople).filter(([p]) => p !== "__me__").every(([, i]) => i.settled || i.mode !== "owes");
       if (bill.paidByTxnId && addedAmt > 0) billTxnMirrors.push({ txnId: bill.paidByTxnId, addedAmt });
       return {
         ...bill,
         splitPeople: updatedSplitPeople,
         ...(groupCap > 0 ? { groupCollectiveSettledAmt: nextGroupSettled } : {}),
-        ...(allOwedSettled ? { status: "paid", paidDate: todayStr() } : {}),
       };
     });
 
@@ -132,8 +133,7 @@ export function applyRepaymentAllocationsCharacterization({ txns, bills, personI
         const nextPRemaining = Math.max(0, origAmt - nextPSettled);
         updatedSplitPeople = { ...bill.splitPeople, [linkPersonId]: { ...info, settled: nextPRemaining <= 0, settledAmt: nextPSettled, remainingAmt: nextPRemaining } };
       }
-      const allOwedSettled = Object.entries(updatedSplitPeople || {}).filter(([p]) => p !== "__me__").every(([, i]) => i.settled || i.mode !== "owes");
-      return { ...bill, ...(cap > 0 ? { groupCollectiveSettledAmt: nextGroupSettled } : {}), splitPeople: updatedSplitPeople, ...(allOwedSettled ? { status: "paid", paidDate: todayStr() } : {}) };
+      return { ...bill, ...(cap > 0 ? { groupCollectiveSettledAmt: nextGroupSettled } : {}), splitPeople: updatedSplitPeople };
     });
   }
 

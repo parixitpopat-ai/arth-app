@@ -86,3 +86,31 @@ test("Unallocated exists only for bill-linked transactions", () => {
   assert.equal(getBillRemaining(bill, [c("c1", "b1", "t1", 2500)]), 1300);
   assert.equal(getBillRemaining({ ...bill, status: "cancelled" }, []), 0);
 });
+
+test("projection: status follows Contributions; the first payment stays paidByTxnId", async () => {
+  const { withProjectedBillStatuses, getPartialRemainingByBill } = await import("./billBalance.js");
+  const txns = [{ id: "t1", date: "2026-09-12" }, { id: "t2", date: "2026-09-20" }];
+  const b = { id: "b1", amount: 3800, status: "unpaid" };
+  const part = withProjectedBillStatuses([b], [c("c1", "b1", "t1", 2500)], txns);
+  assert.equal(part[0].status, "unpaid");
+  assert.equal(part[0].paidByTxnId, "t1");
+  const full = withProjectedBillStatuses(part, [c("c1", "b1", "t1", 2500), c("c2", "b1", "t2", 1300)], txns);
+  assert.equal(full[0].status, "paid");
+  assert.equal(full[0].paidDate, "2026-09-20", "paid on the latest payment's date");
+  assert.equal(full[0].paidByTxnId, "t1");
+  assert.equal(withProjectedBillStatuses(full, [c("c1", "b1", "t1", 2500), c("c2", "b1", "t2", 1300)], txns), full, "no change → same array");
+  const reopened = withProjectedBillStatuses(full, [c("c1", "b1", "t1", 2500)], txns);
+  assert.equal(reopened[0].status, "unpaid");
+  assert.equal(reopened[0].paidDate, null);
+  assert.deepEqual(getPartialRemainingByBill(reopened, [c("c1", "b1", "t1", 2500)]), { b1: 1300 });
+});
+
+test("projection leaves legacy, card-statement and cancelled Bills alone", async () => {
+  const { withProjectedBillStatuses } = await import("./billBalance.js");
+  const bills = [
+    { id: "legacy", amount: 500, status: "paid", paidDate: "2025-01-01" },
+    { id: "cc", amount: 900, status: "unpaid", isCcStatement: true },
+    { id: "x", amount: 100, status: "cancelled" },
+  ];
+  assert.equal(withProjectedBillStatuses(bills, [c("c1", "cc", "t1", 900), c("c2", "x", "t2", 100)], []), bills);
+});
