@@ -78,6 +78,7 @@ import { generateDueStatements } from "./domain/cards/statementBills";
 import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
+import { withBillForSnapshots } from "./domain/bills/billFor";
 import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
 import { getGroupDefaultIntent } from "./domain/group/defaultIntent";
 import { withBillContributionForTxn, withoutBillContributionsForTxn, withoutBillContributionsForTxns, reopenBillsPaidByDeletedTxns } from "./domain/obligations/billContributionSync";
@@ -1130,6 +1131,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(membershipsChanged) setMemberships(correctedMemberships);
     if(relationshipsChanged) setMembershipRelationships(correctedRelationships);
   },[memberships, membershipRelationships]);
+  // UI-2C D-3 / Q-4 — every Bill keeps its own "For" (person / group / unassigned), copied
+  // once from its relationship's attribution. Existing Bills are snapshotted on the first run
+  // (the one-time historical backfill); every Bill created afterwards, by any path, is
+  // snapshotted as it appears. A Bill that already has a For is never rewritten, and
+  // withBillForSnapshots returns the same array when nothing needs doing, so this is a no-op
+  // on every later render.
+  useEffect(()=>{
+    const next = withBillForSnapshots(bills, { billerAccounts, people, groups });
+    if(next!==bills) setBills(next);
+  },[bills, billerAccounts, people, groups]);
   useEffect(()=>safeSetLocalStorage("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
   // Fee Payment was a separate, simpler mechanism (no grace days, no person, no exact-date
   // concept) that's now merged into the single Membership mechanism. Converts each existing fee
