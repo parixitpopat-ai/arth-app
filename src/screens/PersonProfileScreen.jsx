@@ -106,6 +106,8 @@ export function PersonProfileScreen({
   onOpenConnection,
   onViewUnsettled,          // preserves the pre-existing Unsettled-drill-down trigger — if provided,
                             // tapping "They owe me" (when > 0) calls this instead of just displaying the figure
+  topSection,               // UI-2C P-4 — Financial relationships + Capability tiles, rendered by the
+                            //   caller above the existing sections (all existing sections stay)
 }) {
   if (!person) return null;
 
@@ -340,8 +342,7 @@ export function PersonProfileScreen({
         canMoveUp={sectionOrder.indexOf("reminders") > 0} canMoveDown={sectionOrder.indexOf("reminders") < sectionOrder.length - 1}>
         {reminders.map(r => (
           <div key={r.type} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}>
-            <span style={{ color: T.text, fontSize: 13 }}>{r.type === "birthday" ? "🎂" : "💍"} {r.label}</span>
-            <span style={{ color: T.sub, fontSize: 12 }}>{r.label} in {r.daysAway}d ({r.label && r.nextDate ? r.label : ""})</span>
+            <span style={{ color: T.text, fontSize: 13 }}>{r.type === "birthday" ? "🎂" : "💍"} {r.text}</span>
           </div>
         ))}
         <div style={{ color: T.sub, fontSize: 10, marginTop: 6 }}>Shown based on the dates in About — no notification is scheduled.</div>
@@ -357,7 +358,7 @@ export function PersonProfileScreen({
           <div style={{ fontSize: 40 }}>{person.emoji || "👤"}</div>
           <div>
             <div style={{ color: T.text, fontSize: 20, fontWeight: 900 }}>{person.name} {person.favorite && <span style={{ color: "#f0a500" }}>★</span>}</div>
-            <div style={{ color: T.sub, fontSize: 12 }}>{uiTypeLabel || person.personType}{person.relation ? ` · ${person.relation}` : ""}</div>
+            <div style={{ color: T.sub, fontSize: 12 }}>{[uiTypeLabel || person.personType, person.relation].filter(Boolean).join(" · ")}</div>
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -372,7 +373,9 @@ export function PersonProfileScreen({
         </div>
       )}
 
-      {sectionOrder.map(key => <div key={key}>{sections[key]?.()}</div>)}
+      {!arranging && topSection ? <div style={{ marginBottom: 12 }}>{topSection}</div> : null}
+
+      {sectionOrder.map(key => <div key={key} data-section={key}>{sections[key]?.()}</div>)}
 
       {/* Actions — existing Settle/Request/Edit/Archive, unchanged logic, passed through */}
       {!person.isMe && (

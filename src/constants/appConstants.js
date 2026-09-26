@@ -1,10 +1,11 @@
 // Capabilities a person can have — replaces the old hardcoded personType==="dependant"/"contact"
 // checks scattered across the app. `personType` (Contact/Dependant/Vendor/...) stays as an
 // identity classification, but no longer controls which features are available; `modules` does.
+// Labels follow Claude Design's D-15 label map (sentence case, "Can borrow money").
 export const PERSON_MODULES = [
-  { id:"sharedExpenses", label:"Shared Expenses", icon:"🤝" },
-  { id:"borrowMoney", label:"Can Borrow Money", icon:"💳" },
-  { id:"budget", label:"Monthly Budget", icon:"📊" },
+  { id:"sharedExpenses", label:"Shared expenses", icon:"🤝" },
+  { id:"borrowMoney", label:"Can borrow money", icon:"💳" },
+  { id:"budget", label:"Monthly budget", icon:"📊" },
   { id:"gifts", label:"Gifts", icon:"🎁" },
   { id:"notes", label:"Notes", icon:"📝" },
   { id:"reminders", label:"Reminders", icon:"🔔" },
@@ -32,6 +33,10 @@ export const GROUP_MODULES = [
   { id:"budget", label:"Budget", icon:"📊" },
   { id:"bills", label:"Bills", icon:"🧾" },
   { id:"vendors", label:"Vendors", icon:"🏪" },
+  // UI-2C D-8 / Q-3 — optional; off for existing groups (getGroupModules below) and not
+  // offered in Add Group. Switched on from Edit group.
+  { id:"notes", label:"Notes", icon:"📝" },
+  { id:"reminders", label:"Reminders", icon:"🔔" },
 ];
 
 export const GROUP_TYPE_DEFAULT_MODULES = {

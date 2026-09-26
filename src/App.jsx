@@ -57,6 +57,20 @@ import { getPersonSixMonthActivity } from "./domain/person/activity";
 import { getPersonReminders } from "./domain/person/reminders";
 import { getSectionOrder, moveSection } from "./domain/person/sectionOrder";
 import { getPersonTypeUILabel } from "./domain/person/personType";
+import { getSplitShareMode, getNewSplitRowMode, getRowsNeedingSplitChoice, getSplitDefaultChoice, withSplitDefault, SPLIT_DEFAULT_OPTIONS } from "./domain/person/splitDefault";
+import { buildNewPerson, applyPersonSetup } from "./domain/person/newPerson";
+import { buildNewGroup } from "./domain/group/newGroup";
+import AddPersonSheet from "./components/people/AddPersonSheet";
+import PersonSetupSheet from "./components/people/PersonSetupSheet";
+import AddGroupSheet from "./components/people/AddGroupSheet";
+import { FinancialRelationships, CapabilityTiles, PinnedBill } from "./components/people/RelationshipBlocks";
+import { getAttributedRelationships, getOpenBillBadge, summarizeRelationships } from "./domain/relationships/attributedAccounts";
+import { relationshipSummaryText } from "./components/people/relationshipText";
+import { getPersonCapabilityTiles } from "./domain/person/capabilityTiles";
+import { getGroupCapabilityTiles } from "./domain/group/capabilityTiles";
+import { getGroupReminders } from "./domain/group/reminders";
+import { getBillsFor } from "./domain/bills/billFor";
+import GroupSettingsEditor from "./components/people/GroupSettingsEditor";
 import { PersonProfileScreen } from "./screens/PersonProfileScreen";
 import { isSchoolRelationshipCurrent } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
@@ -77,6 +91,7 @@ import { generateDueStatements } from "./domain/cards/statementBills";
 import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
+import { withBillForSnapshots } from "./domain/bills/billFor";
 import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
 import { getGroupDefaultIntent } from "./domain/group/defaultIntent";
 import { withBillContributionForTxn, withoutBillContributionsForTxn, withoutBillContributionsForTxns, reopenBillsPaidByDeletedTxns } from "./domain/obligations/billContributionSync";
@@ -1129,6 +1144,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(membershipsChanged) setMemberships(correctedMemberships);
     if(relationshipsChanged) setMembershipRelationships(correctedRelationships);
   },[memberships, membershipRelationships]);
+  // UI-2C D-3 / Q-4 — every Bill keeps its own "For" (person / group / unassigned), copied
+  // once from its relationship's attribution. Existing Bills are snapshotted on the first run
+  // (the one-time historical backfill); every Bill created afterwards, by any path, is
+  // snapshotted as it appears. A Bill that already has a For is never rewritten, and
+  // withBillForSnapshots returns the same array when nothing needs doing, so this is a no-op
+  // on every later render.
+  useEffect(()=>{
+    const next = withBillForSnapshots(bills, { billerAccounts, people, groups });
+    if(next!==bills) setBills(next);
+  },[bills, billerAccounts, people, groups]);
   useEffect(()=>safeSetLocalStorage("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
   // Fee Payment was a separate, simpler mechanism (no grace days, no person, no exact-date
   // concept) that's now merged into the single Membership mechanism. Converts each existing fee
@@ -1245,6 +1270,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // to auto-expand that person's row, instead of duplicating spend/budget/category cards locally.
   const [budgetFocusPersonId, setBudgetFocusPersonId] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
+  // UI-2C M1 — People | Groups switch and the Add person / P-3 / Add group sheets live here,
+  // not inside <People/>, which remounts whenever AppContent re-renders (e.g. after setPeople).
+  const [subView, setSubView] = useState("people");
+  const [peopleSheet, setPeopleSheet] = useState(null); // {kind:"addPerson"} | {kind:"setup",person} | {kind:"addGroup"}
+  const [preselectedAttribution, setPreselectedAttribution] = useState(null); // {type:"person"|"group", id}
   const [groupViewMode, setGroupViewMode] = useState("overall");
   const [showGroupOwesBreakdown, setShowGroupOwesBreakdown] = useState(false);
   const [groupSpendFilter, setGroupSpendFilter] = useState(null);
@@ -4578,6 +4608,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       // QW-1: never save a bill payment whose amount no longer matches the chosen bill — that used
       // to rewrite the bill or (after the link silently dropped) create a duplicate. Partial
       // payments ("Keep link" with a remainder) arrive with ADR-038 / WP-4.
+      // UI-2C D-4: a person whose default is "Ask each time" joins a split row with no mode
+      // chosen. Ask before saving instead of picking one silently.
+      if(txnType==="expense" && (splitMode==="allocate" || splitMode==="unified")){
+        const unchosen = getRowsNeedingSplitChoice(allocRows);
+        if(unchosen.length){ setRefDupWarning(`Choose A (I pay), O (I owe) or C (they owe) for ${unchosen.map(r=>getPerson(r.targetId).name).join(", ")}.`); return; }
+      }
       if(txnType==="expense" && billLinkMismatch){ setRefDupWarning(`This payment is ${sym}${fmt(billLinkMismatch.paymentAmount)} but the linked bill is ${sym}${fmt(billLinkMismatch.billAmount)}. Change the amount or the bill before saving.`); return; }
       // Credit Card WP: "Add missing transaction" from a statement's reconciliation carries the
       // statement's period as dateMin/dateMax — enforced here too, not just via the date input's
@@ -4787,7 +4823,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const shares = splitMode==="split"?calcShares():{};
         const psplit = {};
         Object.entries(shares).forEach(([pid,sh])=>{
-          const collect = collectMap[pid]!==undefined ? collectMap[pid] : getPerson(pid).personType!=="dependant";
+          const collect = collectMap[pid]!==undefined ? collectMap[pid] : getSplitShareMode(getPerson(pid))==="owes";
           // FIX: preserve an already-settled share exactly on edit, instead of silently
           // rebuilding it unsettled. See script header for full context -- confirmed real bug.
           const priorInfo = isEditing ? (sourceTxn?.splitPeople?.[pid] || sourceTxn?.people?.[pid]) : null;
@@ -6397,7 +6433,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           return (
                             <button key={`${x.type}_${x.id}`} onClick={()=>{
                               if(isSelected){ setAllocRows(prev=>prev.filter(r=>!(r.targetType===x.type&&r.targetId===x.id))); return; }
-                              if(x.type==="person"){ setSplitMode("allocate"); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:x.id, mode:"owes", amount:"", items:[] }]); }
+                              if(x.type==="person"){ setSplitMode("allocate"); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:x.id, mode:getNewSplitRowMode(getPerson(x.id)), amount:"", items:[] }]); }
                               else {
                                 const g = groups.find(gr=>gr.id===x.id);
                                 const di = getGroupDefaultIntent(g);
@@ -6435,6 +6471,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           <div key={row.id} style={{ display:"flex",flexDirection:"column",gap:6,background:T.card,borderRadius:10,padding:"8px 10px" }}>
                             <div style={{ display:"flex",alignItems:"center",gap:6 }}>
                               <span style={{ flex:1,color:T.text,fontSize:13,fontWeight:700 }}>{row.targetType==="group"?(target.icon||"👥"):(target.emoji||"👤")} {target.name}</span>
+                              {row.targetType==="person"&&!row.mode&&<span style={{ color:T.warn,fontSize:10,fontWeight:800 }}>Choose one</span>}
                               <div style={{ display:"flex",gap:4 }}>
                                 {[["spent_on","A"],["i_owe","O"],["owes","C"]].map(([m,label])=>(
                                   <button key={m} title={label==="A"?"Attribute":label==="O"?"Own":"Collect"} onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,mode:m}:r))} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:800,color:row.mode===m?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
@@ -10048,50 +10085,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
   // ── PEOPLE ─────────────────────────────────────────────────────────────────
   const People = () => {
-    const [newName,setNewName]=useState("");
-    const [newEmoji,setNewEmoji]=useState("👤");
-    const [newRelation,setNewRelation]=useState("");
     const [editingGroupName,setEditingGroupName]=useState("");
     const [editingGroupBudget,setEditingGroupBudget]=useState("");
     const [editingGroupMembers,setEditingGroupMembers]=useState([]);
     const [editingGroupIncludeMe,setEditingGroupIncludeMe]=useState(true);
     const [editingGroupColor,setEditingGroupColor]=useState("");
+    // UI-2C G-13 — modules, description, notes and reminders being edited; saved with the rest.
+    const [editingGroupExtras,setEditingGroupExtras]=useState(null);
     const [isEditingGroup,setIsEditingGroup]=useState(false);
   const [editingGroupTypeId,setEditingGroupTypeId]=useState("");
-    const [newColor,setNewColor]=useState(PALETTE[1]);
-    const [newPersonType,setNewPersonType]=useState("contact");
-    const [newCreditLimit,setNewCreditLimit]=useState("");
-    const [newSpendBudget,setNewSpendBudget]=useState("");
-    // 3-step Add Person wizard: Identity → Capabilities → Details
-    const [addPersonStep,setAddPersonStep]=useState(1);
-    const [newModules,setNewModules]=useState(null); // null = not yet touched, use type default
-    const [newUnlimitedCredit,setNewUnlimitedCredit]=useState(false);
-    const [newFavorite,setNewFavorite]=useState(false);
-    const [newDefaultSettlement,setNewDefaultSettlement]=useState("UPI");
-    const effectiveNewModules = newModules ?? getPersonModules({personType:newPersonType,isMe:false});
-    const toggleNewModule = (id) => setNewModules(prev=>{
-      const cur = prev ?? getPersonModules({personType:newPersonType,isMe:false});
-      return cur.includes(id) ? cur.filter(x=>x!==id) : [...cur,id];
-    });
-    const resetAddPersonWizard = () => {
-      setAddPersonStep(1); setNewName(""); setNewEmoji("👤"); setNewRelation(""); setNewPersonType("contact");
-      setNewModules(null); setNewCreditLimit(""); setNewUnlimitedCredit(false); setNewSpendBudget("");
-      setNewFavorite(false); setNewDefaultSettlement("UPI"); setNewColor(PALETTE[1]);
-    };
-    const [newGroupName,setNewGroupName]=useState("");
-    const [newGroupType,setNewGroupType]=useState("");
-    const [newGroupTypeId,setNewGroupTypeId]=useState("");
-    const [newGroupColor,setNewGroupColor]=useState(PALETTE[5]);
-    const [newGroupMembers,setNewGroupMembers]=useState([]);
-    const [newGroupIncludeMe,setNewGroupIncludeMe]=useState(true);
-    const [newGroupManualLimit,setNewGroupManualLimit]=useState("");
-    const [addGroupStep,setAddGroupStep]=useState(1);
-    const [newGroupEnableBudget,setNewGroupEnableBudget]=useState(false);
-    const resetAddGroupWizard = () => {
-      setAddGroupStep(1); setNewGroupName(""); setNewGroupTypeId(""); setNewGroupMembers([]);
-      setNewGroupIncludeMe(true); setNewGroupManualLimit(""); setNewGroupEnableBudget(false); setNewGroupColor(PALETTE[5]);
-    };
-    const [subView,setSubView]=useState("people");
     const [shareMonth,setShareMonth]=useState(()=>{ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
     const [showUpiPicker,setShowUpiPicker]=useState(false);
     const [pendingShareBase,setPendingShareBase]=useState("");
@@ -10166,21 +10168,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const nextFavorite = !person.favorite;
       setPeople(prev=>prev.map(x=>x.id===person.id?{...x,favorite:nextFavorite}:x));
       setSelectedPerson(prev=>prev?.id===person.id?{...prev,favorite:nextFavorite}:prev);
-    };
-
-    const addPerson=()=>{
-      if(!newName.trim()) return;
-      setPeople(p=>[...p,{ id:genId(), name:newName.trim(), emoji:newEmoji, relation:newRelation, color:newColor, personType:newPersonType, creditLimit:newUnlimitedCredit?0:(parseFloat(newCreditLimit)||0), spendBudget:parseFloat(newSpendBudget)||0, favorite:newFavorite, defaultSettlement:newDefaultSettlement, modules:effectiveNewModules }]);
-      resetAddPersonWizard();
-    };
-
-    const addGroup=()=>{
-      if(!newGroupName.trim()) return;
-      const gtlow=(newGroupType||"group").toLowerCase();
-      const gicon=gtlow.includes("house")||gtlow.includes("flat")||gtlow.includes("property")?"🏠":gtlow.includes("trip")||gtlow.includes("travel")?"✈️":gtlow.includes("office")||gtlow.includes("work")?"💼":gtlow.includes("family")?"👨‍👩‍👧":gtlow.includes("friend")?"👫":gtlow.includes("society")||gtlow.includes("building")?"🏢":"👥";
-      const gtMeta = GROUP_TYPES.find(t=>t.id===newGroupTypeId);
-      setGroups(p=>[...p,{ id:genId(), type:gtMeta?.label||newGroupType||"Group", typeId:newGroupTypeId||"other", name:newGroupName.trim(), icon:gtMeta?.icon||gicon, color:newGroupColor, members:newGroupMembers, includeMe:newGroupIncludeMe, manualLimit:newGroupEnableBudget?(parseFloat(newGroupManualLimit)||0):0, defaultIntent:gtMeta?.default||"split", modules:GROUP_TYPE_DEFAULT_MODULES[newGroupTypeId||"other"]||GROUP_TYPE_DEFAULT_MODULES.other }]);
-      resetAddGroupWizard();
     };
 
     if(selectedPerson){
@@ -10475,6 +10462,34 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <PersonProfileScreen
             person={p}
             balance={s}
+            topSection={p.isMe ? null : (()=>{
+              // UI-2C P-4 — relationships as a list, capabilities as tiles. Tiles open the
+              // existing screen or section for that capability; nothing existing is removed.
+              const rows = getAttributedRelationships({ targetType:"person", targetId:p.id, billerAccounts, bills });
+              const openSection = key=>{
+                setExpandedSection(`profile_${key}_${p.id}`);
+                setTimeout(()=>document.querySelector(`[data-section="${key}"]`)?.scrollIntoView({ behavior:"smooth", block:"start" }), 50);
+              };
+              const tileTarget = {
+                budget: ()=>{ setBudgetFocusPersonId(p.id); setTab("budget"); setShowSettings(false); },
+                sharedExpenses: ()=>openSection("financialPosition"),
+                borrowMoney: ()=>openSection("financialPosition"),
+                gifts: ()=>openSection("capabilities"),
+                notes: ()=>openSection("about"),
+                reminders: ()=>openSection("reminders"),
+              };
+              const tiles = getPersonCapabilityTiles({
+                modules:getPersonModules(p), moduleDefs:PERSON_MODULES, balance:s, spent, spendBudget,
+                giftCount:personGifts.length, loanOutstanding:personLoanOutstanding,
+                notes:p.notes, reminders:getPersonReminders(p, todayStr()), sym, fmt,
+              }).map(t=>({ ...t, onClick:tileTarget[t.id] }));
+              return <>
+                <FinancialRelationships T={T} rows={rows} sym={sym} fmt={fmt}
+                  onOpen={ba=>setActiveBillerForAction(ba)}
+                  onAdd={()=>{ setPreselectedAttribution({ type:"person", id:p.id }); setShowAddBillerAccount(true); }}/>
+                <CapabilityTiles T={T} tiles={tiles} onManage={()=>setEditingPerson(p)}/>
+              </>;
+            })()}
             txns={txns} bills={bills}
             groups={personGroupsForBalance}
             groupOwedByMe={groupOwedByMe}
@@ -10907,6 +10922,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         setEditingGroupIncludeMe(g.includeMe !== false);
         setEditingGroupTypeId(g.typeId||"other");
         setEditingGroupColor(g.color||"");
+        setEditingGroupExtras({ modules:getGroupModules(g), description:g.description||"", notes:g.notes||"", reminders:getGroupReminders(g) });
         setIsEditingGroup(true);
       };
 
@@ -10917,6 +10933,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         setEditingGroupIncludeMe(g.includeMe !== false);
         setEditingGroupTypeId(g.typeId||"other");
         setEditingGroupColor(g.color||"");
+        setEditingGroupExtras(null);
         setIsEditingGroup(false);
       };
 
@@ -10937,6 +10954,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           defaultIntent:getGroupDefaultIntent(g),
           color:editingGroupColor||g.color,
         };
+        if(editingGroupExtras){
+          updated.modules = editingGroupExtras.modules;
+          updated.reminders = editingGroupExtras.reminders;
+          const desc = String(editingGroupExtras.description||"").trim();
+          const notesVal = String(editingGroupExtras.notes||"").trim();
+          if(desc) updated.description = desc; else delete updated.description;
+          if(notesVal) updated.notes = notesVal; else delete updated.notes;
+        }
         setGroups(prev=>prev.map(x=>x.id===g.id?updated:x));
         setSelectedGroup(updated);
         setIsEditingGroup(false);
@@ -11236,6 +11261,38 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
             </div>}
 
+            {isEditingGroup && editingGroupExtras ? (
+              <div style={{ marginBottom:14 }}>
+                <GroupSettingsEditor T={T} moduleDefs={GROUP_MODULES} value={editingGroupExtras} onChange={setEditingGroupExtras} genId={genId} today={todayStr()}/>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10,marginTop:14 }}>
+                  <button onClick={cancelEditingGroup} style={btnG}>Cancel</button>
+                  <button data-testid="group-edit-save" onClick={saveGroupEdits} style={btnP}>Save</button>
+                </div>
+              </div>
+            ) : (()=>{
+              // UI-2C G-12 — the overdue Bill whose own For is this group, then relationships
+              // (a list) and capabilities (tiles). Everything below stays as it was.
+              const pinned = getBillsFor(bills, "group", g.id)
+                .filter(b=>b.status!=="paid" && b.status!=="cancelled")
+                .map(b=>({ b, badge:getOpenBillBadge(b) }))
+                .filter(x=>x.badge.kind==="overdue")
+                .sort((x,y)=>y.badge.days-x.badge.days)[0];
+              const rows = getAttributedRelationships({ targetType:"group", targetId:g.id, billerAccounts, bills });
+              const vendorCount = new Set(txns.filter(t=>t.groupId===g.id && t.type==="expense" && t.merchant).map(t=>String(t.merchant).trim().toLowerCase())).size;
+              const tiles = getGroupCapabilityTiles({ group:g, modules:getGroupModules(g), moduleDefs:GROUP_MODULES, owedToMe:total, iOwe:groupIOwe, budget:groupBudget, spent:groupTotalSpend, relationshipCount:rows.length, vendorCount, today:todayStr(), sym, fmt })
+                .map(t=>({ ...t, onClick:(t.id==="notes"||t.id==="reminders") ? startEditingGroup : undefined }));
+              return (
+                <div style={{ marginBottom:14 }}>
+                  {g.description ? <div style={{ color:T.sub,fontSize:12,marginBottom:4 }}>{g.description}</div> : null}
+                  {pinned ? <PinnedBill T={T} bill={pinned.b} forName={g.name} days={pinned.badge.days} sym={sym} fmt={fmt} onOpen={()=>{ setSelectedGroup(null); setTab("bills"); setShowSettings(false); }}/> : null}
+                  <FinancialRelationships T={T} rows={rows} sym={sym} fmt={fmt}
+                    onOpen={ba=>setActiveBillerForAction(ba)}
+                    onAdd={()=>{ setPreselectedAttribution({ type:"group", id:g.id }); setShowAddBillerAccount(true); }}/>
+                  <CapabilityTiles T={T} tiles={tiles} onManage={startEditingGroup}/>
+                </div>
+              );
+            })()}
+
             <div style={{ borderTop:`1px solid ${T.border}`,paddingTop:12,marginTop:4 }}>
               {(g.manualLimit||0)>0&&<div style={{ ...card,marginBottom:12,padding:"12px 14px",background:T.accentSoft,border:`1px solid ${T.accent}33` }}>
                 <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:4 }}>Manual group spend cap</div>
@@ -11297,22 +11354,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     return (
       <div style={{ padding:"14px 16px 0" }}>
         <div style={{ display:"flex",gap:0,marginBottom:12,background:T.pill,borderRadius:12,padding:4 }}>
-          {[["people","👥 People"],["groups","🏘️ Groups"]].map(([v,l])=>(
+          {[["people",`People · ${1+people.filter(p=>!p.isMe && !isPersonArchived(p)).length}`],["groups",`Groups · ${getActiveGroups(groups).length}`]].map(([v,l])=>(
             <button key={v} onClick={()=>setSubView(v)} style={{ flex:1,background:subView===v?T.card:"transparent",border:subView===v?`1px solid ${T.border}`:"none",borderRadius:9,padding:"8px 0",cursor:"pointer",fontSize:13,fontWeight:700,color:subView===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
           ))}
-        </div>
-        <div style={{ display:"flex",gap:8,marginBottom:16,alignItems:"center" }}>
-          <button onClick={()=>setSubView("people")} style={{ background:T.accent,border:"none",borderRadius:10,padding:"9px 18px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>+ Add</button>
-          <div style={{ display:"flex",gap:6,flex:1 }}>
-            {subView==="people"&&<div style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Adding Person</div>}
-            {subView==="groups"&&<div style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Adding Group</div>}
-          </div>
-          {(subView==="people"||subView==="groups")&&(
-            <div style={{ display:"flex",gap:6 }}>
-              <button onClick={()=>setSubView("people")} style={{ background:subView==="people"?T.accentSoft:"none",border:`1px solid ${subView==="people"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:subView==="people"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 Person</button>
-              <button onClick={()=>setSubView("groups")} style={{ background:subView==="groups"?T.accentSoft:"none",border:`1px solid ${subView==="groups"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:subView==="groups"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👥 Group</button>
-            </div>
-          )}
         </div>
 
         {subView==="people"&&<>
@@ -11324,110 +11368,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ fontSize:32 }}>💰</div>
           </div>}
 
-          <div style={{ ...card,border:`1px solid #16a34a33`,background:"#f0fdf408" }}>
-            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
-              <div style={{ color:"#16a34a",fontSize:14,fontWeight:900 }}>➕ Add Person</div>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Step {addPersonStep} of 3</div>
-            </div>
-            <div style={{ display:"flex",gap:4,marginBottom:16 }}>
-              {[1,2,3].map(s=><div key={s} style={{ flex:1,height:4,borderRadius:2,background:s<=addPersonStep?"#16a34a":T.border }}/>)}
-            </div>
-
-            {addPersonStep===1&&(
-              <div>
-                <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:8 }}>IDENTITY</div>
-                <div style={{ display:"flex",gap:8,marginBottom:12 }}>
-                  {["👤","👨","👩","👶","👴","👵","🐕"].map(em=><button key={em} onClick={()=>setNewEmoji(em)} style={{ background:newEmoji===em?"#16a34a22":"none",border:`1px solid ${newEmoji===em?"#16a34a":T.border}`,borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:18 }}>{em}</button>)}
-                </div>
-                <div style={{ marginBottom:10 }}>
-                  <span style={lbl}>Name *</span>
-                  <input style={inp} placeholder="Name" value={newName} onChange={e=>setNewName(e.target.value)}/>
-                </div>
-                <div style={{ marginBottom:14 }}>
-                  <span style={lbl}>Relationship *</span>
-                  <select style={inp} value={newRelation} onChange={e=>setNewRelation(e.target.value)}>
-                    <option value="">Select Relation</option>
-                    {["Spouse","Child","Parent","Uncle","Aunt","Cousin","Friend","Colleague","Sibling","Grandparent","Grandchild","In-law","Other"].map(r=><option key={r} value={r}>{r}</option>)}
-                  </select>
-                </div>
-                <span style={lbl}>Person Type</span>
-                <div style={{ display:"flex",flexDirection:"column",gap:6,marginBottom:16 }}>
-                  {[["contact","Contact","They may owe you"],["dependant","Dependant","Family, you cover them"],["vendor","Vendor","You pay them for goods/services"],["employee","Employee","Reimbursements, payroll"],["tenant","Tenant","Rent, deposits"],["other","Other",""]].map(([v,l,sub])=>(
-                    <button key={v} onClick={()=>{ setNewPersonType(v); setNewModules(null); }} style={{ background:newPersonType===v?"#16a34a18":"none",border:`1px solid ${newPersonType===v?"#16a34a":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
-                      <div style={{ fontSize:12,fontWeight:700,color:newPersonType===v?"#16a34a":T.text }}>{getPersonTypeUILabel(v) || l}</div>
-                      {sub&&<div style={{ fontSize:10,color:T.sub,marginTop:2 }}>{sub}</div>}
-                    </button>
-                  ))}
-                </div>
-                <button disabled={!newName.trim()||!newRelation} onClick={()=>setAddPersonStep(2)} style={{ ...btnP,background:"#16a34a",opacity:(!newName.trim()||!newRelation)?0.5:1,cursor:(!newName.trim()||!newRelation)?"not-allowed":"pointer" }}>Continue →</button>
-              </div>
-            )}
-
-            {addPersonStep===2&&(
-              <div>
-                <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:4 }}>CAPABILITIES</div>
-                <div style={{ color:T.sub,fontSize:11,marginBottom:12 }}>Only enabled features appear later — no forms for things you don't need.</div>
-                <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
-                  {PERSON_MODULES.map(mod=>(
-                    <label key={mod.id} style={{ display:"flex",alignItems:"center",gap:10,background:effectiveNewModules.includes(mod.id)?"#16a34a14":T.input,border:`1px solid ${effectiveNewModules.includes(mod.id)?"#16a34a":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer" }}>
-                      <input type="checkbox" checked={effectiveNewModules.includes(mod.id)} onChange={()=>toggleNewModule(mod.id)} style={{ width:18,height:18,accentColor:"#16a34a",cursor:"pointer" }}/>
-                      <span style={{ fontSize:16 }}>{mod.icon}</span>
-                      <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{mod.label}</span>
-                    </label>
-                  ))}
-                  <label style={{ display:"flex",alignItems:"center",gap:10,background:newFavorite?"#16a34a14":T.input,border:`1px solid ${newFavorite?"#16a34a":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer" }}>
-                    <input type="checkbox" checked={newFavorite} onChange={e=>setNewFavorite(e.target.checked)} style={{ width:18,height:18,accentColor:"#16a34a",cursor:"pointer" }}/>
-                    <span style={{ fontSize:16 }}>★</span>
-                    <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>Favourite</span>
-                  </label>
-                </div>
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
-                  <button onClick={()=>setAddPersonStep(1)} style={btnG}>← Back</button>
-                  <button onClick={()=>setAddPersonStep(3)} style={{ ...btnP,background:"#16a34a" }}>Continue →</button>
-                </div>
-              </div>
-            )}
-
-            {addPersonStep===3&&(
-              <div>
-                <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:4 }}>FEATURE DETAILS</div>
-                <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Only asks what you enabled in the last step.</div>
-
-                {effectiveNewModules.includes("borrowMoney")&&(
-                  <div style={{ marginBottom:14 }}>
-                    <span style={lbl}>Credit limit (max they can owe you)</span>
-                    <input style={{ ...inp,marginBottom:8 }} type="number" placeholder="e.g. 2500" value={newCreditLimit} onChange={e=>setNewCreditLimit(e.target.value)} disabled={newUnlimitedCredit}/>
-                    <label style={{ display:"flex",alignItems:"center",gap:8,cursor:"pointer" }}>
-                      <input type="checkbox" checked={newUnlimitedCredit} onChange={e=>setNewUnlimitedCredit(e.target.checked)} style={{ width:16,height:16,accentColor:"#16a34a",cursor:"pointer" }}/>
-                      <span style={{ color:T.sub,fontSize:12 }}>Unlimited limit</span>
-                    </label>
-                    <div style={{ marginTop:10 }}>
-                      <span style={lbl}>Default Settlement Method</span>
-                      <div style={{ display:"flex",gap:6 }}>
-                        {["UPI","Cash","Bank"].map(m=>(
-                          <button key={m} onClick={()=>setNewDefaultSettlement(m)} style={{ flex:1,background:newDefaultSettlement===m?"#16a34a18":"none",border:`1px solid ${newDefaultSettlement===m?"#16a34a":T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:700,color:newDefaultSettlement===m?"#16a34a":T.text,fontFamily:"Nunito,sans-serif" }}>{m}</button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {effectiveNewModules.includes("budget")&&(
-                  <div style={{ marginBottom:14,background:T.input,borderRadius:10,padding:"10px 12px" }}>
-                    <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>📊 Budget enabled</div>
-                    <div style={{ color:T.sub,fontSize:11,marginTop:3 }}>Set the actual monthly amount afterward in Budget → Budgets — that's the one place it's edited, so it can't drift out of sync per month.</div>
-                  </div>
-                )}
-                <span style={lbl}>Colour</span>
-                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:16 }}>
-                  {PALETTE.map(c=><div key={c} onClick={()=>setNewColor(c)} style={{ width:24,height:24,borderRadius:6,background:c,cursor:"pointer",border:newColor===c?"3px solid #fff":"3px solid transparent" }}/>) }
-                </div>
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
-                  <button onClick={()=>setAddPersonStep(2)} style={btnG}>← Back</button>
-                  <button onClick={addPerson} style={{ ...btnP,background:"#16a34a" }}>Done ✓</button>
-                </div>
-              </div>
-            )}
-          </div>
+          <button data-testid="people-add-person" onClick={()=>setPeopleSheet({ kind:"addPerson" })} style={{ ...btnP,marginBottom:14 }}>+ Add person</button>
 
           {listedPeople.map(p=>{
             const s=settlements[p.id];
@@ -11465,6 +11406,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       : (spent>0 ? ` · ${sym}${fmtK(spent)} spent` : "")}
                     {atLimit&&<span style={{ color:T.danger,fontSize:10,fontWeight:700,marginLeft:6 }}>⚠️ Credit limit</span>}
                   </div>
+                  {(()=>{
+                    // UI-2C P-1 — the row reads as context: relationships and the one Bill needing attention.
+                    const sum = summarizeRelationships(getAttributedRelationships({ targetType:"person", targetId:p.id, billerAccounts, bills }));
+                    const text = relationshipSummaryText(sum, sym, fmt);
+                    return text ? <div data-testid={`person-row-summary-${p.id}`} style={{ color:sum.attention?.kind==="overdue"?T.dangerText:sum.attention?.kind==="due"?T.attention:T.sub,fontSize:11,marginTop:2 }}>{text}</div> : null;
+                  })()}
                 </div>
                 {!p.isMe&&<button onClick={e=>{ e.stopPropagation(); toggleFavorite(p); }} style={{ background:p.favorite?T.accentSoft:"none",border:`1px solid ${p.favorite?T.accent:T.border}`,borderRadius:8,padding:"5px 8px",cursor:"pointer",fontSize:12,fontWeight:800,color:p.favorite?T.accent:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>{p.favorite?"★":"☆"}</button>}
                 {!p.isMe&&net!==0&&(
@@ -11481,77 +11428,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         </>}
 
         {subView==="groups"&&<>
-          <div style={{ ...card,border:`1px solid #16a34a33`,background:"#f0fdf408" }}>
-            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
-              <div style={{ color:"#16a34a",fontSize:14,fontWeight:900 }}>➕ New Group</div>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Step {addGroupStep} of 3</div>
-            </div>
-            <div style={{ display:"flex",gap:4,marginBottom:16 }}>
-              {[1,2,3].map(s=><div key={s} style={{ flex:1,height:4,borderRadius:2,background:s<=addGroupStep?"#16a34a":T.border }}/>)}
-            </div>
-
-            {addGroupStep===1&&(
-              <div>
-                <span style={lbl}>Group Name *</span>
-                <input style={{ ...inp,marginBottom:14 }} placeholder="e.g. Goa Trip" value={newGroupName} onChange={e=>setNewGroupName(e.target.value)}/>
-                <span style={lbl}>Group Type</span>
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:6,marginBottom:16 }}>
-                  {GROUP_TYPES.map(gt=>(
-                    <button key={gt.id} onClick={()=>setNewGroupTypeId(newGroupTypeId===gt.id?"":gt.id)} style={{ background:newGroupTypeId===gt.id?"#16a34a18":"none",border:`1px solid ${newGroupTypeId===gt.id?"#16a34a":T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
-                      <div style={{ fontSize:12,fontWeight:700,color:newGroupTypeId===gt.id?"#16a34a":T.text }}>{gt.icon} {gt.label}</div>
-                      <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>{gt.desc}</div>
-                    </button>
-                  ))}
-                </div>
-                <button disabled={!newGroupName.trim()} onClick={()=>setAddGroupStep(2)} style={{ ...btnP,background:"#16a34a",opacity:!newGroupName.trim()?0.5:1,cursor:!newGroupName.trim()?"not-allowed":"pointer" }}>Continue →</button>
-              </div>
-            )}
-
-            {addGroupStep===2&&(
-              <div>
-                <span style={lbl}>Members</span>
-                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6,marginBottom:16 }}>
-                  <button onClick={()=>setNewGroupIncludeMe(v=>!v)} style={{ background:newGroupIncludeMe?"#16a34a18":"none",border:`1px solid ${newGroupIncludeMe?"#16a34a":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupIncludeMe?"#16a34a":T.sub,fontFamily:"Nunito,sans-serif" }}>🧑 Me {newGroupIncludeMe?"✓":"+"}</button>
-                  {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><button key={p.id} onClick={()=>setNewGroupMembers(prev=>prev.includes(p.id)?prev.filter(x=>x!==p.id):[...prev,p.id])} style={{ background:newGroupMembers.includes(p.id)?"#16a34a18":"none",border:`1px solid ${newGroupMembers.includes(p.id)?"#16a34a":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupMembers.includes(p.id)?"#16a34a":T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
-                </div>
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
-                  <button onClick={()=>setAddGroupStep(1)} style={btnG}>← Back</button>
-                  <button disabled={!newGroupIncludeMe&&newGroupMembers.length===0} onClick={()=>setAddGroupStep(3)} style={{ ...btnP,background:"#16a34a",opacity:(!newGroupIncludeMe&&newGroupMembers.length===0)?0.5:1 }}>Continue →</button>
-                </div>
-              </div>
-            )}
-
-            {addGroupStep===3&&(()=>{
-              const typeModules = GROUP_TYPE_DEFAULT_MODULES[newGroupTypeId||"other"]||GROUP_TYPE_DEFAULT_MODULES.other;
-              const budgetApplies = typeModules.includes("budget");
-              return (
-                <div>
-                  <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:4 }}>SETTINGS</div>
-                  <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Based on {GROUP_TYPES.find(t=>t.id===newGroupTypeId)?.label||"this"} group's defaults — {typeModules.map(m=>GROUP_MODULES.find(x=>x.id===m)?.label).filter(Boolean).join(", ")||"no extras"}.</div>
-
-                  {budgetApplies&&(
-                    <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:14 }}>
-                      <label style={{ display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",marginBottom:newGroupEnableBudget?10:0 }}>
-                        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>📊 Enable group budget?</span>
-                        <input type="checkbox" checked={newGroupEnableBudget} onChange={e=>setNewGroupEnableBudget(e.target.checked)} style={{ width:18,height:18,accentColor:"#16a34a",cursor:"pointer" }}/>
-                      </label>
-                      {newGroupEnableBudget&&(
-                        <input style={inp} type="number" placeholder="Monthly budget, e.g. 10000" value={newGroupManualLimit} onChange={e=>setNewGroupManualLimit(e.target.value)}/>
-                      )}
-                    </div>
-                  )}
-                  <span style={lbl}>Colour</span>
-                  <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6,marginBottom:16 }}>
-                    {PALETTE.map(c=><div key={c} onClick={()=>setNewGroupColor(c)} style={{ width:24,height:24,borderRadius:6,background:c,cursor:"pointer",border:newGroupColor===c?"3px solid #fff":"3px solid transparent" }}/>) }
-                  </div>
-                  <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
-                    <button onClick={()=>setAddGroupStep(2)} style={btnG}>← Back</button>
-                    <button onClick={addGroup} style={{ ...btnP,background:"#16a34a" }}>Done ✓</button>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
+          <button data-testid="people-add-group" onClick={()=>setPeopleSheet({ kind:"addGroup" })} style={{ ...btnP,marginBottom:14 }}>+ Add group</button>
 
           {[...new Set(getActiveGroups(groups).map(g=>g.type||"Group"))].map(gtype=>{
             const grps=getActiveGroups(groups).filter(g=>(g.type||"Group")===gtype);
@@ -11571,6 +11448,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{g.name}</div>
                         <div style={{ color:T.sub,fontSize:11,marginTop:1 }}>{(g.members?.length||0) + (g.includeMe===false?0:1)} members{g.includeMe===false?" · you not included":" · you included"}</div>
                         <div style={{ color:gOver?T.danger:T.sub,fontSize:10,marginTop:2 }}>{gBudget>0?`Budget ${sym}${fmt(gBudget)}/mo · `:""}This month {sym}{fmt(gTotalSpend)}{gOver?` · ⚠️ Over ${sym}${fmt(gTotalSpend-gBudget)}`:""}</div>
+                        {(()=>{
+                          // UI-2C G-10 — relationships and the one Bill needing attention.
+                          const sum = summarizeRelationships(getAttributedRelationships({ targetType:"group", targetId:g.id, billerAccounts, bills }));
+                          const text = relationshipSummaryText(sum, sym, fmt);
+                          return text ? <div data-testid={`group-row-summary-${g.id}`} style={{ color:sum.attention?.kind==="overdue"?T.dangerText:sum.attention?.kind==="due"?T.attention:T.sub,fontSize:11,marginTop:2 }}>{text}</div> : null;
+                        })()}
                       </div>
                       <div style={{ textAlign:"right" }}>
                         <div style={{ color:g.color,fontSize:14,fontWeight:800 }}>{sym}{fmt(groupReceivableTotal(g.id))}</div>
@@ -16187,8 +16070,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [baConsumerNo, setBaConsumerNo] = useState(existing?.consumerNo||"");
     const [baProvider, setBaProvider] = useState(existing?.provider||preselectedBillerProvider||"");
     const providerIsLocked = !existing && !!preselectedBillerProvider;
-    const [baAttributedTo, setBaAttributedTo] = useState(existing?.attributedTo||"");
-    const [baAttributeType, setBaAttributeType] = useState(existing?.attributeType||"house");
+    const [baAttributedTo, setBaAttributedTo] = useState(existing?.attributedTo||(!existing&&preselectedAttribution?.id)||"");
+    const [baAttributeType, setBaAttributeType] = useState(existing?.attributeType||(!existing&&preselectedAttribution?.type)||"house");
     const [baNote, setBaNote] = useState(existing?.note||"");
     const canSave = baName.trim() && baType;
     const [duplicateError, setDuplicateError] = useState("");
@@ -16713,7 +16596,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(!name.trim()||!parseFloat(amount)||!dueDate||duplicateInvoiceBill) return;
       const shares=calcShares();
       const peopleSplit={};
-      Object.entries(shares).forEach(([pid,sh])=>{ const p=getPerson(pid); peopleSplit[pid]={amount:sh,mode:p.personType!=="dependant"?"owes":"spent_on"}; });
+      Object.entries(shares).forEach(([pid,sh])=>{ peopleSplit[pid]={amount:sh,mode:getSplitShareMode(getPerson(pid))}; });
       const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
       const myShare = billIncludeMe ? Math.max(0, amt-owedByOthers) : 0;
       const groupCollectiveAmount = billGroup ? Math.max(0, amt-owedByOthers-myShare) : 0;
@@ -16932,7 +16815,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [emoji,setEmoji]=useState(p.emoji||"👤");
     const [relation,setRelation]=useState(p.relation||"");
     const [color,setColor]=useState(p.color||PALETTE[0]);
-    const [personType,setPersonType]=useState(p.personType||"contact");
+    // UI-2C: people added with the one-screen Add person have no type; don't give them one here.
+    const [personType,setPersonType]=useState(p.personType||"");
+    const [split,setSplit]=useState(getSplitDefaultChoice(p)); // null = an existing person who hasn't chosen
     const [creditLimit,setCreditLimit]=useState(String(p.creditLimit||""));
     const [spendBudget,setSpendBudget]=useState(String(p.spendBudget||""));
     const [favorite,setFavorite]=useState(Boolean(p.favorite));
@@ -16947,8 +16832,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [defaultSettlement,setDefaultSettlement]=useState(p.defaultSettlement||"UPI");
     const toggleModule = (id) => setModules(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
     const save=()=>{
-      setPeople(prev=>prev.map(x=>x.id===p.id?{...x,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules,phone:phone.trim(),email:email.trim(),dob,anniversary,notes:notes.trim(),defaultSettlement}:x));
-      setSelectedPerson(prev=>prev?{...prev,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules,phone:phone.trim(),email:email.trim(),dob,anniversary,notes:notes.trim(),defaultSettlement}:null);
+      const edits = x=>{
+        const next = {...x,name:name.trim(),emoji,relation,color,...(p.personType?{personType}:{}),creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules,phone:phone.trim(),email:email.trim(),dob,anniversary,notes:notes.trim(),defaultSettlement};
+        // Only a choice the user actually made is stored (D-4); an untouched legacy person keeps
+        // following their type.
+        return split && split!==getSplitDefaultChoice(p) ? withSplitDefault(next, split) : next;
+      };
+      setPeople(prev=>prev.map(x=>x.id===p.id?edits(x):x));
+      setSelectedPerson(prev=>prev?edits(prev):null);
       onClose();
     };
     return (
@@ -17001,7 +16892,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 The stored value itself is untouched — state is still
                 seeded from p.personType above and still saved unchanged
                 below; only the interactive control is removed for isMe. */}
-            {!p.isMe && <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+            {!p.isMe && <div data-testid="edit-person-split">
+              <span style={lbl}>Default expense split</span>
+              <div style={{ display:"flex",background:T.pill,borderRadius:12,padding:4,gap:4 }}>
+                {SPLIT_DEFAULT_OPTIONS.map(o=>(
+                  <button key={o.id} data-testid={`edit-split-${o.id}`} onClick={()=>setSplit(o.id)} style={{ flex:1,minHeight:40,background:split===o.id?T.card:"transparent",border:split===o.id?`1px solid ${T.accent}`:"1px solid transparent",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:700,color:split===o.id?T.accent:T.sub }}>{o.label}</button>
+                ))}
+              </div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:6 }}>{split===null ? "Not chosen yet, so their type below still decides." : `Used when you add an expense with ${p.name}.`}</div>
+            </div>}
+            {!p.isMe && p.personType && <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+              <span style={lbl}>Type · older setting</span>
               {[["contact","Contact","They may owe you"],["dependant","Dependant","Family, you cover them"],["vendor","Vendor","You pay them for goods/services"],["employee","Employee","Reimbursements, payroll"],["tenant","Tenant","Rent, deposits"],["other","Other",""]].map(([v,l,sub])=>(
                 <button key={v} onClick={()=>setPersonType(v)} style={{ background:personType===v?T.accentSoft:"none",border:`1px solid ${personType===v?T.accent:T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                   <div style={{ fontSize:12,fontWeight:700,color:personType===v?T.accent:T.text }}>{getPersonTypeUILabel(v) || l}</div>
@@ -17555,7 +17456,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {viewingEvent&&<EventDetailModal event={viewingEvent} onClose={()=>setViewingEvent(null)} T={T} sym={sym} fmt={fmt} txns={txns} getMyExpenseAmount={getMyExpenseAmount} getPerson={getPerson} formatShortDate={formatShortDate} askConfirm={askConfirm} setEvents={setEvents} setEditingEvent={setEditingEvent} setShowAddEvent={setShowAddEvent} setTxnDetailId={setTxnDetailId} EVENT_TYPES={EVENT_TYPES}/>}
         {showNavDrawer&&<NavDrawer onClose={()=>setShowNavDrawer(false)}/>}
         {confirmDialog&&<ConfirmDialog message={confirmDialog.message} onConfirm={confirmDialog.onConfirm} onClose={()=>setConfirmDialog(null)} variant={confirmDialog.variant||(confirmDialog.onConfirm?"danger":"default")} T={T}/>}
-        {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); setPreselectedBillerProvider(""); setPreselectedBillerId(""); }}/>}
+        {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); setPreselectedBillerProvider(""); setPreselectedBillerId(""); setPreselectedAttribution(null); }}/>}
         {categoryAccountsView&&(()=>{
           const type = categoryAccountsView;
           const billersOfType = billers.filter(b=>b.type===type);
@@ -18206,6 +18107,28 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
         )}
         {editingPerson&&<EditPersonModal p={editingPerson} onClose={()=>setEditingPerson(null)}/>}
+        {/* UI-2C M1 — P-2 Add person, P-3 Person created, G-11 Add group */}
+        {peopleSheet?.kind==="addPerson"&&<AddPersonSheet T={T} onClose={()=>setPeopleSheet(null)} onCreate={fields=>{
+          const rec = buildNewPerson(fields, { genId, color:PALETTE[(people.length+1)%PALETTE.length] });
+          setPeople(prev=>[...prev, rec]);
+          setPeopleSheet({ kind:"setup", person:rec });
+        }}/>}
+        {peopleSheet?.kind==="setup"&&(()=>{
+          const rec = peopleSheet.person;
+          const apply = setup=>{ const next = applyPersonSetup(rec, setup); setPeople(prev=>prev.map(x=>x.id===rec.id?applyPersonSetup(x, setup):x)); return next; };
+          return <PersonSetupSheet T={T} person={rec} modules={PERSON_MODULES}
+            onSkip={()=>setPeopleSheet(null)}
+            onOpen={setup=>{ const next = apply(setup); setPeopleSheet(null); setSubView("people"); setSelectedPerson(next); }}
+            onAddRelationship={setup=>{ apply(setup); setPeopleSheet(null); setPreselectedAttribution({ type:"person", id:rec.id }); setShowAddBillerAccount(true); }}/>;
+        })()}
+        {peopleSheet?.kind==="addGroup"&&<AddGroupSheet T={T} me={people.find(p=>p.isMe)||ME} people={people.filter(p=>!p.isMe && !isPersonArchived(p))} groupTypes={GROUP_TYPES}
+          onClose={()=>setPeopleSheet(null)}
+          onCreatePerson={name=>{ const rec = buildNewPerson({ name }, { genId, color:PALETTE[(people.length+1)%PALETTE.length] }); setPeople(prev=>[...prev, rec]); return rec; }}
+          onCreate={fields=>{
+            const rec = buildNewGroup(fields, { genId, color:PALETTE[5], groupTypes:GROUP_TYPES, typeDefaultModules:GROUP_TYPE_DEFAULT_MODULES });
+            setGroups(prev=>[...prev, rec]);
+            setPeopleSheet(null); setSubView("groups"); setSelectedGroup(rec);
+          }}/>}
         {editingTxn&&<EditModal t={editingTxn} onClose={()=>setEditingTxn(null)}/>}
         {linkTxnModal&&(()=>{
           const lm=linkTxnModal;
