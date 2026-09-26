@@ -80,6 +80,7 @@ import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconcili
 import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
 import { getGroupDefaultIntent } from "./domain/group/defaultIntent";
 import { withBillContributionForTxn, withoutBillContributionsForTxn, withoutBillContributionsForTxns, reopenBillsPaidByDeletedTxns } from "./domain/obligations/billContributionSync";
+import { nextBillMatchChoice, getBillChoicesToShow, getBillLinkAmountMismatch, mergePaymentIntoExistingBill } from "./domain/bills/billPaymentLink";
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
@@ -4158,10 +4159,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(lastBillMatchKeyRef.current === billMatchCandidateIdsKey) return; // same candidate set already handled
       lastBillMatchKeyRef.current = billMatchCandidateIdsKey;
       // Pre-selects the closest-dated candidate — still visible and changeable below, never
-      // applied silently. An empty set clears any stale choice from a prior amount/category.
-      setBillMatchChoice(billMatchCandidates[0]?.id || "");
+      // applied silently. QW-1: only while nothing is chosen. A bill that is already chosen
+      // stays chosen when amount/category/date edits change the candidates (it used to be
+      // reset here, silently dropping the link and creating a duplicate Bill on save).
+      setBillMatchChoice(prev=>nextBillMatchChoice(prev, billMatchCandidates.map(b=>b.id), bills.map(b=>b.id)));
     },[billMatchCandidateIdsKey, isEditing]);
     const renderMatchedBill = (billMatchChoice && billMatchChoice!=="__new__") ? bills.find(b=>b.id===billMatchChoice) : null;
+    // QW-1: the chosen bill stays listed even when it no longer matches, and an amount
+    // mismatch is shown (and blocks Save) instead of the link silently dropping.
+    const billChoicesToShow = getBillChoicesToShow(billMatchCandidates, renderMatchedBill);
+    const billLinkMismatch = isBillPayment ? getBillLinkAmountMismatch(renderMatchedBill, amt) : null;
 
     // HOTFIX (TDZ): this effect was originally placed BEFORE renderMatchedBill/selectedPids were
     // declared, causing a ReferenceError on every render of this component. Relocated here —
@@ -4568,6 +4575,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(submittingRef.current) return;
       if(!hasTxnSubject){ setRefDupWarning("Enter a vendor/note before saving."); return; }
       if(!amt){ setRefDupWarning("Enter an amount before saving."); return; }
+      // QW-1: never save a bill payment whose amount no longer matches the chosen bill — that used
+      // to rewrite the bill or (after the link silently dropped) create a duplicate. Partial
+      // payments ("Keep link" with a remainder) arrive with ADR-038 / WP-4.
+      if(txnType==="expense" && billLinkMismatch){ setRefDupWarning(`This payment is ${sym}${fmt(billLinkMismatch.paymentAmount)} but the linked bill is ${sym}${fmt(billLinkMismatch.billAmount)}. Change the amount or the bill before saving.`); return; }
       // Credit Card WP: "Add missing transaction" from a statement's reconciliation carries the
       // statement's period as dateMin/dateMax — enforced here too, not just via the date input's
       // min/max, since a typed date can bypass that.
@@ -5068,7 +5079,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             paymentImageBase64:paymentImageBase64 || matchedBill?.paymentImageBase64 || null,
           };
           setBills(prev=>prev.some(b=>b.id===linkedBillId)
-            ? prev.map(b=>b.id===linkedBillId?{...b,...billRecord}:b)
+            // QW-1: paying an existing bill records the payment but keeps the bill's own amount and due date.
+            ? prev.map(b=>b.id===linkedBillId?mergePaymentIntoExistingBill(b, billRecord):b)
             : [billRecord,...prev]
           );
           // WP-OBL-04a: dual-write — also record a real Contribution for this payment,
@@ -6645,19 +6657,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 )}
                 {isBillPayment&&<input style={{ ...inp,marginTop:4 }} placeholder="Invoice / Bill Number (optional) e.g. MSEB/2026/04/001" value={billInvoiceNo} onChange={e=>setBillInvoiceNo(e.target.value)}/>}
                 {/* T3-SAFE-1 (fix A): matched bill is confirmed here, never applied silently. */}
-                {isBillPayment&&billMatchCandidates.length>0&&(
+                {isBillPayment&&billChoicesToShow.length>0&&(
                   <div style={{ marginTop:10 }}>
-                    <span style={lbl}>{billMatchCandidates.length===1?"This looks like a payment for":`${billMatchCandidates.length} unpaid bills match this amount`}</span>
+                    <span style={lbl}>{isEditing?"This pays":billLinkMismatch?"Selected bill":billMatchCandidates.length===1?"This looks like a payment for":`${billMatchCandidates.length} unpaid bills match this amount`}</span>
                     <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:4 }}>
-                      {billMatchCandidates.map(b=>(
+                      {billChoicesToShow.map(b=>(
                         <button key={b.id} onClick={()=>setBillMatchChoice(b.id)} style={{ background:billMatchChoice===b.id?T.accent+"22":"none",border:`1px solid ${billMatchChoice===b.id?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billMatchChoice===b.id?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>
                           {billMatchChoice===b.id?"✓ ":""}{b.name||b.merchant||"Bill"} · due {formatShortDate(b.dueDate||b.billDate)||b.dueDate||b.billDate}
                         </button>
                       ))}
+{!isEditing&&(
                       <button onClick={()=>setBillMatchChoice("__new__")} style={{ background:billMatchChoice==="__new__"?T.danger+"18":"none",border:`1px solid ${billMatchChoice==="__new__"?T.danger:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billMatchChoice==="__new__"?T.danger:T.sub,fontFamily:"Nunito,sans-serif" }}>
                         {billMatchChoice==="__new__"?"✓ ":""}Not these — new bill
                       </button>
+                      )}
                     </div>
+                    {billLinkMismatch&&(
+                      <div role="alert" style={{ marginTop:8,color:T.warn,fontSize:12,fontWeight:700,lineHeight:1.45 }}>
+                        This payment is {sym}{fmt(billLinkMismatch.paymentAmount)} but the bill is {sym}{fmt(billLinkMismatch.billAmount)}. {isEditing?"Change the amount back, or switch off Bill payment to unlink it.":"Change the amount, choose another bill, or pick “Not these — new bill”."}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
