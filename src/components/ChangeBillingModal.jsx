@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import BottomSheet from "./BottomSheet";
 import { RADIUS, TOUCH, FONT } from "../constants/theme";
-import { dateAtDay } from "../helpers/dateHelpers";
+import { dateAtDay, toLocalDateStr } from "../helpers/dateHelpers";
 import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVersion, migrateLegacyBillingHistory } from "../domain/cards/billingConfig";
 
 // Credit Card WP, deliverable 5 (CC-5/CC-6). A billing change is a new dated version, never an
@@ -32,7 +32,7 @@ export default function ChangeBillingModal({ account, bills, accounts, todayStr,
       let next = dateAtDay(cursor.getFullYear(), cursor.getMonth() + 1, currentStatementDay);
       if (next <= cursor) next = dateAtDay(cursor.getFullYear(), cursor.getMonth() + 2, currentStatementDay);
       const nextDay = new Date(next); nextDay.setDate(nextDay.getDate() + 1);
-      out.push(nextDay.toISOString().slice(0, 10));
+      out.push(toLocalDateStr(nextDay));
       cursor = next;
     }
     return out;

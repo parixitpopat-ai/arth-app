@@ -25,6 +25,7 @@
 // than silently allowing an already-settled obligation to be rewritten.
 
 import { generateFeePeriods } from "./periodGeneration.js";
+import { toLocalDateStr } from "../../helpers/dateHelpers.js";
 
 /**
  * Declare the starting state of a pre-existing fee period — WP-3.
@@ -70,7 +71,7 @@ export function declareFeePeriodStartingState(period, wasPaid) {
  * @returns {Array} the subset of periods needing declaration
  */
 export function getPeriodsNeedingDeclaration(periods, today = new Date()) {
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = toLocalDateStr(today);
   return (periods || []).filter(p => !p.startingStateDeclared && p.periodEnd < todayStr);
 }
 

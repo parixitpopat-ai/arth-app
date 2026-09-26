@@ -1,4 +1,9 @@
-export const todayStr = () => new Date().toISOString().split("T")[0];
+// The user's own calendar day as "YYYY-MM-DD". toISOString() gives the UTC day,
+// which in India is still the previous date until 05:30.
+export const toLocalDateStr = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+export const todayStr = () => toLocalDateStr(new Date());
 
 export const addDaysToDateStr = (dateStr, days) => {
   if(!dateStr) return dateStr;

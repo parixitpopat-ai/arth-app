@@ -12,6 +12,7 @@
 //   Fuel = t1, Service & repairs = t6, Insurance = t5, PUC = t8,
 //   Parking & tolls = t7, EMI = t4, Challan = t9. Anything else (t2 Uber/Ola, t3 Public
 //   Transport, no subcategory, or a non-Transport category txn linked to the vehicle) is Other.
+import { toLocalDateStr } from "../../helpers/dateHelpers.js";
 export const FINE_BUCKETS = {
   t1: "fuel",
   t6: "service",
@@ -248,7 +249,7 @@ export const getVehicleReceipts = (vehicle, txns) => {
 export const getUntaggedVehicleCandidates = (txns, { subId = null, days = 90, today = new Date() } = {}) => {
   const cutoff = new Date(today);
   cutoff.setDate(cutoff.getDate() - days);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const cutoffStr = toLocalDateStr(cutoff);
   return (txns || []).filter(t => {
     if (!t || t.type !== "expense") return false;
     if (t.vehicleId) return false;

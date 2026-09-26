@@ -20,7 +20,7 @@
 // `recurringSchedules` remain exactly as they are. This module only reads
 // and re-labels.
 import { getNetBillAmount } from "./refunds.js";
-import { dateAtDay } from "../../helpers/dateHelpers.js";
+import { dateAtDay, toLocalDateStr } from "../../helpers/dateHelpers.js";
 
 const RECHARGE_CATEGORIES = ["Mobile Prepaid", "Fastag", "Metro Recharge", "NCMC Recharge", "EV Recharge", "Prepaid Meter", "DTH"];
 
@@ -88,7 +88,7 @@ const mapCcAccountToCommittedSpending = (account, accounts, txns, toDateOnly, ge
     subCategory: "scheduledObligation",
     name: `${account.name || "Card"} Statement`,
     amount: summary.currentDue,
-    date: summary.dueOn ? (summary.dueOn.toISOString ? summary.dueOn.toISOString().slice(0, 10) : summary.dueOn) : null,
+    date: summary.dueOn ? (summary.dueOn.toISOString ? toLocalDateStr(summary.dueOn) : summary.dueOn) : null,
     status: "unpaid", // synthetic entries only exist when currentDue > 0, so always unpaid by construction
     recurs: true, // a card statement is inherently a recurring obligation
   };
@@ -120,7 +120,7 @@ export const getNextRecurringOccurrence = (schedule, refDate = new Date()) => {
   const ref = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate(), 0, 0, 0, 0);
   const thisMonthDue = dateAtDay(ref.getFullYear(), ref.getMonth(), day);
   const due = thisMonthDue >= ref ? thisMonthDue : dateAtDay(ref.getFullYear(), ref.getMonth() + 1, day);
-  return due.toISOString().slice(0, 10);
+  return toLocalDateStr(due);
 };
 
 /**

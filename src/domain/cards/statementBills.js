@@ -11,7 +11,7 @@
 // for "this cycle" (src/domain/cards/summaries.js), generalized to an
 // arbitrary [from, to] boundary — one formula, not two competing ones.
 
-import { dateAtDay } from "../../helpers/dateHelpers.js";
+import { dateAtDay, toLocalDateStr } from "../../helpers/dateHelpers.js";
 import { genId } from "../../helpers/idGenerator.js";
 import { getEffectiveBillingConfig } from "./billingConfig.js";
 
@@ -45,7 +45,7 @@ export function computePeriodAmount(card, accounts, txns, from, to, toDateOnly) 
  * cycle's own statement day (not necessarily today's config).
  */
 function cycleForRef(account, refDate) {
-  const refDateStr = refDate.toISOString().slice(0, 10);
+  const refDateStr = toLocalDateStr(refDate);
   const cfg = getEffectiveBillingConfig(account, refDateStr);
   const ref = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate(), 12, 0, 0, 0);
   let to = dateAtDay(ref.getFullYear(), ref.getMonth(), cfg.statementDay);
@@ -74,7 +74,8 @@ function nextCycleAfter(account, afterTo) {
   return { from, to, dueOn, cfg };
 }
 
-const iso = d => d.toISOString().slice(0, 10);
+// Dates here are local-noon values (dateAtDay), so the local day is the right one.
+const iso = d => toLocalDateStr(d);
 
 /**
  * Every closed statement cycle for this card that does not yet have a
