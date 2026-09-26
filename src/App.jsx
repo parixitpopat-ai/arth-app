@@ -8419,7 +8419,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+    // Previously restored-to-empty (liabilities) or never synced at all; now saved like the rest.
+    liabilities,
+    recurringSchedules,
+    ccEmiPlans,
+    skippedInvestmentMonths,
+    budgetCarryForward,
+  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -8469,7 +8475,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(Array.isArray(snapshot.contributions)) setContributions(snapshot.contributions);
     if(Array.isArray(snapshot.schoolCreditNotes)) setSchoolCreditNotes(snapshot.schoolCreditNotes);
     if(Array.isArray(snapshot.schoolRelationships)) setSchoolRelationships(snapshot.schoolRelationships);
-    setLiabilities(Array.isArray(snapshot.liabilities) ? snapshot.liabilities : []);
+    // Guarded: snapshots and backups saved before these keys were included keep this device's
+    // data instead of wiping it (liabilities used to be reset to [] on every restore).
+    if(Array.isArray(snapshot.liabilities)) setLiabilities(snapshot.liabilities);
+    if(Array.isArray(snapshot.recurringSchedules)) setRecurringSchedules(snapshot.recurringSchedules);
+    if(Array.isArray(snapshot.ccEmiPlans)) setCcEmiPlans(snapshot.ccEmiPlans);
+    if(Array.isArray(snapshot.skippedInvestmentMonths)) setSkippedInvestmentMonths(snapshot.skippedInvestmentMonths);
+    if(typeof snapshot.budgetCarryForward === "boolean") setBudgetCarryForward(snapshot.budgetCarryForward);
     setTrackedAssets(Array.isArray(snapshot.trackedAssets) ? snapshot.trackedAssets : []);
     setLoans(normalizeLoans(snapshot.loans));
     setAnnualBudget(Number(snapshot.annualBudget || 600000));
@@ -9014,7 +9026,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, pushCloudSnapshot]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
