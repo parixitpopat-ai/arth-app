@@ -77,6 +77,10 @@ import { generateDueStatements } from "./domain/cards/statementBills";
 import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
+import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
+import { getGroupDefaultIntent } from "./domain/group/defaultIntent";
+import { withBillContributionForTxn, withoutBillContributionsForTxn, withoutBillContributionsForTxns, reopenBillsPaidByDeletedTxns } from "./domain/obligations/billContributionSync";
+import { nextBillMatchChoice, getBillChoicesToShow, getBillLinkAmountMismatch, mergePaymentIntoExistingBill } from "./domain/bills/billPaymentLink";
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
@@ -1377,7 +1381,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // WP-OBL-04a: dual-write — also record a real Contribution alongside the
     // legacy paidByTxnId/status write above. Full amount, since this path has
     // no partial-payment concept yet.
-    setContributions(prev=>withNewContribution(prev, { obligationType:"bill", obligationId:bill.id, txnId:String(paymentTxnId), amount:Number(bill.amount||0), txnAmount:Number(bill.amount||0) }, genId));
+    setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:paymentTxnId, amount:Number(bill.amount||0), txnAmount:Number(bill.amount||0) }, genId));
     if(bill.recurring && bill.autoGenerate!==false){
       const nextDue = computeNextDueDate(bill, paymentDate);
       const nextPeriod = computeNextPeriod(bill, paymentDate);
@@ -1770,6 +1774,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         : bl
       ));
     }
+    // QW-2: a deleted transaction no longer pays anything — drop its bill Contributions too.
+    setContributions(prev=>withoutBillContributionsForTxn(prev, txn.id));
     setTxns(prev=>prev.filter(x=>String(x.id)!==String(txn.id)));
     if(txn.type==="investment"){
       setInvestments(prev=>prev.filter(x=>String(x.id)!==String(txn.linkedInvestmentId||"") && String(x.linkedTxnId)!==String(txn.id)));
@@ -3748,7 +3754,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(!isEditing && defaultGroupId && txnType==="expense" && !tagGroup && !splitGroup){
         const g = groups.find(x=>x.id===defaultGroupId);
         if(g){
-          const di = g.defaultIntent||(g.typeId==="family"||g.typeId==="business"?"attributed":"split");
+          const di = getGroupDefaultIntent(g);
           if(di==="attributed"){ setTagGroup(defaultGroupId); setSplitMode("tag"); }
           else { setSplitGroup(defaultGroupId); setSplitMode("split"); }
         }
@@ -4153,10 +4159,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(lastBillMatchKeyRef.current === billMatchCandidateIdsKey) return; // same candidate set already handled
       lastBillMatchKeyRef.current = billMatchCandidateIdsKey;
       // Pre-selects the closest-dated candidate — still visible and changeable below, never
-      // applied silently. An empty set clears any stale choice from a prior amount/category.
-      setBillMatchChoice(billMatchCandidates[0]?.id || "");
+      // applied silently. QW-1: only while nothing is chosen. A bill that is already chosen
+      // stays chosen when amount/category/date edits change the candidates (it used to be
+      // reset here, silently dropping the link and creating a duplicate Bill on save).
+      setBillMatchChoice(prev=>nextBillMatchChoice(prev, billMatchCandidates.map(b=>b.id), bills.map(b=>b.id)));
     },[billMatchCandidateIdsKey, isEditing]);
     const renderMatchedBill = (billMatchChoice && billMatchChoice!=="__new__") ? bills.find(b=>b.id===billMatchChoice) : null;
+    // QW-1: the chosen bill stays listed even when it no longer matches, and an amount
+    // mismatch is shown (and blocks Save) instead of the link silently dropping.
+    const billChoicesToShow = getBillChoicesToShow(billMatchCandidates, renderMatchedBill);
+    const billLinkMismatch = isBillPayment ? getBillLinkAmountMismatch(renderMatchedBill, amt) : null;
 
     // HOTFIX (TDZ): this effect was originally placed BEFORE renderMatchedBill/selectedPids were
     // declared, causing a ReferenceError on every render of this component. Relocated here —
@@ -4563,6 +4575,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(submittingRef.current) return;
       if(!hasTxnSubject){ setRefDupWarning("Enter a vendor/note before saving."); return; }
       if(!amt){ setRefDupWarning("Enter an amount before saving."); return; }
+      // QW-1: never save a bill payment whose amount no longer matches the chosen bill — that used
+      // to rewrite the bill or (after the link silently dropped) create a duplicate. Partial
+      // payments ("Keep link" with a remainder) arrive with ADR-038 / WP-4.
+      if(txnType==="expense" && billLinkMismatch){ setRefDupWarning(`This payment is ${sym}${fmt(billLinkMismatch.paymentAmount)} but the linked bill is ${sym}${fmt(billLinkMismatch.billAmount)}. Change the amount or the bill before saving.`); return; }
       // Credit Card WP: "Add missing transaction" from a statement's reconciliation carries the
       // statement's period as dateMin/dateMax — enforced here too, not just via the date input's
       // min/max, since a typed date can bypass that.
@@ -5063,14 +5079,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             paymentImageBase64:paymentImageBase64 || matchedBill?.paymentImageBase64 || null,
           };
           setBills(prev=>prev.some(b=>b.id===linkedBillId)
-            ? prev.map(b=>b.id===linkedBillId?{...b,...billRecord}:b)
+            // QW-1: paying an existing bill records the payment but keeps the bill's own amount and due date.
+            ? prev.map(b=>b.id===linkedBillId?mergePaymentIntoExistingBill(b, billRecord):b)
             : [billRecord,...prev]
           );
           // WP-OBL-04a: dual-write — also record a real Contribution for this payment,
           // alongside the legacy billRecord write above. billRecord.amount is this bill's full
           // core amount (this path has no partial-payment concept yet); resolvedTxnId is the
           // transaction that made this payment.
-          setContributions(prev=>withNewContribution(prev, { obligationType:"bill", obligationId:linkedBillId, txnId:String(resolvedTxnId), amount:Number(billRecord.amount||0), txnAmount:Number(billRecord.amount||0) }, genId));
+          // QW-2: upsert — editing this transaction replaces its Contribution instead of adding another.
+          setContributions(prev=>withBillContributionForTxn(prev, { billId:linkedBillId, txnId:resolvedTxnId, amount:Number(billRecord.amount||0), txnAmount:Number(billRecord.amount||0) }, genId));
+        } else if(isEditing && sourceTxn?.paidBillId){
+          // QW-2: "Bill payment" was switched off on an edit. The transaction stops paying its
+          // bill: reopen that bill only if it points back at this transaction (same guard as
+          // delete, WP-BILLS-2C) and drop the Contribution, instead of leaving both orphaned.
+          const unlinkedBillId = sourceTxn.paidBillId;
+          setBills(prev=>prev.map(bl=>String(bl.id)===String(unlinkedBillId) && String(bl.paidByTxnId)===String(resolvedTxnId)
+            ? {...bl, status:"unpaid", paidDate:null, paidByTxnId:null}
+            : bl
+          ));
+          setContributions(prev=>withoutBillContributionsForTxn(prev, resolvedTxnId));
         } else if(matchedBill && !isEditing){
           setBillMatchSuggestion({bill:matchedBill,txn:newTxn});
         }
@@ -6372,7 +6400,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                               if(x.type==="person"){ setSplitMode("allocate"); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:x.id, mode:"owes", amount:"", items:[] }]); }
                               else {
                                 const g = groups.find(gr=>gr.id===x.id);
-                                const di = g?.defaultIntent||(g?.typeId==="family"||g?.typeId==="business"?"attributed":"split");
+                                const di = getGroupDefaultIntent(g);
                                 setSplitMode("allocate");
                                 setAllocRows(prev=>[...prev,{ id:genId(), targetType:"group", targetId:x.id, mode:di==="attributed"?"spent_on":"owes", amount:"", items:[] }]);
                               }
@@ -6629,19 +6657,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 )}
                 {isBillPayment&&<input style={{ ...inp,marginTop:4 }} placeholder="Invoice / Bill Number (optional) e.g. MSEB/2026/04/001" value={billInvoiceNo} onChange={e=>setBillInvoiceNo(e.target.value)}/>}
                 {/* T3-SAFE-1 (fix A): matched bill is confirmed here, never applied silently. */}
-                {isBillPayment&&billMatchCandidates.length>0&&(
+                {isBillPayment&&billChoicesToShow.length>0&&(
                   <div style={{ marginTop:10 }}>
-                    <span style={lbl}>{billMatchCandidates.length===1?"This looks like a payment for":`${billMatchCandidates.length} unpaid bills match this amount`}</span>
+                    <span style={lbl}>{isEditing?"This pays":billLinkMismatch?"Selected bill":billMatchCandidates.length===1?"This looks like a payment for":`${billMatchCandidates.length} unpaid bills match this amount`}</span>
                     <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:4 }}>
-                      {billMatchCandidates.map(b=>(
+                      {billChoicesToShow.map(b=>(
                         <button key={b.id} onClick={()=>setBillMatchChoice(b.id)} style={{ background:billMatchChoice===b.id?T.accent+"22":"none",border:`1px solid ${billMatchChoice===b.id?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billMatchChoice===b.id?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>
                           {billMatchChoice===b.id?"✓ ":""}{b.name||b.merchant||"Bill"} · due {formatShortDate(b.dueDate||b.billDate)||b.dueDate||b.billDate}
                         </button>
                       ))}
+{!isEditing&&(
                       <button onClick={()=>setBillMatchChoice("__new__")} style={{ background:billMatchChoice==="__new__"?T.danger+"18":"none",border:`1px solid ${billMatchChoice==="__new__"?T.danger:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billMatchChoice==="__new__"?T.danger:T.sub,fontFamily:"Nunito,sans-serif" }}>
                         {billMatchChoice==="__new__"?"✓ ":""}Not these — new bill
                       </button>
+                      )}
                     </div>
+                    {billLinkMismatch&&(
+                      <div role="alert" style={{ marginTop:8,color:T.warn,fontSize:12,fontWeight:700,lineHeight:1.45 }}>
+                        This payment is {sym}{fmt(billLinkMismatch.paymentAmount)} but the bill is {sym}{fmt(billLinkMismatch.billAmount)}. {isEditing?"Change the amount back, or switch off Bill payment to unlink it.":"Change the amount, choose another bill, or pick “Not these — new bill”."}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -8323,7 +8358,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     investments,
     bills,
     billerAccounts,
+    billers,
     memberships,
+    membershipRelationships,
     feePayments,
     vehicles,
     events,
@@ -8345,7 +8382,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -8375,7 +8412,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     setInvestments(Array.isArray(snapshot.investments) ? snapshot.investments : []);
     setBills(Array.isArray(snapshot.bills) ? snapshot.bills : []);
     setBillerAccounts(Array.isArray(snapshot.billerAccounts) ? snapshot.billerAccounts : []);
+    // Guarded (not reset to []) so a snapshot saved before these keys existed keeps this device's data.
+    if(Array.isArray(snapshot.billers)) setBillers(snapshot.billers);
     setMemberships(Array.isArray(snapshot.memberships) ? snapshot.memberships : []);
+    if(Array.isArray(snapshot.membershipRelationships)) setMembershipRelationships(snapshot.membershipRelationships);
     setFeePayments(Array.isArray(snapshot.feePayments) ? snapshot.feePayments : []);
     setVehicles(Array.isArray(snapshot.vehicles) ? snapshot.vehicles : []);
     setEvents(Array.isArray(snapshot.events) ? snapshot.events : []);
@@ -8937,7 +8977,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
@@ -9674,6 +9714,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               }} style={{ background:"#00000022",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>⬇️ Export</button>
               <button onClick={()=>{
                 askConfirm(`Delete ${bulkSelected.length} transaction${bulkSelected.length>1?"s":""}? This can't be undone.`, ()=>{
+                  // QW-2: same bill/Contribution cleanup a single delete does, for every deleted transaction.
+                  const deletedTxns = txns.filter(x=>bulkSelected.includes(x.id));
+                  setBills(prev=>reopenBillsPaidByDeletedTxns(prev, deletedTxns));
+                  setContributions(prev=>withoutBillContributionsForTxns(prev, deletedTxns.map(x=>x.id)));
                   setTxns(prev=>prev.filter(x=>!bulkSelected.includes(x.id)));
                   exitBulk();
                 });
@@ -10889,7 +10933,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           typeId:editingGroupTypeId||g.typeId||"other",
           type:gtMeta?.label||g.type,
           icon:gtMeta?.icon||g.icon,
-          defaultIntent:gtMeta?.default||g.defaultIntent||"split",
+          // QW-4: type is descriptive only — keep the group's effective intent, never derive it from the new type.
+          defaultIntent:getGroupDefaultIntent(g),
           color:editingGroupColor||g.color,
         };
         setGroups(prev=>prev.map(x=>x.id===g.id?updated:x));
@@ -10927,11 +10972,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <input value={editingGroupName} onChange={e=>setEditingGroupName(e.target.value)} style={{ ...inp, padding:"8px 10px", fontSize:16, fontWeight:700, width:"100%" }} placeholder="Group name" />
                     <input value={editingGroupBudget} onChange={e=>setEditingGroupBudget(e.target.value)} style={{ ...inp, padding:"8px 10px", fontSize:14, width:"100%" }} type="text" inputMode="decimal" placeholder="Group budget (0 = no budget)" />
                     <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:4 }}>Group Type</div>
+                    {/* QW-4: type no longer changes how expenses split, so the per-type split descriptions are not shown here. */}
+                    <div style={{ color:T.sub,fontSize:12,marginBottom:4 }}>A label only. Changing it doesn't change how this group's expenses split.</div>
                     <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6 }}>
                       {GROUP_TYPES.map(gt=>(
                         <button key={gt.id} onClick={()=>setEditingGroupTypeId(gt.id)} style={{ background:editingGroupTypeId===gt.id?T.accent+"22":"none",border:`1px solid ${editingGroupTypeId===gt.id?T.accent:T.border}`,borderRadius:10,padding:"6px 8px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
                           <div style={{ fontSize:11,fontWeight:700,color:editingGroupTypeId===gt.id?T.accent:T.text }}>{gt.icon} {gt.label}</div>
-                          <div style={{ fontSize:9,color:T.sub }}>{gt.desc}</div>
                         </button>
                       ))}
                     </div>
@@ -15728,6 +15774,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const ids = Object.entries(selected).filter(([,v])=>v).map(([id])=>id);
       if(ids.length===0) return;
       askConfirm(`Delete ${ids.length} duplicate transaction${ids.length>1?"s":""}? This can't be undone.`, ()=>{
+        // QW-2: same bill/Contribution cleanup a single delete does, for every deleted duplicate.
+        const deletedTxns = txns.filter(x=>ids.includes(String(x.id)));
+        setBills(prev=>reopenBillsPaidByDeletedTxns(prev, deletedTxns));
+        setContributions(prev=>withoutBillContributionsForTxns(prev, ids));
         setTxns(prev=>prev.filter(x=>!ids.includes(String(x.id))));
         setSelected({});
       });
@@ -17674,12 +17724,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ display:"flex",gap:8,marginBottom:16 }}>
                   <button onClick={()=>{ setEditingBillerAccount(ba); setActiveBillerForAction(null); }} style={{ flex:1,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit Account</button>
                   <button onClick={()=>{
-                    const linkedBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
-                    const linkedMem = memberships.filter(m=>m.billerAccountId===ba.id);
-                    const linkedFee = feePayments.filter(f=>f.billerAccountId===ba.id);
-                    const total = linkedBills.length+linkedMem.length+linkedFee.length;
-                    if(total>0){
-                      askConfirm(`Cannot delete: ${ba.name} has ${total} linked record${total>1?"s":""}. Delete the bills, memberships and fee payments first.`,null);
+                    // QW-5: transactions linked via billerLinkId now block deletion too.
+                    const blockers = getBillerAccountDeleteBlockers(ba.id, { bills, memberships, feePayments, txns });
+                    if(blockers.total>0){
+                      askConfirm(`Cannot delete: ${ba.name} is still linked to ${describeBillerAccountDeleteBlockers(blockers)}. Remove or relink those first.`,null);
                       return;
                     }
                     askConfirm(`Delete ${ba.name}?`,()=>{
@@ -18044,7 +18092,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 // WP-OBL-04a: dual-write — also record a real Contribution for this match,
                 // alongside the legacy paidByTxnId/status write above. Full amount — this path
                 // (like the other two) has no partial-payment concept yet.
-                setContributions(prev=>withNewContribution(prev, { obligationType:"bill", obligationId:b.id, txnId:String(billMatchSuggestion.txn.id), amount:Number(b.amount||0), txnAmount:Number(b.amount||0) }, genId));
+                setContributions(prev=>withBillContributionForTxn(prev, { billId:b.id, txnId:billMatchSuggestion.txn.id, amount:Number(b.amount||0), txnAmount:Number(b.amount||0) }, genId));
                 setTxns(p=>p.map(x=>x.id===billMatchSuggestion.txn.id?{...x,isBillPayment:true,billInvoiceNo:b.invoiceNo||"",paidBillId:b.id,paidBillName:b.name}:x));
                 if(b.recurring){ const next=new Date(b.dueDate); if(b.frequency==="monthly") next.setMonth(next.getMonth()+1); else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3); else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6); else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
                 setBillMatchSuggestion(null);
