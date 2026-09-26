@@ -34,7 +34,7 @@ test("characterization: overpaying a plain transaction settle records the excess
   assert.equal(result.extraAmt, 200, "the ₹200 excess is tracked as extra/advance, matching the real observed 'kept as advance' behavior");
 });
 
-test("characterization: bill settle (_isBillSettle) reduces the bill's split and flips status to paid once fully settled", () => {
+test("characterization: bill settle (_isBillSettle) reduces the bill's split and leaves status open once fully settled (ADR-038)", () => {
   const bills = [{
     id: "b1", name: "Water Bill", status: "unpaid",
     splitPeople: { p1: { amount: 858.40, mode: "owes", settled: false, settledAmt: 0, remainingAmt: 858.40 } },
@@ -45,7 +45,7 @@ test("characterization: bill settle (_isBillSettle) reduces the bill's split and
 
   const settledBill = result.bills.find(b => b.id === "b1");
   assert.equal(settledBill.splitPeople.p1.settled, true);
-  assert.equal(settledBill.status, "paid", "bill flips to paid once its only owed share is settled");
+  assert.equal(settledBill.status, "unpaid", "ADR-038: settling shares never marks the Bill paid");
 });
 
 test("characterization: bill settle mirrors onto the bill's paidByTxnId transaction (real UG1/Public Works scenario shape)", () => {
@@ -62,7 +62,7 @@ test("characterization: bill settle mirrors onto the bill's paidByTxnId transact
   const result = settle({ t, pid: "ug1", requestedAmt: 858.40, bills, txns, accId: "acc-1", settleDate: "2026-08-03", todayStr });
 
   const settledBill = result.bills.find(b => b.id === "b1");
-  assert.equal(settledBill.status, "paid");
+  assert.equal(settledBill.status, "unpaid", "ADR-038: settling shares never marks the Bill paid");
   const mirroredTxn = result.txns.find(x => x.id === "t1");
   assert.equal(mirroredTxn.people.ug1.settled, true, "linked transaction share reflects the settlement via paidByTxnId mirroring");
 });

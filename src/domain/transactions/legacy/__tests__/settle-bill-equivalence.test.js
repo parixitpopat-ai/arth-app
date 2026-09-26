@@ -31,7 +31,7 @@ test("equivalence (bill-kind): settling a bill share matches legacy exactly", ()
 
   assert.deepEqual(adapterResult.splitPeople.p1, legacyResult.splitPeople.p1);
   assert.equal(adapterResult.status, legacyResult.status);
-  assert.equal(adapterResult.status, "paid");
+  assert.equal(adapterResult.status, "unpaid", "ADR-038: settling shares never marks the Bill paid");
 });
 
 test("equivalence (bill-kind): partial settlement with other unsettled shares does NOT flip status, matches legacy", () => {

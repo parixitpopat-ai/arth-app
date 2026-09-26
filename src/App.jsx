@@ -92,6 +92,10 @@ import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirecti
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
 import { withBillForSnapshots } from "./domain/bills/billFor";
+import { getBillBalance, planBillPayment, withProjectedBillStatuses, getPartialRemainingByBill, getBillBadge, getBillLedger } from "./domain/obligations/billBalance";
+import { buildPaymentsView, getBillPeriodLabel } from "./domain/bills/paymentsView";
+import BillsList from "./screens/payments/BillsList";
+import BillDetailSheet from "./screens/payments/BillDetailSheet";
 import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
 import { getGroupDefaultIntent } from "./domain/group/defaultIntent";
 import { withBillContributionForTxn, withoutBillContributionsForTxn, withoutBillContributionsForTxns, reopenBillsPaidByDeletedTxns } from "./domain/obligations/billContributionSync";
@@ -1154,6 +1158,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const next = withBillForSnapshots(bills, { billerAccounts, people, groups });
     if(next!==bills) setBills(next);
   },[bills, billerAccounts, people, groups]);
+  // ADR-038 §6 — stored Bill status follows its Contributions, in one place, whichever path
+  // recorded, edited, unlinked or deleted a payment. Same-array no-op when nothing changes.
+  useEffect(()=>{
+    const next = withProjectedBillStatuses(bills, contributions, txns);
+    if(next!==bills) setBills(next);
+  },[bills, contributions, txns]);
   useEffect(()=>safeSetLocalStorage("arth_fee_payments",JSON.stringify(feePayments)),[feePayments]);
   // Fee Payment was a separate, simpler mechanism (no grace days, no person, no exact-date
   // concept) that's now merged into the single Membership mechanism. Converts each existing fee
@@ -1231,7 +1241,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [editingOpeningBalanceVal, setEditingOpeningBalanceVal] = useState("");
   const [editingOpeningBalanceDate, setEditingOpeningBalanceDate] = useState(todayStr());
   const [editingBill, setEditingBill] = useState(null);
-  const [markingBillPaid, setMarkingBillPaid] = useState(null); // a `bills` record being confirmed via MarkBillPaidModal
+  const [markingBillPaid, setMarkingBillPaid] = useState(null);
+  // UI-2C M2 — Bill detail and the Bills list's filters live here: <BillsPage/> remounts on
+  // every app render, so its own state would reset.
+  const [viewingBillId, setViewingBillId] = useState(null);
+  const [paymentsForFilter, setPaymentsForFilter] = useState("all");
+  const [paymentsShowCancelled, setPaymentsShowCancelled] = useState(false);
+  const [paymentsShowAllPaid, setPaymentsShowAllPaid] = useState(false); // a `bills` record being confirmed via MarkBillPaidModal
   // Holds the bill's id, not the bill object itself — CreditCardStatementSheet's reconciliation
   // actions (recordBankAmount, applyRecalculatedUpdate, etc.) all patch the `bills` array via
   // setBills, so if this held a snapshot object it would go stale the instant a patch landed: the
@@ -1401,18 +1417,32 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // recurring-regeneration behavior the old inline handler had, byte-for-byte, plus one real fix:
   // forPerson now carries over from the biller account's own attribution instead of always being
   // blank, so "who this bill belongs to" survives onto the payment transaction.
-  const confirmMarkBillPaid = useCallback((bill, accId, transactionRef) => {
+  // M2 PY-25 — Record payment (replaces Mark as paid; account and reference kept). ADR-038: the
+  // payment applies at most the Bill's remaining balance and the rest is Unallocated; the Bill is
+  // paid, and a recurring Bill regenerates, only once its balance reaches 0. The first payment
+  // carries the Bill's split (people / group collective), exactly as the one-payment flow did;
+  // later payments don't, so the split is never counted twice.
+  const confirmMarkBillPaid = useCallback((bill, accId, transactionRef, payment = {}) => {
     const linkedBA = billerAccounts.find(ba=>String(ba.id)===String(bill.billerAccountId));
     const attributedPersonId = linkedBA?.attributeType==="person" && linkedBA.attributedTo ? linkedBA.attributedTo : "";
     const paymentTxnId = Date.now();
-    const paymentDate = todayStr();
-    setTxns(p=>[{id:paymentTxnId,type:"expense",desc:bill.name,merchant:bill.merchant||"",date:paymentDate,note:"Bill payment",catId:bill.catId,catIds:bill.catIds||[bill.catId],subId:bill.subId||null,accId,people:bill.splitPeople||{},forPerson:attributedPersonId,groupId:bill.groupId||null,groupCollectiveAmount:Number(bill.groupCollectiveAmount||0),amount:bill.amount||0,isBillPayment:true,billInvoiceNo:bill.invoiceNo||null,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null,imageBase64:bill.imageBase64||null,paymentImageBase64:bill.paymentImageBase64||null},...p]);
-    setBills(p=>p.map(x=>x.id===bill.id?{...x,status:"paid",paidDate:paymentDate,paidByTxnId:paymentTxnId,lastPaidAmount:bill.amount,lastPaidDate:paymentDate}:x));
+    const paymentDate = payment.date || todayStr();
+    const priorPaymentCount = contributions.filter(c=>c?.obligationType==="bill" && String(c.obligationId)===String(bill.id)).length;
+    const isFirstPayment = priorPaymentCount===0;
+    const balanceBefore = getBillBalance(bill, contributions);
+    const paidAmount = payment.amount!==undefined ? Number(payment.amount||0) : balanceBefore.remaining;
+    const { applied } = planBillPayment(bill, contributions, paidAmount);
+    const becomesPaid = bill.isCcStatement ? true : applied >= balanceBefore.remaining - 0.005;
+    setTxns(p=>[{id:paymentTxnId,type:"expense",desc:bill.name,merchant:bill.merchant||"",date:paymentDate,note:"Bill payment",catId:bill.catId,catIds:bill.catIds||[bill.catId],subId:bill.subId||null,accId,people:isFirstPayment?(bill.splitPeople||{}):{},forPerson:attributedPersonId,groupId:bill.groupId||null,groupCollectiveAmount:isFirstPayment?Number(bill.groupCollectiveAmount||0):0,amount:paidAmount,isBillPayment:true,billInvoiceNo:bill.invoiceNo||null,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null,imageBase64:bill.imageBase64||null,paymentImageBase64:bill.paymentImageBase64||null},...p]);
+    setBills(p=>p.map(x=>x.id===bill.id?{...x,
+      ...(becomesPaid?{status:"paid",paidDate:paymentDate}:{}),
+      ...(isFirstPayment?{paidByTxnId:paymentTxnId}:{}),
+      lastPaidAmount:paidAmount,lastPaidDate:paymentDate}:x));
     // WP-OBL-04a: dual-write — also record a real Contribution alongside the
     // legacy paidByTxnId/status write above. Full amount, since this path has
     // no partial-payment concept yet.
-    setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:paymentTxnId, amount:Number(bill.amount||0), txnAmount:Number(bill.amount||0) }, genId));
-    if(bill.recurring && bill.autoGenerate!==false){
+    setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:paymentTxnId, amount:applied, txnAmount:paidAmount }, genId));
+    if(becomesPaid && bill.recurring && bill.autoGenerate!==false){
       const nextDue = computeNextDueDate(bill, paymentDate);
       const nextPeriod = computeNextPeriod(bill, paymentDate);
       const nextValidFrom = bill.billingModel==="prorata" ? nextDue : null;
@@ -1435,7 +1465,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       },...p]);
     }
     setMarkingBillPaid(null);
-  }, [billerAccounts]);
+  }, [billerAccounts, contributions]);
 
   const sharePaymentRequest = useCallback((recipientName, amount, contextLabel, details = {}) => {
     const safeAmount = Number(amount||0);
@@ -1513,6 +1543,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // paying, so this can't drift into 6 separate copies of the same filter.
   const paidViaAccounts = useMemo(()=>accounts.filter(a=>a.type!=="debit"&&a.type!=="upi"),[accounts]);
   const getPerson = useCallback(id=>people.find(p=>p.id===id)||{name:"?",emoji:"👤",color:"#888",relation:"",personType:"contact"},[people]);
+  // UI-2C D-3 — a Bill's own For as display text: the person or group it was created for, or
+  // "Unassigned". Never derived from bill.groupId (that is the split context).
+  const getBillForLabel = useCallback(bill=>{
+    if(bill?.forType==="person") return bill.forId==="__me__" ? "Me" : (people.find(p=>String(p.id)===String(bill.forId))?.name || "Unassigned");
+    if(bill?.forType==="group") return groups.find(g=>String(g.id)===String(bill.forId))?.name || "Unassigned";
+    return "Unassigned";
+  },[people, groups]);
   const getGroup = useCallback(id=>groups.find(g=>g.id===id)||null,[groups]);
   const getRefundCandidates = useCallback((refundTxn, excludeRefundId = null)=>{
     if(!refundTxn || refundTxn.type!=="settlement_in" || !refundTxn.isRefund) return [];
@@ -2678,8 +2715,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const nextPRemaining = Math.max(0, origAmt - nextPSettled);
           updatedSplitPeople = { ...bill.splitPeople, [linkPersonId]:{ ...info, settled:nextPRemaining<=0, settledAmt:nextPSettled, remainingAmt:nextPRemaining } };
         }
-        const allOwedSettled = Object.entries(updatedSplitPeople||{}).filter(([p])=>p!=="__me__").every(([,i])=>i.settled||i.mode!=="owes");
-        return { ...bill, ...(cap>0?{groupCollectiveSettledAmt:nextGroupSettled}:{}), splitPeople:updatedSplitPeople, ...(allOwedSettled?{status:"paid",paidDate:todayStr()}:{}) };
+        // ADR-038 (product owner, 26 Sep): settling split shares is progress between you and
+        // them, not a payment to the provider, so it never marks the Bill paid.
+        return { ...bill, ...(cap>0?{groupCollectiveSettledAmt:nextGroupSettled}:{}), splitPeople:updatedSplitPeople };
       }));
     }
 
@@ -4198,7 +4236,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // QW-1: the chosen bill stays listed even when it no longer matches, and an amount
     // mismatch is shown (and blocks Save) instead of the link silently dropping.
     const billChoicesToShow = getBillChoicesToShow(billMatchCandidates, renderMatchedBill);
-    const billLinkMismatch = isBillPayment ? getBillLinkAmountMismatch(renderMatchedBill, amt) : null;
+    // M2 / ADR-038: a payment is compared with what is still owed on the Bill, not its full amount,
+    // so the remaining balance of a partially paid Bill can be paid from here.
+    const renderMatchedBalance = renderMatchedBill ? getBillBalance(renderMatchedBill, contributions.filter(c=>!(isEditing && String(c.txnId)===String(sourceTxn?.id)))) : null;
+    const billLinkMismatch = isBillPayment ? getBillLinkAmountMismatch(renderMatchedBill && renderMatchedBalance && !renderMatchedBalance.historical ? { ...renderMatchedBill, amount:renderMatchedBalance.remaining } : renderMatchedBill, amt) : null;
 
     // HOTFIX (TDZ): this effect was originally placed BEFORE renderMatchedBill/selectedPids were
     // declared, causing a ReferenceError on every render of this component. Relocated here —
@@ -4614,7 +4655,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const unchosen = getRowsNeedingSplitChoice(allocRows);
         if(unchosen.length){ setRefDupWarning(`Choose A (I pay), O (I owe) or C (they owe) for ${unchosen.map(r=>getPerson(r.targetId).name).join(", ")}.`); return; }
       }
-      if(txnType==="expense" && billLinkMismatch){ setRefDupWarning(`This payment is ${sym}${fmt(billLinkMismatch.paymentAmount)} but the linked bill is ${sym}${fmt(billLinkMismatch.billAmount)}. Change the amount or the bill before saving.`); return; }
+      if(txnType==="expense" && billLinkMismatch){ setRefDupWarning(`This payment is ${sym}${fmt(billLinkMismatch.paymentAmount)} but the bill's balance is ${sym}${fmt(billLinkMismatch.billAmount)}. Change the amount or the bill before saving.`); return; }
       // Credit Card WP: "Add missing transaction" from a statement's reconciliation carries the
       // statement's period as dateMin/dateMax — enforced here too, not just via the date input's
       // min/max, since a typed date can bypass that.
@@ -5124,7 +5165,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // core amount (this path has no partial-payment concept yet); resolvedTxnId is the
           // transaction that made this payment.
           // QW-2: upsert — editing this transaction replaces its Contribution instead of adding another.
-          setContributions(prev=>withBillContributionForTxn(prev, { billId:linkedBillId, txnId:resolvedTxnId, amount:Number(billRecord.amount||0), txnAmount:Number(billRecord.amount||0) }, genId));
+          // M2 / ADR-038: apply at most what is still owed (this transaction's own earlier payment excluded).
+          setContributions(prev=>{
+            const others = prev.filter(c=>String(c.txnId)!==String(resolvedTxnId));
+            const target = bills.find(b=>b.id===linkedBillId);
+            const applied = target ? planBillPayment({ ...target, status:"unpaid" }, others, amt).applied : amt;
+            return withBillContributionForTxn(prev, { billId:linkedBillId, txnId:resolvedTxnId, amount:applied, txnAmount:amt }, genId);
+          });
         } else if(isEditing && sourceTxn?.paidBillId){
           // QW-2: "Bill payment" was switched off on an edit. The transaction stops paying its
           // bill: reopen that bill only if it points back at this transaction (same guard as
@@ -9065,7 +9112,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // is a deliberately separate, pure-budget concept per the existing "two genuinely different
   // questions" comment already in this file. Safe to Spend is not modified anywhere.
   const futureMoneyToday = new Date(); futureMoneyToday.setHours(0,0,0,0);
-  const rawCommitments = getCommitments(bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill, futureMoneyToday);
+  const rawCommitments = getCommitments(bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill, futureMoneyToday, getPartialRemainingByBill(bills, contributions));
   // Debt Service — the release-critical check (does getCardSummary's currentDue already include
   // this cycle's cc_emi installment?) came back YES, so the adapter itself checks txns[] for an
   // already-logged installment before deciding whether to project the current cycle's due date
@@ -14834,30 +14881,118 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     return "hybrid";
   };
 
+  // UI-2C M2 — today's per-Bill details and actions (split people with Share / Settle, your
+  // share, images, plan and validity, Pause / Resume, Edit, Delete), moved unchanged from the
+  // old expandable Bill row into Bill detail. Record payment is Bill detail's primary action.
+  const renderBillExtras = (b) => {
+    const today=new Date();
+    const daysUntil=Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
+    const isOverdue=b.status==="unpaid"&&daysUntil<0;
+    const cat=getCat(b.catId||b.catIds?.[0]) || { icon:"📋", color:T.sub, name:"—" };
+    const paymentDateText = txns.find(txn=>String(txn.id)===String(b?.paidByTxnId || ""))?.date || b?.paidDate || "";
+    const linkedPaymentTxn = txns.find(txn=>String(txn.id)===String(b.paidByTxnId || "")) || null;
+    const billImageSrc = b.imageBase64 || linkedPaymentTxn?.imageBase64 || null;
+    const paymentImageSrc = b.paymentImageBase64 || linkedPaymentTxn?.paymentImageBase64 || null;
+    return (
+                <div style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:8 }}>
+                    <div style={{ color:T.sub,fontSize:11 }}>{cat.icon} {cat.name}{b.recurring?` · 🔁 ${b.frequency}`:""}{b.invoiceNo?` · #${b.invoiceNo}`:""}</div>
+                    <div style={{ color:isOverdue?T.danger:daysUntil<=3&&b.status==="unpaid"?T.warn:T.sub,fontSize:11 }}>
+                      {b.status==="paid"?`✅ Paid ${formatShortDate(paymentDateText) || paymentDateText || ""}`:isOverdue?`⚠️ ${Math.abs(daysUntil)}d overdue`:daysUntil===0?"Due today":`Due ${formatShortDate(b.dueDate) || b.dueDate}`}
+                    </div>
+                  </div>
+                  {b.splitPeople&&Object.keys(b.splitPeople).length>0&&(
+                    <div style={{ marginBottom:8 }}>
+                      {Object.entries(b.splitPeople).map(([pid,info])=>{ const p=getPerson(pid); return (
+                        <div key={pid} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:11,color:info.mode==="owes"?(info.settled?T.success:Number(info.settledAmt||0)>0?T.warn:T.accent):T.sub,marginBottom:2 }}>
+                          <span>{p.emoji} {p.name}</span>
+                          <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                            {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind==="bill"&&String(l.id)===String(b.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canShare=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canShare&&<button onClick={e=>{ e.stopPropagation(); sharePaymentRequest(p.name,left,b.name||"Bill",{ dueDate:b.dueDate||b.billDate, billDate:b.billDate, billPeriodFrom:b.billPeriodFrom, billPeriodTo:b.billPeriodTo, totalAmount:b.amount, imageBase64:b.imageBase64||paymentImageSrc||billImageSrc||null, shareTitle:b.name||"Bill" }); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Share</button>; })()}
+                            {(()=>{ const owed=Number(info.amount||0); const left=remainingShare(info); const paid=Number(info.settledAmt||0); if(info.mode!=="owes") return <span>Owes {sym}{fmt(owed)} | on you</span>; if(left<=0) return <span>Settled {sym}{fmt(owed)}</span>; if(paid>0) return <span>Owes {sym}{fmt(owed)} | Partly settled {sym}{fmt(paid)} | Bal. {sym}{fmt(left)}</span>; return <span>Owes {sym}{fmt(owed)} | Bal. {sym}{fmt(left)}</span>; })()}
+                            {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind==="bill"&&String(l.id)===String(b.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canSettle=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canSettle&&<button onClick={e=>{ e.stopPropagation(); setSettleTxn({ id:"bill_person_settle_"+b.id+"_"+pid, type:"expense", desc:b.name, amount:left, people:{ [pid]:{ amount:left, mode:"owes", settled:false } }, _billIds:[b.id], _isBillSettle:true }); }} style={{ background:T.success+"18",border:`1px solid ${T.success}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>💰 Settle</button>; })()}
+                          </div>
+                        </div>
+                      ); })}
+                      {(()=>{ const owedTotal=Object.values(b.splitPeople||{}).reduce((sum,info)=>sum+(info.mode==="owes"?Number(info.amount||0):0),0); const fallbackShare=Math.max(0,Number(b.amount||0)-owedTotal-Number(b.groupCollectiveAmount||0)); const storedShare=Number(b.myShare); const group=b.groupId?getGroup(b.groupId):null; const meExcluded=group?.includeMe===false; const myBillShare=Number.isFinite(storedShare)&&(storedShare>0||fallbackShare<=0||meExcluded)?storedShare:fallbackShare; return (
+                        <div style={{ display:"flex",justifyContent:"space-between",gap:8,fontSize:11,color:myBillShare>0?T.success:T.sub,fontWeight:700,marginTop:4 }}>
+                          <span>Your share{meExcluded?" (not included)":""}</span>
+                          <span>{sym}{fmt(myBillShare)}</span>
+                        </div>
+                      ); })()}
+                    </div>
+                  )}
+                  {(billImageSrc || paymentImageSrc)&&(
+                    <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:8 }}>
+                      {billImageSrc&&<button onClick={(e)=>{ e.stopPropagation(); setImageViewSrc(billImageSrc); }} style={{ background:T.info+"14",border:`1px solid ${T.info}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>🧾 View bill</button>}
+                      {paymentImageSrc&&<button onClick={(e)=>{ e.stopPropagation(); setImageViewSrc(paymentImageSrc); }} style={{ background:T.success+"14",border:`1px solid ${T.success}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.success,fontFamily:"Nunito,sans-serif" }}>💳 View payment</button>}
+                    </div>
+                  )}
+                  {/* Bill period */}
+                  {(b.billPeriodFrom||b.billPeriodTo)&&(
+                    <div style={{ display:"flex",gap:6,marginBottom:4 }}>
+                      <span style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.info }}>📅 {formatShortDate(b.billPeriodFrom)||b.billPeriodFrom||"?"} → {formatShortDate(b.billPeriodTo)||b.billPeriodTo||"?"}</span>
+                    </div>
+                  )}
+                  {/* Plan / recharge details */}
+                  {(b.planType||b.planDesc)&&(
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:4 }}>
+                      {b.planType&&<span style={{ background:T.accent+"16",border:`1px solid ${T.accent}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.accent }}>{b.planType}</span>}
+                      {b.planDesc&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,color:T.sub }}>{b.planDesc}</span>}
+                    </div>
+                  )}
+              {/* Validity / period display */}
+                  {(b.validFrom||b.validUntil||b.periodStart||b.periodEnd)&&(
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:6 }}>
+                      {(b.periodStart||b.validFrom)&&<span style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.info }}>From {formatShortDate(b.periodStart||b.validFrom)}</span>}
+                      {(b.periodEnd||b.validUntil)&&<span style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.info }}>Until {formatShortDate(b.periodEnd||b.validUntil)}</span>}
+                      {b.membershipEndDate&&<span style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.warn }}>Ends {formatShortDate(b.membershipEndDate)}</span>}
+                      {b.freeTrialEndDate&&<span style={{ background:T.danger+"16",border:`1px solid ${T.danger}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.danger }}>Trial ends {formatShortDate(b.freeTrialEndDate)}</span>}
+                      {b.isPaused&&<span style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.warn }}>⏸️ Paused {b.pausedDays>0?`${b.pausedDays}d`:""}</span>}
+                    </div>
+                  )}
+                  <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                    
+                    <button onClick={(e)=>{ e.stopPropagation(); setEditingBill(b); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+                    {b.recurring&&b.status==="unpaid"&&<button onClick={(e)=>{
+                      e.stopPropagation();
+                      if(b.isPaused){
+                        // Resume: calculate days paused, extend validUntil if applicable
+                        const pausedSince = b.pausedDate ? new Date(b.pausedDate) : new Date();
+                        const today = new Date();
+                        const daysPaused = Math.max(0, Math.round((today - pausedSince) / 86400000));
+                        const totalPausedDays = (b.pausedDays||0) + daysPaused;
+                        let newValidUntil = b.validUntil;
+                        if(b.validUntil){
+                          const vu = new Date(b.validUntil);
+                          vu.setDate(vu.getDate() + daysPaused);
+                          newValidUntil = vu.toISOString().split("T")[0];
+                        }
+                        let newPeriodEnd = b.periodEnd;
+                        if(b.periodEnd){
+                          const pe = new Date(b.periodEnd);
+                          pe.setDate(pe.getDate() + daysPaused);
+                          newPeriodEnd = pe.toISOString().split("T")[0];
+                        }
+                        setBills(p=>p.map(x=>x.id===b.id?{...x,isPaused:false,resumeDate:todayStr(),pausedDays:totalPausedDays,validUntil:newValidUntil,periodEnd:newPeriodEnd}:x));
+                      } else {
+                        // Pause
+                        const reason = window.prompt("Pause reason (optional):");
+                        setBills(p=>p.map(x=>x.id===b.id?{...x,isPaused:true,pausedDate:todayStr(),resumeDate:null,pauseReason:reason||null}:x));
+                      }
+                    }} style={{ background:b.isPaused?T.success+"22":T.warn+"22",border:`1px solid ${b.isPaused?T.success:T.warn}44`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:b.isPaused?T.success:T.warn,fontFamily:"Nunito,sans-serif" }}>{b.isPaused?"▶️ Resume":"⏸️ Pause"}</button>}
+                    <button onClick={(e)=>{ e.stopPropagation(); if(!window.confirm(`Delete "${b.name}"? This removes the bill; its payments stay as transactions.`)) return; setBills(p=>p.filter(x=>x.id!==b.id)); setViewingBillId(null); }} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
+                  </div>
+                </div>
+    );
+  };
+
   const BillsPage = () => {
-    const [billsTab, setBillsTab] = useState("mybills");
-    const [bFilter, setBFilter] = useState("unpaid");
-    const [expandedBillId, setExpandedBillId] = useState(null);
-    const getBillDate = bill => bill?.billDate || bill?.createdDate || bill?.dueDate || "";
-    const getBillPaymentDate = bill => txns.find(txn=>String(txn.id)===String(bill?.paidByTxnId || ""))?.date || bill?.paidDate || "";
-    const filtered = [...bills]
-      .filter(b=>bFilter==="all"||b.status===bFilter)
-      .sort((a,b)=>{
-        const dueA = toDateOnly(a.dueDate)?.getTime() || 0;
-        const dueB = toDateOnly(b.dueDate)?.getTime() || 0;
-        const billA = toDateOnly(getBillDate(a))?.getTime() || 0;
-        const billB = toDateOnly(getBillDate(b))?.getTime() || 0;
-        const paidA = toDateOnly(getBillPaymentDate(a))?.getTime() || 0;
-        const paidB = toDateOnly(getBillPaymentDate(b))?.getTime() || 0;
-        if(bFilter==="paid") return paidB - paidA || dueA - dueB || billB - billA;
-        return dueA - dueB || billB - billA;
-      });
-    const totalUnpaid = bills.filter(b=>b.status==="unpaid").reduce((s,b)=>s+getNetBillAmount(b, refundTotalsByBill),0);
+    const [billsTab, setBillsTab] = useState("bills");
     return (
       <div style={{ padding:"0 0 120px" }}>
         {/* Tab bar */}
         <div style={{ display:"flex",background:T.card,borderBottom:`1px solid ${T.border}`,position:"sticky",top:0,zIndex:10 }}>
-          {[["mybills","📋 My Bills"],["history","🕐 Bill History"]].map(([t,l])=>(
+          {[["bills","Bills"],["mybills","+ Add / Activate"]].map(([t,l])=>(
             <button key={t} onClick={()=>setBillsTab(t)} style={{ flex:1,padding:"14px 8px",background:"none",border:"none",borderBottom:`2px solid ${billsTab===t?T.accent:"transparent"}`,cursor:"pointer",fontSize:13,fontWeight:800,color:billsTab===t?T.accent:T.sub,fontFamily:"Nunito,sans-serif",transition:"all 0.2s" }}>{l}</button>
           ))}
         </div>
@@ -15040,186 +15175,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         )}
 
         {/* BILL HISTORY TAB */}
-        {billsTab==="history"&&(
-          <div style={{ padding:"14px 16px" }}>
-            {totalUnpaid>0&&<div style={{ ...card,background:`linear-gradient(135deg,${T.danger}10,${T.card})`,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
-          <div>
-            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Total Unpaid</div>
-            <div style={{ color:T.danger,fontSize:22,fontWeight:900,marginTop:4 }}>{sym}{fmt(totalUnpaid)}</div>
-          </div>
-          <div style={{ fontSize:32 }}>📋</div>
-        </div>}
-        <div style={{ display:"flex",gap:6,marginBottom:14 }}>
-          {[["unpaid","🔴 Unpaid"],["paid","✅ Paid"],["all","All"]].map(([v,l])=>(
-            <button key={v} onClick={()=>setBFilter(v)} style={{ background:bFilter===v?T.accent+"22":"none",border:`1px solid ${bFilter===v?T.accent:T.border}`,borderRadius:20,padding:"5px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:bFilter===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
-          ))}
-        </div>
-        {filtered.length===0?<div style={{ ...card,textAlign:"center",padding:40 }}>
-          <EmptyState icon="📭" title="No bills here" T={T}/>
-        </div>:filtered.map(b=>{
-          const today=new Date();
-          const daysUntil=Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
-          const isOverdue=b.status==="unpaid"&&daysUntil<0;
-          const cat=getCat(b.catId||b.catIds?.[0]) || { icon:"📋", color:T.sub, name:"—" };
-          const group=getGroup(b.groupId||"");
-          const billDateText = getBillDate(b);
-          const paymentDateText = getBillPaymentDate(b);
-          const linkedPaymentTxn = txns.find(txn=>String(txn.id)===String(b.paidByTxnId || "")) || null;
-          const billImageSrc = b.imageBase64 || linkedPaymentTxn?.imageBase64 || null;
-          const paymentImageSrc = b.paymentImageBase64 || linkedPaymentTxn?.paymentImageBase64 || null;
-          const isExpanded = expandedBillId===b.id;
-          const linkedBA = billerAccounts.find(ba=>String(ba.id)===String(b.billerAccountId));
-          const attributedPerson = linkedBA?.attributeType==="person" && linkedBA.attributedTo ? getPerson(linkedBA.attributedTo) : null;
-          // Credit Card WP (CC-9): a generated statement Bill sits in this same sorted list, but
-          // its detail is the reconciliation sheet, not the generic split/settle expand-in-place
-          // card below (statements never carry splitPeople) — a dedicated, simpler row instead of
-          // threading CC-only branches through that markup.
-          if(b.isCcStatement){
-            const pill = b.verification==="matched" ? { l:"Matched with bank", c:T.success } : b.verification==="mismatch" ? { l:"Doesn't match", c:T.danger } : { l:"Needs verification", c:T.warn };
-            return (
-              <div key={b.id} onClick={()=>setViewingCcStatementId(b.id)} style={{ ...card,border:`1px solid ${isOverdue?T.danger+"44":T.border}`,cursor:"pointer" }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10 }}>
-                  <div style={{ minWidth:0 }}>
-                    <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>💳 {b.name}</div>
-                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(b.periodFrom)||b.periodFrom} – {formatShortDate(b.periodTo)||b.periodTo}</div>
-                  </div>
-                  <div style={{ color:T.text,fontSize:15,fontWeight:800,whiteSpace:"nowrap" }}>{sym}{fmt(b.amount)}</div>
-                </div>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:8 }}>
-                  <span style={{ background:pill.c+"18",color:pill.c,borderRadius:20,padding:"3px 10px",fontSize:10,fontWeight:800 }}>{pill.l}</span>
-                  <span style={{ color:isOverdue?T.danger:T.sub,fontSize:10,fontWeight:700 }}>{b.status==="paid"?`✅ Paid`:isOverdue?`⚠️ ${Math.abs(daysUntil)}d overdue`:`Due ${formatShortDate(b.dueDate)||b.dueDate}`}</span>
-                </div>
-              </div>
-            );
-          }
-          return (
-            <div key={b.id} style={{ ...card,border:`1px solid ${isOverdue?T.danger+"44":T.border}` }}>
-              <div onClick={()=>setExpandedBillId(prev=>prev===b.id?null:b.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,cursor:"pointer" }}>
-                <div style={{ flex:1,minWidth:0,textAlign:"justify" }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10 }}>
-                    <div style={{ display:"flex",alignItems:"center",gap:6,flex:1,minWidth:0 }}>
-                      <div style={{ color:T.text,fontSize:14,fontWeight:800,wordBreak:"break-word" }}>{b.name}</div>
-                      {attributedPerson&&<span title={attributedPerson.name} style={{ fontSize:12,flexShrink:0 }}>{attributedPerson.emoji||"🧑"}</span>}
-                    </div>
-                    <div style={{ color:T.text,fontSize:15,fontWeight:800,whiteSpace:"nowrap",textAlign:"right" }}>{sym}{fmt(getNetBillAmount(b, refundTotalsByBill))}</div>
-                  </div>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:5 }}>
-                    <span style={{ color:group?.color || T.sub,fontSize:10,fontWeight:700 }}>{group ? `${group.icon||"👥"} ${group.name}` : "Group: —"}</span>
-                    <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{isExpanded?"Tap to close":"Tap to expand"}</span>
-                  </div>
-                  <div style={{ display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8,marginTop:7 }}>
-                    <div style={{ textAlign:"left" }}>
-                      <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.7 }}>Bill</div>
-                      <div style={{ color:T.text,fontSize:10,fontWeight:700,marginTop:2 }}>{formatShortDate(billDateText) || billDateText || "—"}</div>
-                    </div>
-                    <div style={{ textAlign:"center" }}>
-                      <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.7 }}>Due</div>
-                      <div style={{ color:isOverdue?T.danger:T.text,fontSize:10,fontWeight:700,marginTop:2 }}>{formatShortDate(b.dueDate) || b.dueDate || "—"}</div>
-                    </div>
-                    <div style={{ textAlign:"right" }}>
-                      <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.7 }}>Paid</div>
-                      <div style={{ color:b.status==="paid"?T.success:T.text,fontSize:10,fontWeight:700,marginTop:2 }}>{paymentDateText ? (formatShortDate(paymentDateText) || paymentDateText) : "—"}</div>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ color:T.sub,fontSize:14,paddingTop:2 }}>{isExpanded?"▴":"▾"}</div>
-              </div>
-
-              {isExpanded && (
-                <div style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
-                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:8 }}>
-                    <div style={{ color:T.sub,fontSize:11 }}>{cat.icon} {cat.name}{b.recurring?` · 🔁 ${b.frequency}`:""}{b.invoiceNo?` · #${b.invoiceNo}`:""}</div>
-                    <div style={{ color:isOverdue?T.danger:daysUntil<=3&&b.status==="unpaid"?T.warn:T.sub,fontSize:11 }}>
-                      {b.status==="paid"?`✅ Paid ${formatShortDate(paymentDateText) || paymentDateText || ""}`:isOverdue?`⚠️ ${Math.abs(daysUntil)}d overdue`:daysUntil===0?"Due today":`Due ${formatShortDate(b.dueDate) || b.dueDate}`}
-                    </div>
-                  </div>
-                  {b.splitPeople&&Object.keys(b.splitPeople).length>0&&(
-                    <div style={{ marginBottom:8 }}>
-                      {Object.entries(b.splitPeople).map(([pid,info])=>{ const p=getPerson(pid); return (
-                        <div key={pid} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:11,color:info.mode==="owes"?(info.settled?T.success:Number(info.settledAmt||0)>0?T.warn:T.accent):T.sub,marginBottom:2 }}>
-                          <span>{p.emoji} {p.name}</span>
-                          <div style={{ display:"flex",alignItems:"center",gap:6 }}>
-                            {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind==="bill"&&String(l.id)===String(b.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canShare=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canShare&&<button onClick={e=>{ e.stopPropagation(); sharePaymentRequest(p.name,left,b.name||"Bill",{ dueDate:b.dueDate||b.billDate, billDate:b.billDate, billPeriodFrom:b.billPeriodFrom, billPeriodTo:b.billPeriodTo, totalAmount:b.amount, imageBase64:b.imageBase64||paymentImageSrc||billImageSrc||null, shareTitle:b.name||"Bill" }); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Share</button>; })()}
-                            {(()=>{ const owed=Number(info.amount||0); const left=remainingShare(info); const paid=Number(info.settledAmt||0); if(info.mode!=="owes") return <span>Owes {sym}{fmt(owed)} | on you</span>; if(left<=0) return <span>Settled {sym}{fmt(owed)}</span>; if(paid>0) return <span>Owes {sym}{fmt(owed)} | Partly settled {sym}{fmt(paid)} | Bal. {sym}{fmt(left)}</span>; return <span>Owes {sym}{fmt(owed)} | Bal. {sym}{fmt(left)}</span>; })()}
-                            {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind==="bill"&&String(l.id)===String(b.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canSettle=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canSettle&&<button onClick={e=>{ e.stopPropagation(); setSettleTxn({ id:"bill_person_settle_"+b.id+"_"+pid, type:"expense", desc:b.name, amount:left, people:{ [pid]:{ amount:left, mode:"owes", settled:false } }, _billIds:[b.id], _isBillSettle:true }); }} style={{ background:T.success+"18",border:`1px solid ${T.success}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>💰 Settle</button>; })()}
-                          </div>
-                        </div>
-                      ); })}
-                      {(()=>{ const owedTotal=Object.values(b.splitPeople||{}).reduce((sum,info)=>sum+(info.mode==="owes"?Number(info.amount||0):0),0); const fallbackShare=Math.max(0,Number(b.amount||0)-owedTotal-Number(b.groupCollectiveAmount||0)); const storedShare=Number(b.myShare); const group=b.groupId?getGroup(b.groupId):null; const meExcluded=group?.includeMe===false; const myBillShare=Number.isFinite(storedShare)&&(storedShare>0||fallbackShare<=0||meExcluded)?storedShare:fallbackShare; return (
-                        <div style={{ display:"flex",justifyContent:"space-between",gap:8,fontSize:11,color:myBillShare>0?T.success:T.sub,fontWeight:700,marginTop:4 }}>
-                          <span>Your share{meExcluded?" (not included)":""}</span>
-                          <span>{sym}{fmt(myBillShare)}</span>
-                        </div>
-                      ); })()}
-                    </div>
-                  )}
-                  {(billImageSrc || paymentImageSrc)&&(
-                    <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:8 }}>
-                      {billImageSrc&&<button onClick={(e)=>{ e.stopPropagation(); setImageViewSrc(billImageSrc); }} style={{ background:T.info+"14",border:`1px solid ${T.info}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>🧾 View bill</button>}
-                      {paymentImageSrc&&<button onClick={(e)=>{ e.stopPropagation(); setImageViewSrc(paymentImageSrc); }} style={{ background:T.success+"14",border:`1px solid ${T.success}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.success,fontFamily:"Nunito,sans-serif" }}>💳 View payment</button>}
-                    </div>
-                  )}
-                  {/* Bill period */}
-                  {(b.billPeriodFrom||b.billPeriodTo)&&(
-                    <div style={{ display:"flex",gap:6,marginBottom:4 }}>
-                      <span style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.info }}>📅 {formatShortDate(b.billPeriodFrom)||b.billPeriodFrom||"?"} → {formatShortDate(b.billPeriodTo)||b.billPeriodTo||"?"}</span>
-                    </div>
-                  )}
-                  {/* Plan / recharge details */}
-                  {(b.planType||b.planDesc)&&(
-                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:4 }}>
-                      {b.planType&&<span style={{ background:T.accent+"16",border:`1px solid ${T.accent}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.accent }}>{b.planType}</span>}
-                      {b.planDesc&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,color:T.sub }}>{b.planDesc}</span>}
-                    </div>
-                  )}
-              {/* Validity / period display */}
-                  {(b.validFrom||b.validUntil||b.periodStart||b.periodEnd)&&(
-                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:6 }}>
-                      {(b.periodStart||b.validFrom)&&<span style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.info }}>From {formatShortDate(b.periodStart||b.validFrom)}</span>}
-                      {(b.periodEnd||b.validUntil)&&<span style={{ background:T.info+"16",border:`1px solid ${T.info}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.info }}>Until {formatShortDate(b.periodEnd||b.validUntil)}</span>}
-                      {b.membershipEndDate&&<span style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.warn }}>Ends {formatShortDate(b.membershipEndDate)}</span>}
-                      {b.freeTrialEndDate&&<span style={{ background:T.danger+"16",border:`1px solid ${T.danger}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.danger }}>Trial ends {formatShortDate(b.freeTrialEndDate)}</span>}
-                      {b.isPaused&&<span style={{ background:T.warn+"22",border:`1px solid ${T.warn}44`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.warn }}>⏸️ Paused {b.pausedDays>0?`${b.pausedDays}d`:""}</span>}
-                    </div>
-                  )}
-                  <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
-                    {b.status==="unpaid"&&<button onClick={(e)=>{ e.stopPropagation(); setMarkingBillPaid(b); }} style={{ ...btnP,flex:1,padding:"9px" }}>✅ Mark as Paid</button>}
-                    <button onClick={(e)=>{ e.stopPropagation(); setEditingBill(b); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
-                    {b.recurring&&b.status==="unpaid"&&<button onClick={(e)=>{
-                      e.stopPropagation();
-                      if(b.isPaused){
-                        // Resume: calculate days paused, extend validUntil if applicable
-                        const pausedSince = b.pausedDate ? new Date(b.pausedDate) : new Date();
-                        const today = new Date();
-                        const daysPaused = Math.max(0, Math.round((today - pausedSince) / 86400000));
-                        const totalPausedDays = (b.pausedDays||0) + daysPaused;
-                        let newValidUntil = b.validUntil;
-                        if(b.validUntil){
-                          const vu = new Date(b.validUntil);
-                          vu.setDate(vu.getDate() + daysPaused);
-                          newValidUntil = vu.toISOString().split("T")[0];
-                        }
-                        let newPeriodEnd = b.periodEnd;
-                        if(b.periodEnd){
-                          const pe = new Date(b.periodEnd);
-                          pe.setDate(pe.getDate() + daysPaused);
-                          newPeriodEnd = pe.toISOString().split("T")[0];
-                        }
-                        setBills(p=>p.map(x=>x.id===b.id?{...x,isPaused:false,resumeDate:todayStr(),pausedDays:totalPausedDays,validUntil:newValidUntil,periodEnd:newPeriodEnd}:x));
-                      } else {
-                        // Pause
-                        const reason = window.prompt("Pause reason (optional):");
-                        setBills(p=>p.map(x=>x.id===b.id?{...x,isPaused:true,pausedDate:todayStr(),resumeDate:null,pauseReason:reason||null}:x));
-                      }
-                    }} style={{ background:b.isPaused?T.success+"22":T.warn+"22",border:`1px solid ${b.isPaused?T.success:T.warn}44`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:b.isPaused?T.success:T.warn,fontFamily:"Nunito,sans-serif" }}>{b.isPaused?"▶️ Resume":"⏸️ Pause"}</button>}
-                    <button onClick={(e)=>{ e.stopPropagation(); setBills(p=>p.filter(x=>x.id!==b.id)); }} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-          </div>
+        {/* UI-2C M2 PY-18 / PY-27 — the Bills list. Rows open Bill detail; card statements open
+            their existing reconciliation sheet. */}
+        {billsTab==="bills"&&(
+          <BillsList T={T} sym={sym} fmt={fmt}
+            view={buildPaymentsView({ bills, contributions, forFilter:paymentsForFilter, forLabel:getBillForLabel })}
+            forFilter={paymentsForFilter} onForFilter={setPaymentsForFilter}
+            showCancelled={paymentsShowCancelled} onToggleCancelled={()=>setPaymentsShowCancelled(v=>!v)}
+            showAllPaid={paymentsShowAllPaid} onToggleAllPaid={()=>setPaymentsShowAllPaid(v=>!v)}
+            onOpen={b=>{ if(b.isCcStatement) setViewingCcStatementId(b.id); else setViewingBillId(b.id); }}
+            onAddBill={null}/>
         )}
       </div>
     );
@@ -17984,9 +17949,34 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           );
         })()}
         {editingBill&&<EditBillModal b={editingBill} onClose={()=>setEditingBill(null)}/>}
+        {viewingBillId&&(()=>{
+          const vb = bills.find(x=>String(x.id)===String(viewingBillId));
+          if(!vb) return null;
+          const ba = billerAccounts.find(x=>String(x.id)===String(vb.billerAccountId));
+          const shell = ba?.billerId ? billers.find(x=>x.id===ba.billerId) : null;
+          const ledger = getBillLedger(vb, contributions, txns);
+          const shareBill = async ()=>{
+            const text = [`${vb.name}${getBillPeriodLabel(vb)?` · ${getBillPeriodLabel(vb)}`:""}`, `Amount ${sym}${fmt(ledger.amount)}`, vb.dueDate?`Due ${formatShortDate(vb.dueDate)||vb.dueDate}`:null, ledger.remaining>0?`Balance ${sym}${fmt(ledger.remaining)}`:"Paid"].filter(Boolean).join("\n");
+            try{ if(navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); alert("Bill details copied."); } }catch(e){ if(e?.name!=="AbortError") navigator.clipboard?.writeText(text).catch(()=>{}); }
+          };
+          return <BillDetailSheet T={T} sym={sym} fmt={fmt} bill={vb}
+            badge={getBillBadge(vb, contributions)} ledger={ledger}
+            forLabel={getBillForLabel(vb)}
+            provider={shell?.name || vb.merchant || ba?.provider || ""}
+            relationship={ba ? [ba.name, ba.type].filter(Boolean).join(" · ") : ""}
+            accountName={t=>accounts.find(a=>String(a.id)===String(t?.accId))?.name || ""}
+            onClose={()=>setViewingBillId(null)}
+            onRecordPayment={()=>setMarkingBillPaid(vb)}
+            onEdit={()=>{ setEditingBill(vb); }}
+            onShare={shareBill}
+            extras={renderBillExtras(vb)}/>;
+        })()}
         {markingBillPaid&&(
           <MarkBillPaidModal
             bill={markingBillPaid}
+            balance={getBillBalance(markingBillPaid, contributions).remaining}
+            forLabel={getBillForLabel(markingBillPaid)}
+            today={todayStr()}
             accounts={accounts}
             defaultAccId={accounts.find(a=>a.type!=="cc")?.id||""}
             T={T}
@@ -17994,7 +17984,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             fmt={fmt}
             formatShortDate={formatShortDate}
             onClose={()=>setMarkingBillPaid(null)}
-            onConfirm={(accId,transactionRef)=>confirmMarkBillPaid(markingBillPaid,accId,transactionRef)}
+            onConfirm={(accId,transactionRef,payment)=>confirmMarkBillPaid(markingBillPaid,accId,transactionRef,payment)}
           />
         )}
         {billMatchSuggestion&&(
@@ -18005,13 +17995,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <button onClick={()=>setBillMatchSuggestion(null)} style={{ ...btnG,flex:1,padding:"8px" }}>Skip</button>
               <button onClick={()=>{
                 const b=billMatchSuggestion.bill;
-                setBills(p=>p.map(x=>x.id===b.id?{...x,status:"paid",paidDate:billMatchSuggestion.txn.date || todayStr(),paidByTxnId:billMatchSuggestion.txn.id}:x));
+                // M2 / ADR-038: apply at most the remaining balance; status follows Contributions.
+                const matchBalance = getBillBalance(b, contributions);
+                const matchApplied = planBillPayment(b, contributions, Number(billMatchSuggestion.txn.amount||0)).applied;
+                const matchBecomesPaid = matchApplied >= matchBalance.remaining - 0.005;
+                const matchIsFirst = !contributions.some(c=>c?.obligationType==="bill" && String(c.obligationId)===String(b.id));
+                setBills(p=>p.map(x=>x.id===b.id?{...x,...(matchBecomesPaid?{status:"paid",paidDate:billMatchSuggestion.txn.date || todayStr()}:{}),...(matchIsFirst?{paidByTxnId:billMatchSuggestion.txn.id}:{})}:x));
                 // WP-OBL-04a: dual-write — also record a real Contribution for this match,
                 // alongside the legacy paidByTxnId/status write above. Full amount — this path
                 // (like the other two) has no partial-payment concept yet.
-                setContributions(prev=>withBillContributionForTxn(prev, { billId:b.id, txnId:billMatchSuggestion.txn.id, amount:Number(b.amount||0), txnAmount:Number(b.amount||0) }, genId));
+                setContributions(prev=>withBillContributionForTxn(prev, { billId:b.id, txnId:billMatchSuggestion.txn.id, amount:matchApplied, txnAmount:Number(billMatchSuggestion.txn.amount||0) }, genId));
                 setTxns(p=>p.map(x=>x.id===billMatchSuggestion.txn.id?{...x,isBillPayment:true,billInvoiceNo:b.invoiceNo||"",paidBillId:b.id,paidBillName:b.name}:x));
-                if(b.recurring){ const next=new Date(b.dueDate); if(b.frequency==="monthly") next.setMonth(next.getMonth()+1); else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3); else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6); else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
+                if(matchBecomesPaid && b.recurring){ const next=new Date(b.dueDate); if(b.frequency==="monthly") next.setMonth(next.getMonth()+1); else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3); else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6); else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
                 setBillMatchSuggestion(null);
               }} style={{ ...btnP,flex:2,padding:"8px",background:T.success }}>✅ Yes, mark paid</button>
             </div>

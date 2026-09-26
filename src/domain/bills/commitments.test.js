@@ -197,3 +197,14 @@ test("commitment: refunds are netted before household-share calculation, via exi
   const { committedSpending } = getCommitments(bills, [], [], [], [], null, getCardSummary, refundTotalsByBill);
   assert.equal(committedSpending[0].amount, 4000, "5000 - 1000 refund = 4000");
 });
+
+test("ADR-038: a partially paid Bill commits no more than its remaining balance", () => {
+  const bills = [
+    { id: "b1", name: "Society", amount: 3800, status: "unpaid", dueDate: "2026-10-08" },
+    { id: "b2", name: "Jio", amount: 699, status: "unpaid", dueDate: "2026-10-05" },
+  ];
+  const noPartial = getCommitments(bills, [], [], [], [], () => null, () => null);
+  assert.deepEqual(noPartial.committedSpending.map(c => c.amount), [3800, 699], "unchanged without the input");
+  const withPartial = getCommitments(bills, [], [], [], [], () => null, () => null, {}, new Date(), { b1: 300 });
+  assert.deepEqual(withPartial.committedSpending.map(c => c.amount), [300, 699]);
+});

@@ -49,13 +49,16 @@ const getMyBillShare = (b, groups, refundTotalsByBill = {}) => {
  * share computed via getMyBillShare; refunds already netted via
  * getNetBillAmount inside that function.
  */
-const mapBillToCommittedSpending = (b, groups, refundTotalsByBill) => ({
+const mapBillToCommittedSpending = (b, groups, refundTotalsByBill, partialRemainingByBill) => ({
   sourceType: "bill",
   sourceId: b.id,
   category: "committedSpending",
   subCategory: b.isCcStatement ? "ccStatement" : (isRechargeBiller(b.billerCategory) ? "recharge" : "scheduledObligation"),
   name: b.name || "Bill",
-  amount: getMyBillShare(b, groups, refundTotalsByBill),
+  // ADR-038: a partially paid Bill can't need more cash than its remaining balance.
+  amount: partialRemainingByBill && partialRemainingByBill[String(b.id)] !== undefined
+    ? Math.min(getMyBillShare(b, groups, refundTotalsByBill), Number(partialRemainingByBill[String(b.id)]))
+    : getMyBillShare(b, groups, refundTotalsByBill),
   date: b.dueDate || null,
   status: b.status || "unpaid",
   recurs: Boolean(b.recurring), // metadata only — NOT used as an inclusion filter
@@ -160,8 +163,8 @@ const mapScheduleToCommittedSaving = (r, refDate) => ({
  *   Bill/CC entries, which already carry their own real dueDate/dueOn.
  * @returns {{ committedSpending: Array, committedSaving: Array }}
  */
-export const getCommitments = (bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill = {}, refDate = new Date()) => {
-  const billEntries = (bills || []).map(b => mapBillToCommittedSpending(b, groups, refundTotalsByBill));
+export const getCommitments = (bills, recurringSchedules, accounts, txns, groups, toDateOnly, getCardSummary, refundTotalsByBill = {}, refDate = new Date(), partialRemainingByBill = null) => {
+  const billEntries = (bills || []).map(b => mapBillToCommittedSpending(b, groups, refundTotalsByBill, partialRemainingByBill));
   const ccEntries = (accounts || [])
     .map(a => mapCcAccountToCommittedSpending(a, accounts, txns, toDateOnly, getCardSummary, bills))
     .filter(Boolean);

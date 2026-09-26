@@ -36,12 +36,9 @@ export function settlePersonShareOnBill({ bill, personId, amount, todayStr }) {
   };
   const updatedSplitPeople = { ...bill.splitPeople, [personId]: updatedInfo };
 
-  // Bill.status recomputation — a real Bill-level invariant (fixed earlier this
-  // session), expressed here from the canonical per-share `settled` values
-  // rather than duplicated ad hoc.
-  const allOwedSettled = Object.entries(updatedSplitPeople)
-    .filter(([p]) => p !== "__me__")
-    .every(([, i]) => i.settled || i.mode !== "owes");
+  // ADR-038 (product owner, 26 Sep): settling split shares is progress between
+  // you and them, not a payment to the provider, so it never marks the Bill
+  // paid. Bill status follows the Bill's own payments (billBalance.js).
 
   // --- CR-006: group-collective tracking, same legacy pass-through as the
   // Transaction-side adapter, same reasoning (not yet audited as a business
@@ -55,7 +52,6 @@ export function settlePersonShareOnBill({ bill, personId, amount, todayStr }) {
     ...bill,
     splitPeople: updatedSplitPeople,
     ...(groupCap > 0 ? { groupCollectiveSettledAmt: nextGroupSettled } : {}),
-    ...(allOwedSettled ? { status: "paid", paidDate: todayStr() } : {}),
   };
 
   // Mirroring is a cross-entity concern (Bill -> linked Transaction), not
