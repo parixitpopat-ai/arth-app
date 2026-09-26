@@ -20,6 +20,7 @@ import { todayStr } from "../helpers/dateHelpers";
 import BottomSheet from "../components/BottomSheet";
 import EmptyState from "../components/EmptyState";
 import EntityCard from "../components/EntityCard";
+import { FONT } from "../constants/theme";
 import * as schoolFeesService from "../domain/schoolFees/service";
 import { calculateOutstanding } from "../domain/schoolFees/outstanding";
 import { classifyPeriod } from "../domain/schoolFees/startingState";
@@ -28,15 +29,13 @@ import { isPersonArchived } from "../domain/person/archive";
 import { resolveSchoolAttribution, attemptSchoolAttributionChange } from "./SchoolFeesScreen.helpers";
 import { reconcileScheduleEdit } from "../domain/schoolFees/startingState";
 
-const TEAL = "oklch(58% 0.14 195)";
-const TEAL_TEXT = "oklch(38% 0.1 195)";
-const GREEN = "oklch(58% 0.13 150)";
-const GREEN_TEXT = "oklch(38% 0.11 150)";
-const RED = "oklch(58% 0.16 25)";
-const RED_TEXT = "oklch(45% 0.14 25)";
-const AMBER = "oklch(62% 0.13 80)";
-const AMBER_TEXT = "oklch(40% 0.09 80)";
-
+// Checkpoint 5 restyle: this screen used to declare its own local colour palette
+// (TEAL/TEAL_TEXT/GREEN/GREEN_TEXT/RED/RED_TEXT/AMBER/AMBER_TEXT as raw OKLCH values) instead of
+// the app's theme tokens. Credit/discount/projection figures now use T.info/T.infoText (the same
+// teal-family role the rest of the app already has); paid/settled figures use T.success; negative/
+// outstanding figures use T.danger/T.dangerText — three existing roles, no new hue. Money figures
+// use FONT.mono + tabular-nums (the same treatment MONEY.* in constants/theme.js uses) instead of
+// a bare "monospace" string, and labels are at the 11px type floor instead of 9.5px.
 const money = (sym, fmt, n) => `${sym}${fmt(n)}`;
 
 // ============================================================================
@@ -61,7 +60,7 @@ export const SchoolFeeScheduleListModal = ({ onClose, T, sym, fmt, feeSchedules,
             key={schedule.id} icon="🎓" T={T}
             title={schedule.schoolName || "School Fee Schedule"}
             subtitle={`${schedule.schoolYearStart?.slice(0,7)||"?"} – ${schedule.schoolYearEnd?.slice(0,7)||"?"} · ${sym}${fmt(summary.remainingObligation)} outstanding`}
-            trailing={summary.availableCredit>0 ? <span style={{ color:TEAL_TEXT,fontSize:10,fontWeight:700 }}>{sym}{fmt(summary.availableCredit)} credit</span> : null}
+            trailing={summary.availableCredit>0 ? <span style={{ color:T.infoText,fontSize:11,fontWeight:700 }}>{sym}{fmt(summary.availableCredit)} credit</span> : null}
             onClick={()=>setViewingSchedule(schedule)}
           />
         ))}
@@ -404,21 +403,21 @@ export const SchoolFeeScheduleDetailModal = ({
       {/* Annual commitment card */}
       <div style={{ background:T.input,borderRadius:18,padding:16,marginBottom:12 }}>
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>Annual tuition commitment</div>
-        <div style={{ color:T.text,fontSize:26,fontWeight:800,margin:"4px 0 6px",fontFamily:"monospace" }}>{sym}{fmt(summary.grossAnnualCommitment)}</div>
+        <div style={{ color:T.text,fontSize:26,fontWeight:800,margin:"4px 0 6px",fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(summary.grossAnnualCommitment)}</div>
         <div style={{ color:T.sub,fontSize:10.5,lineHeight:1.5,marginBottom:12 }}>Summed from {periods.length} fee periods — not a flat monthly multiple. Any overridden period is reflected here exactly.</div>
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-          <div><div style={{ color:T.sub,fontSize:10 }}>Paid</div><div style={{ color:GREEN_TEXT,fontSize:15,fontWeight:800,fontFamily:"monospace" }}>{sym}{fmt(summary.amountPaid)}</div></div>
-          <div><div style={{ color:T.sub,fontSize:10 }}>Outstanding</div><div style={{ color:T.text,fontSize:15,fontWeight:800,fontFamily:"monospace" }}>{sym}{fmt(summary.remainingObligation)}</div></div>
-          <div><div style={{ color:T.sub,fontSize:10 }}>Discounts</div><div style={{ color:T.text,fontSize:13,fontWeight:700,fontFamily:"monospace" }}>{sym}{fmt(summary.discounts)}</div></div>
-          <div><div style={{ color:T.sub,fontSize:10 }}>Write-offs</div><div style={{ color:T.text,fontSize:13,fontWeight:700,fontFamily:"monospace" }}>{sym}{fmt(summary.writeOffs)}</div></div>
+          <div><div style={{ color:T.sub,fontSize:10 }}>Paid</div><div style={{ color:T.success,fontSize:15,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(summary.amountPaid)}</div></div>
+          <div><div style={{ color:T.sub,fontSize:10 }}>Outstanding</div><div style={{ color:T.text,fontSize:15,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(summary.remainingObligation)}</div></div>
+          <div><div style={{ color:T.sub,fontSize:10 }}>Discounts</div><div style={{ color:T.text,fontSize:13,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(summary.discounts)}</div></div>
+          <div><div style={{ color:T.sub,fontSize:10 }}>Write-offs</div><div style={{ color:T.text,fontSize:13,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(summary.writeOffs)}</div></div>
         </div>
       </div>
 
       {availableCredit>0 && (
         <div style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:16,padding:14,marginBottom:12 }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline" }}>
-            <span style={{ color:TEAL_TEXT,fontSize:12.5,fontWeight:700 }}>School credit available</span>
-            <span style={{ color:TEAL_TEXT,fontSize:15,fontWeight:800,fontFamily:"monospace" }}>{sym}{fmt(availableCredit)}</span>
+            <span style={{ color:T.infoText,fontSize:12.5,fontWeight:700 }}>School credit available</span>
+            <span style={{ color:T.infoText,fontSize:15,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(availableCredit)}</span>
           </div>
           <div style={{ color:T.sub,fontSize:10.5,lineHeight:1.5,margin:"6px 0 10px" }}>Arth suggests applying this to the next outstanding period — it will not apply this on its own.</div>
           <button onClick={applyCreditToOldest} style={{ background:T.accent,border:"none",borderRadius:10,padding:"8px 14px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Apply to next outstanding period</button>
@@ -451,13 +450,13 @@ export const SchoolFeeScheduleDetailModal = ({
             <button onClick={()=>setViewingPeriod(p)} style={{ flex:1,minWidth:0,display:"flex",alignItems:"center",gap:11,padding:"13px 14px",background:und?"transparent":T.card,border:und?`1px dashed ${T.border}`:`1px solid ${T.border}`,borderRadius:16,cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
               <span style={{ flex:1,minWidth:0 }}>
                 <div style={{ color:und?T.sub:T.text,fontSize:14,fontWeight:700 }}>{p.label}</div>
-                <div style={{ color:und?T.sub:(settled?GREEN_TEXT:(out<p.obligationAmount?RED_TEXT:T.sub)),fontSize:10.5,marginTop:2 }}>
+                <div style={{ color:und?T.sub:(settled?T.success:(out<p.obligationAmount?T.dangerText:T.sub)),fontSize:10.5,marginTop:2 }}>
                   {und ? "Status not established · set status" : settled ? "Settled in full" : (p.paidAmount>0 ? `Part paid · ${sym}${fmt(out)} outstanding` : "Unpaid")}
                 </div>
               </span>
               <span style={{ textAlign:"right" }}>
-                <div style={{ color:und?T.sub:T.text,fontSize:14,fontWeight:700,fontFamily:"monospace" }}>{sym}{fmt(p.obligationAmount)}</div>
-                <div style={{ color:und?T.sub:(settled?GREEN_TEXT:T.sub),fontSize:10.5,fontFamily:"monospace" }}>{und ? "not counted" : settled ? "settled" : `${sym}${fmt(out)} due`}</div>
+                <div style={{ color:und?T.sub:T.text,fontSize:14,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(p.obligationAmount)}</div>
+                <div style={{ color:und?T.sub:(settled?T.success:T.sub),fontSize:10.5,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{und ? "not counted" : settled ? "settled" : `${sym}${fmt(out)} due`}</div>
               </span>
             </button>
           </div>
@@ -471,7 +470,7 @@ export const SchoolFeeScheduleDetailModal = ({
         <div style={{ position:"sticky",bottom:0,marginTop:14,padding:"12px 0 0",background:T.bg,borderTop:`1px solid ${T.border}` }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10 }}>
             <span style={{ color:T.sub,fontSize:12 }}>{selectedPeriodIds.length} selected</span>
-            <span style={{ color:T.text,fontSize:18,fontWeight:800,fontFamily:"monospace" }}>{sym}{fmt(selectedTotal)}</span>
+            <span style={{ color:T.text,fontSize:18,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(selectedTotal)}</span>
           </div>
           <div style={{ display:"flex",gap:8 }}>
             <button onClick={()=>setShowSettle(true)} style={{ flex:1,padding:13,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Record payment</button>
@@ -559,22 +558,22 @@ export const SettlePaymentModal = ({
       <div style={{ background:T.input,borderRadius:16,padding:15,marginBottom:12 }}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:11 }}>
           <span style={{ color:T.sub,fontSize:12 }}>Outstanding on {selectedPeriodIds.length} period(s)</span>
-          <span style={{ color:T.text,fontSize:16,fontWeight:800,fontFamily:"monospace" }}>{sym}{fmt(selectedTotal)}</span>
+          <span style={{ color:T.text,fontSize:16,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(selectedTotal)}</span>
         </div>
-        <span style={{ display:"block",color:T.sub,fontSize:9.5,fontWeight:700,textTransform:"uppercase",marginBottom:6 }}>Amount actually paid</span>
-        <input type="number" value={payAmount} onChange={e=>{ setPayAmount(e.target.value); setAlloc({}); }} placeholder="0" style={{ width:"100%",border:`1.5px solid ${T.accent}55`,background:T.bg,borderRadius:12,padding:"11px 14px",fontSize:20,fontWeight:700,color:T.text,fontFamily:"monospace",outline:"none" }}/>
+        <span style={{ display:"block",color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",marginBottom:6 }}>Amount actually paid</span>
+        <input type="number" value={payAmount} onChange={e=>{ setPayAmount(e.target.value); setAlloc({}); }} placeholder="0" style={{ width:"100%",border:`1.5px solid ${T.accent}55`,background:T.bg,borderRadius:12,padding:"11px 14px",fontSize:20,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",outline:"none" }}/>
         <div style={{ color:T.sub,fontSize:11,marginTop:8 }}>
           {payNum===0 ? "Enter what was actually paid."
             : payNum===selectedTotal ? "Covers the selection in full — no allocation needed."
             : selectedPeriodIds.length>1 ? "Less than the total. Allocate it below."
             : `Leaves ${sym}${fmt(Math.max(0,selectedTotal-payNum))} outstanding on this period.`}
         </div>
-        <span style={{ display:"block",color:T.sub,fontSize:9.5,fontWeight:700,textTransform:"uppercase",margin:"12px 0 6px" }}>Paid from</span>
+        <span style={{ display:"block",color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",margin:"12px 0 6px" }}>Paid from</span>
         <select value={accId} onChange={e=>setAccId(e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
           <option value="">Select an account…</option>
           {(accounts||[]).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
-        <span style={{ display:"block",color:T.sub,fontSize:9.5,fontWeight:700,textTransform:"uppercase",margin:"12px 0 6px" }}>Category</span>
+        <span style={{ display:"block",color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",margin:"12px 0 6px" }}>Category</span>
         <select value={catId} onChange={e=>setCatId(e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
           <option value="">Select a category…</option>
           {(cats||[]).map(c=><option key={c.id} value={c.id}>{c.name||c.id}</option>)}
@@ -594,20 +593,20 @@ export const SettlePaymentModal = ({
               <div key={p.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"12px 13px",marginBottom:8 }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8 }}>
                   <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{p.label}</span>
-                  <span style={{ color:T.sub,fontSize:11,fontFamily:"monospace" }}>{sym}{fmt(out)} outstanding</span>
+                  <span style={{ color:T.sub,fontSize:11,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(out)} outstanding</span>
                 </div>
-                <input type="number" value={alloc[p.id]||""} onChange={e=>setAlloc(prev=>({...prev,[p.id]:e.target.value}))} placeholder="0" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"8px 11px",fontSize:14,fontWeight:700,color:T.text,fontFamily:"monospace",outline:"none" }}/>
-                <div style={{ color:v===0?T.sub:(left<=0?GREEN_TEXT:RED_TEXT),fontSize:10.5,marginTop:6 }}>
+                <input type="number" value={alloc[p.id]||""} onChange={e=>setAlloc(prev=>({...prev,[p.id]:e.target.value}))} placeholder="0" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"8px 11px",fontSize:14,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",outline:"none" }}/>
+                <div style={{ color:v===0?T.sub:(left<=0?T.success:T.dangerText),fontSize:10.5,marginTop:6 }}>
                   {v===0 ? `Nothing allocated — stays ${sym}${fmt(out)} outstanding` : left<=0 ? `Settles ${p.label.split(" ")[0]} in full` : `${sym}${fmt(left)} will remain outstanding`}
                 </div>
               </div>
             );
           })}
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 13px",background:unalloc===0?T.accentSoft:"transparent",borderRadius:12 }}>
-            <span style={{ color:unalloc===0?GREEN_TEXT:RED_TEXT,fontSize:12,fontWeight:700 }}>{unalloc===0?"Fully allocated":unalloc>0?"Still to allocate":"Over-allocated"}</span>
-            <span style={{ color:unalloc===0?GREEN_TEXT:RED_TEXT,fontSize:14,fontWeight:800,fontFamily:"monospace" }}>{sym}{fmt(Math.abs(unalloc))}</span>
+            <span style={{ color:unalloc===0?T.success:T.dangerText,fontSize:12,fontWeight:700 }}>{unalloc===0?"Fully allocated":unalloc>0?"Still to allocate":"Over-allocated"}</span>
+            <span style={{ color:unalloc===0?T.success:T.dangerText,fontSize:14,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(Math.abs(unalloc))}</span>
           </div>
-          <button onClick={autoSuggest} style={{ width:"100%",marginTop:9,padding:10,borderRadius:10,background:"none",border:`1px dashed ${T.accent}88`,fontSize:11.5,fontWeight:700,color:TEAL_TEXT,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Suggest a split (oldest period first)</button>
+          <button onClick={autoSuggest} style={{ width:"100%",marginTop:9,padding:10,borderRadius:10,background:"none",border:`1px dashed ${T.accent}88`,fontSize:11.5,fontWeight:700,color:T.infoText,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Suggest a split (oldest period first)</button>
         </div>
       )}
 
@@ -689,14 +688,14 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
 
   const ledger = [
     { label:"Fee", value: `${sym}${fmt(period.obligationAmount)}`, color:T.text },
-    { label:"Paid", value: `${sym}${fmt(period.paidAmount)}`, color: period.paidAmount>0?GREEN_TEXT:T.sub },
+    { label:"Paid", value: `${sym}${fmt(period.paidAmount)}`, color: period.paidAmount>0?T.success:T.sub },
   ];
-  if(period.appliedCreditAmount>0) ledger.push({ label:"Credit applied", value:`${sym}${fmt(period.appliedCreditAmount)}`, color:TEAL_TEXT });
-  if(period.discountAmount>0) ledger.push({ label:"Discount", value:`${sym}${fmt(period.discountAmount)}`, color:TEAL_TEXT });
+  if(period.appliedCreditAmount>0) ledger.push({ label:"Credit applied", value:`${sym}${fmt(period.appliedCreditAmount)}`, color:T.infoText });
+  if(period.discountAmount>0) ledger.push({ label:"Discount", value:`${sym}${fmt(period.discountAmount)}`, color:T.infoText });
   if(period.writeOffAmount>0) ledger.push({ label:"Write-off", value:`${sym}${fmt(period.writeOffAmount)}`, color:T.sub });
   ledger.push(und
     ? { label:"Outstanding", value:"—", color:T.sub }
-    : { label:"Outstanding", value:`${sym}${fmt(out)}`, color: out>0?RED_TEXT:GREEN_TEXT }
+    : { label:"Outstanding", value:`${sym}${fmt(out)}`, color: out>0?T.dangerText:T.success }
   );
 
   return (
@@ -716,7 +715,7 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
           <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.5,marginBottom:13 }}>This period predates the schedule. Arth has no record of whether it was paid, and will not assume it was outstanding.</div>
           <div style={{ color:T.text,fontSize:12.5,fontWeight:700,marginBottom:8 }}>Was this fee paid?</div>
           <div style={{ display:"flex",gap:8 }}>
-            <button onClick={()=>setStatus(true)} style={{ flex:1,padding:12,borderRadius:12,background:GREEN,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Yes — paid</button>
+            <button onClick={()=>setStatus(true)} style={{ flex:1,padding:12,borderRadius:12,background:T.success,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Yes — paid</button>
             <button onClick={()=>setStatus(false)} style={{ flex:1,padding:12,borderRadius:12,background:T.card,border:`1px solid ${T.border}`,fontSize:13,fontWeight:700,color:T.text,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>No — unpaid</button>
           </div>
         </div>
@@ -728,18 +727,18 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
             <>
               <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>Marked paid at setup — no transaction on file</div>
               <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.5,marginBottom:12 }}>This period was marked paid when the schedule was set up, but Arth has no actual payment on record for it — this is a starting-balance claim, not a witnessed transaction. If that was entered incorrectly, you can correct it.</div>
-              <span style={{ display:"block",color:T.sub,fontSize:9.5,fontWeight:700,textTransform:"uppercase",marginBottom:6 }}>Reason for correction *</span>
+              <span style={{ display:"block",color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",marginBottom:6 }}>Reason for correction *</span>
               <input value={correctionReason} onChange={e=>setCorrectionReason(e.target.value)} placeholder="e.g. Marked paid by mistake at setup" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none",marginBottom:11 }}/>
               <button onClick={correctPeriod} disabled={!correctionReason.trim()} style={{ width:"100%",padding:12,borderRadius:12,background:correctionReason.trim()?T.accent:T.border,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:correctionReason.trim()?"pointer":"not-allowed",fontFamily:"Nunito,sans-serif" }}>Correct — mark as actually unpaid</button>
             </>
           ) : classification==="protected" ? (
             <>
-              <div style={{ color:T.text,fontSize:26,fontWeight:800,fontFamily:"monospace" }}>{sym}{fmt(period.obligationAmount)}</div>
+              <div style={{ color:T.text,fontSize:26,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(period.obligationAmount)}</div>
               <div style={{ color:T.sub,fontSize:11,lineHeight:1.5,marginTop:8 }}>This period has been settled or adjusted. Editing the fee would rewrite history — use a discount, write-off, or credit note instead.</div>
             </>
           ) : (
             <>
-              <input type="number" value={feeDraft} onChange={e=>setFeeDraft(e.target.value)} style={{ width:"100%",border:`1.5px solid ${T.accent}55`,background:T.bg,borderRadius:12,padding:"11px 14px",fontSize:22,fontWeight:700,color:T.text,fontFamily:"monospace",outline:"none",marginBottom:9 }}/>
+              <input type="number" value={feeDraft} onChange={e=>setFeeDraft(e.target.value)} style={{ width:"100%",border:`1.5px solid ${T.accent}55`,background:T.bg,borderRadius:12,padding:"11px 14px",fontSize:22,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",outline:"none",marginBottom:9 }}/>
               <div style={{ color:T.sub,fontSize:11,lineHeight:1.5,marginBottom:11 }}>Changes only this period. It does not touch any other period, and does not alter any payment already recorded — this is a future obligation, not history.</div>
               <button onClick={saveFee} style={{ width:"100%",padding:12,borderRadius:12,background:T.accent,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Save fee for {period.label}</button>
             </>
@@ -751,7 +750,7 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
         {ledger.map((l,i)=>(
           <div key={i} style={{ display:"flex",justifyContent:"space-between",padding:"12px 14px",borderBottom:i<ledger.length-1?`1px solid ${T.border}`:"none" }}>
             <span style={{ color:T.sub,fontSize:12.5,fontWeight:600 }}>{l.label}</span>
-            <span style={{ color:l.color,fontSize:14,fontWeight:700,fontFamily:"monospace" }}>{l.value}</span>
+            <span style={{ color:l.color,fontSize:14,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{l.value}</span>
           </div>
         ))}
       </div>
@@ -762,13 +761,13 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
           {paymentEvents.map(({ link, txn, acc }, i)=>(
             <div key={i} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"12px 14px",marginBottom:8 }}>
               <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4 }}>
-                <span style={{ color:GREEN_TEXT,fontSize:13,fontWeight:700 }}>Paid {sym}{fmt(link.amount)}</span>
+                <span style={{ color:T.success,fontSize:13,fontWeight:700 }}>Paid {sym}{fmt(link.amount)}</span>
               </div>
               {txn ? (
                 <>
                   <div style={{ color:T.sub,fontSize:11 }}>Paid on {txn.date || "—"}{acc ? ` · ${acc.name}` : ""}</div>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8 }}>
-                    <span style={{ color:T.sub,fontSize:10.5,fontFamily:"monospace" }}>TXN-{String(txn.id).slice(-8).toUpperCase()}</span>
+                    <span style={{ color:T.sub,fontSize:10.5,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>TXN-{String(txn.id).slice(-8).toUpperCase()}</span>
                     {onViewTransaction && (
                       <button onClick={()=>onViewTransaction(txn.id)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>View transaction →</button>
                     )}
@@ -806,7 +805,7 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
               <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>Committed Spending</div>
               <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>Future Money · source: School Fees</div>
             </div>
-            <span style={{ color:TEAL_TEXT,fontSize:13,fontWeight:700,fontFamily:"monospace" }}>{sym}{fmt(projected.amount)}</span>
+            <span style={{ color:T.infoText,fontSize:13,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(projected.amount)}</span>
           </div>
         ) : (
           <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.5 }}>{und ? "Not projected — status isn't established yet." : "Not projected — this period is fully settled."}</div>
@@ -860,7 +859,7 @@ export const AdjustmentModal = ({ kind, feePeriods, setFeePeriods, targetPeriodI
       <span style={lbl}>Period</span>
       <div style={{ ...inp,display:"flex",alignItems:"center",marginBottom:10 }}>{period?.label || "Select a period"}</div>
       <span style={lbl}>Amount</span>
-      <input style={{ ...inp,fontSize:20,fontWeight:700,fontFamily:"monospace" }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
+      <input style={{ ...inp,fontSize:20,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
       <span style={{ ...lbl,marginTop:10 }}>Reason</span>
       <input style={inp} placeholder="e.g. Sibling concession" value={reason} onChange={e=>setReason(e.target.value)}/>
       {error && <div style={{ color:T.warn,fontSize:11,marginTop:10 }}>{error}</div>}
@@ -897,7 +896,7 @@ export const CreditNoteModal = ({ schedule, feePeriods, setFeePeriods, schoolCre
       </div>
       <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.55,marginBottom:14 }}>A credit note is a separate fact from any payment. It never touches a historical transaction, and is never applied automatically — you choose where it goes.</div>
       <span style={lbl}>Amount</span>
-      <input style={{ ...inp,fontSize:20,fontWeight:700,fontFamily:"monospace" }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
+      <input style={{ ...inp,fontSize:20,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
       <span style={{ ...lbl,marginTop:10 }}>Reason</span>
       <input style={inp} placeholder="e.g. School issued a refund credit" value={reason} onChange={e=>setReason(e.target.value)}/>
       {error && <div style={{ color:T.warn,fontSize:11,marginTop:10 }}>{error}</div>}
