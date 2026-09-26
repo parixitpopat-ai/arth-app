@@ -58,6 +58,11 @@ import { getPersonReminders } from "./domain/person/reminders";
 import { getSectionOrder, moveSection } from "./domain/person/sectionOrder";
 import { getPersonTypeUILabel } from "./domain/person/personType";
 import { getSplitShareMode, getNewSplitRowMode, getRowsNeedingSplitChoice } from "./domain/person/splitDefault";
+import { buildNewPerson, applyPersonSetup } from "./domain/person/newPerson";
+import { buildNewGroup } from "./domain/group/newGroup";
+import AddPersonSheet from "./components/people/AddPersonSheet";
+import PersonSetupSheet from "./components/people/PersonSetupSheet";
+import AddGroupSheet from "./components/people/AddGroupSheet";
 import { PersonProfileScreen } from "./screens/PersonProfileScreen";
 import { isSchoolRelationshipCurrent } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
@@ -1257,6 +1262,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // to auto-expand that person's row, instead of duplicating spend/budget/category cards locally.
   const [budgetFocusPersonId, setBudgetFocusPersonId] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
+  // UI-2C M1 — People | Groups switch and the Add person / P-3 / Add group sheets live here,
+  // not inside <People/>, which remounts whenever AppContent re-renders (e.g. after setPeople).
+  const [subView, setSubView] = useState("people");
+  const [peopleSheet, setPeopleSheet] = useState(null); // {kind:"addPerson"} | {kind:"setup",person} | {kind:"addGroup"}
+  const [preselectedAttribution, setPreselectedAttribution] = useState(null); // {type:"person"|"group", id}
   const [groupViewMode, setGroupViewMode] = useState("overall");
   const [showGroupOwesBreakdown, setShowGroupOwesBreakdown] = useState(false);
   const [groupSpendFilter, setGroupSpendFilter] = useState(null);
@@ -10067,9 +10077,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
   // ── PEOPLE ─────────────────────────────────────────────────────────────────
   const People = () => {
-    const [newName,setNewName]=useState("");
-    const [newEmoji,setNewEmoji]=useState("👤");
-    const [newRelation,setNewRelation]=useState("");
     const [editingGroupName,setEditingGroupName]=useState("");
     const [editingGroupBudget,setEditingGroupBudget]=useState("");
     const [editingGroupMembers,setEditingGroupMembers]=useState([]);
@@ -10077,40 +10084,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [editingGroupColor,setEditingGroupColor]=useState("");
     const [isEditingGroup,setIsEditingGroup]=useState(false);
   const [editingGroupTypeId,setEditingGroupTypeId]=useState("");
-    const [newColor,setNewColor]=useState(PALETTE[1]);
-    const [newPersonType,setNewPersonType]=useState("contact");
-    const [newCreditLimit,setNewCreditLimit]=useState("");
-    const [newSpendBudget,setNewSpendBudget]=useState("");
-    // 3-step Add Person wizard: Identity → Capabilities → Details
-    const [addPersonStep,setAddPersonStep]=useState(1);
-    const [newModules,setNewModules]=useState(null); // null = not yet touched, use type default
-    const [newUnlimitedCredit,setNewUnlimitedCredit]=useState(false);
-    const [newFavorite,setNewFavorite]=useState(false);
-    const [newDefaultSettlement,setNewDefaultSettlement]=useState("UPI");
-    const effectiveNewModules = newModules ?? getPersonModules({personType:newPersonType,isMe:false});
-    const toggleNewModule = (id) => setNewModules(prev=>{
-      const cur = prev ?? getPersonModules({personType:newPersonType,isMe:false});
-      return cur.includes(id) ? cur.filter(x=>x!==id) : [...cur,id];
-    });
-    const resetAddPersonWizard = () => {
-      setAddPersonStep(1); setNewName(""); setNewEmoji("👤"); setNewRelation(""); setNewPersonType("contact");
-      setNewModules(null); setNewCreditLimit(""); setNewUnlimitedCredit(false); setNewSpendBudget("");
-      setNewFavorite(false); setNewDefaultSettlement("UPI"); setNewColor(PALETTE[1]);
-    };
-    const [newGroupName,setNewGroupName]=useState("");
-    const [newGroupType,setNewGroupType]=useState("");
-    const [newGroupTypeId,setNewGroupTypeId]=useState("");
-    const [newGroupColor,setNewGroupColor]=useState(PALETTE[5]);
-    const [newGroupMembers,setNewGroupMembers]=useState([]);
-    const [newGroupIncludeMe,setNewGroupIncludeMe]=useState(true);
-    const [newGroupManualLimit,setNewGroupManualLimit]=useState("");
-    const [addGroupStep,setAddGroupStep]=useState(1);
-    const [newGroupEnableBudget,setNewGroupEnableBudget]=useState(false);
-    const resetAddGroupWizard = () => {
-      setAddGroupStep(1); setNewGroupName(""); setNewGroupTypeId(""); setNewGroupMembers([]);
-      setNewGroupIncludeMe(true); setNewGroupManualLimit(""); setNewGroupEnableBudget(false); setNewGroupColor(PALETTE[5]);
-    };
-    const [subView,setSubView]=useState("people");
     const [shareMonth,setShareMonth]=useState(()=>{ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
     const [showUpiPicker,setShowUpiPicker]=useState(false);
     const [pendingShareBase,setPendingShareBase]=useState("");
@@ -10185,21 +10158,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const nextFavorite = !person.favorite;
       setPeople(prev=>prev.map(x=>x.id===person.id?{...x,favorite:nextFavorite}:x));
       setSelectedPerson(prev=>prev?.id===person.id?{...prev,favorite:nextFavorite}:prev);
-    };
-
-    const addPerson=()=>{
-      if(!newName.trim()) return;
-      setPeople(p=>[...p,{ id:genId(), name:newName.trim(), emoji:newEmoji, relation:newRelation, color:newColor, personType:newPersonType, creditLimit:newUnlimitedCredit?0:(parseFloat(newCreditLimit)||0), spendBudget:parseFloat(newSpendBudget)||0, favorite:newFavorite, defaultSettlement:newDefaultSettlement, modules:effectiveNewModules }]);
-      resetAddPersonWizard();
-    };
-
-    const addGroup=()=>{
-      if(!newGroupName.trim()) return;
-      const gtlow=(newGroupType||"group").toLowerCase();
-      const gicon=gtlow.includes("house")||gtlow.includes("flat")||gtlow.includes("property")?"🏠":gtlow.includes("trip")||gtlow.includes("travel")?"✈️":gtlow.includes("office")||gtlow.includes("work")?"💼":gtlow.includes("family")?"👨‍👩‍👧":gtlow.includes("friend")?"👫":gtlow.includes("society")||gtlow.includes("building")?"🏢":"👥";
-      const gtMeta = GROUP_TYPES.find(t=>t.id===newGroupTypeId);
-      setGroups(p=>[...p,{ id:genId(), type:gtMeta?.label||newGroupType||"Group", typeId:newGroupTypeId||"other", name:newGroupName.trim(), icon:gtMeta?.icon||gicon, color:newGroupColor, members:newGroupMembers, includeMe:newGroupIncludeMe, manualLimit:newGroupEnableBudget?(parseFloat(newGroupManualLimit)||0):0, defaultIntent:gtMeta?.default||"split", modules:GROUP_TYPE_DEFAULT_MODULES[newGroupTypeId||"other"]||GROUP_TYPE_DEFAULT_MODULES.other }]);
-      resetAddGroupWizard();
     };
 
     if(selectedPerson){
@@ -11316,22 +11274,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     return (
       <div style={{ padding:"14px 16px 0" }}>
         <div style={{ display:"flex",gap:0,marginBottom:12,background:T.pill,borderRadius:12,padding:4 }}>
-          {[["people","👥 People"],["groups","🏘️ Groups"]].map(([v,l])=>(
+          {[["people",`People · ${1+people.filter(p=>!p.isMe && !isPersonArchived(p)).length}`],["groups",`Groups · ${getActiveGroups(groups).length}`]].map(([v,l])=>(
             <button key={v} onClick={()=>setSubView(v)} style={{ flex:1,background:subView===v?T.card:"transparent",border:subView===v?`1px solid ${T.border}`:"none",borderRadius:9,padding:"8px 0",cursor:"pointer",fontSize:13,fontWeight:700,color:subView===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
           ))}
-        </div>
-        <div style={{ display:"flex",gap:8,marginBottom:16,alignItems:"center" }}>
-          <button onClick={()=>setSubView("people")} style={{ background:T.accent,border:"none",borderRadius:10,padding:"9px 18px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>+ Add</button>
-          <div style={{ display:"flex",gap:6,flex:1 }}>
-            {subView==="people"&&<div style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Adding Person</div>}
-            {subView==="groups"&&<div style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Adding Group</div>}
-          </div>
-          {(subView==="people"||subView==="groups")&&(
-            <div style={{ display:"flex",gap:6 }}>
-              <button onClick={()=>setSubView("people")} style={{ background:subView==="people"?T.accentSoft:"none",border:`1px solid ${subView==="people"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:subView==="people"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👤 Person</button>
-              <button onClick={()=>setSubView("groups")} style={{ background:subView==="groups"?T.accentSoft:"none",border:`1px solid ${subView==="groups"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:subView==="groups"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>👥 Group</button>
-            </div>
-          )}
         </div>
 
         {subView==="people"&&<>
@@ -11343,110 +11288,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ fontSize:32 }}>💰</div>
           </div>}
 
-          <div style={{ ...card,border:`1px solid #16a34a33`,background:"#f0fdf408" }}>
-            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
-              <div style={{ color:"#16a34a",fontSize:14,fontWeight:900 }}>➕ Add Person</div>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Step {addPersonStep} of 3</div>
-            </div>
-            <div style={{ display:"flex",gap:4,marginBottom:16 }}>
-              {[1,2,3].map(s=><div key={s} style={{ flex:1,height:4,borderRadius:2,background:s<=addPersonStep?"#16a34a":T.border }}/>)}
-            </div>
-
-            {addPersonStep===1&&(
-              <div>
-                <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:8 }}>IDENTITY</div>
-                <div style={{ display:"flex",gap:8,marginBottom:12 }}>
-                  {["👤","👨","👩","👶","👴","👵","🐕"].map(em=><button key={em} onClick={()=>setNewEmoji(em)} style={{ background:newEmoji===em?"#16a34a22":"none",border:`1px solid ${newEmoji===em?"#16a34a":T.border}`,borderRadius:8,padding:"6px 8px",cursor:"pointer",fontSize:18 }}>{em}</button>)}
-                </div>
-                <div style={{ marginBottom:10 }}>
-                  <span style={lbl}>Name *</span>
-                  <input style={inp} placeholder="Name" value={newName} onChange={e=>setNewName(e.target.value)}/>
-                </div>
-                <div style={{ marginBottom:14 }}>
-                  <span style={lbl}>Relationship *</span>
-                  <select style={inp} value={newRelation} onChange={e=>setNewRelation(e.target.value)}>
-                    <option value="">Select Relation</option>
-                    {["Spouse","Child","Parent","Uncle","Aunt","Cousin","Friend","Colleague","Sibling","Grandparent","Grandchild","In-law","Other"].map(r=><option key={r} value={r}>{r}</option>)}
-                  </select>
-                </div>
-                <span style={lbl}>Person Type</span>
-                <div style={{ display:"flex",flexDirection:"column",gap:6,marginBottom:16 }}>
-                  {[["contact","Contact","They may owe you"],["dependant","Dependant","Family, you cover them"],["vendor","Vendor","You pay them for goods/services"],["employee","Employee","Reimbursements, payroll"],["tenant","Tenant","Rent, deposits"],["other","Other",""]].map(([v,l,sub])=>(
-                    <button key={v} onClick={()=>{ setNewPersonType(v); setNewModules(null); }} style={{ background:newPersonType===v?"#16a34a18":"none",border:`1px solid ${newPersonType===v?"#16a34a":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
-                      <div style={{ fontSize:12,fontWeight:700,color:newPersonType===v?"#16a34a":T.text }}>{getPersonTypeUILabel(v) || l}</div>
-                      {sub&&<div style={{ fontSize:10,color:T.sub,marginTop:2 }}>{sub}</div>}
-                    </button>
-                  ))}
-                </div>
-                <button disabled={!newName.trim()||!newRelation} onClick={()=>setAddPersonStep(2)} style={{ ...btnP,background:"#16a34a",opacity:(!newName.trim()||!newRelation)?0.5:1,cursor:(!newName.trim()||!newRelation)?"not-allowed":"pointer" }}>Continue →</button>
-              </div>
-            )}
-
-            {addPersonStep===2&&(
-              <div>
-                <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:4 }}>CAPABILITIES</div>
-                <div style={{ color:T.sub,fontSize:11,marginBottom:12 }}>Only enabled features appear later — no forms for things you don't need.</div>
-                <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
-                  {PERSON_MODULES.map(mod=>(
-                    <label key={mod.id} style={{ display:"flex",alignItems:"center",gap:10,background:effectiveNewModules.includes(mod.id)?"#16a34a14":T.input,border:`1px solid ${effectiveNewModules.includes(mod.id)?"#16a34a":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer" }}>
-                      <input type="checkbox" checked={effectiveNewModules.includes(mod.id)} onChange={()=>toggleNewModule(mod.id)} style={{ width:18,height:18,accentColor:"#16a34a",cursor:"pointer" }}/>
-                      <span style={{ fontSize:16 }}>{mod.icon}</span>
-                      <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{mod.label}</span>
-                    </label>
-                  ))}
-                  <label style={{ display:"flex",alignItems:"center",gap:10,background:newFavorite?"#16a34a14":T.input,border:`1px solid ${newFavorite?"#16a34a":T.border}`,borderRadius:10,padding:"10px 12px",cursor:"pointer" }}>
-                    <input type="checkbox" checked={newFavorite} onChange={e=>setNewFavorite(e.target.checked)} style={{ width:18,height:18,accentColor:"#16a34a",cursor:"pointer" }}/>
-                    <span style={{ fontSize:16 }}>★</span>
-                    <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>Favourite</span>
-                  </label>
-                </div>
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
-                  <button onClick={()=>setAddPersonStep(1)} style={btnG}>← Back</button>
-                  <button onClick={()=>setAddPersonStep(3)} style={{ ...btnP,background:"#16a34a" }}>Continue →</button>
-                </div>
-              </div>
-            )}
-
-            {addPersonStep===3&&(
-              <div>
-                <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:4 }}>FEATURE DETAILS</div>
-                <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Only asks what you enabled in the last step.</div>
-
-                {effectiveNewModules.includes("borrowMoney")&&(
-                  <div style={{ marginBottom:14 }}>
-                    <span style={lbl}>Credit limit (max they can owe you)</span>
-                    <input style={{ ...inp,marginBottom:8 }} type="number" placeholder="e.g. 2500" value={newCreditLimit} onChange={e=>setNewCreditLimit(e.target.value)} disabled={newUnlimitedCredit}/>
-                    <label style={{ display:"flex",alignItems:"center",gap:8,cursor:"pointer" }}>
-                      <input type="checkbox" checked={newUnlimitedCredit} onChange={e=>setNewUnlimitedCredit(e.target.checked)} style={{ width:16,height:16,accentColor:"#16a34a",cursor:"pointer" }}/>
-                      <span style={{ color:T.sub,fontSize:12 }}>Unlimited limit</span>
-                    </label>
-                    <div style={{ marginTop:10 }}>
-                      <span style={lbl}>Default Settlement Method</span>
-                      <div style={{ display:"flex",gap:6 }}>
-                        {["UPI","Cash","Bank"].map(m=>(
-                          <button key={m} onClick={()=>setNewDefaultSettlement(m)} style={{ flex:1,background:newDefaultSettlement===m?"#16a34a18":"none",border:`1px solid ${newDefaultSettlement===m?"#16a34a":T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:700,color:newDefaultSettlement===m?"#16a34a":T.text,fontFamily:"Nunito,sans-serif" }}>{m}</button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {effectiveNewModules.includes("budget")&&(
-                  <div style={{ marginBottom:14,background:T.input,borderRadius:10,padding:"10px 12px" }}>
-                    <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>📊 Budget enabled</div>
-                    <div style={{ color:T.sub,fontSize:11,marginTop:3 }}>Set the actual monthly amount afterward in Budget → Budgets — that's the one place it's edited, so it can't drift out of sync per month.</div>
-                  </div>
-                )}
-                <span style={lbl}>Colour</span>
-                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:16 }}>
-                  {PALETTE.map(c=><div key={c} onClick={()=>setNewColor(c)} style={{ width:24,height:24,borderRadius:6,background:c,cursor:"pointer",border:newColor===c?"3px solid #fff":"3px solid transparent" }}/>) }
-                </div>
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
-                  <button onClick={()=>setAddPersonStep(2)} style={btnG}>← Back</button>
-                  <button onClick={addPerson} style={{ ...btnP,background:"#16a34a" }}>Done ✓</button>
-                </div>
-              </div>
-            )}
-          </div>
+          <button data-testid="people-add-person" onClick={()=>setPeopleSheet({ kind:"addPerson" })} style={{ ...btnP,marginBottom:14 }}>+ Add person</button>
 
           {listedPeople.map(p=>{
             const s=settlements[p.id];
@@ -11500,77 +11342,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         </>}
 
         {subView==="groups"&&<>
-          <div style={{ ...card,border:`1px solid #16a34a33`,background:"#f0fdf408" }}>
-            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14 }}>
-              <div style={{ color:"#16a34a",fontSize:14,fontWeight:900 }}>➕ New Group</div>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Step {addGroupStep} of 3</div>
-            </div>
-            <div style={{ display:"flex",gap:4,marginBottom:16 }}>
-              {[1,2,3].map(s=><div key={s} style={{ flex:1,height:4,borderRadius:2,background:s<=addGroupStep?"#16a34a":T.border }}/>)}
-            </div>
-
-            {addGroupStep===1&&(
-              <div>
-                <span style={lbl}>Group Name *</span>
-                <input style={{ ...inp,marginBottom:14 }} placeholder="e.g. Goa Trip" value={newGroupName} onChange={e=>setNewGroupName(e.target.value)}/>
-                <span style={lbl}>Group Type</span>
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:6,marginBottom:16 }}>
-                  {GROUP_TYPES.map(gt=>(
-                    <button key={gt.id} onClick={()=>setNewGroupTypeId(newGroupTypeId===gt.id?"":gt.id)} style={{ background:newGroupTypeId===gt.id?"#16a34a18":"none",border:`1px solid ${newGroupTypeId===gt.id?"#16a34a":T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
-                      <div style={{ fontSize:12,fontWeight:700,color:newGroupTypeId===gt.id?"#16a34a":T.text }}>{gt.icon} {gt.label}</div>
-                      <div style={{ fontSize:9,color:T.sub,marginTop:2 }}>{gt.desc}</div>
-                    </button>
-                  ))}
-                </div>
-                <button disabled={!newGroupName.trim()} onClick={()=>setAddGroupStep(2)} style={{ ...btnP,background:"#16a34a",opacity:!newGroupName.trim()?0.5:1,cursor:!newGroupName.trim()?"not-allowed":"pointer" }}>Continue →</button>
-              </div>
-            )}
-
-            {addGroupStep===2&&(
-              <div>
-                <span style={lbl}>Members</span>
-                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6,marginBottom:16 }}>
-                  <button onClick={()=>setNewGroupIncludeMe(v=>!v)} style={{ background:newGroupIncludeMe?"#16a34a18":"none",border:`1px solid ${newGroupIncludeMe?"#16a34a":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupIncludeMe?"#16a34a":T.sub,fontFamily:"Nunito,sans-serif" }}>🧑 Me {newGroupIncludeMe?"✓":"+"}</button>
-                  {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><button key={p.id} onClick={()=>setNewGroupMembers(prev=>prev.includes(p.id)?prev.filter(x=>x!==p.id):[...prev,p.id])} style={{ background:newGroupMembers.includes(p.id)?"#16a34a18":"none",border:`1px solid ${newGroupMembers.includes(p.id)?"#16a34a":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:newGroupMembers.includes(p.id)?"#16a34a":T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
-                </div>
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
-                  <button onClick={()=>setAddGroupStep(1)} style={btnG}>← Back</button>
-                  <button disabled={!newGroupIncludeMe&&newGroupMembers.length===0} onClick={()=>setAddGroupStep(3)} style={{ ...btnP,background:"#16a34a",opacity:(!newGroupIncludeMe&&newGroupMembers.length===0)?0.5:1 }}>Continue →</button>
-                </div>
-              </div>
-            )}
-
-            {addGroupStep===3&&(()=>{
-              const typeModules = GROUP_TYPE_DEFAULT_MODULES[newGroupTypeId||"other"]||GROUP_TYPE_DEFAULT_MODULES.other;
-              const budgetApplies = typeModules.includes("budget");
-              return (
-                <div>
-                  <div style={{ color:T.sub,fontSize:11,fontWeight:800,marginBottom:4 }}>SETTINGS</div>
-                  <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Based on {GROUP_TYPES.find(t=>t.id===newGroupTypeId)?.label||"this"} group's defaults — {typeModules.map(m=>GROUP_MODULES.find(x=>x.id===m)?.label).filter(Boolean).join(", ")||"no extras"}.</div>
-
-                  {budgetApplies&&(
-                    <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",marginBottom:14 }}>
-                      <label style={{ display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",marginBottom:newGroupEnableBudget?10:0 }}>
-                        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>📊 Enable group budget?</span>
-                        <input type="checkbox" checked={newGroupEnableBudget} onChange={e=>setNewGroupEnableBudget(e.target.checked)} style={{ width:18,height:18,accentColor:"#16a34a",cursor:"pointer" }}/>
-                      </label>
-                      {newGroupEnableBudget&&(
-                        <input style={inp} type="number" placeholder="Monthly budget, e.g. 10000" value={newGroupManualLimit} onChange={e=>setNewGroupManualLimit(e.target.value)}/>
-                      )}
-                    </div>
-                  )}
-                  <span style={lbl}>Colour</span>
-                  <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:6,marginBottom:16 }}>
-                    {PALETTE.map(c=><div key={c} onClick={()=>setNewGroupColor(c)} style={{ width:24,height:24,borderRadius:6,background:c,cursor:"pointer",border:newGroupColor===c?"3px solid #fff":"3px solid transparent" }}/>) }
-                  </div>
-                  <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
-                    <button onClick={()=>setAddGroupStep(2)} style={btnG}>← Back</button>
-                    <button onClick={addGroup} style={{ ...btnP,background:"#16a34a" }}>Done ✓</button>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
+          <button data-testid="people-add-group" onClick={()=>setPeopleSheet({ kind:"addGroup" })} style={{ ...btnP,marginBottom:14 }}>+ Add group</button>
 
           {[...new Set(getActiveGroups(groups).map(g=>g.type||"Group"))].map(gtype=>{
             const grps=getActiveGroups(groups).filter(g=>(g.type||"Group")===gtype);
@@ -16206,8 +15978,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [baConsumerNo, setBaConsumerNo] = useState(existing?.consumerNo||"");
     const [baProvider, setBaProvider] = useState(existing?.provider||preselectedBillerProvider||"");
     const providerIsLocked = !existing && !!preselectedBillerProvider;
-    const [baAttributedTo, setBaAttributedTo] = useState(existing?.attributedTo||"");
-    const [baAttributeType, setBaAttributeType] = useState(existing?.attributeType||"house");
+    const [baAttributedTo, setBaAttributedTo] = useState(existing?.attributedTo||(!existing&&preselectedAttribution?.id)||"");
+    const [baAttributeType, setBaAttributeType] = useState(existing?.attributeType||(!existing&&preselectedAttribution?.type)||"house");
     const [baNote, setBaNote] = useState(existing?.note||"");
     const canSave = baName.trim() && baType;
     const [duplicateError, setDuplicateError] = useState("");
@@ -17574,7 +17346,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {viewingEvent&&<EventDetailModal event={viewingEvent} onClose={()=>setViewingEvent(null)} T={T} sym={sym} fmt={fmt} txns={txns} getMyExpenseAmount={getMyExpenseAmount} getPerson={getPerson} formatShortDate={formatShortDate} askConfirm={askConfirm} setEvents={setEvents} setEditingEvent={setEditingEvent} setShowAddEvent={setShowAddEvent} setTxnDetailId={setTxnDetailId} EVENT_TYPES={EVENT_TYPES}/>}
         {showNavDrawer&&<NavDrawer onClose={()=>setShowNavDrawer(false)}/>}
         {confirmDialog&&<ConfirmDialog message={confirmDialog.message} onConfirm={confirmDialog.onConfirm} onClose={()=>setConfirmDialog(null)} variant={confirmDialog.variant||(confirmDialog.onConfirm?"danger":"default")} T={T}/>}
-        {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); setPreselectedBillerProvider(""); setPreselectedBillerId(""); }}/>}
+        {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); setPreselectedBillerProvider(""); setPreselectedBillerId(""); setPreselectedAttribution(null); }}/>}
         {categoryAccountsView&&(()=>{
           const type = categoryAccountsView;
           const billersOfType = billers.filter(b=>b.type===type);
@@ -18225,6 +17997,28 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
         )}
         {editingPerson&&<EditPersonModal p={editingPerson} onClose={()=>setEditingPerson(null)}/>}
+        {/* UI-2C M1 — P-2 Add person, P-3 Person created, G-11 Add group */}
+        {peopleSheet?.kind==="addPerson"&&<AddPersonSheet T={T} onClose={()=>setPeopleSheet(null)} onCreate={fields=>{
+          const rec = buildNewPerson(fields, { genId, color:PALETTE[(people.length+1)%PALETTE.length] });
+          setPeople(prev=>[...prev, rec]);
+          setPeopleSheet({ kind:"setup", person:rec });
+        }}/>}
+        {peopleSheet?.kind==="setup"&&(()=>{
+          const rec = peopleSheet.person;
+          const apply = setup=>{ const next = applyPersonSetup(rec, setup); setPeople(prev=>prev.map(x=>x.id===rec.id?applyPersonSetup(x, setup):x)); return next; };
+          return <PersonSetupSheet T={T} person={rec} modules={PERSON_MODULES}
+            onSkip={()=>setPeopleSheet(null)}
+            onOpen={setup=>{ const next = apply(setup); setPeopleSheet(null); setSubView("people"); setSelectedPerson(next); }}
+            onAddRelationship={setup=>{ apply(setup); setPeopleSheet(null); setPreselectedAttribution({ type:"person", id:rec.id }); setShowAddBillerAccount(true); }}/>;
+        })()}
+        {peopleSheet?.kind==="addGroup"&&<AddGroupSheet T={T} me={people.find(p=>p.isMe)||ME} people={people.filter(p=>!p.isMe && !isPersonArchived(p))} groupTypes={GROUP_TYPES}
+          onClose={()=>setPeopleSheet(null)}
+          onCreatePerson={name=>{ const rec = buildNewPerson({ name }, { genId, color:PALETTE[(people.length+1)%PALETTE.length] }); setPeople(prev=>[...prev, rec]); return rec; }}
+          onCreate={fields=>{
+            const rec = buildNewGroup(fields, { genId, color:PALETTE[5], groupTypes:GROUP_TYPES, typeDefaultModules:GROUP_TYPE_DEFAULT_MODULES });
+            setGroups(prev=>[...prev, rec]);
+            setPeopleSheet(null); setSubView("groups"); setSelectedGroup(rec);
+          }}/>}
         {editingTxn&&<EditModal t={editingTxn} onClose={()=>setEditingTxn(null)}/>}
         {linkTxnModal&&(()=>{
           const lm=linkTxnModal;
