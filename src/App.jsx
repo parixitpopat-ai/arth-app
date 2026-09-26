@@ -1201,7 +1201,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [editingOpeningBalanceVal, setEditingOpeningBalanceVal] = useState("");
   const [editingOpeningBalanceDate, setEditingOpeningBalanceDate] = useState(todayStr());
   const [editingBill, setEditingBill] = useState(null);
-  const [viewingCcStatement, setViewingCcStatement] = useState(null); // a `bills` record with isCcStatement:true
+  // Holds the bill's id, not the bill object itself — CreditCardStatementSheet's reconciliation
+  // actions (recordBankAmount, applyRecalculatedUpdate, etc.) all patch the `bills` array via
+  // setBills, so if this held a snapshot object it would go stale the instant a patch landed: the
+  // sheet would keep re-rendering the OLD verification state (e.g. flip back to "Does this match
+  // your bank statement?" right after answering it), even though `bills` itself updated correctly
+  // underneath. Deriving the live bill from `bills` by id on every render (below) makes that class
+  // of bug structurally impossible instead of something to remember to avoid.
+  const [viewingCcStatementId, setViewingCcStatementId] = useState(null);
   const [editingPerson, setEditingPerson] = useState(null);
   const [editingTxn, setEditingTxn] = useState(null);
   const [showAddAccount, setShowAddAccount] = useState(false);
@@ -12181,7 +12188,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const isCcStatement = Boolean(b._originalBill?.isCcStatement);
       const openRow = () => {
         if(isSynthetic || !b._originalBill) return;
-        if(isCcStatement) setViewingCcStatement(b._originalBill);
+        if(isCcStatement) setViewingCcStatementId(b._originalBill.id);
         else setEditingBill(b._originalBill);
       };
       return (
@@ -12622,7 +12629,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div><span style={{ color:T.sub }}>Utilisation: </span><span style={{ color:hasLimit?(utilPct>80?T.danger:utilPct>50?T.warn:T.success):T.sub,fontWeight:hasLimit?800:400 }}>{hasLimit?`${utilPct}%`:"—"}</span></div>
                     <div><span style={{ color:T.sub }}>Total Exposure: </span><span style={{ color:T.danger,fontWeight:800 }}>{sym}{fmt(Math.abs(bal))}</span></div>
                   </div>
-                  {relevantBill&&<div onClick={()=>setViewingCcStatement(relevantBill)} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>View statement in Payments ›</div>}
+                  {relevantBill&&<div onClick={()=>setViewingCcStatementId(relevantBill.id)} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>View statement in Payments ›</div>}
                 </div>
               );
             })}
@@ -15081,7 +15088,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           if(b.isCcStatement){
             const pill = b.verification==="matched" ? { l:"Matched with bank", c:T.success } : b.verification==="mismatch" ? { l:"Doesn't match", c:T.danger } : { l:"Needs verification", c:T.warn };
             return (
-              <div key={b.id} onClick={()=>setViewingCcStatement(b)} style={{ ...card,border:`1px solid ${isOverdue?T.danger+"44":T.border}`,cursor:"pointer" }}>
+              <div key={b.id} onClick={()=>setViewingCcStatementId(b.id)} style={{ ...card,border:`1px solid ${isOverdue?T.danger+"44":T.border}`,cursor:"pointer" }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10 }}>
                   <div style={{ minWidth:0 }}>
                     <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>💳 {b.name}</div>
@@ -17289,7 +17296,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             toDateOnly={toDateOnly}
             getCardSummary={getCardSummary}
             onClose={()=>setShowCreditCardsList(false)}
-            onViewStatement={bill=>{ setShowCreditCardsList(false); setViewingCcStatement(bill); }}
+            onViewStatement={bill=>{ setShowCreditCardsList(false); setViewingCcStatementId(bill.id); }}
             onPay={card=>{ setShowCreditCardsList(false); setAddPrefill({ toAccId:card.id }); setDefaultAddType("cc_payment"); setShowAdd(true); }}
           />
         )}
@@ -17404,11 +17411,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
         )}
         {showAddBill&&<AddBillModal/>}
-        {viewingCcStatement&&(()=>{
-          const stmtCard = accounts.find(a=>a.id===viewingCcStatement.accId);
+        {viewingCcStatementId&&(()=>{
+          // Derived fresh from `bills` every render — never a stored snapshot — so the sheet's
+          // own patches (setBills calls inside CreditCardStatementSheet) are reflected immediately
+          // instead of the sheet re-rendering with the bill's pre-patch state. See the state
+          // declaration's comment for the bug this fixes.
+          const liveBill = bills.find(b=>b.id===viewingCcStatementId);
+          if(!liveBill) return null;
+          const stmtCard = accounts.find(a=>a.id===liveBill.accId);
           return (
             <CreditCardStatementSheet
-              bill={viewingCcStatement}
+              bill={liveBill}
               card={stmtCard}
               accounts={accounts}
               txns={txns}
@@ -17418,18 +17431,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               formatShortDate={formatShortDate}
               toDateOnly={toDateOnly}
               setBills={setBills}
-              onClose={()=>setViewingCcStatement(null)}
-              onRecordPayment={()=>{ setAddPrefill({ toAccId:stmtCard?.id }); setDefaultAddType("cc_payment"); setShowAdd(true); setViewingCcStatement(null); }}
+              onClose={()=>setViewingCcStatementId(null)}
+              onRecordPayment={()=>{ setAddPrefill({ toAccId:stmtCard?.id }); setDefaultAddType("cc_payment"); setShowAdd(true); setViewingCcStatementId(null); }}
               onAddMissingTxn={()=>{
                 // periodFrom is the exclusive lower boundary (the statement-cycle convention used
                 // throughout statementBills.js/reconciliation.js: a period covers (from, to]) — the
                 // first day actually IN this statement is the day after periodFrom.
-                const periodStartInclusive = addDaysToDateStr(viewingCcStatement.periodFrom, 1);
-                setAddPrefill({ accId:stmtCard?.id, date:viewingCcStatement.periodTo, dateMin:periodStartInclusive, dateMax:viewingCcStatement.periodTo });
-                setDefaultAddType("expense"); setShowAdd(true); setViewingCcStatement(null);
+                const periodStartInclusive = addDaysToDateStr(liveBill.periodFrom, 1);
+                setAddPrefill({ accId:stmtCard?.id, date:liveBill.periodTo, dateMin:periodStartInclusive, dateMax:liveBill.periodTo });
+                setDefaultAddType("expense"); setShowAdd(true); setViewingCcStatementId(null);
               }}
-              onReviewTxn={txn=>{ setEditingTxn(txn); setViewingCcStatement(null); }}
-              onViewTransactions={()=>{ setShowAccDetail(stmtCard); setViewingCcStatement(null); }}
+              onReviewTxn={txn=>{ setEditingTxn(txn); setViewingCcStatementId(null); }}
+              onViewTransactions={()=>{ setShowAccDetail(stmtCard); setViewingCcStatementId(null); }}
             />
           );
         })()}
