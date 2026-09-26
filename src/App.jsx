@@ -16717,7 +16717,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   {linkedCcAccount ? (
                     <button onClick={()=>{ setShowAddBill(false); setShowAccDetail(linkedCcAccount); }} style={{ minHeight:TOUCH.min,background:T.accent,border:"none",color:T.accentInk,borderRadius:RADIUS.md,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Open {linkedCcAccount.name}</button>
                   ) : (
-                    <button onClick={()=>{ setShowAddBill(false); setShowSettings(true); }} style={{ minHeight:TOUCH.min,background:T.accent,border:"none",color:T.accentInk,borderRadius:RADIUS.md,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Go to Accounts</button>
+                    <button onClick={()=>{ setShowAddBill(false); setShowSettings(true); setSettingsSection("accounts"); }} style={{ minHeight:TOUCH.min,background:T.accent,border:"none",color:T.accentInk,borderRadius:RADIUS.md,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Go to Accounts</button>
                   )}
                 </div>
               );
@@ -17549,6 +17549,41 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           setShowAdd(true);
                           setActiveBillerShell(null);
                         }} style={{ width:"100%",background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>💳 Pay Statement / Settle Balance</button>
+                      </>
+                    );
+                  }
+                  if(shell.type==="Credit Card" && !linkedCcAccount){
+                    // Credit Card WP, rule 13 (last line): "If an existing Credit Card Biller is
+                    // currently functioning as both Biller and Account identity, reconcile it to
+                    // the canonical Account relationship instead of creating another entity." This
+                    // is exactly that case — a Credit Card shell with no resolvable linked account
+                    // (predates the auto-shell-creation migration, or was added by hand). It must
+                    // never fall through to the generic multi-connection "+Add Person/Account" flow
+                    // below, which would create a second, ledger-less identity for the same card.
+                    const linkedAccIds = new Set(billerAccounts.filter(ba=>ba.accId).map(ba=>ba.accId));
+                    const unlinkedCcAccounts = accounts.filter(a=>a.type==="cc" && !linkedAccIds.has(a.id));
+                    const linkExisting = acc=>{
+                      setBillerAccounts(prev=>[...prev, { id:genId(), billerId:shell.id, accId:acc.id, name:acc.name, type:"Credit Card", consumerNo:null, createdAt:Date.now() }]);
+                      setActiveBillerShell(null);
+                    };
+                    return (
+                      <>
+                        <div style={{ color:T.sub,fontSize:12,lineHeight:1.5,marginBottom:14 }}>Credit Card billers are linked to a Credit Card Account. "{shell.name}" isn't connected to one yet — statements, outstanding and utilisation all live on that account, not here.</div>
+                        {unlinkedCcAccounts.length>0&&(
+                          <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
+                            <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>LINK TO AN EXISTING CREDIT CARD ACCOUNT</div>
+                            {unlinkedCcAccounts.map(acc=>(
+                              <div key={acc.id} onClick={()=>linkExisting(acc)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer" }}>
+                                <div>
+                                  <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{acc.name}</div>
+                                  {acc.last4&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>••{acc.last4}</div>}
+                                </div>
+                                <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Link</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <button onClick={()=>{ setActiveBillerShell(null); setShowSettings(true); setSettingsSection("accounts"); }} style={{ width:"100%",background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add Credit Card Account</button>
                       </>
                     );
                   }
