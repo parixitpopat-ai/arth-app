@@ -79,6 +79,7 @@ import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
 import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
 import { getGroupDefaultIntent } from "./domain/group/defaultIntent";
+import { withBillContributionForTxn, withoutBillContributionsForTxn, withoutBillContributionsForTxns, reopenBillsPaidByDeletedTxns } from "./domain/obligations/billContributionSync";
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
@@ -1379,7 +1380,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // WP-OBL-04a: dual-write — also record a real Contribution alongside the
     // legacy paidByTxnId/status write above. Full amount, since this path has
     // no partial-payment concept yet.
-    setContributions(prev=>withNewContribution(prev, { obligationType:"bill", obligationId:bill.id, txnId:String(paymentTxnId), amount:Number(bill.amount||0), txnAmount:Number(bill.amount||0) }, genId));
+    setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:paymentTxnId, amount:Number(bill.amount||0), txnAmount:Number(bill.amount||0) }, genId));
     if(bill.recurring && bill.autoGenerate!==false){
       const nextDue = computeNextDueDate(bill, paymentDate);
       const nextPeriod = computeNextPeriod(bill, paymentDate);
@@ -1772,6 +1773,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         : bl
       ));
     }
+    // QW-2: a deleted transaction no longer pays anything — drop its bill Contributions too.
+    setContributions(prev=>withoutBillContributionsForTxn(prev, txn.id));
     setTxns(prev=>prev.filter(x=>String(x.id)!==String(txn.id)));
     if(txn.type==="investment"){
       setInvestments(prev=>prev.filter(x=>String(x.id)!==String(txn.linkedInvestmentId||"") && String(x.linkedTxnId)!==String(txn.id)));
@@ -5072,7 +5075,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // alongside the legacy billRecord write above. billRecord.amount is this bill's full
           // core amount (this path has no partial-payment concept yet); resolvedTxnId is the
           // transaction that made this payment.
-          setContributions(prev=>withNewContribution(prev, { obligationType:"bill", obligationId:linkedBillId, txnId:String(resolvedTxnId), amount:Number(billRecord.amount||0), txnAmount:Number(billRecord.amount||0) }, genId));
+          // QW-2: upsert — editing this transaction replaces its Contribution instead of adding another.
+          setContributions(prev=>withBillContributionForTxn(prev, { billId:linkedBillId, txnId:resolvedTxnId, amount:Number(billRecord.amount||0), txnAmount:Number(billRecord.amount||0) }, genId));
+        } else if(isEditing && sourceTxn?.paidBillId){
+          // QW-2: "Bill payment" was switched off on an edit. The transaction stops paying its
+          // bill: reopen that bill only if it points back at this transaction (same guard as
+          // delete, WP-BILLS-2C) and drop the Contribution, instead of leaving both orphaned.
+          const unlinkedBillId = sourceTxn.paidBillId;
+          setBills(prev=>prev.map(bl=>String(bl.id)===String(unlinkedBillId) && String(bl.paidByTxnId)===String(resolvedTxnId)
+            ? {...bl, status:"unpaid", paidDate:null, paidByTxnId:null}
+            : bl
+          ));
+          setContributions(prev=>withoutBillContributionsForTxn(prev, resolvedTxnId));
         } else if(matchedBill && !isEditing){
           setBillMatchSuggestion({bill:matchedBill,txn:newTxn});
         }
@@ -9681,6 +9695,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               }} style={{ background:"#00000022",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Nunito,sans-serif" }}>⬇️ Export</button>
               <button onClick={()=>{
                 askConfirm(`Delete ${bulkSelected.length} transaction${bulkSelected.length>1?"s":""}? This can't be undone.`, ()=>{
+                  // QW-2: same bill/Contribution cleanup a single delete does, for every deleted transaction.
+                  const deletedTxns = txns.filter(x=>bulkSelected.includes(x.id));
+                  setBills(prev=>reopenBillsPaidByDeletedTxns(prev, deletedTxns));
+                  setContributions(prev=>withoutBillContributionsForTxns(prev, deletedTxns.map(x=>x.id)));
                   setTxns(prev=>prev.filter(x=>!bulkSelected.includes(x.id)));
                   exitBulk();
                 });
@@ -15737,6 +15755,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const ids = Object.entries(selected).filter(([,v])=>v).map(([id])=>id);
       if(ids.length===0) return;
       askConfirm(`Delete ${ids.length} duplicate transaction${ids.length>1?"s":""}? This can't be undone.`, ()=>{
+        // QW-2: same bill/Contribution cleanup a single delete does, for every deleted duplicate.
+        const deletedTxns = txns.filter(x=>ids.includes(String(x.id)));
+        setBills(prev=>reopenBillsPaidByDeletedTxns(prev, deletedTxns));
+        setContributions(prev=>withoutBillContributionsForTxns(prev, ids));
         setTxns(prev=>prev.filter(x=>!ids.includes(String(x.id))));
         setSelected({});
       });
@@ -18051,7 +18073,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 // WP-OBL-04a: dual-write — also record a real Contribution for this match,
                 // alongside the legacy paidByTxnId/status write above. Full amount — this path
                 // (like the other two) has no partial-payment concept yet.
-                setContributions(prev=>withNewContribution(prev, { obligationType:"bill", obligationId:b.id, txnId:String(billMatchSuggestion.txn.id), amount:Number(b.amount||0), txnAmount:Number(b.amount||0) }, genId));
+                setContributions(prev=>withBillContributionForTxn(prev, { billId:b.id, txnId:billMatchSuggestion.txn.id, amount:Number(b.amount||0), txnAmount:Number(b.amount||0) }, genId));
                 setTxns(p=>p.map(x=>x.id===billMatchSuggestion.txn.id?{...x,isBillPayment:true,billInvoiceNo:b.invoiceNo||"",paidBillId:b.id,paidBillName:b.name}:x));
                 if(b.recurring){ const next=new Date(b.dueDate); if(b.frequency==="monthly") next.setMonth(next.getMonth()+1); else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3); else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6); else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
                 setBillMatchSuggestion(null);
