@@ -8323,7 +8323,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     investments,
     bills,
     billerAccounts,
+    billers,
     memberships,
+    membershipRelationships,
     feePayments,
     vehicles,
     events,
@@ -8345,7 +8347,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     lastFYTarget,
     monthOverrides,
     cardOrder,
-  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
+  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -8375,7 +8377,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     setInvestments(Array.isArray(snapshot.investments) ? snapshot.investments : []);
     setBills(Array.isArray(snapshot.bills) ? snapshot.bills : []);
     setBillerAccounts(Array.isArray(snapshot.billerAccounts) ? snapshot.billerAccounts : []);
+    // Guarded (not reset to []) so a snapshot saved before these keys existed keeps this device's data.
+    if(Array.isArray(snapshot.billers)) setBillers(snapshot.billers);
     setMemberships(Array.isArray(snapshot.memberships) ? snapshot.memberships : []);
+    if(Array.isArray(snapshot.membershipRelationships)) setMembershipRelationships(snapshot.membershipRelationships);
     setFeePayments(Array.isArray(snapshot.feePayments) ? snapshot.feePayments : []);
     setVehicles(Array.isArray(snapshot.vehicles) ? snapshot.vehicles : []);
     setEvents(Array.isArray(snapshot.events) ? snapshot.events : []);
@@ -8937,7 +8942,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, memberships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, pushCloudSnapshot]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
