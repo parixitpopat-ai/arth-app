@@ -77,6 +77,7 @@ import { generateDueStatements } from "./domain/cards/statementBills";
 import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
+import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
@@ -17679,12 +17680,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ display:"flex",gap:8,marginBottom:16 }}>
                   <button onClick={()=>{ setEditingBillerAccount(ba); setActiveBillerForAction(null); }} style={{ flex:1,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit Account</button>
                   <button onClick={()=>{
-                    const linkedBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
-                    const linkedMem = memberships.filter(m=>m.billerAccountId===ba.id);
-                    const linkedFee = feePayments.filter(f=>f.billerAccountId===ba.id);
-                    const total = linkedBills.length+linkedMem.length+linkedFee.length;
-                    if(total>0){
-                      askConfirm(`Cannot delete: ${ba.name} has ${total} linked record${total>1?"s":""}. Delete the bills, memberships and fee payments first.`,null);
+                    // QW-5: transactions linked via billerLinkId now block deletion too.
+                    const blockers = getBillerAccountDeleteBlockers(ba.id, { bills, memberships, feePayments, txns });
+                    if(blockers.total>0){
+                      askConfirm(`Cannot delete: ${ba.name} is still linked to ${describeBillerAccountDeleteBlockers(blockers)}. Remove or relink those first.`,null);
                       return;
                     }
                     askConfirm(`Delete ${ba.name}?`,()=>{
