@@ -59,3 +59,9 @@ test("null/undefined person handled gracefully", () => {
   assert.deepEqual(getPersonReminders(null, "2026-09-01"), []);
   assert.deepEqual(getPersonReminders(undefined, "2026-09-01"), []);
 });
+
+test("UI-2C D-9: each reminder carries dates-only display text", () => {
+  const r = getPersonReminders({ dob: "1990-11-14", anniversary: "2015-02-01" }, "2026-09-26");
+  assert.deepEqual(r.map(x => x.text), ["Birthday · 14 Nov", "Anniversary · 1 Feb"]);
+  assert.deepEqual(r.map(x => x.title), ["Birthday", "Anniversary"]);
+});

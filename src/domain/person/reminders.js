@@ -69,9 +69,12 @@ export function getNextOccurrence(dateStr, todayStr) {
  */
 export function getPersonReminders(person, todayStr) {
   const reminders = [];
+  // `label` has always ended up as the date ("14 Nov"), because the spread
+  // below overrides it; kept as-is for existing callers. UI-2C D-9 adds
+  // `title` and the dates-only display text, e.g. "Birthday · 14 Nov".
   const birthday = getNextOccurrence(person?.dob, todayStr);
-  if (birthday) reminders.push({ type: "birthday", label: "Birthday", ...birthday });
+  if (birthday) reminders.push({ type: "birthday", label: "Birthday", ...birthday, title: "Birthday", text: `Birthday · ${birthday.label}` });
   const anniversary = getNextOccurrence(person?.anniversary, todayStr);
-  if (anniversary) reminders.push({ type: "anniversary", label: "Anniversary", ...anniversary });
+  if (anniversary) reminders.push({ type: "anniversary", label: "Anniversary", ...anniversary, title: "Anniversary", text: `Anniversary · ${anniversary.label}` });
   return reminders;
 }

@@ -57,12 +57,19 @@ import { getPersonSixMonthActivity } from "./domain/person/activity";
 import { getPersonReminders } from "./domain/person/reminders";
 import { getSectionOrder, moveSection } from "./domain/person/sectionOrder";
 import { getPersonTypeUILabel } from "./domain/person/personType";
-import { getSplitShareMode, getNewSplitRowMode, getRowsNeedingSplitChoice } from "./domain/person/splitDefault";
+import { getSplitShareMode, getNewSplitRowMode, getRowsNeedingSplitChoice, getSplitDefaultChoice, withSplitDefault, SPLIT_DEFAULT_OPTIONS } from "./domain/person/splitDefault";
 import { buildNewPerson, applyPersonSetup } from "./domain/person/newPerson";
 import { buildNewGroup } from "./domain/group/newGroup";
 import AddPersonSheet from "./components/people/AddPersonSheet";
 import PersonSetupSheet from "./components/people/PersonSetupSheet";
 import AddGroupSheet from "./components/people/AddGroupSheet";
+import { FinancialRelationships, CapabilityTiles, PinnedBill } from "./components/people/RelationshipBlocks";
+import { getAttributedRelationships, getOpenBillBadge } from "./domain/relationships/attributedAccounts";
+import { getPersonCapabilityTiles } from "./domain/person/capabilityTiles";
+import { getGroupCapabilityTiles } from "./domain/group/capabilityTiles";
+import { getGroupReminders } from "./domain/group/reminders";
+import { getBillsFor } from "./domain/bills/billFor";
+import GroupSettingsEditor from "./components/people/GroupSettingsEditor";
 import { PersonProfileScreen } from "./screens/PersonProfileScreen";
 import { isSchoolRelationshipCurrent } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
@@ -10082,6 +10089,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [editingGroupMembers,setEditingGroupMembers]=useState([]);
     const [editingGroupIncludeMe,setEditingGroupIncludeMe]=useState(true);
     const [editingGroupColor,setEditingGroupColor]=useState("");
+    // UI-2C G-13 — modules, description, notes and reminders being edited; saved with the rest.
+    const [editingGroupExtras,setEditingGroupExtras]=useState(null);
     const [isEditingGroup,setIsEditingGroup]=useState(false);
   const [editingGroupTypeId,setEditingGroupTypeId]=useState("");
     const [shareMonth,setShareMonth]=useState(()=>{ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; });
@@ -10452,6 +10461,34 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <PersonProfileScreen
             person={p}
             balance={s}
+            topSection={p.isMe ? null : (()=>{
+              // UI-2C P-4 — relationships as a list, capabilities as tiles. Tiles open the
+              // existing screen or section for that capability; nothing existing is removed.
+              const rows = getAttributedRelationships({ targetType:"person", targetId:p.id, billerAccounts, bills });
+              const openSection = key=>{
+                setExpandedSection(`profile_${key}_${p.id}`);
+                setTimeout(()=>document.querySelector(`[data-section="${key}"]`)?.scrollIntoView({ behavior:"smooth", block:"start" }), 50);
+              };
+              const tileTarget = {
+                budget: ()=>{ setBudgetFocusPersonId(p.id); setTab("budget"); setShowSettings(false); },
+                sharedExpenses: ()=>openSection("financialPosition"),
+                borrowMoney: ()=>openSection("financialPosition"),
+                gifts: ()=>openSection("capabilities"),
+                notes: ()=>openSection("about"),
+                reminders: ()=>openSection("reminders"),
+              };
+              const tiles = getPersonCapabilityTiles({
+                modules:getPersonModules(p), moduleDefs:PERSON_MODULES, balance:s, spent, spendBudget,
+                giftCount:personGifts.length, loanOutstanding:personLoanOutstanding,
+                notes:p.notes, reminders:getPersonReminders(p, todayStr()), sym, fmt,
+              }).map(t=>({ ...t, onClick:tileTarget[t.id] }));
+              return <>
+                <FinancialRelationships T={T} rows={rows} sym={sym} fmt={fmt}
+                  onOpen={ba=>setActiveBillerForAction(ba)}
+                  onAdd={()=>{ setPreselectedAttribution({ type:"person", id:p.id }); setShowAddBillerAccount(true); }}/>
+                <CapabilityTiles T={T} tiles={tiles} onManage={()=>setEditingPerson(p)}/>
+              </>;
+            })()}
             txns={txns} bills={bills}
             groups={personGroupsForBalance}
             groupOwedByMe={groupOwedByMe}
@@ -10884,6 +10921,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         setEditingGroupIncludeMe(g.includeMe !== false);
         setEditingGroupTypeId(g.typeId||"other");
         setEditingGroupColor(g.color||"");
+        setEditingGroupExtras({ modules:getGroupModules(g), description:g.description||"", notes:g.notes||"", reminders:getGroupReminders(g) });
         setIsEditingGroup(true);
       };
 
@@ -10894,6 +10932,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         setEditingGroupIncludeMe(g.includeMe !== false);
         setEditingGroupTypeId(g.typeId||"other");
         setEditingGroupColor(g.color||"");
+        setEditingGroupExtras(null);
         setIsEditingGroup(false);
       };
 
@@ -10914,6 +10953,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           defaultIntent:getGroupDefaultIntent(g),
           color:editingGroupColor||g.color,
         };
+        if(editingGroupExtras){
+          updated.modules = editingGroupExtras.modules;
+          updated.reminders = editingGroupExtras.reminders;
+          const desc = String(editingGroupExtras.description||"").trim();
+          const notesVal = String(editingGroupExtras.notes||"").trim();
+          if(desc) updated.description = desc; else delete updated.description;
+          if(notesVal) updated.notes = notesVal; else delete updated.notes;
+        }
         setGroups(prev=>prev.map(x=>x.id===g.id?updated:x));
         setSelectedGroup(updated);
         setIsEditingGroup(false);
@@ -11212,6 +11259,38 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 ))}
               </div>
             </div>}
+
+            {isEditingGroup && editingGroupExtras ? (
+              <div style={{ marginBottom:14 }}>
+                <GroupSettingsEditor T={T} moduleDefs={GROUP_MODULES} value={editingGroupExtras} onChange={setEditingGroupExtras} genId={genId} today={todayStr()}/>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10,marginTop:14 }}>
+                  <button onClick={cancelEditingGroup} style={btnG}>Cancel</button>
+                  <button data-testid="group-edit-save" onClick={saveGroupEdits} style={btnP}>Save</button>
+                </div>
+              </div>
+            ) : (()=>{
+              // UI-2C G-12 — the overdue Bill whose own For is this group, then relationships
+              // (a list) and capabilities (tiles). Everything below stays as it was.
+              const pinned = getBillsFor(bills, "group", g.id)
+                .filter(b=>b.status!=="paid" && b.status!=="cancelled")
+                .map(b=>({ b, badge:getOpenBillBadge(b) }))
+                .filter(x=>x.badge.kind==="overdue")
+                .sort((x,y)=>y.badge.days-x.badge.days)[0];
+              const rows = getAttributedRelationships({ targetType:"group", targetId:g.id, billerAccounts, bills });
+              const vendorCount = new Set(txns.filter(t=>t.groupId===g.id && t.type==="expense" && t.merchant).map(t=>String(t.merchant).trim().toLowerCase())).size;
+              const tiles = getGroupCapabilityTiles({ group:g, modules:getGroupModules(g), moduleDefs:GROUP_MODULES, owedToMe:total, iOwe:groupIOwe, budget:groupBudget, spent:groupTotalSpend, relationshipCount:rows.length, vendorCount, today:todayStr(), sym, fmt })
+                .map(t=>({ ...t, onClick:(t.id==="notes"||t.id==="reminders") ? startEditingGroup : undefined }));
+              return (
+                <div style={{ marginBottom:14 }}>
+                  {g.description ? <div style={{ color:T.sub,fontSize:12,marginBottom:4 }}>{g.description}</div> : null}
+                  {pinned ? <PinnedBill T={T} bill={pinned.b} forName={g.name} days={pinned.badge.days} sym={sym} fmt={fmt} onOpen={()=>{ setSelectedGroup(null); setTab("bills"); setShowSettings(false); }}/> : null}
+                  <FinancialRelationships T={T} rows={rows} sym={sym} fmt={fmt}
+                    onOpen={ba=>setActiveBillerForAction(ba)}
+                    onAdd={()=>{ setPreselectedAttribution({ type:"group", id:g.id }); setShowAddBillerAccount(true); }}/>
+                  <CapabilityTiles T={T} tiles={tiles} onManage={startEditingGroup}/>
+                </div>
+              );
+            })()}
 
             <div style={{ borderTop:`1px solid ${T.border}`,paddingTop:12,marginTop:4 }}>
               {(g.manualLimit||0)>0&&<div style={{ ...card,marginBottom:12,padding:"12px 14px",background:T.accentSoft,border:`1px solid ${T.accent}33` }}>
@@ -16723,7 +16802,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [emoji,setEmoji]=useState(p.emoji||"👤");
     const [relation,setRelation]=useState(p.relation||"");
     const [color,setColor]=useState(p.color||PALETTE[0]);
-    const [personType,setPersonType]=useState(p.personType||"contact");
+    // UI-2C: people added with the one-screen Add person have no type; don't give them one here.
+    const [personType,setPersonType]=useState(p.personType||"");
+    const [split,setSplit]=useState(getSplitDefaultChoice(p)); // null = an existing person who hasn't chosen
     const [creditLimit,setCreditLimit]=useState(String(p.creditLimit||""));
     const [spendBudget,setSpendBudget]=useState(String(p.spendBudget||""));
     const [favorite,setFavorite]=useState(Boolean(p.favorite));
@@ -16738,8 +16819,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [defaultSettlement,setDefaultSettlement]=useState(p.defaultSettlement||"UPI");
     const toggleModule = (id) => setModules(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
     const save=()=>{
-      setPeople(prev=>prev.map(x=>x.id===p.id?{...x,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules,phone:phone.trim(),email:email.trim(),dob,anniversary,notes:notes.trim(),defaultSettlement}:x));
-      setSelectedPerson(prev=>prev?{...prev,name:name.trim(),emoji,relation,color,personType,creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules,phone:phone.trim(),email:email.trim(),dob,anniversary,notes:notes.trim(),defaultSettlement}:null);
+      const edits = x=>{
+        const next = {...x,name:name.trim(),emoji,relation,color,...(p.personType?{personType}:{}),creditLimit:parseFloat(creditLimit)||0,spendBudget:parseFloat(spendBudget)||0,favorite,modules,phone:phone.trim(),email:email.trim(),dob,anniversary,notes:notes.trim(),defaultSettlement};
+        // Only a choice the user actually made is stored (D-4); an untouched legacy person keeps
+        // following their type.
+        return split && split!==getSplitDefaultChoice(p) ? withSplitDefault(next, split) : next;
+      };
+      setPeople(prev=>prev.map(x=>x.id===p.id?edits(x):x));
+      setSelectedPerson(prev=>prev?edits(prev):null);
       onClose();
     };
     return (
@@ -16792,7 +16879,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 The stored value itself is untouched — state is still
                 seeded from p.personType above and still saved unchanged
                 below; only the interactive control is removed for isMe. */}
-            {!p.isMe && <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+            {!p.isMe && <div data-testid="edit-person-split">
+              <span style={lbl}>Default expense split</span>
+              <div style={{ display:"flex",background:T.pill,borderRadius:12,padding:4,gap:4 }}>
+                {SPLIT_DEFAULT_OPTIONS.map(o=>(
+                  <button key={o.id} data-testid={`edit-split-${o.id}`} onClick={()=>setSplit(o.id)} style={{ flex:1,minHeight:40,background:split===o.id?T.card:"transparent",border:split===o.id?`1px solid ${T.accent}`:"1px solid transparent",borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:700,color:split===o.id?T.accent:T.sub }}>{o.label}</button>
+                ))}
+              </div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:6 }}>{split===null ? "Not chosen yet, so their type below still decides." : `Used when you add an expense with ${p.name}.`}</div>
+            </div>}
+            {!p.isMe && p.personType && <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+              <span style={lbl}>Type · older setting</span>
               {[["contact","Contact","They may owe you"],["dependant","Dependant","Family, you cover them"],["vendor","Vendor","You pay them for goods/services"],["employee","Employee","Reimbursements, payroll"],["tenant","Tenant","Rent, deposits"],["other","Other",""]].map(([v,l,sub])=>(
                 <button key={v} onClick={()=>setPersonType(v)} style={{ background:personType===v?T.accentSoft:"none",border:`1px solid ${personType===v?T.accent:T.border}`,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                   <div style={{ fontSize:12,fontWeight:700,color:personType===v?T.accent:T.text }}>{getPersonTypeUILabel(v) || l}</div>

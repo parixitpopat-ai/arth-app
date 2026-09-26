@@ -72,3 +72,13 @@ test("rows without a mode are the ones that still need a choice", () => {
   assert.deepEqual(getRowsNeedingSplitChoice(rows).map(r => r.id), ["r1"]);
   assert.deepEqual(getRowsNeedingSplitChoice(undefined), []);
 });
+
+test("an existing person can choose Ask each time; it is stored so their type stops deciding", () => {
+  const asked = withSplitDefault(legacyFamily, "ask");
+  assert.equal(asked.defaultSplit, "ask");
+  assert.equal(getPersonSplitDefault(asked), "ask");
+  assert.equal(getNewSplitRowMode(asked), null);
+  assert.equal(getSplitDefaultChoice(asked), "ask");
+  // New people still store nothing for Ask each time.
+  assert.equal("defaultSplit" in withSplitDefault(newSkipped, "ask"), false);
+});

@@ -16,6 +16,10 @@
 //   neither               → "ask": the form asks each time
 //
 // Skipping the P-3 question stores nothing, so a new person is "ask".
+//
+// One exception: an existing (typed) person who chooses "Ask each time" in
+// Edit person has to store it as "ask", or their type would keep deciding.
+// New people never get that value; for them "ask" is simply no field.
 
 export const SPLIT_DEFAULT_I_PAY = "i_pay";
 export const SPLIT_DEFAULT_THEY_OWE = "they_owe";
@@ -27,7 +31,7 @@ export const SPLIT_DEFAULT_OPTIONS = [
   { id: SPLIT_DEFAULT_ASK, label: "Ask each time" },
 ];
 
-const EXPLICIT = new Set([SPLIT_DEFAULT_I_PAY, SPLIT_DEFAULT_THEY_OWE]);
+const EXPLICIT = new Set([SPLIT_DEFAULT_I_PAY, SPLIT_DEFAULT_THEY_OWE, SPLIT_DEFAULT_ASK]);
 
 export function isLegacySplitPerson(person) {
   return Boolean(person && !EXPLICIT.has(person.defaultSplit) && person.personType);
@@ -42,16 +46,18 @@ export function getPersonSplitDefault(person) {
 
 /**
  * The value to store when the user picks an option. "Ask each time" is
- * stored as no field at all (Option A), so it returns undefined.
+ * stored as no field at all (Option A) — except for a person with a
+ * stored personType, where no field would mean "follow the type".
  */
-export function toStoredSplitDefault(choice) {
+export function toStoredSplitDefault(choice, person) {
+  if (choice === SPLIT_DEFAULT_ASK) return person?.personType ? SPLIT_DEFAULT_ASK : undefined;
   return EXPLICIT.has(choice) ? choice : undefined;
 }
 
-/** Returns a copy of the person with defaultSplit set, or removed for "ask". */
+/** Returns a copy of the person with defaultSplit set, or removed when not needed. */
 export function withSplitDefault(person, choice) {
   const next = { ...person };
-  const stored = toStoredSplitDefault(choice);
+  const stored = toStoredSplitDefault(choice, person);
   if (stored) next.defaultSplit = stored;
   else delete next.defaultSplit;
   return next;
