@@ -8,6 +8,7 @@
 // screen got extracted without the shared components existing first.
 
 import React, { useState } from "react";
+import { toLocalDateStr } from "../helpers/dateHelpers";
 import { genId } from "../helpers/idGenerator";
 import BottomSheet from "../components/BottomSheet";
 import EmptyState from "../components/EmptyState";
@@ -16,7 +17,7 @@ export const AddEventModal = ({ existing, onClose, T, inp, lbl, people, setEvent
   const isEdit = Boolean(existing);
   const [name, setName] = useState(existing?.name||"");
   const [occasionType, setOccasionType] = useState(existing?.occasionType||"trip");
-  const [date, setDate] = useState(existing?.date||new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(existing?.date||toLocalDateStr(new Date()));
   const [selectedPeople, setSelectedPeople] = useState(existing?.peopleIds||[]);
   const [budget, setBudget] = useState(existing?.budget?String(existing.budget):"");
   const canSave = name.trim();

@@ -17,7 +17,7 @@ const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
 import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY } from "./constants/theme";
-import { todayStr, addDaysToDateStr, dateAtDay, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
+import { todayStr, toLocalDateStr, addDaysToDateStr, dateAtDay, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
 import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
 import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
 import { normalizeVendorText } from "./helpers/textHelpers";
@@ -386,7 +386,7 @@ const getNextDueDate = (startDate, dueDay) => {
   const safeDay = Math.max(1, Math.min(31, parseInt(dueDay || base.getDate(), 10) || base.getDate()));
   let candidate = dateAtDay(base.getFullYear(), base.getMonth(), safeDay);
   if(candidate < base) candidate = dateAtDay(base.getFullYear(), base.getMonth() + 1, safeDay);
-  return candidate.toISOString().split("T")[0];
+  return toLocalDateStr(candidate);
 };
 const isInvestmentAccount = account => {
   if(!account || account.type==="cc") return false;
@@ -2756,7 +2756,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const savingsScore = savingsRate===null ? 12.5 : Math.max(0,Math.min(25, (savingsRate/0.30)*25));
 
     // Bills Paid On Time — 20 pts. Looks at bills paid in the last 90 days.
-    const in90 = new Date(Date.now()-90*24*60*60*1000).toISOString().split("T")[0];
+    const in90 = toLocalDateStr(new Date(Date.now()-90*24*60*60*1000));
     const recentPaidBills = bills.filter(b=>b.status==="paid"&&b.paidDate&&b.paidDate>=in90);
     const onTimeCount = recentPaidBills.filter(b=>!b.dueDate || b.paidDate<=b.dueDate).length;
     const billsScore = recentPaidBills.length===0 ? 20 : (onTimeCount/recentPaidBills.length)*20;
@@ -2784,7 +2784,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Net Worth Growth — 10 pts. Compares today's net worth to the snapshot closest to 30 days
     // ago. Neutral score until enough snapshot history has accumulated (this only started
     // recording recently, so early users won't have 30 days of history yet).
-    const target30 = new Date(Date.now()-30*24*60*60*1000).toISOString().split("T")[0];
+    const target30 = toLocalDateStr(new Date(Date.now()-30*24*60*60*1000));
     const past = [...wealthSnapshots].filter(s=>s.date<=target30).sort((a,b)=>b.date.localeCompare(a.date))[0];
     const growthScore = (!past || !past.netWorth) ? 5 : (()=>{
       const base = Math.abs(past.netWorth)||1;
@@ -2794,7 +2794,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
     // Transaction Consistency — 5 pts. Share of the last 30 days with at least one transaction logged.
     const last30Dates = new Set();
-    for(let i=0;i<30;i++){ const d=new Date(); d.setDate(d.getDate()-i); last30Dates.add(d.toISOString().split("T")[0]); }
+    for(let i=0;i<30;i++){ const d=new Date(); d.setDate(d.getDate()-i); last30Dates.add(toLocalDateStr(d)); }
     const daysWithTxn = new Set(txns.filter(t=>last30Dates.has(t.date)).map(t=>t.date)).size;
     const consistencyScore = Math.max(0,Math.min(5,(daysWithTxn/30)*5));
 
@@ -4762,7 +4762,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   type:"expense",
                   desc:`EMI ${i+1}/${tenureNum} – ${who.trim() || note.trim() || "EMI purchase"}`,
                   merchant:who.trim() || "EMI purchase",
-                  date:cursor.toISOString().split("T")[0],
+                  date:toLocalDateStr(cursor),
                   note:`CC EMI installment ${i+1} of ${tenureNum}`,
                   amount:emiAmt,
                   accId,
@@ -9140,7 +9140,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Recurring investment reminders
     const todayDate = new Date();
     const todayDay = todayDate.getDate();
-    const todayStr2 = new Date().toISOString().split("T")[0];
+    const todayStr2 = todayStr();
     const dueRecurring = recurringSchedules.filter(r=>r.active!==false && r.day===todayDay && (!r.snoozedUntil || r.snoozedUntil < todayStr2));
     // All investment folios for dashboard recording
     const investmentGroups = Object.values(investments.reduce((acc,inv)=>{
@@ -9374,8 +9374,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const today = new Date();
         const upcoming = bills.filter(b=>b.status==="unpaid").sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).slice(0,4);
         const overdue = upcoming.filter(b=>new Date(b.dueDate)<today);
-        const todayStrFocus = today.toISOString().split("T")[0];
-        const in7Focus = new Date(Date.now()+7*24*60*60*1000).toISOString().split("T")[0];
+        const todayStrFocus = toLocalDateStr(today);
+        const in7Focus = toLocalDateStr(new Date(Date.now()+7*24*60*60*1000));
         const withPeriodFocus = memberships.map(m=>({ m, period:getCurrentPeriod(m) })).filter(x=>x.period);
         const expiringMemberships = withPeriodFocus.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); return eff>=todayStrFocus && eff<=in7Focus; });
         const lapsedMemberships = withPeriodFocus.filter(x=>{ const eff=getPeriodEffectiveEnd(x.period); if(eff>=todayStrFocus) return false; const diffDays = Math.round((new Date()-new Date(eff))/(1000*60*60*24)); return diffDays<=3; });
@@ -12057,7 +12057,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const sipsAsBills = (recurringSchedules||[]).filter(r=>r.active!==false).map(r=>{
       const thisMonthDue = new Date(todayDate.getFullYear(), todayDate.getMonth(), r.day);
       const nextDue = thisMonthDue >= todayDate ? thisMonthDue : new Date(todayDate.getFullYear(), todayDate.getMonth()+1, r.day);
-      return { id:`sip_${r.id}`, type:"sip", name:r.name?`${r.name} SIP`:"SIP", amount:r.amount, dueDate:nextDue.toISOString().slice(0,10), status:"unpaid" };
+      return { id:`sip_${r.id}`, type:"sip", name:r.name?`${r.name} SIP`:"SIP", amount:r.amount, dueDate:toLocalDateStr(nextDue), status:"unpaid" };
     });
     // Same gap, different entity: CC statement amounts are computed dynamically via
     // getCardSummary's cycle logic (confirmed by an explicit code comment: "card statements
@@ -12067,7 +12067,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const ccStatementsAsBills = accounts.filter(a=>a.type==="cc").map(a=>{
       const summary = getCardSummary(a, accounts, txns, toDateOnly);
       if(!summary.currentDue || summary.currentDue<=0) return null;
-      return { id:`ccstmt_${a.id}`, type:"cc_statement", name:`${a.name} Statement`, amount:summary.currentDue, dueDate:summary.dueOn.toISOString().slice(0,10), status:"unpaid" };
+      return { id:`ccstmt_${a.id}`, type:"cc_statement", name:`${a.name} Statement`, amount:summary.currentDue, dueDate:toLocalDateStr(summary.dueOn), status:"unpaid" };
     }).filter(Boolean);
     // billsForForecast/sipsAsBills/ccStatementsAsBills are kept EXACTLY as before, unchanged —
     // Cash Flow (timeline/projectedBalance below) must keep consuming this array directly, per
@@ -14888,12 +14888,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               const unshelled = filtered.filter(ba=>!ba.billerId);
               const shellGroups = {};
               shelled.forEach(ba=>{ if(!shellGroups[ba.billerId]) shellGroups[ba.billerId]=[]; shellGroups[ba.billerId].push(ba); });
-              const in7 = new Date(Date.now()+7*24*60*60*1000).toISOString().split("T")[0];
+              const in7 = toLocalDateStr(new Date(Date.now()+7*24*60*60*1000));
               const todayStrV = todayStr();
               const dueSoonText = (dueDate) => {
                 if(!dueDate) return "";
                 if(dueDate===todayStrV) return "Due Today";
-                if(dueDate===new Date(Date.now()+86400000).toISOString().split("T")[0]) return "Due Tomorrow";
+                if(dueDate===toLocalDateStr(new Date(Date.now()+86400000))) return "Due Tomorrow";
                 if(dueDate<todayStrV) return "Overdue";
                 return `Due ${formatShortDate(dueDate)||dueDate}`;
               };
@@ -15269,7 +15269,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const pctChange = prevCashFlow!==0 ? Math.round(((cashFlow-prevCashFlow)/Math.abs(prevCashFlow))*100) : null;
     // Daily trend for the chart
     const dayBuckets = {};
-    for(let i=0;i<daysBack;i++){ const d=new Date(now); d.setDate(d.getDate()-i); dayBuckets[d.toISOString().split("T")[0]] = { income:0, expense:0 }; }
+    for(let i=0;i<daysBack;i++){ const d=new Date(now); d.setDate(d.getDate()-i); dayBuckets[toLocalDateStr(d)] = { income:0, expense:0 }; }
     periodTxns.forEach(t=>{
       const key = t.date;
       if(!dayBuckets[key]) return;

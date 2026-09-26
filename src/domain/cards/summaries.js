@@ -9,7 +9,7 @@
 // extractDateFromText). Passing it as a parameter keeps this pass contained to exactly what was
 // scoped: Cards.
 
-import { dateAtDay } from "../../helpers/dateHelpers";
+import { dateAtDay, toLocalDateStr } from "../../helpers/dateHelpers";
 
 export const getCardCycleDates = (card, refDate = new Date()) => {
   const statementDay = Math.max(1, Math.min(31, parseInt(card?.statementDate || 15, 10)));
@@ -34,7 +34,7 @@ export const getCardSummary = (card, accounts, txns, toDateOnly) => {
   const allIds = [card.id, ...linkedUpiIds];
   const today = new Date();
   const todayMid = new Date(today.getFullYear(),today.getMonth(),today.getDate(),12,0,0,0);
-  const todayS = today.toISOString().split("T")[0];
+  const todayS = toLocalDateStr(today);
   const lastCycleCharges = txns.reduce((sum,t)=>{
     if((t.type!=="expense"&&t.type!=="investment"&&t.type!=="cc_emi")||!allIds.includes(t.accId)) return sum;
     if(!t.date||String(t.date)>todayS) return sum;

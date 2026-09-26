@@ -22,7 +22,7 @@
 // Extraction Checklist discipline as domain/bills, domain/cards. This module can be unit tested
 // with plain objects, no React involved.
 
-import { getMonthBounds } from "../../helpers/dateHelpers";
+import { getMonthBounds, toLocalDateStr } from "../../helpers/dateHelpers";
 
 /**
  * Total expected income for a given month that hasn't been marked received yet.
@@ -111,7 +111,7 @@ export const calculateRecognition = (_bill) => null;
  * @returns {number}
  */
 export const averageOfLastNMonthsVariableSpend = (txns, months = 3, refMonthKey) => {
-  const ref = refMonthKey || new Date().toISOString().slice(0,7);
+  const ref = refMonthKey || toLocalDateStr(new Date()).slice(0,7);
   const [refYear, refMonth] = ref.split("-").map(Number);
   let total = 0;
   for (let i = 1; i <= months; i++) {
@@ -141,10 +141,10 @@ export const averageOfLastNMonthsVariableSpend = (txns, months = 3, refMonthKey)
  */
 export const buildCashFlowTimeline = (openingBalance, bills, expectedIncome, days = 30, refundTotalsByBill = {}) => {
   if (typeof openingBalance !== "number" || Number.isNaN(openingBalance)) return [];
-  const todayStr = new Date().toISOString().slice(0,10);
+  const todayStr = toLocalDateStr(new Date());
   const horizon = new Date();
   horizon.setDate(horizon.getDate() + days);
-  const horizonStr = horizon.toISOString().slice(0,10);
+  const horizonStr = toLocalDateStr(horizon);
 
   const billEvents = (bills||[])
     .filter(b => b.status !== "paid" && b.dueDate >= todayStr && b.dueDate <= horizonStr)

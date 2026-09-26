@@ -10,6 +10,7 @@
 // correctly for timezones ahead of UTC even without this fix, but that
 // was luck, not correctness — fixed proactively once the same bug class
 // was confirmed real elsewhere in this session.
+import { toLocalDateStr } from "../../helpers/dateHelpers.js";
 function parseDateOnly(str) {
   const parts = String(str).split("-").map(Number);
   const [year, month, day] = parts;
@@ -29,7 +30,7 @@ function parseDateOnly(str) {
  * }}
  */
 export function getPersonSixMonthActivity(personId, txns, getPersonAttributedAmount, referenceDateStr) {
-  const ref = parseDateOnly(referenceDateStr || new Date().toISOString().slice(0, 10));
+  const ref = parseDateOnly(referenceDateStr || toLocalDateStr(new Date()));
   const monthKeys = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(ref.getFullYear(), ref.getMonth() - i, 1);
