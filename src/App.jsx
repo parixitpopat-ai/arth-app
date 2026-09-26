@@ -57,6 +57,7 @@ import { getPersonSixMonthActivity } from "./domain/person/activity";
 import { getPersonReminders } from "./domain/person/reminders";
 import { getSectionOrder, moveSection } from "./domain/person/sectionOrder";
 import { getPersonTypeUILabel } from "./domain/person/personType";
+import { getSplitShareMode, getNewSplitRowMode, getRowsNeedingSplitChoice } from "./domain/person/splitDefault";
 import { PersonProfileScreen } from "./screens/PersonProfileScreen";
 import { isSchoolRelationshipCurrent } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
@@ -4578,6 +4579,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       // QW-1: never save a bill payment whose amount no longer matches the chosen bill — that used
       // to rewrite the bill or (after the link silently dropped) create a duplicate. Partial
       // payments ("Keep link" with a remainder) arrive with ADR-038 / WP-4.
+      // UI-2C D-4: a person whose default is "Ask each time" joins a split row with no mode
+      // chosen. Ask before saving instead of picking one silently.
+      if(txnType==="expense" && (splitMode==="allocate" || splitMode==="unified")){
+        const unchosen = getRowsNeedingSplitChoice(allocRows);
+        if(unchosen.length){ setRefDupWarning(`Choose A (I pay), O (I owe) or C (they owe) for ${unchosen.map(r=>getPerson(r.targetId).name).join(", ")}.`); return; }
+      }
       if(txnType==="expense" && billLinkMismatch){ setRefDupWarning(`This payment is ${sym}${fmt(billLinkMismatch.paymentAmount)} but the linked bill is ${sym}${fmt(billLinkMismatch.billAmount)}. Change the amount or the bill before saving.`); return; }
       // Credit Card WP: "Add missing transaction" from a statement's reconciliation carries the
       // statement's period as dateMin/dateMax — enforced here too, not just via the date input's
@@ -4787,7 +4794,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const shares = splitMode==="split"?calcShares():{};
         const psplit = {};
         Object.entries(shares).forEach(([pid,sh])=>{
-          const collect = collectMap[pid]!==undefined ? collectMap[pid] : getPerson(pid).personType!=="dependant";
+          const collect = collectMap[pid]!==undefined ? collectMap[pid] : getSplitShareMode(getPerson(pid))==="owes";
           // FIX: preserve an already-settled share exactly on edit, instead of silently
           // rebuilding it unsettled. See script header for full context -- confirmed real bug.
           const priorInfo = isEditing ? (sourceTxn?.splitPeople?.[pid] || sourceTxn?.people?.[pid]) : null;
@@ -6397,7 +6404,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           return (
                             <button key={`${x.type}_${x.id}`} onClick={()=>{
                               if(isSelected){ setAllocRows(prev=>prev.filter(r=>!(r.targetType===x.type&&r.targetId===x.id))); return; }
-                              if(x.type==="person"){ setSplitMode("allocate"); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:x.id, mode:"owes", amount:"", items:[] }]); }
+                              if(x.type==="person"){ setSplitMode("allocate"); setAllocRows(prev=>[...prev,{ id:genId(), targetType:"person", targetId:x.id, mode:getNewSplitRowMode(getPerson(x.id)), amount:"", items:[] }]); }
                               else {
                                 const g = groups.find(gr=>gr.id===x.id);
                                 const di = getGroupDefaultIntent(g);
@@ -6435,6 +6442,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           <div key={row.id} style={{ display:"flex",flexDirection:"column",gap:6,background:T.card,borderRadius:10,padding:"8px 10px" }}>
                             <div style={{ display:"flex",alignItems:"center",gap:6 }}>
                               <span style={{ flex:1,color:T.text,fontSize:13,fontWeight:700 }}>{row.targetType==="group"?(target.icon||"👥"):(target.emoji||"👤")} {target.name}</span>
+                              {row.targetType==="person"&&!row.mode&&<span style={{ color:T.warn,fontSize:10,fontWeight:800 }}>Choose one</span>}
                               <div style={{ display:"flex",gap:4 }}>
                                 {[["spent_on","A"],["i_owe","O"],["owes","C"]].map(([m,label])=>(
                                   <button key={m} title={label==="A"?"Attribute":label==="O"?"Own":"Collect"} onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,mode:m}:r))} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:800,color:row.mode===m?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
@@ -16713,7 +16721,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(!name.trim()||!parseFloat(amount)||!dueDate||duplicateInvoiceBill) return;
       const shares=calcShares();
       const peopleSplit={};
-      Object.entries(shares).forEach(([pid,sh])=>{ const p=getPerson(pid); peopleSplit[pid]={amount:sh,mode:p.personType!=="dependant"?"owes":"spent_on"}; });
+      Object.entries(shares).forEach(([pid,sh])=>{ peopleSplit[pid]={amount:sh,mode:getSplitShareMode(getPerson(pid))}; });
       const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
       const myShare = billIncludeMe ? Math.max(0, amt-owedByOthers) : 0;
       const groupCollectiveAmount = billGroup ? Math.max(0, amt-owedByOthers-myShare) : 0;

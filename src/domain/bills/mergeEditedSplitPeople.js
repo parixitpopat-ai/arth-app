@@ -14,12 +14,15 @@
 // - A newly-added person (no prior entry) gets a fresh {amount, mode} record with no settlement
 //   fields, identical to AddBillModal's own construction.
 
+import { getSplitShareMode } from "../person/splitDefault.js";
+
 export function mergeEditedSplitPeople(existingSplitPeople, editedShares, getPerson) {
   const existing = existingSplitPeople || {};
   const peopleSplit = {};
   Object.entries(editedShares || {}).forEach(([pid, sh]) => {
     const p = getPerson(pid);
-    const mode = p?.personType !== "dependant" ? "owes" : "spent_on";
+    // UI-2C D-4: explicit default first; legacy people keep the personType rule.
+    const mode = getSplitShareMode(p);
     const prior = existing[pid];
     if (!prior) {
       peopleSplit[pid] = { amount: sh, mode };
