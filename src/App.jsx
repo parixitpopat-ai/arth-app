@@ -64,7 +64,8 @@ import AddPersonSheet from "./components/people/AddPersonSheet";
 import PersonSetupSheet from "./components/people/PersonSetupSheet";
 import AddGroupSheet from "./components/people/AddGroupSheet";
 import { FinancialRelationships, CapabilityTiles, PinnedBill } from "./components/people/RelationshipBlocks";
-import { getAttributedRelationships, getOpenBillBadge } from "./domain/relationships/attributedAccounts";
+import { getAttributedRelationships, getOpenBillBadge, summarizeRelationships } from "./domain/relationships/attributedAccounts";
+import { relationshipSummaryText } from "./components/people/relationshipText";
 import { getPersonCapabilityTiles } from "./domain/person/capabilityTiles";
 import { getGroupCapabilityTiles } from "./domain/group/capabilityTiles";
 import { getGroupReminders } from "./domain/group/reminders";
@@ -11405,6 +11406,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       : (spent>0 ? ` · ${sym}${fmtK(spent)} spent` : "")}
                     {atLimit&&<span style={{ color:T.danger,fontSize:10,fontWeight:700,marginLeft:6 }}>⚠️ Credit limit</span>}
                   </div>
+                  {(()=>{
+                    // UI-2C P-1 — the row reads as context: relationships and the one Bill needing attention.
+                    const sum = summarizeRelationships(getAttributedRelationships({ targetType:"person", targetId:p.id, billerAccounts, bills }));
+                    const text = relationshipSummaryText(sum, sym, fmt);
+                    return text ? <div data-testid={`person-row-summary-${p.id}`} style={{ color:sum.attention?.kind==="overdue"?T.dangerText:sum.attention?.kind==="due"?T.attention:T.sub,fontSize:11,marginTop:2 }}>{text}</div> : null;
+                  })()}
                 </div>
                 {!p.isMe&&<button onClick={e=>{ e.stopPropagation(); toggleFavorite(p); }} style={{ background:p.favorite?T.accentSoft:"none",border:`1px solid ${p.favorite?T.accent:T.border}`,borderRadius:8,padding:"5px 8px",cursor:"pointer",fontSize:12,fontWeight:800,color:p.favorite?T.accent:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>{p.favorite?"★":"☆"}</button>}
                 {!p.isMe&&net!==0&&(
@@ -11441,6 +11448,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{g.name}</div>
                         <div style={{ color:T.sub,fontSize:11,marginTop:1 }}>{(g.members?.length||0) + (g.includeMe===false?0:1)} members{g.includeMe===false?" · you not included":" · you included"}</div>
                         <div style={{ color:gOver?T.danger:T.sub,fontSize:10,marginTop:2 }}>{gBudget>0?`Budget ${sym}${fmt(gBudget)}/mo · `:""}This month {sym}{fmt(gTotalSpend)}{gOver?` · ⚠️ Over ${sym}${fmt(gTotalSpend-gBudget)}`:""}</div>
+                        {(()=>{
+                          // UI-2C G-10 — relationships and the one Bill needing attention.
+                          const sum = summarizeRelationships(getAttributedRelationships({ targetType:"group", targetId:g.id, billerAccounts, bills }));
+                          const text = relationshipSummaryText(sum, sym, fmt);
+                          return text ? <div data-testid={`group-row-summary-${g.id}`} style={{ color:sum.attention?.kind==="overdue"?T.dangerText:sum.attention?.kind==="due"?T.attention:T.sub,fontSize:11,marginTop:2 }}>{text}</div> : null;
+                        })()}
                       </div>
                       <div style={{ textAlign:"right" }}>
                         <div style={{ color:g.color,fontSize:14,fontWeight:800 }}>{sym}{fmt(groupReceivableTotal(g.id))}</div>

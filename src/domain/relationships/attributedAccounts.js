@@ -71,3 +71,15 @@ export function getAttributedRelationships({ targetType, targetId, billerAccount
     rank[a.state.kind] - rank[b.state.kind]
     || String(a.billerAccount.name || "").localeCompare(String(b.billerAccount.name || ""), "en", { sensitivity: "base" }));
 }
+
+/**
+ * UI-2C P-1 / G-10 list rows: how many relationships, and the one Bill
+ * that needs attention (the first row after getAttributedRelationships'
+ * ordering), if any open Bill exists.
+ */
+export function summarizeRelationships(rows) {
+  const list = rows || [];
+  const first = list[0]?.state;
+  const attention = first && (first.kind === "overdue" || first.kind === "due" || first.kind === "unpaid") ? first : null;
+  return { count: list.length, attention };
+}

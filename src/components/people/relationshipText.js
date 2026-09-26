@@ -23,3 +23,17 @@ export function relationshipStatusText(state, sym, fmt) {
   }
 }
 
+
+/** "3 relationships · ₹699 due 5 Oct", "1 relationship · ₹8,765 overdue", or "" when there are none. */
+export function relationshipSummaryText(summary, sym, fmt) {
+  if (!summary || !summary.count) return "";
+  const parts = [`${summary.count} relationship${summary.count === 1 ? "" : "s"}`];
+  const a = summary.attention;
+  if (a && a.bill) {
+    const amt = `${sym}${fmt(Number(a.bill.amount || 0))}`;
+    if (a.kind === "overdue") parts.push(`${amt} overdue`);
+    else if (a.bill.dueDate) parts.push(`${amt} due ${a.kind === "due" && a.days === 0 ? "today" : dayMonth(a.bill.dueDate)}`);
+    else parts.push(`${amt} unpaid`);
+  }
+  return parts.join(" · ");
+}

@@ -45,3 +45,22 @@ test("only relationships attributed to this person or group, attention first", (
   assert.deepEqual(rows.map(r => r.state.kind), ["due", "paid", "none"]);
   assert.equal(getAttributedRelationships({ targetType: "group", targetId: "p1", billerAccounts, bills }).length, 1);
 });
+
+test("list-row summary: count plus the most urgent open Bill only", async () => {
+  const { summarizeRelationships } = await import("./attributedAccounts.js");
+  const billerAccounts = [
+    { id: "a", name: "Water", attributeType: "group", attributedTo: "g1" },
+    { id: "b", name: "Electricity", attributeType: "group", attributedTo: "g1" },
+  ];
+  const bills = [
+    { billerAccountId: "a", status: "paid", paidDate: "2026-09-10" },
+    { billerAccountId: "b", status: "unpaid", dueDate: "2026-09-20" },
+  ];
+  const s = summarizeRelationships(getAttributedRelationships({ targetType: "group", targetId: "g1", billerAccounts, bills, refDate: today }));
+  assert.equal(s.count, 2);
+  assert.equal(s.attention.kind, "overdue");
+  assert.equal(s.attention.days, 6);
+  const paidOnly = summarizeRelationships(getAttributedRelationships({ targetType: "group", targetId: "g1", billerAccounts: [billerAccounts[0]], bills, refDate: today }));
+  assert.deepEqual(paidOnly, { count: 1, attention: null });
+  assert.deepEqual(summarizeRelationships([]), { count: 0, attention: null });
+});
