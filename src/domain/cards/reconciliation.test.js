@@ -84,3 +84,12 @@ test("getReviewCandidates flags boundary-day and duplicate-looking transactions 
   assert.ok(ids.includes("t3"));
   assert.ok(ids.includes("t4"));
 });
+
+test("verified dates are the local calendar day, not the UTC day (just after midnight)", () => {
+  const justAfterMidnight = new Date(2026, 8, 26, 0, 30);
+  assert.equal(confirmMatchedWithBank(baseBill, justAfterMidnight).verifiedAt, "2026-09-26");
+  assert.equal(recordBankAmount(baseBill, 35000, justAfterMidnight).verifiedAt, "2026-09-26");
+  const updated = applyRecalculatedUpdate(recordBankAmount(baseBill, 40000), 40000, justAfterMidnight);
+  assert.equal(updated.verifiedAt, "2026-09-26");
+  assert.equal(updated.adjustments[0].at, "2026-09-26");
+});

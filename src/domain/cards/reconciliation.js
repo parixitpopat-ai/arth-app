@@ -13,9 +13,14 @@ const AMOUNT_EPSILON = 0.005;
 
 const amountsEqual = (a, b) => Math.abs(Number(a || 0) - Number(b || 0)) < AMOUNT_EPSILON;
 
+// The user's own calendar day. toISOString() gives the UTC day, which in
+// India is still "yesterday" until 05:30, so a statement confirmed after
+// midnight was stamped with the previous date.
+const localDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
 /** "Yes, this matches my bank statement" (CC-10/CC-11). */
 export function confirmMatchedWithBank(bill, refDate = new Date()) {
-  return { ...bill, verification: "matched", verifiedAt: refDate.toISOString().slice(0, 10) };
+  return { ...bill, verification: "matched", verifiedAt: localDay(refDate) };
 }
 
 /** Undo an explicit match, back to needs_verification (CC-11 "Undo"). */
@@ -32,7 +37,7 @@ export function undoMatch(bill) {
 export function recordBankAmount(bill, bankAmount, refDate = new Date()) {
   const next = { ...bill, bankAmount: Number(bankAmount) };
   if (amountsEqual(bankAmount, bill.arthAmount)) {
-    return { ...next, verification: "matched", verifiedAt: refDate.toISOString().slice(0, 10) };
+    return { ...next, verification: "matched", verifiedAt: localDay(refDate) };
   }
   return { ...next, verification: "mismatch", verifiedAt: null };
 }
@@ -57,7 +62,7 @@ export function getRecordsNowTotal(bill, card, accounts, txns, toDateOnly) {
  * the Bill's own history rather than silently rewriting arthAmount.
  */
 export function applyRecalculatedUpdate(bill, newTotal, refDate = new Date()) {
-  const today = refDate.toISOString().slice(0, 10);
+  const today = localDay(refDate);
   const matched = bill.bankAmount != null && amountsEqual(newTotal, bill.bankAmount);
   return {
     ...bill,
