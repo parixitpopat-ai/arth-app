@@ -17804,7 +17804,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                                 <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{ba.consumerNo?`#${ba.consumerNo}`:"No account number set"}</div>
                                 {lastBill&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Last: {sym}{fmt(lastBill.amount)} · {formatShortDate(lastBill.date)||lastBill.date}</div>}
                               </div>
-                              {unpaidCount>0&&<div style={{ background:T.danger,color:"#fff",borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:800 }}>{unpaidCount} unpaid</div>}
+                              <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                                {unpaidCount>0&&<div style={{ background:T.danger,color:"#fff",borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:800 }}>{unpaidCount} unpaid</div>}
+                                {/* Discoverability fix: the same real-world thing being added twice under
+                                    one Provider (the reported "Parixit"/"Me" duplicate) is visible right
+                                    here, as two rows — merging shouldn't require first opening one of
+                                    them. Tapping this treats the row it's on as the survivor and jumps
+                                    straight to MergeBillerAccountSheet's duplicate picker. */}
+                                {accs.length>1&&<button onClick={e=>{ e.stopPropagation(); setMergeBillerSurvivor(ba); setActiveBillerShell(null); }} title={`Merge another account into ${ba.name}`} style={{ background:"none",border:`1px solid ${T.borderStrong}`,borderRadius:8,padding:"4px 7px",cursor:"pointer",fontSize:12,color:T.sub,flexShrink:0 }}>🔗</button>}
+                              </div>
                             </div>
                           );
                         })}

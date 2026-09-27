@@ -15,8 +15,13 @@ test("reported scenario: two accounts (\"Parixit\"/\"Me\"), same target — rela
     { id: "ba_me", name: "Me", type: "Gym / Fitness", billerId: "shell1", consumerNo: "12345" },
   ];
   const membershipRelationships = [
-    { id: "rel_parixit", billerAccountId: "ba_parixit", targetType: "person", targetId: "__me__", status: "active", statusHistory: [] },
-    { id: "rel_me", billerAccountId: "ba_me", targetType: "person", targetId: "__me__", status: "active", statusHistory: [] },
+    { id: "rel_parixit", billerAccountId: "ba_parixit", targetType: "person", targetId: "__me__", status: "paused", statusHistory: [
+      { status: "active", effectiveDate: "2026-01-01", timestamp: 1 },
+      { status: "paused", effectiveDate: "2026-06-01", timestamp: 2 },
+    ] },
+    { id: "rel_me", billerAccountId: "ba_me", targetType: "person", targetId: "__me__", status: "active", statusHistory: [
+      { status: "active", effectiveDate: "2026-03-01", timestamp: 3 },
+    ] },
   ];
   const memberships = [
     { id: "m1", billerAccountId: "ba_parixit", membershipRelationshipId: "rel_parixit", amount: 8499 },
@@ -37,6 +42,36 @@ test("reported scenario: two accounts (\"Parixit\"/\"Me\"), same target — rela
   assert.equal(result.memberships.length, 1);
   assert.equal(result.memberships[0].billerAccountId, "ba_me");
   assert.equal(result.memberships[0].membershipRelationshipId, "rel_me");
+});
+
+test("merge: converged relationships combine statusHistory chronologically, status reflects the latest event overall", () => {
+  const billerAccounts = [
+    { id: "ba_parixit", name: "Parixit", type: "Gym / Fitness" },
+    { id: "ba_me", name: "Me", type: "Gym / Fitness" },
+  ];
+  const membershipRelationships = [
+    // Survivor's own row: started active, then paused on 2026-06-01 (e.g. logged under "Me").
+    { id: "rel_me", billerAccountId: "ba_me", targetType: "person", targetId: "__me__", status: "paused", statusHistory: [
+      { status: "active", effectiveDate: "2026-01-01", timestamp: 1 },
+      { status: "paused", effectiveDate: "2026-06-01", timestamp: 2 },
+    ] },
+    // Duplicate's row: resumed later, on 2026-07-01 — the real, most recent fact, logged
+    // under "Parixit" instead. Naively keeping only the survivor's history would wrongly
+    // leave the merged relationship "paused" even though it was actually resumed.
+    { id: "rel_parixit", billerAccountId: "ba_parixit", targetType: "person", targetId: "__me__", status: "active", statusHistory: [
+      { status: "active", effectiveDate: "2026-07-01", timestamp: 3 },
+    ] },
+  ];
+  const state = { billerAccounts, membershipRelationships, memberships: [], bills: [], txns: [], feeSchedules: [] };
+
+  const result = mergeBillerAccounts(state, "ba_me", "ba_parixit");
+
+  assert.equal(result.membershipRelationships.length, 1);
+  const merged = result.membershipRelationships[0];
+  assert.equal(merged.id, "rel_me");
+  assert.equal(merged.statusHistory.length, 3, "no entries dropped, none duplicated");
+  assert.deepEqual(merged.statusHistory.map(h => h.effectiveDate), ["2026-01-01", "2026-06-01", "2026-07-01"], "chronological order across both original relationships");
+  assert.equal(merged.status, "active", "status reflects the merged timeline's latest event, not just whichever row survived");
 });
 
 test("different targets on each side: both relationships kept, re-pointed onto the survivor (1:N)", () => {
