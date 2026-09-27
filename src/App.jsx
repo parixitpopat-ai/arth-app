@@ -43,7 +43,7 @@ import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVa
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
-import { pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel, createRelationship, migrateBillerAccountAttributions, getRelationshipTarget } from "./domain/membership/relationship";
+import { pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel, createRelationship, migrateBillerAccountAttributions, backfillBillerAccountAttributionFromRelationships, getRelationshipTarget } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { getPersonSpendingSummary, getPersonActiveConnections } from "./domain/person/personOverview";
@@ -101,7 +101,7 @@ import { generateDueStatements } from "./domain/cards/statementBills";
 import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
-import { withBillForSnapshots } from "./domain/bills/billFor";
+import { withBillForSnapshots, repairUnassignedBills } from "./domain/bills/billFor";
 import { getBillBalance, planBillPayment, withProjectedBillStatuses, getPartialRemainingByBill, getBillBadge, getBillLedger } from "./domain/obligations/billBalance";
 import { hasCompleteSchedule, setRelationshipSchedule, getExpectedForRelationship, getExpectedItems, buildBillFieldsFromExpected } from "./domain/obligations/expected";
 import { buildPaymentsView, getBillPeriodLabel, getBadgeText } from "./domain/bills/paymentsView";
@@ -1194,6 +1194,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const next = migrateBillerAccountAttributions(billerAccounts.filter(ba=>ba?.type!=="School Fees"), membershipRelationships, genId);
     if(next!==membershipRelationships) setMembershipRelationships(next);
   },[billerAccounts, membershipRelationships]);
+  // Bug fix — the reverse direction of the migration above, and the actual fix for the reported
+  // "gym bill shows Unassigned" bug: AddMembershipModal's own relationship-creation call site
+  // never mirrored a new relationship into the billerAccount's legacy attributeType/attributedTo
+  // (the other two creation call sites, AddRelationshipSheet and AttachBillerTargetSheet, always
+  // did). That gap is now closed going forward at the call site itself; this is the one-time
+  // repair for a billerAccount that already has an active relationship but was never backfilled.
+  // School Fees excluded for the same reason as the migration above — it owns its own path.
+  useEffect(()=>{
+    const eligible = billerAccounts.filter(ba=>ba?.type!=="School Fees");
+    const backfilled = backfillBillerAccountAttributionFromRelationships(eligible, membershipRelationships);
+    if(backfilled===eligible) return;
+    const byId = new Map(backfilled.map(ba=>[ba.id, ba]));
+    setBillerAccounts(prev=>prev.map(ba=>byId.has(ba.id) ? byId.get(ba.id) : ba));
+  },[billerAccounts, membershipRelationships]);
   // WP-5 self-sentinel data correction — fixes any existing records (created before the
   // WP-1/WP-4 fixes) whose personId is still the literal "self" instead of the real ME.id
   // ("__me__"). Reuses correctSelfSentinel as-is (domain/membership/relationship.js) — no new
@@ -1222,6 +1236,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // on every later render.
   useEffect(()=>{
     const next = withBillForSnapshots(bills, { billerAccounts, people, groups });
+    if(next!==bills) setBills(next);
+  },[bills, billerAccounts, people, groups]);
+  // Paired one-time repair: a Bill already snapshotted "Unassigned" is normally never touched
+  // again (that's deliberate — a later, real relationship change shouldn't rewrite history), but
+  // the billerAccount backfill above means some Bills were snapshotted "Unassigned" only because
+  // of the AddMembershipModal gap, not because they were genuinely unattributed. Re-derives only
+  // Bills currently "Unassigned"; a Bill that's genuinely, correctly unassigned re-derives to the
+  // same "Unassigned" and is left alone.
+  useEffect(()=>{
+    const next = repairUnassignedBills(bills, { billerAccounts, people, groups });
     if(next!==bills) setBills(next);
   },[bills, billerAccounts, people, groups]);
   // ADR-038 §6 — stored Bill status follows its Contributions, in one place, whichever path
@@ -16497,8 +16521,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         if(existingRel){
           relationshipId = existingRel.id;
         } else {
+          // Bug fix: this is the one relationship-creation call site that never did the legacy
+          // attributeType/attributedTo mirror write the other two (AddRelationshipSheet,
+          // AttachBillerTargetSheet) already do — billFor.js's Bill-For bridge still reads only
+          // that legacy field, never membershipRelationships[], so every Bill against a
+          // membership created straight from this modal (exactly how a new gym membership is
+          // normally added) was permanently "Unassigned", with no later event that could ever
+          // correct it. Same isFirstRelationship condition as the other two sites.
+          const activeForBa = membershipRelationships.filter(r=>r.status==="active" && String(r.billerAccountId)===String(billerAccount.id));
+          const isFirstRelationship = activeForBa.length===0;
           const newRel = createRelationship({ billerAccountId:billerAccount.id, targetType:memberTargetType, targetId:memberTargetId, startDate:finalPeriods[0]?.from||todayStr(), genId });
           setMembershipRelationships(prev=>[...prev, newRel]);
+          if(isFirstRelationship) setBillerAccounts(prev=>prev.map(x=>x.id===billerAccount.id ? { ...x, attributeType:memberTargetType, attributedTo:memberTargetId } : x));
           relationshipId = newRel.id;
         }
       }

@@ -92,3 +92,24 @@ export function getBillsFor(bills, forType, forId) {
   const id = String(forId);
   return (bills || []).filter(b => b && b.forType === forType && String(b.forId) === id);
 }
+
+/**
+ * One-time repair, paired with relationship.js's backfillBillerAccountAttributionFromRelationships:
+ * a Bill already snapshotted "unassigned" stays that way forever by design (hasBillForSnapshot
+ * makes withBillForSnapshot skip it) — correct for a later, genuine reassignment, but wrong for a
+ * Bill that was snapshotted "unassigned" only because its billerAccount hadn't been backfilled
+ * yet. Once that backfill runs, re-deriving here catches up every Bill that was actually a victim
+ * of that gap, without touching a Bill that's genuinely, correctly unassigned (its fresh
+ * derivation is still "unassigned", so it's left alone) or a Bill attributed to something else.
+ */
+export function repairUnassignedBills(bills, context) {
+  let changed = false;
+  const next = (bills || []).map(b => {
+    if (!b || b.forType !== BILL_FOR_UNASSIGNED) return b;
+    const fresh = deriveBillFor(b, context);
+    if (fresh.forType === BILL_FOR_UNASSIGNED) return b;
+    changed = true;
+    return { ...b, ...fresh };
+  });
+  return changed ? next : bills;
+}
