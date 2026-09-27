@@ -6495,7 +6495,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             )}
 
             {/* STEP 5 - WHO IS THIS FOR? */}
-            {txnType==="expense"&&(
+            {/* Bug fix: this rendered for every expense, but the save logic below only ever
+                writes allocRows into the transaction when splitMode is "allocate" or "unified"
+                (see the `allocations:` and `people:` assignments further down). For a
+                transaction already in "split" (Collect, e.g. a bill payment split with a group)
+                or "tag" mode, anything picked here was silently discarded on save — the exact
+                reported bug ("it doesn't store who this is for"). The existing split/tag data
+                itself is preserved fine on re-save (splitPeople/tagPerson state is seeded from
+                the transaction being edited independently of this section); it's only this
+                control that was a dead end. Gating its visibility on the same condition the save
+                path already uses means it's never shown unless it will actually be saved. */}
+            {txnType==="expense"&&(splitMode==="allocate"||splitMode==="unified")&&(
               <div>
                 <span style={lbl}>Who is this for? (optional)</span>
                 <div style={{ display:"flex",gap:8,marginBottom:8 }}>
