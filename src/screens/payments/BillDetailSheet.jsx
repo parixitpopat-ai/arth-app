@@ -24,7 +24,7 @@ function Row({ T, k, v }) {
   );
 }
 
-export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, provider, relationship, accountName, sym, fmt, onClose, onRecordPayment, onEdit, onShare, onOpenProvider, extras }) {
+export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, provider, relationship, accountName, sym, fmt, onClose, onRecordPayment, onEdit, onShare, onOpenProvider, extras, txns }) {
   const bt = getBadgeText(badge, bill);
   const open = badge.kind !== "paid" && badge.kind !== "cancelled";
   const dueLine = (() => {
@@ -78,7 +78,7 @@ export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, prov
           ) : <Row T={T} k="Provider" v={provider} />}
           <Row T={T} k="Period" v={getBillPeriodRange(bill)} />
           <Row T={T} k="Relationship" v={relationship} />
-          <Row T={T} k="Split" v={getSplitProgressText(bill)} />
+          <Row T={T} k="Split" v={getSplitProgressText(bill, txns)} />
         </div>
 
         <div data-testid="bill-ledger" style={{ marginTop: 16 }}>

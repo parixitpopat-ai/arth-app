@@ -4,6 +4,8 @@
 // computes a balance independently, never stores one. This module only
 // labels and explains what settlements already produced.
 
+import { getBillSplitSource } from "../bills/splitSource.js";
+
 /**
  * @param {{owesMe:number, iOwe:number}} settlement - settlements[p.id],
  *   the existing authoritative shape, as-is
@@ -61,7 +63,13 @@ export function getFinancialPositionBreakdown(personId, txns, bills, getPersonAt
 
   for (const b of (bills || [])) {
     if (!b) continue;
-    const info = b.splitPeople?.[personId];
+    // Once paid, a split Bill's own splitPeople is a stale snapshot — the linked payment
+    // Transaction is what settling actually updates (see splitSource.js). Counting the Bill's own
+    // copy here too would double the same debt: once from the txns loop above (via that
+    // Transaction's `people`), once from the Bill's stale, forever-unsettled copy.
+    const splitSource = getBillSplitSource(b, txns);
+    if (splitSource.kind === "txn") continue;
+    const info = splitSource.people?.[personId];
     if (!info) continue;
     const remaining = Number(info.amount || 0) - Number(info.settledAmt || 0);
     if (!(remaining > 0)) continue;

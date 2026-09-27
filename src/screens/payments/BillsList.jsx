@@ -11,11 +11,11 @@ function Badge({ T, row }) {
   return <span data-testid={`badge-${row.bill.id}`} style={statusStyle(BADGE_STATUS[row.badge.kind], T)}>{row.badgeText.text}</span>;
 }
 
-function BillRow({ T, row, sym, fmt, onOpen }) {
+function BillRow({ T, row, sym, fmt, onOpen, txns }) {
   const b = row.bill;
   const bal = row.badge.balance;
   const unassigned = row.forText === "Unassigned";
-  const extra = b.isCcStatement ? getCardVerificationText(b) : getSplitProgressText(b);
+  const extra = b.isCcStatement ? getCardVerificationText(b) : getSplitProgressText(b, txns);
   const showDueInSub = row.badge.kind === "overdue" || row.badge.kind === "partial" || row.badge.kind === "unpaid";
   return (
     <button data-testid={`bill-row-${b.id}`} onClick={() => onOpen(b)} style={{ display: "flex", gap: 12, width: "100%", background: T.card, border: `1px solid ${row.badge.kind === "overdue" ? T.danger + "55" : T.border}`, borderRadius: 14, padding: "12px 14px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: FONT.sans }}>
@@ -62,7 +62,7 @@ function Group({ T, title, rows, ...rest }) {
   );
 }
 
-export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, onOpen, onOpenExpected, onAddBill, showCancelled, onToggleCancelled, showAllPaid, onToggleAllPaid }) {
+export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, onOpen, onOpenExpected, onAddBill, showCancelled, onToggleCancelled, showAllPaid, onToggleAllPaid, txns }) {
   const { groups, forChips, totalUnpaid, openCount, lastPaid } = view;
   const paidRows = showAllPaid ? groups.paid : groups.paid.slice(0, 5);
   return (
@@ -93,17 +93,17 @@ export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, o
         </div>
       ) : null}
 
-      <Group T={T} title="Overdue" rows={groups.overdue} sym={sym} fmt={fmt} onOpen={onOpen} />
-      <Group T={T} title="Due today" rows={groups.dueToday} sym={sym} fmt={fmt} onOpen={onOpen} />
-      <Group T={T} title="Due tomorrow" rows={groups.dueTomorrow} sym={sym} fmt={fmt} onOpen={onOpen} />
-      <Group T={T} title="Upcoming" rows={groups.upcoming} sym={sym} fmt={fmt} onOpen={onOpen} />
+      <Group T={T} title="Overdue" rows={groups.overdue} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />
+      <Group T={T} title="Due today" rows={groups.dueToday} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />
+      <Group T={T} title="Due tomorrow" rows={groups.dueTomorrow} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />
+      <Group T={T} title="Upcoming" rows={groups.upcoming} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />
       {groups.expected?.length ? (
         <div data-testid="group-Expected">
           <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", margin: "16px 0 8px" }}>Expected · not bills yet</div>
           {groups.expected.map(row => <ExpectedRow key={row.expected.relationshipId} T={T} row={row} sym={sym} fmt={fmt} onOpen={onOpenExpected} />)}
         </div>
       ) : null}
-      <Group T={T} title="Paid" rows={paidRows} sym={sym} fmt={fmt} onOpen={onOpen} />
+      <Group T={T} title="Paid" rows={paidRows} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />
       {groups.paid.length > 5 ? <button onClick={onToggleAllPaid} style={{ background: "none", border: "none", color: T.accent, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: "4px 0" }}>{showAllPaid ? "Show fewer paid bills" : `See all ${groups.paid.length} paid bills`}</button> : null}
 
       {groups.cancelled.length ? (
@@ -111,7 +111,7 @@ export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, o
           <button data-testid="payments-cancelled-toggle" onClick={onToggleCancelled} style={{ display: "flex", justifyContent: "space-between", width: "100%", background: "none", border: `1px dashed ${T.borderStrong}`, borderRadius: 14, padding: "12px 14px", marginTop: 16, color: T.sub, fontSize: 13, cursor: "pointer" }}>
             <span>Cancelled</span><span>{groups.cancelled.length} bill{groups.cancelled.length === 1 ? "" : "s"} · not in totals {showCancelled ? "▴" : "▾"}</span>
           </button>
-          {showCancelled ? <div style={{ marginTop: 8 }}>{groups.cancelled.map(r => <BillRow key={r.bill.id} T={T} row={r} sym={sym} fmt={fmt} onOpen={onOpen} />)}</div> : null}
+          {showCancelled ? <div style={{ marginTop: 8 }}>{groups.cancelled.map(r => <BillRow key={r.bill.id} T={T} row={r} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />)}</div> : null}
         </>
       ) : null}
     </div>
