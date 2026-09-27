@@ -91,6 +91,7 @@ import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategor
    Home/Insights IA split. (removed placeholder JSX fragments) */
 import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./domain/transactions/legacy/settlePersonShareOnBill";
 import { mergeEditedSplitPeople } from "./domain/bills/mergeEditedSplitPeople";
+import { getBillSplitSource } from "./domain/bills/splitSource";
 import { withNewContribution, withoutContribution, getContributionsForObligation, getContributionsForTransaction, getTotalContributed, hasProtectedContributions } from "./domain/obligations/contribution";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
 import { getFrequentVendors, getFrequentItemsForVendor, getVendorAggregate } from "./domain/transactions/vendorInsights";
@@ -2073,14 +2074,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       }
     });
 
-    const txnById = new Map(txns.map(t=>[t.id,t]));
     bills.forEach(b=>{
       if(!b.splitPeople) return;
       // If this bill has a linked expense that also tracks the same person, skip —
-      // the expense is the source of truth and is already counted above.
-      const linkedTxn = b.paidByTxnId ? txnById.get(b.paidByTxnId) : null;
-      const linkedTxnHasPeople = linkedTxn?.people && Object.keys(linkedTxn.people).length > 0;
-      if(linkedTxnHasPeople) return;
+      // the expense is the source of truth and is already counted above. (getBillSplitSource
+      // is the one place this rule is written now — see splitSource.js.)
+      const splitSource = getBillSplitSource(b, txns);
+      if(splitSource.kind==="txn") return;
       Object.entries(b.splitPeople).forEach(([pid,info])=>{
         if(pid==="__me__" || info.mode!=="owes" || info.settled) return;
         receivables[pid] = (receivables[pid]||0) + remainingShare(info);
@@ -10852,29 +10852,51 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {(relTxns.length>0||taggedTxns.length>0||settlementTxns.length>0)&&(
             <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:10 }}>Transactions</div>
           )}
-          {relTxns.length>0&&(
-            <div style={card}>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>Shared expenses</div>
-              {relTxns.map((t,idx,arr)=>{
-                const info=t.people[p.id];
-                // FIX: same bug/same fix as the txnDetailId modal -- info.settled alone missed
-                // settlements recorded via a separately-created settlement_in transaction
-                // (linked back through againstTxnId+fromPersonId). Read-only, no mutation logic
-                // changed.
-                const linkedSettlement = txns.find(x=>x.type==="settlement_in" && String(x.againstTxnId)===String(t.id) && String(x.fromPersonId)===String(p.id));
-                const isSettled = Boolean(info.settled) || Boolean(linkedSettlement);
-                return (
-                <div key={t.id} onClick={()=>{ setTab("transactions"); setTimeout(()=>setExpandedTxn(t.id),80); }} style={{ display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:idx<arr.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
-                  <div>
-                    <div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{t.desc}</div>
-                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(t.date) || t.date} · tap to open</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ color:info.mode==="owes"&&!isSettled?T.accent:T.sub,fontSize:13,fontWeight:700,textDecoration:isSettled?"line-through":"none" }}>{sym}{fmt(isSettled ? info.amount : remainingShare(info))}</div>
-                    <div style={{ color:T.sub,fontSize:10 }}>{isSettled?"paid":info.mode==="owes"?"owes you":"on you"}</div>
-                  </div>
+          {(relTxns.length>0||settlementTxns.length>0)&&(
+            // Side by side (when both exist) instead of stacked, so reviewing what you're owed
+            // against what's already been settled doesn't take two separate scrolls.
+            <div style={{ display:"grid",gridTemplateColumns:(relTxns.length>0&&settlementTxns.length>0)?"1fr 1fr":"1fr",gap:8,alignItems:"start" }}>
+              {relTxns.length>0&&(
+                <div style={card}>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>Shared expenses</div>
+                  {relTxns.map((t,idx,arr)=>{
+                    const info=t.people[p.id];
+                    // FIX: same bug/same fix as the txnDetailId modal -- info.settled alone missed
+                    // settlements recorded via a separately-created settlement_in transaction
+                    // (linked back through againstTxnId+fromPersonId). Read-only, no mutation logic
+                    // changed.
+                    const linkedSettlement = txns.find(x=>x.type==="settlement_in" && String(x.againstTxnId)===String(t.id) && String(x.fromPersonId)===String(p.id));
+                    const isSettled = Boolean(info.settled) || Boolean(linkedSettlement);
+                    return (
+                    <div key={t.id} onClick={()=>{ setTab("transactions"); setTimeout(()=>setExpandedTxn(t.id),80); }} style={{ display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:idx<arr.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
+                      <div>
+                        <div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{t.desc}</div>
+                        <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(t.date) || t.date} · tap to open</div>
+                      </div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ color:info.mode==="owes"&&!isSettled?T.accent:T.sub,fontSize:13,fontWeight:700,textDecoration:isSettled?"line-through":"none" }}>{sym}{fmt(isSettled ? info.amount : remainingShare(info))}</div>
+                        <div style={{ color:T.sub,fontSize:10 }}>{isSettled?"paid":info.mode==="owes"?"owes you":"on you"}</div>
+                      </div>
+                    </div>
+                  );})}
                 </div>
-              );})}
+              )}
+              {settlementTxns.length>0&&(
+                <div style={card}>
+                  <div style={{ color:T.success,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>Settlements received</div>
+                  {settlementTxns.map((st,idx,arr)=>(
+                    <div key={st.id} onClick={()=>{ setTab("transactions"); setTimeout(()=>setExpandedTxn(st.id),80); }} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:idx<arr.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
+                      <div>
+                        <div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{st.desc||`Settlement from ${p.name}`}</div>
+                        <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(st.date) || st.date} · tap to open</div>
+                      </div>
+                      <div style={{ textAlign:"right" }}>
+                        <div style={{ color:T.success,fontSize:13,fontWeight:700 }}>+{sym}{fmt(st.amount)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {taggedTxns.length>0&&(
@@ -10920,22 +10942,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
             );
           })()}
-          {settlementTxns.length>0&&(
-            <div style={card}>
-              <div style={{ color:T.success,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10 }}>Settlements received</div>
-              {settlementTxns.map((st,idx,arr)=>(
-                <div key={st.id} onClick={()=>{ setTab("transactions"); setTimeout(()=>setExpandedTxn(st.id),80); }} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:idx<arr.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
-                  <div>
-                    <div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{st.desc||`Settlement from ${p.name}`}</div>
-                    <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(st.date) || st.date} · tap to open</div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ color:T.success,fontSize:13,fontWeight:700 }}>+{sym}{fmt(st.amount)}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       );
     }
@@ -15020,26 +15026,39 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div style={{ color:T.sub,fontSize:11 }}>{cat.icon} {cat.name}{b.recurring?` · 🔁 ${b.frequency}`:""}{b.invoiceNo?` · #${b.invoiceNo}`:""}</div>
                     <div style={{ color:toneColor,fontSize:11 }}>{bt.text}</div>
                   </div>
-                  {b.splitPeople&&Object.keys(b.splitPeople).length>0&&(
+                  {(()=>{
+                    // Bug fix: once a split Bill is paid, confirmMarkBillPaid snapshots
+                    // bill.splitPeople into the payment Transaction's own `people` — from then on,
+                    // settling a share (via Person/Group settle, or this very panel) updates that
+                    // Transaction, never the Bill's own splitPeople, which is left behind as a
+                    // stale, forever-unsettled copy. getBillSplitSource picks whichever copy is
+                    // actually authoritative right now (the linked Transaction's, once paid, else
+                    // the Bill's own) so this panel always shows real settlement state instead of
+                    // "0 of 3 settled" for people who have already paid.
+                    const splitSource = getBillSplitSource(b, txns);
+                    const splitPeopleNow = splitSource.people;
+                    if(!splitPeopleNow||Object.keys(splitPeopleNow).length===0) return null;
+                    return (
                     <div style={{ marginBottom:8 }}>
-                      {Object.entries(b.splitPeople).map(([pid,info])=>{ const p=getPerson(pid); return (
+                      {Object.entries(splitPeopleNow).map(([pid,info])=>{ const p=getPerson(pid); return (
                         <div key={pid} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:11,color:info.mode==="owes"?(info.settled?T.success:Number(info.settledAmt||0)>0?T.warn:T.accent):T.sub,marginBottom:2 }}>
                           <span>{p.emoji} {p.name}</span>
                           <div style={{ display:"flex",alignItems:"center",gap:6 }}>
-                            {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind==="bill"&&String(l.id)===String(b.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canShare=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canShare&&<button onClick={e=>{ e.stopPropagation(); sharePaymentRequest(p.name,left,b.name||"Bill",{ dueDate:b.dueDate||b.billDate, billDate:b.billDate, billPeriodFrom:b.billPeriodFrom, billPeriodTo:b.billPeriodTo, totalAmount:b.amount, imageBase64:b.imageBase64||paymentImageSrc||billImageSrc||null, shareTitle:b.name||"Bill" }); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Share</button>; })()}
+                            {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind===splitSource.kind&&String(l.id)===String(splitSource.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canShare=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canShare&&<button onClick={e=>{ e.stopPropagation(); sharePaymentRequest(p.name,left,b.name||"Bill",{ dueDate:b.dueDate||b.billDate, billDate:b.billDate, billPeriodFrom:b.billPeriodFrom, billPeriodTo:b.billPeriodTo, totalAmount:b.amount, imageBase64:b.imageBase64||paymentImageSrc||billImageSrc||null, shareTitle:b.name||"Bill" }); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Share</button>; })()}
                             {(()=>{ const owed=Number(info.amount||0); const left=remainingShare(info); const paid=Number(info.settledAmt||0); if(info.mode!=="owes") return <span>Owes {sym}{fmt(owed)} | on you</span>; if(left<=0) return <span>Settled {sym}{fmt(owed)}</span>; if(paid>0) return <span>Owes {sym}{fmt(owed)} | Partly settled {sym}{fmt(paid)} | Bal. {sym}{fmt(left)}</span>; return <span>Owes {sym}{fmt(owed)} | Bal. {sym}{fmt(left)}</span>; })()}
-                            {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind==="bill"&&String(l.id)===String(b.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canSettle=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canSettle&&<button onClick={e=>{ e.stopPropagation(); setSettleTxn({ id:"bill_person_settle_"+b.id+"_"+pid, type:"expense", desc:b.name, amount:left, people:{ [pid]:{ amount:left, mode:"owes", settled:false } }, _billIds:[b.id], _isBillSettle:true }); }} style={{ background:T.success+"18",border:`1px solid ${T.success}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>💰 Settle</button>; })()}
+                            {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind===splitSource.kind&&String(l.id)===String(splitSource.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canSettle=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canSettle&&<button onClick={e=>{ e.stopPropagation(); setSettleTxn({ id:"bill_person_settle_"+b.id+"_"+pid, type:"expense", desc:b.name, amount:left, people:{ [pid]:{ amount:left, mode:"owes", settled:false } }, _billIds:splitSource.kind==="bill"?[splitSource.id]:[], _txnIds:splitSource.kind==="txn"?[splitSource.id]:[], _isBillSettle:true }); }} style={{ background:T.success+"18",border:`1px solid ${T.success}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>💰 Settle</button>; })()}
                           </div>
                         </div>
                       ); })}
-                      {(()=>{ const owedTotal=Object.values(b.splitPeople||{}).reduce((sum,info)=>sum+(info.mode==="owes"?Number(info.amount||0):0),0); const fallbackShare=Math.max(0,Number(b.amount||0)-owedTotal-Number(b.groupCollectiveAmount||0)); const storedShare=Number(b.myShare); const group=b.groupId?getGroup(b.groupId):null; const meExcluded=group?.includeMe===false; const myBillShare=Number.isFinite(storedShare)&&(storedShare>0||fallbackShare<=0||meExcluded)?storedShare:fallbackShare; return (
+                      {(()=>{ const owedTotal=Object.values(splitPeopleNow).reduce((sum,info)=>sum+(info.mode==="owes"?Number(info.amount||0):0),0); const fallbackShare=Math.max(0,Number(b.amount||0)-owedTotal-Number(b.groupCollectiveAmount||0)); const storedShare=Number(b.myShare); const group=b.groupId?getGroup(b.groupId):null; const meExcluded=group?.includeMe===false; const myBillShare=Number.isFinite(storedShare)&&(storedShare>0||fallbackShare<=0||meExcluded)?storedShare:fallbackShare; return (
                         <div style={{ display:"flex",justifyContent:"space-between",gap:8,fontSize:11,color:myBillShare>0?T.success:T.sub,fontWeight:700,marginTop:4 }}>
                           <span>Your share{meExcluded?" (not included)":""}</span>
                           <span>{sym}{fmt(myBillShare)}</span>
                         </div>
                       ); })()}
                     </div>
-                  )}
+                    );
+                  })()}
                   {(billImageSrc || paymentImageSrc)&&(
                     <div style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:8 }}>
                       {billImageSrc&&<button onClick={(e)=>{ e.stopPropagation(); setImageViewSrc(billImageSrc); }} style={{ background:T.info+"14",border:`1px solid ${T.info}33`,borderRadius:16,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>🧾 View bill</button>}
@@ -15315,7 +15334,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             showAllPaid={paymentsShowAllPaid} onToggleAllPaid={()=>setPaymentsShowAllPaid(v=>!v)}
             onOpen={b=>{ if(b.isCcStatement) setViewingCcStatementId(b.id); else setViewingBillId(b.id); }}
             onOpenExpected={e=>{ const ba=billerAccounts.find(x=>String(x.id)===String(e.billerAccountId)); if(ba) setActiveBillerForAction(ba); }}
-            onAddBill={null}/>
+            onAddBill={null} txns={txns}/>
         )}
       </div>
     );
@@ -18292,7 +18311,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             onRecordPayment={()=>setMarkingBillPaid(vb)}
             onEdit={()=>{ setViewingBillId(null); setEditingBill(vb); }}
             onOpenProvider={ba?()=>{ setViewingBillId(null); setActiveBillerForAction(ba); }:undefined}
-            onShare={shareBill}
+            onShare={shareBill} txns={txns}
             extras={renderBillExtras(vb)}/>;
         })()}
         {markingBillPaid&&(

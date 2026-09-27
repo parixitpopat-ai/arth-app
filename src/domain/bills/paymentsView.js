@@ -9,6 +9,7 @@
 // single D-16 badge. Expected items (M5) are not Bills and never appear here.
 
 import { getBillBadge } from "../obligations/billBalance.js";
+import { getBillSplitSource } from "./splitSource.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -50,11 +51,17 @@ export function getBadgeText(badge, bill) {
   }
 }
 
-/** "split 3 ways · 1 of 2 settled", or "" for a Bill with no split. */
-export function getSplitProgressText(bill) {
-  const owing = Object.entries(bill?.splitPeople || {}).filter(([pid, i]) => pid !== "__me__" && i && i.mode === "owes");
+/**
+ * "split 3 ways · 1 of 2 settled", or "" for a Bill with no split. Reads whichever copy of the
+ * split is currently authoritative (see splitSource.js) — once a Bill is paid, that's the paying
+ * Transaction's own `people`, not the Bill's now-stale splitPeople snapshot, so this reflects real
+ * settlements made against that Transaction instead of always showing "0 settled".
+ */
+export function getSplitProgressText(bill, txns) {
+  const people = getBillSplitSource(bill, txns).people;
+  const owing = Object.entries(people || {}).filter(([pid, i]) => pid !== "__me__" && i && i.mode === "owes");
   if (!owing.length) return "";
-  const ways = Object.keys(bill.splitPeople).filter(pid => pid !== "__me__").length + 1;
+  const ways = Object.keys(people).filter(pid => pid !== "__me__").length + 1;
   const settled = owing.filter(([, i]) => i.settled).length;
   return `split ${ways} ways · ${settled} of ${owing.length} settled`;
 }
