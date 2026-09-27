@@ -41,7 +41,7 @@ import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVa
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
-import { createMembershipRelationship, pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel } from "./domain/membership/relationship";
+import { createMembershipRelationship, pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel, createRelationship, migrateBillerAccountAttributions, getRelationshipTarget } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { getPersonSpendingSummary, getPersonActiveConnections } from "./domain/person/personOverview";
@@ -1129,6 +1129,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     setMembershipRelationships(relationships);
     setMemberships(updatedMemberships);
   },[memberships, membershipRelationships]);
+  // Arth 2.0 IA step 2 — the general Financial Relationship migration: every billerAccount's own
+  // attribution (attributeType person|group + attributedTo) gets exactly one active relationship
+  // row, same array as above (this is the canonical store now, not a Membership-only one). Same
+  // idempotent, same-array-when-nothing-changed pattern as migrateMembershipRelationships — see
+  // migrateBillerAccountAttributions in src/domain/membership/relationship.js for exactly what
+  // this does and doesn't fabricate. Non-destructive: billerAccounts are read, never written, by
+  // this effect — attributeType/attributedTo stays the legacy Bill-For bridge (billFor.js).
+  useEffect(()=>{
+    const next = migrateBillerAccountAttributions(billerAccounts, membershipRelationships, genId);
+    if(next!==membershipRelationships) setMembershipRelationships(next);
+  },[billerAccounts, membershipRelationships]);
   // WP-5 self-sentinel data correction — fixes any existing records (created before the
   // WP-1/WP-4 fixes) whose personId is still the literal "self" instead of the real ME.id
   // ("__me__"). Reuses correctSelfSentinel as-is (domain/membership/relationship.js) — no new
@@ -10543,7 +10554,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             topSection={p.isMe ? null : (()=>{
               // UI-2C P-4 — relationships as a list, capabilities as tiles. Tiles open the
               // existing screen or section for that capability; nothing existing is removed.
-              const rows = getAttributedRelationships({ targetType:"person", targetId:p.id, billerAccounts, bills });
+              const rows = getAttributedRelationships({ targetType:"person", targetId:p.id, billerAccounts, relationships:membershipRelationships, bills });
               const openSection = key=>{
                 setExpandedSection(`profile_${key}_${p.id}`);
                 setTimeout(()=>document.querySelector(`[data-section="${key}"]`)?.scrollIntoView({ behavior:"smooth", block:"start" }), 50);
@@ -11355,7 +11366,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 .map(b=>({ b, badge:getOpenBillBadge(b) }))
                 .filter(x=>x.badge.kind==="overdue")
                 .sort((x,y)=>y.badge.days-x.badge.days)[0];
-              const rows = getAttributedRelationships({ targetType:"group", targetId:g.id, billerAccounts, bills });
+              const rows = getAttributedRelationships({ targetType:"group", targetId:g.id, billerAccounts, relationships:membershipRelationships, bills });
               const vendorCount = new Set(txns.filter(t=>t.groupId===g.id && t.type==="expense" && t.merchant).map(t=>String(t.merchant).trim().toLowerCase())).size;
               const tiles = getGroupCapabilityTiles({ group:g, modules:getGroupModules(g), moduleDefs:GROUP_MODULES, owedToMe:total, iOwe:groupIOwe, budget:groupBudget, spent:groupTotalSpend, relationshipCount:rows.length, vendorCount, today:todayStr(), sym, fmt })
                 .map(t=>({ ...t, onClick:(t.id==="notes"||t.id==="reminders") ? startEditingGroup : undefined }));
@@ -11486,7 +11497,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   </div>
                   {(()=>{
                     // UI-2C P-1 — the row reads as context: relationships and the one Bill needing attention.
-                    const sum = summarizeRelationships(getAttributedRelationships({ targetType:"person", targetId:p.id, billerAccounts, bills }));
+                    const sum = summarizeRelationships(getAttributedRelationships({ targetType:"person", targetId:p.id, billerAccounts, relationships:membershipRelationships, bills }));
                     const text = relationshipSummaryText(sum, sym, fmt);
                     return text ? <div data-testid={`person-row-summary-${p.id}`} style={{ color:sum.attention?.kind==="overdue"?T.dangerText:sum.attention?.kind==="due"?T.attention:T.sub,fontSize:11,marginTop:2 }}>{text}</div> : null;
                   })()}
@@ -11528,7 +11539,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         <div style={{ color:gOver?T.danger:T.sub,fontSize:10,marginTop:2 }}>{gBudget>0?`Budget ${sym}${fmt(gBudget)}/mo · `:""}This month {sym}{fmt(gTotalSpend)}{gOver?` · ⚠️ Over ${sym}${fmt(gTotalSpend-gBudget)}`:""}</div>
                         {(()=>{
                           // UI-2C G-10 — relationships and the one Bill needing attention.
-                          const sum = summarizeRelationships(getAttributedRelationships({ targetType:"group", targetId:g.id, billerAccounts, bills }));
+                          const sum = summarizeRelationships(getAttributedRelationships({ targetType:"group", targetId:g.id, billerAccounts, relationships:membershipRelationships, bills }));
                           const text = relationshipSummaryText(sum, sym, fmt);
                           return text ? <div data-testid={`group-row-summary-${g.id}`} style={{ color:sum.attention?.kind==="overdue"?T.dangerText:sum.attention?.kind==="due"?T.attention:T.sub,fontSize:11,marginTop:2 }}>{text}</div> : null;
                         })()}
@@ -17461,16 +17472,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             one. Scope for this pass (locked): one Provider still has one owner at a time —
             selecting an existing biller reassigns its Attributed To rather than creating a
             duplicate biller account for the same provider. */}
+        {/* Arth 2.0 IA step 4 — reusing an existing biller now creates/reuses a Financial
+            Relationship row (1:N, membershipRelationships[]) instead of overwriting the
+            biller account's single-owner attributeType/attributedTo. That legacy field is
+            touched only when this is the biller's FIRST relationship, so it keeps working as
+            the Bill-For bridge (billFor.js's locked compatibility rule) — adding a second
+            relationship to an already-owned biller no longer moves or overwrites anything. */}
         {showAddRelationship&&<AddRelationshipSheet T={T} billerAccounts={billerAccounts}
           targetLabel={showAddRelationship.targetLabel} currentLabel={getBillerOwnerLabel}
           onClose={()=>setShowAddRelationship(null)}
           onSelectExisting={ba=>{
             const target = showAddRelationship;
-            const alreadyHere = ba.attributeType===target.targetType && String(ba.attributedTo)===String(target.targetId);
+            const activeForBa = membershipRelationships.filter(r=>r.status==="active" && String(r.billerAccountId)===String(ba.id));
+            const alreadyHere = activeForBa.some(r=>{ const t=getRelationshipTarget(r); return t.targetType===target.targetType && String(t.targetId)===String(target.targetId); });
             if(alreadyHere){ setShowAddRelationship(null); return; }
-            const hasOtherOwner = (ba.attributeType==="person" || ba.attributeType==="group") && ba.attributedTo;
-            if(hasOtherOwner && !window.confirm(`${ba.name} is currently attributed to ${getBillerOwnerLabel(ba)}. Move it to ${target.targetLabel} instead?`)) return;
-            setBillerAccounts(prev=>prev.map(x=>x.id===ba.id ? { ...x, attributeType:target.targetType, attributedTo:target.targetId } : x));
+            const isFirstRelationship = activeForBa.length===0;
+            const newRel = createRelationship({ billerAccountId:ba.id, targetType:target.targetType, targetId:target.targetId, startDate:todayStr(), genId });
+            setMembershipRelationships(prev=>[...prev, newRel]);
+            if(isFirstRelationship) setBillerAccounts(prev=>prev.map(x=>x.id===ba.id ? { ...x, attributeType:target.targetType, attributedTo:target.targetId } : x));
             setShowAddRelationship(null);
           }}
           onCreateNew={()=>{ const target=showAddRelationship; setShowAddRelationship(null); setPreselectedAttribution({ type:target.targetType, id:target.targetId }); setShowAddBillerAccount(true); }}/>}

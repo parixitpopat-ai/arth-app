@@ -1,8 +1,19 @@
 // domain/relationships/attributedAccounts.js
 //
-// UI-2C QW-6 — read-only: the financial relationships (billerAccounts)
-// attributed to one person or group, each with the state of its Bills, for
-// Person detail (P-4) and Group detail (G-12). It never writes.
+// UI-2C QW-6, generalized for Arth 2.0 IA step 3 — read-only: the Financial
+// Relationships (canonical rows in membershipRelationships[], see
+// domain/membership/relationship.js) for one person or group, each with the
+// state of its Bills, for Person detail (P-4) and Group detail (G-12). It
+// never writes.
+//
+// Source of truth changed here: this used to read billerAccount.attributeType
+// /attributedTo directly (one owner per Provider). It now reads active
+// Financial Relationship rows instead, joined to their billerAccount — so a
+// Provider can have several relationships, and a Paused/Ended one correctly
+// disappears from this list (decision: lifecycle lives on the relationship,
+// never derived from Bills). billerAccount.attributeType/attributedTo itself
+// is untouched by this change — it stays the legacy bridge Bill-For still
+// reads (see billFor.js's header comment for that compatibility rule).
 //
 // Bill badge rules follow Claude Design's D-16 vocabulary:
 //   Overdue — past its due date with a balance left
@@ -11,6 +22,8 @@
 //   Paid    — the newest Bill is paid and nothing is open
 // "Partially paid" needs Bill balances from Contributions (WP-4 / M2) and
 // is not derived here yet. Cancelled Bills are ignored.
+
+import { getRelationshipTarget } from "../membership/relationship.js";
 
 const DUE_WINDOW_DAYS = 14;
 const DAY_MS = 86400000;
@@ -58,13 +71,24 @@ export function getRelationshipBillState(billerAccountId, bills, refDate = new D
 }
 
 /**
- * Relationships attributed to a person ("person") or group ("group"), in a
- * stable order: anything needing attention first, then by name.
+ * Active Financial Relationships for a person ("person") or group ("group"),
+ * in a stable order: anything needing attention first, then by name. A
+ * Paused or Ended relationship never appears here — its history stays
+ * reachable elsewhere, just not in this Active list.
+ *
+ * `relationships` is membershipRelationships[] — any generation of row shape
+ * (getRelationshipTarget handles a pre-generalization, personId-only row).
  */
-export function getAttributedRelationships({ targetType, targetId, billerAccounts = [], bills = [], refDate = new Date() }) {
+export function getAttributedRelationships({ targetType, targetId, billerAccounts = [], relationships = [], bills = [], refDate = new Date() }) {
   const id = String(targetId);
+  const activeBillerIds = new Set();
+  (relationships || []).forEach(r => {
+    if (!r || r.status !== "active") return;
+    const t = getRelationshipTarget(r);
+    if (t.targetType === targetType && String(t.targetId) === id) activeBillerIds.add(String(r.billerAccountId));
+  });
   const rows = billerAccounts
-    .filter(ba => ba && ba.attributeType === targetType && String(ba.attributedTo) === id)
+    .filter(ba => ba && activeBillerIds.has(String(ba.id)))
     .map(ba => ({ billerAccount: ba, state: getRelationshipBillState(ba.id, bills, refDate) }));
   const rank = { overdue: 0, due: 1, unpaid: 2, paid: 3, none: 4 };
   return rows.sort((a, b) =>

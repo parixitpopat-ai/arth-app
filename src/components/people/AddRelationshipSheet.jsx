@@ -5,12 +5,13 @@ import { fieldStyles } from "./peopleStyles";
 
 // Arth 2.0 IA §6 — "+ Add relationship" no longer only creates a new Provider/Biller: it first
 // offers every Provider you already have, so the same "Genesis" never gets a second row just
-// because it wasn't attributed here yet. Picking one reassigns its existing "Attributed To" (D-1,
-// today's one-owner-per-Provider model — locked as the scope for this pass); picking "+ Create
-// new provider" falls through to the existing biller-account form unchanged.
+// because it wasn't attributed here yet. Picking one creates (or reuses, if already active here)
+// a Financial Relationship to this Provider — one Provider can have several at once (§5's 1:N
+// model). "+ Create new provider" falls through to the existing biller-account form unchanged.
 //
-// `currentLabel(ba)` returns the Provider's current owner as display text ("Unassigned", a
-// person's name, or a group's name) so reassigning is never a surprise.
+// `currentLabel(ba)` returns the Provider's PRIMARY owner as display text ("Unassigned", a
+// person's name, or a group's name) — the legacy attributeType/attributedTo bridge new Bills
+// still read (billFor.js's compatibility rule), not the only relationship a Provider can have.
 export default function AddRelationshipSheet({ T, billerAccounts, targetLabel, currentLabel, onClose, onSelectExisting, onCreateNew }) {
   const s = fieldStyles(T);
   const [q, setQ] = useState("");
@@ -37,7 +38,7 @@ export default function AddRelationshipSheet({ T, billerAccounts, targetLabel, c
           >
             <span style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>{ba.name}</span>
             <span style={{ color: T.sub, fontSize: 12, marginTop: 2 }}>{[ba.type, ba.provider].filter(Boolean).join(" · ")}</span>
-            <span style={{ color: T.sub, fontSize: 11, marginTop: 2 }}>Currently: {currentLabel(ba)}</span>
+            <span style={{ color: T.sub, fontSize: 11, marginTop: 2 }}>Primary: {currentLabel(ba)}</span>
           </button>
         ))}
         {!matches.length ? <div style={{ ...s.hint, padding: "10px 0" }}>{query ? "No matching biller." : "No billers yet."}</div> : null}
