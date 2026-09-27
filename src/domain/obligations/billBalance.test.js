@@ -114,3 +114,12 @@ test("projection leaves legacy, card-statement and cancelled Bills alone", async
   ];
   assert.equal(withProjectedBillStatuses(bills, [c("c1", "cc", "t1", 900), c("c2", "x", "t2", 100)], []), bills);
 });
+
+test("the same payment stored twice for a Bill counts once (legacy duplicates)", () => {
+  const bill = { id: "gym", amount: 8499, status: "paid" };
+  const dup = [1, 2, 3, 4].map(n => ({ id: `c${n}`, obligationType: "bill", obligationId: "gym", txnId: "t1", amount: 8499 }));
+  const ledger = getBillLedger(bill, dup, [{ id: "t1", amount: 8499, date: "2026-09-16" }]);
+  assert.equal(ledger.rows.length, 1);
+  assert.equal(ledger.remaining, 0);
+  assert.equal(ledger.unallocated, 0);
+});
