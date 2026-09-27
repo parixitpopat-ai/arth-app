@@ -76,8 +76,12 @@ const matchesFor = (bill, forFilter) => {
 /**
  * Groups, totals and the For chips for the Bills list.
  * `forLabel(bill)` returns the display text of the Bill's own For.
+ * `expectedItems` (ADR-039 — domain/obligations/expected.js's getExpectedItems, computed by the
+ * caller) render as their own group, dashed, "not bills yet" (Arth 2.0 IA Redesign.dc.html's D1).
+ * They never count toward totalUnpaid/openCount and are never Due/Overdue/paid/cancelled — they
+ * are not Bills.
  */
-export function buildPaymentsView({ bills, contributions, refDate = new Date(), forFilter = "all", forLabel = () => "" }) {
+export function buildPaymentsView({ bills, contributions, refDate = new Date(), forFilter = "all", forLabel = () => "", expectedItems = [] }) {
   const all = (bills || []).filter(Boolean);
   const chipMap = new Map();
   let hasUnassigned = false;
@@ -109,5 +113,12 @@ export function buildPaymentsView({ bills, contributions, refDate = new Date(), 
   };
   const totalUnpaid = Math.round(open.reduce((s, r) => s + r.badge.balance.remaining, 0) * 100) / 100;
   const lastPaid = groups.paid[0] || null;
+
+  const expectedRows = (expectedItems || [])
+    .filter(e => matchesFor({ forType: e.targetType, forId: e.targetId }, forFilter))
+    .map(e => ({ expected: e, forText: forLabel({ forType: e.targetType, forId: e.targetId }) }))
+    .sort((a, b) => String(a.expected.dueDate || "9999").localeCompare(String(b.expected.dueDate || "9999")));
+  groups.expected = expectedRows;
+
   return { forChips, groups, totalUnpaid, openCount: open.length, lastPaid };
 }

@@ -74,3 +74,19 @@ test("a ₹0 open Bill (card statement with nothing due) is not counted as owed"
   assert.equal(v.openCount, 0);
   assert.equal(Object.values(v.groups).flat().some(r => r.bill.id === "z"), false);
 });
+
+test("Expected items (ADR-039) get their own group, filtered by For, never counted in totals", () => {
+  const expectedItems = [
+    { relationshipId: "r1", billerAccountId: "ba1", targetType: "group", targetId: "g1", amount: 800, dueDate: "2026-10-05" },
+    { relationshipId: "r2", billerAccountId: "ba2", targetType: "person", targetId: "vyom", amount: 1500, dueDate: "2026-10-01" },
+  ];
+  const v = buildPaymentsView({ bills, contributions, refDate: today, forLabel, expectedItems });
+  assert.deepEqual(v.groups.expected.map(r => r.expected.relationshipId), ["r2", "r1"], "sorted by due date");
+  assert.equal(v.groups.expected[0].forText, "Vyom");
+  // Expected never affects totals — the whole point is "dashed, never payable" (ADR-039 §10b).
+  const withoutExpected = buildPaymentsView({ bills, contributions, refDate: today, forLabel });
+  assert.equal(v.totalUnpaid, withoutExpected.totalUnpaid);
+  assert.equal(v.openCount, withoutExpected.openCount);
+  const onlyGroup = buildPaymentsView({ bills, contributions, refDate: today, forLabel, expectedItems, forFilter: "group:g1" });
+  assert.deepEqual(onlyGroup.groups.expected.map(r => r.expected.relationshipId), ["r1"]);
+});

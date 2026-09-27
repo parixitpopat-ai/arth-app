@@ -66,6 +66,7 @@ import AddGroupSheet from "./components/people/AddGroupSheet";
 import { FinancialRelationships, CapabilityTiles, PinnedBill } from "./components/people/RelationshipBlocks";
 import AddRelationshipSheet from "./components/people/AddRelationshipSheet";
 import RelationshipStatusPanel from "./components/people/RelationshipStatusPanel";
+import ExpectedSchedulePanel from "./components/people/ExpectedSchedulePanel";
 import { getAttributedRelationships, getOpenBillBadge, summarizeRelationships } from "./domain/relationships/attributedAccounts";
 import { relationshipSummaryText } from "./components/people/relationshipText";
 import { getPersonCapabilityTiles } from "./domain/person/capabilityTiles";
@@ -95,6 +96,7 @@ import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
 import { withBillForSnapshots } from "./domain/bills/billFor";
 import { getBillBalance, planBillPayment, withProjectedBillStatuses, getPartialRemainingByBill, getBillBadge, getBillLedger } from "./domain/obligations/billBalance";
+import { hasCompleteSchedule, setRelationshipSchedule, getExpectedForRelationship, getExpectedItems, buildBillFieldsFromExpected } from "./domain/obligations/expected";
 import { buildPaymentsView, getBillPeriodLabel } from "./domain/bills/paymentsView";
 import BillsList from "./screens/payments/BillsList";
 import BillDetailSheet from "./screens/payments/BillDetailSheet";
@@ -1496,7 +1498,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // legacy paidByTxnId/status write above. Full amount, since this path has
     // no partial-payment concept yet.
     setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:paymentTxnId, amount:applied, txnAmount:paidAmount }, genId));
-    if(becomesPaid && bill.recurring && bill.autoGenerate!==false){
+    // ADR-039 §7 — "the schedule becomes the only generation mechanism. Regeneration stops for
+    // that relationship." Once this Bill's relationship has a complete schedule, Expected
+    // (domain/obligations/expected.js) is what produces the next cycle, via Confirm amount — this
+    // legacy path must not also create one, or the same cycle would get two Bills.
+    const billRelationship = membershipRelationships.find(r=>{
+      if(r.status!=="active" || String(r.billerAccountId)!==String(bill.billerAccountId)) return false;
+      const t = getRelationshipTarget(r);
+      return t.targetType===bill.forType && String(t.targetId)===String(bill.forId);
+    });
+    const scheduleOwnsRegeneration = billRelationship && billRelationship.billingMode==="regular" && hasCompleteSchedule(billRelationship);
+    if(becomesPaid && bill.recurring && bill.autoGenerate!==false && !scheduleOwnsRegeneration){
       const nextDue = computeNextDueDate(bill, paymentDate);
       const nextPeriod = computeNextPeriod(bill, paymentDate);
       const nextValidFrom = bill.billingModel==="prorata" ? nextDue : null;
@@ -1519,7 +1531,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       },...p]);
     }
     setMarkingBillPaid(null);
-  }, [billerAccounts, contributions]);
+  }, [billerAccounts, contributions, membershipRelationships]);
+
+  // ADR-039 §6 — "Confirm amount": `bill.fromSchedule`. Creates one real, normal Bill from an
+  // Expected item, through the same path every other Bill uses — this is the only writer;
+  // domain/obligations/expected.js only computes the new Bill's own fields (buildBillFieldsFromExpected)
+  // and never touches bills[] itself. forType/forId are left for the existing billFor.js snapshot
+  // effect to fill in, exactly like every other Bill-creation path in this file.
+  const confirmExpectedToBill = useCallback(expected=>{
+    const ba = billerAccounts.find(x=>String(x.id)===String(expected.billerAccountId));
+    const fields = buildBillFieldsFromExpected(expected);
+    setBills(prev=>[{ id:genId(), name:ba?.name||"Bill", ...fields, splitPeople:{}, createdDate:todayStr(), createdAt:Date.now() }, ...prev]);
+  },[billerAccounts]);
 
   const sharePaymentRequest = useCallback((recipientName, amount, contextLabel, details = {}) => {
     const safeAmount = Number(amount||0);
@@ -15251,11 +15274,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             their existing reconciliation sheet. */}
         {billsTab==="bills"&&(
           <BillsList T={T} sym={sym} fmt={fmt}
-            view={buildPaymentsView({ bills, contributions, forFilter:paymentsForFilter, forLabel:getBillForLabel })}
+            view={buildPaymentsView({ bills, contributions, forFilter:paymentsForFilter, forLabel:getBillForLabel, expectedItems:getExpectedItems(membershipRelationships, bills) })}
             forFilter={paymentsForFilter} onForFilter={setPaymentsForFilter}
             showCancelled={paymentsShowCancelled} onToggleCancelled={()=>setPaymentsShowCancelled(v=>!v)}
             showAllPaid={paymentsShowAllPaid} onToggleAllPaid={()=>setPaymentsShowAllPaid(v=>!v)}
             onOpen={b=>{ if(b.isCcStatement) setViewingCcStatementId(b.id); else setViewingBillId(b.id); }}
+            onOpenExpected={e=>{ const ba=billerAccounts.find(x=>String(x.id)===String(e.billerAccountId)); if(ba) setActiveBillerForAction(ba); }}
             onAddBill={null}/>
         )}
       </div>
@@ -17715,6 +17739,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     onPause={(reason, effectiveDate)=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?pauseRelationship(x, reason, effectiveDate):x))}
                     onResume={effectiveDate=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?resumeRelationship(x, effectiveDate):x))}
                     onEnd={(reason, effectiveDate)=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?endRelationship(x, reason, effectiveDate):x))}/>
+                ))}
+                {/* ADR-039 §9 — Expected/Schedule is scoped to Bills only. School Fees and every
+                    "membership" action type (Gym/Fitness, Club Membership, Insurance, Society
+                    Maintenance, Rental, Education Fees, Other Subscription — MEMBERSHIP_TYPES)
+                    keep their own existing generation (feeSchedules/feePeriods,
+                    memberships[]/MembershipDetailModal). This is the ADR's own scope line, not a
+                    simplification — building Expected for those would mean reconciling it with a
+                    real, separate payment-period system already in place, which ADR-039
+                    explicitly defers. */}
+                {actionType!=="membership"&&membershipRelationships.filter(r=>String(r.billerAccountId)===String(ba.id)).map(r=>(
+                  <ExpectedSchedulePanel key={r.id} T={T} relationship={r} targetLabel={getRelationshipTargetLabel(r)}
+                    expected={getExpectedForRelationship(r, bills)} sym={sym} fmt={fmt}
+                    onSetSchedule={input=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?setRelationshipSchedule(x, input):x))}
+                    onConfirm={expected=>confirmExpectedToBill(expected)}/>
                 ))}
                 {/* Edit / Delete biller account — moved right under the header, not buried below
                     Analytics/History/Documents, so it's reachable without scrolling. */}
