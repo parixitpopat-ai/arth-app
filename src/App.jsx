@@ -9607,7 +9607,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               never asks twice in one day. Purely additive — records into its own gymCheckIns[],
               never touches memberships[]/bills[]/membershipRelationships. */}
           {(()=>{
-            const pending = getPendingGymCheckIn({ relationships:membershipRelationships, billerAccounts, checkIns:gymCheckIns, holidays:arthHolidays, today:todayStr() });
+            const pending = getPendingGymCheckIn({ relationships:membershipRelationships, billerAccounts, billers, checkIns:gymCheckIns, holidays:arthHolidays, today:todayStr() });
             if(!pending) return null;
             const answer = attended=>setGymCheckIns(prev=>[...prev, recordGymCheckIn({ relationshipId:pending.relationshipId, billerAccountId:pending.billerAccountId, date:todayStr(), attended, genId })]);
             return (
@@ -17299,7 +17299,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   </div>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8 }}>
                     <div>
-                      <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1.2 }}>{greetIcon} {greeting}{(people.find(p=>p.isMe)?.name)?`, ${people.find(p=>p.isMe).name}`:""}</div>
+                      <div style={{ color:T.text,fontSize:16,fontWeight:900,lineHeight:1.2 }}>{greetIcon} {greeting}{(people.find(p=>p.isMe)?.name)?`, ${people.find(p=>p.isMe).name.trim().split(/\s+/)[0]}`:""}</div>
                       <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{dateStr}</div>
                     </div>
                     <button onClick={()=>setTab("insights")} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif",whiteSpace:"nowrap",flexShrink:0 }}>✨ Insights for you</button>
