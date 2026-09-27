@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { fieldStyles } from "./peopleStyles";
+import { todayStr } from "../../helpers/dateHelpers";
 
 // Arth 2.0 IA step 5 — generalizes the pause/resume/end action UI that previously existed only
 // inside MembershipDetailModal (gym-style billers, one relationship per person) so any Financial
@@ -26,7 +27,10 @@ const ACTION_COPY = {
 
 export default function RelationshipStatusPanel({ T, relationship, targetLabel, onPause, onResume, onEnd }) {
   const s = fieldStyles(T);
-  const today = new Date().toISOString().slice(0, 10);
+  // todayStr(), not toISOString() — the latter gives the UTC calendar day, which in India is
+  // still the previous day until 05:30 local (the same bug class fixed across the app's other
+  // date-stepping code this session; see helpers/dateHelpers.js's own header comment).
+  const today = todayStr();
   const [pendingAction, setPendingAction] = useState(null); // "pause" | "resume" | "end" | null
   const [reason, setReason] = useState("");
   const [effectiveDate, setEffectiveDate] = useState(today);

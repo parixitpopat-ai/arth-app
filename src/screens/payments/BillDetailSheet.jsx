@@ -24,7 +24,7 @@ function Row({ T, k, v }) {
   );
 }
 
-export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, provider, relationship, accountName, sym, fmt, onClose, onRecordPayment, onEdit, onShare, extras }) {
+export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, provider, relationship, accountName, sym, fmt, onClose, onRecordPayment, onEdit, onShare, onOpenProvider, extras }) {
   const bt = getBadgeText(badge, bill);
   const open = badge.kind !== "paid" && badge.kind !== "cancelled";
   const dueLine = (() => {
@@ -70,7 +70,12 @@ export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, prov
 
         <div style={{ marginTop: 10 }}>
           <Row T={T} k="For" v={<span data-testid="bill-detail-for" style={forLabel === "Unassigned" ? { border: `1px dashed ${T.borderStrong}`, borderRadius: RADIUS.pill, padding: "0 8px" } : null}>{forLabel}</span>} />
-          <Row T={T} k="Provider" v={provider} />
+          {onOpenProvider && provider ? (
+            <div data-testid="bill-detail-provider-open" onClick={onOpenProvider} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderBottom: `1px solid ${T.border}`, cursor: "pointer" }}>
+              <span style={{ color: T.sub, fontSize: 13 }}>Provider</span>
+              <span style={{ color: T.accent, fontSize: 13, fontWeight: 600, textAlign: "right" }}>{provider} ›</span>
+            </div>
+          ) : <Row T={T} k="Provider" v={provider} />}
           <Row T={T} k="Period" v={getBillPeriodRange(bill)} />
           <Row T={T} k="Relationship" v={relationship} />
           <Row T={T} k="Split" v={getSplitProgressText(bill)} />

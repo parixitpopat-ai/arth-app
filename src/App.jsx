@@ -17,7 +17,7 @@ const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
 import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY } from "./constants/theme";
-import { todayStr, toLocalDateStr, addDaysToDateStr, dateAtDay, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
+import { todayStr, toLocalDateStr, addDaysToDateStr, addMonthsClamped, dateAtDay, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
 import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
 import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
 import { normalizeVendorText } from "./helpers/textHelpers";
@@ -65,6 +65,7 @@ import PersonSetupSheet from "./components/people/PersonSetupSheet";
 import AddGroupSheet from "./components/people/AddGroupSheet";
 import { FinancialRelationships, CapabilityTiles, PinnedBill } from "./components/people/RelationshipBlocks";
 import AddRelationshipSheet from "./components/people/AddRelationshipSheet";
+import AttachBillerTargetSheet from "./components/people/AttachBillerTargetSheet";
 import RelationshipStatusPanel from "./components/people/RelationshipStatusPanel";
 import ExpectedSchedulePanel from "./components/people/ExpectedSchedulePanel";
 import { getAttributedRelationships, getOpenBillBadge, summarizeRelationships } from "./domain/relationships/attributedAccounts";
@@ -97,7 +98,7 @@ import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconcili
 import { withBillForSnapshots } from "./domain/bills/billFor";
 import { getBillBalance, planBillPayment, withProjectedBillStatuses, getPartialRemainingByBill, getBillBadge, getBillLedger } from "./domain/obligations/billBalance";
 import { hasCompleteSchedule, setRelationshipSchedule, getExpectedForRelationship, getExpectedItems, buildBillFieldsFromExpected } from "./domain/obligations/expected";
-import { buildPaymentsView, getBillPeriodLabel } from "./domain/bills/paymentsView";
+import { buildPaymentsView, getBillPeriodLabel, getBadgeText } from "./domain/bills/paymentsView";
 import BillsList from "./screens/payments/BillsList";
 import BillDetailSheet from "./screens/payments/BillDetailSheet";
 import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
@@ -1347,6 +1348,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Arth 2.0 IA §6 — "+ Add relationship" first shows this instead of jumping straight to the
   // new-biller form: {targetType, targetId, targetLabel} | null.
   const [showAddRelationship, setShowAddRelationship] = useState(null);
+  // Payments-side entry point (Bill/Biller audit finding): the biller account being attached to
+  // a person/group, opened from the biller detail sheet when it has no relationship yet.
+  const [attachBillerTarget, setAttachBillerTarget] = useState(null);
   const [groupViewMode, setGroupViewMode] = useState("overall");
   const [showGroupOwesBreakdown, setShowGroupOwesBreakdown] = useState(false);
   const [groupSpendFilter, setGroupSpendFilter] = useState(null);
@@ -3893,7 +3897,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const cycleMonthsMap = { monthly:1, quarterly:3, halfyearly:6, annual:12 };
     // Grace days are no longer baked into this date — they're applied separately via
     // getPeriodEffectiveEnd (graceAppliedSeparately below), consistent with the periods-array model.
-    const linkValidUntil = linkValidFrom && linkBulkMonths ? (()=>{ const d=new Date(linkValidFrom); d.setMonth(d.getMonth()+Number(linkBulkMonths)*(cycleMonthsMap[linkCycle]||1)); d.setDate(d.getDate()-1); return d.toISOString().split("T")[0]; })() : "";
+    // Bug fix: setMonth() on a day-31 linkValidFrom overflowed past a short month (e.g. a
+    // quarterly membership starting 31 Oct would land in Feb, not end on 30/31 Jan) — the same
+    // bug class found and fixed for Bills' own recurring dates in this session's date-logic audit.
+    const linkValidUntil = linkValidFrom && linkBulkMonths ? addDaysToDateStr(addMonthsClamped(linkValidFrom, Number(linkBulkMonths)*(cycleMonthsMap[linkCycle]||1)), -1) : "";
     const [imageBase64, setImageBase64] = useState(sourceTxn?.imageBase64 || null);
     const [paymentImageBase64, setPaymentImageBase64] = useState(sourceTxn?.paymentImageBase64 || null);
     const isNative = isNativeSmsAvailable();
@@ -4889,8 +4896,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               const ccAcc = getAcc(accId);
               const stmtDay = Number(ccAcc?.statementDate || dueDayNum || 15);
               const purchaseDate = new Date((date || todayStr()) + "T00:00:00");
-              let cursor = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth(), stmtDay);
-              if(cursor <= purchaseDate) cursor = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth()+1, stmtDay);
+              // dateAtDay clamps stmtDay into whichever month it lands in, instead of letting
+              // Date's day-overflow silently roll a 29th-31st statement day into a later month
+              // (e.g. a card statementDate of 31 landing in February would otherwise become
+              // March) — the same bug class found and fixed in domain/bills/periodCalculations.js
+              // and domain/obligations/expected.js during this session's date-logic audit.
+              let cursor = dateAtDay(purchaseDate.getFullYear(), purchaseDate.getMonth(), stmtDay);
+              // Compare by calendar day, not the raw Date objects — dateAtDay anchors at noon to
+              // dodge DST/midnight edge cases, so a same-day comparison against purchaseDate's
+              // midnight would wrongly read as "after" and skip the intended advance to next month.
+              if(toLocalDateStr(cursor) <= toLocalDateStr(purchaseDate)) cursor = dateAtDay(purchaseDate.getFullYear(), purchaseDate.getMonth()+1, stmtDay);
               const instCatIds = catIds.length ? catIds : (catId ? [catId] : ["financial"]);
               for(let i=0; i<tenureNum; i++){
                 autoInstallments.push({
@@ -4912,7 +4927,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   trackingMode:"none",
                   people:{},
                 });
-                cursor = new Date(cursor.getFullYear(), cursor.getMonth()+1, stmtDay);
+                cursor = dateAtDay(cursor.getFullYear(), cursor.getMonth()+1, stmtDay);
               }
             }
 
@@ -14747,6 +14762,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       return m;
     });
     const [editGroup,setEditGroup]=useState(b.groupId||"");
+    // Bill/Biller audit finding — a Bill's "For" (billFor.js) was a one-time snapshot from its
+    // biller's attribution at creation, with no way to fix it afterward. This is a direct
+    // override: editing it here only changes THIS Bill's own forType/forId, same as any other
+    // Bill field — it never touches the biller account's attribution or other Bills against it.
+    const [editForType,setEditForType]=useState(b.forType==="person"||b.forType==="group"?b.forType:"unassigned");
+    const [editForId,setEditForId]=useState(b.forType==="person"||b.forType==="group"?b.forId:"");
     const curCat=getCat(catId||"");
     const billDateText = b.billDate || b.createdDate || b.dueDate || "";
     const paymentDateText = txns.find(txn=>String(txn.id)===String(b.paidByTxnId || ""))?.date || b.paidDate || "";
@@ -14781,7 +14802,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
         const myShare=editIncludeMe ? Math.max(0, editAmt-owedByOthers) : 0;
         const groupCollectiveAmount = editGroup ? Math.max(0, editAmt-owedByOthers-myShare) : 0;
-        return {...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null};
+        return {...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null,forType:editForType==="unassigned"?"unassigned":editForType,forId:editForType==="unassigned"?null:editForId};
       }));
       onClose();
     };
@@ -14807,6 +14828,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   </select>
               }
               {selectedBA&&<div style={{ marginTop:8,display:"flex",gap:6,flexWrap:"wrap" }}><span style={{ background:T.success+"16",border:`1px solid ${T.success}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.success }}>{selectedBA.type}</span>{selectedBA.consumerNo&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>#{selectedBA.consumerNo}</span>}{selectedBA.provider&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>{selectedBA.provider}</span>}</div>}
+            </div>
+            <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+              <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>FOR (WHO THIS BILL BELONGS TO)</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:8 }}>
+                <button onClick={()=>{setEditForType("unassigned");setEditForId("");}} style={{ background:editForType==="unassigned"?"#88888822":"none",border:`1px solid ${editForType==="unassigned"?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Unassigned</button>
+                {people.filter(p=>!isPersonArchived(p)).map(p=>(
+                  <button key={p.id} onClick={()=>{setEditForType("person");setEditForId(p.id);}} style={{ background:editForType==="person"&&String(editForId)===String(p.id)?p.color+"22":"none",border:`1px solid ${editForType==="person"&&String(editForId)===String(p.id)?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editForType==="person"&&String(editForId)===String(p.id)?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.isMe?"Me":p.name}</button>
+                ))}
+                {groups.map(g=>(
+                  <button key={g.id} onClick={()=>{setEditForType("group");setEditForId(g.id);}} style={{ background:editForType==="group"&&String(editForId)===String(g.id)?g.color+"22":"none",border:`1px solid ${editForType==="group"&&String(editForId)===String(g.id)?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editForType==="group"&&String(editForId)===String(g.id)?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>
+                ))}
+              </div>
             </div>
             <input style={inp} placeholder="Bill name * e.g. April Electricity Bill" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
             <input style={inp} placeholder="Biller / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
@@ -14980,11 +15013,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // share, images, plan and validity, Pause / Resume, Edit, Delete), moved unchanged from the
   // old expandable Bill row into Bill detail. Record payment is Bill detail's primary action.
   const renderBillExtras = (b) => {
-    const today=new Date();
-    const daysUntil=Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
-    const isOverdue=b.status==="unpaid"&&daysUntil<0;
-    const cat=getCat(b.catId||b.catIds?.[0]) || { icon:"📋", color:T.sub, name:"—" };
+    // Bug fix (found alongside the date-stepping duplication audit): this used to compute its own
+    // overdue/due-today text via `new Date(b.dueDate)` (UTC-parsed) against `new Date()` (local),
+    // the exact UTC-vs-local mismatch class already fixed elsewhere this session — and used a
+    // hard-coded "3 days" amber threshold, its own third disagreement with the D-16 "due" window
+    // (14 days) the canonical badge right above it uses. Reusing getBillBadge/getBadgeText (the
+    // same functions Bill detail's own badge uses) means this text can no longer show something
+    // different from the badge it sits under, in the same sheet, for the same Bill.
     const paymentDateText = txns.find(txn=>String(txn.id)===String(b?.paidByTxnId || ""))?.date || b?.paidDate || "";
+    const badge = getBillBadge(b, contributions);
+    const bt = getBadgeText(badge, { ...b, paidDate: b?.paidDate || paymentDateText });
+    const toneColor = { positive:T.success, negative:T.danger, attention:T.warn, muted:T.sub }[bt.tone] || T.sub;
+    const cat=getCat(b.catId||b.catIds?.[0]) || { icon:"📋", color:T.sub, name:"—" };
     const linkedPaymentTxn = txns.find(txn=>String(txn.id)===String(b.paidByTxnId || "")) || null;
     const billImageSrc = b.imageBase64 || linkedPaymentTxn?.imageBase64 || null;
     const paymentImageSrc = b.paymentImageBase64 || linkedPaymentTxn?.paymentImageBase64 || null;
@@ -14992,9 +15032,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:8 }}>
                     <div style={{ color:T.sub,fontSize:11 }}>{cat.icon} {cat.name}{b.recurring?` · 🔁 ${b.frequency}`:""}{b.invoiceNo?` · #${b.invoiceNo}`:""}</div>
-                    <div style={{ color:isOverdue?T.danger:daysUntil<=3&&b.status==="unpaid"?T.warn:T.sub,fontSize:11 }}>
-                      {b.status==="paid"?`✅ Paid ${formatShortDate(paymentDateText) || paymentDateText || ""}`:isOverdue?`⚠️ ${Math.abs(daysUntil)}d overdue`:daysUntil===0?"Due today":`Due ${formatShortDate(b.dueDate) || b.dueDate}`}
-                    </div>
+                    <div style={{ color:toneColor,fontSize:11 }}>{bt.text}</div>
                   </div>
                   {b.splitPeople&&Object.keys(b.splitPeople).length>0&&(
                     <div style={{ marginBottom:8 }}>
@@ -15047,7 +15085,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   )}
                   <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
                     
-                    <button onClick={(e)=>{ e.stopPropagation(); setEditingBill(b); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
                     {b.recurring&&b.status==="unpaid"&&<button onClick={(e)=>{
                       e.stopPropagation();
                       if(b.isPaused){
@@ -16324,12 +16361,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
     const planMonths = { monthly:1, quarterly:3, annual:12 };
     // Auto-compute end date from start + plan, unless Custom (user sets it directly) or in exact-dates use.
+    // Bug fix: same day-31 setMonth() overflow as the membership bulk-months calc above — an
+    // annual plan starting 31 Jan would have ended 3 Mar the year after, not 30/31 Jan.
     useEffect(()=>{
       if(plan==="custom" || !startsOn) return;
-      const d = new Date(startsOn);
-      d.setMonth(d.getMonth()+planMonths[plan]);
-      d.setDate(d.getDate()-1);
-      setEndsOn(d.toISOString().split("T")[0]);
+      setEndsOn(addDaysToDateStr(addMonthsClamped(startsOn, planMonths[plan]), -1));
       // eslint-disable-next-line react-hooks/exhaustive-deps
     },[plan,startsOn]);
 
@@ -17563,6 +17599,21 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             setShowAddRelationship(null);
           }}
           onCreateNew={()=>{ const target=showAddRelationship; setShowAddRelationship(null); setPreselectedAttribution({ type:target.targetType, id:target.targetId }); setShowAddBillerAccount(true); }}/>}
+        {attachBillerTarget&&<AttachBillerTargetSheet T={T} billerAccount={attachBillerTarget} people={people} groups={groups}
+          onClose={()=>{ const ba=attachBillerTarget; setAttachBillerTarget(null); setActiveBillerForAction(ba); }}
+          onSelectTarget={target=>{
+            const ba = attachBillerTarget;
+            const activeForBa = membershipRelationships.filter(r=>r.status==="active" && String(r.billerAccountId)===String(ba.id));
+            const alreadyHere = activeForBa.some(r=>{ const t=getRelationshipTarget(r); return t.targetType===target.targetType && String(t.targetId)===String(target.targetId); });
+            if(!alreadyHere){
+              const isFirstRelationship = activeForBa.length===0;
+              const newRel = createRelationship({ billerAccountId:ba.id, targetType:target.targetType, targetId:target.targetId, startDate:todayStr(), genId });
+              setMembershipRelationships(prev=>[...prev, newRel]);
+              if(isFirstRelationship) setBillerAccounts(prev=>prev.map(x=>x.id===ba.id ? { ...x, attributeType:target.targetType, attributedTo:target.targetId } : x));
+            }
+            setAttachBillerTarget(null);
+            setActiveBillerForAction(ba);
+          }}/>}
         {categoryAccountsView&&(()=>{
           const type = categoryAccountsView;
           const billersOfType = billers.filter(b=>b.type===type);
@@ -17740,6 +17791,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     onResume={effectiveDate=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?resumeRelationship(x, effectiveDate):x))}
                     onEnd={(reason, effectiveDate)=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?endRelationship(x, reason, effectiveDate):x))}/>
                 ))}
+                {/* Bill/Biller audit finding — a biller with no relationship yet had no way to
+                    attach one from Payments; AddRelationshipSheet (People/Groups' "+ Add
+                    relationship") only starts from the person/group side. This is the inverse
+                    entry point, scoped to existing people/groups only, per the ask. */}
+                {/* Bug fix, same class as the earlier Bill-Edit-behind-sheet fix: closing this
+                    sheet before opening the next one (rather than stacking both at the same
+                    z-index) is what keeps the new one on top. */}
+                {ba.type!=="School Fees"&&!membershipRelationships.some(r=>r.status==="active"&&String(r.billerAccountId)===String(ba.id))&&(
+                  <button onClick={()=>{ setAttachBillerTarget(ba); setActiveBillerForAction(null); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.borderStrong}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",marginBottom:16 }}>+ Attach to person/group</button>
+                )}
                 {/* ADR-039 §9 — Expected/Schedule is scoped to Bills only. School Fees and every
                     "membership" action type (Gym/Fitness, Club Membership, Insurance, Society
                     Maintenance, Rental, Education Fees, Other Subscription — MEMBERSHIP_TYPES)
@@ -18120,7 +18181,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             accountName={t=>accounts.find(a=>String(a.id)===String(t?.accId))?.name || ""}
             onClose={()=>setViewingBillId(null)}
             onRecordPayment={()=>setMarkingBillPaid(vb)}
-            onEdit={()=>{ setEditingBill(vb); }}
+            onEdit={()=>{ setViewingBillId(null); setEditingBill(vb); }}
+            onOpenProvider={ba?()=>{ setViewingBillId(null); setActiveBillerForAction(ba); }:undefined}
             onShare={shareBill}
             extras={renderBillExtras(vb)}/>;
         })()}
@@ -18159,7 +18221,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 // (like the other two) has no partial-payment concept yet.
                 setContributions(prev=>withBillContributionForTxn(prev, { billId:b.id, txnId:billMatchSuggestion.txn.id, amount:matchApplied, txnAmount:Number(billMatchSuggestion.txn.amount||0) }, genId));
                 setTxns(p=>p.map(x=>x.id===billMatchSuggestion.txn.id?{...x,isBillPayment:true,billInvoiceNo:b.invoiceNo||"",paidBillId:b.id,paidBillName:b.name}:x));
-                if(matchBecomesPaid && b.recurring){ const next=new Date(b.dueDate); if(b.frequency==="monthly") next.setMonth(next.getMonth()+1); else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3); else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6); else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
+                {/* Bug fix: this used to reimplement Bills' own recurring-date stepping inline
+                    (a 4th copy found in the cross-app date-logic audit), with the same day-31
+                    overflow bug computeNextDueDate was already fixed for. Reusing it here instead. */}
+                if(matchBecomesPaid && b.recurring){ setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:computeNextDueDate(b),paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
                 setBillMatchSuggestion(null);
               }} style={{ ...btnP,flex:2,padding:"8px",background:T.success }}>✅ Yes, mark paid</button>
             </div>
