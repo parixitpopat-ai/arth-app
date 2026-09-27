@@ -14952,7 +14952,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   )}
                   <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
                     
-                    <button onClick={(e)=>{ e.stopPropagation(); setEditingBill(b); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"9px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+                    
                     {b.recurring&&b.status==="unpaid"&&<button onClick={(e)=>{
                       e.stopPropagation();
                       if(b.isPaused){
@@ -17967,7 +17967,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             accountName={t=>accounts.find(a=>String(a.id)===String(t?.accId))?.name || ""}
             onClose={()=>setViewingBillId(null)}
             onRecordPayment={()=>setMarkingBillPaid(vb)}
-            onEdit={()=>{ setEditingBill(vb); }}
+            onEdit={()=>{ setViewingBillId(null); setEditingBill(vb); }}
             onShare={shareBill}
             extras={renderBillExtras(vb)}/>;
         })()}
