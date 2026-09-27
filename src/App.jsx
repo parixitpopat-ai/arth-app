@@ -97,7 +97,7 @@ import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconcili
 import { withBillForSnapshots } from "./domain/bills/billFor";
 import { getBillBalance, planBillPayment, withProjectedBillStatuses, getPartialRemainingByBill, getBillBadge, getBillLedger } from "./domain/obligations/billBalance";
 import { hasCompleteSchedule, setRelationshipSchedule, getExpectedForRelationship, getExpectedItems, buildBillFieldsFromExpected } from "./domain/obligations/expected";
-import { buildPaymentsView, getBillPeriodLabel } from "./domain/bills/paymentsView";
+import { buildPaymentsView, getBillPeriodLabel, getBadgeText } from "./domain/bills/paymentsView";
 import BillsList from "./screens/payments/BillsList";
 import BillDetailSheet from "./screens/payments/BillDetailSheet";
 import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
@@ -14980,11 +14980,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // share, images, plan and validity, Pause / Resume, Edit, Delete), moved unchanged from the
   // old expandable Bill row into Bill detail. Record payment is Bill detail's primary action.
   const renderBillExtras = (b) => {
-    const today=new Date();
-    const daysUntil=Math.ceil((new Date(b.dueDate)-today)/(1000*60*60*24));
-    const isOverdue=b.status==="unpaid"&&daysUntil<0;
-    const cat=getCat(b.catId||b.catIds?.[0]) || { icon:"📋", color:T.sub, name:"—" };
+    // Bug fix (found alongside the date-stepping duplication audit): this used to compute its own
+    // overdue/due-today text via `new Date(b.dueDate)` (UTC-parsed) against `new Date()` (local),
+    // the exact UTC-vs-local mismatch class already fixed elsewhere this session — and used a
+    // hard-coded "3 days" amber threshold, its own third disagreement with the D-16 "due" window
+    // (14 days) the canonical badge right above it uses. Reusing getBillBadge/getBadgeText (the
+    // same functions Bill detail's own badge uses) means this text can no longer show something
+    // different from the badge it sits under, in the same sheet, for the same Bill.
     const paymentDateText = txns.find(txn=>String(txn.id)===String(b?.paidByTxnId || ""))?.date || b?.paidDate || "";
+    const badge = getBillBadge(b, contributions);
+    const bt = getBadgeText(badge, { ...b, paidDate: b?.paidDate || paymentDateText });
+    const toneColor = { positive:T.success, negative:T.danger, attention:T.warn, muted:T.sub }[bt.tone] || T.sub;
+    const cat=getCat(b.catId||b.catIds?.[0]) || { icon:"📋", color:T.sub, name:"—" };
     const linkedPaymentTxn = txns.find(txn=>String(txn.id)===String(b.paidByTxnId || "")) || null;
     const billImageSrc = b.imageBase64 || linkedPaymentTxn?.imageBase64 || null;
     const paymentImageSrc = b.paymentImageBase64 || linkedPaymentTxn?.paymentImageBase64 || null;
@@ -14992,9 +14999,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:8 }}>
                     <div style={{ color:T.sub,fontSize:11 }}>{cat.icon} {cat.name}{b.recurring?` · 🔁 ${b.frequency}`:""}{b.invoiceNo?` · #${b.invoiceNo}`:""}</div>
-                    <div style={{ color:isOverdue?T.danger:daysUntil<=3&&b.status==="unpaid"?T.warn:T.sub,fontSize:11 }}>
-                      {b.status==="paid"?`✅ Paid ${formatShortDate(paymentDateText) || paymentDateText || ""}`:isOverdue?`⚠️ ${Math.abs(daysUntil)}d overdue`:daysUntil===0?"Due today":`Due ${formatShortDate(b.dueDate) || b.dueDate}`}
-                    </div>
+                    <div style={{ color:toneColor,fontSize:11 }}>{bt.text}</div>
                   </div>
                   {b.splitPeople&&Object.keys(b.splitPeople).length>0&&(
                     <div style={{ marginBottom:8 }}>
