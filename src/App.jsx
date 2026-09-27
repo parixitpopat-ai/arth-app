@@ -18,6 +18,8 @@ const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 // ─── THEME ───────────────────────────────────────────────────────────────────
 import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY } from "./constants/theme";
 import { todayStr, toLocalDateStr, addDaysToDateStr, addMonthsClamped, dateAtDay, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
+import { getMembershipRenewalStatus } from "./domain/membership/renewalStatus";
+import { getPendingGymCheckIn, recordGymCheckIn } from "./domain/membership/checkIn";
 import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
 import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
 import { normalizeVendorText } from "./helpers/textHelpers";
@@ -41,7 +43,7 @@ import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVa
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
-import { createMembershipRelationship, pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel, createRelationship, migrateBillerAccountAttributions, getRelationshipTarget } from "./domain/membership/relationship";
+import { pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel, createRelationship, migrateBillerAccountAttributions, getRelationshipTarget } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { getPersonSpendingSummary, getPersonActiveConnections } from "./domain/person/personOverview";
@@ -49,6 +51,7 @@ import { archivePerson, unarchivePerson, isPersonArchived, getActivePeople } fro
 import { archiveGroup, isGroupArchived, getActiveGroups } from "./domain/group/archive";
 import { writeOffGroupTxns, writeOffGroupBills, groupHasOutstandingBalance } from "./domain/group/writeOff";
 import { getGroupMemberOwed as getGroupMemberOwedPure, getGroupMemberIOwe as getGroupMemberIOwePure } from "./domain/group/balances";
+import { getGroupCollectiveDue as getGroupCollectiveDuePure, groupReceivableTotal as groupReceivableTotalPure } from "./domain/group/receivable";
 import { wireTransactionApplication } from "./application/transactions/wiring";
 import { submitTransactionThroughBoundary } from "./domain/transactions/legacy/transactionBoundary";
 import { getPersonAboutFields, getAboutCompleteness, getPersonNotes } from "./domain/person/about";
@@ -66,6 +69,8 @@ import AddGroupSheet from "./components/people/AddGroupSheet";
 import { FinancialRelationships, CapabilityTiles, PinnedBill } from "./components/people/RelationshipBlocks";
 import AddRelationshipSheet from "./components/people/AddRelationshipSheet";
 import AttachBillerTargetSheet from "./components/people/AttachBillerTargetSheet";
+import MergeBillerAccountSheet from "./components/people/MergeBillerAccountSheet";
+import { mergeBillerAccounts } from "./domain/billers/merge";
 import RelationshipStatusPanel from "./components/people/RelationshipStatusPanel";
 import ExpectedSchedulePanel from "./components/people/ExpectedSchedulePanel";
 import { getAttributedRelationships, getOpenBillBadge, summarizeRelationships } from "./domain/relationships/attributedAccounts";
@@ -890,6 +895,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // and this needs to be buildable/verifiable entirely on its own.
   const [expectedIncome, setExpectedIncome] = useState(()=>JSON.parse(localStorage.getItem("arth_expected_income")||"[]"));
   const [insurancePolicies, setInsurancePolicies] = useState(()=>JSON.parse(localStorage.getItem("arth_insurance_policies")||"[]"));
+  // Daily Gym check-in ("did you go today?") + per-visit cost — domain/membership/checkIn.js.
+  // Deliberately its own small store: never touches memberships[]/bills[]/membershipRelationships.
+  const [gymCheckIns, setGymCheckIns] = useState(()=>JSON.parse(localStorage.getItem("arth_gym_checkins")||"[]"));
+  const [arthHolidays, setArthHolidays] = useState(()=>JSON.parse(localStorage.getItem("arth_holidays")||"[]"));
   // I-5 WP-1: School Fees domain persistence — mirrors insurancePolicies' pattern exactly.
   const [feeSchedules, setFeeSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_schedules")||"[]"));
   const [feePeriods, setFeePeriods] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_periods")||"[]"));
@@ -1033,6 +1042,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   useEffect(()=>safeSetLocalStorage("arth_goals",JSON.stringify(goals)),[goals]);
   useEffect(()=>safeSetLocalStorage("arth_expected_income",JSON.stringify(expectedIncome)),[expectedIncome]);
   useEffect(()=>safeSetLocalStorage("arth_insurance_policies",JSON.stringify(insurancePolicies)),[insurancePolicies]);
+  useEffect(()=>safeSetLocalStorage("arth_gym_checkins",JSON.stringify(gymCheckIns)),[gymCheckIns]);
+  useEffect(()=>safeSetLocalStorage("arth_holidays",JSON.stringify(arthHolidays)),[arthHolidays]);
   useEffect(()=>safeSetLocalStorage("arth_fee_schedules",JSON.stringify(feeSchedules)),[feeSchedules]);
   useEffect(()=>safeSetLocalStorage("arth_fee_periods",JSON.stringify(feePeriods)),[feePeriods]);
   useEffect(()=>safeSetLocalStorage("arth_contributions",JSON.stringify(contributions)),[contributions]);
@@ -1351,6 +1362,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Payments-side entry point (Bill/Biller audit finding): the biller account being attached to
   // a person/group, opened from the biller detail sheet when it has no relationship yet.
   const [attachBillerTarget, setAttachBillerTarget] = useState(null);
+  // The biller account being kept (survivor) while merging a duplicate into it — see
+  // domain/billers/merge.js, fixes the reported "Parixit"/"Me" duplicate-account bug.
+  const [mergeBillerSurvivor, setMergeBillerSurvivor] = useState(null);
   const [groupViewMode, setGroupViewMode] = useState("overall");
   const [showGroupOwesBreakdown, setShowGroupOwesBreakdown] = useState(false);
   const [groupSpendFilter, setGroupSpendFilter] = useState(null);
@@ -1696,17 +1710,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     return map;
   },{}),[txns]);
   const getNetExpenseAmount = useCallback(expense=>Math.max(0, Number(expense?.amount||0) - Number(refundTotalsByExpense[String(expense?.id)]||0)),[refundTotalsByExpense]);
-  const getGroupCollectiveDue = useCallback(expense=>{
-    if(!expense?.groupId || expense?.type!=="expense") return 0;
-    const hasIndividualReceivable = Object.entries(expense?.people||{}).some(([pid,info])=>pid!=="__me__" && info?.mode==="owes" && Number(info?.amount||0)>0 && !info?.settled);
-    const trackingMode = expense?.trackingMode || (hasIndividualReceivable ? "split" : (expense?.forPerson || expense?.groupId ? "tag" : "none"));
-    // Handle both split and allocate (Txn breakup unified mode)
-    if(trackingMode!=="split" && trackingMode!=="allocate") return 0;
-    if(expense.groupCollectiveAmount !== undefined && expense.groupCollectiveAmount !== null){
-      return Math.max(0, Number(expense.groupCollectiveAmount||0) - Number(expense.groupCollectiveSettledAmt||0));
-    }
-    return hasIndividualReceivable ? 0 : Math.max(0, Number(expense.amount||0));
-  },[]);
+  // Bug fix (Group A / Group B receivable mix-up): extracted to domain/group/receivable.js,
+  // with a real regression test, so this is a thin wrapper now, not a second copy of the logic.
+  const getGroupCollectiveDue = useCallback(expense=>getGroupCollectiveDuePure(expense),[]);
   const getMyExpenseAmount = useCallback(expense=>{
     if(expense?.excludeFromSpend) return 0;
     const netAmount = getNetExpenseAmount(expense);
@@ -2564,53 +2570,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   },[txns,accounts]);
   const creditCardLiabilityTotal = useMemo(()=>accounts.reduce((sum,a)=>sum+(a.type==="cc"?cardOutstanding(a):0),0),[accounts,cardOutstanding]);
   const otherLiabilityTotal = useMemo(()=>liabilities.reduce((sum,l)=>sum+Number(l.outstanding||0),0),[liabilities]);
-  const groupReceivableTotal = useCallback(groupId=>{
-    const txnOwed = txns.filter(t=>t.type==="expense" && (
-      t.groupId===groupId ||
-      // Also include Txn breakup allocations where this group has mode=owes
-      t.groupAllocations?.some(g=>g.groupId===groupId&&g.mode==="owes"&&Number(g.amount||0)>0)
-    )).reduce((sum,t)=>{
-      // If this group is in groupAllocations with mode=owes, use its specific amount
-      const groupAlloc = t.groupAllocations?.find(g=>g.groupId===groupId&&g.mode==="owes");
-      if(groupAlloc) {
-        // Use ratio of settled to calculate remaining
-        const totalCollective = Number(t.groupCollectiveAmount||0);
-        const totalSettled = Number(t.groupCollectiveSettledAmt||0);
-        const groupAmt = Number(groupAlloc.amount||0);
-        const settledRatio = totalCollective>0 ? Math.min(1, totalSettled/totalCollective) : 0;
-        const remaining = Math.max(0, groupAmt - (groupAmt * settledRatio));
-        return sum + remaining;
-      }
-      // Primary groupId case: use people splits + collective
-      return sum + Object.entries(t.people||{}).reduce((inner,[pid,info])=>{
-        if(pid==="__me__" || info.mode!=="owes" || info.settled) return inner;
-        return inner + remainingShare(info);
-      },0) + getGroupCollectiveDue(t);
-    },0);
-    const billOwed = bills.filter(b=>b.groupId===groupId&&b.status==="unpaid").reduce((sum,b)=>
-      sum + Object.entries(b.splitPeople||{}).reduce((inner,[pid,info])=>{
-        if(pid==="__me__" || info.mode!=="owes" || info.settled) return inner;
-        return inner + remainingShare(info);
-      },0) + Number(b.groupCollectiveAmount||0)
-    ,0);
-    // Add individual member outstanding (expenses tagged to group members individually)
-    const group = groups.find(g=>g.id===groupId);
-    const memberIndividualOwed = (group?.members||[]).reduce((sum,memberId)=>{
-      const memberTxnOwed = txns.filter(t=>
-        t.type==="expense" &&
-        t.people?.[memberId]?.mode==="owes" &&
-        !t.people?.[memberId]?.settled &&
-        !t.groupId // not a group expense - avoid double counting
-      ).reduce((s,t)=>s+remainingShare(t.people[memberId]),0);
-      const memberLoanOwed = loans.filter(l=>
-        l.direction!=="taken" &&
-        l.status==="active" &&
-        String(l.personId||l.linkedPersonId||"")===String(memberId)
-      ).reduce((s,l)=>s+Number(l.outstanding||0),0);
-      return sum + memberTxnOwed + memberLoanOwed;
-    },0);
-    return txnOwed + billOwed + memberIndividualOwed;
-  },[txns,bills,loans,groups,getGroupCollectiveDue]);
+  // Bug fix (Group A / Group B receivable mix-up): extracted to domain/group/receivable.js,
+  // with a real regression test reproducing the reported bug, so this is a thin wrapper now.
+  const groupReceivableTotal = useCallback(groupId=>groupReceivableTotalPure({ txns, bills, loans, groups }, groupId),[txns,bills,loans,groups]);
 
   // PGRP-001 WP2 — relocated from inside People's if(selectedGroup) block
   // (where it was previously only reachable by toggleMember) to this
@@ -8565,6 +8527,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     goals,
     expectedIncome,
     insurancePolicies,
+    gymCheckIns,
+    arthHolidays,
     feeSchedules,
     feePeriods,
     contributions,
@@ -8584,7 +8548,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     budgetCarryForward,
     defaultGroupId,
     hiddenCards:[...hiddenCards],
-  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards]);
+  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -8629,6 +8593,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(Array.isArray(snapshot.goals)) setGoals(snapshot.goals);
     if(Array.isArray(snapshot.expectedIncome)) setExpectedIncome(snapshot.expectedIncome);
     if(Array.isArray(snapshot.insurancePolicies)) setInsurancePolicies(snapshot.insurancePolicies);
+    if(Array.isArray(snapshot.gymCheckIns)) setGymCheckIns(snapshot.gymCheckIns);
+    if(Array.isArray(snapshot.arthHolidays)) setArthHolidays(snapshot.arthHolidays);
     if(Array.isArray(snapshot.feeSchedules)) setFeeSchedules(snapshot.feeSchedules);
     if(Array.isArray(snapshot.feePeriods)) setFeePeriods(snapshot.feePeriods);
     if(Array.isArray(snapshot.contributions)) setContributions(snapshot.contributions);
@@ -9187,7 +9153,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards, pushCloudSnapshot]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
@@ -9636,6 +9602,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {/* Investment reminders (due today + not recorded this month) and Membership expiry
               alerts all folded into Today's Focus (the "bills" card below) - one system, one
               source, not three separate always-visible legacy blocks. */}
+          {/* Daily Gym check-in — "did you go today?" (domain/membership/checkIn.js). Skips
+              itself on a paused (traveling) relationship or a day already marked a holiday;
+              never asks twice in one day. Purely additive — records into its own gymCheckIns[],
+              never touches memberships[]/bills[]/membershipRelationships. */}
+          {(()=>{
+            const pending = getPendingGymCheckIn({ relationships:membershipRelationships, billerAccounts, checkIns:gymCheckIns, holidays:arthHolidays, today:todayStr() });
+            if(!pending) return null;
+            const answer = attended=>setGymCheckIns(prev=>[...prev, recordGymCheckIn({ relationshipId:pending.relationshipId, billerAccountId:pending.billerAccountId, date:todayStr(), attended, genId })]);
+            return (
+              <div style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:16,padding:14,marginBottom:12 }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:10 }}>🏋️ Did you go to {pending.billerName} today?</div>
+                <div style={{ display:"flex",gap:8 }}>
+                  <button onClick={()=>answer(true)} style={{ flex:1,background:T.success,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>✅ Went</button>
+                  <button onClick={()=>answer(false)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>❌ Didn't go</button>
+                  <button onClick={()=>setArthHolidays(prev=>prev.includes(todayStr())?prev:[...prev,todayStr()])} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏖 Holiday</button>
+                </div>
+              </div>
+            );
+          })()}
+
           <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:8 }}>
             <button onClick={()=>setEditingCards(e=>!e)} style={{ background:editingCards?T.accent+"22":"none",border:`1px solid ${editingCards?T.accent:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:editingCards?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{editingCards?"✓ Done":"⠿ Arrange"}</button>
           </div>
@@ -15182,17 +15168,29 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   const unpaidCount = allBills.filter(b=>b.status==="unpaid").length;
                   const nextUnpaid = allBills.filter(b=>b.status==="unpaid"&&b.dueDate).sort((a,b2)=>a.dueDate.localeCompare(b2.dueDate))[0];
                   const memsForShell = memberships.filter(m=>accs.some(a=>String(a.id)===String(m.billerAccountId)));
-                  const memRenewing = memsForShell.map(m=>({m,period:getCurrentPeriod(m)})).filter(x=>x.period).map(x=>({...x,eff:getPeriodEffectiveEnd(x.period)})).filter(x=>x.eff>=todayStrV&&x.eff<=in7).sort((a,b2)=>a.eff.localeCompare(b2.eff))[0];
-                  const needsAttention = Boolean((nextUnpaid&&nextUnpaid.dueDate<=in7) || memRenewing);
-                  const amount = nextUnpaid ? Number(nextUnpaid.amount||0) : (memRenewing ? Number(memRenewing.m.amount||0) : 0);
-                  const dueText = nextUnpaid ? dueSoonText(nextUnpaid.dueDate) : (memRenewing ? `Renewal in ${Math.max(0,Math.round((new Date(memRenewing.eff)-new Date())/86400000))} days` : "");
+                  // Fix (audit finding): was a 7-day-forward-only nudge with no overdue/expired
+                  // state at all once a period lapsed. getMembershipRenewalStatus adds that side
+                  // without inventing a new Bill/Expected representation for memberships (a
+                  // separate, still-open decision) — this only extends the existing "how close"
+                  // read.
+                  const memStatus = getMembershipRenewalStatus(memsForShell.map(m=>({ m, period:getCurrentPeriod(m) })), todayStrV);
+                  const needsAttention = Boolean((nextUnpaid&&nextUnpaid.dueDate<=in7) || memStatus);
+                  const amount = nextUnpaid ? Number(nextUnpaid.amount||0) : (memStatus ? Number(memStatus.m.amount||0) : 0);
+                  const dueText = nextUnpaid ? dueSoonText(nextUnpaid.dueDate) : (memStatus ? (memStatus.kind==="overdue" ? `Overdue ${memStatus.days}d` : `Renewal in ${memStatus.days} days`) : "");
                   return { key:"shell-"+billerId, billerId, icon:getBillerIcon(shell.type), name:shell.name, connLabel:accs.length>1?`${accs.length} Connections`:shell.type, unpaidCount, pinned:Boolean(shell.pinned), needsAttention, amount, dueText, onClick:()=>setActiveBillerShell(shell) };
                 }).filter(Boolean),
                 ...unshelled.map(ba=>{
                   const billsForAcc = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
                   const nextUnpaid = billsForAcc.filter(b=>b.status==="unpaid"&&b.dueDate).sort((a,b2)=>a.dueDate.localeCompare(b2.dueDate))[0];
-                  const needsAttention = Boolean(nextUnpaid&&nextUnpaid.dueDate<=in7);
-                  return { key:"acc-"+ba.id, billerId:null, icon:getBillerIcon(ba.type), name:ba.name, connLabel:ba.type, unpaidCount:billsForAcc.filter(b=>b.status==="unpaid").length, pinned:false, needsAttention, amount:nextUnpaid?Number(nextUnpaid.amount||0):0, dueText:nextUnpaid?dueSoonText(nextUnpaid.dueDate):"", onClick:()=>setActiveBillerForAction(ba) };
+                  // Fix (audit finding): unshelled accounts — most personal Gym/Club/Society/Rental
+                  // ones, since a billerId shell is only for known catalog brands — previously got
+                  // NO membership renewal signal at all, shelled or not. Same helper as above.
+                  const memsForAcc = memberships.filter(m=>String(m.billerAccountId)===String(ba.id));
+                  const memStatus = memsForAcc.length ? getMembershipRenewalStatus(memsForAcc.map(m=>({ m, period:getCurrentPeriod(m) })), todayStrV) : null;
+                  const needsAttention = Boolean((nextUnpaid&&nextUnpaid.dueDate<=in7) || memStatus);
+                  const amount = nextUnpaid ? Number(nextUnpaid.amount||0) : (memStatus ? Number(memStatus.m.amount||0) : 0);
+                  const dueText = nextUnpaid ? dueSoonText(nextUnpaid.dueDate) : (memStatus ? (memStatus.kind==="overdue" ? `Overdue ${memStatus.days}d` : `Renewal in ${memStatus.days} days`) : "");
+                  return { key:"acc-"+ba.id, billerId:null, icon:getBillerIcon(ba.type), name:ba.name, connLabel:ba.type, unpaidCount:billsForAcc.filter(b=>b.status==="unpaid").length, pinned:false, needsAttention, amount, dueText, onClick:()=>setActiveBillerForAction(ba) };
                 }),
               ];
               const dueSoon = items.filter(i=>i.needsAttention);
@@ -15211,7 +15209,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{item.dueText || item.connLabel}</div>
                     </div>
                   </div>
-                  {item.amount>0&&<div style={{ color:item.dueText==="Overdue"?T.danger:T.text,fontSize:13,fontWeight:800,flexShrink:0,marginLeft:8 }}>{sym}{fmt(item.amount)}</div>}
+                  {item.amount>0&&<div style={{ color:item.dueText?.startsWith("Overdue")?T.danger:T.text,fontSize:13,fontWeight:800,flexShrink:0,marginLeft:8 }}>{sym}{fmt(item.amount)}</div>}
                 </div>
               );
               return (
@@ -15820,7 +15818,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
   const MembershipDetailModal = ({ membership, onClose, onViewTransaction }) => {
     const m = membership;
-    const person = m.personId==="self" ? null : people.find(p=>String(p.id)===String(m.personId));
+    // getRelationshipTarget(m) works directly here: a membership record's shape (targetType/
+    // targetId, falling back to legacy personId-only rows) is exactly the same generalization
+    // domain/membership/relationship.js already did for the relationship row itself. "self" ->
+    // "__me__" first — same pre-generalization sentinel bug correctSelfSentinel fixes elsewhere,
+    // never migrated for memberships[] specifically.
+    const memberTarget = getRelationshipTarget(m.personId==="self" ? { ...m, personId:"__me__" } : m);
+    const person = memberTarget.targetType==="person" && memberTarget.targetId!=="__me__" ? people.find(p=>String(p.id)===String(memberTarget.targetId)) : null;
+    const memberGroup = memberTarget.targetType==="group" ? groups.find(g=>String(g.id)===String(memberTarget.targetId)) : null;
+    const memberLabel = memberTarget.targetType==="group" ? (memberGroup?.name||"Unknown group") : (memberTarget.targetId==="__me__" ? "Me" : (person?.name||"Unknown person"));
+    const memberIcon = memberGroup ? (memberGroup.icon||"👥") : (person?.emoji||"🧑");
     const acc = accounts.find(a=>a.id===m.accId);
     const ba = billerAccounts.find(b=>b.id===m.billerAccountId);
     const linkedTxn = m.linkedTxnId ? txns.find(t=>t.id===m.linkedTxnId) : null;
@@ -15869,7 +15876,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:330,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{person?.emoji||"🧑"} {person?.name||"Me"}</div>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{memberIcon} {memberLabel}</div>
             <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
           </div>
 
@@ -15931,7 +15938,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>MEMBERSHIP DETAILS</div>
           <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
             <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Provider</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{ba?.provider||ba?.name||"—"}</span></div>
-            <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Member</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{person?.name||"Me"}</span></div>
+            <div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>{memberGroup?"Group":"Member"}</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{memberLabel}</span></div>
             {m.paidDate&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Payment Date</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{formatShortDate(m.paidDate)||m.paidDate}</span></div>}
             {acc&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Payment Account</span><span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{acc.name}</span></div>}
             {m.note&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Note</span><span style={{ color:T.text,fontSize:12 }}>{m.note}</span></div>}
@@ -15960,7 +15967,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
           <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>PAYMENT ALLOCATION</div>
           <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
-            {periods.map(p=>{
+            {/* Fix (reported): latest period on top, chronologically — periods were previously
+                shown in whatever order they were entered, not the order they actually cover. */}
+            {[...periods].sort((a,b)=>String(b.to||"").localeCompare(String(a.to||""))).map(p=>{
               const effEnd = getPeriodEffectiveEnd(p);
               const dateCurrent = p.from<=today && today<=effEnd;
               const isPast = effEnd<today;
@@ -16189,6 +16198,29 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [baNote, setBaNote] = useState(existing?.note||"");
     const canSave = baName.trim() && baType;
     const [duplicateError, setDuplicateError] = useState("");
+    // Warn on the exact Parixit/Me-style duplicate: a brand-new account of the same type, under
+    // the same real Provider (billerId shell, or same provider name when there's no shell yet),
+    // attributed to the same person/group that already has an ACTIVE relationship via a sibling
+    // account. Non-blocking — there are legitimate reasons for two real accounts of one type
+    // (e.g. two different actual gyms) — this only flags the likely-accidental case.
+    const duplicateRelationshipWarning = (()=>{
+      if(isEdit) return null;
+      if(baAttributeType!=="person" && baAttributeType!=="group") return null;
+      if(!baAttributedTo) return null;
+      const shellId = existing?.billerId||preselectedBillerId||null;
+      const siblingIds = billerAccounts.filter(ba=>
+        ba.type===baType && (shellId ? ba.billerId===shellId : (ba.provider||"").trim().toLowerCase()===baProvider.trim().toLowerCase() && baProvider.trim())
+      ).map(ba=>ba.id);
+      if(!siblingIds.length) return null;
+      const existingActive = membershipRelationships.find(r=>{
+        if(r.status!=="active" || !siblingIds.includes(r.billerAccountId)) return false;
+        const t = getRelationshipTarget(r);
+        return t.targetType===baAttributeType && String(t.targetId)===String(baAttributedTo);
+      });
+      if(!existingActive) return null;
+      const sibling = billerAccounts.find(ba=>ba.id===existingActive.billerAccountId);
+      return `"${sibling?.name||"An existing account"}" already has an active ${baType} relationship with ${getRelationshipTargetLabel(existingActive)}. This looks like the same one — consider opening that account instead of creating a duplicate.`;
+    })();
     const handleSave = () => {
       if(!canSave) return;
       const trimmedConsumerNo = baConsumerNo.trim();
@@ -16317,6 +16349,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </select>
               )}
               {baAttributeType==="house"&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Shared household expense.</div>}
+              {duplicateRelationshipWarning&&<div style={{ background:T.warn+"18",border:`1px solid ${T.warn}44`,borderRadius:10,padding:"8px 12px",color:T.warn,fontSize:11,fontWeight:700,marginTop:8 }}>⚠️ {duplicateRelationshipWarning}</div>}
             </div>
             <div>
               <span style={lbl}>Note (optional)</span>
@@ -16335,7 +16368,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const AddMembershipModal = ({ billerAccount, existing, onClose }) => {
     const isEdit = !!existing;
     const derivedPersonId = (billerAccount.attributeType==="person" && billerAccount.attributedTo) ? String(billerAccount.attributedTo) : "__me__"; // WP-4 fix: was "self" — ME.id is "__me__", same bug class as WP-1/WP-A1
-    const [memberPersonId, setMemberPersonId] = useState(existing?.personId||derivedPersonId);
+    // Fix (audit finding): this modal used to be person-only (the deprecated
+    // createMembershipRelationship wrapper) — a membership could never target a Group through the
+    // normal creation flow, even though the canonical relationship model has supported Group
+    // since Arth 2.0 IA. `memberTarget` is a composite "person:<id>"/"group:<id>" value so the
+    // existing single-select UI still works; existing?.targetType falls back to existing?.personId
+    // (pre-generalization rows) same as getRelationshipTarget does elsewhere.
+    const initialTarget = existing?.targetType ? `${existing.targetType}:${existing.targetId}` : `person:${existing?.personId||derivedPersonId}`;
+    const [memberTarget, setMemberTarget] = useState(initialTarget);
+    const [memberTargetType, memberTargetId] = memberTarget.split(":");
     const existingPeriods = existing?.periods || (existing ? [{ id:genId(), label:existing.cycle||"Period", from:existing.validFrom, to:existing.validUntil, amount:existing.amount, graceDays: existing.graceAppliedSeparately ? Number(existing.graceDays||0) : 0 }] : null);
 
     const [plan, setPlan] = useState(existing?.cycle||"monthly");
@@ -16419,11 +16460,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       // the relationship is separate from this payment record and owns lifecycle state.
       let relationshipId = existing?.membershipRelationshipId || null;
       if(!relationshipId){
-        const existingRel = membershipRelationships.find(r=>r.billerAccountId===billerAccount.id && r.personId===memberPersonId);
+        const existingRel = membershipRelationships.find(r=>{
+          if(r.billerAccountId!==billerAccount.id) return false;
+          const t = getRelationshipTarget(r);
+          return t.targetType===memberTargetType && String(t.targetId)===String(memberTargetId);
+        });
         if(existingRel){
           relationshipId = existingRel.id;
         } else {
-          const newRel = createMembershipRelationship({ billerAccountId:billerAccount.id, personId:memberPersonId, startDate:finalPeriods[0]?.from||todayStr(), genId });
+          const newRel = createRelationship({ billerAccountId:billerAccount.id, targetType:memberTargetType, targetId:memberTargetId, startDate:finalPeriods[0]?.from||todayStr(), genId });
           setMembershipRelationships(prev=>[...prev, newRel]);
           relationshipId = newRel.id;
         }
@@ -16432,7 +16477,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const record = {
         id: recordId,
         billerAccountId: billerAccount.id,
-        personId: memberPersonId,
+        // personId kept (mirroring targetId when the target is a person) purely for backward
+        // compatibility — every existing reader of a memberships[] record's own name (the
+        // "for" label shown on membership history rows) still reads .personId directly. New
+        // readers should prefer targetType/targetId, the same generalization
+        // domain/membership/relationship.js already did for the relationship itself.
+        personId: memberTargetType==="person" ? memberTargetId : null,
+        targetType: memberTargetType,
+        targetId: memberTargetId,
         membershipRelationshipId: relationshipId,
         amount: totalAmount,
         accId,
@@ -16464,9 +16516,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
             <div>
               <span style={lbl}>For</span>
-              <select style={inp} value={memberPersonId} onChange={e=>setMemberPersonId(e.target.value)}>
-                <option value="__me__">Me</option>
-                {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+              <select style={inp} value={memberTarget} onChange={e=>setMemberTarget(e.target.value)}>
+                <optgroup label="Person">
+                  <option value="person:__me__">Me</option>
+                  {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><option key={p.id} value={`person:${p.id}`}>{p.name}</option>)}
+                </optgroup>
+                {groups.length>0 && <optgroup label="Group">
+                  {groups.map(g=><option key={g.id} value={`group:${g.id}`}>{g.name}</option>)}
+                </optgroup>}
               </select>
             </div>
 
@@ -17614,6 +17671,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             setAttachBillerTarget(null);
             setActiveBillerForAction(ba);
           }}/>}
+        {mergeBillerSurvivor&&<MergeBillerAccountSheet T={T} survivor={mergeBillerSurvivor} billerAccounts={billerAccounts} ownerLabel={getBillerOwnerLabel(mergeBillerSurvivor)}
+          onClose={()=>{ const ba=mergeBillerSurvivor; setMergeBillerSurvivor(null); setActiveBillerForAction(ba); }}
+          onConfirm={duplicate=>{
+            const survivor = mergeBillerSurvivor;
+            const result = mergeBillerAccounts({ billerAccounts, bills, memberships, membershipRelationships, txns, feeSchedules }, survivor.id, duplicate.id);
+            setBillerAccounts(result.billerAccounts);
+            setBills(result.bills);
+            setMemberships(result.memberships);
+            setMembershipRelationships(result.membershipRelationships);
+            setTxns(result.txns);
+            setFeeSchedules(result.feeSchedules);
+            setMergeBillerSurvivor(null);
+            setActiveBillerForAction(result.billerAccounts.find(ba=>ba.id===survivor.id));
+          }}/>}
         {categoryAccountsView&&(()=>{
           const type = categoryAccountsView;
           const billersOfType = billers.filter(b=>b.type===type);
@@ -17817,7 +17888,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 ))}
                 {/* Edit / Delete biller account — moved right under the header, not buried below
                     Analytics/History/Documents, so it's reachable without scrolling. */}
-                <div style={{ display:"flex",gap:8,marginBottom:16 }}>
+                <div style={{ display:"flex",gap:8,marginBottom:8 }}>
                   <button onClick={()=>{ setEditingBillerAccount(ba); setActiveBillerForAction(null); }} style={{ flex:1,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit Account</button>
                   <button onClick={()=>{
                     // QW-5: transactions linked via billerLinkId now block deletion too.
@@ -17832,6 +17903,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     });
                   }} style={{ flex:1,background:"none",border:`1px solid ${T.danger}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete Account</button>
                 </div>
+                {/* Fixes the reported "Parixit"/"Me" duplicate: the same real thing created as two
+                    separate accounts, each with its own Relationship and history. */}
+                {billerAccounts.length>1&&(
+                  <button onClick={()=>{ setMergeBillerSurvivor(ba); setActiveBillerForAction(null); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.borderStrong}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",marginBottom:16 }}>🔗 Merge duplicate account into this one</button>
+                )}
                 {/* Credit Card WP, rule 13: this connection-detail sheet is still the Biller — it
                     names the linked Account and says what it's used for, nothing else. Statement/
                     payment state lives in Payments -> Credit Cards, not here. */}
@@ -17957,7 +18033,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 })()}
                 {/* Membership: Hero Card, Renewal banner, Timeline, Lifetime Analytics */}
                 {actionType==="membership"&&baMemberships.length>0&&(()=>{
-                  const sorted = [...baMemberships].sort((a,b2)=>b2.createdAt-a.createdAt);
+                  // Fix (reported): sorted by createdAt (when the record was entered) rather than
+                  // the period it actually covers — a retroactively-added older payment enterred
+                  // after a newer one showed up on top. Sort by the period's own end date instead,
+                  // so "latest" always means chronologically latest, not most recently typed in.
+                  const sorted = [...baMemberships].sort((a,b2)=>{
+                    const da = getCurrentPeriod(a)?.to || a.paidDate || "";
+                    const db = getCurrentPeriod(b2)?.to || b2.paidDate || "";
+                    return db.localeCompare(da) || (b2.createdAt||0)-(a.createdAt||0);
+                  });
                   const today = todayStr();
                   // "Current" = the payment whose active period covers today, or failing that, whichever
                   // payment's most recent period is closest to today (covers both "mid-membership" and
@@ -18037,6 +18121,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{sym}{fmt(avgMonthlyCost)}</div>
                           <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>AVG MONTHLY COST</div>
                         </div>
+                        {/* Cost per visit — from the daily Gym check-in (domain/membership/
+                            checkIn.js). Only shown once there's at least one logged visit; "no
+                            visits logged yet" is a different fact from "free", never shown as 0. */}
+                        {ba.type==="Gym / Fitness"&&(()=>{
+                          const visits = gymCheckIns.filter(c=>c.billerAccountId===ba.id&&c.attended).length;
+                          if(!visits) return null;
+                          return (
+                            <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+                              <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{sym}{fmt(Math.round(lifetimeSpend/visits))}</div>
+                              <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>COST PER VISIT ({visits})</div>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {hero&&(()=>{
@@ -18078,12 +18175,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {actionType!=="membership"&&baMemberships.length>0&&(
                   <div style={{ marginBottom:12 }}>
                     <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>MEMBERSHIP HISTORY</div>
-                    {baMemberships.sort((a,b2)=>b2.createdAt-a.createdAt).slice(0,5).map(m=>{
+                    {[...baMemberships].sort((a,b2)=>{
+                      const da = getCurrentPeriod(a)?.to || a.paidDate || "";
+                      const db = getCurrentPeriod(b2)?.to || b2.paidDate || "";
+                      return db.localeCompare(da) || (b2.createdAt||0)-(a.createdAt||0);
+                    }).slice(0,5).map(m=>{
                       const period = getCurrentPeriod(m);
                       return (
                       <div key={m.id} onClick={()=>setViewingMembership(m)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
                         <div>
-                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{people.find(p=>String(p.id)===String(m.personId))?.name||"Me"}</div>
+                          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{(()=>{ const t=getRelationshipTarget(m.personId==="self"?{...m,personId:"__me__"}:m); return t.targetType==="group" ? (groups.find(g=>String(g.id)===String(t.targetId))?.name||"Unknown group") : (t.targetId==="__me__"?"Me":(people.find(p=>String(p.id)===String(t.targetId))?.name||"Unknown person")); })()}</div>
                           <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(period?.from)||period?.from} to {formatShortDate(period?.to)||period?.to}</div>
                           {m.paidDate&&<div style={{ color:T.sub,fontSize:10 }}>Paid: {formatShortDate(m.paidDate)||m.paidDate}</div>}
                         </div>
