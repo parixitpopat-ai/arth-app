@@ -134,6 +134,42 @@ export function migrateBillerAccountAttributions(billerAccounts, existingRelatio
   return additions.length ? [...relationships, ...additions] : existingRelationships;
 }
 
+/**
+ * The reverse direction of migrateBillerAccountAttributions above — and the fix for a real,
+ * reported bug: every relationship-creation call site (AddRelationshipSheet, AttachBillerTargetSheet)
+ * mirrors a NEW relationship into the billerAccount's legacy attributeType/attributedTo (the
+ * Bill-For bridge billFor.js still exclusively reads), except AddMembershipModal's own creation
+ * path, which never did — so a membership created directly from "Add Membership" (the ordinary way
+ * to add one) got a real, active Financial Relationship but a billerAccount stuck with no legacy
+ * attribution, and every Bill against it was derived as "Unassigned" forever, with no later event
+ * that could ever correct it. That gap is now closed at the call site for anything created from
+ * here on; this is the one-time repair for a billerAccount that already has that gap.
+ *
+ * Idempotent: only ever fills in a billerAccount that currently has NO attribution at all
+ * (attributeType is neither "person" nor "group") — never touches one already attributed
+ * (including to a house/vehicle), and never edits or removes a relationship. When a billerAccount
+ * has more than one active relationship, the oldest (by startDate) is used, matching the
+ * "first relationship" convention every creation call site already applies.
+ *
+ * @param {Array} billerAccounts
+ * @param {Array} relationships - membershipRelationships[]
+ * @returns {Array} a new array, or the same reference (billerAccounts) if nothing needed backfilling.
+ */
+export function backfillBillerAccountAttributionFromRelationships(billerAccounts, relationships) {
+  let changed = false;
+  const next = (billerAccounts || []).map(ba => {
+    if (!ba) return ba;
+    if (ba.attributeType === "person" || ba.attributeType === "group") return ba;
+    const active = (relationships || []).filter(r => r.status === "active" && String(r.billerAccountId) === String(ba.id));
+    if (!active.length) return ba;
+    const oldest = [...active].sort((a, b) => String(a.statusHistory?.[0]?.effectiveDate || "").localeCompare(String(b.statusHistory?.[0]?.effectiveDate || "")))[0];
+    const t = getRelationshipTarget(oldest);
+    changed = true;
+    return { ...ba, attributeType: t.targetType, attributedTo: t.targetId };
+  });
+  return changed ? next : billerAccounts;
+}
+
 export function pauseRelationship(relationship, reason, effectiveDate) {
   return pauseMembership(relationship, reason, effectiveDate);
 }

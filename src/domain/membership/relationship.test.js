@@ -9,6 +9,7 @@ import {
   createRelationship,
   getRelationshipTarget,
   migrateBillerAccountAttributions,
+  backfillBillerAccountAttributionFromRelationships,
 } from "./relationship.js";
 import {
   getRelationshipStatusAsOfDate as getRelationshipStatusAsOfDateFromLifecycle,
@@ -226,4 +227,39 @@ test("migrateBillerAccountAttributions running twice never doubles up", () => {
   const twice = migrateBillerAccountAttributions(billerAccounts, once, genId);
   assert.equal(twice, once);
   assert.equal(once.length, 1);
+});
+
+test("backfillBillerAccountAttributionFromRelationships: reported bug — a membership created via AddMembershipModal's own path (relationship exists, legacy attribution never mirrored) gets backfilled", () => {
+  const billerAccounts = [{ id: "ba1", name: "Parixit", type: "Gym / Fitness" }]; // no attributeType/attributedTo at all
+  const relationships = [{ id: "r1", billerAccountId: "ba1", targetType: "person", targetId: "parixit_popat", status: "active", statusHistory: [{ status: "active", effectiveDate: "2026-09-16" }] }];
+  const result = backfillBillerAccountAttributionFromRelationships(billerAccounts, relationships);
+  assert.equal(result[0].attributeType, "person");
+  assert.equal(result[0].attributedTo, "parixit_popat");
+});
+
+test("backfillBillerAccountAttributionFromRelationships: never touches an already-attributed billerAccount (house/vehicle/person/group), even a stale one", () => {
+  const billerAccounts = [
+    { id: "ba1", attributeType: "house", attributedTo: "h1" },
+    { id: "ba2", attributeType: "person", attributedTo: "someone-else" },
+  ];
+  const relationships = [{ id: "r1", billerAccountId: "ba2", targetType: "person", targetId: "p1", status: "active", statusHistory: [] }];
+  const result = backfillBillerAccountAttributionFromRelationships(billerAccounts, relationships);
+  assert.equal(result, billerAccounts, "same reference — nothing needed backfilling");
+});
+
+test("backfillBillerAccountAttributionFromRelationships: no active relationship at all is left unassigned, not guessed", () => {
+  const billerAccounts = [{ id: "ba1" }];
+  assert.equal(backfillBillerAccountAttributionFromRelationships(billerAccounts, []), billerAccounts);
+  const pausedOnly = [{ id: "r1", billerAccountId: "ba1", targetType: "person", targetId: "p1", status: "paused", statusHistory: [] }];
+  assert.equal(backfillBillerAccountAttributionFromRelationships(billerAccounts, pausedOnly), billerAccounts);
+});
+
+test("backfillBillerAccountAttributionFromRelationships: more than one active relationship uses the oldest by startDate", () => {
+  const billerAccounts = [{ id: "ba1" }];
+  const relationships = [
+    { id: "r1", billerAccountId: "ba1", targetType: "person", targetId: "newer", status: "active", statusHistory: [{ status: "active", effectiveDate: "2026-06-01" }] },
+    { id: "r2", billerAccountId: "ba1", targetType: "person", targetId: "older", status: "active", statusHistory: [{ status: "active", effectiveDate: "2026-01-01" }] },
+  ];
+  const result = backfillBillerAccountAttributionFromRelationships(billerAccounts, relationships);
+  assert.equal(result[0].attributedTo, "older");
 });

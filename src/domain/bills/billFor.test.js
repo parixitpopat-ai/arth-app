@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deriveBillFor, withBillForSnapshot, withBillForSnapshots, getBillsFor, hasBillForSnapshot } from "./billFor.js";
+import { deriveBillFor, withBillForSnapshot, withBillForSnapshots, getBillsFor, hasBillForSnapshot, repairUnassignedBills } from "./billFor.js";
 
 const people = [{ id: "p1", name: "Nidhi" }];
 const groups = [{ id: "g1", name: "Goa Household" }];
@@ -53,6 +53,24 @@ test("later relationship changes don't reach an existing snapshot", () => {
   const [snap] = withBillForSnapshots([{ id: "b1", billerAccountId: "ba1" }], ctx);
   const moved = { ...ctx, billerAccounts: [{ id: "ba1", attributeType: "group", attributedTo: "g1" }] };
   assert.deepEqual(withBillForSnapshots([snap], moved)[0], snap);
+});
+
+test("repairUnassignedBills: reported bug — a bill wrongly stuck 'unassigned' because its billerAccount hadn't been backfilled yet is corrected once the billerAccount has real attribution", () => {
+  const bills = [{ id: "b1", billerAccountId: "ba1", forType: "unassigned", forId: null }];
+  // ba1 already resolves to p1 in ctx (unlike when the bug first wrote "unassigned"), simulating
+  // the billerAccount having since been backfilled by backfillBillerAccountAttributionFromRelationships.
+  const [repaired] = repairUnassignedBills(bills, ctx);
+  assert.deepEqual(repaired, { id: "b1", billerAccountId: "ba1", forType: "person", forId: "p1" });
+});
+
+test("repairUnassignedBills: a genuinely, correctly unassigned bill is left alone", () => {
+  const bills = [{ id: "b1", billerAccountId: "ba5", forType: "unassigned", forId: null }];
+  assert.equal(repairUnassignedBills(bills, ctx), bills);
+});
+
+test("repairUnassignedBills: never touches a bill that already has a real For", () => {
+  const bills = [{ id: "b1", billerAccountId: "ba1", forType: "group", forId: "some-other-group" }];
+  assert.equal(repairUnassignedBills(bills, ctx), bills);
 });
 
 test("getBillsFor filters by the Bill's own For", () => {
