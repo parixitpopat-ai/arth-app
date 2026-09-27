@@ -16934,12 +16934,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     );
   };
 
+  // Arth 2.0 IA §1 — primary nav is Home / Money / Payments / People. Outlook and Insights
+  // aren't removed: they're still full screens (tab==="outlook"/"insights" below), reached from
+  // Home's existing entry points (Safe to Spend → Outlook, "✨ Insights for you" → Insights, both
+  // already in <Home/>), per IA §2's "Home ├── Today ├── Outlook └── Insights".
   const TABS=[
     {id:"home",icon:"🏠",label:"Home"},
     {id:"wealth",icon:"💰",label:"Money"},
     {id:"__fab__",icon:"➕",label:""},
-    {id:"outlook",icon:"🔮",label:"Outlook"},
-    {id:"insights",icon:"📊",label:"Insights"}
+    {id:"bills",icon:"🧾",label:"Payments"},
+    {id:"people",icon:"👥",label:"People"}
   ];
 
   const [wealthUnlocked, setWealthUnlocked] = useState(false);
