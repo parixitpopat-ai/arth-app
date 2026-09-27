@@ -65,6 +65,7 @@ import PersonSetupSheet from "./components/people/PersonSetupSheet";
 import AddGroupSheet from "./components/people/AddGroupSheet";
 import { FinancialRelationships, CapabilityTiles, PinnedBill } from "./components/people/RelationshipBlocks";
 import AddRelationshipSheet from "./components/people/AddRelationshipSheet";
+import AttachBillerTargetSheet from "./components/people/AttachBillerTargetSheet";
 import RelationshipStatusPanel from "./components/people/RelationshipStatusPanel";
 import ExpectedSchedulePanel from "./components/people/ExpectedSchedulePanel";
 import { getAttributedRelationships, getOpenBillBadge, summarizeRelationships } from "./domain/relationships/attributedAccounts";
@@ -1347,6 +1348,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Arth 2.0 IA §6 — "+ Add relationship" first shows this instead of jumping straight to the
   // new-biller form: {targetType, targetId, targetLabel} | null.
   const [showAddRelationship, setShowAddRelationship] = useState(null);
+  // Payments-side entry point (Bill/Biller audit finding): the biller account being attached to
+  // a person/group, opened from the biller detail sheet when it has no relationship yet.
+  const [attachBillerTarget, setAttachBillerTarget] = useState(null);
   const [groupViewMode, setGroupViewMode] = useState("overall");
   const [showGroupOwesBreakdown, setShowGroupOwesBreakdown] = useState(false);
   const [groupSpendFilter, setGroupSpendFilter] = useState(null);
@@ -14758,6 +14762,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       return m;
     });
     const [editGroup,setEditGroup]=useState(b.groupId||"");
+    // Bill/Biller audit finding — a Bill's "For" (billFor.js) was a one-time snapshot from its
+    // biller's attribution at creation, with no way to fix it afterward. This is a direct
+    // override: editing it here only changes THIS Bill's own forType/forId, same as any other
+    // Bill field — it never touches the biller account's attribution or other Bills against it.
+    const [editForType,setEditForType]=useState(b.forType==="person"||b.forType==="group"?b.forType:"unassigned");
+    const [editForId,setEditForId]=useState(b.forType==="person"||b.forType==="group"?b.forId:"");
     const curCat=getCat(catId||"");
     const billDateText = b.billDate || b.createdDate || b.dueDate || "";
     const paymentDateText = txns.find(txn=>String(txn.id)===String(b.paidByTxnId || ""))?.date || b.paidDate || "";
@@ -14792,7 +14802,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
         const myShare=editIncludeMe ? Math.max(0, editAmt-owedByOthers) : 0;
         const groupCollectiveAmount = editGroup ? Math.max(0, editAmt-owedByOthers-myShare) : 0;
-        return {...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null};
+        return {...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null,forType:editForType==="unassigned"?"unassigned":editForType,forId:editForType==="unassigned"?null:editForId};
       }));
       onClose();
     };
@@ -14818,6 +14828,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   </select>
               }
               {selectedBA&&<div style={{ marginTop:8,display:"flex",gap:6,flexWrap:"wrap" }}><span style={{ background:T.success+"16",border:`1px solid ${T.success}33`,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.success }}>{selectedBA.type}</span>{selectedBA.consumerNo&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>#{selectedBA.consumerNo}</span>}{selectedBA.provider&&<span style={{ background:T.pill,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700,color:T.sub }}>{selectedBA.provider}</span>}</div>}
+            </div>
+            <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+              <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>FOR (WHO THIS BILL BELONGS TO)</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:8 }}>
+                <button onClick={()=>{setEditForType("unassigned");setEditForId("");}} style={{ background:editForType==="unassigned"?"#88888822":"none",border:`1px solid ${editForType==="unassigned"?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Unassigned</button>
+                {people.filter(p=>!isPersonArchived(p)).map(p=>(
+                  <button key={p.id} onClick={()=>{setEditForType("person");setEditForId(p.id);}} style={{ background:editForType==="person"&&String(editForId)===String(p.id)?p.color+"22":"none",border:`1px solid ${editForType==="person"&&String(editForId)===String(p.id)?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editForType==="person"&&String(editForId)===String(p.id)?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.isMe?"Me":p.name}</button>
+                ))}
+                {groups.map(g=>(
+                  <button key={g.id} onClick={()=>{setEditForType("group");setEditForId(g.id);}} style={{ background:editForType==="group"&&String(editForId)===String(g.id)?g.color+"22":"none",border:`1px solid ${editForType==="group"&&String(editForId)===String(g.id)?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editForType==="group"&&String(editForId)===String(g.id)?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>
+                ))}
+              </div>
             </div>
             <input style={inp} placeholder="Bill name * e.g. April Electricity Bill" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
             <input style={inp} placeholder="Biller / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
@@ -17577,6 +17599,21 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             setShowAddRelationship(null);
           }}
           onCreateNew={()=>{ const target=showAddRelationship; setShowAddRelationship(null); setPreselectedAttribution({ type:target.targetType, id:target.targetId }); setShowAddBillerAccount(true); }}/>}
+        {attachBillerTarget&&<AttachBillerTargetSheet T={T} billerAccount={attachBillerTarget} people={people} groups={groups}
+          onClose={()=>{ const ba=attachBillerTarget; setAttachBillerTarget(null); setActiveBillerForAction(ba); }}
+          onSelectTarget={target=>{
+            const ba = attachBillerTarget;
+            const activeForBa = membershipRelationships.filter(r=>r.status==="active" && String(r.billerAccountId)===String(ba.id));
+            const alreadyHere = activeForBa.some(r=>{ const t=getRelationshipTarget(r); return t.targetType===target.targetType && String(t.targetId)===String(target.targetId); });
+            if(!alreadyHere){
+              const isFirstRelationship = activeForBa.length===0;
+              const newRel = createRelationship({ billerAccountId:ba.id, targetType:target.targetType, targetId:target.targetId, startDate:todayStr(), genId });
+              setMembershipRelationships(prev=>[...prev, newRel]);
+              if(isFirstRelationship) setBillerAccounts(prev=>prev.map(x=>x.id===ba.id ? { ...x, attributeType:target.targetType, attributedTo:target.targetId } : x));
+            }
+            setAttachBillerTarget(null);
+            setActiveBillerForAction(ba);
+          }}/>}
         {categoryAccountsView&&(()=>{
           const type = categoryAccountsView;
           const billersOfType = billers.filter(b=>b.type===type);
@@ -17754,6 +17791,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     onResume={effectiveDate=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?resumeRelationship(x, effectiveDate):x))}
                     onEnd={(reason, effectiveDate)=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?endRelationship(x, reason, effectiveDate):x))}/>
                 ))}
+                {/* Bill/Biller audit finding — a biller with no relationship yet had no way to
+                    attach one from Payments; AddRelationshipSheet (People/Groups' "+ Add
+                    relationship") only starts from the person/group side. This is the inverse
+                    entry point, scoped to existing people/groups only, per the ask. */}
+                {/* Bug fix, same class as the earlier Bill-Edit-behind-sheet fix: closing this
+                    sheet before opening the next one (rather than stacking both at the same
+                    z-index) is what keeps the new one on top. */}
+                {ba.type!=="School Fees"&&!membershipRelationships.some(r=>r.status==="active"&&String(r.billerAccountId)===String(ba.id))&&(
+                  <button onClick={()=>{ setAttachBillerTarget(ba); setActiveBillerForAction(null); }} style={{ width:"100%",background:"none",border:`1px dashed ${T.borderStrong}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",marginBottom:16 }}>+ Attach to person/group</button>
+                )}
                 {/* ADR-039 §9 — Expected/Schedule is scoped to Bills only. School Fees and every
                     "membership" action type (Gym/Fitness, Club Membership, Insurance, Society
                     Maintenance, Rental, Education Fees, Other Subscription — MEMBERSHIP_TYPES)
@@ -18135,6 +18182,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             onClose={()=>setViewingBillId(null)}
             onRecordPayment={()=>setMarkingBillPaid(vb)}
             onEdit={()=>{ setViewingBillId(null); setEditingBill(vb); }}
+            onOpenProvider={ba?()=>{ setViewingBillId(null); setActiveBillerForAction(ba); }:undefined}
             onShare={shareBill}
             extras={renderBillExtras(vb)}/>;
         })()}
