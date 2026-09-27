@@ -19,6 +19,7 @@ const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY } from "./constants/theme";
 import { todayStr, toLocalDateStr, addDaysToDateStr, addMonthsClamped, dateAtDay, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
 import { getMembershipRenewalStatus } from "./domain/membership/renewalStatus";
+import { getPendingGymCheckIn, recordGymCheckIn } from "./domain/membership/checkIn";
 import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
 import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
 import { normalizeVendorText } from "./helpers/textHelpers";
@@ -894,6 +895,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // and this needs to be buildable/verifiable entirely on its own.
   const [expectedIncome, setExpectedIncome] = useState(()=>JSON.parse(localStorage.getItem("arth_expected_income")||"[]"));
   const [insurancePolicies, setInsurancePolicies] = useState(()=>JSON.parse(localStorage.getItem("arth_insurance_policies")||"[]"));
+  // Daily Gym check-in ("did you go today?") + per-visit cost — domain/membership/checkIn.js.
+  // Deliberately its own small store: never touches memberships[]/bills[]/membershipRelationships.
+  const [gymCheckIns, setGymCheckIns] = useState(()=>JSON.parse(localStorage.getItem("arth_gym_checkins")||"[]"));
+  const [arthHolidays, setArthHolidays] = useState(()=>JSON.parse(localStorage.getItem("arth_holidays")||"[]"));
   // I-5 WP-1: School Fees domain persistence — mirrors insurancePolicies' pattern exactly.
   const [feeSchedules, setFeeSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_schedules")||"[]"));
   const [feePeriods, setFeePeriods] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_periods")||"[]"));
@@ -1037,6 +1042,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   useEffect(()=>safeSetLocalStorage("arth_goals",JSON.stringify(goals)),[goals]);
   useEffect(()=>safeSetLocalStorage("arth_expected_income",JSON.stringify(expectedIncome)),[expectedIncome]);
   useEffect(()=>safeSetLocalStorage("arth_insurance_policies",JSON.stringify(insurancePolicies)),[insurancePolicies]);
+  useEffect(()=>safeSetLocalStorage("arth_gym_checkins",JSON.stringify(gymCheckIns)),[gymCheckIns]);
+  useEffect(()=>safeSetLocalStorage("arth_holidays",JSON.stringify(arthHolidays)),[arthHolidays]);
   useEffect(()=>safeSetLocalStorage("arth_fee_schedules",JSON.stringify(feeSchedules)),[feeSchedules]);
   useEffect(()=>safeSetLocalStorage("arth_fee_periods",JSON.stringify(feePeriods)),[feePeriods]);
   useEffect(()=>safeSetLocalStorage("arth_contributions",JSON.stringify(contributions)),[contributions]);
@@ -8520,6 +8527,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     goals,
     expectedIncome,
     insurancePolicies,
+    gymCheckIns,
+    arthHolidays,
     feeSchedules,
     feePeriods,
     contributions,
@@ -8539,7 +8548,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     budgetCarryForward,
     defaultGroupId,
     hiddenCards:[...hiddenCards],
-  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards]);
+  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -8584,6 +8593,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(Array.isArray(snapshot.goals)) setGoals(snapshot.goals);
     if(Array.isArray(snapshot.expectedIncome)) setExpectedIncome(snapshot.expectedIncome);
     if(Array.isArray(snapshot.insurancePolicies)) setInsurancePolicies(snapshot.insurancePolicies);
+    if(Array.isArray(snapshot.gymCheckIns)) setGymCheckIns(snapshot.gymCheckIns);
+    if(Array.isArray(snapshot.arthHolidays)) setArthHolidays(snapshot.arthHolidays);
     if(Array.isArray(snapshot.feeSchedules)) setFeeSchedules(snapshot.feeSchedules);
     if(Array.isArray(snapshot.feePeriods)) setFeePeriods(snapshot.feePeriods);
     if(Array.isArray(snapshot.contributions)) setContributions(snapshot.contributions);
@@ -9142,7 +9153,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards, pushCloudSnapshot]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
@@ -9591,6 +9602,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {/* Investment reminders (due today + not recorded this month) and Membership expiry
               alerts all folded into Today's Focus (the "bills" card below) - one system, one
               source, not three separate always-visible legacy blocks. */}
+          {/* Daily Gym check-in — "did you go today?" (domain/membership/checkIn.js). Skips
+              itself on a paused (traveling) relationship or a day already marked a holiday;
+              never asks twice in one day. Purely additive — records into its own gymCheckIns[],
+              never touches memberships[]/bills[]/membershipRelationships. */}
+          {(()=>{
+            const pending = getPendingGymCheckIn({ relationships:membershipRelationships, billerAccounts, checkIns:gymCheckIns, holidays:arthHolidays, today:todayStr() });
+            if(!pending) return null;
+            const answer = attended=>setGymCheckIns(prev=>[...prev, recordGymCheckIn({ relationshipId:pending.relationshipId, billerAccountId:pending.billerAccountId, date:todayStr(), attended, genId })]);
+            return (
+              <div style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:16,padding:14,marginBottom:12 }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:10 }}>🏋️ Did you go to {pending.billerName} today?</div>
+                <div style={{ display:"flex",gap:8 }}>
+                  <button onClick={()=>answer(true)} style={{ flex:1,background:T.success,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>✅ Went</button>
+                  <button onClick={()=>answer(false)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>❌ Didn't go</button>
+                  <button onClick={()=>setArthHolidays(prev=>prev.includes(todayStr())?prev:[...prev,todayStr()])} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏖 Holiday</button>
+                </div>
+              </div>
+            );
+          })()}
+
           <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:8 }}>
             <button onClick={()=>setEditingCards(e=>!e)} style={{ background:editingCards?T.accent+"22":"none",border:`1px solid ${editingCards?T.accent:T.border}`,borderRadius:20,padding:"4px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:editingCards?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{editingCards?"✓ Done":"⠿ Arrange"}</button>
           </div>
@@ -18090,6 +18121,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{sym}{fmt(avgMonthlyCost)}</div>
                           <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>AVG MONTHLY COST</div>
                         </div>
+                        {/* Cost per visit — from the daily Gym check-in (domain/membership/
+                            checkIn.js). Only shown once there's at least one logged visit; "no
+                            visits logged yet" is a different fact from "free", never shown as 0. */}
+                        {ba.type==="Gym / Fitness"&&(()=>{
+                          const visits = gymCheckIns.filter(c=>c.billerAccountId===ba.id&&c.attended).length;
+                          if(!visits) return null;
+                          return (
+                            <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+                              <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{sym}{fmt(Math.round(lifetimeSpend/visits))}</div>
+                              <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>COST PER VISIT ({visits})</div>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {hero&&(()=>{
