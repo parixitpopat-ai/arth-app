@@ -56,10 +56,23 @@ export const getPreviousMonthKey = (monthKey = todayStr().slice(0,7)) => {
 
 // Returns the given day-of-month within (year, monthIndex), clamped to that month's actual last
 // day — e.g. day 31 in a 30-day month becomes the 30th, not an overflow into the next month.
-// Used by getCardCycleDates (domain/cards/summaries.js) and getNextDueDate. General-purpose, not
-// domain-specific, so it lives here rather than in a domain module.
+// Used by getCardCycleDates (domain/cards/summaries.js) and computeNextDueDate/computeNextPeriod
+// (domain/bills/periodCalculations.js). General-purpose, not domain-specific, so it lives here
+// rather than in a domain module.
 export const dateAtDay = (year, monthIndex, day) => {
   const safeDay = Math.max(1, Number(day)||1);
   const lastDay = new Date(year, monthIndex + 1, 0).getDate();
   return new Date(year, monthIndex, Math.min(safeDay, lastDay), 12, 0, 0, 0);
+};
+
+// "dateStr + N calendar months", keeping dateStr's own day-of-month, clamped into whichever
+// month/year that lands in via dateAtDay — e.g. 31 Jan + 1 month is 28/29 Feb, never a silent
+// overflow into March. Found needed (and its absence found buggy: raw date.setMonth() overflowing
+// past a short month) in three separate places during a cross-app date-logic audit — Bills'
+// recurring due-date stepping, membership bulk-month validity, and OTT/subscription plan end
+// dates — all now share this one implementation instead of each keeping its own copy.
+export const addMonthsClamped = (dateStr, months) => {
+  if(!dateStr) return dateStr;
+  const d = new Date(dateStr);
+  return toLocalDateStr(dateAtDay(d.getFullYear(), d.getMonth() + Number(months||0), d.getDate()));
 };

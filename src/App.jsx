@@ -17,7 +17,7 @@ const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
 import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY } from "./constants/theme";
-import { todayStr, toLocalDateStr, addDaysToDateStr, dateAtDay, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
+import { todayStr, toLocalDateStr, addDaysToDateStr, addMonthsClamped, dateAtDay, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
 import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
 import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
 import { normalizeVendorText } from "./helpers/textHelpers";
@@ -3893,7 +3893,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const cycleMonthsMap = { monthly:1, quarterly:3, halfyearly:6, annual:12 };
     // Grace days are no longer baked into this date — they're applied separately via
     // getPeriodEffectiveEnd (graceAppliedSeparately below), consistent with the periods-array model.
-    const linkValidUntil = linkValidFrom && linkBulkMonths ? (()=>{ const d=new Date(linkValidFrom); d.setMonth(d.getMonth()+Number(linkBulkMonths)*(cycleMonthsMap[linkCycle]||1)); d.setDate(d.getDate()-1); return d.toISOString().split("T")[0]; })() : "";
+    // Bug fix: setMonth() on a day-31 linkValidFrom overflowed past a short month (e.g. a
+    // quarterly membership starting 31 Oct would land in Feb, not end on 30/31 Jan) — the same
+    // bug class found and fixed for Bills' own recurring dates in this session's date-logic audit.
+    const linkValidUntil = linkValidFrom && linkBulkMonths ? addDaysToDateStr(addMonthsClamped(linkValidFrom, Number(linkBulkMonths)*(cycleMonthsMap[linkCycle]||1)), -1) : "";
     const [imageBase64, setImageBase64] = useState(sourceTxn?.imageBase64 || null);
     const [paymentImageBase64, setPaymentImageBase64] = useState(sourceTxn?.paymentImageBase64 || null);
     const isNative = isNativeSmsAvailable();
@@ -4889,8 +4892,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               const ccAcc = getAcc(accId);
               const stmtDay = Number(ccAcc?.statementDate || dueDayNum || 15);
               const purchaseDate = new Date((date || todayStr()) + "T00:00:00");
-              let cursor = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth(), stmtDay);
-              if(cursor <= purchaseDate) cursor = new Date(purchaseDate.getFullYear(), purchaseDate.getMonth()+1, stmtDay);
+              // dateAtDay clamps stmtDay into whichever month it lands in, instead of letting
+              // Date's day-overflow silently roll a 29th-31st statement day into a later month
+              // (e.g. a card statementDate of 31 landing in February would otherwise become
+              // March) — the same bug class found and fixed in domain/bills/periodCalculations.js
+              // and domain/obligations/expected.js during this session's date-logic audit.
+              let cursor = dateAtDay(purchaseDate.getFullYear(), purchaseDate.getMonth(), stmtDay);
+              // Compare by calendar day, not the raw Date objects — dateAtDay anchors at noon to
+              // dodge DST/midnight edge cases, so a same-day comparison against purchaseDate's
+              // midnight would wrongly read as "after" and skip the intended advance to next month.
+              if(toLocalDateStr(cursor) <= toLocalDateStr(purchaseDate)) cursor = dateAtDay(purchaseDate.getFullYear(), purchaseDate.getMonth()+1, stmtDay);
               const instCatIds = catIds.length ? catIds : (catId ? [catId] : ["financial"]);
               for(let i=0; i<tenureNum; i++){
                 autoInstallments.push({
@@ -4912,7 +4923,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   trackingMode:"none",
                   people:{},
                 });
-                cursor = new Date(cursor.getFullYear(), cursor.getMonth()+1, stmtDay);
+                cursor = dateAtDay(cursor.getFullYear(), cursor.getMonth()+1, stmtDay);
               }
             }
 
@@ -16328,12 +16339,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
     const planMonths = { monthly:1, quarterly:3, annual:12 };
     // Auto-compute end date from start + plan, unless Custom (user sets it directly) or in exact-dates use.
+    // Bug fix: same day-31 setMonth() overflow as the membership bulk-months calc above — an
+    // annual plan starting 31 Jan would have ended 3 Mar the year after, not 30/31 Jan.
     useEffect(()=>{
       if(plan==="custom" || !startsOn) return;
-      const d = new Date(startsOn);
-      d.setMonth(d.getMonth()+planMonths[plan]);
-      d.setDate(d.getDate()-1);
-      setEndsOn(d.toISOString().split("T")[0]);
+      setEndsOn(addDaysToDateStr(addMonthsClamped(startsOn, planMonths[plan]), -1));
       // eslint-disable-next-line react-hooks/exhaustive-deps
     },[plan,startsOn]);
 
@@ -18163,7 +18173,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 // (like the other two) has no partial-payment concept yet.
                 setContributions(prev=>withBillContributionForTxn(prev, { billId:b.id, txnId:billMatchSuggestion.txn.id, amount:matchApplied, txnAmount:Number(billMatchSuggestion.txn.amount||0) }, genId));
                 setTxns(p=>p.map(x=>x.id===billMatchSuggestion.txn.id?{...x,isBillPayment:true,billInvoiceNo:b.invoiceNo||"",paidBillId:b.id,paidBillName:b.name}:x));
-                if(matchBecomesPaid && b.recurring){ const next=new Date(b.dueDate); if(b.frequency==="monthly") next.setMonth(next.getMonth()+1); else if(b.frequency==="quarterly") next.setMonth(next.getMonth()+3); else if(b.frequency==="halfyearly") next.setMonth(next.getMonth()+6); else if(b.frequency==="yearly") next.setFullYear(next.getFullYear()+1); setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:next.toISOString().split("T")[0],paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
+                {/* Bug fix: this used to reimplement Bills' own recurring-date stepping inline
+                    (a 4th copy found in the cross-app date-logic audit), with the same day-31
+                    overflow bug computeNextDueDate was already fixed for. Reusing it here instead. */}
+                if(matchBecomesPaid && b.recurring){ setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:computeNextDueDate(b),paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
                 setBillMatchSuggestion(null);
               }} style={{ ...btnP,flex:2,padding:"8px",background:T.success }}>✅ Yes, mark paid</button>
             </div>

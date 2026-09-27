@@ -29,21 +29,18 @@
 //                         path (genId, name, the billFor.js attribution snapshot, wiring into
 //                         bills[]) — this module has no bills[] setter and never will.
 
+// Date math reuses helpers/dateHelpers.js's dateAtDay/toLocalDateStr — the app's one canonical
+// "clamp a day into whichever month it lands in" and "format a Date as the local YYYY-MM-DD"
+// implementations — rather than this module keeping its own copies (found duplicated, and in one
+// case reintroducing a real bug, during the cross-app date-logic audit; see
+// domain/bills/periodCalculations.js's header for the full story).
+import { dateAtDay, toLocalDateStr } from "../../helpers/dateHelpers.js";
 import { getRelationshipStatusAsOfDate } from "../membership/lifecycle.js";
 import { getRelationshipTarget } from "../membership/relationship.js";
 
 const FREQUENCIES = ["monthly", "quarterly", "halfyearly", "yearly"];
+const MONTHS_TO_ADD = { monthly: 1, quarterly: 3, halfyearly: 6, yearly: 12 };
 
-const stepByFrequency = (date, frequency) => {
-  const d = new Date(date);
-  if (frequency === "monthly") d.setMonth(d.getMonth() + 1);
-  else if (frequency === "quarterly") d.setMonth(d.getMonth() + 3);
-  else if (frequency === "halfyearly") d.setMonth(d.getMonth() + 6);
-  else if (frequency === "yearly") d.setFullYear(d.getFullYear() + 1);
-  return d;
-};
-const daysInMonth = d => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-const toYMD = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const ymdToDate = ymd => {
   const [y, m, dd] = String(ymd).slice(0, 10).split("-").map(Number);
   return new Date(y, m - 1, dd);
@@ -92,27 +89,15 @@ export function setRelationshipSchedule(relationship, { amount, frequency, dueDa
  */
 function firstDueOnOrAfter(fromYMD, dueDay) {
   const base = ymdToDate(fromYMD);
-  const candidate = new Date(base.getFullYear(), base.getMonth(), Math.min(dueDay, daysInMonth(base)));
-  if (candidate < base) {
-    // Advance from the 1st, never from a day-31 date — setMonth() on day 31 rolls into the
-    // month AFTER next when the immediate next month is short (e.g. Jan 31 -> "Mar 3"), which
-    // would then clamp against the wrong month entirely.
-    const firstOfNext = new Date(candidate.getFullYear(), candidate.getMonth() + 1, 1);
-    firstOfNext.setDate(Math.min(dueDay, daysInMonth(firstOfNext)));
-    return toYMD(firstOfNext);
-  }
-  return toYMD(candidate);
+  const candidate = dateAtDay(base.getFullYear(), base.getMonth(), dueDay);
+  if (candidate < base) return toLocalDateStr(dateAtDay(base.getFullYear(), base.getMonth() + 1, dueDay));
+  return toLocalDateStr(candidate);
 }
 
 /** One frequency step past an existing Bill's due date — ADR-039 §4/§5's "the next cycle". */
 function nextDueAfter(lastBillDueYMD, frequency, dueDay) {
   const base = ymdToDate(lastBillDueYMD);
-  // Step from the 1st of the month, not from the actual day-of-month — the same day-31 overflow
-  // hazard as above (e.g. stepping "monthly" from Jan 31 must land in Feb, not roll into March).
-  const firstOfBase = new Date(base.getFullYear(), base.getMonth(), 1);
-  const next = stepByFrequency(firstOfBase, frequency);
-  next.setDate(Math.min(dueDay, daysInMonth(next)));
-  return toYMD(next);
+  return toLocalDateStr(dateAtDay(base.getFullYear(), base.getMonth() + MONTHS_TO_ADD[frequency], dueDay));
 }
 
 /**
@@ -128,7 +113,7 @@ function nextDueAfter(lastBillDueYMD, frequency, dueDay) {
 export function getExpectedForRelationship(relationship, bills, refDate = new Date()) {
   if (!relationship || relationship.billingMode !== "regular") return null;
   if (!hasCompleteSchedule(relationship)) return null;
-  const refYMD = toYMD(refDate);
+  const refYMD = toLocalDateStr(refDate);
   if (getRelationshipStatusAsOfDate(relationship.statusHistory, refYMD) !== "active") return null;
 
   const target = getRelationshipTarget(relationship);
