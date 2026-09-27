@@ -8,17 +8,39 @@
 // re-pointed at survivorId. The one genuine subtlety: if BOTH accounts already have an active
 // Financial Relationship to the exact same target (person or group) — which is precisely how
 // this duplicate happens — merging them naively would leave the survivor with two active
-// relationships to the same target, i.e. the same bug in a new shape. Instead, the duplicate's
-// relationship is dropped and its membership payment history is re-pointed at the survivor's
-// existing relationship for that target, so history is kept but ownership converges onto one row.
-// A duplicate relationship to a DIFFERENT target than anything the survivor already has is kept,
-// re-pointed onto the survivor — the 1:N model already supports a Provider having several.
+// relationships to the same target, i.e. the same bug in a new shape. The two relationships
+// converge onto the survivor's row, but neither one's OWN history is discarded: their
+// statusHistory arrays (pause/resume/end timelines — real facts about when a membership was
+// actually paused) are merged chronologically into one combined timeline on the surviving row,
+// and its current status is derived from that merged timeline's latest entry — not just
+// whichever relationship happened to be picked as the survivor. Membership payment history is
+// re-pointed at the (now history-merged) surviving relationship. A duplicate relationship to a
+// DIFFERENT target than anything the survivor already has is kept, re-pointed onto the survivor
+// unchanged — the 1:N model already supports a Provider having several.
 //
 // Pure and read-only: returns a new state slice, writes nothing itself. The caller applies it.
 
 import { getRelationshipTarget } from "../membership/relationship.js";
 
 const sameId = (a, b) => a != null && b != null && String(a) === String(b);
+
+/**
+ * Combine two relationships' statusHistory into one chronological timeline — every entry from
+ * both, sorted by (effectiveDate, timestamp), the same ordering lifecycle.js's own
+ * getRelationshipStatusAsOfDate relies on. Exact duplicate entries (can happen if, implausibly,
+ * both rows were touched by the same action) collapse to one.
+ */
+function mergeStatusHistory(a, b) {
+  const combined = [...(a || []), ...(b || [])];
+  const seen = new Set();
+  const deduped = combined.filter(h => {
+    const key = `${h.status}|${h.effectiveDate}|${h.timestamp}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return deduped.sort((x, y) => String(x.effectiveDate || "").localeCompare(String(y.effectiveDate || "")) || (x.timestamp || 0) - (y.timestamp || 0));
+}
 
 /**
  * @param {Object} state - { billerAccounts, bills, memberships, membershipRelationships, txns, feeSchedules }
@@ -56,8 +78,22 @@ export function mergeBillerAccounts(state, survivorId, duplicateId) {
     }
   }
 
+  // Relationships that converged (survivorRel.id -> the duplicate relationship merged into it):
+  // merge their statusHistory rather than silently keeping only the survivor's.
+  const convergedFrom = new Map();
+  for (const dupRel of duplicateRelationships) {
+    const targetId = relationshipIdMap.get(dupRel.id);
+    if (targetId !== dupRel.id) convergedFrom.set(targetId, dupRel);
+  }
+
   const nextMembershipRelationships = [
-    ...membershipRelationships.filter(r => !sameId(r.billerAccountId, duplicateId)),
+    ...membershipRelationships.filter(r => !sameId(r.billerAccountId, duplicateId)).map(r => {
+      const absorbedDupRel = convergedFrom.get(r.id);
+      if (!absorbedDupRel) return r;
+      const statusHistory = mergeStatusHistory(r.statusHistory, absorbedDupRel.statusHistory);
+      const latest = statusHistory[statusHistory.length - 1];
+      return { ...r, statusHistory, status: latest ? latest.status : r.status };
+    }),
     ...keptDuplicateRelationships,
   ];
 
