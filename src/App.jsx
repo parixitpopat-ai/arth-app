@@ -65,6 +65,7 @@ import PersonSetupSheet from "./components/people/PersonSetupSheet";
 import AddGroupSheet from "./components/people/AddGroupSheet";
 import { FinancialRelationships, CapabilityTiles, PinnedBill } from "./components/people/RelationshipBlocks";
 import AddRelationshipSheet from "./components/people/AddRelationshipSheet";
+import RelationshipStatusPanel from "./components/people/RelationshipStatusPanel";
 import { getAttributedRelationships, getOpenBillBadge, summarizeRelationships } from "./domain/relationships/attributedAccounts";
 import { relationshipSummaryText } from "./components/people/relationshipText";
 import { getPersonCapabilityTiles } from "./domain/person/capabilityTiles";
@@ -1576,6 +1577,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(ba?.attributeType==="house") return "House";
     return "Unassigned";
   },[people, groups, vehicles]);
+  // Arth 2.0 IA step 5 — a Financial Relationship's target as display text, whatever generation
+  // of row it is (getRelationshipTarget handles a pre-generalization, personId-only row).
+  const getRelationshipTargetLabel = useCallback(r=>{
+    const t = getRelationshipTarget(r);
+    if(t.targetType==="group") return groups.find(g=>String(g.id)===String(t.targetId))?.name || "Unknown group";
+    return t.targetId==="__me__" ? "Me" : (people.find(p=>String(p.id)===String(t.targetId))?.name || "Unknown person");
+  },[people, groups]);
   const getGroup = useCallback(id=>groups.find(g=>g.id===id)||null,[groups]);
   const getRefundCandidates = useCallback((refundTxn, excludeRefundId = null)=>{
     if(!refundTxn || refundTxn.type!=="settlement_in" || !refundTxn.isRefund) return [];
@@ -17656,6 +17664,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   </div>
                   <button onClick={()=>setActiveBillerForAction(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>x</button>
                 </div>
+                {/* Arth 2.0 IA step 5 — every Financial Relationship this Provider has (1:N,
+                    step 1-4), each with its own status and Pause/Resume/End. Generalizes the
+                    action UI that used to exist only inside MembershipDetailModal. */}
+                {membershipRelationships.filter(r=>String(r.billerAccountId)===String(ba.id)).map(r=>(
+                  <RelationshipStatusPanel key={r.id} T={T} relationship={r} targetLabel={getRelationshipTargetLabel(r)}
+                    onPause={(reason, effectiveDate)=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?pauseRelationship(x, reason, effectiveDate):x))}
+                    onResume={effectiveDate=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?resumeRelationship(x, effectiveDate):x))}
+                    onEnd={(reason, effectiveDate)=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?endRelationship(x, reason, effectiveDate):x))}/>
+                ))}
                 {/* Edit / Delete biller account — moved right under the header, not buried below
                     Analytics/History/Documents, so it's reachable without scrolling. */}
                 <div style={{ display:"flex",gap:8,marginBottom:16 }}>
