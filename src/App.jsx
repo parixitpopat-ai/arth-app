@@ -64,6 +64,7 @@ import AddPersonSheet from "./components/people/AddPersonSheet";
 import PersonSetupSheet from "./components/people/PersonSetupSheet";
 import AddGroupSheet from "./components/people/AddGroupSheet";
 import { FinancialRelationships, CapabilityTiles, PinnedBill } from "./components/people/RelationshipBlocks";
+import AddRelationshipSheet from "./components/people/AddRelationshipSheet";
 import { getAttributedRelationships, getOpenBillBadge, summarizeRelationships } from "./domain/relationships/attributedAccounts";
 import { relationshipSummaryText } from "./components/people/relationshipText";
 import { getPersonCapabilityTiles } from "./domain/person/capabilityTiles";
@@ -1291,6 +1292,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [subView, setSubView] = useState("people");
   const [peopleSheet, setPeopleSheet] = useState(null); // {kind:"addPerson"} | {kind:"setup",person} | {kind:"addGroup"}
   const [preselectedAttribution, setPreselectedAttribution] = useState(null); // {type:"person"|"group", id}
+  // Arth 2.0 IA §6 — "+ Add relationship" first shows this instead of jumping straight to the
+  // new-biller form: {targetType, targetId, targetLabel} | null.
+  const [showAddRelationship, setShowAddRelationship] = useState(null);
   const [groupViewMode, setGroupViewMode] = useState("overall");
   const [showGroupOwesBreakdown, setShowGroupOwesBreakdown] = useState(false);
   const [groupSpendFilter, setGroupSpendFilter] = useState(null);
@@ -1550,6 +1554,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(bill?.forType==="group") return groups.find(g=>String(g.id)===String(bill.forId))?.name || "Unassigned";
     return "Unassigned";
   },[people, groups]);
+  // Arth 2.0 IA §6 — a biller account's current owner as display text, so reassigning it in
+  // AddRelationshipSheet is never a surprise ("Currently: Rohan" / "Currently: Goa Household" /
+  // "Currently: Unassigned"). Mirrors getBillForLabel's fallback rules but reads the biller
+  // account's own attributeType/attributedTo (D-1's one-owner model), not a Bill's snapshot.
+  const getBillerOwnerLabel = useCallback(ba=>{
+    if(ba?.attributeType==="person") return ba.attributedTo==="__me__" ? "Me" : (people.find(p=>String(p.id)===String(ba.attributedTo))?.name || "Unassigned");
+    if(ba?.attributeType==="group") return groups.find(g=>String(g.id)===String(ba.attributedTo))?.name || "Unassigned";
+    if(ba?.attributeType==="vehicle") return vehicles.find(v=>String(v.id)===String(ba.attributedTo))?.name || "Unassigned";
+    if(ba?.attributeType==="house") return "House";
+    return "Unassigned";
+  },[people, groups, vehicles]);
   const getGroup = useCallback(id=>groups.find(g=>g.id===id)||null,[groups]);
   const getRefundCandidates = useCallback((refundTxn, excludeRefundId = null)=>{
     if(!refundTxn || refundTxn.type!=="settlement_in" || !refundTxn.isRefund) return [];
@@ -10549,7 +10564,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               return <>
                 <FinancialRelationships T={T} rows={rows} sym={sym} fmt={fmt}
                   onOpen={ba=>setActiveBillerForAction(ba)}
-                  onAdd={()=>{ setPreselectedAttribution({ type:"person", id:p.id }); setShowAddBillerAccount(true); }}/>
+                  onAdd={()=>setShowAddRelationship({ targetType:"person", targetId:p.id, targetLabel:p.name })}/>
                 <CapabilityTiles T={T} tiles={tiles} onManage={()=>setEditingPerson(p)}/>
               </>;
             })()}
@@ -11350,7 +11365,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   {pinned ? <PinnedBill T={T} bill={pinned.b} forName={g.name} days={pinned.badge.days} sym={sym} fmt={fmt} onOpen={()=>{ setSelectedGroup(null); setTab("bills"); setShowSettings(false); }}/> : null}
                   <FinancialRelationships T={T} rows={rows} sym={sym} fmt={fmt}
                     onOpen={ba=>setActiveBillerForAction(ba)}
-                    onAdd={()=>{ setPreselectedAttribution({ type:"group", id:g.id }); setShowAddBillerAccount(true); }}/>
+                    onAdd={()=>setShowAddRelationship({ targetType:"group", targetId:g.id, targetLabel:g.name })}/>
                   <CapabilityTiles T={T} tiles={tiles} onManage={startEditingGroup}/>
                 </div>
               );
@@ -17442,6 +17457,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {showNavDrawer&&<NavDrawer onClose={()=>setShowNavDrawer(false)}/>}
         {confirmDialog&&<ConfirmDialog message={confirmDialog.message} onConfirm={confirmDialog.onConfirm} onClose={()=>setConfirmDialog(null)} variant={confirmDialog.variant||(confirmDialog.onConfirm?"danger":"default")} T={T}/>}
         {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); setPreselectedBillerProvider(""); setPreselectedBillerId(""); setPreselectedAttribution(null); }}/>}
+        {/* Arth 2.0 IA §6 — reuse an existing Provider/Biller instead of only creating a new
+            one. Scope for this pass (locked): one Provider still has one owner at a time —
+            selecting an existing biller reassigns its Attributed To rather than creating a
+            duplicate biller account for the same provider. */}
+        {showAddRelationship&&<AddRelationshipSheet T={T} billerAccounts={billerAccounts}
+          targetLabel={showAddRelationship.targetLabel} currentLabel={getBillerOwnerLabel}
+          onClose={()=>setShowAddRelationship(null)}
+          onSelectExisting={ba=>{
+            const target = showAddRelationship;
+            const alreadyHere = ba.attributeType===target.targetType && String(ba.attributedTo)===String(target.targetId);
+            if(alreadyHere){ setShowAddRelationship(null); return; }
+            const hasOtherOwner = (ba.attributeType==="person" || ba.attributeType==="group") && ba.attributedTo;
+            if(hasOtherOwner && !window.confirm(`${ba.name} is currently attributed to ${getBillerOwnerLabel(ba)}. Move it to ${target.targetLabel} instead?`)) return;
+            setBillerAccounts(prev=>prev.map(x=>x.id===ba.id ? { ...x, attributeType:target.targetType, attributedTo:target.targetId } : x));
+            setShowAddRelationship(null);
+          }}
+          onCreateNew={()=>{ const target=showAddRelationship; setShowAddRelationship(null); setPreselectedAttribution({ type:target.targetType, id:target.targetId }); setShowAddBillerAccount(true); }}/>}
         {categoryAccountsView&&(()=>{
           const type = categoryAccountsView;
           const billersOfType = billers.filter(b=>b.type===type);
@@ -18134,7 +18166,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           return <PersonSetupSheet T={T} person={rec} modules={PERSON_MODULES}
             onSkip={()=>setPeopleSheet(null)}
             onOpen={setup=>{ const next = apply(setup); setPeopleSheet(null); setSubView("people"); setSelectedPerson(next); }}
-            onAddRelationship={setup=>{ apply(setup); setPeopleSheet(null); setPreselectedAttribution({ type:"person", id:rec.id }); setShowAddBillerAccount(true); }}/>;
+            onAddRelationship={setup=>{ apply(setup); setPeopleSheet(null); setShowAddRelationship({ targetType:"person", targetId:rec.id, targetLabel:rec.name }); }}/>;
         })()}
         {peopleSheet?.kind==="addGroup"&&<AddGroupSheet T={T} me={people.find(p=>p.isMe)||ME} people={people.filter(p=>!p.isMe && !isPersonArchived(p))} groupTypes={GROUP_TYPES}
           onClose={()=>setPeopleSheet(null)}
