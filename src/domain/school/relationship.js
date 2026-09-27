@@ -3,8 +3,18 @@
 // The persistent School relationship: Person -> School. Built per WP-C2
 // (ARTH-003), directly on top of WP-C1 Step 1's finding: lifecycle.js is
 // already fully generic, so School gets its own persisted shape and its
-// own thin module here, sharing lifecycle.js's create/end machinery
-// without touching or knowing anything about membershipRelationships[].
+// own thin module here, sharing lifecycle.js's create/end machinery.
+//
+// Arth 2.0 IA consolidation — this module's row shape was ALREADY exactly a
+// canonical, pre-generalization membershipRelationships[] row (thanks to the
+// PPL-006 convergence below), so create/end/isSchoolRelationshipCurrent/
+// getCurrentSchoolRelationship/getHistoricalSchoolRelationships stay
+// completely unchanged — they operate on rows, not on which array those rows
+// live in. What changed is WHERE the rows are stored: App.jsx's
+// schoolRelationships is now a derived read of the one canonical
+// membershipRelationships[] store (getSchoolRelationships below), not its own
+// separate localStorage/state. See migrateSchoolRelationshipsIntoCanonicalStore
+// at the bottom of this file for the one-time move of existing data.
 //
 // PPL-006 (2026-09-02) — School identity revision: this module previously
 // used a standalone, opaque `schoolId` field. Per PPL-006 Decision D/E/F,
@@ -135,4 +145,45 @@ export function getCurrentSchoolRelationship(relationships, personId, date) {
 export function getHistoricalSchoolRelationships(relationships, personId, date) {
   const mine = (relationships || []).filter(r => r.personId === personId);
   return mine.filter(r => !isSchoolRelationshipCurrent(r.statusHistory, date));
+}
+
+// --- Arth 2.0 IA consolidation: School as a canonical-store slice ---------
+//
+// This was the third, independent relationship store the mapping doc found
+// (billerAccount.attributeType/attributedTo and membershipRelationships[]
+// were the other two). Its row shape needed no reshaping to become a valid
+// canonical row — only relocating storage.
+
+/**
+ * Which biller accounts are School Fees ones — the same billerAccountId+type
+ * join every existing School call site already uses (there is deliberately
+ * no separate "kind" field on a relationship row — identity is
+ * billerAccountId+type, nothing else, per PPL-006).
+ */
+const isSchoolBillerAccountId = (billerAccountId, billerAccounts) =>
+  (billerAccounts || []).some(ba => String(ba.id) === String(billerAccountId) && ba.type === "School Fees");
+
+/**
+ * The School slice of the canonical store — every relationship whose
+ * billerAccountId is a School Fees biller account. Read-only: a plain
+ * filter over the canonical store, not a stored duplicate of it.
+ */
+export function getSchoolRelationships(canonicalRelationships, billerAccounts) {
+  return (canonicalRelationships || []).filter(r => isSchoolBillerAccountId(r?.billerAccountId, billerAccounts));
+}
+
+/**
+ * One-time, idempotent, non-destructive migration: every row from the old,
+ * separate schoolRelationships[] store that isn't already present (by id) in
+ * the canonical store gets added, completely unchanged — same id,
+ * billerAccountId, personId, status, statusHistory, createdAt. Nothing is
+ * removed or rewritten. Returns the same `canonicalRelationships` reference
+ * when there is nothing left to migrate, so a caller can skip the state
+ * update.
+ */
+export function migrateSchoolRelationshipsIntoCanonicalStore(legacySchoolRelationships, canonicalRelationships) {
+  const canonical = canonicalRelationships || [];
+  const existingIds = new Set(canonical.map(r => String(r.id)));
+  const missing = (legacySchoolRelationships || []).filter(r => r && !existingIds.has(String(r.id)));
+  return missing.length ? [...canonical, ...missing] : canonicalRelationships;
 }

@@ -6,6 +6,8 @@ import {
   isSchoolRelationshipCurrent,
   getCurrentSchoolRelationship,
   getHistoricalSchoolRelationships,
+  getSchoolRelationships,
+  migrateSchoolRelationshipsIntoCanonicalStore,
 } from "./relationship.js";
 import { endMembership } from "../membership/lifecycle.js";
 
@@ -158,4 +160,52 @@ test("this module never creates, edits, or archives a Person record — it has n
     const src = fn.toString();
     assert.equal(/setPeople|people\[/.test(src), false, `${name} should never reference a people[] array or setter`);
   }
+});
+
+// --- Arth 2.0 IA consolidation: canonical-store slice + migration -----------
+
+test("getSchoolRelationships returns only relationships whose billerAccountId is a School Fees biller account", () => {
+  const billerAccounts = [
+    { id: "dps", type: "School Fees" },
+    { id: "gym1", type: "Gym / Fitness" },
+  ];
+  const canonical = [
+    { id: "r1", billerAccountId: "dps", personId: "vyom_id", status: "active" },
+    { id: "r2", billerAccountId: "gym1", personId: "vyom_id", status: "active" },
+  ];
+  const rows = getSchoolRelationships(canonical, billerAccounts);
+  assert.deepEqual(rows.map(r => r.id), ["r1"]);
+});
+
+test("getSchoolRelationships returns an empty array, not an error, when nothing matches", () => {
+  assert.deepEqual(getSchoolRelationships([], []), []);
+  assert.deepEqual(getSchoolRelationships(undefined, undefined), []);
+});
+
+test("migrateSchoolRelationshipsIntoCanonicalStore adds legacy rows unchanged, by id, without touching existing canonical rows", () => {
+  const legacy = [
+    { id: "srel_1", billerAccountId: "dps", personId: "vyom_id", status: "active", statusHistory: [{ status: "active", effectiveDate: "2025-06-01", timestamp: 1 }], createdAt: 1 },
+  ];
+  const canonical = [{ id: "other", billerAccountId: "gym1", personId: "vyom_id", status: "active" }];
+  const result = migrateSchoolRelationshipsIntoCanonicalStore(legacy, canonical);
+  assert.equal(result.length, 2);
+  assert.equal(result[0], canonical[0], "the existing canonical row is the exact same reference");
+  assert.deepEqual(result[1], legacy[0]);
+});
+
+test("migrateSchoolRelationshipsIntoCanonicalStore is idempotent: a legacy row already present (by id) is skipped, and the same array reference is returned when nothing changed", () => {
+  const legacy = [{ id: "srel_1", billerAccountId: "dps", personId: "vyom_id", status: "ended" }];
+  const canonical = [{ id: "srel_1", billerAccountId: "dps", personId: "vyom_id", status: "ended" }];
+  const result = migrateSchoolRelationshipsIntoCanonicalStore(legacy, canonical);
+  assert.equal(result, canonical);
+});
+
+test("migrateSchoolRelationshipsIntoCanonicalStore never rewrites an existing canonical row even if the legacy row with the same id differs", () => {
+  // Non-destructive: if a row with this id already exists canonically, the legacy copy is
+  // ignored entirely rather than overwriting it — the canonical store already won.
+  const legacy = [{ id: "srel_1", billerAccountId: "dps", personId: "vyom_id", status: "active" }];
+  const canonical = [{ id: "srel_1", billerAccountId: "dps", personId: "vyom_id", status: "ended" }];
+  const result = migrateSchoolRelationshipsIntoCanonicalStore(legacy, canonical);
+  assert.equal(result, canonical);
+  assert.equal(result[0].status, "ended");
 });

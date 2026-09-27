@@ -74,7 +74,7 @@ import { getGroupReminders } from "./domain/group/reminders";
 import { getBillsFor } from "./domain/bills/billFor";
 import GroupSettingsEditor from "./components/people/GroupSettingsEditor";
 import { PersonProfileScreen } from "./screens/PersonProfileScreen";
-import { isSchoolRelationshipCurrent } from "./domain/school/relationship";
+import { isSchoolRelationshipCurrent, getSchoolRelationships, migrateSchoolRelationshipsIntoCanonicalStore } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { getCommitments } from "./domain/bills/commitments";
 import { remainingShare } from "./domain/shared/remainingShare";
@@ -947,7 +947,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // at all (personId/billerAccountId both null) whenever "Not linked to a
   // saved person" is chosen — the default, unpenalized option in WP-4's
   // picker, not a degraded fallback.
-  const [schoolRelationships, setSchoolRelationships] = useState(()=>JSON.parse(localStorage.getItem("arth_school_relationships")||"[]"));
+  // Arth 2.0 IA — School relationship consolidation (the prerequisite before Obligation):
+  // schoolRelationships is no longer its own store. It's a read-only slice of the one canonical
+  // Financial Relationship store (membershipRelationships[]) — every relationship whose
+  // billerAccountId is a School Fees biller account. setSchoolRelationships is a thin compatibility
+  // wrapper so every existing call site (functional updater or a direct array, e.g. the cloud
+  // snapshot restore) keeps working unchanged: it merges the given school slice back into
+  // membershipRelationships, leaving every non-school relationship untouched. See
+  // domain/school/relationship.js's header for what did and didn't need to change.
+  const schoolRelationships = useMemo(()=>getSchoolRelationships(membershipRelationships, billerAccounts), [membershipRelationships, billerAccounts]);
+  const setSchoolRelationships = useCallback(updater=>{
+    setMembershipRelationships(prev=>{
+      const isSchool = r=>billerAccounts.some(ba=>String(ba.id)===String(r?.billerAccountId) && ba.type==="School Fees");
+      const currentSlice = prev.filter(isSchool);
+      const nonSchool = prev.filter(r=>!isSchool(r));
+      const nextSlice = typeof updater==="function" ? updater(currentSlice) : (updater||[]);
+      return [...nonSchool, ...nextSlice];
+    });
+  },[billerAccounts]);
   const [feePayments, setFeePayments] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_payments")||"[]"));
   const [showAddMembership, setShowAddMembership] = useState(false);
   const [editingMembership, setEditingMembership] = useState(null);
@@ -1114,7 +1131,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   },[accounts, billers, billerAccounts]);
   useEffect(()=>safeSetLocalStorage("arth_memberships",JSON.stringify(memberships)),[memberships]);
   useEffect(()=>safeSetLocalStorage("arth_membership_relationships",JSON.stringify(membershipRelationships)),[membershipRelationships]);
-  useEffect(()=>safeSetLocalStorage("arth_school_relationships",JSON.stringify(schoolRelationships)),[schoolRelationships]);
+  // Arth 2.0 IA — schoolRelationships is now derived (see its declaration above), so it has no
+  // separate localStorage key to write; it persists via membershipRelationships' own effect above.
+  // This one-time, idempotent migration instead reads the OLD key directly (arth_school_relationships,
+  // never written to again after this) and merges any not-yet-migrated rows into the canonical
+  // store, completely unchanged (domain/school/relationship.js's migrateSchoolRelationshipsIntoCanonicalStore).
+  // Depends on membershipRelationships, not `[]`, for the same reason the sibling migrations below
+  // do: applyCloudSnapshot's setMembershipRelationships can still arrive after this first runs.
+  useEffect(()=>{
+    let legacy = [];
+    try{ legacy = JSON.parse(localStorage.getItem("arth_school_relationships")||"[]"); }catch{ legacy = []; }
+    if(!legacy.length) return;
+    const next = migrateSchoolRelationshipsIntoCanonicalStore(legacy, membershipRelationships);
+    if(next!==membershipRelationships) setMembershipRelationships(next);
+  },[membershipRelationships]);
   // Backfill for payment records that predate the relationship entity, not one-time — same bug
   // class as the Credit Card Biller reconciliation (App.jsx's `[]`-gated migrations run once at
   // mount, before applyCloudSnapshot's async setMemberships/setMembershipRelationships land, and
@@ -1137,8 +1167,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // migrateBillerAccountAttributions in src/domain/membership/relationship.js for exactly what
   // this does and doesn't fabricate. Non-destructive: billerAccounts are read, never written, by
   // this effect — attributeType/attributedTo stays the legacy Bill-For bridge (billFor.js).
+  //
+  // School Fees biller accounts are excluded here: they also keep attributeType/attributedTo in
+  // sync (for the same Bill-For bridge), but their OWN relationship is exclusively created/migrated
+  // by School's dedicated path (migrateSchoolRelationshipsIntoCanonicalStore, createSchoolRelationship,
+  // attemptSchoolAttributionChange). Without this exclusion, a School biller with no
+  // schoolRelationships row yet on this render (a real race on first load, before the School
+  // migration effect has run) would get a second, generic relationship created for the exact same
+  // pairing — a duplicate this effect must never produce.
   useEffect(()=>{
-    const next = migrateBillerAccountAttributions(billerAccounts, membershipRelationships, genId);
+    const next = migrateBillerAccountAttributions(billerAccounts.filter(ba=>ba?.type!=="School Fees"), membershipRelationships, genId);
     if(next!==membershipRelationships) setMembershipRelationships(next);
   },[billerAccounts, membershipRelationships]);
   // WP-5 self-sentinel data correction — fixes any existing records (created before the
@@ -17666,8 +17704,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
                 {/* Arth 2.0 IA step 5 — every Financial Relationship this Provider has (1:N,
                     step 1-4), each with its own status and Pause/Resume/End. Generalizes the
-                    action UI that used to exist only inside MembershipDetailModal. */}
-                {membershipRelationships.filter(r=>String(r.billerAccountId)===String(ba.id)).map(r=>(
+                    action UI that used to exist only inside MembershipDetailModal. School Fees
+                    relationships are deliberately excluded here: they're now part of this same
+                    canonical store (the School consolidation), but School product rules have no
+                    Pause — only ongoing or ended — and School's own screens already own its
+                    relationship lifecycle presentation. Showing this generic panel for a School
+                    biller would silently add a capability that was never there. */}
+                {ba.type!=="School Fees"&&membershipRelationships.filter(r=>String(r.billerAccountId)===String(ba.id)).map(r=>(
                   <RelationshipStatusPanel key={r.id} T={T} relationship={r} targetLabel={getRelationshipTargetLabel(r)}
                     onPause={(reason, effectiveDate)=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?pauseRelationship(x, reason, effectiveDate):x))}
                     onResume={effectiveDate=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?resumeRelationship(x, effectiveDate):x))}
