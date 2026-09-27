@@ -29,6 +29,18 @@ test("doesn't ask for a non-Gym relationship type", () => {
   assert.equal(getPendingGymCheckIn({ relationships, billerAccounts: otherAccounts, checkIns: [], holidays: [], today: "2026-09-27" }), null);
 });
 
+test("reported bug: account's own name is just a nickname to tell two accounts apart (\"Parixit\") — the prompt uses the real gym shell's name instead", () => {
+  const nicknamedAccounts = [{ id: "ba1", type: "Gym / Fitness", name: "Parixit", billerId: "shell1" }];
+  const billers = [{ id: "shell1", name: "Genesis Calisthenics Park" }];
+  const pending = getPendingGymCheckIn({ relationships, billerAccounts: nicknamedAccounts, billers, checkIns: [], holidays: [], today: "2026-09-27" });
+  assert.equal(pending.billerName, "Genesis Calisthenics Park", "not the account nickname \"Parixit\"");
+});
+
+test("no biller shell linked: falls back to the account's own name", () => {
+  const pending = getPendingGymCheckIn({ relationships, billerAccounts, billers: [], checkIns: [], holidays: [], today: "2026-09-27" });
+  assert.equal(pending.billerName, "Genesis Calisthenics Park");
+});
+
 test("recordGymCheckIn builds a plain record", () => {
   const rec = recordGymCheckIn({ relationshipId: "rel1", billerAccountId: "ba1", date: "2026-09-27", attended: true, genId: () => "ck1" });
   assert.equal(rec.id, "ck1");

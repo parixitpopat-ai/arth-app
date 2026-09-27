@@ -16,12 +16,16 @@ const GYM_TYPE = "Gym / Fitness";
  * @param {Object} params
  * @param {Array} params.relationships - membershipRelationships[]
  * @param {Array} params.billerAccounts
+ * @param {Array} params.billers - biller shells (the real "Genesis Calisthenics Park" etc.); a
+ *   Biller Account's own `name` is often just a nickname the user gave it to tell accounts apart
+ *   (e.g. "Parixit" or "Nidhi Genesis" for two people's memberships at the same gym), so asking
+ *   "did you go to Parixit today?" reads as nonsense — the shell's real name is what this is for.
  * @param {Array} params.checkIns - gymCheckIns[]: {relationshipId, date, attended}
  * @param {Array} params.holidays - "YYYY-MM-DD" strings the user has marked
  * @param {string} params.today - "YYYY-MM-DD"
  * @returns {{relationshipId:string, billerAccountId:string, billerName:string}|null}
  */
-export function getPendingGymCheckIn({ relationships, billerAccounts, checkIns, holidays, today }) {
+export function getPendingGymCheckIn({ relationships, billerAccounts, billers, checkIns, holidays, today }) {
   if ((holidays || []).includes(today)) return null;
   const gymAccountIds = new Set((billerAccounts || []).filter(ba => ba.type === GYM_TYPE).map(ba => ba.id));
   if (!gymAccountIds.size) return null;
@@ -36,7 +40,8 @@ export function getPendingGymCheckIn({ relationships, billerAccounts, checkIns, 
   if (!pending) return null;
 
   const ba = (billerAccounts || []).find(x => x.id === pending.billerAccountId);
-  return { relationshipId: pending.id, billerAccountId: pending.billerAccountId, billerName: ba?.name || "Gym" };
+  const shell = ba?.billerId ? (billers || []).find(x => x.id === ba.billerId) : null;
+  return { relationshipId: pending.id, billerAccountId: pending.billerAccountId, billerName: shell?.name || ba?.name || "Gym" };
 }
 
 /** A new gymCheckIns[] record for one answer. `attended` is true/false; holidays are recorded via
