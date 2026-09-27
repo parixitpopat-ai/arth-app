@@ -6,6 +6,9 @@ import {
   correctSelfSentinel,
   getRelationshipStatusAsOfDate,
   isDateActiveMembershipCoverage,
+  createRelationship,
+  getRelationshipTarget,
+  migrateBillerAccountAttributions,
 } from "./relationship.js";
 import {
   getRelationshipStatusAsOfDate as getRelationshipStatusAsOfDateFromLifecycle,
@@ -150,4 +153,77 @@ test("WP-C1 req 3: behavior is identical to the pre-move implementation across t
   // Before the relationship existed at all.
   assert.equal(getRelationshipStatusAsOfDate(statusHistory, "2025-01-01"), null);
   assert.equal(isDateActiveMembershipCoverage("2025-01-01", statusHistory), false);
+});
+
+// --- Arth 2.0 IA: the canonical, generalized Financial Relationship ------
+
+test("createRelationship builds a person relationship with personId mirrored for legacy readers", () => {
+  const r = createRelationship({ billerAccountId: "ba1", targetType: "person", targetId: "p1", startDate: "2026-01-01", genId });
+  assert.equal(r.billerAccountId, "ba1");
+  assert.equal(r.targetType, "person");
+  assert.equal(r.targetId, "p1");
+  assert.equal(r.personId, "p1");
+  assert.equal(r.status, "active");
+  assert.equal(r.statusHistory.length, 1);
+});
+
+test("createRelationship builds a group relationship with personId left null (never a fabricated group-as-person id)", () => {
+  const r = createRelationship({ billerAccountId: "ba1", targetType: "group", targetId: "g1", startDate: "2026-01-01", genId });
+  assert.equal(r.targetType, "group");
+  assert.equal(r.targetId, "g1");
+  assert.equal(r.personId, null);
+});
+
+test("createRelationship rejects a bad targetType rather than silently defaulting", () => {
+  assert.throws(() => createRelationship({ billerAccountId: "ba1", targetType: "vehicle", targetId: "v1", startDate: "2026-01-01", genId }));
+});
+
+test("createMembershipRelationship still throws its own message when personId is missing (unchanged external behavior)", () => {
+  assert.throws(() => createMembershipRelationship({ billerAccountId: "ba1", startDate: "2026-01-01", genId }), /personId is required/);
+});
+
+test("getRelationshipTarget reads a generalized row directly, and a pre-generalization row (personId only) as targetType person", () => {
+  assert.deepEqual(getRelationshipTarget({ targetType: "group", targetId: "g1", personId: null }), { targetType: "group", targetId: "g1" });
+  assert.deepEqual(getRelationshipTarget({ personId: "p1" }), { targetType: "person", targetId: "p1" });
+});
+
+test("migrateBillerAccountAttributions creates one active relationship per attributed billerAccount, house/vehicle/unset skipped", () => {
+  const billerAccounts = [
+    { id: "ba1", attributeType: "person", attributedTo: "p1", createdAt: Date.UTC(2026, 0, 15) },
+    { id: "ba2", attributeType: "group", attributedTo: "g1", createdAt: Date.UTC(2026, 1, 1) },
+    { id: "ba3", attributeType: "house", attributedTo: "" },
+    { id: "ba4", attributeType: "person", attributedTo: "" }, // no real target — skipped
+  ];
+  const result = migrateBillerAccountAttributions(billerAccounts, [], genId);
+  assert.equal(result.length, 2);
+  const forBa1 = result.find(r => r.billerAccountId === "ba1");
+  assert.equal(forBa1.targetType, "person");
+  assert.equal(forBa1.targetId, "p1");
+  assert.equal(forBa1.status, "active");
+  const forBa2 = result.find(r => r.billerAccountId === "ba2");
+  assert.equal(forBa2.targetType, "group");
+  assert.equal(forBa2.targetId, "g1");
+});
+
+test("migrateBillerAccountAttributions is idempotent and non-destructive: a pair with an existing relationship (any row generation) is skipped, existing rows are never rewritten", () => {
+  const billerAccounts = [{ id: "ba1", attributeType: "person", attributedTo: "p1", createdAt: 1 }];
+  const legacyRow = { id: "existing", billerAccountId: "ba1", personId: "p1", status: "paused", statusHistory: [] };
+  const result = migrateBillerAccountAttributions(billerAccounts, [legacyRow], genId);
+  assert.equal(result.length, 1);
+  assert.equal(result[0], legacyRow, "the existing row is the exact same reference — never rewritten");
+});
+
+test("migrateBillerAccountAttributions returns the same array reference when nothing needs migrating", () => {
+  const billerAccounts = [{ id: "ba1", attributeType: "person", attributedTo: "p1" }];
+  const existing = [{ billerAccountId: "ba1", personId: "p1", status: "active" }];
+  const result = migrateBillerAccountAttributions(billerAccounts, existing, genId);
+  assert.equal(result, existing);
+});
+
+test("migrateBillerAccountAttributions running twice never doubles up", () => {
+  const billerAccounts = [{ id: "ba1", attributeType: "person", attributedTo: "p1", createdAt: 1 }];
+  const once = migrateBillerAccountAttributions(billerAccounts, [], genId);
+  const twice = migrateBillerAccountAttributions(billerAccounts, once, genId);
+  assert.equal(twice, once);
+  assert.equal(once.length, 1);
 });

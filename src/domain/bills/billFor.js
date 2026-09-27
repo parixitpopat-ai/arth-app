@@ -10,6 +10,22 @@
 // then belongs to the Bill: later changes to the relationship never rewrite
 // it. bill.groupId stays the split context and is not the "For".
 //
+// Arth 2.0 IA compatibility rule (locked, documented before Financial
+// Relationship work began building on top of billerAccounts — see
+// UI-2C-financial-relationship-mapping.md): a billerAccount (Provider) can
+// now have more than one Financial Relationship (domain/membership/
+// relationship.js's canonical, generalized store). billerAccount.
+// attributeType/attributedTo is UNCHANGED by that work — it remains this
+// legacy bridge, and this file keeps reading it exactly as before. Existing
+// Bills' "For" is a historical snapshot and is never retroactively changed
+// when a Financial Relationship is created, paused, resumed, ended, or
+// reassigned. For a NEW Bill against a billerAccount that has gained a
+// second relationship, this file still reads attributeType/attributedTo
+// (whichever relationship is "primary" — today, the first/oldest one) —
+// this is a temporary bridge, not the target architecture, and stays in
+// place only until the Bill model is explicitly upgraded to ask which
+// relationship a new Bill belongs to when more than one exists.
+//
 // A Bill is only attributed when that is certain: its relationship exists,
 // the relationship is attributed to a person or a group, and that person or
 // group exists. Anything else (no relationship, house/vehicle attribution,

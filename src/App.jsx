@@ -41,7 +41,7 @@ import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVa
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
-import { createMembershipRelationship, pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel } from "./domain/membership/relationship";
+import { createMembershipRelationship, pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel, createRelationship, migrateBillerAccountAttributions, getRelationshipTarget } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { getPersonSpendingSummary, getPersonActiveConnections } from "./domain/person/personOverview";
@@ -64,6 +64,9 @@ import AddPersonSheet from "./components/people/AddPersonSheet";
 import PersonSetupSheet from "./components/people/PersonSetupSheet";
 import AddGroupSheet from "./components/people/AddGroupSheet";
 import { FinancialRelationships, CapabilityTiles, PinnedBill } from "./components/people/RelationshipBlocks";
+import AddRelationshipSheet from "./components/people/AddRelationshipSheet";
+import RelationshipStatusPanel from "./components/people/RelationshipStatusPanel";
+import ExpectedSchedulePanel from "./components/people/ExpectedSchedulePanel";
 import { getAttributedRelationships, getOpenBillBadge, summarizeRelationships } from "./domain/relationships/attributedAccounts";
 import { relationshipSummaryText } from "./components/people/relationshipText";
 import { getPersonCapabilityTiles } from "./domain/person/capabilityTiles";
@@ -72,7 +75,7 @@ import { getGroupReminders } from "./domain/group/reminders";
 import { getBillsFor } from "./domain/bills/billFor";
 import GroupSettingsEditor from "./components/people/GroupSettingsEditor";
 import { PersonProfileScreen } from "./screens/PersonProfileScreen";
-import { isSchoolRelationshipCurrent } from "./domain/school/relationship";
+import { isSchoolRelationshipCurrent, getSchoolRelationships, migrateSchoolRelationshipsIntoCanonicalStore } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { getCommitments } from "./domain/bills/commitments";
 import { remainingShare } from "./domain/shared/remainingShare";
@@ -93,6 +96,7 @@ import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
 import { withBillForSnapshots } from "./domain/bills/billFor";
 import { getBillBalance, planBillPayment, withProjectedBillStatuses, getPartialRemainingByBill, getBillBadge, getBillLedger } from "./domain/obligations/billBalance";
+import { hasCompleteSchedule, setRelationshipSchedule, getExpectedForRelationship, getExpectedItems, buildBillFieldsFromExpected } from "./domain/obligations/expected";
 import { buildPaymentsView, getBillPeriodLabel } from "./domain/bills/paymentsView";
 import BillsList from "./screens/payments/BillsList";
 import BillDetailSheet from "./screens/payments/BillDetailSheet";
@@ -945,7 +949,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // at all (personId/billerAccountId both null) whenever "Not linked to a
   // saved person" is chosen — the default, unpenalized option in WP-4's
   // picker, not a degraded fallback.
-  const [schoolRelationships, setSchoolRelationships] = useState(()=>JSON.parse(localStorage.getItem("arth_school_relationships")||"[]"));
+  // Arth 2.0 IA — School relationship consolidation (the prerequisite before Obligation):
+  // schoolRelationships is no longer its own store. It's a read-only slice of the one canonical
+  // Financial Relationship store (membershipRelationships[]) — every relationship whose
+  // billerAccountId is a School Fees biller account. setSchoolRelationships is a thin compatibility
+  // wrapper so every existing call site (functional updater or a direct array, e.g. the cloud
+  // snapshot restore) keeps working unchanged: it merges the given school slice back into
+  // membershipRelationships, leaving every non-school relationship untouched. See
+  // domain/school/relationship.js's header for what did and didn't need to change.
+  const schoolRelationships = useMemo(()=>getSchoolRelationships(membershipRelationships, billerAccounts), [membershipRelationships, billerAccounts]);
+  const setSchoolRelationships = useCallback(updater=>{
+    setMembershipRelationships(prev=>{
+      const isSchool = r=>billerAccounts.some(ba=>String(ba.id)===String(r?.billerAccountId) && ba.type==="School Fees");
+      const currentSlice = prev.filter(isSchool);
+      const nonSchool = prev.filter(r=>!isSchool(r));
+      const nextSlice = typeof updater==="function" ? updater(currentSlice) : (updater||[]);
+      return [...nonSchool, ...nextSlice];
+    });
+  },[billerAccounts]);
   const [feePayments, setFeePayments] = useState(()=>JSON.parse(localStorage.getItem("arth_fee_payments")||"[]"));
   const [showAddMembership, setShowAddMembership] = useState(false);
   const [editingMembership, setEditingMembership] = useState(null);
@@ -1112,7 +1133,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   },[accounts, billers, billerAccounts]);
   useEffect(()=>safeSetLocalStorage("arth_memberships",JSON.stringify(memberships)),[memberships]);
   useEffect(()=>safeSetLocalStorage("arth_membership_relationships",JSON.stringify(membershipRelationships)),[membershipRelationships]);
-  useEffect(()=>safeSetLocalStorage("arth_school_relationships",JSON.stringify(schoolRelationships)),[schoolRelationships]);
+  // Arth 2.0 IA — schoolRelationships is now derived (see its declaration above), so it has no
+  // separate localStorage key to write; it persists via membershipRelationships' own effect above.
+  // This one-time, idempotent migration instead reads the OLD key directly (arth_school_relationships,
+  // never written to again after this) and merges any not-yet-migrated rows into the canonical
+  // store, completely unchanged (domain/school/relationship.js's migrateSchoolRelationshipsIntoCanonicalStore).
+  // Depends on membershipRelationships, not `[]`, for the same reason the sibling migrations below
+  // do: applyCloudSnapshot's setMembershipRelationships can still arrive after this first runs.
+  useEffect(()=>{
+    let legacy = [];
+    try{ legacy = JSON.parse(localStorage.getItem("arth_school_relationships")||"[]"); }catch{ legacy = []; }
+    if(!legacy.length) return;
+    const next = migrateSchoolRelationshipsIntoCanonicalStore(legacy, membershipRelationships);
+    if(next!==membershipRelationships) setMembershipRelationships(next);
+  },[membershipRelationships]);
   // Backfill for payment records that predate the relationship entity, not one-time — same bug
   // class as the Credit Card Biller reconciliation (App.jsx's `[]`-gated migrations run once at
   // mount, before applyCloudSnapshot's async setMemberships/setMembershipRelationships land, and
@@ -1128,6 +1162,25 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     setMembershipRelationships(relationships);
     setMemberships(updatedMemberships);
   },[memberships, membershipRelationships]);
+  // Arth 2.0 IA step 2 — the general Financial Relationship migration: every billerAccount's own
+  // attribution (attributeType person|group + attributedTo) gets exactly one active relationship
+  // row, same array as above (this is the canonical store now, not a Membership-only one). Same
+  // idempotent, same-array-when-nothing-changed pattern as migrateMembershipRelationships — see
+  // migrateBillerAccountAttributions in src/domain/membership/relationship.js for exactly what
+  // this does and doesn't fabricate. Non-destructive: billerAccounts are read, never written, by
+  // this effect — attributeType/attributedTo stays the legacy Bill-For bridge (billFor.js).
+  //
+  // School Fees biller accounts are excluded here: they also keep attributeType/attributedTo in
+  // sync (for the same Bill-For bridge), but their OWN relationship is exclusively created/migrated
+  // by School's dedicated path (migrateSchoolRelationshipsIntoCanonicalStore, createSchoolRelationship,
+  // attemptSchoolAttributionChange). Without this exclusion, a School biller with no
+  // schoolRelationships row yet on this render (a real race on first load, before the School
+  // migration effect has run) would get a second, generic relationship created for the exact same
+  // pairing — a duplicate this effect must never produce.
+  useEffect(()=>{
+    const next = migrateBillerAccountAttributions(billerAccounts.filter(ba=>ba?.type!=="School Fees"), membershipRelationships, genId);
+    if(next!==membershipRelationships) setMembershipRelationships(next);
+  },[billerAccounts, membershipRelationships]);
   // WP-5 self-sentinel data correction — fixes any existing records (created before the
   // WP-1/WP-4 fixes) whose personId is still the literal "self" instead of the real ME.id
   // ("__me__"). Reuses correctSelfSentinel as-is (domain/membership/relationship.js) — no new
@@ -1291,6 +1344,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [subView, setSubView] = useState("people");
   const [peopleSheet, setPeopleSheet] = useState(null); // {kind:"addPerson"} | {kind:"setup",person} | {kind:"addGroup"}
   const [preselectedAttribution, setPreselectedAttribution] = useState(null); // {type:"person"|"group", id}
+  // Arth 2.0 IA §6 — "+ Add relationship" first shows this instead of jumping straight to the
+  // new-biller form: {targetType, targetId, targetLabel} | null.
+  const [showAddRelationship, setShowAddRelationship] = useState(null);
   const [groupViewMode, setGroupViewMode] = useState("overall");
   const [showGroupOwesBreakdown, setShowGroupOwesBreakdown] = useState(false);
   const [groupSpendFilter, setGroupSpendFilter] = useState(null);
@@ -1442,7 +1498,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // legacy paidByTxnId/status write above. Full amount, since this path has
     // no partial-payment concept yet.
     setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:paymentTxnId, amount:applied, txnAmount:paidAmount }, genId));
-    if(becomesPaid && bill.recurring && bill.autoGenerate!==false){
+    // ADR-039 §7 — "the schedule becomes the only generation mechanism. Regeneration stops for
+    // that relationship." Once this Bill's relationship has a complete schedule, Expected
+    // (domain/obligations/expected.js) is what produces the next cycle, via Confirm amount — this
+    // legacy path must not also create one, or the same cycle would get two Bills.
+    const billRelationship = membershipRelationships.find(r=>{
+      if(r.status!=="active" || String(r.billerAccountId)!==String(bill.billerAccountId)) return false;
+      const t = getRelationshipTarget(r);
+      return t.targetType===bill.forType && String(t.targetId)===String(bill.forId);
+    });
+    const scheduleOwnsRegeneration = billRelationship && billRelationship.billingMode==="regular" && hasCompleteSchedule(billRelationship);
+    if(becomesPaid && bill.recurring && bill.autoGenerate!==false && !scheduleOwnsRegeneration){
       const nextDue = computeNextDueDate(bill, paymentDate);
       const nextPeriod = computeNextPeriod(bill, paymentDate);
       const nextValidFrom = bill.billingModel==="prorata" ? nextDue : null;
@@ -1465,7 +1531,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       },...p]);
     }
     setMarkingBillPaid(null);
-  }, [billerAccounts, contributions]);
+  }, [billerAccounts, contributions, membershipRelationships]);
+
+  // ADR-039 §6 — "Confirm amount": `bill.fromSchedule`. Creates one real, normal Bill from an
+  // Expected item, through the same path every other Bill uses — this is the only writer;
+  // domain/obligations/expected.js only computes the new Bill's own fields (buildBillFieldsFromExpected)
+  // and never touches bills[] itself. forType/forId are left for the existing billFor.js snapshot
+  // effect to fill in, exactly like every other Bill-creation path in this file.
+  const confirmExpectedToBill = useCallback(expected=>{
+    const ba = billerAccounts.find(x=>String(x.id)===String(expected.billerAccountId));
+    const fields = buildBillFieldsFromExpected(expected);
+    setBills(prev=>[{ id:genId(), name:ba?.name||"Bill", ...fields, splitPeople:{}, createdDate:todayStr(), createdAt:Date.now() }, ...prev]);
+  },[billerAccounts]);
 
   const sharePaymentRequest = useCallback((recipientName, amount, contextLabel, details = {}) => {
     const safeAmount = Number(amount||0);
@@ -1549,6 +1626,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(bill?.forType==="person") return bill.forId==="__me__" ? "Me" : (people.find(p=>String(p.id)===String(bill.forId))?.name || "Unassigned");
     if(bill?.forType==="group") return groups.find(g=>String(g.id)===String(bill.forId))?.name || "Unassigned";
     return "Unassigned";
+  },[people, groups]);
+  // Arth 2.0 IA §6 — a biller account's current owner as display text, so reassigning it in
+  // AddRelationshipSheet is never a surprise ("Currently: Rohan" / "Currently: Goa Household" /
+  // "Currently: Unassigned"). Mirrors getBillForLabel's fallback rules but reads the biller
+  // account's own attributeType/attributedTo (D-1's one-owner model), not a Bill's snapshot.
+  const getBillerOwnerLabel = useCallback(ba=>{
+    if(ba?.attributeType==="person") return ba.attributedTo==="__me__" ? "Me" : (people.find(p=>String(p.id)===String(ba.attributedTo))?.name || "Unassigned");
+    if(ba?.attributeType==="group") return groups.find(g=>String(g.id)===String(ba.attributedTo))?.name || "Unassigned";
+    if(ba?.attributeType==="vehicle") return vehicles.find(v=>String(v.id)===String(ba.attributedTo))?.name || "Unassigned";
+    if(ba?.attributeType==="house") return "House";
+    return "Unassigned";
+  },[people, groups, vehicles]);
+  // Arth 2.0 IA step 5 — a Financial Relationship's target as display text, whatever generation
+  // of row it is (getRelationshipTarget handles a pre-generalization, personId-only row).
+  const getRelationshipTargetLabel = useCallback(r=>{
+    const t = getRelationshipTarget(r);
+    if(t.targetType==="group") return groups.find(g=>String(g.id)===String(t.targetId))?.name || "Unknown group";
+    return t.targetId==="__me__" ? "Me" : (people.find(p=>String(p.id)===String(t.targetId))?.name || "Unknown person");
   },[people, groups]);
   const getGroup = useCallback(id=>groups.find(g=>g.id===id)||null,[groups]);
   const getRefundCandidates = useCallback((refundTxn, excludeRefundId = null)=>{
@@ -10528,7 +10623,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             topSection={p.isMe ? null : (()=>{
               // UI-2C P-4 — relationships as a list, capabilities as tiles. Tiles open the
               // existing screen or section for that capability; nothing existing is removed.
-              const rows = getAttributedRelationships({ targetType:"person", targetId:p.id, billerAccounts, bills });
+              const rows = getAttributedRelationships({ targetType:"person", targetId:p.id, billerAccounts, relationships:membershipRelationships, bills });
               const openSection = key=>{
                 setExpandedSection(`profile_${key}_${p.id}`);
                 setTimeout(()=>document.querySelector(`[data-section="${key}"]`)?.scrollIntoView({ behavior:"smooth", block:"start" }), 50);
@@ -10549,7 +10644,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               return <>
                 <FinancialRelationships T={T} rows={rows} sym={sym} fmt={fmt}
                   onOpen={ba=>setActiveBillerForAction(ba)}
-                  onAdd={()=>{ setPreselectedAttribution({ type:"person", id:p.id }); setShowAddBillerAccount(true); }}/>
+                  onAdd={()=>setShowAddRelationship({ targetType:"person", targetId:p.id, targetLabel:p.name })}/>
                 <CapabilityTiles T={T} tiles={tiles} onManage={()=>setEditingPerson(p)}/>
               </>;
             })()}
@@ -11340,7 +11435,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 .map(b=>({ b, badge:getOpenBillBadge(b) }))
                 .filter(x=>x.badge.kind==="overdue")
                 .sort((x,y)=>y.badge.days-x.badge.days)[0];
-              const rows = getAttributedRelationships({ targetType:"group", targetId:g.id, billerAccounts, bills });
+              const rows = getAttributedRelationships({ targetType:"group", targetId:g.id, billerAccounts, relationships:membershipRelationships, bills });
               const vendorCount = new Set(txns.filter(t=>t.groupId===g.id && t.type==="expense" && t.merchant).map(t=>String(t.merchant).trim().toLowerCase())).size;
               const tiles = getGroupCapabilityTiles({ group:g, modules:getGroupModules(g), moduleDefs:GROUP_MODULES, owedToMe:total, iOwe:groupIOwe, budget:groupBudget, spent:groupTotalSpend, relationshipCount:rows.length, vendorCount, today:todayStr(), sym, fmt })
                 .map(t=>({ ...t, onClick:(t.id==="notes"||t.id==="reminders") ? startEditingGroup : undefined }));
@@ -11350,7 +11445,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   {pinned ? <PinnedBill T={T} bill={pinned.b} forName={g.name} days={pinned.badge.days} sym={sym} fmt={fmt} onOpen={()=>{ setSelectedGroup(null); setTab("bills"); setShowSettings(false); }}/> : null}
                   <FinancialRelationships T={T} rows={rows} sym={sym} fmt={fmt}
                     onOpen={ba=>setActiveBillerForAction(ba)}
-                    onAdd={()=>{ setPreselectedAttribution({ type:"group", id:g.id }); setShowAddBillerAccount(true); }}/>
+                    onAdd={()=>setShowAddRelationship({ targetType:"group", targetId:g.id, targetLabel:g.name })}/>
                   <CapabilityTiles T={T} tiles={tiles} onManage={startEditingGroup}/>
                 </div>
               );
@@ -11471,7 +11566,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   </div>
                   {(()=>{
                     // UI-2C P-1 — the row reads as context: relationships and the one Bill needing attention.
-                    const sum = summarizeRelationships(getAttributedRelationships({ targetType:"person", targetId:p.id, billerAccounts, bills }));
+                    const sum = summarizeRelationships(getAttributedRelationships({ targetType:"person", targetId:p.id, billerAccounts, relationships:membershipRelationships, bills }));
                     const text = relationshipSummaryText(sum, sym, fmt);
                     return text ? <div data-testid={`person-row-summary-${p.id}`} style={{ color:sum.attention?.kind==="overdue"?T.dangerText:sum.attention?.kind==="due"?T.attention:T.sub,fontSize:11,marginTop:2 }}>{text}</div> : null;
                   })()}
@@ -11513,7 +11608,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         <div style={{ color:gOver?T.danger:T.sub,fontSize:10,marginTop:2 }}>{gBudget>0?`Budget ${sym}${fmt(gBudget)}/mo · `:""}This month {sym}{fmt(gTotalSpend)}{gOver?` · ⚠️ Over ${sym}${fmt(gTotalSpend-gBudget)}`:""}</div>
                         {(()=>{
                           // UI-2C G-10 — relationships and the one Bill needing attention.
-                          const sum = summarizeRelationships(getAttributedRelationships({ targetType:"group", targetId:g.id, billerAccounts, bills }));
+                          const sum = summarizeRelationships(getAttributedRelationships({ targetType:"group", targetId:g.id, billerAccounts, relationships:membershipRelationships, bills }));
                           const text = relationshipSummaryText(sum, sym, fmt);
                           return text ? <div data-testid={`group-row-summary-${g.id}`} style={{ color:sum.attention?.kind==="overdue"?T.dangerText:sum.attention?.kind==="due"?T.attention:T.sub,fontSize:11,marginTop:2 }}>{text}</div> : null;
                         })()}
@@ -15179,11 +15274,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             their existing reconciliation sheet. */}
         {billsTab==="bills"&&(
           <BillsList T={T} sym={sym} fmt={fmt}
-            view={buildPaymentsView({ bills, contributions, forFilter:paymentsForFilter, forLabel:getBillForLabel })}
+            view={buildPaymentsView({ bills, contributions, forFilter:paymentsForFilter, forLabel:getBillForLabel, expectedItems:getExpectedItems(membershipRelationships, bills) })}
             forFilter={paymentsForFilter} onForFilter={setPaymentsForFilter}
             showCancelled={paymentsShowCancelled} onToggleCancelled={()=>setPaymentsShowCancelled(v=>!v)}
             showAllPaid={paymentsShowAllPaid} onToggleAllPaid={()=>setPaymentsShowAllPaid(v=>!v)}
             onOpen={b=>{ if(b.isCcStatement) setViewingCcStatementId(b.id); else setViewingBillId(b.id); }}
+            onOpenExpected={e=>{ const ba=billerAccounts.find(x=>String(x.id)===String(e.billerAccountId)); if(ba) setActiveBillerForAction(ba); }}
             onAddBill={null}/>
         )}
       </div>
@@ -16934,12 +17030,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     );
   };
 
+  // Arth 2.0 IA §1 — primary nav is Home / Money / Payments / People. Outlook and Insights
+  // aren't removed: they're still full screens (tab==="outlook"/"insights" below), reached from
+  // Home's existing entry points (Safe to Spend → Outlook, "✨ Insights for you" → Insights, both
+  // already in <Home/>), per IA §2's "Home ├── Today ├── Outlook └── Insights".
   const TABS=[
     {id:"home",icon:"🏠",label:"Home"},
     {id:"wealth",icon:"💰",label:"Money"},
     {id:"__fab__",icon:"➕",label:""},
-    {id:"outlook",icon:"🔮",label:"Outlook"},
-    {id:"insights",icon:"📊",label:"Insights"}
+    {id:"bills",icon:"🧾",label:"Payments"},
+    {id:"people",icon:"👥",label:"People"}
   ];
 
   const [wealthUnlocked, setWealthUnlocked] = useState(false);
@@ -17438,6 +17538,31 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {showNavDrawer&&<NavDrawer onClose={()=>setShowNavDrawer(false)}/>}
         {confirmDialog&&<ConfirmDialog message={confirmDialog.message} onConfirm={confirmDialog.onConfirm} onClose={()=>setConfirmDialog(null)} variant={confirmDialog.variant||(confirmDialog.onConfirm?"danger":"default")} T={T}/>}
         {showAddBillerAccount&&<BillerAccountModal existing={null} onClose={()=>{ setShowAddBillerAccount(false); setPreselectedBillerType(""); setPreselectedBillerProvider(""); setPreselectedBillerId(""); setPreselectedAttribution(null); }}/>}
+        {/* Arth 2.0 IA §6 — reuse an existing Provider/Biller instead of only creating a new
+            one. Scope for this pass (locked): one Provider still has one owner at a time —
+            selecting an existing biller reassigns its Attributed To rather than creating a
+            duplicate biller account for the same provider. */}
+        {/* Arth 2.0 IA step 4 — reusing an existing biller now creates/reuses a Financial
+            Relationship row (1:N, membershipRelationships[]) instead of overwriting the
+            biller account's single-owner attributeType/attributedTo. That legacy field is
+            touched only when this is the biller's FIRST relationship, so it keeps working as
+            the Bill-For bridge (billFor.js's locked compatibility rule) — adding a second
+            relationship to an already-owned biller no longer moves or overwrites anything. */}
+        {showAddRelationship&&<AddRelationshipSheet T={T} billerAccounts={billerAccounts}
+          targetLabel={showAddRelationship.targetLabel} currentLabel={getBillerOwnerLabel}
+          onClose={()=>setShowAddRelationship(null)}
+          onSelectExisting={ba=>{
+            const target = showAddRelationship;
+            const activeForBa = membershipRelationships.filter(r=>r.status==="active" && String(r.billerAccountId)===String(ba.id));
+            const alreadyHere = activeForBa.some(r=>{ const t=getRelationshipTarget(r); return t.targetType===target.targetType && String(t.targetId)===String(target.targetId); });
+            if(alreadyHere){ setShowAddRelationship(null); return; }
+            const isFirstRelationship = activeForBa.length===0;
+            const newRel = createRelationship({ billerAccountId:ba.id, targetType:target.targetType, targetId:target.targetId, startDate:todayStr(), genId });
+            setMembershipRelationships(prev=>[...prev, newRel]);
+            if(isFirstRelationship) setBillerAccounts(prev=>prev.map(x=>x.id===ba.id ? { ...x, attributeType:target.targetType, attributedTo:target.targetId } : x));
+            setShowAddRelationship(null);
+          }}
+          onCreateNew={()=>{ const target=showAddRelationship; setShowAddRelationship(null); setPreselectedAttribution({ type:target.targetType, id:target.targetId }); setShowAddBillerAccount(true); }}/>}
         {categoryAccountsView&&(()=>{
           const type = categoryAccountsView;
           const billersOfType = billers.filter(b=>b.type===type);
@@ -17601,6 +17726,34 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   </div>
                   <button onClick={()=>setActiveBillerForAction(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>x</button>
                 </div>
+                {/* Arth 2.0 IA step 5 — every Financial Relationship this Provider has (1:N,
+                    step 1-4), each with its own status and Pause/Resume/End. Generalizes the
+                    action UI that used to exist only inside MembershipDetailModal. School Fees
+                    relationships are deliberately excluded here: they're now part of this same
+                    canonical store (the School consolidation), but School product rules have no
+                    Pause — only ongoing or ended — and School's own screens already own its
+                    relationship lifecycle presentation. Showing this generic panel for a School
+                    biller would silently add a capability that was never there. */}
+                {ba.type!=="School Fees"&&membershipRelationships.filter(r=>String(r.billerAccountId)===String(ba.id)).map(r=>(
+                  <RelationshipStatusPanel key={r.id} T={T} relationship={r} targetLabel={getRelationshipTargetLabel(r)}
+                    onPause={(reason, effectiveDate)=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?pauseRelationship(x, reason, effectiveDate):x))}
+                    onResume={effectiveDate=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?resumeRelationship(x, effectiveDate):x))}
+                    onEnd={(reason, effectiveDate)=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?endRelationship(x, reason, effectiveDate):x))}/>
+                ))}
+                {/* ADR-039 §9 — Expected/Schedule is scoped to Bills only. School Fees and every
+                    "membership" action type (Gym/Fitness, Club Membership, Insurance, Society
+                    Maintenance, Rental, Education Fees, Other Subscription — MEMBERSHIP_TYPES)
+                    keep their own existing generation (feeSchedules/feePeriods,
+                    memberships[]/MembershipDetailModal). This is the ADR's own scope line, not a
+                    simplification — building Expected for those would mean reconciling it with a
+                    real, separate payment-period system already in place, which ADR-039
+                    explicitly defers. */}
+                {actionType!=="membership"&&membershipRelationships.filter(r=>String(r.billerAccountId)===String(ba.id)).map(r=>(
+                  <ExpectedSchedulePanel key={r.id} T={T} relationship={r} targetLabel={getRelationshipTargetLabel(r)}
+                    expected={getExpectedForRelationship(r, bills)} sym={sym} fmt={fmt}
+                    onSetSchedule={input=>setMembershipRelationships(prev=>prev.map(x=>x.id===r.id?setRelationshipSchedule(x, input):x))}
+                    onConfirm={expected=>confirmExpectedToBill(expected)}/>
+                ))}
                 {/* Edit / Delete biller account — moved right under the header, not buried below
                     Analytics/History/Documents, so it's reachable without scrolling. */}
                 <div style={{ display:"flex",gap:8,marginBottom:16 }}>
@@ -18130,7 +18283,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           return <PersonSetupSheet T={T} person={rec} modules={PERSON_MODULES}
             onSkip={()=>setPeopleSheet(null)}
             onOpen={setup=>{ const next = apply(setup); setPeopleSheet(null); setSubView("people"); setSelectedPerson(next); }}
-            onAddRelationship={setup=>{ apply(setup); setPeopleSheet(null); setPreselectedAttribution({ type:"person", id:rec.id }); setShowAddBillerAccount(true); }}/>;
+            onAddRelationship={setup=>{ apply(setup); setPeopleSheet(null); setShowAddRelationship({ targetType:"person", targetId:rec.id, targetLabel:rec.name }); }}/>;
         })()}
         {peopleSheet?.kind==="addGroup"&&<AddGroupSheet T={T} me={people.find(p=>p.isMe)||ME} people={people.filter(p=>!p.isMe && !isPersonArchived(p))} groupTypes={GROUP_TYPES}
           onClose={()=>setPeopleSheet(null)}
