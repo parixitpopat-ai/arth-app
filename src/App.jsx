@@ -49,6 +49,7 @@ import { archivePerson, unarchivePerson, isPersonArchived, getActivePeople } fro
 import { archiveGroup, isGroupArchived, getActiveGroups } from "./domain/group/archive";
 import { writeOffGroupTxns, writeOffGroupBills, groupHasOutstandingBalance } from "./domain/group/writeOff";
 import { getGroupMemberOwed as getGroupMemberOwedPure, getGroupMemberIOwe as getGroupMemberIOwePure } from "./domain/group/balances";
+import { getGroupCollectiveDue as getGroupCollectiveDuePure, groupReceivableTotal as groupReceivableTotalPure } from "./domain/group/receivable";
 import { wireTransactionApplication } from "./application/transactions/wiring";
 import { submitTransactionThroughBoundary } from "./domain/transactions/legacy/transactionBoundary";
 import { getPersonAboutFields, getAboutCompleteness, getPersonNotes } from "./domain/person/about";
@@ -1696,17 +1697,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     return map;
   },{}),[txns]);
   const getNetExpenseAmount = useCallback(expense=>Math.max(0, Number(expense?.amount||0) - Number(refundTotalsByExpense[String(expense?.id)]||0)),[refundTotalsByExpense]);
-  const getGroupCollectiveDue = useCallback(expense=>{
-    if(!expense?.groupId || expense?.type!=="expense") return 0;
-    const hasIndividualReceivable = Object.entries(expense?.people||{}).some(([pid,info])=>pid!=="__me__" && info?.mode==="owes" && Number(info?.amount||0)>0 && !info?.settled);
-    const trackingMode = expense?.trackingMode || (hasIndividualReceivable ? "split" : (expense?.forPerson || expense?.groupId ? "tag" : "none"));
-    // Handle both split and allocate (Txn breakup unified mode)
-    if(trackingMode!=="split" && trackingMode!=="allocate") return 0;
-    if(expense.groupCollectiveAmount !== undefined && expense.groupCollectiveAmount !== null){
-      return Math.max(0, Number(expense.groupCollectiveAmount||0) - Number(expense.groupCollectiveSettledAmt||0));
-    }
-    return hasIndividualReceivable ? 0 : Math.max(0, Number(expense.amount||0));
-  },[]);
+  // Bug fix (Group A / Group B receivable mix-up): extracted to domain/group/receivable.js,
+  // with a real regression test, so this is a thin wrapper now, not a second copy of the logic.
+  const getGroupCollectiveDue = useCallback(expense=>getGroupCollectiveDuePure(expense),[]);
   const getMyExpenseAmount = useCallback(expense=>{
     if(expense?.excludeFromSpend) return 0;
     const netAmount = getNetExpenseAmount(expense);
@@ -2564,53 +2557,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   },[txns,accounts]);
   const creditCardLiabilityTotal = useMemo(()=>accounts.reduce((sum,a)=>sum+(a.type==="cc"?cardOutstanding(a):0),0),[accounts,cardOutstanding]);
   const otherLiabilityTotal = useMemo(()=>liabilities.reduce((sum,l)=>sum+Number(l.outstanding||0),0),[liabilities]);
-  const groupReceivableTotal = useCallback(groupId=>{
-    const txnOwed = txns.filter(t=>t.type==="expense" && (
-      t.groupId===groupId ||
-      // Also include Txn breakup allocations where this group has mode=owes
-      t.groupAllocations?.some(g=>g.groupId===groupId&&g.mode==="owes"&&Number(g.amount||0)>0)
-    )).reduce((sum,t)=>{
-      // If this group is in groupAllocations with mode=owes, use its specific amount
-      const groupAlloc = t.groupAllocations?.find(g=>g.groupId===groupId&&g.mode==="owes");
-      if(groupAlloc) {
-        // Use ratio of settled to calculate remaining
-        const totalCollective = Number(t.groupCollectiveAmount||0);
-        const totalSettled = Number(t.groupCollectiveSettledAmt||0);
-        const groupAmt = Number(groupAlloc.amount||0);
-        const settledRatio = totalCollective>0 ? Math.min(1, totalSettled/totalCollective) : 0;
-        const remaining = Math.max(0, groupAmt - (groupAmt * settledRatio));
-        return sum + remaining;
-      }
-      // Primary groupId case: use people splits + collective
-      return sum + Object.entries(t.people||{}).reduce((inner,[pid,info])=>{
-        if(pid==="__me__" || info.mode!=="owes" || info.settled) return inner;
-        return inner + remainingShare(info);
-      },0) + getGroupCollectiveDue(t);
-    },0);
-    const billOwed = bills.filter(b=>b.groupId===groupId&&b.status==="unpaid").reduce((sum,b)=>
-      sum + Object.entries(b.splitPeople||{}).reduce((inner,[pid,info])=>{
-        if(pid==="__me__" || info.mode!=="owes" || info.settled) return inner;
-        return inner + remainingShare(info);
-      },0) + Number(b.groupCollectiveAmount||0)
-    ,0);
-    // Add individual member outstanding (expenses tagged to group members individually)
-    const group = groups.find(g=>g.id===groupId);
-    const memberIndividualOwed = (group?.members||[]).reduce((sum,memberId)=>{
-      const memberTxnOwed = txns.filter(t=>
-        t.type==="expense" &&
-        t.people?.[memberId]?.mode==="owes" &&
-        !t.people?.[memberId]?.settled &&
-        !t.groupId // not a group expense - avoid double counting
-      ).reduce((s,t)=>s+remainingShare(t.people[memberId]),0);
-      const memberLoanOwed = loans.filter(l=>
-        l.direction!=="taken" &&
-        l.status==="active" &&
-        String(l.personId||l.linkedPersonId||"")===String(memberId)
-      ).reduce((s,l)=>s+Number(l.outstanding||0),0);
-      return sum + memberTxnOwed + memberLoanOwed;
-    },0);
-    return txnOwed + billOwed + memberIndividualOwed;
-  },[txns,bills,loans,groups,getGroupCollectiveDue]);
+  // Bug fix (Group A / Group B receivable mix-up): extracted to domain/group/receivable.js,
+  // with a real regression test reproducing the reported bug, so this is a thin wrapper now.
+  const groupReceivableTotal = useCallback(groupId=>groupReceivableTotalPure({ txns, bills, loans, groups }, groupId),[txns,bills,loans,groups]);
 
   // PGRP-001 WP2 — relocated from inside People's if(selectedGroup) block
   // (where it was previously only reachable by toggleMember) to this
