@@ -22,6 +22,7 @@ import {
   isMandatoryCommitmentsConfirmed,
   getMandatoryCommitmentState,
   getUnplannedCategoryIds,
+  wouldExceedDiscretionaryPool,
 } from "./adapter.js";
 
 // --- Household: WP6 unified onto `??` semantics (explicit 0 is respected) ---
@@ -292,6 +293,27 @@ test("getAllocationHierarchyWarning: allocations exceeding the pool — Sigma(ch
 
 test("getAllocationHierarchyWarning: allocations exactly matching the pool is not a warning", () => {
   assert.equal(getAllocationHierarchyWarning(20000, 20000), null);
+});
+
+// --- WP7 correction: wouldExceedDiscretionaryPool — blocking validation, not just a warning ---
+
+test("wouldExceedDiscretionaryPool: candidate plus others fits inside the pool — null, commit allowed", () => {
+  assert.equal(wouldExceedDiscretionaryPool(20000, 15000, 5000), null);
+});
+
+test("wouldExceedDiscretionaryPool: candidate plus others exactly matches the pool — still allowed", () => {
+  assert.equal(wouldExceedDiscretionaryPool(20000, 15000, 5000.0), null);
+  assert.equal(wouldExceedDiscretionaryPool(20000, 12000, 8000), null);
+});
+
+test("wouldExceedDiscretionaryPool: candidate pushes the total over — returns overBy, commit refused", () => {
+  const result = wouldExceedDiscretionaryPool(20000, 15000, 8000);
+  assert.deepEqual(result, { overBy: 3000 });
+});
+
+test("wouldExceedDiscretionaryPool: other allocations alone (before this candidate) already fit — only this candidate is what's evaluated", () => {
+  assert.equal(wouldExceedDiscretionaryPool(20000, 0, 20000), null);
+  assert.deepEqual(wouldExceedDiscretionaryPool(20000, 0, 20001), { overBy: 1 });
 });
 
 test("getMandatoryCommitmentsConfirmationId: month-scoped id, matching the existing budget-alert id shape", () => {

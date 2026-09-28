@@ -89,7 +89,7 @@ import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refu
 import { getCommitments } from "./domain/bills/commitments";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
-import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds } from "../domain/allocations/adapter";
+import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool } from "../domain/allocations/adapter";
 /* Vertical-slice additions (this session) - Observe-level only, per BUD-002's
    Home/Insights IA split. (removed placeholder JSX fragments) */
 import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./domain/transactions/legacy/settlePersonShareOnBill";
@@ -14365,15 +14365,49 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // only on blur/Enter — same pattern as the Annual Budget input above — avoids that entirely.
     const [personBudgetDrafts, setPersonBudgetDrafts] = useState({});
     const [groupBudgetDrafts, setGroupBudgetDrafts] = useState({});
+    // WP7 — Σ allocations ≤ Discretionary Pool, computed once here so both the commit
+    // functions below (which must REFUSE a write that would violate it) and the Budgets tab's
+    // live banner share one figure — the same canonical functions the Dashboard tab's
+    // Mandatory Commitments/Discretionary Pool cards use, called again here for this tab's
+    // own viewMonth, matching this page's existing per-tab pattern (e.g. getPersonPlanningAllocation
+    // is already called independently per-tab, not lifted).
+    const [liveYY,liveMM] = viewMonth.split("-").map(Number);
+    const liveBaseMonthly = getHouseholdPlanningAllocation(annualBudget, monthOverrides, viewMonth);
+    const livePrevMonthKey = liveMM===1 ? `${liveYY-1}-12` : `${liveYY}-${String(liveMM-1).padStart(2,"0")}`;
+    const livePrevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, livePrevMonthKey);
+    const livePrevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(livePrevMonthKey)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
+    const liveMonthly = resolveCarryForwardMonthly(budgetCarryForward, liveBaseMonthly, livePrevBudget, livePrevSpend);
+    const liveActiveMandatory = mandatoryCommitments.filter(c=>!(c.skippedMonths||[]).includes(viewMonth));
+    const liveDiscretionaryPool = getDiscretionaryPool(liveMonthly, getMandatoryCommitmentsTotal(liveActiveMandatory));
+    const liveDiscretionaryAllocated = getDiscretionaryAllocatedTotal([
+      ...people.map(p=>getPersonPlanningAllocation(p, viewMonth)),
+      ...groups.map(g=>getGroupPlanningAllocation(g, viewMonth)),
+    ]);
+    const liveHierarchyWarning = getAllocationHierarchyWarning(liveDiscretionaryPool, liveDiscretionaryAllocated);
+    // WP7 correction — the locked IA requires blocking, not a warning-only condition: an
+    // allocation that would exceed the remaining pool must be rejected, and the number the
+    // person typed must never be silently changed. Each commit function below checks its own
+    // candidate against every OTHER allocation exactly as it already stands (never touching or
+    // reconsidering them) before writing anything to people/groups state.
+    const personAllocationExcept = (exceptId) => getDiscretionaryAllocatedTotal([
+      ...people.filter(p=>p.id!==exceptId).map(p=>getPersonPlanningAllocation(p, viewMonth)),
+      ...groups.map(g=>getGroupPlanningAllocation(g, viewMonth)),
+    ]);
+    const groupAllocationExcept = (exceptId) => getDiscretionaryAllocatedTotal([
+      ...people.map(p=>getPersonPlanningAllocation(p, viewMonth)),
+      ...groups.filter(g=>g.id!==exceptId).map(g=>getGroupPlanningAllocation(g, viewMonth)),
+    ]);
     const commitPersonBudget = (p) => {
       if(!(p.id in personBudgetDrafts)) return;
       const val = parseMoney(personBudgetDrafts[p.id]||"")||0;
+      if (wouldExceedDiscretionaryPool(liveDiscretionaryPool, personAllocationExcept(p.id), val)) return;
       setPeople(prev=>prev.map(x=>x.id===p.id?{...x,spendBudgetOverrides:{...(x.spendBudgetOverrides||{}),[viewMonth]:val}}:x));
       setPersonBudgetDrafts(prev=>{ const n={...prev}; delete n[p.id]; return n; });
     };
     const commitGroupBudget = (g) => {
       if(!(g.id in groupBudgetDrafts)) return;
       const val = parseMoney(groupBudgetDrafts[g.id]||"")||0;
+      if (wouldExceedDiscretionaryPool(liveDiscretionaryPool, groupAllocationExcept(g.id), val)) return;
       setGroups(prev=>prev.map(x=>x.id===g.id?{...x,manualLimitOverrides:{...(x.manualLimitOverrides||{}),[viewMonth]:val}}:x));
       setGroupBudgetDrafts(prev=>{ const n={...prev}; delete n[g.id]; return n; });
     };
@@ -14764,28 +14798,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             product decision, not resolved by this change. */}
         {budgetSubTab==="insights"&&<BudgetInsights viewMonth={viewMonth} setViewMonth={setViewMonth} cats={cats} txns={txns} people={people} T={T} sym={sym} fmt={fmt}/>}
 
-        {budgetSubTab==="budgets"&&(()=>{
-          // WP7 — live Σ allocations ≤ Discretionary Pool feedback, right where allocations are
-          // actually entered (not just a passive banner on a different tab). Same canonical
-          // functions as the Dashboard tab's Mandatory Commitments/Discretionary Pool cards —
-          // called again here rather than lifted, matching this page's existing pattern of each
-          // sub-tab calling the shared domain functions independently for its own viewMonth
-          // (e.g. getPersonPlanningAllocation below, already called separately per-tab).
-          const [liveYY,liveMM] = viewMonth.split("-").map(Number);
-          const liveBaseMonthly = getHouseholdPlanningAllocation(annualBudget, monthOverrides, viewMonth);
-          const livePrevMonthKey = liveMM===1 ? `${liveYY-1}-12` : `${liveYY}-${String(liveMM-1).padStart(2,"0")}`;
-          const livePrevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, livePrevMonthKey);
-          const livePrevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(livePrevMonthKey)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
-          const liveMonthly = resolveCarryForwardMonthly(budgetCarryForward, liveBaseMonthly, livePrevBudget, livePrevSpend);
-          const liveActiveMandatory = mandatoryCommitments.filter(c=>!(c.skippedMonths||[]).includes(viewMonth));
-          const liveDiscretionaryPool = getDiscretionaryPool(liveMonthly, getMandatoryCommitmentsTotal(liveActiveMandatory));
-          const liveDiscretionaryAllocated = getDiscretionaryAllocatedTotal([
-            ...people.map(p=>getPersonPlanningAllocation(p, viewMonth)),
-            ...groups.map(g=>getGroupPlanningAllocation(g, viewMonth)),
-          ]);
-          const liveHierarchyWarning = getAllocationHierarchyWarning(liveDiscretionaryPool, liveDiscretionaryAllocated);
-          return (
-        <>
+        {budgetSubTab==="budgets"&&(<>
         {liveDiscretionaryPool>0&&(
           <div style={{ ...card,background:liveHierarchyWarning?T.danger+"12":T.accentSoft,border:`1px solid ${liveHierarchyWarning?T.danger+"44":T.accent+"33"}`,marginTop:8,marginBottom:4 }}>
             <div style={{ display:"flex",justifyContent:"space-between",fontSize:12 }}>
@@ -14813,6 +14826,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
             const pct = monthBudget>0 ? Math.min(100,Math.round(monthSpend/monthBudget*100)) : 0;
             const isOver = monthSpend > monthBudget && monthBudget > 0;
+            // WP7 correction — live, blocking validation on the draft itself (not just on
+            // blur/commit): shown the moment the candidate would exceed the pool, so the person
+            // sees it before they even try to save.
+            const personDraftInvalid = p.id in personBudgetDrafts
+              ? wouldExceedDiscretionaryPool(liveDiscretionaryPool, personAllocationExcept(p.id), parseMoney(personBudgetDrafts[p.id]||"")||0)
+              : null;
             return (
               <div key={p.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,marginBottom:10,padding:"12px 14px" }}>
                 <div onClick={()=>{ setExpandedBudgetPersonId(prev=>prev===p.id?null:p.id); setExpandedBudgetCatId(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,cursor:"pointer" }}>
@@ -14824,7 +14843,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div style={{ display:"flex",alignItems:"center",gap:6 }} onClick={e=>e.stopPropagation()}>
                     <span style={{ color:T.sub,fontSize:11 }}>₹</span>
                     <input
-                      style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
+                      style={{ background:T.input,border:`1px solid ${personDraftInvalid?T.danger:T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
                       type="text" inputMode="decimal" placeholder="Budget"
                       value={p.id in personBudgetDrafts ? personBudgetDrafts[p.id] : (monthBudget?String(monthBudget):"")}
                       onChange={e=>{ const val=cleanMoneyInput(e.target.value); setPersonBudgetDrafts(prev=>({...prev,[p.id]:val})); }}
@@ -14834,6 +14853,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <span style={{ color:T.sub,fontSize:10 }}>this mo.</span>
                   </div>
                 </div>
+                {personDraftInvalid&&(
+                  <div style={{ color:T.danger,fontSize:10.5,fontWeight:700,marginBottom:8,textAlign:"right" }}>⚠️ Exceeds Discretionary Pool by {sym}{fmt(personDraftInvalid.overBy)} — reduce this to save.</div>
+                )}
                 {monthBudget>0&&(
                   <>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4 }}>
@@ -14989,6 +15011,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             const monthSpend = oldStyle + allocStyle;
             const pct = monthBudget>0 ? Math.min(100,Math.round(monthSpend/monthBudget*100)) : 0;
             const isOver = monthSpend > monthBudget && monthBudget > 0;
+            // WP7 correction — same live, blocking validation as the Person rows above.
+            const groupDraftInvalid = g.id in groupBudgetDrafts
+              ? wouldExceedDiscretionaryPool(liveDiscretionaryPool, groupAllocationExcept(g.id), parseMoney(groupBudgetDrafts[g.id]||"")||0)
+              : null;
             return (
               <div key={g.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,marginBottom:10,padding:"12px 14px" }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
@@ -14999,7 +15025,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div style={{ display:"flex",alignItems:"center",gap:6 }}>
                     <span style={{ color:T.sub,fontSize:11 }}>₹</span>
                     <input
-                      style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
+                      style={{ background:T.input,border:`1px solid ${groupDraftInvalid?T.danger:T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
                       type="text" inputMode="decimal" placeholder="Budget"
                       value={g.id in groupBudgetDrafts ? groupBudgetDrafts[g.id] : (monthBudget?String(monthBudget):"")}
                       onChange={e=>{ const val=cleanMoneyInput(e.target.value); setGroupBudgetDrafts(prev=>({...prev,[g.id]:val})); }}
@@ -15009,6 +15035,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <span style={{ color:T.sub,fontSize:10 }}>this mo.</span>
                   </div>
                 </div>
+                {groupDraftInvalid&&(
+                  <div style={{ color:T.danger,fontSize:10.5,fontWeight:700,marginBottom:8,textAlign:"right" }}>⚠️ Exceeds Discretionary Pool by {sym}{fmt(groupDraftInvalid.overBy)} — reduce this to save.</div>
+                )}
                 {monthBudget>0&&(
                   <>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4 }}>
@@ -15026,9 +15055,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           })}
           <button onClick={()=>{ setTab("people"); setShowSettings(false); }} style={{ background:"none",border:"none",color:"#16a34a",fontSize:12,fontWeight:700,cursor:"pointer",padding:"6px 0",display:"flex",alignItems:"center",gap:4 }}>Manage Groups →</button>
         </div>
-        </>
-          );
-        })()}
+        </>)}
         {showAddCommitment&&<AddMandatoryCommitmentModal
           existing={editingCommitment}
           monthKey={viewMonth}

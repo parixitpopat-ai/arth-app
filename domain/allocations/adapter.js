@@ -573,6 +573,28 @@ export function getAllocationHierarchyWarning(discretionaryPool, allocatedTotal)
 }
 
 /**
+ * WP7 correction — the locked IA does not treat Σ allocations ≤ Discretionary Pool as
+ * warning-only: an allocation that would push the total over the pool must be rejected, not
+ * silently persisted. This is the single-candidate version of getAllocationHierarchyWarning
+ * above, evaluated BEFORE a write: "if I commit this one candidate amount, alongside every
+ * other allocation exactly as it already stands, does the total fit?" Every other allocation
+ * stays exactly as it is — this never touches or reconsiders them, only the one being entered.
+ * Returns null when it fits (the caller may commit); a plain data object when it doesn't (the
+ * caller must refuse the write and keep whatever the person typed on screen, never clamp it to
+ * a guessed valid number).
+ *
+ * @param {number} discretionaryPool
+ * @param {number} otherAllocationsTotal - Σ every OTHER Person/Group allocation, i.e. the
+ *   existing allocatedTotal with this one dimension's current committed amount subtracted out
+ * @param {number} candidateAmount - the not-yet-committed amount being typed/entered
+ * @returns {{overBy: number}|null}
+ */
+export function wouldExceedDiscretionaryPool(discretionaryPool, otherAllocationsTotal, candidateAmount) {
+  const overBy = Number(otherAllocationsTotal || 0) + Number(candidateAmount || 0) - Number(discretionaryPool || 0);
+  return overBy > 0 ? { overBy } : null;
+}
+
+/**
  * The dismissedAlerts[] id for "has this month's Mandatory Commitments been
  * confirmed" — same month-scoped id shape App.jsx's existing budget alerts
  * already use (`budget_<subject>_<monthKey>_<variant>`), reused rather than
