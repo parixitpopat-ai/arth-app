@@ -50,6 +50,7 @@ export function getMembershipRenewalReminders({ billerAccounts, memberships, get
       const status = getMembershipRenewalStatus(memsForAcc.map(m => ({ m, period: getCurrentPeriod(m) })), today, forwardDays);
       if (!status) return null;
       return {
+        id: `membership:${ba.id}`,
         billerAccountId: ba.id,
         sourceType: "membership",
         name: ba.name || "Membership",
@@ -89,6 +90,7 @@ export function getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts
       if (!isOverdue && p.dueDate > forwardLimit) return;
       const days = Math.round((new Date(isOverdue ? today : p.dueDate) - new Date(isOverdue ? p.dueDate : today)) / 86400000);
       items.push({
+        id: `school:${p.id}`,
         billerAccountId: sch.billerAccountId,
         sourceType: "school",
         name: p.label || ba?.name || "School Fees",

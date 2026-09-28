@@ -103,6 +103,7 @@ import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
 import { withBillForSnapshots, repairUnassignedBills } from "./domain/bills/billFor";
 import { getMembershipRenewalReminders, getSchoolFeeReminders } from "./domain/bills/renewalReminders";
+import { getInsuranceRenewalReminders } from "./domain/insurance/renewalReminders";
 import { getBillBalance, planBillPayment, withProjectedBillStatuses, getPartialRemainingByBill, getBillBadge, getBillLedger } from "./domain/obligations/billBalance";
 import { hasCompleteSchedule, setRelationshipSchedule, getExpectedForRelationship, getExpectedItems, buildBillFieldsFromExpected } from "./domain/obligations/expected";
 import { buildPaymentsView, getBillPeriodLabel, getBadgeText } from "./domain/bills/paymentsView";
@@ -15367,6 +15368,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             view={buildPaymentsView({ bills, contributions, forFilter:paymentsForFilter, forLabel:getBillForLabel, expectedItems:getExpectedItems(membershipRelationships, bills), renewalItems:[
               ...getMembershipRenewalReminders({ billerAccounts, memberships, getCurrentPeriod, forLabel:getBillerOwnerLabel, today:todayStr() }),
               ...getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts, forLabel:getBillerOwnerLabel, today:todayStr() }),
+              ...getInsuranceRenewalReminders({ insurancePolicies, today:todayStr() }),
             ] })}
             forFilter={paymentsForFilter} onForFilter={setPaymentsForFilter}
             showCancelled={paymentsShowCancelled} onToggleCancelled={()=>setPaymentsShowCancelled(v=>!v)}
@@ -15375,6 +15377,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             onOpenExpected={e=>{ const ba=billerAccounts.find(x=>String(x.id)===String(e.billerAccountId)); if(ba) setActiveBillerForAction(ba); }}
             onOpenRenewal={row=>{
               if(row.sourceType==="school"){ setShowSchoolFeesList(true); return; }
+              if(row.sourceType==="insurance"){ const p=insurancePolicies.find(x=>String(x.id)===String(row.policyId)); if(p) setViewingPolicy(p); return; }
               const ba = billerAccounts.find(x=>String(x.id)===String(row.billerAccountId));
               if(ba) setActiveBillerForAction(ba);
             }}

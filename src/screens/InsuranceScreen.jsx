@@ -1,7 +1,14 @@
 // Insurance Policy — Manage entity (ADR-021). Deliberately separate screens from Premium/Bill,
 // per the explicit decision this time (learned from the Biller/Bill mistake — combined screens
 // that were supposed to be conceptually separate). Policy never creates Transactions (ADR-021
-// core rule) — it only creates a Bill; the Bill's own existing payment flow handles Transactions.
+// core rule).
+//
+// WP2 (Arth IA §2/§12) — a NEW policy no longer creates a Bill for its premium. Insurance is a
+// domain-specific record, exactly like Membership never becomes a Bill; its renewal now surfaces
+// in Payments via domain/insurance/renewalReminders.js instead. A policy saved before WP2 that
+// already has a linkedBillId keeps working exactly as before — that Bill, and its real payment
+// history, is left alone (never migrated), and editing it still keeps the Bill's core figures in
+// sync, same as always. Only NEW policies (no linkedBillId) take the no-Bill path.
 //
 // Policy type is NOT hardcoded to a fixed enum — free text with suggestions, since policy types
 // (Life/Health/Vehicle/Bike/Travel/Home/Business/Gadget/Pet/Other) will keep growing and a rigid
@@ -53,21 +60,11 @@ export const AddInsurancePolicyModal = ({ existing, prefill, onClose, T, inp, lb
       createdAt: existing?.createdAt||Date.now(),
     };
 
-    // Policy never creates Transactions (ADR-021) — only ever creates/updates its own linked Bill.
-    // The Bill's existing payment flow (isBillPayment/paidBillId) handles Transactions from there,
-    // exactly like every other Bill type — no insurance-specific payment logic.
-    if(!isEdit){
-      const billId = genId();
-      record.linkedBillId = billId;
-      setBills(prev=>[{
-        id: billId, name: `${record.name} Premium`, merchant: record.provider||record.name,
-        amount: record.premiumAmount, dueDate: record.renewalDate, status:"unpaid",
-        recurring: true, frequency: record.premiumFrequency,
-        type: "insurance_premium", linkedPolicyId: policyId,
-        catId: null, catIds: [], subId: null, subIds: [],
-        createdDate: todayStr(), createdAt: Date.now(),
-      }, ...prev]);
-    } else if(existing.linkedBillId){
+    // WP2: a NEW policy no longer creates a Bill — its renewal surfaces in Payments via
+    // domain/insurance/renewalReminders.js instead (record.linkedBillId stays null). A policy
+    // saved before WP2 keeps its existing linked Bill working exactly as before (never migrated);
+    // editing it still keeps that Bill's core figures in sync, same as always.
+    if(isEdit && existing.linkedBillId){
       // Editing: keep the linked Bill's core figures in sync (amount/frequency/dueDate can drift
       // if only edited on one side) - never touches the Bill's paid/unpaid history.
       setBills(prev=>prev.map(b=>b.id===existing.linkedBillId
@@ -131,7 +128,7 @@ export const AddInsurancePolicyModal = ({ existing, prefill, onClose, T, inp, lb
             <div style={{ width:18,height:18,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:autopay?20:2,transition:"left 0.15s" }}/>
           </div>
         </div>
-        {!isEdit&&<div style={{ color:T.sub,fontSize:10 }}>Saving will automatically create the Premium as a Bill in Outlook — you'll never need to create it separately.</div>}
+        {!isEdit&&<div style={{ color:T.sub,fontSize:10 }}>The premium will appear in Payments → Renewals &amp; fees as it comes due — no separate Bill needed.</div>}
         <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Policy"}</button>
       </div>
     </BottomSheet>
@@ -183,7 +180,9 @@ export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, bills
           </div>
         ))}
       </div>
-      {linkedBill&&<div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Premium tracked in Outlook as a Bill — pay it there, this screen only manages the policy itself.</div>}
+      {linkedBill
+        ? <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Premium tracked as a Bill — pay it there, this screen only manages the policy itself.</div>
+        : (policy.status!=="archived"&&<div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Appears in Payments → Renewals &amp; fees as it comes due.</div>)}
       <div style={{ display:"flex",gap:8 }}>
         <button onClick={()=>{ setEditingPolicy(policy); setShowAddPolicy(true); onClose(); }} style={{ flex:1,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
         <button onClick={()=>{
