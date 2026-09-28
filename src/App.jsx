@@ -14871,7 +14871,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
             </div>
             <input style={inp} placeholder="Bill name * e.g. April Electricity Bill" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
-            <input style={inp} placeholder="Biller / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
+            <input style={inp} placeholder="Provider / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
             <input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>
             {duplicateInvoiceBill && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:-4 }}>This invoice number already exists for {duplicateInvoiceBill.name}.</div>}
             <div>
@@ -15288,14 +15288,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
                   {favourites.length>0&&(
                     <div style={{ margin:"8px 16px",background:T.card,border:`1px solid ${T.border}`,borderRadius:16,overflow:"hidden" }}>
-                      <div style={{ color:T.text,fontSize:12,fontWeight:900,padding:"12px 16px 4px" }}>★ Favourite Billers</div>
+                      <div style={{ color:T.text,fontSize:12,fontWeight:900,padding:"12px 16px 4px" }}>★ Favourite Providers</div>
                       {favourites.map(renderListRow)}
                     </div>
                   )}
 
                   {!billerAccounts.length&&null}
                   <div style={{ padding:"4px 16px 8px",textAlign:"right" }}>
-                    <button onClick={()=>setShowAddBillerModal(true)} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>+ Add Biller</button>
+                    <button onClick={()=>setShowAddBillerModal(true)} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>+ Add Provider</button>
                   </div>
                 </>
               );
@@ -16208,17 +16208,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:310,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
-            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{existing?"Edit Provider":"Add Biller"}</div>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{existing?"Edit Provider":"Add Provider"}</div>
             <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
           </div>
-          <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>{existing?"Rename or fix the type for this provider.":"Create the biller first — you can add Self, family members, or anyone else under it one at a time, whenever you're ready."}</div>
+          <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>{existing?"Rename or fix the type for this provider.":"Create the provider first — you can add Self, family members, or anyone else under it one at a time, whenever you're ready."}</div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
             <div>
-              <span style={lbl}>Biller Name *</span>
+              <span style={lbl}>Provider Name *</span>
               <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. Jio, Gym XYZ, Goa Electricity Dept" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
             </div>
             <div>
-              <span style={lbl}>Biller Type *</span>
+              <span style={lbl}>Provider Type *</span>
               {!showTypePicker ? (
                 <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.accent+"18",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"8px 14px" }}>
                   <span style={{ fontSize:13,fontWeight:700,color:T.accent }}>{getBillerIcon(type)} {type}</span>
@@ -16237,7 +16237,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
               )}
             </div>
-            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{existing?"Save Changes":"Add Biller"}</button>
+            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{existing?"Save Changes":"Add Provider"}</button>
           </div>
         </div>
       </div>
@@ -16334,7 +16334,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
-            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit Biller Account":"Add Biller Account"}</div>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit Provider Account":"Add Provider Account"}</div>
             <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
           </div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
@@ -16343,7 +16343,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <input style={inp} placeholder="e.g. M1, Flat 201, My Number, Me" value={baName} onChange={e=>setBaName(e.target.value)} autoFocus/>
             </div>
             <div>
-              <span style={lbl}>Biller Type *</span>
+              <span style={lbl}>Provider Type *</span>
               {!showTypePicker ? (
                 <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",background:T.accent+"18",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"8px 14px" }}>
                   <span style={{ fontSize:13,fontWeight:700,color:T.accent }}>{getBillerIcon(baType)} {baType}</span>
@@ -16419,10 +16419,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
             <div>
               <span style={lbl}>Note (optional)</span>
-              <input style={inp} placeholder="Any notes about this biller" value={baNote} onChange={e=>setBaNote(e.target.value)}/>
+              <input style={inp} placeholder="Any notes about this provider" value={baNote} onChange={e=>setBaNote(e.target.value)}/>
             </div>
             {duplicateError&&<div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",color:T.danger,fontSize:11,fontWeight:700 }}>{duplicateError}</div>}
-            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Biller Account"}</button>
+            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Provider Account"}</button>
           </div>
         </div>
       </div>
@@ -16876,7 +16876,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               return (
                 <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
                   <div>
-                    <span style={lbl}>Existing Biller (optional)</span>
+                    <span style={lbl}>Existing Provider (optional)</span>
                     <select style={inp} value={selectedBillerId} onChange={e=>{
                       const billerId = e.target.value;
                       setSelectedBillerId(billerId);
@@ -16892,7 +16892,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       // something specific (e.g. "July Electricity"), not blindly echo the biller.
                       setMerchant(prev=>prev.trim()?prev:(biller?.name||""));
                     }}>
-                      <option value="">— Not linked to an existing biller —</option>
+                      <option value="">— Not linked to an existing provider —</option>
                       {billers.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                   </div>
@@ -16958,7 +16958,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {(selectedBillerId && (billers.find(b=>b.id===selectedBillerId)?.type==="Credit Card" || getBillerActionType(billers.find(b=>b.id===selectedBillerId)?.type)==="membership")) ? null : (<>
 
             <input style={{ ...inp,fontSize:17,fontWeight:700,border:`1px solid ${!name.trim()?T.danger+"66":T.border}` }} placeholder="Bill name * e.g. Common Meter Electric" value={name} onChange={e=>setName(e.target.value)}/>
-            <input style={inp} placeholder="Biller / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
+            <input style={inp} placeholder="Provider / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
             <input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>
             {duplicateInvoiceBill && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:-4 }}>This invoice number already exists for {duplicateInvoiceBill.name}.</div>}
 

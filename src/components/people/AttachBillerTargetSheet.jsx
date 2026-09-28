@@ -23,7 +23,7 @@ export default function AttachBillerTargetSheet({ T, billerAccount, people, grou
   return (
     <BottomSheet T={T} onClose={onClose}>
       <SheetHeader T={T} title="Attach to person or group" onCancel={onClose} />
-      <div style={{ color: T.sub, fontSize: 12, marginBottom: 10 }}>Attach {billerAccount?.name || "this biller"} to who it belongs to.</div>
+      <div style={{ color: T.sub, fontSize: 12, marginBottom: 10 }}>Attach {billerAccount?.name || "this provider"} to who it belongs to.</div>
       <input style={s.input} placeholder="Search people or groups" value={q} onChange={e => setQ(e.target.value)} />
       <div style={{ marginTop: 10, maxHeight: "50vh", overflowY: "auto" }}>
         {showMe ? (

@@ -122,7 +122,7 @@ export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, o
       ) : null}
       {groups.renewals?.length ? (
         <div data-testid="group-Renewals">
-          <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", margin: "16px 0 8px" }}>Renewals & fees</div>
+          <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", margin: "16px 0 8px" }}>Subscriptions & Fees</div>
           {groups.renewals.map(row => <RenewalRow key={row.id} T={T} row={row} sym={sym} fmt={fmt} onOpen={onOpenRenewal} />)}
         </div>
       ) : null}

@@ -128,7 +128,7 @@ export const AddInsurancePolicyModal = ({ existing, prefill, onClose, T, inp, lb
             <div style={{ width:18,height:18,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:autopay?20:2,transition:"left 0.15s" }}/>
           </div>
         </div>
-        {!isEdit&&<div style={{ color:T.sub,fontSize:10 }}>The premium will appear in Payments → Renewals &amp; fees as it comes due — no separate Bill needed.</div>}
+        {!isEdit&&<div style={{ color:T.sub,fontSize:10 }}>The premium will appear in Payments → Subscriptions &amp; Fees as it comes due — no separate Bill needed.</div>}
         <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Policy"}</button>
       </div>
     </BottomSheet>
@@ -182,7 +182,7 @@ export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, bills
       </div>
       {linkedBill
         ? <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Premium tracked as a Bill — pay it there, this screen only manages the policy itself.</div>
-        : (policy.status!=="archived"&&<div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Appears in Payments → Renewals &amp; fees as it comes due.</div>)}
+        : (policy.status!=="archived"&&<div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Appears in Payments → Subscriptions &amp; Fees as it comes due.</div>)}
       <div style={{ display:"flex",gap:8 }}>
         <button onClick={()=>{ setEditingPolicy(policy); setShowAddPolicy(true); onClose(); }} style={{ flex:1,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
         <button onClick={()=>{
