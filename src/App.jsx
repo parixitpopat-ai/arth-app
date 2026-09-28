@@ -86,7 +86,8 @@ import GroupSettingsEditor from "./components/people/GroupSettingsEditor";
 import { PersonProfileScreen } from "./screens/PersonProfileScreen";
 import { isSchoolRelationshipCurrent, getSchoolRelationships, migrateSchoolRelationshipsIntoCanonicalStore } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
-import { getCommitments } from "./domain/bills/commitments";
+import { getCommitments, isRechargeBiller } from "./domain/bills/commitments";
+import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
 import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool } from "../domain/allocations/adapter";
@@ -18602,6 +18603,50 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:4 }}>LINKED CREDIT CARD ACCOUNT</div>
                       <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{ccAcc.name}</div>
                       <div style={{ color:T.sub,fontSize:11,marginTop:6 }}>Used for Credit Card payments. Statements and balance: Payments → Credit Cards.</div>
+                    </div>
+                  );
+                })()}
+                {/* WP9 — Prepaid/Utilisation generalization. Real payment stays exactly one Bill
+                    (the existing Add Bill flow's validFrom2/validUntilCalc, unchanged) — coverage,
+                    utilisation and remaining are derived here from that one record via
+                    getPrepaidCoverage, never stored as a separate synthetic record. Same
+                    derivation the Insights page's Prepaid & Service Utilisation card already
+                    uses, now surfaced where a person actually checks a specific connection. */}
+                {isRechargeBiller(ba.type)&&(()=>{
+                  const coverage = getPrepaidCoverage(baBills);
+                  if(!coverage) return null;
+                  const color = coverage.status==="expired"?T.danger:coverage.status==="expiring_soon"?T.warn:T.success;
+                  const statusLabel = coverage.status==="expired"?"Expired":coverage.status==="expiring_soon"?"Expiring Soon":"Active";
+                  const history = getPrepaidHistory(baBills);
+                  return (
+                    <div style={{ background:`linear-gradient(135deg,${color}12,${T.card})`,border:`1px solid ${color}44`,borderRadius:16,padding:16,marginBottom:12 }}>
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                        <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>📶 Prepaid Coverage</div>
+                        <div style={{ background:color+"22",border:`1px solid ${color}44`,borderRadius:20,padding:"3px 10px" }}>
+                          <span style={{ color,fontSize:10,fontWeight:800 }}>{statusLabel}</span>
+                        </div>
+                      </div>
+                      <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>{coverage.validFrom?`${formatShortDate(coverage.validFrom)||coverage.validFrom} → `:""}{formatShortDate(coverage.validUntil)||coverage.validUntil}</div>
+                      <div style={{ color,fontSize:13,fontWeight:800,marginBottom:6 }}>{coverage.daysRemaining>=0?`${coverage.daysRemaining} Day${coverage.daysRemaining===1?"":"s"} Left`:`Expired ${Math.abs(coverage.daysRemaining)} day${Math.abs(coverage.daysRemaining)===1?"":"s"} ago`}</div>
+                      {coverage.percentUsed!=null&&(
+                        <>
+                          <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:4 }}>
+                            <div style={{ height:"100%",width:`${coverage.percentUsed}%`,background:color,borderRadius:3 }}/>
+                          </div>
+                          <div style={{ color:T.sub,fontSize:10 }}>{coverage.percentUsed}% of this period used</div>
+                        </>
+                      )}
+                      {history.length>1&&(
+                        <div style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
+                          <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>PAST RECHARGES</div>
+                          {history.slice(1,4).map(b=>(
+                            <div key={b.id} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}>
+                              <span style={{ color:T.sub,fontSize:10 }}>{formatShortDate(b.validFrom)||b.validFrom} → {formatShortDate(b.validUntil)||b.validUntil}</span>
+                              <span style={{ color:T.text,fontSize:10,fontWeight:700 }}>{sym}{fmt(b.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
