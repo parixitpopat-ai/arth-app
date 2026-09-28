@@ -16928,7 +16928,30 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
               );
             })()}
-            {(selectedBillerId && billers.find(b=>b.id===selectedBillerId)?.type==="Credit Card") ? null : (<>
+            {/* Bug fix, same reasoning/pattern as the Credit Card block above: a Gym/Fitness,
+                Club Membership, School/Education Fees, Other Subscription, Society Maintenance or
+                Rental biller is already tracked exclusively via its own Membership screen — the
+                Biller Action Sheet's own "Add Bill" button is already hidden for these
+                (actionType==="membership"), but this second, general Add Bill entry point had no
+                matching guard, so it could (and, per a real reported case, did) create a real Bill
+                that tracked the exact same recurring payment a second time, permanently — nothing
+                ever reconciles the two. Reusing the same getBillerActionType this whole app
+                already gates on, rather than a second, separate list. */}
+            {(()=>{
+              const selectedBiller = selectedBillerId ? billers.find(b=>b.id===selectedBillerId) : null;
+              if(!selectedBiller || selectedBiller.type==="Credit Card" || getBillerActionType(selectedBiller.type)!=="membership") return null;
+              const linkedAccount = billerAccountId ? billerAccounts.find(a=>a.id===billerAccountId) : billerAccounts.find(a=>a.billerId===selectedBiller.id);
+              return (
+                <div style={{ background:T.input,borderRadius:RADIUS.lg,padding:"14px",display:"flex",flexDirection:"column",gap:8 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{selectedBiller.name} is tracked as a Membership, not a Bill.</div>
+                  <div style={{ color:T.sub,fontSize:11,lineHeight:1.5 }}>Gym/Club Membership, School/Education Fees, Subscription, Society Maintenance and Rental payments are recorded from the account's own Add Membership screen, so the payment and its renewal period stay in one place. Creating a Bill here instead would track the same payment a second time, with nothing keeping the two in sync.</div>
+                  {linkedAccount ? (
+                    <button onClick={()=>{ setShowAddBill(false); setActiveBillerForAction(linkedAccount); }} style={{ minHeight:TOUCH.min,background:T.accent,border:"none",color:T.accentInk,borderRadius:RADIUS.md,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Open {linkedAccount.name}</button>
+                  ) : null}
+                </div>
+              );
+            })()}
+            {(selectedBillerId && (billers.find(b=>b.id===selectedBillerId)?.type==="Credit Card" || getBillerActionType(billers.find(b=>b.id===selectedBillerId)?.type)==="membership")) ? null : (<>
 
             <input style={{ ...inp,fontSize:17,fontWeight:700,border:`1px solid ${!name.trim()?T.danger+"66":T.border}` }} placeholder="Bill name * e.g. Common Meter Electric" value={name} onChange={e=>setName(e.target.value)}/>
             <input style={inp} placeholder="Biller / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
@@ -18024,6 +18047,32 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{avgAmt?`${sym}${fmt(avgAmt)}`:"—"}</div>
                         <div style={{ color:T.sub,fontSize:8,marginTop:2 }}>AVERAGE</div>
                       </div>
+                    </div>
+                  );
+                })()}
+                {/* Bug fix: a membership-type account could already have an open Bill sitting
+                    against it from before the Add Bill guard above existed (or from any other
+                    path that predates it) — the exact reported case: a real, unpaid, permanently-
+                    overdue Bill that a Membership payment recorded against the same account never
+                    touches, since nothing reconciles the two. Surfaced explicitly here rather than
+                    silently auto-settling it — the two might genuinely not be the same payment
+                    (different amount/period), so only the person opening this account can say
+                    they match. */}
+                {actionType==="membership"&&(()=>{
+                  const openBills = baBills.filter(b=>b.status==="unpaid");
+                  if(!openBills.length) return null;
+                  return (
+                    <div style={{ background:T.danger+"14",border:`1px solid ${T.danger}33`,borderRadius:14,padding:"13px",marginBottom:12 }}>
+                      <div style={{ color:T.danger,fontSize:12,fontWeight:800,marginBottom:4 }}>⚠️ {openBills.length} open Bill{openBills.length===1?"":"s"} on this Membership account</div>
+                      <div style={{ color:T.sub,fontSize:11,lineHeight:1.5,marginBottom:8 }}>This account is tracked as a Membership, but also has {openBills.length===1?"a Bill":"Bills"} sitting unpaid — most likely from before Membership tracking, still open because paying via Membership never touches Bills. If this is the same payment, pay or delete it below; if it's genuinely separate, leave it.</div>
+                      {openBills.map(b=>(
+                        <div key={b.id} onClick={()=>{ setActiveBillerForAction(null); setViewingBillId(b.id); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:`1px solid ${T.danger}22`,cursor:"pointer" }}>
+                          <div>
+                            <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name}{b.dueDate?` · due ${formatShortDate(b.dueDate)||b.dueDate}`:""}</div>
+                          </div>
+                          <div style={{ color:T.danger,fontSize:12,fontWeight:800 }}>{sym}{fmt(b.amount)} ›</div>
+                        </div>
+                      ))}
                     </div>
                   );
                 })()}
