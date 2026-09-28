@@ -102,6 +102,7 @@ import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirecti
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
 import { withBillForSnapshots, repairUnassignedBills } from "./domain/bills/billFor";
+import { getMembershipRenewalReminders, getSchoolFeeReminders } from "./domain/bills/renewalReminders";
 import { getBillBalance, planBillPayment, withProjectedBillStatuses, getPartialRemainingByBill, getBillBadge, getBillLedger } from "./domain/obligations/billBalance";
 import { hasCompleteSchedule, setRelationshipSchedule, getExpectedForRelationship, getExpectedItems, buildBillFieldsFromExpected } from "./domain/obligations/expected";
 import { buildPaymentsView, getBillPeriodLabel, getBadgeText } from "./domain/bills/paymentsView";
@@ -15362,12 +15363,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             their existing reconciliation sheet. */}
         {billsTab==="bills"&&(
           <BillsList T={T} sym={sym} fmt={fmt}
-            view={buildPaymentsView({ bills, contributions, forFilter:paymentsForFilter, forLabel:getBillForLabel, expectedItems:getExpectedItems(membershipRelationships, bills) })}
+            view={buildPaymentsView({ bills, contributions, forFilter:paymentsForFilter, forLabel:getBillForLabel, expectedItems:getExpectedItems(membershipRelationships, bills), renewalItems:[
+              ...getMembershipRenewalReminders({ billerAccounts, memberships, getCurrentPeriod, forLabel:getBillerOwnerLabel, today:todayStr() }),
+              ...getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts, forLabel:getBillerOwnerLabel, today:todayStr() }),
+            ] })}
             forFilter={paymentsForFilter} onForFilter={setPaymentsForFilter}
             showCancelled={paymentsShowCancelled} onToggleCancelled={()=>setPaymentsShowCancelled(v=>!v)}
             showAllPaid={paymentsShowAllPaid} onToggleAllPaid={()=>setPaymentsShowAllPaid(v=>!v)}
             onOpen={b=>{ if(b.isCcStatement) setViewingCcStatementId(b.id); else setViewingBillId(b.id); }}
             onOpenExpected={e=>{ const ba=billerAccounts.find(x=>String(x.id)===String(e.billerAccountId)); if(ba) setActiveBillerForAction(ba); }}
+            onOpenRenewal={row=>{
+              if(row.sourceType==="school"){ setShowSchoolFeesList(true); return; }
+              const ba = billerAccounts.find(x=>String(x.id)===String(row.billerAccountId));
+              if(ba) setActiveBillerForAction(ba);
+            }}
             onAddBill={null} txns={txns}/>
         )}
       </div>

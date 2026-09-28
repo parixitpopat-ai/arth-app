@@ -87,8 +87,13 @@ const matchesFor = (bill, forFilter) => {
  * caller) render as their own group, dashed, "not bills yet" (Arth 2.0 IA Redesign.dc.html's D1).
  * They never count toward totalUnpaid/openCount and are never Due/Overdue/paid/cancelled — they
  * are not Bills.
+ * `renewalItems` (domain/bills/renewalReminders.js — School Fees/Subscription/Membership
+ * renewals, computed by the caller) render as their own group too, same reasoning: they're not
+ * Bills either (ADR-039 §9 keeps that data in memberships[]/feePeriods, deliberately), but per
+ * the user's own explicit direction, showing them here too — without becoming Bills — beats being
+ * invisible in the one screen a person actually checks what's due.
  */
-export function buildPaymentsView({ bills, contributions, refDate = new Date(), forFilter = "all", forLabel = () => "", expectedItems = [] }) {
+export function buildPaymentsView({ bills, contributions, refDate = new Date(), forFilter = "all", forLabel = () => "", expectedItems = [], renewalItems = [] }) {
   const all = (bills || []).filter(Boolean);
   const chipMap = new Map();
   let hasUnassigned = false;
@@ -126,6 +131,12 @@ export function buildPaymentsView({ bills, contributions, refDate = new Date(), 
     .map(e => ({ expected: e, forText: forLabel({ forType: e.targetType, forId: e.targetId }) }))
     .sort((a, b) => String(a.expected.dueDate || "9999").localeCompare(String(b.expected.dueDate || "9999")));
   groups.expected = expectedRows;
+
+  groups.renewals = [...(renewalItems || [])].sort((a, b) => {
+    if (a.kind === "overdue" && b.kind !== "overdue") return -1;
+    if (a.kind !== "overdue" && b.kind === "overdue") return 1;
+    return (b.days || 0) - (a.days || 0);
+  });
 
   return { forChips, groups, totalUnpaid, openCount: open.length, lastPaid };
 }

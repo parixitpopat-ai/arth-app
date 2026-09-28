@@ -90,3 +90,17 @@ test("Expected items (ADR-039) get their own group, filtered by For, never count
   const onlyGroup = buildPaymentsView({ bills, contributions, refDate: today, forLabel, expectedItems, forFilter: "group:g1" });
   assert.deepEqual(onlyGroup.groups.expected.map(r => r.expected.relationshipId), ["r1"]);
 });
+
+test("Renewal reminders (School Fees/Subscription/Membership, domain/bills/renewalReminders.js) get their own group, overdue first, never counted in totals", () => {
+  const renewalItems = [
+    { billerAccountId: "gym", name: "Parixit", amount: 8499, kind: "overdue", days: 12 },
+    { billerAccountId: "school", name: "September", amount: 12000, kind: "overdue", days: 27 },
+    { billerAccountId: "netflix", name: "Netflix", amount: 649, kind: "renewing", days: 3 },
+  ];
+  const v = buildPaymentsView({ bills, contributions, refDate: today, forLabel, renewalItems });
+  assert.deepEqual(v.groups.renewals.map(r => r.billerAccountId), ["school", "gym", "netflix"], "overdue first, longest-overdue first, then renewing-soon");
+  const withoutRenewals = buildPaymentsView({ bills, contributions, refDate: today, forLabel });
+  assert.equal(v.totalUnpaid, withoutRenewals.totalUnpaid, "renewals never affect totals — not Bills");
+  assert.equal(v.openCount, withoutRenewals.openCount);
+  assert.deepEqual(withoutRenewals.groups.renewals, [], "no renewalItems given -> empty group, not undefined");
+});

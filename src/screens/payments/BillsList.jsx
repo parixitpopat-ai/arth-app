@@ -52,6 +52,23 @@ function ExpectedRow({ T, row, sym, fmt, onOpen }) {
   );
 }
 
+// School Fees/Subscription/Membership renewal reminders (domain/bills/renewalReminders.js) —
+// deliberately NOT Bills (ADR-039 §9), shown dashed like Expected, per the user's own explicit
+// direction: visible here so they're not invisible in the one screen a person checks what's due,
+// without becoming a Bill. Tapping opens the underlying Biller Account, not a Bill detail sheet.
+function RenewalRow({ T, row, sym, fmt, onOpen }) {
+  const overdue = row.kind === "overdue";
+  return (
+    <button data-testid={`renewal-row-${row.billerAccountId}`} onClick={() => onOpen(row)} style={{ display: "flex", gap: 12, width: "100%", background: "transparent", border: `1px dashed ${overdue ? T.danger + "88" : T.borderStrong}`, borderRadius: 14, padding: "12px 14px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: FONT.sans }}>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: "block", color: T.text, fontSize: 14, fontWeight: 700 }}>{row.name}{row.forText ? ` · ${row.forText}` : ""}</span>
+        <span style={{ display: "block", color: overdue ? T.danger : T.sub, fontSize: 12, marginTop: 2 }}>{overdue ? `${row.days} day${row.days === 1 ? "" : "s"} overdue` : `Renewing in ${row.days} day${row.days === 1 ? "" : "s"}`}</span>
+      </span>
+      <span style={{ color: T.sub, fontSize: 15, fontWeight: 600, fontFamily: FONT.mono, flexShrink: 0 }}>{sym}{fmt(row.amount)}</span>
+    </button>
+  );
+}
+
 function Group({ T, title, rows, ...rest }) {
   if (!rows.length) return null;
   return (
@@ -62,7 +79,7 @@ function Group({ T, title, rows, ...rest }) {
   );
 }
 
-export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, onOpen, onOpenExpected, onAddBill, showCancelled, onToggleCancelled, showAllPaid, onToggleAllPaid, txns }) {
+export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, onOpen, onOpenExpected, onOpenRenewal, onAddBill, showCancelled, onToggleCancelled, showAllPaid, onToggleAllPaid, txns }) {
   const { groups, forChips, totalUnpaid, openCount, lastPaid } = view;
   const paidRows = showAllPaid ? groups.paid : groups.paid.slice(0, 5);
   return (
@@ -101,6 +118,12 @@ export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, o
         <div data-testid="group-Expected">
           <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", margin: "16px 0 8px" }}>Expected · not bills yet</div>
           {groups.expected.map(row => <ExpectedRow key={row.expected.relationshipId} T={T} row={row} sym={sym} fmt={fmt} onOpen={onOpenExpected} />)}
+        </div>
+      ) : null}
+      {groups.renewals?.length ? (
+        <div data-testid="group-Renewals">
+          <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", margin: "16px 0 8px" }}>Renewals & fees · not bills</div>
+          {groups.renewals.map(row => <RenewalRow key={row.billerAccountId} T={T} row={row} sym={sym} fmt={fmt} onOpen={onOpenRenewal} />)}
         </div>
       ) : null}
       <Group T={T} title="Paid" rows={paidRows} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />
