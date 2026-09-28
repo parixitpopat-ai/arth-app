@@ -9,24 +9,20 @@
 // plan. This file only makes the canonical read path available; it does
 // not yet replace anything.
 //
-// Deliberately preserves today's real, if inconsistent, resolution
-// semantics rather than unifying them:
-//   - Household (annualBudget/monthOverrides) resolves with `||`, so an
-//     explicit override of 0 falls through to the computed default.
-//   - Person/Group (spendBudgetOverrides/manualLimitOverrides) resolve
-//     with `??`, so an explicit override of 0 is respected as-is.
-// This split was flagged as a real inconsistency in BUD-000A/ADR-035
-// (CBR-BUD-05/08). Unifying it is an explicit future decision, not
-// something this PR silently changes - doing so here would be a
-// behavior change, which is out of scope for WP-1.
+// WP6 (Arth IA — Budget Core Model, 2026-09-28) — the `||` vs `??` split this
+// file used to preserve deliberately is now RESOLVED: Household unifies onto
+// `??`, matching Person/Group exactly. An explicit household month override
+// of 0 is a deliberate zero, not "not meaningfully set" — same rule as
+// Person/Group already had. This is a real behavior change to existing
+// Budget numbers for anyone who's set a household override to exactly 0,
+// decided explicitly (not inferred) before building the Mandatory/
+// Discretionary hierarchy on top of it, per the locked decision record in
+// the "Arth IA — Payments, Outlook, Budget & Insights" doc, §12.
 
 /**
  * Resolve the Planning Allocation amount for the Household dimension,
- * for a given period. Mirrors the six duplicate implementations found
- * in BUD-000's Mutation Census (AppContent, Home, OutlookPage,
- * BudgetPage) exactly - same formula, same `||` semantics - so that
- * switching a consumer over to this function in PR-2/PR-3 produces
- * identical output to what it already computed inline.
+ * for a given period. Same `??` semantics as Person/Group (WP6) - an
+ * explicit override of 0 is respected as a deliberate zero.
  *
  * @param {number} annualBudget
  * @param {Object} monthOverrides - { [monthKey: "YYYY-MM"]: number }
@@ -34,7 +30,7 @@
  * @returns {number}
  */
 export function getHouseholdPlanningAllocation(annualBudget, monthOverrides, monthKey) {
-  return monthOverrides[monthKey] || Math.round(Number(annualBudget || 0) / 12);
+  return monthOverrides[monthKey] ?? Math.round(Number(annualBudget || 0) / 12);
 }
 
 /**
@@ -79,10 +75,9 @@ export function getBudgetVariance(actual, budget) {
 
 /**
  * Resolve the Planning Allocation amount for a Person dimension, for a
- * given period. Uses `??` (nullish), not `||` - an explicit override of
- * 0 is respected as a deliberate zero, matching today's real behavior
- * at spendBudgetOverrides call sites (not unified with Household's `||`
- * semantics - see file header).
+ * given period. Uses `??` (nullish) - an explicit override of 0 is
+ * respected as a deliberate zero. Household uses this same semantics now
+ * too (WP6) - all three dimensions are unified.
  *
  * @param {Object} person - a Person object with `.spendBudget` and
  *   optionally `.spendBudgetOverrides`
@@ -95,7 +90,7 @@ export function getPersonPlanningAllocation(person, monthKey) {
 
 /**
  * Resolve the Planning Allocation amount for a Group dimension, for a
- * given period. Same `??` semantics as Person - see file header.
+ * given period. Same `??` semantics as Person and Household (WP6).
  *
  * @param {Object} group - a Group object with `.manualLimit` and
  *   optionally `.manualLimitOverrides`
@@ -465,4 +460,139 @@ export function getBudgetHealthStatus(isProjectedOver, projectedMarginPct) {
   if (isProjectedOver) return { status: "over" };
   if (projectedMarginPct < 10) return { status: "close" };
   return { status: "onTrack" };
+}
+
+// --- WP6 (Arth IA — Budget Core Model) ---------------------------------
+//
+// The hierarchy the IA locked: Monthly Budget (getHouseholdPlanningAllocation,
+// above) minus Mandatory Commitments = Discretionary Pool; Person/Group
+// Planning Allocations (already implemented above) are envelopes carved out
+// of that pool; whatever's left is Unallocated. This is new work layered on
+// top of the existing sibling-dimension functions above — it does not
+// replace or recompute them, and it adds no second spend engine: a Mandatory
+// Commitment's "remaining" is arithmetic over the exact same
+// getCategoryAttributedTotal a caller already has, per the locked invariant
+// "spending reduces exactly one envelope, computed once."
+//
+// A Mandatory Commitment record: { id, name, amount, categoryId }. No
+// month-override layer, deliberately — same reasoning getCategoryPlanningAllocation
+// already documents for Category (flat only); amount changes are edits, not
+// a parallel per-month map for a handful of user-defined line items.
+
+/**
+ * Sum of every Mandatory Commitment's amount — the "Mandatory Commitments"
+ * figure in the hierarchy (e.g. Household 5,000 + Spouse support 3,000 +
+ * Pocket money 2,000 = 10,000).
+ *
+ * @param {Array} mandatoryCommitments - [{id, name, amount, categoryId}]
+ * @returns {number}
+ */
+export function getMandatoryCommitmentsTotal(mandatoryCommitments) {
+  return (mandatoryCommitments || []).reduce((sum, c) => sum + Number(c?.amount || 0), 0);
+}
+
+/**
+ * How much of one Mandatory Commitment is left, given what's actually been
+ * spent against its linked category so far this period. Thin wrapper over
+ * getBudgetVariance (same arithmetic, relabeled for this dimension) — not a
+ * second calculation. `spent` is the caller's own
+ * getCategoryAttributedTotal(periodTransactions, commitment.categoryId)
+ * result; this function never reads transactions itself.
+ *
+ * @param {Object} commitment - {amount}
+ * @param {number} spent
+ * @returns {{spent: number, remaining: number, isOver: boolean}}
+ */
+export function getMandatoryCommitmentRemaining(commitment, spent) {
+  const { variance, isOver } = getBudgetVariance(spent, commitment?.amount);
+  return { spent: Number(spent || 0), remaining: variance, isOver };
+}
+
+/**
+ * Discretionary Pool = Monthly Budget − Mandatory Commitments. Not floored
+ * at 0 — if commitments exceed the budget, that's a real over-commitment,
+ * and hiding it behind a floor would be exactly the kind of silent
+ * inconsistency ADR-035/BUD-000A already flagged once for this file (see
+ * the || vs ?? history above). Callers surface a negative pool as a warning,
+ * not a broken UI.
+ *
+ * @param {number} monthlyBudget - getHouseholdPlanningAllocation's result
+ * @param {number} mandatoryCommitmentsTotal - getMandatoryCommitmentsTotal's result
+ * @returns {number}
+ */
+export function getDiscretionaryPool(monthlyBudget, mandatoryCommitmentsTotal) {
+  return Number(monthlyBudget || 0) - Number(mandatoryCommitmentsTotal || 0);
+}
+
+/**
+ * Sum of every Person/Group Planning Allocation envelope carved out of the
+ * Discretionary Pool this period. Takes already-resolved amounts (each
+ * from getPersonPlanningAllocation/getGroupPlanningAllocation) rather than
+ * Person/Group objects themselves — stays a pure arithmetic function, like
+ * getBudgetVariance, with no knowledge of either shape.
+ *
+ * @param {Array<number>} allocationAmounts
+ * @returns {number}
+ */
+export function getDiscretionaryAllocatedTotal(allocationAmounts) {
+  return (allocationAmounts || []).reduce((sum, n) => sum + Number(n || 0), 0);
+}
+
+/**
+ * Unallocated discretionary = Discretionary Pool − Σ(Person/Group
+ * allocations). Not floored, same reasoning as getDiscretionaryPool — a
+ * negative result means allocations exceed the pool, which
+ * getAllocationHierarchyWarning below turns into a real warning rather than
+ * a silently-clamped number.
+ *
+ * @param {number} discretionaryPool
+ * @param {number} allocatedTotal
+ * @returns {number}
+ */
+export function getUnallocatedDiscretionary(discretionaryPool, allocatedTotal) {
+  return Number(discretionaryPool || 0) - Number(allocatedTotal || 0);
+}
+
+/**
+ * The Σ(children) ≤ parent check the hierarchy needs and the sibling
+ * Planning Allocation dimensions never had (per the IA doc: "today these
+ * are independent sibling dimensions, no parent/child nesting, no
+ * Σ(children) ≤ parent check anywhere. That check is new work this model
+ * requires.") Returns null when allocations fit inside the pool; a plain
+ * data object (no formatted string — presentation stays in the UI layer,
+ * same as getBudgetHealthStatus) when they don't, so a caller can warn
+ * without silently clamping anything.
+ *
+ * @param {number} discretionaryPool
+ * @param {number} allocatedTotal
+ * @returns {{overBy: number}|null}
+ */
+export function getAllocationHierarchyWarning(discretionaryPool, allocatedTotal) {
+  const overBy = Number(allocatedTotal || 0) - Number(discretionaryPool || 0);
+  return overBy > 0 ? { overBy } : null;
+}
+
+/**
+ * The dismissedAlerts[] id for "has this month's Mandatory Commitments been
+ * confirmed" — same month-scoped id shape App.jsx's existing budget alerts
+ * already use (`budget_<subject>_<monthKey>_<variant>`), reused rather than
+ * inventing a second confirmation-tracking array. Confirming appends this
+ * id to the existing dismissedAlerts[] state; nothing new to persist.
+ *
+ * @param {string} monthKey - "YYYY-MM"
+ * @returns {string}
+ */
+export function getMandatoryCommitmentsConfirmationId(monthKey) {
+  return `mandatory_confirm_${monthKey}`;
+}
+
+/**
+ * Has this month's Mandatory Commitments total already been confirmed?
+ *
+ * @param {Array<string>} dismissedAlerts
+ * @param {string} monthKey
+ * @returns {boolean}
+ */
+export function isMandatoryCommitmentsConfirmed(dismissedAlerts, monthKey) {
+  return (dismissedAlerts || []).includes(getMandatoryCommitmentsConfirmationId(monthKey));
 }

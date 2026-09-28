@@ -12,9 +12,17 @@ import {
   getPersonAttributedTotal,
   buildRefundTotalsByExpense,
   getHouseholdAttributedTotal,
+  getMandatoryCommitmentsTotal,
+  getMandatoryCommitmentRemaining,
+  getDiscretionaryPool,
+  getDiscretionaryAllocatedTotal,
+  getUnallocatedDiscretionary,
+  getAllocationHierarchyWarning,
+  getMandatoryCommitmentsConfirmationId,
+  isMandatoryCommitmentsConfirmed,
 } from "./adapter.js";
 
-// --- Household: `||` semantics (explicit 0 override falls through) ---
+// --- Household: WP6 unified onto `??` semantics (explicit 0 is respected) ---
 
 test("household: uses month override when present", () => {
   const result = getHouseholdPlanningAllocation(600000, { "2026-08": 65000 }, "2026-08");
@@ -26,9 +34,9 @@ test("household: falls back to annualBudget/12 when no override", () => {
   assert.equal(result, 50000);
 });
 
-test("household: an explicit 0 override falls through to the default (matches existing || behavior, not a bug)", () => {
+test("household: WP6 — an explicit 0 override is now respected, matching Person/Group (unified, not the old || behavior)", () => {
   const result = getHouseholdPlanningAllocation(600000, { "2026-08": 0 }, "2026-08");
-  assert.equal(result, 50000);
+  assert.equal(result, 0);
 });
 
 // --- Category: flat only, no override layer ---
@@ -210,4 +218,90 @@ test("household attribution: accepts a precomputed refundTotalsByExpense instead
   });
 
   assert.equal(result, 700);
+});
+
+// --- WP6: Budget Core Model — Mandatory Commitments / Discretionary Pool ---
+// The IA's own worked example, used throughout: Monthly Budget 30,000 ->
+// Mandatory Commitments 10,000 (Household 5,000 + Spouse support 3,000 +
+// Pocket money 2,000) -> Discretionary Pool 20,000 -> Rohan/Group A 8,000 +
+// Family/Group B 7,000 -> Unallocated 5,000.
+
+const WORKED_COMMITMENTS = [
+  { id: "c1", name: "Household", amount: 5000, categoryId: "cat_household" },
+  { id: "c2", name: "Spouse support", amount: 3000, categoryId: "cat_spouse" },
+  { id: "c3", name: "Pocket money", amount: 2000, categoryId: "cat_pocket" },
+];
+
+test("getMandatoryCommitmentsTotal: sums the worked example to 10,000", () => {
+  assert.equal(getMandatoryCommitmentsTotal(WORKED_COMMITMENTS), 10000);
+});
+
+test("getMandatoryCommitmentsTotal: no commitments is a safe 0, not a crash", () => {
+  assert.equal(getMandatoryCommitmentsTotal([]), 0);
+  assert.equal(getMandatoryCommitmentsTotal(null), 0);
+});
+
+test("getMandatoryCommitmentRemaining: partially spent commitment", () => {
+  const result = getMandatoryCommitmentRemaining({ amount: 3000 }, 1200);
+  assert.equal(result.spent, 1200);
+  assert.equal(result.remaining, 1800);
+  assert.equal(result.isOver, false);
+});
+
+test("getMandatoryCommitmentRemaining: overspent commitment is flagged, not floored", () => {
+  const result = getMandatoryCommitmentRemaining({ amount: 2000 }, 2500);
+  assert.equal(result.remaining, -500);
+  assert.equal(result.isOver, true);
+});
+
+test("getDiscretionaryPool: worked example — 30,000 budget minus 10,000 mandatory = 20,000", () => {
+  assert.equal(getDiscretionaryPool(30000, 10000), 20000);
+});
+
+test("getDiscretionaryPool: over-committed (mandatory exceeds budget) goes negative, not floored to 0", () => {
+  assert.equal(getDiscretionaryPool(10000, 15000), -5000);
+});
+
+test("getDiscretionaryAllocatedTotal: worked example — Rohan/Group A 8,000 + Family/Group B 7,000 = 15,000", () => {
+  assert.equal(getDiscretionaryAllocatedTotal([8000, 7000]), 15000);
+});
+
+test("getDiscretionaryAllocatedTotal: no allocations is a safe 0", () => {
+  assert.equal(getDiscretionaryAllocatedTotal([]), 0);
+  assert.equal(getDiscretionaryAllocatedTotal(null), 0);
+});
+
+test("getUnallocatedDiscretionary: worked example — 20,000 pool minus 15,000 allocated = 5,000", () => {
+  assert.equal(getUnallocatedDiscretionary(20000, 15000), 5000);
+});
+
+test("getUnallocatedDiscretionary: over-allocated goes negative, not floored to 0", () => {
+  assert.equal(getUnallocatedDiscretionary(20000, 25000), -5000);
+});
+
+test("getAllocationHierarchyWarning: worked example allocations fit inside the pool — null, no warning", () => {
+  assert.equal(getAllocationHierarchyWarning(20000, 15000), null);
+});
+
+test("getAllocationHierarchyWarning: allocations exceeding the pool — Sigma(children) > parent — returns overBy", () => {
+  const result = getAllocationHierarchyWarning(20000, 25000);
+  assert.deepEqual(result, { overBy: 5000 });
+});
+
+test("getAllocationHierarchyWarning: allocations exactly matching the pool is not a warning", () => {
+  assert.equal(getAllocationHierarchyWarning(20000, 20000), null);
+});
+
+test("getMandatoryCommitmentsConfirmationId: month-scoped id, matching the existing budget-alert id shape", () => {
+  assert.equal(getMandatoryCommitmentsConfirmationId("2026-09"), "mandatory_confirm_2026-09");
+});
+
+test("isMandatoryCommitmentsConfirmed: true once the id is in dismissedAlerts", () => {
+  assert.equal(isMandatoryCommitmentsConfirmed(["mandatory_confirm_2026-09"], "2026-09"), true);
+});
+
+test("isMandatoryCommitmentsConfirmed: false for a month not yet confirmed, or an empty/missing array", () => {
+  assert.equal(isMandatoryCommitmentsConfirmed(["mandatory_confirm_2026-08"], "2026-09"), false);
+  assert.equal(isMandatoryCommitmentsConfirmed([], "2026-09"), false);
+  assert.equal(isMandatoryCommitmentsConfirmed(null, "2026-09"), false);
 });
