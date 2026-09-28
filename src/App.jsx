@@ -12362,6 +12362,63 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     });
     const outlookBills = unpaidBills.filter(b=>!isWithinPaymentsHorizon(b, todayStr())).sort((a,b)=>(a.daysUntil??Infinity)-(b.daysUntil??Infinity));
 
+    // WP6 — "Preserve provenance back to the underlying source." Every Future Money row, not
+    // just real Bills, now opens its real underlying record. One dispatcher keyed on the
+    // composed event's own sourceType, reused by both the Future Money card's line items and
+    // the >30-day BillRow list below — never a second, bespoke navigation path per surface.
+    // Deliberately NOT wired into the Forecast Timeline below: that list is built from
+    // billsForForecast (SIPs/CC statements converted into bill-shaped stand-ins, kept
+    // separate from this Commitment Read Model on purpose — see the comment above
+    // billsForForecast) and doesn't carry sourceType/sourceId in this shape.
+    const openCommitmentRow = (c) => {
+      switch (c.sourceType) {
+        case "bill": {
+          const bill = originalBillsById[String(c.sourceId)];
+          if (!bill) return;
+          if (bill.isCcStatement) setViewingCcStatementId(bill.id);
+          else setEditingBill(bill);
+          return;
+        }
+        case "ccStatement": {
+          // Synthetic — no generated statement Bill exists yet (mapCcAccountToCommittedSpending).
+          // Opens the card's own account detail, the real record behind the figure.
+          const accId = String(c.sourceId).replace(/^ccstmt_/, "");
+          const acc = accounts.find(a=>String(a.id)===accId);
+          if (acc) setShowAccDetail(acc);
+          return;
+        }
+        case "recurringSchedule":
+          // No per-schedule detail screen exists — Investments is the real destination, not a
+          // guessed one.
+          setSelectedInvestmentTypeView("all");
+          setShowInvestments(true);
+          return;
+        case "feePeriod": {
+          const period = feePeriods.find(p=>String(p.id)===String(c.sourceId));
+          const schedule = period && feeSchedules.find(s=>String(s.id)===String(period.scheduleId));
+          if (schedule) setViewingSchoolFeeSchedule(schedule);
+          return;
+        }
+        case "membership": {
+          const ba = billerAccounts.find(x=>String(x.id)===String(c.sourceId));
+          if (ba) setActiveBillerForAction(ba);
+          return;
+        }
+        case "insurancePolicy": {
+          const p = insurancePolicies.find(x=>String(x.id)===String(c.sourceId));
+          if (p) setViewingPolicy(p);
+          return;
+        }
+        case "debt": {
+          const loan = loans.find(x=>String(x.id)===String(c.sourceId));
+          if (loan) setEditingLoan(loan);
+          return;
+        }
+        default:
+          return;
+      }
+    };
+
     // What Changed — Facts tier only, using the real daily snapshot mechanism (wealthSnapshots).
     // Reasons/Impact tiers omitted here since deriving "why" reliably from raw transactions is a
     // separate piece of work, not silently assumed — matches the ADS's own "omit when data isn't
@@ -12373,20 +12430,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const cashDelta = yesterdaySnap && todaySnap ? todaySnap.cash - yesterdaySnap.cash : null;
 
     const BillRow = ({ b }) => {
-      // Badge now derived from sourceType (canonical) instead of the old synthetic `type`/id-
-      // prefix check — reproduces the exact same visual badge (Step 4 Proof confirmed the
-      // mapping is equivalent). Only real Bills are clickable, same as before. A generated
-      // Credit Card statement IS a real Bill (sourceType "bill", per the CC WP) — it opens the
-      // reconciliation sheet instead of the plain bill editor.
-      const isSynthetic = b.sourceType !== "bill";
+      // Badge derived from sourceType (canonical). WP6 — every row now opens its real
+      // underlying source via openCommitmentRow, not just real Bills; this is the
+      // discoverability fix the design doc calls out ("a projected line had no visible
+      // origin"). A generated Credit Card statement IS a real Bill (sourceType "bill", per
+      // the CC WP) — it opens the reconciliation sheet instead of the plain bill editor.
       const isCcStatement = Boolean(b._originalBill?.isCcStatement);
-      const openRow = () => {
-        if(isSynthetic || !b._originalBill) return;
-        if(isCcStatement) setViewingCcStatementId(b._originalBill.id);
-        else setEditingBill(b._originalBill);
-      };
       return (
-      <div onClick={openRow} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:isSynthetic?"default":"pointer" }}>
+      <div onClick={()=>openCommitmentRow(b)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
         <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name}{b.sourceType==="recurringSchedule"&&<span style={{ color:T.sub,fontWeight:400 }}> · SIP</span>}{isCcStatement&&<span style={{ color:T.sub,fontWeight:400 }}> · Card</span>}</span>
         <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(b.amount)}</span>
       </div>
@@ -12402,6 +12453,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           reusing the exact real Budget formula, not a separate calculation. */}
       <div style={{ ...card,textAlign:"center",padding:20,marginBottom:12 }}>
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND</div>
+        <div style={{ color:T.accent,fontSize:9,fontWeight:800,letterSpacing:0.8,marginTop:2,textTransform:"uppercase" }}>The plan</div>
         {monthBudget<=0 ? (
           <div style={{ color:T.sub,fontSize:13,padding:"14px 0" }}>No budget set for this month yet.</div>
         ) : (
@@ -12410,6 +12462,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(safeToSpendPerDay))}/day for the rest of this month</div>
           </>
         )}
+        <div style={{ color:T.sub,fontSize:10,lineHeight:1.5,marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
+          Your monthly budget minus what you have spent. It answers "can I follow my plan" — it does not know about bills yet.
+        </div>
       </div>
 
       {/* Your Future Money — I-1's three commitment classes, made visible for the first time.
@@ -12424,7 +12479,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         ) : (
           <div style={{ marginBottom:14 }}>
             {unpaidSpending.map(c=>(
-              <div key={`${c.sourceType}_${c.sourceId}`} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+              <div key={`${c.sourceType}_${c.sourceId}`} onClick={()=>openCommitmentRow(c)} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0",cursor:"pointer" }}>
                 <span style={{ color:T.sub,fontSize:11 }}>{c.name||"—"}</span>
                 <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{c.amount!=null?`${sym}${fmt(c.amount)}`:"Amount not set"}</span>
               </div>
@@ -12438,7 +12493,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         ) : (
           <div style={{ marginBottom:14 }}>
             {committedSaving.map(c=>(
-              <div key={`${c.sourceType}_${c.sourceId}`} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+              <div key={`${c.sourceType}_${c.sourceId}`} onClick={()=>openCommitmentRow(c)} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0",cursor:"pointer" }}>
                 <span style={{ color:T.sub,fontSize:11 }}>{c.name||"—"}</span>
                 <span style={{ color:T.success,fontSize:12,fontWeight:700 }}>{c.amount!=null?`${sym}${fmt(c.amount)}`:"Amount not set"}</span>
               </div>
@@ -12454,7 +12509,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         ) : (
           <div>
             {futureMoney.debtService.map(d=>(
-              <div key={`${d.sourceType}_${d.sourceId}`} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0" }}>
+              <div key={`${d.sourceType}_${d.sourceId}`} onClick={()=>openCommitmentRow(d)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",cursor:"pointer" }}>
                 <div>
                   <div style={{ color:T.text,fontSize:11.5,fontWeight:700 }}>{d.name||"—"}</div>
                   {/* The release rule: a null date must read as genuinely unknown, never quietly
@@ -12476,7 +12531,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           already committed to Bills/SIPs/CC statements — Outlook is telling you not to
           accidentally spend this on something else. */}
       <div style={{ ...card,marginBottom:12 }}>
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>PROTECTED MONEY</div>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>PROTECTED MONEY</div>
+        <div style={{ color:T.accent,fontSize:9,fontWeight:800,letterSpacing:0.8,marginTop:2,marginBottom:10,textTransform:"uppercase" }}>The cash</div>
         {!hasEnoughData ? (
           <div style={{ color:T.sub,fontSize:13,textAlign:"center",padding:"10px 0" }}>Not enough data yet.</div>
         ) : (
@@ -12496,6 +12552,45 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {!hasCommitmentData&&(
               <div style={{ color:T.warn,fontSize:10,marginTop:8 }}>⚠ No Bills, SIPs, or CC statements recorded yet — this figure may be inaccurate.</div>
             )}
+            <div style={{ color:T.sub,fontSize:10,lineHeight:1.5,marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
+              What you have already committed, against what you hold. It answers "how much must I keep available".
+              {buffer<0&&" A negative buffer is why the forecast reads tight even though the budget looks fine."}
+            </div>
+            {/* WP6 — provenance summary, grouped by source, same array as cashRequired above.
+                Only groups with an unambiguous, already-existing list screen are tappable
+                (bill/feePeriod/recurringSchedule); the rest stay plain labels rather than
+                guessing a destination — the per-row tap-through above covers those cases. */}
+            {(()=>{
+              const protectedItems = [...unpaidSpending, ...committedSaving];
+              if(protectedItems.length===0) return null;
+              const GROUP_LABELS = {
+                bill:["bill","bills"], ccStatement:["card statement","card statements"],
+                recurringSchedule:["SIP","SIPs"], feePeriod:["school fee","school fees"],
+                membership:["membership","memberships"], insurancePolicy:["insurance policy","insurance policies"],
+                debt:["loan EMI","loan EMIs"],
+              };
+              const counts = {};
+              protectedItems.forEach(c=>{ counts[c.sourceType]=(counts[c.sourceType]||0)+1; });
+              const openGroup = {
+                bill: ()=>setTab("bills"),
+                feePeriod: ()=>setShowSchoolFeesList(true),
+                recurringSchedule: ()=>{ setSelectedInvestmentTypeView("all"); setShowInvestments(true); },
+              };
+              return (
+                <div style={{ display:"flex",flexWrap:"wrap",gap:"4px 10px",marginTop:8 }}>
+                  {Object.entries(counts).map(([type,n])=>{
+                    const [sing,plur] = GROUP_LABELS[type]||[type,type];
+                    const clickable = Boolean(openGroup[type]);
+                    return (
+                      <span key={type} onClick={clickable?openGroup[type]:undefined}
+                        style={{ color:clickable?T.accent:T.sub,fontSize:10,fontWeight:700,cursor:clickable?"pointer":"default" }}>
+                        From {n} {n===1?sing:plur}{clickable?" →":""}
+                      </span>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </>
         )}
       </div>
