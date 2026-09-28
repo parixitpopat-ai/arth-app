@@ -45,7 +45,10 @@ import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
 import { pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel, createRelationship, migrateBillerAccountAttributions, backfillBillerAccountAttributionFromRelationships, getRelationshipTarget } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
+import { isWithinPaymentsHorizon, PAYMENTS_HORIZON_DAYS } from "./domain/futureMoney/horizon";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
+import { projectMembershipsToCommitments as getMembershipFutureMoneyEvents } from "./domain/membership/futureMoney";
+import { projectPoliciesToCommitments as getInsuranceFutureMoneyEvents } from "./domain/insurance/futureMoney";
 import { getPersonSpendingSummary, getPersonActiveConnections } from "./domain/person/personOverview";
 import { archivePerson, unarchivePerson, isPersonArchived, getActivePeople } from "./domain/person/archive";
 import { archiveGroup, isGroupArchived, getActiveGroups } from "./domain/group/archive";
@@ -9216,10 +9219,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // duplication flagged in Home's own comment ("a shared hook would be the right fix, not
   // done here") — Home and Outlook previously each called getCommitments() independently.
   //
-  // Composition only — no new commitment calculation exists here. getCommitments() itself
-  // is untouched; this merges its output with School Fees' already-built projection via the
-  // already-tested composeFutureMoneyCommitments(). Debt Service stays empty — no adapter
-  // exists yet, and nothing here fabricates one.
+  // Composition only — no new commitment calculation exists here. getCommitments() itself is
+  // untouched; this merges its output with every other canonical projection's already-built
+  // events via the already-tested composeFutureMoneyCommitments(): School Fees, Debt/EMI, and
+  // (WP4) Membership renewals and Insurance — the two Outlook sources the IA identified as
+  // missing. Membership and Insurance events use their own uncapped adapters (no forward-window
+  // limit, unlike the Payments-side renewal reminders in domain/bills/renewalReminders.js and
+  // domain/insurance/renewalReminders.js) — which screen shows a given event is decided once,
+  // at read time, by isWithinPaymentsHorizon (domain/futureMoney/horizon.js), never inside the
+  // adapter itself.
   //
   // This feeds Protected Money (Outlook) and its Home equivalent — NOT Safe to Spend, which
   // is a deliberately separate, pure-budget concept per the existing "two genuinely different
@@ -9233,7 +9241,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // accounts[], txns[], and toDateOnly passed through unmodified; nothing here recomputes
   // anything the adapter doesn't already own.
   const debtServiceEvents = projectLoansToDebtServiceEvents(loans, accounts, txns, toDateOnly, futureMoneyToday);
-  const futureMoney = composeFutureMoneyCommitments(rawCommitments, [getSchoolFeeCommitments(feePeriods), debtServiceEvents]);
+  const futureMoney = composeFutureMoneyCommitments(rawCommitments, [
+    getSchoolFeeCommitments(feePeriods),
+    debtServiceEvents,
+    getMembershipFutureMoneyEvents(billerAccounts, memberships, getCurrentPeriod),
+    getInsuranceFutureMoneyEvents(insurancePolicies),
+  ]);
 
   const Home = () => {
     // Safe to Spend / Protected Money — same calculations as OutlookPage (ADR-024), duplicated
@@ -12324,24 +12337,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       : { level:"comfortable", icon:"🟢", label:"Comfortable", detail:"Your Bills, SIPs, and card statements are covered." };
     const statusColor = { incomplete:T.sub, risk:T.danger, tight:T.warn, watchful:T.gold||T.warn, comfortable:T.success }[forecastStatus?.level] || T.sub;
 
-    // Bills grouped by urgency, not a flat "Already Available" launcher list — Overdue / Due
-    // Today / Next 7 Days / Later. Reuses the exact daysUntil/isOverdue logic already used
-    // elsewhere (O003/O004), not a new calculation.
+    // WP4 (Arth IA §6/§7) — Outlook shows only the >30-day slice of the one composed list;
+    // Payments (Bills tab's own Overdue/Due today/Due tomorrow/Upcoming groups, plus Renewals &
+    // Fees) owns everything overdue or due within 30 days. Mutually exclusive windows over the
+    // same events, decided once by the shared isWithinPaymentsHorizon rule — Outlook no longer
+    // computes its own Overdue/Due Today/Next 7 Days buckets; those are Payments' territory now.
     const today = new Date(); today.setHours(0,0,0,0);
     // Repointed (Phase 5): committedSpending + committedSaving, using each entry's own canonical
     // date — SIPs now bucket correctly (Phase 4A gave committedSaving a real next-occurrence
     // date via getNextRecurringOccurrence, reusing dateAtDay). An entry with no computable date
-    // (invalid/missing schedule day — an edge case, see Phase 4A) is left out of every bucket
-    // rather than guessed into one, same "honest absence over fabricated guess" principle as the
-    // read model itself.
+    // (invalid/missing schedule day — an edge case, see Phase 4A) is left out of the Outlook list
+    // rather than guessed into it — isWithinPaymentsHorizon treats "no date" as Payments'
+    // territory, same "honest absence over fabricated guess" principle as the read model itself.
     const unpaidBills = [...unpaidSpending, ...committedSaving].map(c=>{
       const daysUntil = c.date ? Math.ceil((new Date(c.date)-today)/(1000*60*60*24)) : null;
       return { ...c, daysUntil, isOverdue: daysUntil!=null && daysUntil<0, _originalBill: c.sourceType==="bill" ? originalBillsById[String(c.sourceId)] : null };
     });
-    const overdueBills = unpaidBills.filter(b=>b.isOverdue).sort((a,b)=>a.daysUntil-b.daysUntil);
-    const dueTodayBills = unpaidBills.filter(b=>b.daysUntil===0);
-    const next7Bills = unpaidBills.filter(b=>b.daysUntil>0 && b.daysUntil<=7).sort((a,b)=>a.daysUntil-b.daysUntil);
-    const laterBills = unpaidBills.filter(b=>b.daysUntil>7).sort((a,b)=>a.daysUntil-b.daysUntil);
+    const outlookBills = unpaidBills.filter(b=>!isWithinPaymentsHorizon(b, todayStr())).sort((a,b)=>(a.daysUntil??Infinity)-(b.daysUntil??Infinity));
 
     // What Changed — Facts tier only, using the real daily snapshot mechanism (wealthSnapshots).
     // Reasons/Impact tiers omitted here since deriving "why" reliably from raw transactions is a
@@ -12516,34 +12528,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         ))}
       </div>
 
-      {/* Upcoming Commitments — grouped by urgency, replaces the old "Already Available"
-          launcher list entirely. No "Open →" cards. */}
-      {overdueBills.length>0&&(
+      {/* WP4 — Outlook's own Overdue/Due Today/Next 7 Days buckets are gone: those windows are
+          exclusively Payments' territory now (isWithinPaymentsHorizon). This is the single
+          >30-days-out slice of the one composed future-money list. */}
+      {outlookBills.length>0&&(
         <div style={{ marginBottom:12 }}>
-          <div style={{ color:T.danger,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>OVERDUE ({overdueBills.length})</div>
-          <div style={{ ...card }}>{overdueBills.map(b=><BillRow key={b.sourceId} b={b}/>)}</div>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>UPCOMING · BEYOND 30 DAYS ({outlookBills.length})</div>
+          <div style={{ ...card }}>{outlookBills.map(b=><BillRow key={`${b.sourceType}:${b.sourceId}`} b={b}/>)}</div>
         </div>
       )}
-      {dueTodayBills.length>0&&(
-        <div style={{ marginBottom:12 }}>
-          <div style={{ color:T.warn,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>DUE TODAY ({dueTodayBills.length})</div>
-          <div style={{ ...card }}>{dueTodayBills.map(b=><BillRow key={b.sourceId} b={b}/>)}</div>
-        </div>
-      )}
-      {next7Bills.length>0&&(
-        <div style={{ marginBottom:12 }}>
-          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>NEXT 7 DAYS</div>
-          <div style={{ ...card }}>{next7Bills.map(b=><BillRow key={b.sourceId} b={b}/>)}</div>
-        </div>
-      )}
-      {laterBills.length>0&&(
-        <div style={{ marginBottom:12,opacity:0.7 }}>
-          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>LATER</div>
-          <div style={{ ...card }}>{laterBills.map(b=><BillRow key={b.sourceId} b={b}/>)}</div>
-        </div>
-      )}
-      {overdueBills.length===0&&dueTodayBills.length===0&&next7Bills.length===0&&laterBills.length===0&&(
-        <div style={{ ...card,textAlign:"center",color:T.sub,fontSize:12,padding:20,marginBottom:12 }}>No upcoming commitments tracked yet.</div>
+      {outlookBills.length===0&&(
+        <div style={{ ...card,textAlign:"center",color:T.sub,fontSize:12,padding:20,marginBottom:12 }}>No commitments beyond 30 days tracked yet. Anything overdue or due sooner is in Payments.</div>
       )}
 
       {/* Real gap found: Outlook had ZERO direct link to the full Bills screen (My Bills/Bill
@@ -15366,9 +15361,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {billsTab==="bills"&&(
           <BillsList T={T} sym={sym} fmt={fmt}
             view={buildPaymentsView({ bills, contributions, forFilter:paymentsForFilter, forLabel:getBillForLabel, expectedItems:getExpectedItems(membershipRelationships, bills), renewalItems:[
-              ...getMembershipRenewalReminders({ billerAccounts, memberships, getCurrentPeriod, forLabel:getBillerOwnerLabel, today:todayStr() }),
-              ...getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts, forLabel:getBillerOwnerLabel, today:todayStr() }),
-              ...getInsuranceRenewalReminders({ insurancePolicies, today:todayStr() }),
+              // WP4 — widened from the functions' own 7-day default to PAYMENTS_HORIZON_DAYS (30),
+              // so this window stays exactly complementary with Outlook's (isWithinPaymentsHorizon):
+              // no renewal ever falls into the 8-29 day gap between the two screens.
+              ...getMembershipRenewalReminders({ billerAccounts, memberships, getCurrentPeriod, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
+              ...getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
+              ...getInsuranceRenewalReminders({ insurancePolicies, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
             ] })}
             forFilter={paymentsForFilter} onForFilter={setPaymentsForFilter}
             showCancelled={paymentsShowCancelled} onToggleCancelled={()=>setPaymentsShowCancelled(v=>!v)}
