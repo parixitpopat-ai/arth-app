@@ -1,8 +1,9 @@
 // src/screens/BudgetInsights.jsx
 //
-// BUD-002 Insights shell. Read-only throughout — see BudgetInsights.helpers.js
-// for all pure calculation logic and its own header notes on canonical
-// function usage and open ambiguities. This file is presentation only.
+// BUD-002 Insights shell. Read-only throughout — see domain/insights/spending.js and
+// domain/insights/budgetPerformance.js for all pure calculation logic (WP8: promoted out of
+// this file's own co-located helpers so the new top-level Insights page shares the exact same
+// functions, per WP8's locked rule that no Insight card computes independently).
 //
 // Category → Subcategory (this change): shows a breakdown of the focused
 // category's subcategories for the CURRENT selected period only (not a
@@ -33,9 +34,10 @@
 // filter is preferred instead, pass a pre-filtered `people` list (or the
 // helper itself) from the caller.
 import React, { useState, useMemo } from "react";
-import { getCategoryAttributedTotal, getCategoryPlanningAllocation } from "../../domain/allocations/adapter";
+import { getCategoryPlanningAllocation } from "../../domain/allocations/adapter";
 import PeriodSelector from "../components/PeriodSelector";
-import { buildCategorySeries, buildPersonRows, buildSubcategoryBreakdown } from "./BudgetInsights.helpers";
+import { buildCategorySeries, buildSubcategoryBreakdown, getCategorySpendBreakdown } from "../../domain/insights/spending.js";
+import { buildPersonRows } from "../../domain/insights/budgetPerformance.js";
 
 const STATUS_LABEL = { onTrack: "Within Budget", close: "Approaching Budget", over: "Over Budget", no_budget: "No Budget Set" };
 
@@ -52,10 +54,7 @@ export default function BudgetInsights({ viewMonth, setViewMonth, cats, txns, pe
 
   const monthCategoryRows = useMemo(() => {
     const periodTxns = txns.filter(t => t.date && t.date.startsWith(viewMonth));
-    return cats
-      .map(c => ({ cat: c, amt: getCategoryAttributedTotal(periodTxns, c.id, { allTransactions: txns }) }))
-      .filter(r => r.amt > 0)
-      .sort((a, b) => b.amt - a.amt);
+    return getCategorySpendBreakdown(periodTxns, cats, txns);
   }, [cats, txns, viewMonth]);
 
   const categorySeries = useMemo(() => {
@@ -121,10 +120,10 @@ export default function BudgetInsights({ viewMonth, setViewMonth, cats, txns, pe
               Nothing to report yet for this period.
             </div>
           ) : (
-            monthCategoryRows.map(({ cat, amt }) => (
+            monthCategoryRows.map(({ category, amount }) => (
               <div
-                key={cat.id}
-                onClick={() => openCategory(cat.id)}
+                key={category.id}
+                onClick={() => openCategory(category.id)}
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -134,8 +133,8 @@ export default function BudgetInsights({ viewMonth, setViewMonth, cats, txns, pe
                   cursor: "pointer",
                 }}
               >
-                <span style={{ color: T.text, fontSize: 13 }}>{cat.icon} {cat.name}</span>
-                <span style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{sym}{fmt(amt)}</span>
+                <span style={{ color: T.text, fontSize: 13 }}>{category.icon} {category.name}</span>
+                <span style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{sym}{fmt(amount)}</span>
               </div>
             ))
           )}

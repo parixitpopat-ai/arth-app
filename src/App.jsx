@@ -90,6 +90,15 @@ import { getCommitments } from "./domain/bills/commitments";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
 import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool } from "../domain/allocations/adapter";
+// WP8 — the central Insights read model. Every Insights card on InsightsPage (and
+// BudgetInsights, which imports the spending/budgetPerformance pair directly) is required to
+// consume these, never compute independently — see domain/insights/*.js file headers.
+import { getCategorySpendBreakdown, getTopMerchants } from "../domain/insights/spending.js";
+import { buildPersonRows, getHouseholdForecastSummary } from "../domain/insights/budgetPerformance.js";
+import { getRecurringCostsSummary } from "../domain/insights/commitments.js";
+import { buildGroupRows } from "../domain/insights/people.js";
+import { getProviderSpendBreakdown } from "../domain/insights/providers.js";
+import { getPrepaidUtilisation } from "../domain/insights/utilisation.js";
 /* Vertical-slice additions (this session) - Observe-level only, per BUD-002's
    Home/Insights IA split. (removed placeholder JSX fragments) */
 import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./domain/transactions/legacy/settlePersonShareOnBill";
@@ -12761,15 +12770,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Insights placeholder — Sprint 1 Item #2. Deliberately no charts, no fake data — Insights is
   // confirmed 0% built (Screen Inventory). A blank "under development" state is more honest than
   // a chart drawn from nothing.
+  // WP8 — the central Insights page. Below the Data Readiness gate (unchanged — still real, not
+  // fabricated), every card consumes domain/insights/ exclusively: no figure here is computed
+  // independently of the canonical read model (locked rule for this WP). Covers all 8 required
+  // source areas: Spending, Budget performance, Mandatory commitments, Recurring costs,
+  // People/Groups, Categories, Providers, Prepaid/service utilisation (where available).
   const InsightsPage = () => {
-    // Real metrics only - no fabricated "unlock in X days" countdown, since no actual readiness
-    // threshold has been decided anywhere in this design process. Ranked by actual importance to
-    // analytics quality, not shown as equal.
     const txnDates = txns.map(t=>t.date).filter(Boolean).sort();
     const daysOfHistory = txnDates.length>0 ? Math.max(1, Math.ceil((new Date()-new Date(txnDates[0]))/(1000*60*60*24))) : 0;
     const monthsOfHistory = Math.floor(daysOfHistory/30);
     const hasBudget = Number(annualBudget||0)>0 || Object.keys(monthOverrides||{}).length>0;
     const hasIncomeSources = (expectedIncome||[]).length>0;
+    const dataReady = txns.length>0 && cats.length>0;
 
     const tiers = [
       { label:"Required", items:[
@@ -12785,38 +12797,224 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       ]},
     ];
 
+    const [insightsMonth, setInsightsMonth] = useState(()=>todayStr().slice(0,7));
+    const periodTxns = txns.filter(t=>t.date && t.date.startsWith(insightsMonth));
+
+    // Budget performance — same canonical functions/inputs BudgetPage's own dashboard tab uses
+    // (App.jsx's BudgetPage, "dashMonthly"), called again here for insightsMonth rather than
+    // lifted, matching this app's established per-tab pattern (e.g. WP7's live Discretionary
+    // Pool banner does the same). The resolved canonical forecast method for this question
+    // ("will I stay within budget?") — Outlook's separate cash-solvency forecast intentionally
+    // stays on Outlook, per the explicit decision not to unify two different questions.
+    const [insightsYY,insightsMM] = insightsMonth.split("-").map(Number);
+    const insightsBaseMonthly = getHouseholdPlanningAllocation(annualBudget, monthOverrides, insightsMonth);
+    const insightsPrevMonthKey = insightsMM===1 ? `${insightsYY-1}-12` : `${insightsYY}-${String(insightsMM-1).padStart(2,"0")}`;
+    const insightsPrevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, insightsPrevMonthKey);
+    const insightsPrevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(insightsPrevMonthKey)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
+    const insightsMonthly = resolveCarryForwardMonthly(budgetCarryForward, insightsBaseMonthly, insightsPrevBudget, insightsPrevSpend);
+    const insightsSpend = getHouseholdAttributedTotal({ periodTransactions: periodTxns, allTransactions: txns });
+    const insightsToday = new Date();
+    const isCurrentInsightsMonth = insightsMonth === todayStr().slice(0,7);
+    const daysInInsightsMonth = new Date(insightsYY, insightsMM, 0).getDate();
+    const insightsDaysElapsed = isCurrentInsightsMonth ? insightsToday.getDate() : daysInInsightsMonth;
+    const forecastSummary = insightsMonthly>0 ? getHouseholdForecastSummary(insightsSpend, insightsDaysElapsed, daysInInsightsMonth, insightsMonthly) : null;
+    const FORECAST_LABEL = { onTrack:"Within Budget", close:"Approaching Budget", over:"Over Budget" };
+
+    // Mandatory commitments / Recurring costs — same functions BudgetPage's dashboard already
+    // reuses; futureMoney is the one composed Future Money list every screen reads.
+    const insightsActiveMandatory = mandatoryCommitments.filter(c=>!(c.skippedMonths||[]).includes(insightsMonth));
+    const insightsMandatoryTotal = getMandatoryCommitmentsTotal(insightsActiveMandatory);
+    const insightsDiscretionaryPool = getDiscretionaryPool(insightsMonthly, insightsMandatoryTotal);
+    const recurringCosts = getRecurringCostsSummary(futureMoney);
+
+    // Spending / Categories — one ranking serves both required source areas (they are, at the
+    // household level, the same underlying figure: real areas 1 and 6 aren't two different
+    // calculations here).
+    const categoryRows = getCategorySpendBreakdown(periodTxns, cats, txns);
+    const topMerchants = getTopMerchants(periodTxns, 5);
+
+    // People/Groups
+    const personRows = buildPersonRows(people, periodTxns, insightsMonth);
+    const groupRows = buildGroupRows(groups, periodTxns, insightsMonth, getGroupAttributedAmount);
+
+    // Providers
+    const providerRows = getProviderSpendBreakdown(bills, billerAccounts, insightsMonth, refundTotalsByBill);
+
+    // Prepaid/service utilisation — "where available" per the acceptance criteria; not
+    // month-scoped, always today's real status.
+    const utilisationRows = getPrepaidUtilisation(bills, billerAccounts);
+
+    const STATUS_COLOR = { onTrack:T.success, close:T.warn, over:T.danger, no_budget:T.sub };
+    const STATUS_LABEL = { onTrack:"Within Budget", close:"Approaching", over:"Over", no_budget:"No Budget Set" };
+
     return (
     <div style={{ padding:"14px 16px 90px" }}>
       <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:2 }}>📊 Insights</div>
       <div style={{ color:T.sub,fontSize:12,marginBottom:16 }}>Understand your money.</div>
 
-      <div style={{ ...card,marginBottom:14 }}>
-        <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>Data Readiness</div>
-        <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Arth is collecting enough history to identify your spending patterns.</div>
-        {tiers.map(tier=>(
-          <div key={tier.label} style={{ marginBottom:12 }}>
-            <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>{tier.label}</div>
-            {tier.items.map(item=>(
-              <div key={item.label} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0" }}>
-                <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.ready?"✔":"○"} {item.label}</span>
-                <span style={{ color:item.ready?T.accent:T.sub,fontSize:12,fontWeight:800 }}>{item.value}</span>
+      {!dataReady ? (
+        <>
+          <div style={{ ...card,marginBottom:14 }}>
+            <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>Data Readiness</div>
+            <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Arth is collecting enough history to identify your spending patterns.</div>
+            {tiers.map(tier=>(
+              <div key={tier.label} style={{ marginBottom:12 }}>
+                <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>{tier.label}</div>
+                {tier.items.map(item=>(
+                  <div key={item.label} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0" }}>
+                    <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.ready?"✔":"○"} {item.label}</span>
+                    <span style={{ color:item.ready?T.accent:T.sub,fontSize:12,fontWeight:800 }}>{item.value}</span>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
-        ))}
-      </div>
+          <div style={{ ...card }}>
+            <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:6 }}>Why isn't Insights available yet?</div>
+            <div style={{ color:T.sub,fontSize:11,lineHeight:1.6 }}>Arth doesn't use generic averages. It builds insights from your own financial behaviour — record a transaction and set up categories to get started.</div>
+          </div>
+        </>
+      ) : (
+      <>
+        <PeriodSelector viewMonth={insightsMonth} setViewMonth={setInsightsMonth} T={T}/>
 
-      <div style={{ ...card,marginBottom:14 }}>
-        <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:6 }}>Why isn't Insights available yet?</div>
-        <div style={{ color:T.sub,fontSize:11,lineHeight:1.6 }}>Arth doesn't use generic averages. It builds insights from your own financial behaviour — the more history you record, the more personalized your insights become.</div>
-      </div>
+        {/* Budget performance */}
+        <div style={{ ...card,marginTop:12,marginBottom:12 }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Budget Performance</div>
+          {insightsMonthly<=0 ? (
+            <div style={{ color:T.sub,fontSize:12 }}>No budget set for this month.</div>
+          ) : (
+            <>
+              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
+                <span style={{ color:T.sub,fontSize:12 }}>Spent</span>
+                <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(insightsSpend)} of {sym}{fmt(insightsMonthly)}</span>
+              </div>
+              {forecastSummary&&(
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <span style={{ color:T.sub,fontSize:12 }}>Projected month-end</span>
+                  <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                    <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(forecastSummary.projectedMonthEnd)}</span>
+                    <span style={{ color:forecastSummary.status==="over"?T.danger:forecastSummary.status==="close"?T.warn:T.success,fontSize:10,fontWeight:700 }}>{FORECAST_LABEL[forecastSummary.status]}</span>
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
 
-      <div style={{ ...card }}>
-        <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10 }}>Insights You'll Receive</div>
-        {["Spending Patterns","Income Trends","Net Worth Growth","Merchant Insights","Financial Health","Saving Rate"].map(f=>(
-          <div key={f} style={{ color:T.text,fontSize:12,fontWeight:700,padding:"5px 0" }}>✓ {f}</div>
-        ))}
-      </div>
+        {/* Mandatory commitments */}
+        <div style={{ ...card,marginBottom:12 }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Mandatory Commitments</div>
+          {insightsActiveMandatory.length===0 ? (
+            <div style={{ color:T.sub,fontSize:12 }}>Nothing reserved this month.</div>
+          ) : (
+            <>
+              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
+                <span style={{ color:T.sub,fontSize:12 }}>Reserved</span>
+                <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(insightsMandatoryTotal)}</span>
+              </div>
+              <div style={{ display:"flex",justifyContent:"space-between" }}>
+                <span style={{ color:T.sub,fontSize:12 }}>Discretionary Pool remaining</span>
+                <span style={{ color:insightsDiscretionaryPool<0?T.danger:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(insightsDiscretionaryPool)}</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Recurring costs */}
+        {recurringCosts.length>0&&(
+          <div style={{ ...card,marginBottom:12 }}>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Recurring Costs</div>
+            {recurringCosts.map(r=>(
+              <div key={r.sourceType} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                <span style={{ color:T.text,fontSize:12 }}>{r.label} <span style={{ color:T.sub }}>({r.count})</span></span>
+                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(r.total)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Spending & Categories — one ranking, two required source areas */}
+        <div style={{ ...card,marginBottom:12 }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Top Categories</div>
+          {categoryRows.length===0 ? (
+            <div style={{ color:T.sub,fontSize:12 }}>No spending recorded this month yet.</div>
+          ) : categoryRows.slice(0,6).map(({category,amount})=>(
+            <div key={category.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+              <span style={{ color:T.text,fontSize:12 }}>{category.icon} {category.name}</span>
+              <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(amount)}</span>
+            </div>
+          ))}
+        </div>
+
+        {topMerchants.length>0&&(
+          <div style={{ ...card,marginBottom:12 }}>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Top Merchants</div>
+            {topMerchants.map(m=>(
+              <div key={m.merchant} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                <span style={{ color:T.text,fontSize:12 }}>{m.merchant} <span style={{ color:T.sub }}>×{m.count}</span></span>
+                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(m.totalSpend)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* People/Groups */}
+        {(personRows.length>0||groupRows.length>0)&&(
+          <div style={{ ...card,marginBottom:12 }}>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>People &amp; Groups</div>
+            {personRows.map(r=>(
+              <div key={r.person.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0" }}>
+                <span style={{ color:T.text,fontSize:12 }}>{r.person.emoji} {r.person.name}</span>
+                <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                  <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(r.actual)}</span>
+                  <span style={{ color:STATUS_COLOR[r.status],fontSize:10,fontWeight:700 }}>{STATUS_LABEL[r.status]}</span>
+                </span>
+              </div>
+            ))}
+            {groupRows.map(r=>(
+              <div key={r.group.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0" }}>
+                <span style={{ color:T.text,fontSize:12 }}>{r.group.icon||"👥"} {r.group.name}</span>
+                <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                  <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(r.actual)}</span>
+                  <span style={{ color:STATUS_COLOR[r.status],fontSize:10,fontWeight:700 }}>{STATUS_LABEL[r.status]}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Providers */}
+        {providerRows.length>0&&(
+          <div style={{ ...card,marginBottom:12 }}>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Providers</div>
+            {providerRows.slice(0,6).map(r=>(
+              <div key={r.billerAccount.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                <span style={{ color:T.text,fontSize:12 }}>{r.billerAccount.name} <span style={{ color:T.sub }}>({r.count})</span></span>
+                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(r.total)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Prepaid/service utilisation — where available */}
+        {utilisationRows.length>0&&(
+          <div style={{ ...card,marginBottom:12 }}>
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Prepaid &amp; Service Utilisation</div>
+            {utilisationRows.map(r=>{
+              const color = r.status==="expired"?T.danger:r.status==="expiring_soon"?T.warn:T.success;
+              const label = r.status==="expired"?`Expired ${Math.abs(r.daysRemaining)}d ago`:r.status==="expiring_soon"?`${r.daysRemaining}d left`:`${r.daysRemaining}d left`;
+              return (
+                <div key={r.billerAccount.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                  <span style={{ color:T.text,fontSize:12 }}>{r.billerAccount.name}</span>
+                  <span style={{ color,fontSize:11,fontWeight:700 }}>{label}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>
+      )}
     </div>
     );
   };
