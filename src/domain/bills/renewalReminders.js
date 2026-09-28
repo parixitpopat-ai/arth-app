@@ -68,6 +68,14 @@ export function getMembershipRenewalReminders({ billerAccounts, memberships, get
  * 0 — the existing, unmodified, single source of truth for that) and due/overdue/within
  * forwardDays. A period with no dueDate at all is skipped rather than guessed.
  *
+ * WP5 (Arth IA — School Fees wiring gap) — an undeclared period (startingStateDeclared !== true)
+ * is now skipped here too, same as it already was in domain/schoolFees/futureMoney.js's Outlook
+ * adapter. startingState.js's own locked rule is that an undeclared period is "invisible
+ * everywhere downstream" until the user explicitly says whether it was already paid — this
+ * function was the one consumer still violating that, showing a real, non-zero amount for a
+ * period Arth genuinely doesn't know the status of. Fixing it here, rather than loosening the
+ * rule, keeps Payments and Outlook consistent for the same underlying period.
+ *
  * @param {Object} params
  * @param {Array} params.feeSchedules
  * @param {Array} params.feePeriods
@@ -84,6 +92,7 @@ export function getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts
     if (!sch) return;
     const ba = (billerAccounts || []).find(b => String(b.id) === String(sch.billerAccountId));
     (feePeriods || []).filter(p => p && p.scheduleId === sch.id).forEach(p => {
+      if (!p.startingStateDeclared) return;
       const outstanding = calculateOutstanding(p);
       if (!(outstanding > 0) || !p.dueDate) return;
       const isOverdue = p.dueDate < today;
