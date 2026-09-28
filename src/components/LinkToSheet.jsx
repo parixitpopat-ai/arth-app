@@ -3,6 +3,7 @@ import BottomSheet from "./BottomSheet";
 import AddVehicleModal from "./AddVehicleModal";
 import LinkPicker from "./LinkPicker";
 import { FONT, RADIUS, TOUCH } from "../constants/theme";
+import { getProviderAccountLabel } from "../domain/billers/accountLabel";
 
 // T3.1 Part B2 — "Link to…" sheet. One BottomSheet, two stages: the type list (unchanged idea
 // from B1) and, per type, the real LinkPicker (Arth UI-2B T3.1 B2 Link To Pickers.dc.html).
@@ -26,7 +27,7 @@ export default function LinkToSheet({
   onClose,
   initialStage = "types",
   // Data
-  billerAccounts, schoolRelationships, events, vehicles, txns,
+  billerAccounts, billers, schoolRelationships, events, vehicles, txns,
   billerLinkId, eventLinkId, vehicleId, showVehicle,
   detailsDate,
   // Helpers/lookups already owned by AddModal — reused, not reimplemented
@@ -45,7 +46,12 @@ export default function LinkToSheet({
   const [stage, setStage] = useState(initialStage);
   const [showNewVehicle, setShowNewVehicle] = useState(false);
 
-  const billerName = ba => ba.name || ba.provider || "Biller";
+  // WP1 (Arth IA §2/§3) — Provider name is the title, "{nickname} · A/c ****{last4}" is the
+  // account line, both from the one shared labeling function every Provider/account picker now
+  // uses. Fixes the exact reported confusion: this account's own `name` is often just a nickname
+  // ("Parixit" vs "Me") that used to stand in as the row's whole identity, with no Provider name
+  // and no account number to tell two accounts under the same real Provider apart.
+  const billerName = ba => getProviderAccountLabel(ba, billers).providerName;
   const attributionLabel = ba => {
     if (!ba.attributedTo) return null;
     if (ba.attributeType === "group") return getGroup(ba.attributedTo)?.name || null;
@@ -56,20 +62,26 @@ export default function LinkToSheet({
     .reduce((max, t) => (t.date && (!max || t.date > max) ? t.date : max), null);
 
   // Bill / Membership / School fees all read the same billerAccounts array, partitioned by
-  // getBillerActionType (per the per-picker spec table).
-  const billerRow = ba => ({
-    id: ba.id, icon: getBillerIcon(ba.type), title: billerName(ba),
-    searchText: [ba.name, ba.provider, ba.consumerNo, attributionLabel(ba)].filter(Boolean).join(" "),
-  });
-  const buildBillerGroups = (list, { meta }) => {
+  // getBillerActionType (per the per-picker spec table). `meta` defaults to the account line
+  // (nickname + masked account number); a caller passes its own only to ADD something (School's
+  // "which term" note), never to reconstruct the account number a second time.
+  const billerRow = (ba, metaOverride) => {
+    const label = getProviderAccountLabel(ba, billers);
+    return {
+      id: ba.id, icon: getBillerIcon(ba.type), title: label.providerName,
+      meta: metaOverride || [label.accountLine, attributionLabel(ba)].filter(Boolean).join(" · "),
+      searchText: [label.searchText, attributionLabel(ba)].filter(Boolean).join(" "),
+    };
+  };
+  const buildBillerGroups = (list, { meta } = {}) => {
     const withRecency = list.map(ba => ({ ba, recent: lastLinkedDate(ba.id, "billerLinkId") }));
     const recent3 = withRecency.filter(x => x.recent).sort((a, b) => (b.recent > a.recent ? 1 : -1)).slice(0, 3).map(x => x.ba.id);
-    const rows = ba => ({ ...billerRow(ba), meta: meta(ba) });
+    const rows = ba => billerRow(ba, meta?.(ba));
     const recentGroup = { label: "Recently linked", rows: list.filter(ba => recent3.includes(ba.id)).sort((a, b) => recent3.indexOf(a.id) - recent3.indexOf(b.id)).map(rows) };
     const restGroup = { label: "All · A–Z", rows: list.filter(ba => !recent3.includes(ba.id)).sort((a, b) => billerName(a).localeCompare(billerName(b))).map(rows) };
     return [recentGroup, restGroup].filter(g => g.rows.length);
   };
-  const buildBillerSingleList = (list, { meta }) => {
+  const buildBillerSingleList = (list, { meta } = {}) => {
     const withRecency = list.map(ba => ({ ba, recent: lastLinkedDate(ba.id, "billerLinkId") }));
     const sorted = withRecency.sort((a, b) => {
       if (a.recent && b.recent) return a.recent > b.recent ? -1 : 1;
@@ -77,7 +89,7 @@ export default function LinkToSheet({
       if (b.recent) return 1;
       return billerName(a.ba).localeCompare(billerName(b.ba));
     }).map(x => x.ba);
-    return sorted.length ? [{ label: "", rows: sorted.map(ba => ({ ...billerRow(ba), meta: meta(ba) })) }] : [];
+    return sorted.length ? [{ label: "", rows: sorted.map(ba => billerRow(ba, meta?.(ba))) }] : [];
   };
 
   const isSchoolBiller = ba => ba.type === "School Fees" || ba.type === "Education Fees";
@@ -177,9 +189,9 @@ export default function LinkToSheet({
     );
   } else if (stage === "bill") {
     body = (
-      <LinkPicker T={T} title="Bill" searchPlaceholder="Search bills"
-        linkedRow={!linkedIsMembership && !linkedIsSchool && linkedBiller ? { ...billerRow(linkedBiller), meta: `${linkedBiller.type}${attributionLabel(linkedBiller) ? " · " + attributionLabel(linkedBiller) : ""}` } : null}
-        groups={buildBillerGroups(billBillers, { meta: ba => [ba.type, ba.consumerNo ? `···${String(ba.consumerNo).slice(-4)}` : null, attributionLabel(ba)].filter(Boolean).join(" · ") })}
+      <LinkPicker T={T} title="Bill" searchPlaceholder="Search Provider, nickname or account number"
+        linkedRow={!linkedIsMembership && !linkedIsSchool && linkedBiller ? billerRow(linkedBiller, [linkedBiller.type, getProviderAccountLabel(linkedBiller, billers).accountLine, attributionLabel(linkedBiller)].filter(Boolean).join(" · ")) : null}
+        groups={buildBillerGroups(billBillers, { meta: ba => [ba.type, getProviderAccountLabel(ba, billers).accountLine, attributionLabel(ba)].filter(Boolean).join(" · ") })}
         itemNoun="bill" itemNounPlural="bills"
         emptyTitle="No bills yet" emptySubtitle="Add the provider once, such as your broadband or electricity account, and link future payments to it."
         onBack={effectiveClose}
@@ -189,9 +201,9 @@ export default function LinkToSheet({
     );
   } else if (stage === "membership") {
     body = (
-      <LinkPicker T={T} title="Membership" searchPlaceholder="Search memberships"
-        linkedRow={linkedIsMembership ? { ...billerRow(linkedBiller), meta: linkedBiller.type } : null}
-        groups={buildBillerGroups(membershipBillers, { meta: ba => [ba.type, attributionLabel(ba)].filter(Boolean).join(" · ") })}
+      <LinkPicker T={T} title="Membership" searchPlaceholder="Search Provider, nickname or account number"
+        linkedRow={linkedIsMembership ? billerRow(linkedBiller, [linkedBiller.type, getProviderAccountLabel(linkedBiller, billers).accountLine, attributionLabel(linkedBiller)].filter(Boolean).join(" · ")) : null}
+        groups={buildBillerGroups(membershipBillers, { meta: ba => [ba.type, getProviderAccountLabel(ba, billers).accountLine, attributionLabel(ba)].filter(Boolean).join(" · ") })}
         itemNoun="membership" itemNounPlural="memberships"
         emptyTitle="No memberships yet" emptySubtitle="Add a gym, club or subscription once, and link future payments to it."
         onBack={effectiveClose}
@@ -202,9 +214,9 @@ export default function LinkToSheet({
     );
   } else if (stage === "school") {
     body = (
-      <LinkPicker T={T} title="School fees" searchPlaceholder="Search schools"
-        linkedRow={linkedIsSchool ? { ...billerRow(linkedBiller), meta: [linkedBiller.type, attributionLabel(linkedBiller)].filter(Boolean).join(" · ") } : null}
-        groups={buildBillerSingleList(schoolBillers, { meta: ba => [ba.type, attributionLabel(ba), ba.consumerNo ? `···${String(ba.consumerNo).slice(-4)}` : null].filter(Boolean).join(" · ") })}
+      <LinkPicker T={T} title="School fees" searchPlaceholder="Search Provider, nickname or account number"
+        linkedRow={linkedIsSchool ? billerRow(linkedBiller, [linkedBiller.type, getProviderAccountLabel(linkedBiller, billers).accountLine, attributionLabel(linkedBiller)].filter(Boolean).join(" · ")) : null}
+        groups={buildBillerSingleList(schoolBillers, { meta: ba => [ba.type, getProviderAccountLabel(ba, billers).accountLine, attributionLabel(ba)].filter(Boolean).join(" · ") })}
         itemNoun="school" itemNounPlural="schools"
         emptyTitle="No schools yet" emptySubtitle="Add the school once, and link fee payments to it."
         onBack={effectiveClose}
