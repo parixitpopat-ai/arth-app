@@ -596,3 +596,52 @@ export function getMandatoryCommitmentsConfirmationId(monthKey) {
 export function isMandatoryCommitmentsConfirmed(dismissedAlerts, monthKey) {
   return (dismissedAlerts || []).includes(getMandatoryCommitmentsConfirmationId(monthKey));
 }
+
+/**
+ * WP7 — which of the four states a single Mandatory Commitment is in for a
+ * given month: "skipped" (explicitly marked not happening this month, same
+ * per-month opt-out shape as the existing skippedInvestmentMonths[] pattern
+ * — a commitment.skippedMonths array of monthKeys, nothing new invented),
+ * "actual" (money has actually moved against its linked category this
+ * month), or "planned" (reserved, nothing spent against it yet). A skipped
+ * commitment is "actual" only in the trivial sense that spend could still
+ * post to its category even after being skipped — that's surfaced as
+ * "actual", not silently reclassified back to skipped, since real spend
+ * happened regardless of the plan.
+ *
+ * @param {Object} commitment - {skippedMonths?: string[]}
+ * @param {number} spent - caller's own getCategoryAttributedTotal result
+ * @param {string} monthKey - "YYYY-MM"
+ * @returns {"skipped"|"actual"|"planned"}
+ */
+export function getMandatoryCommitmentState(commitment, spent, monthKey) {
+  if (Number(spent) > 0) return "actual";
+  if ((commitment?.skippedMonths || []).includes(monthKey)) return "skipped";
+  return "planned";
+}
+
+/**
+ * WP7 — the fourth state, "Unplanned Actual": which categories have NO
+ * Mandatory Commitment covering them this month (skipped commitments don't
+ * count as coverage — their category is exactly as unplanned as one with no
+ * commitment at all). Returns category ids only; the caller runs its own
+ * getCategoryAttributedTotal per id (the existing attribution function,
+ * same as every other figure on this page) to find which of those ids
+ * actually have spend against them — this function does not touch
+ * transactions or amounts at all, matching getDiscretionaryAllocatedTotal's
+ * "pure arithmetic/set logic, no knowledge of the caller's other shapes"
+ * pattern.
+ *
+ * @param {Array} categories - [{id}]
+ * @param {Array} mandatoryCommitments - [{categoryId, skippedMonths?}]
+ * @param {string} monthKey - "YYYY-MM"
+ * @returns {Array<string>} category ids not covered by any active commitment
+ */
+export function getUnplannedCategoryIds(categories, mandatoryCommitments, monthKey) {
+  const coveredIds = new Set(
+    (mandatoryCommitments || [])
+      .filter(c => !(c?.skippedMonths || []).includes(monthKey))
+      .map(c => c.categoryId)
+  );
+  return (categories || []).filter(cat => !coveredIds.has(cat.id)).map(cat => cat.id);
+}

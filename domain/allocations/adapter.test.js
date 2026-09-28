@@ -20,6 +20,8 @@ import {
   getAllocationHierarchyWarning,
   getMandatoryCommitmentsConfirmationId,
   isMandatoryCommitmentsConfirmed,
+  getMandatoryCommitmentState,
+  getUnplannedCategoryIds,
 } from "./adapter.js";
 
 // --- Household: WP6 unified onto `??` semantics (explicit 0 is respected) ---
@@ -304,4 +306,53 @@ test("isMandatoryCommitmentsConfirmed: false for a month not yet confirmed, or a
   assert.equal(isMandatoryCommitmentsConfirmed(["mandatory_confirm_2026-08"], "2026-09"), false);
   assert.equal(isMandatoryCommitmentsConfirmed([], "2026-09"), false);
   assert.equal(isMandatoryCommitmentsConfirmed(null, "2026-09"), false);
+});
+
+// --- WP7: getMandatoryCommitmentState — Planned/Committed, Actual, Skipped ---
+
+test("getMandatoryCommitmentState: spent > 0 is 'actual', regardless of skip status", () => {
+  assert.equal(getMandatoryCommitmentState({ skippedMonths: ["2026-09"] }, 500, "2026-09"), "actual");
+  assert.equal(getMandatoryCommitmentState({}, 500, "2026-09"), "actual");
+});
+
+test("getMandatoryCommitmentState: no spend and month is in skippedMonths is 'skipped'", () => {
+  assert.equal(getMandatoryCommitmentState({ skippedMonths: ["2026-09"] }, 0, "2026-09"), "skipped");
+});
+
+test("getMandatoryCommitmentState: no spend, not skipped this month, is 'planned'", () => {
+  assert.equal(getMandatoryCommitmentState({ skippedMonths: ["2026-08"] }, 0, "2026-09"), "planned");
+  assert.equal(getMandatoryCommitmentState({}, 0, "2026-09"), "planned");
+  assert.equal(getMandatoryCommitmentState(null, 0, "2026-09"), "planned");
+});
+
+// --- WP7: getUnplannedCategoryIds — the fourth state, "Unplanned Actual" ---
+
+test("getUnplannedCategoryIds: categories with no Mandatory Commitment referencing them are unplanned", () => {
+  const categories = [{ id: "rent" }, { id: "groceries" }, { id: "misc" }];
+  const commitments = [{ categoryId: "rent" }];
+  assert.deepEqual(getUnplannedCategoryIds(categories, commitments, "2026-09"), ["groceries", "misc"]);
+});
+
+test("getUnplannedCategoryIds: a skipped commitment's category is unplanned again this month", () => {
+  const categories = [{ id: "rent" }, { id: "groceries" }];
+  const commitments = [{ categoryId: "rent", skippedMonths: ["2026-09"] }];
+  assert.deepEqual(getUnplannedCategoryIds(categories, commitments, "2026-09"), ["rent", "groceries"]);
+});
+
+test("getUnplannedCategoryIds: a commitment skipped in a different month still covers this month", () => {
+  const categories = [{ id: "rent" }, { id: "groceries" }];
+  const commitments = [{ categoryId: "rent", skippedMonths: ["2026-08"] }];
+  assert.deepEqual(getUnplannedCategoryIds(categories, commitments, "2026-09"), ["groceries"]);
+});
+
+test("getUnplannedCategoryIds: no commitments at all — every category is unplanned", () => {
+  const categories = [{ id: "rent" }, { id: "groceries" }];
+  assert.deepEqual(getUnplannedCategoryIds(categories, [], "2026-09"), ["rent", "groceries"]);
+  assert.deepEqual(getUnplannedCategoryIds(categories, null, "2026-09"), ["rent", "groceries"]);
+});
+
+test("getUnplannedCategoryIds: every category covered — empty result", () => {
+  const categories = [{ id: "rent" }];
+  const commitments = [{ categoryId: "rent" }];
+  assert.deepEqual(getUnplannedCategoryIds(categories, commitments, "2026-09"), []);
 });
