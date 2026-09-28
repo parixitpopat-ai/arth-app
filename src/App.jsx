@@ -89,7 +89,7 @@ import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refu
 import { getCommitments } from "./domain/bills/commitments";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
-import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus } from "../domain/allocations/adapter";
+import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed } from "../domain/allocations/adapter";
 /* Vertical-slice additions (this session) - Observe-level only, per BUD-002's
    Home/Insights IA split. (removed placeholder JSX fragments) */
 import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./domain/transactions/legacy/settlePersonShareOnBill";
@@ -1027,6 +1027,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [selectedBudgetFY, setSelectedBudgetFY] = useState(currentFYStartYear);
   const [monthOverrides, setMonthOverrides] = useState(()=>JSON.parse(localStorage.getItem("arth_month_overrides")||"{}"));
   const [monthBudget] = useState(()=>Number(localStorage.getItem("arth_budget")||50000));
+  // WP6 (Arth IA — Budget Core Model) — Mandatory Commitments: [{id, name, amount, categoryId}].
+  // Flat, no month-override layer, same reasoning as Category's own planning allocation (a
+  // handful of user-defined line items; amount changes are edits, not a parallel per-month map).
+  const [mandatoryCommitments, setMandatoryCommitments] = useState(()=>JSON.parse(localStorage.getItem("arth_mandatory_commitments")||"[]"));
 
   useEffect(()=>safeSetLocalStorage("arth_cats",JSON.stringify(cats)),[cats]);
   useEffect(()=>safeSetLocalStorage("arth_account_types",JSON.stringify(accountTypes)),[accountTypes]);
@@ -1314,6 +1318,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   useEffect(()=>{ if(defaultGroupId) safeSetLocalStorage("arth_default_group",defaultGroupId); else localStorage.removeItem("arth_default_group"); },[defaultGroupId]);
   useEffect(()=>safeSetLocalStorage("arth_last_fy_target",lastFYTarget),[lastFYTarget]);
   useEffect(()=>safeSetLocalStorage("arth_month_overrides",JSON.stringify(monthOverrides)),[monthOverrides]);
+  useEffect(()=>safeSetLocalStorage("arth_mandatory_commitments",JSON.stringify(mandatoryCommitments)),[mandatoryCommitments]);
 
   // ── MODAL STATE ────────────────────────────────────────────────────────────
   const [showAdd, setShowAdd] = useState(false);
@@ -8579,6 +8584,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     annualBudget,
     lastFYTarget,
     monthOverrides,
+    mandatoryCommitments,
     cardOrder,
     // Previously restored-to-empty (liabilities) or never synced at all; now saved like the rest.
     liabilities,
@@ -8588,7 +8594,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     budgetCarryForward,
     defaultGroupId,
     hiddenCards:[...hiddenCards],
-  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards]);
+  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, mandatoryCommitments, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -8633,6 +8639,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(Array.isArray(snapshot.goals)) setGoals(snapshot.goals);
     if(Array.isArray(snapshot.expectedIncome)) setExpectedIncome(snapshot.expectedIncome);
     if(Array.isArray(snapshot.insurancePolicies)) setInsurancePolicies(snapshot.insurancePolicies);
+    if(Array.isArray(snapshot.mandatoryCommitments)) setMandatoryCommitments(snapshot.mandatoryCommitments);
     if(Array.isArray(snapshot.gymCheckIns)) setGymCheckIns(snapshot.gymCheckIns);
     if(Array.isArray(snapshot.arthHolidays)) setArthHolidays(snapshot.arthHolidays);
     if(Array.isArray(snapshot.feeSchedules)) setFeeSchedules(snapshot.feeSchedules);
@@ -9193,7 +9200,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, mandatoryCommitments, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards, pushCloudSnapshot]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
@@ -14242,6 +14249,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [budgetPersonViewMode, setBudgetPersonViewMode] = useState("month");
     const [showAffordModal, setShowAffordModal] = useState(false);
     const [affordAmount, setAffordAmount] = useState("");
+    // WP6 — Mandatory Commitments add/edit sheet. Local to BudgetPage, same as the drafts below:
+    // it only ever opens from here, and its own fields are local state committed on Save, so it's
+    // immune to the redefine-on-every-App-state-change remount issue this file's own comment (just
+    // below) already documents for typing.
+    const [showAddCommitment, setShowAddCommitment] = useState(false);
+    const [editingCommitment, setEditingCommitment] = useState(null);
     useEffect(()=>{
       if(budgetFocusPersonId){
         setBudgetSubTab("budgets");
@@ -14338,6 +14351,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const healthLabel = healthStatus==="over" ? "Over Budget" : healthStatus==="close" ? "Cutting It Close" : "On Track";
           const healthNote = isProjectedOver ? `Projected to exceed budget by ${sym}${fmt(projectedMonthEnd-dashMonthly)}` : `${Math.abs(projectedMarginPct)}% ${projectedMarginPct>=0?"under":"over"} budget at this pace`;
 
+          // WP6 (Arth IA — Budget Core Model) — Mandatory Commitments / Discretionary Pool
+          // hierarchy, layered on top of the existing dashMonthly figure above (never a second
+          // Household number). monthTxns/refundTotalsByExpense computed once and reused for every
+          // commitment's "remaining" — same getCategoryAttributedTotal every other screen already
+          // uses, not a second spend engine.
+          const monthTxns = txns.filter(t=>t.date&&t.date.startsWith(viewMonth));
+          const mandatoryTotal = getMandatoryCommitmentsTotal(mandatoryCommitments);
+          const discretionaryPool = getDiscretionaryPool(dashMonthly, mandatoryTotal);
+          const personAllocations = people.map(p=>getPersonPlanningAllocation(p, viewMonth));
+          const groupAllocations = groups.map(g=>getGroupPlanningAllocation(g, viewMonth));
+          const discretionaryAllocated = getDiscretionaryAllocatedTotal([...personAllocations, ...groupAllocations]);
+          const unallocatedDiscretionary = getUnallocatedDiscretionary(discretionaryPool, discretionaryAllocated);
+          const hierarchyWarning = getAllocationHierarchyWarning(discretionaryPool, discretionaryAllocated);
+          const mandatoryConfirmed = isMandatoryCommitmentsConfirmed(dismissedAlerts, viewMonth);
+          const confirmMandatory = () => setDismissedAlerts(prev=>prev.includes(getMandatoryCommitmentsConfirmationId(viewMonth))?prev:[...prev, getMandatoryCommitmentsConfirmationId(viewMonth)]);
+
           // D.1 Empty State — zero Planning Allocations for the household this period
           // (C.1 step 2). Not a degraded normal state: no Safe-to-Spend/Health/Variance/
           // Forecast rendered as zeroed. Single call-to-action → Planning Workspace's
@@ -14378,6 +14407,73 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Spent</div><div style={{ color:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(dashSpend)}</div></div>
                   <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>{dashRemaining>=0?"Remaining":"Over Budget"}</div><div style={{ color:dashRemaining>=0?T.success:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{dashRemaining<0?"−":""}{sym}{fmt(Math.abs(dashRemaining))}</div></div>
                 </div>
+              </div>
+
+              {/* WP6 — monthly confirmation prompt, same pattern as the existing budget-alert
+                  dismissedAlerts[] mechanism: a month-scoped id, nothing new to persist. Only
+                  shown once there's something to confirm — an empty commitments list has nothing
+                  to reserve. */}
+              {!mandatoryConfirmed&&mandatoryCommitments.length>0&&(
+                <div style={{ ...card,background:T.accentSoft,border:`1px solid ${T.accent}44`,marginBottom:12 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>Confirm this month's commitments?</div>
+                  <div style={{ color:T.sub,fontSize:12,marginBottom:10 }}>{sym}{fmt(mandatoryTotal)} reserved, {sym}{fmt(discretionaryPool)} available</div>
+                  <button onClick={confirmMandatory} style={{ background:T.accent,border:"none",borderRadius:12,padding:"9px 16px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Confirm</button>
+                </div>
+              )}
+
+              {/* WP6 (Arth IA — Budget Core Model) — Mandatory Commitments card. Monthly Budget
+                  (above) minus this total = Discretionary Pool (next card); never a second
+                  Household figure, never a Bill (a commitment is a Budget/Planning fact — see
+                  the adapter's own doc). */}
+              <div style={{ ...card }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Mandatory Commitments</div>
+                  <button onClick={()=>{ setEditingCommitment(null); setShowAddCommitment(true); }} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>+ Add</button>
+                </div>
+                {mandatoryCommitments.length===0 ? (
+                  <div style={{ color:T.sub,fontSize:12 }}>Nothing reserved yet. Add rent, support, or pocket money you always set aside first.</div>
+                ) : (
+                  <>
+                    {mandatoryCommitments.map(c=>{
+                      const cat = cats.find(x=>x.id===c.categoryId);
+                      const spent = getCategoryAttributedTotal(monthTxns, c.categoryId, { allTransactions: txns });
+                      const { remaining, isOver } = getMandatoryCommitmentRemaining(c, spent);
+                      return (
+                        <button key={c.id} onClick={()=>{ setEditingCommitment(c); setShowAddCommitment(true); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",background:"none",border:"none",borderBottom:`1px solid ${T.border}`,padding:"9px 0",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
+                          <span style={{ minWidth:0 }}>
+                            <span style={{ display:"block",color:T.text,fontSize:13,fontWeight:700 }}>{cat?.icon?`${cat.icon} `:""}{c.name}</span>
+                            <span style={{ display:"block",color:isOver?T.danger:T.sub,fontSize:10.5,marginTop:1 }}>{isOver?`${sym}${fmt(Math.abs(remaining))} over`:`${sym}${fmt(remaining)} left`}</span>
+                          </span>
+                          <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono,flexShrink:0 }}>{sym}{fmt(c.amount)}</span>
+                        </button>
+                      );
+                    })}
+                    <div style={{ display:"flex",justifyContent:"space-between",paddingTop:10 }}>
+                      <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Total reserved</span>
+                      <span style={{ color:T.text,fontSize:13,fontWeight:900,fontFamily:FONT.mono }}>{sym}{fmt(mandatoryTotal)}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* WP6 — Discretionary Pool: Monthly Budget − Mandatory Commitments, then
+                  Person/Group Planning Allocations (already-existing envelopes, unchanged) carved
+                  out of it. hierarchyWarning is the new Σ(children) ≤ parent check the sibling
+                  dimensions never had. */}
+              <div style={{ ...card }}>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6 }}>Discretionary Pool</div>
+                <div style={{ color:discretionaryPool<0?T.danger:T.text,fontSize:22,fontWeight:900,marginBottom:10 }}>{sym}{fmt(discretionaryPool)}</div>
+                <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}>
+                  <span style={{ color:T.sub,fontSize:12 }}>Allocated to people/groups</span>
+                  <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(discretionaryAllocated)}</span>
+                </div>
+                <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}>
+                  <span style={{ color:T.sub,fontSize:12 }}>Unallocated</span>
+                  <span style={{ color:unallocatedDiscretionary<0?T.danger:T.success,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(unallocatedDiscretionary)}</span>
+                </div>
+                {hierarchyWarning&&(
+                  <div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",color:T.danger,fontSize:11,fontWeight:700,marginTop:10 }}>⚠️ Person/Group allocations exceed the Discretionary Pool by {sym}{fmt(hierarchyWarning.overBy)}.</div>
+                )}
               </div>
 
               {/* BUD-002 D.1 — Budget Health (Progress Ring/tile) + Forecast Card, side by side per Sections layout */}
@@ -14750,6 +14846,63 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <button onClick={()=>{ setTab("people"); setShowSettings(false); }} style={{ background:"none",border:"none",color:"#16a34a",fontSize:12,fontWeight:700,cursor:"pointer",padding:"6px 0",display:"flex",alignItems:"center",gap:4 }}>Manage Groups →</button>
         </div>
         </>)}
+        {showAddCommitment&&<AddMandatoryCommitmentModal
+          existing={editingCommitment}
+          onClose={()=>{ setShowAddCommitment(false); setEditingCommitment(null); }}
+          onSave={record=>{
+            setMandatoryCommitments(prev=>editingCommitment ? prev.map(c=>c.id===record.id?record:c) : [record, ...prev]);
+            setShowAddCommitment(false); setEditingCommitment(null);
+          }}
+          onDelete={id=>{
+            setMandatoryCommitments(prev=>prev.filter(c=>c.id!==id));
+            setShowAddCommitment(false); setEditingCommitment(null);
+          }}
+        />}
+      </div>
+    );
+  };
+
+  // ── ADD MANDATORY COMMITMENT MODAL (WP6 — Budget Core Model) ────────────────
+  // Name + amount + a Category to attribute real spend against — "spending reduces exactly one
+  // envelope, computed once," reusing getCategoryAttributedTotal (BudgetPage's own render), never
+  // a new spend engine or a new transaction-tagging mechanism.
+  const AddMandatoryCommitmentModal = ({ existing, onClose, onSave, onDelete }) => {
+    const isEdit = Boolean(existing);
+    const [name, setName] = useState(existing?.name || "");
+    const [amount, setAmount] = useState(existing?.amount ? String(existing.amount) : "");
+    const [categoryId, setCategoryId] = useState(existing?.categoryId || cats[0]?.id || "");
+    const canSave = name.trim() && Number(amount) > 0 && categoryId;
+    const save = () => {
+      if (!canSave) return;
+      onSave({ id: existing?.id || genId(), name: name.trim(), amount: parseMoney(amount) || 0, categoryId });
+    };
+    return (
+      <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:320,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit Commitment":"Add Mandatory Commitment"}</div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            <div>
+              <span style={lbl}>Name *</span>
+              <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. Household, Spouse support, Pocket money" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
+            </div>
+            <div>
+              <span style={lbl}>Amount *</span>
+              <input style={inp} type="number" placeholder="e.g. 5000" value={amount} onChange={e=>setAmount(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>Category *</span>
+              <select style={inp} value={categoryId} onChange={e=>setCategoryId(e.target.value)}>
+                {cats.map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+              </select>
+              <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Spending tagged to this category counts against this commitment's remaining.</div>
+            </div>
+            <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Commitment"}</button>
+            {isEdit&&<button onClick={()=>onDelete(existing.id)} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"11px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete Commitment</button>}
+          </div>
+        </div>
       </div>
     );
   };
