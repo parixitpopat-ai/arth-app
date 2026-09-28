@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import BottomSheet from "../BottomSheet";
 import { SheetHeader } from "./peopleUi";
 import { fieldStyles } from "./peopleStyles";
+import { searchProviderAccounts } from "../../domain/billers/accountLabel";
 
 // Arth 2.0 IA §6 — "+ Add relationship" no longer only creates a new Provider/Biller: it first
 // offers every Provider you already have, so the same "Genesis" never gets a second row just
@@ -12,36 +13,34 @@ import { fieldStyles } from "./peopleStyles";
 // `currentLabel(ba)` returns the Provider's PRIMARY owner as display text ("Unassigned", a
 // person's name, or a group's name) — the legacy attributeType/attributedTo bridge new Bills
 // still read (billFor.js's compatibility rule), not the only relationship a Provider can have.
-export default function AddRelationshipSheet({ T, billerAccounts, targetLabel, currentLabel, onClose, onSelectExisting, onCreateNew }) {
+export default function AddRelationshipSheet({ T, billerAccounts, billers, targetLabel, currentLabel, onClose, onSelectExisting, onCreateNew }) {
   const s = fieldStyles(T);
   const [q, setQ] = useState("");
-  const query = q.trim().toLowerCase();
-  const matches = (billerAccounts || []).filter(ba =>
-    !query
-    || String(ba.name || "").toLowerCase().includes(query)
-    || String(ba.type || "").toLowerCase().includes(query)
-    || String(ba.provider || "").toLowerCase().includes(query)
-  ).sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "en", { sensitivity: "base" }));
+  // WP1 (Arth IA §2/§3) — search by Provider name, nickname, or full/partial account number; the
+  // Provider name leads each row (not the nickname alone, which used to read as the whole
+  // identity — the exact "Parixit"/"Me" duplicate-account confusion).
+  const matches = searchProviderAccounts(billerAccounts, billers, q)
+    .sort((a, b) => a.providerName.localeCompare(b.providerName, "en", { sensitivity: "base" }));
 
   return (
     <BottomSheet T={T} onClose={onClose}>
       <SheetHeader T={T} title="Add relationship" onCancel={onClose} />
-      <div style={{ color: T.sub, fontSize: 12, marginBottom: 10 }}>Attach an existing biller to {targetLabel}, or create a new one.</div>
-      <input data-testid="relationship-search" style={s.input} placeholder="Search your billers" value={q} onChange={e => setQ(e.target.value)} />
+      <div style={{ color: T.sub, fontSize: 12, marginBottom: 10 }}>Attach an existing Provider to {targetLabel}, or create a new one.</div>
+      <input data-testid="relationship-search" style={s.input} placeholder="Search Provider, nickname or account number" value={q} onChange={e => setQ(e.target.value)} />
       <div style={{ marginTop: 10, maxHeight: "50vh", overflowY: "auto" }}>
-        {matches.map(ba => (
+        {matches.map(({ billerAccount: ba, providerName, accountLine }) => (
           <button
             key={ba.id}
             data-testid={`relationship-existing-${ba.id}`}
             onClick={() => onSelectExisting(ba)}
             style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", width: "100%", background: "none", border: "none", borderBottom: `1px solid ${T.border}`, padding: "10px 0", cursor: "pointer", textAlign: "left" }}
           >
-            <span style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>{ba.name}</span>
-            <span style={{ color: T.sub, fontSize: 12, marginTop: 2 }}>{[ba.type, ba.provider].filter(Boolean).join(" · ")}</span>
+            <span style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>{providerName}</span>
+            <span style={{ color: T.sub, fontSize: 12, marginTop: 2 }}>{accountLine}</span>
             <span style={{ color: T.sub, fontSize: 11, marginTop: 2 }}>Primary: {currentLabel(ba)}</span>
           </button>
         ))}
-        {!matches.length ? <div style={{ ...s.hint, padding: "10px 0" }}>{query ? "No matching biller." : "No billers yet."}</div> : null}
+        {!matches.length ? <div style={{ ...s.hint, padding: "10px 0" }}>{q.trim() ? "No matching Provider or account." : "No Providers yet."}</div> : null}
       </div>
       <button
         data-testid="relationship-create-new"

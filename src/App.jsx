@@ -6792,6 +6792,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       onClose={()=>setShowLinkToSheet(false)}
                       initialStage={linkToInitialStage}
                       billerAccounts={billerAccounts}
+                      billers={billers}
                       schoolRelationships={schoolRelationships}
                       events={events}
                       vehicles={vehicles}
@@ -17736,7 +17737,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             touched only when this is the biller's FIRST relationship, so it keeps working as
             the Bill-For bridge (billFor.js's locked compatibility rule) — adding a second
             relationship to an already-owned biller no longer moves or overwrites anything. */}
-        {showAddRelationship&&<AddRelationshipSheet T={T} billerAccounts={billerAccounts}
+        {showAddRelationship&&<AddRelationshipSheet T={T} billerAccounts={billerAccounts} billers={billers}
           targetLabel={showAddRelationship.targetLabel} currentLabel={getBillerOwnerLabel}
           onClose={()=>setShowAddRelationship(null)}
           onSelectExisting={ba=>{
@@ -17766,7 +17767,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             setAttachBillerTarget(null);
             setActiveBillerForAction(ba);
           }}/>}
-        {mergeBillerSurvivor&&<MergeBillerAccountSheet T={T} survivor={mergeBillerSurvivor} billerAccounts={billerAccounts} ownerLabel={getBillerOwnerLabel(mergeBillerSurvivor)}
+        {mergeBillerSurvivor&&<MergeBillerAccountSheet T={T} survivor={mergeBillerSurvivor} billerAccounts={billerAccounts} billers={billers} ownerLabel={getBillerOwnerLabel(mergeBillerSurvivor)}
           onClose={()=>{ const ba=mergeBillerSurvivor; setMergeBillerSurvivor(null); setActiveBillerForAction(ba); }}
           onConfirm={duplicate=>{
             const survivor = mergeBillerSurvivor;
