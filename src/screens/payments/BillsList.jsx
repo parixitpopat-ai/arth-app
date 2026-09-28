@@ -59,7 +59,7 @@ function ExpectedRow({ T, row, sym, fmt, onOpen }) {
 function RenewalRow({ T, row, sym, fmt, onOpen }) {
   const overdue = row.kind === "overdue";
   return (
-    <button data-testid={`renewal-row-${row.billerAccountId}`} onClick={() => onOpen(row)} style={{ display: "flex", gap: 12, width: "100%", background: "transparent", border: `1px dashed ${overdue ? T.danger + "88" : T.borderStrong}`, borderRadius: 14, padding: "12px 14px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: FONT.sans }}>
+    <button data-testid={`renewal-row-${row.id}`} onClick={() => onOpen(row)} style={{ display: "flex", gap: 12, width: "100%", background: "transparent", border: `1px dashed ${overdue ? T.danger + "88" : T.borderStrong}`, borderRadius: 14, padding: "12px 14px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: FONT.sans }}>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: "block", color: T.text, fontSize: 14, fontWeight: 700 }}>{row.name}{row.forText ? ` · ${row.forText}` : ""}</span>
         <span style={{ display: "block", color: overdue ? T.danger : T.sub, fontSize: 12, marginTop: 2 }}>{overdue ? `${row.days} day${row.days === 1 ? "" : "s"} overdue` : `Renewing in ${row.days} day${row.days === 1 ? "" : "s"}`}</span>
@@ -123,7 +123,7 @@ export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, o
       {groups.renewals?.length ? (
         <div data-testid="group-Renewals">
           <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", margin: "16px 0 8px" }}>Renewals & fees</div>
-          {groups.renewals.map(row => <RenewalRow key={row.billerAccountId} T={T} row={row} sym={sym} fmt={fmt} onOpen={onOpenRenewal} />)}
+          {groups.renewals.map(row => <RenewalRow key={row.id} T={T} row={row} sym={sym} fmt={fmt} onOpen={onOpenRenewal} />)}
         </div>
       ) : null}
       <Group T={T} title="Paid" rows={paidRows} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />
