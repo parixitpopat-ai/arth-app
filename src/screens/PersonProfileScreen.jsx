@@ -95,6 +95,8 @@ export function PersonProfileScreen({
                             // of duplicated in a separate standalone block
   onShareStatement,         // if absent, Statement renders as honestly unavailable
   getPersonAttributedAmount,
+  meId,                     // the household's own person id — needed by getFinancialPositionBreakdown
+                            // to replicate settlements[]'s receivable/payable logic exactly
   isDateActiveMembershipCoverage,
   today,                    // "YYYY-MM-DD", injected for determinism
   T, sym, fmt,
@@ -116,7 +118,7 @@ export function PersonProfileScreen({
   const toggle = key => setExpandedSection(prev => prev === `profile_${key}_${person.id}` ? null : `profile_${key}_${person.id}`);
 
   const positionLabel = getFinancialPositionLabel(balance);
-  const breakdown = getFinancialPositionBreakdown(person.id, txns, bills, getPersonAttributedAmount);
+  const breakdown = getFinancialPositionBreakdown(person.id, txns, bills, meId);
   const aboutFields = getPersonAboutFields(person);
   const aboutCompleteness = getAboutCompleteness(person);
   const notes = getPersonNotes(person);
@@ -174,18 +176,47 @@ export function PersonProfileScreen({
             <div style={{ color: T.danger, fontSize: 14, fontWeight: 800 }}>{sym}{fmt(positionLabel.iOwe)}</div>
           </div>
         </div>
-        {breakdown.length > 0 && (
-          <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.border}` }}>
-            <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, marginBottom: 6 }}>HOW THIS IS WORKED OUT</div>
-            <div style={{ color: T.sub, fontSize: 11, marginBottom: 6 }}>Not a stored balance — recalculated from these each time.</div>
-            {breakdown.slice(0, 8).map(item => (
-              <div key={`${item.kind}_${item.id}`} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
-                <span style={{ color: T.sub, fontSize: 12 }}>{item.desc}</span>
-                <span style={{ color: item.mode === "owesMe" ? T.success : T.danger, fontSize: 12 }}>{sym}{fmt(item.amount)}</span>
+        {breakdown.length > 0 && (() => {
+          // Full audit trail, not a preview — every item that contributes to the total above,
+          // so the two numbers can actually be checked against each other rather than trusted.
+          // If enumeratedTotal !== positionLabel.owesMe/iOwe, that's real evidence something
+          // outside this enumeration is contributing (worth investigating separately) — shown,
+          // not hidden. A real UPI/bank reference repeated across two entries here means the
+          // same physical payment was recorded twice, directly inflating this person's balance —
+          // flagged inline, using the exact same reference this session's Duplicate Finder now
+          // matches on, never a second detection method.
+          const refCounts = {};
+          breakdown.forEach(item => { if (item.transactionRef) refCounts[item.transactionRef] = (refCounts[item.transactionRef] || 0) + 1; });
+          const enumeratedOwesMe = breakdown.filter(i => i.mode === "owesMe").reduce((s, i) => s + i.amount, 0);
+          const enumeratedIOwe = breakdown.filter(i => i.mode === "iOwe").reduce((s, i) => s + i.amount, 0);
+          const owesMeMismatch = Math.round(enumeratedOwesMe) !== Math.round(positionLabel.owesMe);
+          const iOweMismatch = Math.round(enumeratedIOwe) !== Math.round(positionLabel.iOwe);
+          return (
+            <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.border}` }}>
+              <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, marginBottom: 6 }}>HOW THIS IS WORKED OUT ({breakdown.length})</div>
+              <div style={{ color: T.sub, fontSize: 11, marginBottom: 6 }}>Not a stored balance — recalculated from these each time.</div>
+              {breakdown.map(item => {
+                const isDupRef = item.transactionRef && refCounts[item.transactionRef] > 1;
+                return (
+                  <div key={`${item.kind}_${item.id}`} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+                    <span style={{ color: isDupRef ? T.danger : T.sub, fontSize: 12 }}>{item.desc}{isDupRef ? ` ⚠️ ref ${item.transactionRef} repeats` : ""}</span>
+                    <span style={{ color: item.mode === "owesMe" ? T.success : T.danger, fontSize: 12 }}>{sym}{fmt(item.amount)}</span>
+                  </div>
+                );
+              })}
+              <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px dashed ${T.border}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+                  <span style={{ color: owesMeMismatch ? T.warn : T.sub, fontSize: 11, fontWeight: 700 }}>Sum of "owes me" entries above{owesMeMismatch ? " ⚠️ doesn't match total" : ""}</span>
+                  <span style={{ color: owesMeMismatch ? T.warn : T.sub, fontSize: 11, fontWeight: 700 }}>{sym}{fmt(enumeratedOwesMe)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+                  <span style={{ color: iOweMismatch ? T.warn : T.sub, fontSize: 11, fontWeight: 700 }}>Sum of "I owe" entries above{iOweMismatch ? " ⚠️ doesn't match total" : ""}</span>
+                  <span style={{ color: iOweMismatch ? T.warn : T.sub, fontSize: 11, fontWeight: 700 }}>{sym}{fmt(enumeratedIOwe)}</span>
+                </div>
               </div>
-            ))}
-          </div>
-        )}
+            </div>
+          );
+        })()}
       </SectionShell>
     ),
 
