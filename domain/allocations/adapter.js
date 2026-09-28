@@ -573,6 +573,28 @@ export function getAllocationHierarchyWarning(discretionaryPool, allocatedTotal)
 }
 
 /**
+ * WP7 correction — the locked IA does not treat Σ allocations ≤ Discretionary Pool as
+ * warning-only: an allocation that would push the total over the pool must be rejected, not
+ * silently persisted. This is the single-candidate version of getAllocationHierarchyWarning
+ * above, evaluated BEFORE a write: "if I commit this one candidate amount, alongside every
+ * other allocation exactly as it already stands, does the total fit?" Every other allocation
+ * stays exactly as it is — this never touches or reconsiders them, only the one being entered.
+ * Returns null when it fits (the caller may commit); a plain data object when it doesn't (the
+ * caller must refuse the write and keep whatever the person typed on screen, never clamp it to
+ * a guessed valid number).
+ *
+ * @param {number} discretionaryPool
+ * @param {number} otherAllocationsTotal - Σ every OTHER Person/Group allocation, i.e. the
+ *   existing allocatedTotal with this one dimension's current committed amount subtracted out
+ * @param {number} candidateAmount - the not-yet-committed amount being typed/entered
+ * @returns {{overBy: number}|null}
+ */
+export function wouldExceedDiscretionaryPool(discretionaryPool, otherAllocationsTotal, candidateAmount) {
+  const overBy = Number(otherAllocationsTotal || 0) + Number(candidateAmount || 0) - Number(discretionaryPool || 0);
+  return overBy > 0 ? { overBy } : null;
+}
+
+/**
  * The dismissedAlerts[] id for "has this month's Mandatory Commitments been
  * confirmed" — same month-scoped id shape App.jsx's existing budget alerts
  * already use (`budget_<subject>_<monthKey>_<variant>`), reused rather than
@@ -595,4 +617,53 @@ export function getMandatoryCommitmentsConfirmationId(monthKey) {
  */
 export function isMandatoryCommitmentsConfirmed(dismissedAlerts, monthKey) {
   return (dismissedAlerts || []).includes(getMandatoryCommitmentsConfirmationId(monthKey));
+}
+
+/**
+ * WP7 — which of the four states a single Mandatory Commitment is in for a
+ * given month: "skipped" (explicitly marked not happening this month, same
+ * per-month opt-out shape as the existing skippedInvestmentMonths[] pattern
+ * — a commitment.skippedMonths array of monthKeys, nothing new invented),
+ * "actual" (money has actually moved against its linked category this
+ * month), or "planned" (reserved, nothing spent against it yet). A skipped
+ * commitment is "actual" only in the trivial sense that spend could still
+ * post to its category even after being skipped — that's surfaced as
+ * "actual", not silently reclassified back to skipped, since real spend
+ * happened regardless of the plan.
+ *
+ * @param {Object} commitment - {skippedMonths?: string[]}
+ * @param {number} spent - caller's own getCategoryAttributedTotal result
+ * @param {string} monthKey - "YYYY-MM"
+ * @returns {"skipped"|"actual"|"planned"}
+ */
+export function getMandatoryCommitmentState(commitment, spent, monthKey) {
+  if (Number(spent) > 0) return "actual";
+  if ((commitment?.skippedMonths || []).includes(monthKey)) return "skipped";
+  return "planned";
+}
+
+/**
+ * WP7 — the fourth state, "Unplanned Actual": which categories have NO
+ * Mandatory Commitment covering them this month (skipped commitments don't
+ * count as coverage — their category is exactly as unplanned as one with no
+ * commitment at all). Returns category ids only; the caller runs its own
+ * getCategoryAttributedTotal per id (the existing attribution function,
+ * same as every other figure on this page) to find which of those ids
+ * actually have spend against them — this function does not touch
+ * transactions or amounts at all, matching getDiscretionaryAllocatedTotal's
+ * "pure arithmetic/set logic, no knowledge of the caller's other shapes"
+ * pattern.
+ *
+ * @param {Array} categories - [{id}]
+ * @param {Array} mandatoryCommitments - [{categoryId, skippedMonths?}]
+ * @param {string} monthKey - "YYYY-MM"
+ * @returns {Array<string>} category ids not covered by any active commitment
+ */
+export function getUnplannedCategoryIds(categories, mandatoryCommitments, monthKey) {
+  const coveredIds = new Set(
+    (mandatoryCommitments || [])
+      .filter(c => !(c?.skippedMonths || []).includes(monthKey))
+      .map(c => c.categoryId)
+  );
+  return (categories || []).filter(cat => !coveredIds.has(cat.id)).map(cat => cat.id);
 }
