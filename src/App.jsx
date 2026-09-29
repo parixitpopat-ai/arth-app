@@ -16,7 +16,10 @@ const readCopiedSms = async () => ({ text: "", error: "Not supported" });
 const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
-import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY } from "./constants/theme";
+import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY, STATUS, statusStyle } from "./constants/theme";
+import { Compass, Calendar, ChevronRight, ChevronDown, Landmark, GraduationCap, Dumbbell, Shield, Repeat, CreditCard, Receipt, TrendingUp } from "lucide-react";
+import { groupFutureMoneyByRhythm } from "./domain/futureMoney/rhythm";
+import { getSourceTypeLabel, getDisplayStatus, isEstimatedOccurrence } from "./domain/futureMoney/sourceTypeMeta";
 import { todayStr, toLocalDateStr, addDaysToDateStr, addMonthsClamped, dateAtDay, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
 import { getMembershipRenewalStatus } from "./domain/membership/renewalStatus";
 import { getPendingGymCheckIn, recordGymCheckIn } from "./domain/membership/checkIn";
@@ -12267,6 +12270,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // forecasts — per the Architecture Freeze Enforcement rule: placeholder screens are fine,
   // placeholder business logic is not.
   const OutlookPage = () => {
+    // WP10 (Outlook redesign) — filter chips scope the rhythm section (Every month + future
+    // month buckets) to one source type at a time; the collapsed "Show April – September 2027"
+    // row expands the remaining months. Local UI state only, nothing persisted.
+    const [outlookFilter, setOutlookFilter] = useState("all");
+    const [showAllMonths, setShowAllMonths] = useState(false);
     // O014 Cash Forecast — real, using the Forecast Engine functions. openingBalance = liquid
     // accounts only (bank/cash/upi), excluding investments and credit cards, per Balance Engine's
     // ownership of the actual balance figure.
@@ -12325,30 +12333,28 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const timeline = buildCashFlowTimeline(openingBalance, billsForForecast, expectedIncome, 30, refundTotalsByBill);
     const projectedBalance = calculateProjectedBalance(openingBalance, billsForForecast, expectedIncome, estimatedVariable, monthKey, refundTotalsByBill);
     const hasEnoughData = typeof openingBalance === "number" && !Number.isNaN(openingBalance);
-
-    // Two genuinely different questions, per the review that led to this - conflating them into
-    // one "Safe to Spend" number was the actual bug, not just a labeling issue.
-    //
-    // (1) Safe to Spend = Monthly Budget - Spent This Month. Pure budget concept. Reuses the exact
-    // same monthBudget/monthSpend formula already used for the real household Budget elsewhere
-    // (confirmed by checking, not reinvented) - so this never drifts into a second, slightly
-    // different Budget number.
-    const thisMonthTxns = txns.filter(t=>t.date&&t.date.startsWith(monthKey));
-    const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
-    const monthBudget = monthOverrides[monthKey] || Math.round(Number(annualBudget||0)/12);
-    const safeToSpend = monthBudget - monthSpend;
     const daysLeftInMonth = new Date(todayDate.getFullYear(), todayDate.getMonth()+1, 0).getDate() - todayDate.getDate() + 1;
-    const safeToSpendPerDay = daysLeftInMonth>0 ? safeToSpend/daysLeftInMonth : safeToSpend;
 
-    // (2) Protected Money = cash that's already committed and shouldn't be spent on something
-    // else - Bills (incl. Insurance, still Bill.type per the frozen ADR-021/023 - unchanged),
-    // SIPs, CC statements. Cash Available is the real opening balance; Buffer is what's left.
-    // Repointed (Phase 5): Committed Spending (unpaid) + Committed Saving, summed together per
-    // the approved array-scope decision — architecturally the same shape as "Next Month Cash
-    // Outflow" below, just not month-scoped (this is the immediate/ongoing figure).
-    const cashRequired = unpaidSpending.reduce((sum,c)=>sum+c.amount,0) + committedSaving.reduce((sum,c)=>sum+c.amount,0);
+    // WP10 (Outlook redesign) — per the explicit product decision this session, Budget's own
+    // pace forecast (Monthly Budget minus Spent This Month) and Outlook's own cash-solvency
+    // forecast (this Buffer) stay two separate, different questions; this screen no longer shows
+    // the budget-pace number at all (that's now purely Budget's job, reached via the "budget"
+    // link below) — it never duplicates or re-derives it here.
+    //
+    // Cash Available is the real opening balance; Buffer is what's left once every committed
+    // outflow is set aside. BUG FOUND AND FIXED while building this redesign: cashRequired
+    // previously summed only unpaidSpending + committedSaving, omitting futureMoney.debtService
+    // (loan EMIs) entirely — a real EMI is exactly the kind of cash commitment this figure exists
+    // to protect, and the WP10 handoff's own worked example confirms EMIs belong in this total
+    // (its "Needed" = Spending + Saving + Debt). The omission predates this WP — debtService
+    // didn't exist yet when this formula was first written (see the stale "Debt Service is
+    // honestly empty" comment this WP also removes below) and was never revisited once the debt
+    // adapter shipped.
+    const debtServiceTotal = futureMoney.debtService.reduce((sum,d)=>sum+Number(d.amount||0),0);
+    const cashRequired = unpaidSpending.reduce((sum,c)=>sum+c.amount,0) + committedSaving.reduce((sum,c)=>sum+c.amount,0) + debtServiceTotal;
     const cashAvailable = openingBalance;
     const buffer = cashAvailable - cashRequired;
+    const bufferPerDay = daysLeftInMonth>0 ? buffer/daysLeftInMonth : buffer;
     const negativeCheck = hasTransientNegativeBalance(timeline);
 
     // Forecast Status classifier — ADR-022, revised twice now: (1) data completeness must be
@@ -12356,7 +12362,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // check), not the budget-based Safe to Spend — status answers "can I survive the month,"
     // not "am I within budget," which are the two different questions this whole redesign
     // exists to separate.
-    const unpaidBillCount = unpaidSpending.length + committedSaving.length;
+    const unpaidBillCount = unpaidSpending.length + committedSaving.length + futureMoney.debtService.length;
     const pendingIncomeCount = (expectedIncome||[]).filter(e=>e.status!=="received").length;
     const hasCommitmentData = unpaidBillCount>0 || pendingIncomeCount>0;
     const forecastStatus = !hasEnoughData ? null
@@ -12364,7 +12370,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       : negativeCheck.negative || buffer<0 ? { level:"risk", icon:"🔴", label:"At Risk", detail:"Forecast goes negative or a commitment can't be covered." }
       : buffer<cashRequired*0.1 ? { level:"tight", icon:"🟠", label:"Tight", detail:"Buffer is small — one unexpected expense could create stress." }
       : buffer<cashRequired*0.3 ? { level:"watchful", icon:"🟡", label:"Watchful", detail:"Commitments are covered, but margin is limited." }
-      : { level:"comfortable", icon:"🟢", label:"Comfortable", detail:"Your Bills, SIPs, and card statements are covered." };
+      : { level:"comfortable", icon:"🟢", label:"Comfortable", detail:"Your Bills, SIPs, EMIs and card statements are covered." };
     const statusColor = { incomplete:T.sub, risk:T.danger, tight:T.warn, watchful:T.gold||T.warn, comfortable:T.success }[forecastStatus?.level] || T.sub;
 
     // WP4 (Arth IA §6/§7) — Outlook shows only the >30-day slice of the one composed list;
@@ -12372,18 +12378,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Fees) owns everything overdue or due within 30 days. Mutually exclusive windows over the
     // same events, decided once by the shared isWithinPaymentsHorizon rule — Outlook no longer
     // computes its own Overdue/Due Today/Next 7 Days buckets; those are Payments' territory now.
-    const today = new Date(); today.setHours(0,0,0,0);
-    // Repointed (Phase 5): committedSpending + committedSaving, using each entry's own canonical
-    // date — SIPs now bucket correctly (Phase 4A gave committedSaving a real next-occurrence
-    // date via getNextRecurringOccurrence, reusing dateAtDay). An entry with no computable date
-    // (invalid/missing schedule day — an edge case, see Phase 4A) is left out of the Outlook list
-    // rather than guessed into it — isWithinPaymentsHorizon treats "no date" as Payments'
-    // territory, same "honest absence over fabricated guess" principle as the read model itself.
-    const unpaidBills = [...unpaidSpending, ...committedSaving].map(c=>{
-      const daysUntil = c.date ? Math.ceil((new Date(c.date)-today)/(1000*60*60*24)) : null;
-      return { ...c, daysUntil, isOverdue: daysUntil!=null && daysUntil<0, _originalBill: c.sourceType==="bill" ? originalBillsById[String(c.sourceId)] : null };
-    });
-    const outlookBills = unpaidBills.filter(b=>!isWithinPaymentsHorizon(b, todayStr())).sort((a,b)=>(a.daysUntil??Infinity)-(b.daysUntil??Infinity));
+    // WP10 superseded the old flat >30-day unpaidBills/outlookBills list with the rhythm
+    // grouping below (groupFutureMoneyByRhythm), which computes its own 30-day cutoff directly
+    // rather than calling isWithinPaymentsHorizon — that horizon rule stays Payments' own way of
+    // deciding what it shows; Outlook's "next 30 days" is a genuinely separate window built for
+    // this screen's own rhythm-first layout (next 30 days, then Every month, then real months).
 
     // WP6 — "Preserve provenance back to the underlying source." Every Future Money row, not
     // just real Bills, now opens its real underlying record. One dispatcher keyed on the
@@ -12452,184 +12451,151 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const netWorthDelta = yesterdaySnap && todaySnap ? todaySnap.netWorth - yesterdaySnap.netWorth : null;
     const cashDelta = yesterdaySnap && todaySnap ? todaySnap.cash - yesterdaySnap.cash : null;
 
-    const BillRow = ({ b }) => {
-      // Badge derived from sourceType (canonical). WP6 — every row now opens its real
-      // underlying source via openCommitmentRow, not just real Bills; this is the
-      // discoverability fix the design doc calls out ("a projected line had no visible
-      // origin"). A generated Credit Card statement IS a real Bill (sourceType "bill", per
-      // the CC WP) — it opens the reconciliation sheet instead of the plain bill editor.
-      const isCcStatement = Boolean(b._originalBill?.isCcStatement);
+    // WP10 (Outlook redesign) — "The long list is organised by rhythm first, then by date."
+    // groupFutureMoneyByRhythm takes the exact, unmodified `futureMoney` object this screen
+    // already had (composeFutureMoneyCommitments's own output) — no new commitment logic, only
+    // a different read over the same data.
+    const rhythm = groupFutureMoneyByRhythm(futureMoney, todayStr());
+    const OUTLOOK_FILTER_CHIPS = [
+      { key:"all", label:"All" },
+      { key:"bill", label:"Bills" },
+      { key:"ccStatement", label:"Card statements" },
+      { key:"debt", label:"Loans" },
+      { key:"insurancePolicy", label:"Insurance" },
+      { key:"feePeriod", label:"School fees" },
+      { key:"membership", label:"Memberships" },
+      { key:"recurringSchedule", label:"Scheduled" },
+    ];
+    const matchesFilter = (e) => outlookFilter==="all" || e.sourceType===outlookFilter;
+    const filteredEveryMonthEvents = rhythm.everyMonthEvents.filter(matchesFilter);
+    const filteredEveryMonthTotal = filteredEveryMonthEvents.reduce((s,e)=>s+Number(e.amount||0),0);
+    const filteredMonthBuckets = rhythm.monthBuckets.map(b=>{
+      const items = b.items.filter(matchesFilter);
+      return { ...b, items, total: filteredEveryMonthTotal + items.reduce((s,e)=>s+Number(e.amount||0),0) };
+    });
+    const nothingAfter30Days = rhythm.everyMonthEvents.length===0 && rhythm.monthBuckets.every(b=>b.items.length===0);
+
+    const SOURCE_TYPE_ICON = { bill:Receipt, ccStatement:CreditCard, recurringSchedule:Repeat, feePeriod:GraduationCap, debt:Landmark, membership:Dumbbell, insurancePolicy:Shield };
+    const rowIcon = (sourceType) => { const Icon = SOURCE_TYPE_ICON[sourceType] || Receipt; return <Icon size={15} style={{ flexShrink:0 }}/>; };
+
+    // One row, seven source types — date/name/type·category/amount/status, per the handoff's
+    // "One row, seven source types" rule. `section` decides only the date badge and the
+    // solid-vs-dashed amount (isEstimatedOccurrence); everything else about the row already
+    // comes from the composed event itself.
+    const RhythmRow = ({ e, section, showDate }) => {
+      const statusKey = getDisplayStatus(e.sourceType);
+      const dashed = isEstimatedOccurrence(e.sourceType, section);
       return (
-      <div onClick={()=>openCommitmentRow(b)} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
-        <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name}{b.sourceType==="recurringSchedule"&&<span style={{ color:T.sub,fontWeight:400 }}> · SIP</span>}{isCcStatement&&<span style={{ color:T.sub,fontWeight:400 }}> · Card</span>}</span>
-        <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(b.amount)}</span>
-      </div>
+        <div onClick={()=>openCommitmentRow(e)} style={{ display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
+          {showDate&&(
+            <div style={{ width:34,textAlign:"center",flexShrink:0 }}>
+              <div style={{ color:T.sub,fontSize:8.5,fontWeight:800,letterSpacing:0.3 }}>{new Date(e.date).toLocaleString("en-IN",{month:"short"}).toUpperCase()}</div>
+              <div style={{ color:T.text,fontSize:13,fontWeight:900 }}>{new Date(e.date).getDate()}</div>
+            </div>
+          )}
+          <span style={{ color:T.sub,flexShrink:0 }}>{rowIcon(e.sourceType)}</span>
+          <div style={{ flex:1,minWidth:0 }}>
+            <div style={{ color:T.text,fontSize:12.5,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{e.name}</div>
+            <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>{getSourceTypeLabel(e.sourceType)}{e.recurs&&section!=="next30"?" · last amount":""}</div>
+          </div>
+          <div style={{ textAlign:"right",flexShrink:0 }}>
+            <div style={{ color:T.text,fontSize:12.5,fontWeight:800,fontFamily:FONT.mono }}>{dashed?"~":""}{sym}{fmt(e.amount)}</div>
+            <div style={{ marginTop:2 }}><span style={statusStyle(statusKey,T)}>{STATUS[statusKey]?.label||""}</span></div>
+          </div>
+        </div>
       );
     };
 
     return (
     <div style={{ padding:"14px 16px 90px" }}>
-      <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:16 }}>🔮 Outlook</div>
+      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:16 }}>
+        <Compass size={20} color={T.text}/>
+        <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>Outlook</div>
+      </div>
 
-      {/* Safe to Spend — now genuinely the budget question ("can I follow my budget?"), not
-          conflated with the cash-commitment question. Monthly Budget minus Spent This Month,
-          reusing the exact real Budget formula, not a separate calculation. */}
-      <div style={{ ...card,textAlign:"center",padding:20,marginBottom:12 }}>
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND</div>
-        <div style={{ color:T.accent,fontSize:9,fontWeight:800,letterSpacing:0.8,marginTop:2,textTransform:"uppercase" }}>The plan</div>
-        {monthBudget<=0 ? (
-          <div style={{ color:T.sub,fontSize:13,padding:"14px 0" }}>No budget set for this month yet.</div>
-        ) : (
-          <>
-            <div style={{ color:safeToSpend>=0?T.accent:T.danger,fontSize:30,fontWeight:900,margin:"6px 0" }}>{sym}{fmt(safeToSpend)}</div>
-            <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(safeToSpendPerDay))}/day for the rest of this month</div>
-          </>
-        )}
-        <div style={{ color:T.sub,fontSize:10,lineHeight:1.5,marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
-          Your monthly budget minus what you have spent. It answers "can I follow my plan" — it does not know about bills yet.
+      {/* Hero card — WP10 (Outlook redesign). Merges the old two-card "Safe to Spend" (budget
+          pace) + "Protected Money" (cash commitment) into ONE card, and per the explicit product
+          decision this session, this is Outlook's cash-solvency Buffer, not Budget's pace
+          number — the old "Safe to Spend" label now genuinely means "what's safe to spend
+          without touching money you've already committed," reusing Buffer exactly as it always
+          was (see cashRequired/cashAvailable/buffer above; only the label and layout changed). */}
+      <div style={{ ...card,padding:20,marginBottom:12 }}>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND · REST OF {todayDate.toLocaleString("en-IN",{month:"long"}).toUpperCase()}</div>
+          {!hasEnoughData ? (
+            <div style={{ color:T.sub,fontSize:13,padding:"14px 0" }}>Not enough data yet.</div>
+          ) : (
+            <>
+              <div style={{ ...MONEY.hero,color:buffer>=0?T.text:T.danger,margin:"6px 0" }}>{sym}{fmt(buffer)}</div>
+              <div style={{ color:T.sub,fontSize:11 }}>About {sym}{fmt(Math.round(Math.abs(bufferPerDay)))} a day for {daysLeftInMonth} day{daysLeftInMonth===1?"":"s"}</div>
+            </>
+          )}
         </div>
-      </div>
 
-      {/* Your Future Money — I-1's three commitment classes, made visible for the first time.
-          Pure display: every number here already exists in `futureMoney`, computed once above.
-          Debt Service is honestly empty — no adapter exists yet, nothing here estimates one. */}
-      <div style={{ ...card,marginBottom:12 }}>
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:12 }}>YOUR FUTURE MONEY</div>
-
-        <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>Committed Spending</div>
-        {unpaidSpending.length===0 ? (
-          <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>Nothing outstanding right now.</div>
-        ) : (
-          <div style={{ marginBottom:14 }}>
-            {unpaidSpending.map(c=>(
-              <div key={`${c.sourceType}_${c.sourceId}`} onClick={()=>openCommitmentRow(c)} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0",cursor:"pointer" }}>
-                <span style={{ color:T.sub,fontSize:11 }}>{c.name||"—"}</span>
-                <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{c.amount!=null?`${sym}${fmt(c.amount)}`:"Amount not set"}</span>
-              </div>
-            ))}
+        {forecastStatus&&(
+          <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:14,paddingTop:14,borderTop:`1px solid ${T.border}` }}>
+            <span style={{ fontSize:18 }}>{forecastStatus.icon}</span>
+            <div>
+              <div style={{ color:statusColor,fontSize:12,fontWeight:800 }}>Next 30 days {forecastStatus.level==="comfortable"?"are covered":"need attention"} · {forecastStatus.label}</div>
+              <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{forecastStatus.detail}</div>
+            </div>
           </div>
         )}
 
-        <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>Committed Saving</div>
-        {committedSaving.length===0 ? (
-          <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>No active recurring investments.</div>
-        ) : (
-          <div style={{ marginBottom:14 }}>
-            {committedSaving.map(c=>(
-              <div key={`${c.sourceType}_${c.sourceId}`} onClick={()=>openCommitmentRow(c)} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0",cursor:"pointer" }}>
-                <span style={{ color:T.sub,fontSize:11 }}>{c.name||"—"}</span>
-                <span style={{ color:T.success,fontSize:12,fontWeight:700 }}>{c.amount!=null?`${sym}${fmt(c.amount)}`:"Amount not set"}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>Debt Service</div>
-        {futureMoney.debtService.length===0 ? (
-          <div style={{ border:`1px dashed ${T.border}`,borderRadius:10,padding:"10px 12px" }}>
-            <div style={{ color:T.sub,fontSize:11,lineHeight:1.5 }}>No active EMI obligations found. Arth tracks your loan balance and, where a recurring EMI amount is on record, its upcoming repayment here.</div>
-          </div>
-        ) : (
-          <div>
-            {futureMoney.debtService.map(d=>(
-              <div key={`${d.sourceType}_${d.sourceId}`} onClick={()=>openCommitmentRow(d)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",cursor:"pointer" }}>
-                <div>
-                  <div style={{ color:T.text,fontSize:11.5,fontWeight:700 }}>{d.name||"—"}</div>
-                  {/* The release rule: a null date must read as genuinely unknown, never quietly
-                      turned into "next month" or any other inferred date. This is the only
-                      place that distinction is made — nothing upstream fills it in. */}
-                  {d.date!=null
-                    ? <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>Due {formatShortDate(d.date)||d.date}</div>
-                    : <div style={{ color:T.warn,fontSize:10,marginTop:1 }}>Date not established</div>}
-                </div>
-                <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{d.amount!=null?`${sym}${fmt(d.amount)}`:"Amount not set"}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Protected Money — the cash-commitment question ("how much cash must I keep available?").
-          This is what the old, conflated "Safe to Spend" was actually computing. Money you've
-          already committed to Bills/SIPs/CC statements — Outlook is telling you not to
-          accidentally spend this on something else. */}
-      <div style={{ ...card,marginBottom:12 }}>
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>PROTECTED MONEY</div>
-        <div style={{ color:T.accent,fontSize:9,fontWeight:800,letterSpacing:0.8,marginTop:2,marginBottom:10,textTransform:"uppercase" }}>The cash</div>
-        {!hasEnoughData ? (
-          <div style={{ color:T.sub,fontSize:13,textAlign:"center",padding:"10px 0" }}>Not enough data yet.</div>
-        ) : (
+        {hasEnoughData&&(
           <>
-            <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
-              <span style={{ color:T.sub,fontSize:11 }}>Cash Required</span>
-              <span style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(cashRequired)}</span>
+            <div style={{ display:"flex",justifyContent:"space-between",marginTop:14,paddingTop:14,borderTop:`1px solid ${T.border}` }}>
+              <span style={{ color:T.sub,fontSize:11 }}>Needed</span>
+              <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(cashRequired)}</span>
             </div>
-            <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
-              <span style={{ color:T.sub,fontSize:11 }}>Cash Available</span>
-              <span style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(cashAvailable)}</span>
+            <div style={{ display:"flex",justifyContent:"space-between",marginTop:6 }}>
+              <span style={{ color:T.sub,fontSize:11 }}>Available</span>
+              <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(cashAvailable)}</span>
             </div>
-            <div style={{ display:"flex",justifyContent:"space-between",paddingTop:6,borderTop:`1px solid ${T.border}` }}>
+            <div style={{ display:"flex",justifyContent:"space-between",marginTop:6,paddingTop:6,borderTop:`1px solid ${T.border}` }}>
               <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Buffer</span>
-              <span style={{ color:buffer>=0?T.success:T.danger,fontSize:14,fontWeight:900 }}>{sym}{fmt(buffer)}</span>
+              <span style={{ color:buffer>=0?T.success:T.danger,fontSize:13,fontWeight:900,fontFamily:FONT.mono }}>{sym}{fmt(buffer)}</span>
+            </div>
+
+            {/* Three-line split — Spending/Saving/Debt, replacing the old "Your Future Money"
+                card. Sums to Needed above; every number already existed, just regrouped. */}
+            <div style={{ display:"flex",flexDirection:"column",gap:6,marginTop:14,paddingTop:14,borderTop:`1px solid ${T.border}` }}>
+              <div style={{ display:"flex",justifyContent:"space-between" }}>
+                <span style={{ color:T.sub,fontSize:11 }}>Spending · bills, statements, fees</span>
+                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(unpaidSpending.reduce((s,c)=>s+c.amount,0))}</span>
+              </div>
+              <div style={{ display:"flex",justifyContent:"space-between" }}>
+                <span style={{ color:T.sub,fontSize:11 }}>Saving · SIPs</span>
+                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(committedSaving.reduce((s,c)=>s+c.amount,0))}</span>
+              </div>
+              <div style={{ display:"flex",justifyContent:"space-between" }}>
+                <span style={{ color:T.sub,fontSize:11 }}>Debt · EMIs</span>
+                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(debtServiceTotal)}</span>
+              </div>
             </div>
             {!hasCommitmentData&&(
-              <div style={{ color:T.warn,fontSize:10,marginTop:8 }}>⚠ No Bills, SIPs, or CC statements recorded yet — this figure may be inaccurate.</div>
+              <div style={{ color:T.warn,fontSize:10,marginTop:10 }}>⚠ No Bills, SIPs, EMIs or CC statements recorded yet — this figure may be inaccurate.</div>
             )}
-            <div style={{ color:T.sub,fontSize:10,lineHeight:1.5,marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
-              What you have already committed, against what you hold. It answers "how much must I keep available".
-              {buffer<0&&" A negative buffer is why the forecast reads tight even though the budget looks fine."}
-            </div>
-            {/* WP6 — provenance summary, grouped by source, same array as cashRequired above.
-                Only groups with an unambiguous, already-existing list screen are tappable
-                (bill/feePeriod/recurringSchedule); the rest stay plain labels rather than
-                guessing a destination — the per-row tap-through above covers those cases. */}
-            {(()=>{
-              const protectedItems = [...unpaidSpending, ...committedSaving];
-              if(protectedItems.length===0) return null;
-              const GROUP_LABELS = {
-                bill:["bill","bills"], ccStatement:["card statement","card statements"],
-                recurringSchedule:["SIP","SIPs"], feePeriod:["school fee","school fees"],
-                membership:["membership","memberships"], insurancePolicy:["insurance policy","insurance policies"],
-                debt:["loan EMI","loan EMIs"],
-              };
-              const counts = {};
-              protectedItems.forEach(c=>{ counts[c.sourceType]=(counts[c.sourceType]||0)+1; });
-              const openGroup = {
-                bill: ()=>setTab("bills"),
-                feePeriod: ()=>setShowSchoolFeesList(true),
-                recurringSchedule: ()=>{ setSelectedInvestmentTypeView("all"); setShowInvestments(true); },
-              };
-              return (
-                <div style={{ display:"flex",flexWrap:"wrap",gap:"4px 10px",marginTop:8 }}>
-                  {Object.entries(counts).map(([type,n])=>{
-                    const [sing,plur] = GROUP_LABELS[type]||[type,type];
-                    const clickable = Boolean(openGroup[type]);
-                    return (
-                      <span key={type} onClick={clickable?openGroup[type]:undefined}
-                        style={{ color:clickable?T.accent:T.sub,fontSize:10,fontWeight:700,cursor:clickable?"pointer":"default" }}>
-                        From {n} {n===1?sing:plur}{clickable?" →":""}
-                      </span>
-                    );
-                  })}
-                </div>
-              );
-            })()}
           </>
         )}
       </div>
 
-      {/* Forecast Status — ADR-022, weather-style interpretation, never a numeric score. */}
-      {forecastStatus&&(
-        <div style={{ background:statusColor+"15",border:`1px solid ${statusColor}44`,borderRadius:14,padding:"12px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:10 }}>
-          <span style={{ fontSize:22 }}>{forecastStatus.icon}</span>
-          <div>
-            <div style={{ color:statusColor,fontSize:14,fontWeight:800 }}>{forecastStatus.label}</div>
-            <div style={{ color:T.sub,fontSize:10 }}>{forecastStatus.detail}</div>
-          </div>
+      {/* Next 30 days — WP10. The one composed future-money list's near-term slice, real dated
+          rows (date, name, type · biller, amount, status), each opening its real source. */}
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6 }}>
+        <span style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>NEXT 30 DAYS · TO {formatShortDate(toLocalDateStr(rhythm.next30CutoffDate))||""}</span>
+        <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{rhythm.next30.length} item{rhythm.next30.length===1?"":"s"}</span>
+      </div>
+      {rhythm.next30.length===0 ? (
+        <div style={{ ...card,textAlign:"center",color:T.sub,fontSize:12,padding:20,marginBottom:12 }}>Nothing due in the next 30 days. Anything overdue or due sooner is in Payments.</div>
+      ) : (
+        <div style={{ ...card,marginBottom:12 }}>
+          {rhythm.next30.map(e=><RhythmRow key={`${e.sourceType}:${e.sourceId}`} e={e} section="next30" showDate/>)}
         </div>
       )}
 
-      {/* Forecast Timeline */}
+      {/* Forecast Status detail is folded into the hero card above now — Forecast Timeline
+          (day-by-day cash projection) stays a separate, deeper view. */}
       <div style={{ ...card,marginBottom:12 }}>
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>FORECAST TIMELINE — NEXT 30 DAYS</div>
         {negativeCheck.negative&&(
@@ -12653,115 +12619,74 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         ))}
       </div>
 
-      {/* WP4 — Outlook's own Overdue/Due Today/Next 7 Days buckets are gone: those windows are
-          exclusively Payments' territory now (isWithinPaymentsHorizon). This is the single
-          >30-days-out slice of the one composed future-money list. */}
-      {outlookBills.length>0&&(
-        <div style={{ marginBottom:12 }}>
-          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>UPCOMING · BEYOND 30 DAYS ({outlookBills.length})</div>
-          <div style={{ ...card }}>{outlookBills.map(b=><BillRow key={`${b.sourceType}:${b.sourceId}`} b={b}/>)}</div>
+      {/* After 30 days — WP10. Rhythm first (Every month, shown once), then each future
+          calendar month's total (baseline + that month's one-off events), matching the
+          handoff's own worked example exactly (see domain/futureMoney/rhythm.js). */}
+      <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>AFTER {formatShortDate(toLocalDateStr(rhythm.next30CutoffDate))||""}</div>
+
+      <div style={{ display:"flex",gap:6,overflowX:"auto",marginBottom:12,paddingBottom:2 }}>
+        {OUTLOOK_FILTER_CHIPS.map(chip=>(
+          <button key={chip.key} onClick={()=>setOutlookFilter(chip.key)} style={{ flexShrink:0,background:outlookFilter===chip.key?T.accentSoft:"none",border:`1px solid ${outlookFilter===chip.key?T.accent:T.border}`,borderRadius:RADIUS.pill,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:outlookFilter===chip.key?T.accent:T.sub,fontFamily:FONT.sans,whiteSpace:"nowrap" }}>{chip.label}</button>
+        ))}
+      </div>
+
+      {nothingAfter30Days ? (
+        <div style={{ ...card,textAlign:"center",padding:20,marginBottom:12 }}>
+          <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:6 }}>Nothing scheduled yet</div>
+          <div style={{ color:T.sub,fontSize:11,lineHeight:1.5,marginBottom:10 }}>Outlook shows loans, insurance, school fees, memberships, SIPs and bills once they're in Arth. Anything overdue or due sooner is in Payments.</div>
+          <button onClick={()=>setTab("bills")} style={BUTTON("ghost",T)}>Open Payments</button>
         </div>
-      )}
-      {outlookBills.length===0&&(
-        <div style={{ ...card,textAlign:"center",color:T.sub,fontSize:12,padding:20,marginBottom:12 }}>No commitments beyond 30 days tracked yet. Anything overdue or due sooner is in Payments.</div>
-      )}
-
-      {/* Real gap found: Outlook had ZERO direct link to the full Bills screen (My Bills/Bill
-          History) - the only paths were buried in a Person's budget context or a 5-step detour
-          through Settings -> Manage -> Billers. Given Outlook is the actual home for commitments,
-          this belongs here directly, not behind Settings. */}
-      <button onClick={()=>setTab("bills")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,cursor:"pointer",border:`1px solid ${T.border}` }}>
-        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>📋 View All Bills</span>
-        <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Open →</span>
-      </button>
-
-      {/* Budget — deliberately not folded into Commitments above (it's a limit, not a scheduled
-          item, per O005's spec). But removing the old launcher list also removed the only general
-          entry point to it, since the Drawer's direct link was already removed earlier this
-          session in favor of routing through Outlook - leaving Budget genuinely unreachable for a
-          plain check-in. This restores that entry point without re-adding the launcher pattern. */}
-      {/* Next Month Preview — genuinely new, confirmed nothing like this existed anywhere before
-          this. Answers "how much of next month's budget will already be eaten by known
-          commitments?" using the exact same data sources as the rest of this screen (bills,
-          recurringSchedules-as-SIPs, CC statements), just scoped to next calendar month instead
-          of the current one. Never fabricates - if a bill's date falls in next month, it counts;
-          nothing estimated or guessed for recurring items without a real next occurrence. */}
-      {(()=>{
-        const nextMonthDate = new Date(todayDate.getFullYear(), todayDate.getMonth()+1, 1);
-        const nextMonthKey = `${nextMonthDate.getFullYear()}-${String(nextMonthDate.getMonth()+1).padStart(2,"0")}`;
-        // Repointed (Phase 5, Decisions 1 & 2): the old isCashOnlyNotBudget bucket wrongly
-        // conflated CC statements (Committed Spending) with SIPs (Committed Saving) under one
-        // "Cash Only" label — real architectural smell, resolved by using the canonical
-        // committedSpending/committedSaving arrays instead. nextMonthBudgetExpenses stays a
-        // Bills-only Outlook presentation subset (Decision 1: committedSpending excluding
-        // ccStatement, NOT a new dataset field). "Next Month Cash Outflow" (Decision 2) replaces
-        // nextMonthCashOnly/nextMonthCashRequired's old meaning — Committed Spending + Committed
-        // Saving, both genuinely month-scoped via each entry's own canonical date (SIPs now have
-        // one, per Phase 4A). Household-share/refund netting already happened once, canonically,
-        // inside getCommitments() — no local reimplementation here.
-        const inNextMonth = c => c.status!=="paid" && c.date && c.date.startsWith(nextMonthKey);
-        const nextMonthSpending = committedSpending.filter(inNextMonth);
-        const nextMonthSaving = committedSaving.filter(inNextMonth);
-        const nextMonthBudgetExpenses = nextMonthSpending.filter(c=>c.sourceType!=="ccStatement");
-        const nextMonthAll = [...nextMonthSpending, ...nextMonthSaving]; // union, used only for the empty-state check below
-        const nextMonthCommitted = nextMonthBudgetExpenses.reduce((sum,c)=>sum+c.amount, 0);
-        const nextMonthCashOutflow = nextMonthSpending.reduce((sum,c)=>sum+c.amount,0) + nextMonthSaving.reduce((sum,c)=>sum+c.amount,0);
-        const nextMonthBudget = monthOverrides[nextMonthKey] || Math.round(Number(annualBudget||0)/12);
-        const nextMonthLabel = nextMonthDate.toLocaleString("en-IN",{month:"long"});
-        if(nextMonthBudget<=0 && nextMonthAll.length<=0) return null;
-        return (
-          <div style={{ ...card,marginBottom:12 }}>
-            <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>NEXT MONTH — {nextMonthLabel.toUpperCase()}</div>
-            {nextMonthBudget<=0 ? (
-              <div style={{ color:T.sub,fontSize:12 }}>No budget set for {nextMonthLabel} yet.</div>
-            ) : (
-              <>
-                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
-                  <span style={{ color:T.sub,fontSize:11 }}>Budget</span>
-                  <span style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(nextMonthBudget)}</span>
-                </div>
-                <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
-                  <span style={{ color:T.sub,fontSize:11 }}>Expected Expenses <span style={{ color:T.sub,fontStyle:"italic" }}>(your share, new)</span></span>
-                  <span style={{ color:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(nextMonthCommitted)}</span>
-                </div>
-                <div style={{ display:"flex",justifyContent:"space-between",paddingTop:6,borderTop:`1px solid ${T.border}` }}>
-                  <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Remaining Before Spending</span>
-                  <span style={{ color:(nextMonthBudget-nextMonthCommitted)>=0?T.success:T.danger,fontSize:14,fontWeight:900 }}>{sym}{fmt(nextMonthBudget-nextMonthCommitted)}</span>
-                </div>
-              </>
-            )}
-            {nextMonthCashOutflow>0&&(
-              <div style={{ marginTop:10,paddingTop:8,borderTop:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between" }}>
-                <span style={{ color:T.sub,fontSize:11 }}>Next Month Cash Outflow <span style={{ fontStyle:"italic" }}>(total cash leaving, incl. Expected Expenses above)</span></span>
-                <span style={{ color:T.warn,fontSize:12,fontWeight:800 }}>{sym}{fmt(nextMonthCashOutflow)}</span>
+      ) : (
+        <>
+          {filteredEveryMonthEvents.length>0&&(
+            <div style={{ ...card,marginBottom:12 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6 }}>
+                <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>Every month</span>
+                <span style={{ color:T.sub,fontSize:10 }}>{filteredEveryMonthEvents.length} item{filteredEveryMonthEvents.length===1?"":"s"} · counted in each month below</span>
               </div>
-            )}
-            {nextMonthBudgetExpenses.length>0&&(
-              <div style={{ marginTop:10,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
-                {nextMonthBudgetExpenses.slice(0,3).map(c=>(
-                  <div key={c.sourceId} style={{ display:"flex",justifyContent:"space-between",fontSize:11,color:T.sub,padding:"3px 0" }}>
-                    <span>{c.name}</span><span>{sym}{fmt(c.amount)}</span>
-                  </div>
-                ))}
-                {nextMonthBudgetExpenses.length>3&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>+{nextMonthBudgetExpenses.length-3} more</div>}
+              <div style={{ color:T.text,fontSize:15,fontWeight:900,fontFamily:FONT.mono,marginBottom:6 }}>{sym}{fmt(filteredEveryMonthTotal)}</div>
+              {filteredEveryMonthEvents.map(e=><RhythmRow key={`${e.sourceType}:${e.sourceId}`} e={e} section="everyMonth" showDate={false}/>)}
+            </div>
+          )}
+
+          {filteredMonthBuckets.filter(b=>!b.hidden).map(b=>(
+            <div key={b.monthKey} style={{ ...card,marginBottom:12 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:b.items.length>0?6:0 }}>
+                <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{b.monthDate.toLocaleString("en-IN",{month:"long",year:b.monthDate.getFullYear()!==todayDate.getFullYear()?"numeric":undefined})}</span>
+                <span style={{ color:T.sub,fontSize:10 }}>{b.items.length>0?`Every month ${sym}${fmt(filteredEveryMonthTotal)} + ${b.items.length} more`:"Every month only"}</span>
               </div>
-            )}
-          </div>
-        );
-      })()}
+              <div style={{ color:T.text,fontSize:15,fontWeight:900,fontFamily:FONT.mono,marginBottom:b.items.length>0?6:0 }}>{sym}{fmt(b.total)}</div>
+              {b.items.map(e=><RhythmRow key={`${e.sourceType}:${e.sourceId}`} e={e} section="monthBucket" showDate/>)}
+            </div>
+          ))}
 
-      <button onClick={()=>setTab("budget")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,cursor:"pointer",border:`1px solid ${T.border}` }}>
-        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>📊 Budget Progress</span>
-        <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>View →</span>
+          {filteredMonthBuckets.some(b=>b.hidden)&&!showAllMonths&&(
+            <button onClick={()=>setShowAllMonths(true)} style={{ ...card,width:"100%",textAlign:"center",cursor:"pointer",border:`1px solid ${T.border}`,marginBottom:12,color:T.accent,fontSize:12,fontWeight:700 }}>
+              Show {filteredMonthBuckets.find(b=>b.hidden)?.monthDate.toLocaleString("en-IN",{month:"long"})} – {filteredMonthBuckets[filteredMonthBuckets.length-1]?.monthDate.toLocaleString("en-IN",{month:"long",year:"numeric"})}
+            </button>
+          )}
+          {showAllMonths&&filteredMonthBuckets.filter(b=>b.hidden).map(b=>(
+            <div key={b.monthKey} style={{ ...card,marginBottom:12 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:b.items.length>0?6:0 }}>
+                <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{b.monthDate.toLocaleString("en-IN",{month:"long",year:"numeric"})}</span>
+                <span style={{ color:T.sub,fontSize:10 }}>{b.items.length>0?`Every month ${sym}${fmt(filteredEveryMonthTotal)} + ${b.items.length} more`:"Every month only"}</span>
+              </div>
+              <div style={{ color:T.text,fontSize:15,fontWeight:900,fontFamily:FONT.mono,marginBottom:b.items.length>0?6:0 }}>{sym}{fmt(b.total)}</div>
+              {b.items.map(e=><RhythmRow key={`${e.sourceType}:${e.sourceId}`} e={e} section="monthBucket" showDate/>)}
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* Two links replace the old View All Bills / Budget Progress / Manage Bills buttons and
+          the Next Month Preview card (now superseded by the month buckets above). */}
+      <button onClick={()=>setTab("budget")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,cursor:"pointer",border:`1px solid ${T.border}` }}>
+        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{todayDate.toLocaleString("en-IN",{month:"long"})} budget</span>
+        <ChevronRight size={16} color={T.accent}/>
       </button>
-
-      {/* Direct entry point to Bills (My Bills / Bill History tabs) - real friction found and
-          fixed: reaching Bills previously required Drawer -> Settings -> Manage -> Billers ->
-          lands on Bills tab, 5 steps for something used often. Outlook already owns Commitments
-          conceptually, so this is the natural, short home for it. */}
       <button onClick={()=>setTab("bills")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,cursor:"pointer",border:`1px solid ${T.border}` }}>
-        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>🧾 Manage Bills</span>
-        <span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>Open →</span>
+        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>All bills in Payments</span>
+        <ChevronRight size={16} color={T.accent}/>
       </button>
 
       {/* What Changed — Facts tier, using the real wealthSnapshots mechanism. Reasons/Impact
@@ -12773,10 +12698,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {cashDelta!==null&&<div style={{ color:T.text,fontSize:12,fontWeight:700,marginTop:4 }}>{cashDelta>=0?"💰":"💸"} Cash {cashDelta>=0?"+":""}{sym}{fmt(cashDelta)}</div>}
         </div>
       )}
-
-      {/* Coming Soon removed entirely — per this review's finding, permanent "not built yet"
-          reminders don't belong on a production screen. Calendar/Monthly Planner will simply
-          appear here once they exist. */}
     </div>
     );
   };

@@ -91,6 +91,10 @@ export const STATUS = {
   paused:     { label: "Paused",      tone: "muted" },
   ended:      { label: "Ended",       tone: "muted" },
   writtenOff: { label: "Written off", tone: "muted" },
+  // Outlook redesign (WP10) — the two further display statuses its "one row, seven source
+  // types" lookup needs (Bill/card statement/loan/SIP already covered by due/scheduled above).
+  unpaid:     { label: "Unpaid",      tone: "attention" },
+  expected:   { label: "Expected",    tone: "muted" },
 };
 
 const TONE = {
