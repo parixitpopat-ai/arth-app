@@ -3,8 +3,24 @@
 // Pure. Reads the existing, authoritative settlements[p.id] shape — never
 // computes a balance independently, never stores one. This module only
 // labels and explains what settlements already produced.
+//
+// BUG FOUND AND FIXED (live, via this file's own reconciliation check surfaced on
+// PersonProfileScreen — a real "They owe me" total didn't match the enumerated items behind
+// it): getFinancialPositionBreakdown used to run every transaction through
+// getPersonAttributedAmount(t, personId) to decide both the amount AND the owesMe/iOwe label.
+// That function (App.jsx) only ever returns a non-zero amount for mode==="spent_on" — an
+// entirely different fact (money spent ON this person) from money owed BACK by them
+// (mode==="owes", the actual source of "They owe me"). Every real receivable transaction was
+// silently enumerated as amount 0 and dropped, while the real total (settlements[p.id].owesMe,
+// computed inline in App.jsx from the SAME three sources replicated below) kept including them
+// correctly — hence a real total with an incomplete, wrong-looking explanation underneath it.
+// Fixed by replicating App.jsx's settlements[] receivables/payables logic exactly (same three
+// receivable sources: mode:"owes", forPerson, tagItems; same three payable sources:
+// mode:"owes_by_me", settlement_in, settlement_out) instead of routing through a function built
+// for a different question.
 
 import { getBillSplitSource } from "../bills/splitSource.js";
+import { remainingShare } from "../shared/remainingShare.js";
 
 /**
  * @param {{owesMe:number, iOwe:number}} settlement - settlements[p.id],
@@ -31,34 +47,73 @@ export function getFinancialPositionLabel(settlement) {
  * and bills. This never recomputes the total independently — the total
  * shown alongside this breakdown always comes from settlements[p.id]
  * itself; this function only enumerates what's behind it, for
- * transparency, using the same existing, already-correct attribution
- * primitive (getPersonAttributedAmount) rather than a second calculation.
+ * transparency, replicating the exact same per-source logic App.jsx's
+ * settlements[] computation already uses (never a second, diverging
+ * calculation of what counts as owed).
  *
  * @param {string} personId
  * @param {Array} txns
  * @param {Array} bills
- * @param {Function} getPersonAttributedAmount - injected, the real
- *   existing function, never reimplemented here
- * @returns {Array<{id, kind:"txn"|"bill", desc, amount, mode:"owesMe"|"iOwe", date}>}
+ * @param {string} meId - the household's own person id (people.find(p=>p.isMe)?.id), needed to
+ *   exclude self and to match forPerson's own "not me" guard exactly, same as App.jsx's
+ *   settlements[] computation
+ * @returns {Array<{id, kind:"txn"|"bill", desc, amount, mode:"owesMe"|"iOwe", date, transactionRef}>}
  *   sorted most-recent first; only entries with a genuine non-zero
- *   attributed amount for this person are included
+ *   attributed amount for this person are included. transactionRef is a
+ *   raw pass-through of the underlying transaction's real UPI/bank
+ *   reference (null for Bill-sourced and settlement entries, which don't
+ *   carry one) — not a new calculation, just surfaced so a caller can spot
+ *   two entries that share a real reference (the same physical payment,
+ *   entered twice) rather than guessing from desc/amount/date alone.
  */
-export function getFinancialPositionBreakdown(personId, txns, bills, getPersonAttributedAmount) {
+export function getFinancialPositionBreakdown(personId, txns, bills, meId) {
   const items = [];
 
   for (const t of (txns || [])) {
-    if (!t || t.type !== "expense") continue;
-    const info = t.people?.[personId];
-    if (!info) continue;
-    const amount = getPersonAttributedAmount(t, personId);
-    if (!(amount > 0)) continue;
-    items.push({
-      id: t.id, kind: "txn",
-      desc: t.desc || t.merchant || "Expense",
-      amount,
-      mode: info.mode === "owes" ? "owesMe" : "iOwe",
-      date: t.date || null,
-    });
+    if (!t) continue;
+
+    if (t.type === "expense") {
+      // owesMe — mirrors App.jsx settlements[] receivables exactly, same three sources, same
+      // double-count guards (a transaction contributes at most one receivable entry per person).
+      const peopleMap = { ...(t.splitPeople || {}), ...(t.people || {}) };
+      const info = peopleMap[personId];
+      if (info && personId !== meId && info.mode === "owes" && !info.settled) {
+        const amount = remainingShare(info);
+        if (amount > 0) {
+          items.push({ id: t.id, kind: "txn", desc: t.desc || t.merchant || "Expense", amount, mode: "owesMe", date: t.date || null, transactionRef: t.transactionRef || null });
+        }
+      } else if (t.forPerson && t.forPerson === personId && personId !== meId) {
+        const amt = Number(t.tagPersonAmount || 0) > 0 ? Number(t.tagPersonAmount) : (t.tagMode === "person" ? Number(t.amount || 0) : 0);
+        if (amt > 0) {
+          items.push({ id: t.id, kind: "txn", desc: t.desc || t.merchant || "Expense", amount: amt, mode: "owesMe", date: t.date || null, transactionRef: t.transactionRef || null });
+        }
+      } else {
+        const tagItem = (t.tagItems || []).find(item => item.targetType === "person" && item.targetId === personId && personId !== meId && Number(item.amount || 0) > 0);
+        if (tagItem) {
+          items.push({ id: t.id, kind: "txn", desc: t.desc || t.merchant || "Expense", amount: Number(tagItem.amount), mode: "owesMe", date: t.date || null, transactionRef: t.transactionRef || null });
+        }
+      }
+
+      // iOwe — the one expense-level payable source; settlement_in/settlement_out (the other
+      // two real sources) are handled below, since they're a different transaction type.
+      const owesByMeInfo = t.people?.[personId];
+      if (owesByMeInfo && owesByMeInfo.mode === "owes_by_me") {
+        const amount = Number(owesByMeInfo.amount || 0);
+        if (amount > 0) {
+          items.push({ id: `${t.id}_iowe`, kind: "txn", desc: t.desc || t.merchant || "Expense", amount, mode: "iOwe", date: t.date || null, transactionRef: t.transactionRef || null });
+        }
+      }
+    }
+
+    if (t.type === "settlement_in" && t.fromPersonId === personId && Number(t.extraAmount || 0) > 0 && (t.settlementLinks || []).length > 0) {
+      items.push({ id: t.id, kind: "txn", desc: t.desc || "Settlement", amount: Number(t.extraAmount), mode: "iOwe", date: t.date || null, transactionRef: t.transactionRef || null });
+    }
+    if (t.type === "settlement_out" && t.toPersonId === personId) {
+      const amount = Number(t.amount || 0);
+      if (amount > 0) {
+        items.push({ id: t.id, kind: "txn", desc: t.desc || "Settlement", amount, mode: "iOwe", date: t.date || null, transactionRef: t.transactionRef || null });
+      }
+    }
   }
 
   for (const b of (bills || [])) {
@@ -79,6 +134,7 @@ export function getFinancialPositionBreakdown(personId, txns, bills, getPersonAt
       amount: remaining,
       mode: info.mode === "owes" ? "owesMe" : "iOwe",
       date: b.dueDate || null,
+      transactionRef: null,
     });
   }
 

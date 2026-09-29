@@ -10743,6 +10743,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             onRequest={handleRequest}
             onArchivePerson={handleArchive}
             getPersonAttributedAmount={getPersonAttributedAmount}
+            meId={people.find(x=>x.isMe)?.id}
             isDateActiveMembershipCoverage={isDateActiveMembershipCoverage}
             today={todayStr()}
             T={T} sym={sym} fmt={fmt}
@@ -16390,19 +16391,25 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     );
   };
 
-  // Finds LIKELY duplicate transactions — same type, amount, date, and account. This is the exact
-  // signature the double-submit race condition would have produced before it was fixed: two
-  // identical records, different ids/createdAt. Never deletes automatically — surfaces groups for
-  // review, keeps whichever one the user picks, deletes the rest only on explicit confirmation.
+  // Finds LIKELY duplicate transactions — matched SOLELY on a real UPI/bank reference number
+  // (t.transactionRef: UTR/RRN/Txn ID/IMPS/NEFT ref, either typed in or auto-extracted from an
+  // imported SMS — see the Add Transaction "UPI / bank reference" field). Explicit product
+  // decision: type/amount/date/account is not a reliable signal on its own — two genuinely
+  // different real payments (different payee, different purpose) can easily coincide on all
+  // four, which is exactly what the old heuristic was flagging as false positives. A shared real
+  // bank reference is authoritative: it's the same physical transaction, full stop. A
+  // transaction with no reference on record has nothing reliable to match on and is never
+  // guessed into a group. Never deletes automatically — surfaces groups for review, keeps
+  // whichever one the user picks, deletes the rest only on explicit confirmation.
   const DuplicateFinderModal = ({ onClose }) => {
     const [selected, setSelected] = useState({}); // txnId -> true if marked for deletion
     const groups = useMemo(() => {
       const map = new Map();
       txns.forEach(t=>{
-        if(t.type!=="expense"&&t.type!=="income") return; // transfers/settlements too often legitimately repeat
-        const key = `${t.type}|${Number(t.amount||0)}|${t.date}|${t.accId||""}`;
-        if(!map.has(key)) map.set(key, []);
-        map.get(key).push(t);
+        const ref = String(t.transactionRef||"").trim();
+        if(!ref) return; // no real UPI/bank reference on record — nothing reliable to match on
+        if(!map.has(ref)) map.set(ref, []);
+        map.get(ref).push(t);
       });
       return [...map.values()].filter(g=>g.length>1).sort((a,b)=>Number(b[0].amount||0)-Number(a[0].amount||0));
     }, [txns]);
@@ -16427,27 +16434,30 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🔍 Duplicate Transactions</div>
             <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
           </div>
-          <div style={{ color:T.sub,fontSize:11,marginBottom:16 }}>Matches: same type, amount, date, and account. Nothing is deleted until you select and confirm — review each group before removing anything.</div>
+          <div style={{ color:T.sub,fontSize:11,marginBottom:16 }}>Matches: same UPI / bank reference number only — the one signal that actually proves two records are the same real payment. Transactions with no reference on record aren't checked; there's nothing reliable to match them on. Nothing is deleted until you select and confirm — review each group before removing anything.</div>
           {groups.length===0&&(
             <EmptyState icon="✅" title="No likely duplicates found" T={T}/>
           )}
           {groups.map((g,gi)=>{
-            const acc = accounts.find(a=>a.id===g[0].accId);
             return (
               <div key={gi} style={{ background:T.input,borderRadius:14,padding:"12px 14px",marginBottom:10 }}>
                 <div style={{ display:"flex",justifyContent:"space-between",marginBottom:8 }}>
-                  <span style={{ color:T.text,fontSize:13,fontWeight:800 }}>{sym}{fmt(g[0].amount)} · {formatShortDate(g[0].date)||g[0].date}</span>
-                  <span style={{ color:T.sub,fontSize:10 }}>{acc?.name||"—"} · {g.length} matches</span>
+                  <span style={{ color:T.text,fontSize:13,fontWeight:800 }}>🔖 {g[0].transactionRef}</span>
+                  <span style={{ color:T.sub,fontSize:10 }}>{g.length} matches</span>
                 </div>
-                {g.map(t=>(
+                {g.map(t=>{
+                  const tAcc = accounts.find(a=>a.id===t.accId);
+                  return (
                   <label key={t.id} style={{ display:"flex",alignItems:"center",gap:10,padding:"6px 0",cursor:"pointer" }}>
                     <input type="checkbox" checked={Boolean(selected[t.id])} onChange={()=>toggleSelect(String(t.id))} style={{ width:16,height:16,accentColor:T.danger,cursor:"pointer" }}/>
                     <div style={{ flex:1 }}>
                       <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{t.merchant||t.desc||"—"}</div>
+                      <div style={{ color:T.sub,fontSize:10 }}>{sym}{fmt(t.amount)} · {formatShortDate(t.date)||t.date} · {tAcc?.name||"—"}</div>
                       <div style={{ color:T.sub,fontSize:10 }}>Added {t.createdAt?new Date(t.createdAt).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}):"—"}{t.note?` · ${t.note}`:""}</div>
                     </div>
                   </label>
-                ))}
+                  );
+                })}
               </div>
             );
           })}
