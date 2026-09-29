@@ -156,3 +156,86 @@ test("two entries sharing the same real transactionRef are both surfaced, unmodi
   assert.equal(items.length, 2, "this function only enumerates — it never dedupes or merges on the caller's behalf");
   assert.deepEqual(items.map(i => i.transactionRef), ["UTR999", "UTR999"]);
 });
+
+test("a shared transactionRef is surfaced but never changes the financial total — the sum is exactly the two real amounts, not merged or deduped", () => {
+  const txns = [
+    { id: "t1", type: "expense", desc: "Dup A", date: "2026-08-20", people: { p1: { mode: "owes", amount: 1500 } }, transactionRef: "UTR999" },
+    { id: "t2", type: "expense", desc: "Dup B", date: "2026-08-20", people: { p1: { mode: "owes", amount: 1500 } }, transactionRef: "UTR999" },
+  ];
+  const items = getFinancialPositionBreakdown("p1", txns, [], ME);
+  const owesMeSum = items.filter(i => i.mode === "owesMe").reduce((s, i) => s + i.amount, 0);
+  assert.equal(owesMeSum, 3000, "surfacing the duplicate reference is presentation only — it does not alter the enumerated total");
+});
+
+// --- Reconciliation: the breakdown's enumerated sum must exactly equal an independently
+// computed receivables/payables total for the same inputs — the property the live
+// investigation found broken (a correct total sitting above an incomplete breakdown). This
+// independent oracle mirrors App.jsx's settlements[] logic (receivables/payables useMemo)
+// structurally, but is written fresh here specifically so it can't share a bug with the
+// implementation under test. ---
+
+function independentSettlementTotal(personId, txns, bills, meId) {
+  let receivable = 0;
+  let payable = 0;
+  (txns || []).forEach(t => {
+    if (t.type === "expense") {
+      const peopleMap = { ...(t.splitPeople || {}), ...(t.people || {}) };
+      const info = peopleMap[personId];
+      if (info && personId !== meId && info.mode === "owes" && !info.settled) {
+        receivable += Math.max(0, Number(info.remainingAmt ?? info.amount ?? 0));
+      } else if (t.forPerson === personId && personId !== meId) {
+        const amt = Number(t.tagPersonAmount || 0) > 0 ? Number(t.tagPersonAmount) : (t.tagMode === "person" ? Number(t.amount || 0) : 0);
+        receivable += Math.max(0, amt);
+      } else {
+        const tagItem = (t.tagItems || []).find(i => i.targetType === "person" && i.targetId === personId);
+        if (tagItem) receivable += Math.max(0, Number(tagItem.amount || 0));
+      }
+      const owesByMeInfo = t.people?.[personId];
+      if (owesByMeInfo && owesByMeInfo.mode === "owes_by_me") payable += Math.max(0, Number(owesByMeInfo.amount || 0));
+    }
+    if (t.type === "settlement_in" && t.fromPersonId === personId && Number(t.extraAmount || 0) > 0 && (t.settlementLinks || []).length > 0) {
+      payable += Number(t.extraAmount);
+    }
+    if (t.type === "settlement_out" && t.toPersonId === personId) {
+      payable += Math.max(0, Number(t.amount || 0));
+    }
+  });
+  (bills || []).forEach(b => {
+    if (!b.splitPeople) return;
+    const info = b.splitPeople[personId];
+    if (!info || info.mode !== "owes" || info.settled) return;
+    const remaining = Number(info.amount || 0) - Number(info.settledAmt || 0);
+    if (remaining > 0) receivable += remaining;
+  });
+  return { receivable, payable };
+}
+
+test("reconciliation: breakdown's enumerated owesMe/iOwe sums exactly equal an independent receivables/payables total, across every real source at once", () => {
+  const txns = [
+    { id: "t1", type: "expense", desc: "Dinner", date: "2026-09-01", people: { p1: { mode: "owes", amount: 500 } } },
+    { id: "t2", type: "expense", desc: "Partial", date: "2026-08-15", people: { p1: { mode: "owes", amount: 1000, remainingAmt: 300 } } },
+    { id: "t3", type: "expense", desc: "Already settled", date: "2026-08-10", people: { p1: { mode: "owes", amount: 999, settled: true } } },
+    { id: "t4", type: "expense", desc: "Tagged gift", date: "2026-08-05", forPerson: "p1", tagPersonAmount: 250 },
+    { id: "t5", type: "expense", desc: "Shared cart item", date: "2026-08-01", tagItems: [{ targetType: "person", targetId: "p1", amount: 175 }] },
+    { id: "t6", type: "expense", desc: "I owe them", date: "2026-07-28", people: { p1: { mode: "owes_by_me", amount: 400 } } },
+    { id: "t7", type: "settlement_in", date: "2026-07-20", fromPersonId: "p1", extraAmount: 200, settlementLinks: [{ x: 1 }] },
+    { id: "t8", type: "settlement_out", date: "2026-07-15", toPersonId: "p1", amount: 150 },
+    { id: "t9", type: "expense", desc: "Unrelated spent_on", date: "2026-07-10", people: { p1: { mode: "spent_on", amount: 9999 } } },
+  ];
+  const bills = [{ id: "b1", name: "Rent", dueDate: "2026-06-01", splitPeople: { p1: { mode: "owes", amount: 1000, settledAmt: 400 } } }];
+
+  const items = getFinancialPositionBreakdown("p1", txns, bills, ME);
+  const enumeratedOwesMe = items.filter(i => i.mode === "owesMe").reduce((s, i) => s + i.amount, 0);
+  const enumeratedIOwe = items.filter(i => i.mode === "iOwe").reduce((s, i) => s + i.amount, 0);
+
+  const independent = independentSettlementTotal("p1", txns, bills, ME);
+
+  assert.equal(enumeratedOwesMe, independent.receivable, "owesMe enumeration must reconcile exactly to the independent receivables total");
+  assert.equal(enumeratedIOwe, independent.payable, "iOwe enumeration must reconcile exactly to the independent payables total");
+  // Concrete expected values, so this test fails loudly (not just "numbers matched by
+  // coincidence") if either side's logic drifts: 500 + 300 + 250 + 175 (txns) + 600 (bill b1,
+  // 1000-400) = 1825 receivable; 400 + 200 + 150 = 750 payable. t3 (settled) and t9 (spent_on)
+  // contribute nothing to either.
+  assert.equal(enumeratedOwesMe, 1825);
+  assert.equal(enumeratedIOwe, 750);
+});
