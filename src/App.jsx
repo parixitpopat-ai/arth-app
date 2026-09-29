@@ -3925,14 +3925,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [priceInterestRate, setPriceInterestRate] = useState(isEditing ? String(sourceTxn?.priceInterestRate||"") : "");
     const [splitMode, setSplitMode] = useState(initialTrackingMode); // none | split | tag | allocate | unified
     const [splitGroup, setSplitGroup] = useState(isEditing && sourceTxn?.type==="expense" && initialTrackingMode==="split" ? (sourceTxn.groupId || "") : "");
-    // Apply default group for new expenses
+    // Apply default group for new expenses. BUG FIX: this used to switch splitMode to "tag"
+    // or "split" — modes with no person/group picker UI anywhere in this form (the only
+    // picker, "Who is this for?", renders solely for splitMode "allocate"/"unified"). Every
+    // household with a default group configured (Settings → "New expenses auto-tagged to X")
+    // therefore lost the entire allocation section on every new expense, with no visible link
+    // between the two screens explaining why. Fixed to pre-select the default group as an
+    // allocRow instead — the exact same write `setAllocRows` already does when a group is
+    // tapped manually in "Who is this for?" (see the identical di==="attributed"?"spent_on":
+    // "owes" logic a few hundred lines below) — so the picker keeps rendering and the
+    // pre-selection is just what a manual tap already produces, not a new code path.
     useEffect(()=>{
-      if(!isEditing && defaultGroupId && txnType==="expense" && !tagGroup && !splitGroup){
+      if(!isEditing && defaultGroupId && txnType==="expense" && allocRows.length===0){
         const g = groups.find(x=>x.id===defaultGroupId);
         if(g){
           const di = getGroupDefaultIntent(g);
-          if(di==="attributed"){ setTagGroup(defaultGroupId); setSplitMode("tag"); }
-          else { setSplitGroup(defaultGroupId); setSplitMode("split"); }
+          setSplitMode("allocate");
+          // Guard against StrictMode's dev-only double effect-invocation on mount adding
+          // this row twice — checked inside the updater since two invocations can both see
+          // the stale allocRows.length===0 from the outer condition.
+          setAllocRows(prev=>prev.some(r=>r.targetType==="group"&&r.targetId===defaultGroupId) ? prev : [...prev,{ id:genId(), targetType:"group", targetId:defaultGroupId, mode:di==="attributed"?"spent_on":"owes", amount:"", items:[] }]);
         }
       }
     // eslint-disable-next-line react-hooks/exhaustive-deps
