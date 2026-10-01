@@ -27,33 +27,51 @@
 // relationship a new Bill belongs to when more than one exists.
 //
 // A Bill is only attributed when that is certain: its relationship exists,
-// the relationship is attributed to a person or a group, and that person or
-// group exists. Anything else (no relationship, house/vehicle attribution,
+// and the relationship is attributed to a person, a group, a vehicle that
+// exists, or the house/Common Areas bucket. Anything else (no relationship,
 // dangling ids) is stored as "unassigned", never guessed. Writing
 // "unassigned" explicitly records that the Bill has been looked at, so a
 // later run never re-derives it.
+//
+// Locked product decision (this session): Relationship attribution and a
+// Bill's own For are DISTINCT concepts that may legitimately diverge — e.g.
+// a biller account attributed to a Group ("Family") can still produce one
+// particular Bill whose own For is House/"Common Areas", because the two
+// questions ("who is this provider relationship with" vs "who does this
+// specific bill's cost belong to") are not the same question. The
+// relationship only supplies the DEFAULT a new Bill starts with; the person
+// creating the Bill can override it before saving, and whatever was chosen
+// becomes this Bill's own permanent snapshot (hasBillForSnapshot below) —
+// never rewritten by a later relationship change, exactly like the
+// person/group case already was.
 //
 // The same function snapshots existing Bills once (the historical backfill)
 // and every new Bill as it appears, whichever path created it.
 
 export const BILL_FOR_PERSON = "person";
 export const BILL_FOR_GROUP = "group";
+export const BILL_FOR_HOUSE = "house";
+export const BILL_FOR_VEHICLE = "vehicle";
 export const BILL_FOR_UNASSIGNED = "unassigned";
 
 const SELF_ID = "__me__";
-const FOR_TYPES = new Set([BILL_FOR_PERSON, BILL_FOR_GROUP, BILL_FOR_UNASSIGNED]);
+const FOR_TYPES = new Set([BILL_FOR_PERSON, BILL_FOR_GROUP, BILL_FOR_HOUSE, BILL_FOR_VEHICLE, BILL_FOR_UNASSIGNED]);
 
 export function hasBillForSnapshot(bill) {
   return Boolean(bill && FOR_TYPES.has(bill.forType));
 }
 
 /** The snapshot a Bill would get from its relationship right now. */
-export function deriveBillFor(bill, { billerAccounts = [], people = [], groups = [] } = {}) {
+export function deriveBillFor(bill, { billerAccounts = [], people = [], groups = [], vehicles = [] } = {}) {
   const unassigned = { forType: BILL_FOR_UNASSIGNED, forId: null };
   const baId = bill?.billerAccountId;
   if (baId === undefined || baId === null || baId === "") return unassigned;
   const ba = billerAccounts.find(a => String(a.id) === String(baId));
-  if (!ba || ba.attributedTo === undefined || ba.attributedTo === null || ba.attributedTo === "") return unassigned;
+  if (!ba) return unassigned;
+  // House/Common Areas is a bucket, not an entity — it carries no attributedTo id, so it must be
+  // checked before the attributedTo-emptiness guard below, not fall through it.
+  if (ba.attributeType === BILL_FOR_HOUSE) return { forType: BILL_FOR_HOUSE, forId: null };
+  if (ba.attributedTo === undefined || ba.attributedTo === null || ba.attributedTo === "") return unassigned;
   const targetId = String(ba.attributedTo);
   if (ba.attributeType === BILL_FOR_PERSON) {
     const exists = targetId === SELF_ID || people.some(p => String(p.id) === targetId);
@@ -62,6 +80,10 @@ export function deriveBillFor(bill, { billerAccounts = [], people = [], groups =
   if (ba.attributeType === BILL_FOR_GROUP) {
     const exists = groups.some(g => String(g.id) === targetId);
     return exists ? { forType: BILL_FOR_GROUP, forId: targetId } : unassigned;
+  }
+  if (ba.attributeType === BILL_FOR_VEHICLE) {
+    const exists = vehicles.some(v => String(v.id) === targetId);
+    return exists ? { forType: BILL_FOR_VEHICLE, forId: targetId } : unassigned;
   }
   return unassigned;
 }

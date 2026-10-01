@@ -19,17 +19,33 @@ import { getPeriodEffectiveEnd } from "../../helpers/dateHelpers.js";
 
 const NON_SCHOOL_MEMBERSHIP_TYPES = ["Gym / Fitness", "Club Membership", "Other Subscription", "Society Maintenance", "Rental"];
 
+// Lifecycle gate (confirmed product decision): a Paused or Ended Financial Relationship
+// (domain/membership/relationship.js's membershipRelationships[], status active/paused/ended)
+// must stop projecting a future payment into Committed Spending/Outlook — only an Active
+// relationship may. An account with NO relationship record at all (predates the relationship
+// model, or one was simply never created for it) is left ungated, exactly as before this fix —
+// this never retroactively blocks an account nobody has ever paused. Historical memberships[]
+// payment records and bills/txns are never touched by this; only the forward projection is gated.
+function hasLiveMembershipRelationship(billerAccountId, relationships) {
+  const forAccount = (relationships || []).filter(r => String(r.billerAccountId) === String(billerAccountId));
+  if (!forAccount.length) return true;
+  return forAccount.some(r => r.status === "active");
+}
+
 /**
  * Project one Biller Account's memberships into a Future Money event, or null if it's not a
- * non-School membership type, or has no derivable current period at all.
+ * non-School membership type, has no derivable current period at all, or has no live (Active)
+ * Financial Relationship — see hasLiveMembershipRelationship above.
  *
  * @param {Object} billerAccount
  * @param {Array} memberships
  * @param {Function} getCurrentPeriod - the existing, unmodified (m) => period|null
+ * @param {Array} [relationships] - membershipRelationships[]; omit to leave ungated (legacy behavior)
  * @returns {Object|null}
  */
-export function mapMembershipToCommitment(billerAccount, memberships, getCurrentPeriod) {
+export function mapMembershipToCommitment(billerAccount, memberships, getCurrentPeriod, relationships) {
   if (!billerAccount || !NON_SCHOOL_MEMBERSHIP_TYPES.includes(billerAccount.type)) return null;
+  if (!hasLiveMembershipRelationship(billerAccount.id, relationships)) return null;
   const withEff = (memberships || [])
     .filter(m => m && String(m.billerAccountId) === String(billerAccount.id))
     .map(m => ({ m, eff: getPeriodEffectiveEnd(getCurrentPeriod(m)) }))
@@ -60,10 +76,11 @@ export function mapMembershipToCommitment(billerAccount, memberships, getCurrent
  * @param {Array} billerAccounts
  * @param {Array} memberships
  * @param {Function} getCurrentPeriod
+ * @param {Array} [relationships] - membershipRelationships[]; omit to leave ungated (legacy behavior)
  * @returns {Array}
  */
-export function projectMembershipsToCommitments(billerAccounts, memberships, getCurrentPeriod) {
+export function projectMembershipsToCommitments(billerAccounts, memberships, getCurrentPeriod, relationships) {
   return (billerAccounts || [])
-    .map(ba => mapMembershipToCommitment(ba, memberships, getCurrentPeriod))
+    .map(ba => mapMembershipToCommitment(ba, memberships, getCurrentPeriod, relationships))
     .filter(Boolean);
 }

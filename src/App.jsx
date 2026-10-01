@@ -1264,9 +1264,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // withBillForSnapshots returns the same array when nothing needs doing, so this is a no-op
   // on every later render.
   useEffect(()=>{
-    const next = withBillForSnapshots(bills, { billerAccounts, people, groups });
+    const next = withBillForSnapshots(bills, { billerAccounts, people, groups, vehicles });
     if(next!==bills) setBills(next);
-  },[bills, billerAccounts, people, groups]);
+  },[bills, billerAccounts, people, groups, vehicles]);
   // Paired one-time repair: a Bill already snapshotted "Unassigned" is normally never touched
   // again (that's deliberate — a later, real relationship change shouldn't rewrite history), but
   // the billerAccount backfill above means some Bills were snapshotted "Unassigned" only because
@@ -1274,9 +1274,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Bills currently "Unassigned"; a Bill that's genuinely, correctly unassigned re-derives to the
   // same "Unassigned" and is left alone.
   useEffect(()=>{
-    const next = repairUnassignedBills(bills, { billerAccounts, people, groups });
+    const next = repairUnassignedBills(bills, { billerAccounts, people, groups, vehicles });
     if(next!==bills) setBills(next);
-  },[bills, billerAccounts, people, groups]);
+  },[bills, billerAccounts, people, groups, vehicles]);
   // ADR-038 §6 — stored Bill status follows its Contributions, in one place, whichever path
   // recorded, edited, unlinked or deleted a payment. Same-array no-op when nothing changes.
   useEffect(()=>{
@@ -1698,8 +1698,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const getBillForLabel = useCallback(bill=>{
     if(bill?.forType==="person") return bill.forId==="__me__" ? "Me" : (people.find(p=>String(p.id)===String(bill.forId))?.name || "Unassigned");
     if(bill?.forType==="group") return groups.find(g=>String(g.id)===String(bill.forId))?.name || "Unassigned";
+    if(bill?.forType==="vehicle") return vehicles.find(v=>String(v.id)===String(bill.forId))?.name || "Unassigned";
+    if(bill?.forType==="house") return "Common Areas";
     return "Unassigned";
-  },[people, groups]);
+  },[people, groups, vehicles]);
   // Arth 2.0 IA §6 — a biller account's current owner as display text, so reassigning it in
   // AddRelationshipSheet is never a surprise ("Currently: Rohan" / "Currently: Goa Household" /
   // "Currently: Unassigned"). Mirrors getBillForLabel's fallback rules but reads the biller
@@ -9283,7 +9285,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const futureMoney = composeFutureMoneyCommitments(rawCommitments, [
     getSchoolFeeCommitments(feePeriods),
     debtServiceEvents,
-    getMembershipFutureMoneyEvents(billerAccounts, memberships, getCurrentPeriod),
+    getMembershipFutureMoneyEvents(billerAccounts, memberships, getCurrentPeriod, membershipRelationships),
     getInsuranceFutureMoneyEvents(insurancePolicies),
   ]);
 
@@ -15455,8 +15457,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // biller's attribution at creation, with no way to fix it afterward. This is a direct
     // override: editing it here only changes THIS Bill's own forType/forId, same as any other
     // Bill field — it never touches the biller account's attribution or other Bills against it.
-    const [editForType,setEditForType]=useState(b.forType==="person"||b.forType==="group"?b.forType:"unassigned");
-    const [editForId,setEditForId]=useState(b.forType==="person"||b.forType==="group"?b.forId:"");
+    const [editForType,setEditForType]=useState(["person","group","house","vehicle"].includes(b.forType)?b.forType:"unassigned");
+    const [editForId,setEditForId]=useState(["person","group","vehicle"].includes(b.forType)?b.forId:"");
     const curCat=getCat(catId||"");
     const billDateText = b.billDate || b.createdDate || b.dueDate || "";
     const paymentDateText = txns.find(txn=>String(txn.id)===String(b.paidByTxnId || ""))?.date || b.paidDate || "";
@@ -15491,7 +15493,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
         const myShare=editIncludeMe ? Math.max(0, editAmt-owedByOthers) : 0;
         const groupCollectiveAmount = editGroup ? Math.max(0, editAmt-owedByOthers-myShare) : 0;
-        return {...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null,forType:editForType==="unassigned"?"unassigned":editForType,forId:editForType==="unassigned"?null:editForId};
+        return {...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null,forType:editForType==="unassigned"?"unassigned":editForType,forId:editForType==="unassigned"||editForType==="house"?null:editForId};
       }));
       onClose();
     };
@@ -15522,11 +15524,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>FOR (WHO THIS BILL BELONGS TO)</span>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:8 }}>
                 <button onClick={()=>{setEditForType("unassigned");setEditForId("");}} style={{ background:editForType==="unassigned"?"#88888822":"none",border:`1px solid ${editForType==="unassigned"?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Unassigned</button>
+                <button onClick={()=>{setEditForType("house");setEditForId("");}} style={{ background:editForType==="house"?T.accent+"22":"none",border:`1px solid ${editForType==="house"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editForType==="house"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🏠 Common Areas</button>
                 {people.filter(p=>!isPersonArchived(p)).map(p=>(
                   <button key={p.id} onClick={()=>{setEditForType("person");setEditForId(p.id);}} style={{ background:editForType==="person"&&String(editForId)===String(p.id)?p.color+"22":"none",border:`1px solid ${editForType==="person"&&String(editForId)===String(p.id)?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editForType==="person"&&String(editForId)===String(p.id)?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.isMe?"Me":p.name}</button>
                 ))}
                 {groups.map(g=>(
                   <button key={g.id} onClick={()=>{setEditForType("group");setEditForId(g.id);}} style={{ background:editForType==="group"&&String(editForId)===String(g.id)?g.color+"22":"none",border:`1px solid ${editForType==="group"&&String(editForId)===String(g.id)?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editForType==="group"&&String(editForId)===String(g.id)?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>
+                ))}
+                {vehicles.map(v=>(
+                  <button key={v.id} onClick={()=>{setEditForType("vehicle");setEditForId(v.id);}} style={{ background:editForType==="vehicle"&&String(editForId)===String(v.id)?T.accent+"22":"none",border:`1px solid ${editForType==="vehicle"&&String(editForId)===String(v.id)?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editForType==="vehicle"&&String(editForId)===String(v.id)?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🚗 {v.name}</button>
                 ))}
               </div>
             </div>
@@ -17459,7 +17465,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [amount,setAmount]=useState("");
     const [billDate,setBillDate]=useState(todayStr());
     const [dueDate,setDueDate]=useState("");
-    const [billCatIds,setBillCatIds]=useState([cats[0]?.id||""]);
+    // Locked product decision (this session): a Bill's category has no existing authoritative
+    // Relationship field to copy from (confirmed by audit — billerAccounts/membershipRelationships
+    // carry no category of their own), so this must stay empty rather than defaulting to
+    // cats[0] (the first category in the list, picked only because it happened to be first —
+    // confirmed bug). Leaving it empty forces an explicit choice; nothing here invents one.
+    const [billCatIds,setBillCatIds]=useState([]);
     const [subId,setSubId]=useState("");
     const [recurring,setRecurring]=useState(false);
     const [frequency,setFrequency]=useState("monthly");
@@ -17486,6 +17497,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [billGroup,setBillGroup]=useState(_preBA?.attributeType==="group" ? (_preBA.attributedTo||"") : "");
     const [splitCalc,setSplitCalc]=useState("equally");
     const [splitCustom,setSplitCustom]=useState({});
+
+    // Bill "For" (domain/bills/billFor.js) — a distinct concept from both billGroup (the split
+    // context above) and the relationship's own attribution: this Bill's own permanent record of
+    // who/what its cost belongs to. The relationship only supplies a sensible STARTING point here
+    // (e.g. a Goa Electricity relationship attributed to Family still lets THIS bill be set to
+    // Common Areas) — the person creating the Bill can change it before saving, and whatever is
+    // chosen is written directly onto the new Bill below, so the background snapshot effect
+    // (withBillForSnapshots) sees it as already-decided and never touches it again.
+    const [billForType,setBillForType]=useState(_preBA?.attributeType || "unassigned");
+    const [billForId,setBillForId]=useState(_preBA?.attributeType && _preBA.attributeType!=="house" ? (_preBA.attributedTo||"") : "");
 
     const selectedPids=Object.entries(billSplitPeople).filter(([,v])=>v).map(([k])=>k);
     const amt=parseFloat(amount)||0;
@@ -17518,7 +17539,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
       const myShare = billIncludeMe ? Math.max(0, amt-owedByOthers) : 0;
       const groupCollectiveAmount = billGroup ? Math.max(0, amt-owedByOthers-myShare) : 0;
-      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),amount:amt,dueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring,frequency,status:"unpaid",paidDate:null,billDate:billDate||todayStr(),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto,billerAccountId:billerAccountId||null,billerCategory:billerCategory||null,consumerNumber:consumerNumber.trim()||null,lastPaidAmount:lastPaidAmount?parseFloat(lastPaidAmount):null,autoGenerate,isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0,validityDays:validityDays?Number(validityDays):null,planType:planType||null,planDesc:planDesc.trim()||null,validFrom:validFrom2||null,validUntil:validUntilCalc||null,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null};
+      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),amount:amt,dueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring,frequency,status:"unpaid",paidDate:null,billDate:billDate||todayStr(),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto,billerAccountId:billerAccountId||null,billerCategory:billerCategory||null,consumerNumber:consumerNumber.trim()||null,lastPaidAmount:lastPaidAmount?parseFloat(lastPaidAmount):null,autoGenerate,isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0,validityDays:validityDays?Number(validityDays):null,planType:planType||null,planDesc:planDesc.trim()||null,validFrom:validFrom2||null,validUntil:validUntilCalc||null,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null,forType:billForType==="unassigned"?"unassigned":billForType,forId:billForType==="unassigned"||billForType==="house"?null:billForId};
       setBills(p=>[newBill,...p]);
 
       const matchingTxn = txns.find(t=>t.type==="expense" && !t.isBillPayment && !t.paidBillId && Number(t.amount)===amt && (billCatIds[0]? t.catId===billCatIds[0] : true));
@@ -17634,7 +17655,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>
             {duplicateInvoiceBill && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:-4 }}>This invoice number already exists for {duplicateInvoiceBill.name}.</div>}
 
-
+            {/* Bill "For" (domain/bills/billFor.js) — pre-filled from the relationship's own
+                attribution when opened from one, but always changeable: this specific Bill's cost
+                may belong somewhere other than the relationship itself (e.g. a Family-attributed
+                electricity relationship can still produce one bill that's For: Common Areas). */}
+            <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+              <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>FOR (WHO THIS BILL BELONGS TO)</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:8 }}>
+                <button onClick={()=>{setBillForType("unassigned");setBillForId("");}} style={{ background:billForType==="unassigned"?"#88888822":"none",border:`1px solid ${billForType==="unassigned"?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Unassigned</button>
+                <button onClick={()=>{setBillForType("house");setBillForId("");}} style={{ background:billForType==="house"?T.accent+"22":"none",border:`1px solid ${billForType==="house"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="house"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🏠 Common Areas</button>
+                {getActivePeople(people).map(p=>(
+                  <button key={p.id} onClick={()=>{setBillForType("person");setBillForId(p.id);}} style={{ background:billForType==="person"&&String(billForId)===String(p.id)?p.color+"22":"none",border:`1px solid ${billForType==="person"&&String(billForId)===String(p.id)?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="person"&&String(billForId)===String(p.id)?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.isMe?"Me":p.name}</button>
+                ))}
+                {groups.map(g=>(
+                  <button key={g.id} onClick={()=>{setBillForType("group");setBillForId(g.id);}} style={{ background:billForType==="group"&&String(billForId)===String(g.id)?g.color+"22":"none",border:`1px solid ${billForType==="group"&&String(billForId)===String(g.id)?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="group"&&String(billForId)===String(g.id)?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>
+                ))}
+                {vehicles.map(v=>(
+                  <button key={v.id} onClick={()=>{setBillForType("vehicle");setBillForId(v.id);}} style={{ background:billForType==="vehicle"&&String(billForId)===String(v.id)?T.accent+"22":"none",border:`1px solid ${billForType==="vehicle"&&String(billForId)===String(v.id)?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="vehicle"&&String(billForId)===String(v.id)?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🚗 {v.name}</button>
+                ))}
+              </div>
+            </div>
 
             <div>
               <span style={lbl}>Amount ({sym}) *</span>
