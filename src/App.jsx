@@ -93,7 +93,7 @@ import { getCommitments, isRechargeBiller } from "./domain/bills/commitments";
 import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
-import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool } from "../domain/allocations/adapter";
+import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope } from "../domain/allocations/adapter";
 // WP8 — the central Insights read model. Every Insights card on InsightsPage (and
 // BudgetInsights, which imports the spending/budgetPerformance pair directly) is required to
 // consume these, never compute independently — see domain/insights/*.js file headers.
@@ -12765,7 +12765,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // WP12 — "Not in budget this month" line for section 2, same getUnplannedCategoryIds/
     // getCategoryAttributedTotal pair Budget's own dashboard already uses for its "Not In
     // Budget" card — read again here for insightsMonth, never a second spend engine.
-    const unplannedCategoryIdsForInsights = getUnplannedCategoryIds(cats, mandatoryCommitments, insightsMonth);
+    // WP14 — a Person/Group-scoped commitment (e.g. "Spouse phone bill") is debited from that
+    // Person/Group's own envelope, never the Household pool a second time; Insights' Mandatory
+    // Commitments section mirrors Budget's Household-level card exactly, so it must see the same
+    // Household-scoped-only subset Budget's own dashboard filters to, not every commitment in the
+    // shared array.
+    const insightsHouseholdCommitments = mandatoryCommitments.filter(isHouseholdScopedCommitment);
+    const unplannedCategoryIdsForInsights = getUnplannedCategoryIds(cats, insightsHouseholdCommitments, insightsMonth);
     const unplannedSpendForInsights = unplannedCategoryIdsForInsights
       .map(catId=>({ category: cats.find(c=>c.id===catId), amount: getCategoryAttributedTotal(periodTxns, catId, { allTransactions: txns }) }))
       .filter(x=>x.category && x.amount > 0)
@@ -12773,7 +12779,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
     // Mandatory commitments / Recurring costs — same functions BudgetPage's dashboard already
     // reuses; futureMoney is the one composed Future Money list every screen reads.
-    const insightsActiveMandatory = mandatoryCommitments.filter(c=>!(c.skippedMonths||[]).includes(insightsMonth));
+    const insightsActiveMandatory = insightsHouseholdCommitments.filter(c=>!(c.skippedMonths||[]).includes(insightsMonth));
     const insightsMandatoryTotal = getMandatoryCommitmentsTotal(insightsActiveMandatory);
     const insightsDiscretionaryPool = getDiscretionaryPool(insightsMonthly, insightsMandatoryTotal);
     const recurringCosts = getRecurringCostsSummary(futureMoney);
@@ -14708,6 +14714,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // below — exactly where the mock puts them — instead of behind a separate tab.
     const [budgetView, setBudgetView] = useState("main"); // "main" | "year"
     const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
+    // WP14 — Groups get the same lightweight expand affordance as Person rows, scoped to just the
+    // Commitments list (not the heavier category-by-category PersonBudgetDrilldown, which wasn't
+    // asked for here).
+    const [expandedBudgetGroupId, setExpandedBudgetGroupId] = useState(null);
     const [expandedBudgetCatId, setExpandedBudgetCatId] = useState(null);
     const [budgetPersonViewMode, setBudgetPersonViewMode] = useState("month");
     const [showAffordModal, setShowAffordModal] = useState(false);
@@ -14718,6 +14728,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // below) already documents for typing.
     const [showAddCommitment, setShowAddCommitment] = useState(false);
     const [editingCommitment, setEditingCommitment] = useState(null);
+    // WP14 — which Person/Group (if any) the open Add/Edit Commitment sheet is scoped to. null =
+    // Household (every pre-existing commitment and the default from the top-level "+ Add").
+    const [commitmentScope, setCommitmentScope] = useState(null); // null | { type: "person"|"group", id }
     // WP11 — "Add as commitment" on a Not In Budget row opens the same sheet, pre-filled with
     // that category, rather than a second creation path.
     const [prefilledCommitmentCategoryId, setPrefilledCommitmentCategoryId] = useState(null);
@@ -14748,7 +14761,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const livePrevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, livePrevMonthKey);
     const livePrevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(livePrevMonthKey)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
     const liveMonthly = resolveCarryForwardMonthly(budgetCarryForward, liveBaseMonthly, livePrevBudget, livePrevSpend);
-    const liveActiveMandatory = mandatoryCommitments.filter(c=>!(c.skippedMonths||[]).includes(viewMonth));
+    // WP14 — Person/Group-scoped commitments (e.g. "Spouse phone bill") reduce only that
+    // Person/Group's own envelope, never the Household Discretionary Pool a second time; every
+    // Household-level figure on this page must read this filtered subset, not the raw array.
+    const householdCommitments = mandatoryCommitments.filter(isHouseholdScopedCommitment);
+    const liveActiveMandatory = householdCommitments.filter(c=>!(c.skippedMonths||[]).includes(viewMonth));
     const liveDiscretionaryPool = getDiscretionaryPool(liveMonthly, getMandatoryCommitmentsTotal(liveActiveMandatory));
     const liveDiscretionaryAllocated = getDiscretionaryAllocatedTotal([
       ...people.map(p=>getPersonPlanningAllocation(p, viewMonth)),
@@ -14859,7 +14876,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // WP7 — "Unplanned Actual": real spend this month in a category no active Mandatory
           // Commitment covers. Same getCategoryAttributedTotal every other figure on this page
           // already uses — no second spend engine.
-          const unplannedCategoryIds = getUnplannedCategoryIds(cats, mandatoryCommitments, viewMonth);
+          const unplannedCategoryIds = getUnplannedCategoryIds(cats, householdCommitments, viewMonth);
           const unplannedSpend = unplannedCategoryIds
             .map(catId=>({ category: cats.find(c=>c.id===catId), amount: getCategoryAttributedTotal(monthTxns, catId, { allTransactions: txns }) }))
             .filter(x=>x.category && x.amount > 0)
@@ -14908,7 +14925,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   dismissedAlerts[] mechanism: a month-scoped id, nothing new to persist. Only
                   shown once there's something to confirm — an empty commitments list has nothing
                   to reserve. */}
-              {!mandatoryConfirmed&&mandatoryCommitments.length>0&&(
+              {!mandatoryConfirmed&&householdCommitments.length>0&&(
                 <div style={{ ...card,background:T.accentSoft,border:`1px solid ${T.accent}44`,marginBottom:12 }}>
                   <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>Confirm this month's commitments?</div>
                   <div style={{ color:T.sub,fontSize:12,marginBottom:10 }}>{sym}{fmt(getMandatoryCommitmentsTotal(liveActiveMandatory))} reserved, {sym}{fmt(liveDiscretionaryPool)} available</div>
@@ -14926,13 +14943,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <div style={{ ...card }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2 }}>
                   <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Mandatory Commitments</div>
-                  <button onClick={()=>{ setEditingCommitment(null); setShowAddCommitment(true); }} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>+ Add</button>
+                  <button onClick={()=>{ setEditingCommitment(null); setCommitmentScope(null); setShowAddCommitment(true); }} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>+ Add</button>
                 </div>
                 <div style={{ color:T.text,fontSize:15,fontWeight:900,fontFamily:FONT.mono,marginBottom:10 }}>{sym}{fmt(getMandatoryCommitmentsTotal(liveActiveMandatory))}</div>
-                {mandatoryCommitments.length===0 ? (
+                {householdCommitments.length===0 ? (
                   <div style={{ color:T.sub,fontSize:12 }}>Nothing reserved yet. Add rent, support, or pocket money you always set aside first.</div>
                 ) : (
-                  mandatoryCommitments.map(c=>{
+                  householdCommitments.map(c=>{
                     const cat = cats.find(x=>x.id===c.categoryId);
                     const spent = getCategoryAttributedTotal(monthTxns, c.categoryId, { allTransactions: txns });
                     const { remaining, isOver } = getMandatoryCommitmentRemaining(c, spent);
@@ -14945,7 +14962,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       planned: { label:"Planned", color:T.sub },
                     }[state];
                     return (
-                      <button key={c.id} onClick={()=>{ setEditingCommitment(c); setShowAddCommitment(true); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",background:"none",border:"none",borderLeft:`2px ${state==="planned"?"dashed":"solid"} ${T.border}`,borderBottom:`1px solid ${T.border}`,padding:"9px 0 9px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif",opacity:state==="skipped"?0.6:1 }}>
+                      <button key={c.id} onClick={()=>{ setEditingCommitment(c); setCommitmentScope(null); setShowAddCommitment(true); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",background:"none",border:"none",borderLeft:`2px ${state==="planned"?"dashed":"solid"} ${T.border}`,borderBottom:`1px solid ${T.border}`,padding:"9px 0 9px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif",opacity:state==="skipped"?0.6:1 }}>
                         <span style={{ minWidth:0 }}>
                           <span style={{ display:"flex",alignItems:"center",gap:6 }}>
                             <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{cat?.icon?`${cat.icon} `:""}{c.name}</span>
@@ -15007,9 +15024,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       {personMonthBudget>0&&(
                         <div style={{ color:personIsOver?T.danger:T.sub,fontSize:10.5,marginTop:2 }}>{sym}{fmt(personMonthSpend)} spent · {personIsOver?`${sym}${fmt(personMonthSpend-personMonthBudget)} over`:`${sym}${fmt(personMonthBudget-personMonthSpend)} left`}</div>
                       )}
-                      {expandedBudgetPersonId===p.id&&(
+                      {expandedBudgetPersonId===p.id&&(<>
+                        <ScopedCommitmentsCard scopeType="person" scopeId={p.id} scopeLabel={p.name} planningAllocation={personMonthBudget} monthTxns={monthTxns} viewMonth={viewMonth}
+                          onAdd={()=>{ setEditingCommitment(null); setCommitmentScope({ type:"person", id:p.id }); setShowAddCommitment(true); }}
+                          onEdit={c=>{ setEditingCommitment(c); setCommitmentScope({ type:"person", id:p.id }); setShowAddCommitment(true); }}/>
                         <PersonBudgetDrilldown p={p} monthTxns={monthTxns} months={months} fyLabel={fyLabel} budgetPersonViewMode={budgetPersonViewMode} setBudgetPersonViewMode={setBudgetPersonViewMode} expandedBudgetCatId={expandedBudgetCatId} setExpandedBudgetCatId={setExpandedBudgetCatId}/>
-                      )}
+                      </>)}
                     </div>
                   );
                 })}
@@ -15028,8 +15048,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   return (
                     <div key={g.id} style={{ borderLeft:`2px solid ${T.border}`,paddingLeft:10,marginBottom:10 }}>
                       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{g.icon||"👥"} {g.name}</span>
-                        <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                        <div onClick={()=>setExpandedBudgetGroupId(prev=>prev===g.id?null:g.id)} style={{ display:"flex",alignItems:"center",gap:6,cursor:"pointer",minWidth:0 }}>
+                          <span style={{ color:T.sub,fontSize:11 }}>{expandedBudgetGroupId===g.id?"▾":"▸"}</span>
+                          <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{g.icon||"👥"} {g.name}</span>
+                        </div>
+                        <div style={{ display:"flex",alignItems:"center",gap:6 }} onClick={e=>e.stopPropagation()}>
                           <span style={{ color:T.sub,fontSize:11 }}>{sym}</span>
                           <input
                             style={{ background:T.input,border:`1px solid ${groupDraftInvalid?T.danger:T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:80,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
@@ -15046,6 +15069,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       )}
                       {groupMonthBudget>0&&(
                         <div style={{ color:groupIsOver?T.danger:T.sub,fontSize:10.5,marginTop:2 }}>{sym}{fmt(groupMonthSpend)} spent · {groupIsOver?`${sym}${fmt(groupMonthSpend-groupMonthBudget)} over`:`${sym}${fmt(groupMonthBudget-groupMonthSpend)} left`}</div>
+                      )}
+                      {expandedBudgetGroupId===g.id&&(
+                        <ScopedCommitmentsCard scopeType="group" scopeId={g.id} scopeLabel={g.name} planningAllocation={groupMonthBudget} monthTxns={monthTxns} viewMonth={viewMonth}
+                          onAdd={()=>{ setEditingCommitment(null); setCommitmentScope({ type:"group", id:g.id }); setShowAddCommitment(true); }}
+                          onEdit={c=>{ setEditingCommitment(c); setCommitmentScope({ type:"group", id:g.id }); setShowAddCommitment(true); }}/>
                       )}
                     </div>
                   );
@@ -15080,7 +15108,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       <span style={{ color:T.text,fontSize:12 }}>{x.category.icon?`${x.category.icon} `:""}{x.category.name}</span>
                       <span style={{ display:"flex",alignItems:"center",gap:8 }}>
                         <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(x.amount)}</span>
-                        <button onClick={()=>{ setEditingCommitment(null); setPrefilledCommitmentCategoryId(x.category.id); setShowAddCommitment(true); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Add as commitment</button>
+                        <button onClick={()=>{ setEditingCommitment(null); setCommitmentScope(null); setPrefilledCommitmentCategoryId(x.category.id); setShowAddCommitment(true); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Add as commitment</button>
                       </span>
                     </div>
                   ))}
@@ -15211,14 +15239,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           existing={editingCommitment}
           monthKey={viewMonth}
           prefilledCategoryId={prefilledCommitmentCategoryId}
-          onClose={()=>{ setShowAddCommitment(false); setEditingCommitment(null); setPrefilledCommitmentCategoryId(null); }}
+          scope={commitmentScope}
+          scopeLabel={commitmentScope ? (commitmentScope.type==="person" ? getPerson(commitmentScope.id)?.name : getGroup(commitmentScope.id)?.name) : null}
+          onClose={()=>{ setShowAddCommitment(false); setEditingCommitment(null); setPrefilledCommitmentCategoryId(null); setCommitmentScope(null); }}
           onSave={record=>{
             setMandatoryCommitments(prev=>editingCommitment ? prev.map(c=>c.id===record.id?record:c) : [record, ...prev]);
-            setShowAddCommitment(false); setEditingCommitment(null); setPrefilledCommitmentCategoryId(null);
+            setShowAddCommitment(false); setEditingCommitment(null); setPrefilledCommitmentCategoryId(null); setCommitmentScope(null);
           }}
           onDelete={id=>{
             setMandatoryCommitments(prev=>prev.filter(c=>c.id!==id));
-            setShowAddCommitment(false); setEditingCommitment(null); setPrefilledCommitmentCategoryId(null);
+            setShowAddCommitment(false); setEditingCommitment(null); setPrefilledCommitmentCategoryId(null); setCommitmentScope(null);
           }}
         />}
       </div>
@@ -15229,8 +15259,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Name + amount + a Category to attribute real spend against — "spending reduces exactly one
   // envelope, computed once," reusing getCategoryAttributedTotal (BudgetPage's own render), never
   // a new spend engine or a new transaction-tagging mechanism.
-  const AddMandatoryCommitmentModal = ({ existing, monthKey, prefilledCategoryId, onClose, onSave, onDelete }) => {
+  const AddMandatoryCommitmentModal = ({ existing, monthKey, prefilledCategoryId, scope, scopeLabel, onClose, onSave, onDelete }) => {
     const isEdit = Boolean(existing);
+    // WP14 — editing an existing commitment always keeps its OWN scope, whatever the sheet was
+    // opened from; creating a new one takes the scope the sheet was opened with (null = Household,
+    // the default from the top-level "+ Add"). A commitment's scope is fixed at creation, same as
+    // every other field here — switching it afterward would be a different feature (re-parenting),
+    // not asked for.
+    const effectiveScopeType = existing ? (existing.scopeType || null) : (scope?.type || null);
+    const effectiveScopeId = existing ? (existing.scopeId || null) : (scope?.id || null);
     const [name, setName] = useState(existing?.name || "");
     const [amount, setAmount] = useState(existing?.amount ? String(existing.amount) : "");
     // WP11 — "Add as commitment" on a Not In Budget row opens this same sheet pre-filled with
@@ -15246,7 +15283,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const canSave = name.trim() && Number(amount) > 0 && categoryId;
     const save = () => {
       if (!canSave) return;
-      onSave({ id: existing?.id || genId(), name: name.trim(), amount: parseMoney(amount) || 0, categoryId, skippedMonths });
+      onSave({
+        id: existing?.id || genId(), name: name.trim(), amount: parseMoney(amount) || 0, categoryId, skippedMonths,
+        ...(effectiveScopeType ? { scopeType: effectiveScopeType, scopeId: effectiveScopeId } : {}),
+      });
     };
     return (
       <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:320,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
@@ -15256,9 +15296,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
           </div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            {effectiveScopeType&&(
+              <div style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:12,padding:"9px 12px",color:T.accent,fontSize:12,fontWeight:700 }}>
+                For {scopeLabel || (effectiveScopeType==="group"?"this group":"this person")} — debited from {effectiveScopeType==="group"?"their group's":"their own"} budget, not the Household Discretionary Pool.
+              </div>
+            )}
             <div>
               <span style={lbl}>Name *</span>
-              <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder="e.g. Household, Spouse support, Pocket money" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
+              <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder={effectiveScopeType?"e.g. Pocket money, Phone bill, School supplies":"e.g. Household, Spouse support, Pocket money"} value={name} onChange={e=>setName(e.target.value)} autoFocus/>
             </div>
             <div>
               <span style={lbl}>Amount *</span>
@@ -15417,6 +15462,62 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
           );
         })()}
+      </div>
+    );
+  };
+
+  // ── SCOPED COMMITMENTS CARD (WP14 — Person/Group Mandatory Commitments) ─────
+  // The person/group-scoped answer to "where do I add a monthly commitment to family, like
+  // household expenses or pocket money, debited from that person's or group's own budget?" Reuses
+  // the exact same AddMandatoryCommitmentModal, getMandatoryCommitmentsTotal/Remaining/State and
+  // getDiscretionaryPool the Household-level Mandatory Commitments card already calls — only the
+  // input list (getCommitmentsForScope) and the "spent" figure (this person's/group's own
+  // attributed spend in that category, not the whole household's) differ. A scoped commitment
+  // reduces only this envelope; it is filtered out of every Household-level figure elsewhere on
+  // this page (see householdCommitments in BudgetPage) so nothing is ever debited twice.
+  const ScopedCommitmentsCard = ({ scopeType, scopeId, scopeLabel, planningAllocation, monthTxns, viewMonth, onAdd, onEdit }) => {
+    const commitments = getCommitmentsForScope(mandatoryCommitments, scopeType, scopeId);
+    const activeCommitments = commitments.filter(c=>!(c.skippedMonths||[]).includes(viewMonth));
+    const commitmentsTotal = getMandatoryCommitmentsTotal(activeCommitments);
+    const discretionaryAfter = getDiscretionaryPool(planningAllocation, commitmentsTotal);
+    const getScopedCategorySpent = categoryId => monthTxns.filter(t=>t.type==="expense").reduce((s,t)=>{
+      const tCats = (t.catIds||[t.catId]).filter(Boolean);
+      if(!tCats.includes(categoryId)) return s;
+      const amt = scopeType==="person" ? getPersonAttributedAmount(t,scopeId) : getGroupAttributedAmount(t,scopeId);
+      if(amt<=0) return s;
+      return s + amt/tCats.length;
+    },0);
+    return (
+      <div style={{ background:T.card,borderRadius:10,padding:"8px 10px",marginTop:8 }}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
+          <span style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5 }}>Commitments</span>
+          <button onClick={onAdd} style={{ background:"none",border:"none",color:T.accent,fontSize:10.5,fontWeight:700,cursor:"pointer" }}>+ Add</button>
+        </div>
+        {commitments.length===0 ? (
+          <div style={{ color:T.sub,fontSize:10.5 }}>Nothing committed yet — e.g. pocket money or a phone bill, debited from {scopeLabel}'s own budget, not the Household pool.</div>
+        ) : (
+          <>
+            {commitments.map(c=>{
+              const cat = cats.find(x=>x.id===c.categoryId);
+              const spent = getScopedCategorySpent(c.categoryId);
+              const { remaining, isOver } = getMandatoryCommitmentRemaining(c, spent);
+              const state = getMandatoryCommitmentState(c, spent, viewMonth);
+              return (
+                <button key={c.id} onClick={()=>onEdit(c)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",background:"none",border:"none",borderBottom:`1px solid ${T.border}`,padding:"6px 0",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif",opacity:state==="skipped"?0.6:1 }}>
+                  <span style={{ minWidth:0 }}>
+                    <span style={{ color:T.text,fontSize:11.5,fontWeight:700 }}>{cat?.icon?`${cat.icon} `:""}{c.name}</span>
+                    <span style={{ display:"block",color:isOver?T.danger:T.sub,fontSize:9.5,marginTop:1 }}>{state==="skipped"?"Skipped this month":isOver?`${sym}${fmt(Math.abs(remaining))} over`:`${sym}${fmt(remaining)} left`}</span>
+                  </span>
+                  <span style={{ color:T.text,fontSize:11.5,fontWeight:800,fontFamily:FONT.mono,flexShrink:0 }}>{sym}{fmt(c.amount)}</span>
+                </button>
+              );
+            })}
+            <div style={{ display:"flex",justifyContent:"space-between",padding:"6px 0 0" }}>
+              <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Discretionary after commitments</span>
+              <span style={{ color:discretionaryAfter<0?T.danger:T.text,fontSize:10,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(discretionaryAfter)}</span>
+            </div>
+          </>
+        )}
       </div>
     );
   };
