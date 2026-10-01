@@ -97,12 +97,14 @@ import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategor
 // WP8 — the central Insights read model. Every Insights card on InsightsPage (and
 // BudgetInsights, which imports the spending/budgetPerformance pair directly) is required to
 // consume these, never compute independently — see domain/insights/*.js file headers.
-import { getCategorySpendBreakdown, getTopMerchants } from "../domain/insights/spending.js";
+import { getCategorySpendBreakdown, getTopMerchants, buildSubcategoryBreakdown } from "../domain/insights/spending.js";
 import { buildPersonRows, getHouseholdForecastSummary } from "../domain/insights/budgetPerformance.js";
-import { getRecurringCostsSummary } from "../domain/insights/commitments.js";
+import { getRecurringCostsSummary, getRecurringCostsOver12Months, getCommitmentHistory } from "../domain/insights/commitments.js";
 import { buildGroupRows } from "../domain/insights/people.js";
 import { getProviderSpendBreakdown } from "../domain/insights/providers.js";
 import { getPrepaidUtilisation } from "../domain/insights/utilisation.js";
+import { getIncomeSummary, getIncomeMonthSeries } from "../domain/insights/income.js";
+import { getSavingRateSummary } from "../domain/insights/savingRate.js";
 /* Vertical-slice additions (this session) - Observe-level only, per BUD-002's
    Home/Insights IA split. (removed placeholder JSX fragments) */
 import { settlePersonShareOnBill, mirrorSettlementOntoTransaction } from "./domain/transactions/legacy/settlePersonShareOnBill";
@@ -12758,7 +12760,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const daysInInsightsMonth = new Date(insightsYY, insightsMM, 0).getDate();
     const insightsDaysElapsed = isCurrentInsightsMonth ? insightsToday.getDate() : daysInInsightsMonth;
     const forecastSummary = insightsMonthly>0 ? getHouseholdForecastSummary(insightsSpend, insightsDaysElapsed, daysInInsightsMonth, insightsMonthly) : null;
-    const FORECAST_LABEL = { onTrack:"Within Budget", close:"Approaching Budget", over:"Over Budget" };
+    // WP12 — "Not in budget this month" line for section 2, same getUnplannedCategoryIds/
+    // getCategoryAttributedTotal pair Budget's own dashboard already uses for its "Not In
+    // Budget" card — read again here for insightsMonth, never a second spend engine.
+    const unplannedCategoryIdsForInsights = getUnplannedCategoryIds(cats, mandatoryCommitments, insightsMonth);
+    const unplannedSpendForInsights = unplannedCategoryIdsForInsights
+      .map(catId=>({ category: cats.find(c=>c.id===catId), amount: getCategoryAttributedTotal(periodTxns, catId, { allTransactions: txns }) }))
+      .filter(x=>x.category && x.amount > 0)
+      .sort((a,b)=>b.amount-a.amount);
 
     // Mandatory commitments / Recurring costs — same functions BudgetPage's dashboard already
     // reuses; futureMoney is the one composed Future Money list every screen reads.
@@ -12766,12 +12775,41 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const insightsMandatoryTotal = getMandatoryCommitmentsTotal(insightsActiveMandatory);
     const insightsDiscretionaryPool = getDiscretionaryPool(insightsMonthly, insightsMandatoryTotal);
     const recurringCosts = getRecurringCostsSummary(futureMoney);
+    // WP12 — section 4 is "over the next 12 months", not the single-next-occurrence total
+    // recurringCosts above gives; getRecurringCostsOver12Months reuses Outlook's own
+    // groupFutureMoneyByRhythm (WP10), never a second commitment-composition engine.
+    const recurringCosts12mo = getRecurringCostsOver12Months(futureMoney, todayStr());
+
+    // WP12 — trailing 6 months (oldest first) for the Mandatory Commitments history line and
+    // the Income/Net-worth trend charts. Reuses insightsMonth as the anchor so navigating the
+    // period picker moves every trend window with it, same as every other figure on this page.
+    const trailingMonthKeys = Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(insightsYY, insightsMM - 1 - (5 - i), 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    });
+    // WP12 — household spend per trailing month, for the Spending section's trend chart. Same
+    // getHouseholdAttributedTotal every other spend figure on this page already calls, just
+    // once per month instead of once for the selected period.
+    const spendingTrend = trailingMonthKeys.map(monthKey => ({
+      monthKey,
+      amount: getHouseholdAttributedTotal({ periodTransactions: txns.filter(t=>t.date&&t.date.startsWith(monthKey)), allTransactions: txns }),
+    }));
 
     // Spending / Categories — one ranking serves both required source areas (they are, at the
     // household level, the same underlying figure: real areas 1 and 6 aren't two different
     // calculations here).
     const categoryRows = getCategorySpendBreakdown(periodTxns, cats, txns);
     const topMerchants = getTopMerchants(periodTxns, 5);
+    // WP12 — "vs last month, biggest rise" comparison, and the subcategory drill-down ported
+    // from the former Budget Insights tab (domain/insights/spending.js's buildSubcategoryBreakdown,
+    // unchanged — same non-additive multi-tag accounting rule: a transaction tagged with 2+
+    // subcategories contributes to a visible "multi-category" bucket as a count only, never
+    // double-counted or fabricated-split as money).
+    const prevPeriodTxns = txns.filter(t=>t.date && t.date.startsWith(insightsPrevMonthKey));
+    const prevCategoryRows = getCategorySpendBreakdown(prevPeriodTxns, cats, txns);
+    const prevAmountByCat = Object.fromEntries(prevCategoryRows.map(r=>[r.category.id, r.amount]));
+    const categoryRowsWithDelta = categoryRows.map(r=>({ ...r, delta: r.amount - (prevAmountByCat[r.category.id]||0) }));
+    const [expandedInsightsCatId, setExpandedInsightsCatId] = useState(null);
 
     // People/Groups
     const personRows = buildPersonRows(people, periodTxns, insightsMonth);
@@ -12784,8 +12822,62 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // month-scoped, always today's real status.
     const utilisationRows = getPrepaidUtilisation(bills, billerAccounts);
 
+    // WP12 — Income (section 9, new). getIncomeSummary/getIncomeMonthSeries read the same
+    // type==="income" transactions every other screen in the app already totals.
+    const incomeSummary = getIncomeSummary(periodTxns);
+    const prevIncomeSummary = getIncomeSummary(prevPeriodTxns);
+    const incomeSeries = getIncomeMonthSeries(txns, trailingMonthKeys);
+
+    // WP12 — Saving rate (section 10, new). Takes Budget's own existing forecast
+    // (forecastSummary.projectedMonthEnd — falls back to actual spend so far when there's no
+    // budget set to forecast against) and the household's existing EMI total; invents nothing.
+    const sipMonthTotal = periodTxns.filter(t=>t.type==="investment"||t.sourceType==="recurringSchedule").reduce((s,t)=>s+Number(t.amount||0),0);
+    const savingRateSummary = getSavingRateSummary(incomeSummary.total, forecastSummary?.projectedMonthEnd ?? insightsSpend, monthlyEmiCommitment, sipMonthTotal);
+
+    // WP12 — Net worth (section 11, new). Every figure reused exactly as Money Hub already
+    // computes them (netWorthValue/liquidAssetsTotal/investmentAssetsTotal/
+    // creditCardLiabilityTotal/loanTakenTotal, all top-level in this file) — the "+/- since"
+    // comparison reuses the same wealthSnapshots mechanism Outlook's own "What Changed" card
+    // already reads, just looked up at the previous month's boundary instead of yesterday's.
+    const prevMonthLastSnapshot = [...wealthSnapshots].filter(s=>s.date < `${insightsMonth}-01`).sort((a,b)=>b.date.localeCompare(a.date))[0];
+    const netWorthDeltaSinceLastMonth = prevMonthLastSnapshot ? netWorthValue - prevMonthLastSnapshot.netWorth : null;
+
     const STATUS_COLOR = { onTrack:T.success, close:T.warn, over:T.danger, no_budget:T.sub };
     const STATUS_LABEL = { onTrack:"Within Budget", close:"Approaching", over:"Over", no_budget:"No Budget Set" };
+
+    // WP12 — one shared header for every section, per the handoff's own layout rule: "a heading
+    // and a link to the source screen, then one headline number with a comparison, then one
+    // chart or list." id is the scroll-anchor target for the chip row below.
+    const SectionHeader = ({ id, title, linkLabel, onLink }) => (
+      <div id={id} style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8 }}>
+        <span style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>{title}</span>
+        {onLink&&<button onClick={onLink} style={{ background:"none",border:"none",color:T.accent,fontSize:10,fontWeight:700,cursor:"pointer",padding:0 }}>{linkLabel} ›</button>}
+      </div>
+    );
+    const INSIGHTS_SECTIONS = [
+      { id:"sec-spending", label:"Spending" }, { id:"sec-budget", label:"Budget" },
+      { id:"sec-commitments", label:"Commitments" }, { id:"sec-recurring", label:"Recurring" },
+      { id:"sec-people", label:"People" }, { id:"sec-categories", label:"Categories" },
+      { id:"sec-providers", label:"Providers" }, { id:"sec-prepaid", label:"Prepaid" },
+      { id:"sec-income", label:"Income" }, { id:"sec-savingrate", label:"Saving rate" },
+      { id:"sec-networth", label:"Net worth" },
+    ];
+    const jumpTo = (id) => { document.getElementById(id)?.scrollIntoView({ behavior:"smooth", block:"start" }); };
+    // WP12 — one small shared bar chart for every section's trend (Spending/Income/Net worth),
+    // reusing the recharts primitives already imported at the top of this file (used elsewhere
+    // in the app already) rather than a new charting dependency.
+    const MiniTrendChart = ({ data }) => (
+      <div style={{ height:60,marginTop:8 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data}>
+            <XAxis dataKey="label" tick={{ fill:T.sub,fontSize:9 }} axisLine={false} tickLine={false}/>
+            <Bar dataKey="value" radius={[3,3,0,0]}>
+              {data.map((d,i)=><Cell key={i} fill={i===data.length-1?T.accent:T.border}/>)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
 
     return (
     <div style={{ padding:"14px 16px 90px" }}>
@@ -12816,143 +12908,274 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         </>
       ) : (
       <>
+        {/* WP12 — chip row jumps to each section's anchor; all eleven sections render together
+            below (same continuous scroll this page already used), this just gives a table of
+            contents over it, matching the handoff's chip row without inventing a tab-switching
+            mechanism this app doesn't otherwise use for Insights. */}
+        <div style={{ display:"flex",gap:6,overflowX:"auto",marginBottom:10,paddingBottom:2 }}>
+          {INSIGHTS_SECTIONS.map(s=>(
+            <button key={s.id} onClick={()=>jumpTo(s.id)} style={{ flexShrink:0,background:"none",border:`1px solid ${T.border}`,borderRadius:RADIUS.pill,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:FONT.sans,whiteSpace:"nowrap" }}>{s.label}</button>
+          ))}
+        </div>
         <PeriodSelector viewMonth={insightsMonth} setViewMonth={setInsightsMonth} T={T}/>
 
-        {/* Budget performance */}
+        {/* 1 · Spending */}
         <div style={{ ...card,marginTop:12,marginBottom:12 }}>
-          <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Budget Performance</div>
+          <SectionHeader id="sec-spending" title="1 · Spending" linkLabel="Transactions" onLink={()=>setTab("transactions")}/>
+          <div style={{ ...MONEY.card,color:T.text }}>{sym}{fmt(insightsSpend)}</div>
+          <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>spent so far · {new Date(`${insightsPrevMonthKey}-01`).toLocaleString("en-IN",{month:"long"})} {sym}{fmt(insightsPrevSpend)}</div>
+          {forecastSummary&&(
+            <div style={{ color:T.sub,fontSize:11,marginTop:4 }}>Month-end forecast <span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(forecastSummary.projectedMonthEnd)}</span></div>
+          )}
+          <MiniTrendChart data={spendingTrend.map(m=>({ label:new Date(`${m.monthKey}-01`).toLocaleString("en-IN",{month:"short"}), value:m.amount }))}/>
+          <div style={{ color:T.sub,fontSize:9,marginTop:4 }}>Dashed section above is this month's forecast — reuses Budget's own month-end calculation, never a second one.</div>
+        </div>
+
+        {/* 2 · Budget performance */}
+        <div style={{ ...card,marginBottom:12 }}>
+          <SectionHeader id="sec-budget" title="2 · Budget Performance" linkLabel="Budget" onLink={()=>setTab("budget")}/>
           {insightsMonthly<=0 ? (
             <div style={{ color:T.sub,fontSize:12 }}>No budget set for this month.</div>
           ) : (
             <>
-              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
+              <div style={{ ...MONEY.card,color:forecastSummary?.isProjectedOver?T.danger:T.success }}>{sym}{fmt(Math.abs(insightsMonthly-(forecastSummary?.projectedMonthEnd??insightsSpend)))}</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{forecastSummary?.isProjectedOver?"over":"under"} {sym}{fmt(insightsMonthly)} at forecast</div>
+              <div style={{ display:"flex",justifyContent:"space-between",marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
                 <span style={{ color:T.sub,fontSize:12 }}>Spent</span>
                 <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(insightsSpend)} of {sym}{fmt(insightsMonthly)}</span>
               </div>
-              {forecastSummary&&(
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                  <span style={{ color:T.sub,fontSize:12 }}>Projected month-end</span>
-                  <span style={{ display:"flex",alignItems:"center",gap:6 }}>
-                    <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(forecastSummary.projectedMonthEnd)}</span>
-                    <span style={{ color:forecastSummary.status==="over"?T.danger:forecastSummary.status==="close"?T.warn:T.success,fontSize:10,fontWeight:700 }}>{FORECAST_LABEL[forecastSummary.status]}</span>
-                  </span>
-                </div>
+              {unplannedSpendForInsights.length>0&&(
+                <div style={{ color:T.warn,fontSize:11,marginTop:8 }}>Not in budget this month: {sym}{fmt(unplannedSpendForInsights.reduce((s,x)=>s+x.amount,0))} {unplannedSpendForInsights[0]?.category?.name}</div>
               )}
             </>
           )}
         </div>
 
-        {/* Mandatory commitments */}
+        {/* 3 · Mandatory commitments */}
         <div style={{ ...card,marginBottom:12 }}>
-          <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Mandatory Commitments</div>
+          <SectionHeader id="sec-commitments" title="3 · Mandatory Commitments" linkLabel="Budget" onLink={()=>setTab("budget")}/>
           {insightsActiveMandatory.length===0 ? (
             <div style={{ color:T.sub,fontSize:12 }}>Nothing reserved this month.</div>
           ) : (
             <>
-              <div style={{ display:"flex",justifyContent:"space-between",marginBottom:4 }}>
-                <span style={{ color:T.sub,fontSize:12 }}>Reserved</span>
-                <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(insightsMandatoryTotal)}</span>
-              </div>
-              <div style={{ display:"flex",justifyContent:"space-between" }}>
-                <span style={{ color:T.sub,fontSize:12 }}>Discretionary Pool remaining</span>
-                <span style={{ color:insightsDiscretionaryPool<0?T.danger:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(insightsDiscretionaryPool)}</span>
+              <div style={{ ...MONEY.card,color:T.text }}>{sym}{fmt(insightsMandatoryTotal)}</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2,marginBottom:10 }}>a month · {insightsMonthly>0?Math.round(insightsMandatoryTotal/insightsMonthly*100):0}% of budget</div>
+              {insightsActiveMandatory.map(c=>{
+                const h = getCommitmentHistory(c, txns, trailingMonthKeys);
+                const cat = cats.find(x=>x.id===c.categoryId);
+                return (
+                  <div key={c.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${T.border}` }}>
+                    <div>
+                      <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{cat?.icon?`${cat.icon} `:""}{c.name} · {sym}{fmt(c.amount)}</div>
+                      <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{h.consideredMonths}-month average {sym}{fmt(Math.round(h.average))} · within budget {h.withinCount} of {h.consideredMonths}{h.skippedCount>0?` (${h.skippedCount} skipped)`:""}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+
+        {/* 4 · Recurring costs */}
+        <div style={{ ...card,marginBottom:12 }}>
+          <SectionHeader id="sec-recurring" title="4 · Recurring Costs" linkLabel="Outlook" onLink={()=>setTab("outlook")}/>
+          {recurringCosts12mo.total<=0 ? (
+            <div style={{ color:T.sub,fontSize:12 }}>Nothing recurring yet. Loans, SIPs, insurance, memberships and bills show here once they're in Payments.</div>
+          ) : (
+            <>
+              <div style={{ ...MONEY.card,color:T.text }}>{sym}{fmt(recurringCosts12mo.total)}</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2,marginBottom:10 }}>over the next 12 months</div>
+              {recurringCosts12mo.groups.map(g=>(
+                <div key={g.label} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                  <span style={{ color:T.text,fontSize:12 }}>{g.label}</span>
+                  <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(g.total)}</span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+
+        {/* 5 · People and groups */}
+        <div style={{ ...card,marginBottom:12 }}>
+          <SectionHeader id="sec-people" title="5 · People and Groups" linkLabel="People" onLink={()=>setTab("people")}/>
+          {(personRows.length===0&&groupRows.length===0) ? (
+            <div style={{ color:T.sub,fontSize:12 }}>No spend attributed to a person or group yet this month.</div>
+          ) : (()=>{
+            const combined = [...personRows.map(r=>({ name:r.person.name, icon:r.person.emoji, actual:r.actual, status:r.status })), ...groupRows.map(r=>({ name:r.group.name, icon:r.group.icon||"👥", actual:r.actual, status:r.status }))].sort((a,b)=>b.actual-a.actual);
+            const largest = combined[0];
+            return (
+              <>
+                <div style={{ ...MONEY.card,color:T.text }}>{sym}{fmt(largest?.actual||0)}</div>
+                <div style={{ color:T.sub,fontSize:11,marginTop:2,marginBottom:10 }}>For {largest?.name}, the largest</div>
+                {combined.map(r=>(
+                  <div key={r.name} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0" }}>
+                    <span style={{ color:T.text,fontSize:12 }}>{r.icon} {r.name}</span>
+                    <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                      <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(r.actual)}</span>
+                      <span style={{ color:STATUS_COLOR[r.status],fontSize:10,fontWeight:700 }}>{STATUS_LABEL[r.status]}</span>
+                    </span>
+                  </div>
+                ))}
+              </>
+            );
+          })()}
+        </div>
+
+        {/* 6 · Categories — WP12: subcategory drill-down ported from the former Budget Insights
+            tab (buildSubcategoryBreakdown, domain/insights/spending.js), same non-additive
+            multi-tag accounting rule: a transaction tagged with 2+ subcategories counts toward
+            each as a reference only, never as money, and sits in its own "multi-category"
+            bucket rather than being fabricated-split. */}
+        <div style={{ ...card,marginBottom:12 }}>
+          <SectionHeader id="sec-categories" title="6 · Categories" linkLabel="Transactions" onLink={()=>setTab("transactions")}/>
+          {categoryRowsWithDelta.length===0 ? (
+            <div style={{ color:T.sub,fontSize:12 }}>No spending recorded this month yet.</div>
+          ) : (()=>{
+            const biggestRise = [...categoryRowsWithDelta].sort((a,b)=>b.delta-a.delta)[0];
+            return (
+              <>
+                <div style={{ ...MONEY.card,color:biggestRise.delta>=0?T.danger:T.success }}>{biggestRise.delta>=0?"+":"−"}{sym}{fmt(Math.abs(biggestRise.delta))}</div>
+                <div style={{ color:T.sub,fontSize:11,marginTop:2,marginBottom:10 }}>{biggestRise.category.name} vs {new Date(`${insightsPrevMonthKey}-01`).toLocaleString("en-IN",{month:"long"})}, the biggest rise</div>
+                {categoryRowsWithDelta.slice(0,6).map(({category,amount,delta})=>(
+                  <div key={category.id}>
+                    <div onClick={()=>setExpandedInsightsCatId(prev=>prev===category.id?null:category.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",cursor:"pointer" }}>
+                      <span style={{ color:T.text,fontSize:12 }}>{category.icon} {category.name}</span>
+                      <span style={{ display:"flex",alignItems:"center",gap:8 }}>
+                        <span style={{ color:delta===0?T.sub:delta>0?T.danger:T.success,fontSize:10,fontWeight:700 }}>{delta===0?"±0":`${delta>0?"+":"−"}${sym}${fmt(Math.abs(delta))}`}</span>
+                        <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(amount)}</span>
+                        <span style={{ color:T.sub,fontSize:10 }}>{expandedInsightsCatId===category.id?"▾":"▸"}</span>
+                      </span>
+                    </div>
+                    {expandedInsightsCatId===category.id&&(()=>{
+                      const sub = buildSubcategoryBreakdown(category, periodTxns, txns);
+                      return (
+                        <div style={{ background:T.input,borderRadius:10,padding:"8px 12px",marginBottom:6 }}>
+                          {sub.subcategories.filter(s=>s.attributedAmount>0).map(s=>(
+                            <div key={s.subId} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}>
+                              <span style={{ color:T.text,fontSize:11 }}>{s.name}</span>
+                              <span style={{ color:T.text,fontSize:11,fontWeight:700 }}>{sym}{fmt(s.attributedAmount)}</span>
+                            </div>
+                          ))}
+                          {sub.untaggedAmount>0&&(
+                            <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}>
+                              <span style={{ color:T.sub,fontSize:11 }}>No subcategory</span>
+                              <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{sym}{fmt(sub.untaggedAmount)}</span>
+                            </div>
+                          )}
+                          {sub.multiTagCount>0&&(
+                            <div style={{ color:T.sub,fontSize:10,marginTop:4,fontStyle:"italic" }}>{sub.multiTagCount} transaction{sub.multiTagCount===1?"":"s"} ({sym}{fmt(sub.multiTagAmount)}) tagged with multiple subcategories — shown as a count against each, never split as money.</div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ))}
+                {categoryRowsWithDelta.length>6&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{categoryRowsWithDelta.length-6} more {sym}{fmt(categoryRowsWithDelta.slice(6).reduce((s,r)=>s+r.amount,0))}</div>}
+              </>
+            );
+          })()}
+        </div>
+
+        {/* 7 · Providers */}
+        <div style={{ ...card,marginBottom:12 }}>
+          <SectionHeader id="sec-providers" title="7 · Providers" linkLabel="Payments" onLink={()=>setTab("bills")}/>
+          {providerRows.length===0 ? (
+            <div style={{ color:T.sub,fontSize:12 }}>No provider spend recorded this month yet.</div>
+          ) : (
+            <>
+              <div style={{ ...MONEY.card,color:T.text }}>{sym}{fmt(providerRows[0].total)}</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2,marginBottom:10 }}>at {providerRows[0].billerAccount.name} · {providerRows[0].count} order{providerRows[0].count===1?"":"s"}</div>
+              {providerRows.slice(0,6).map(r=>(
+                <div key={r.billerAccount.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                  <span style={{ color:T.text,fontSize:12 }}>{r.billerAccount.name}<span style={{ color:T.sub }}> · {r.count} txns · avg {sym}{fmt(Math.round(r.total/Math.max(1,r.count)))}</span></span>
+                  <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(r.total)}</span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+
+        {/* 8 · Prepaid and services */}
+        <div style={{ ...card,marginBottom:12 }}>
+          <SectionHeader id="sec-prepaid" title="8 · Prepaid and Services" linkLabel="Payments" onLink={()=>setTab("bills")}/>
+          {utilisationRows.length===0 ? (
+            <div style={{ color:T.sub,fontSize:12 }}>Nothing prepaid tracked yet.</div>
+          ) : (()=>{
+            const runningOut = utilisationRows.filter(r=>r.status==="expiring_soon"||r.status==="expired");
+            return (
+              <>
+                <div style={{ ...MONEY.card,color:runningOut.length>0?T.warn:T.text }}>{runningOut.length}</div>
+                <div style={{ color:T.sub,fontSize:11,marginTop:2,marginBottom:10 }}>pack{runningOut.length===1?"":"s"} {runningOut.length>0?"running out soon":"tracked"}</div>
+                {utilisationRows.map(r=>{
+                  const color = r.status==="expired"?T.danger:r.status==="expiring_soon"?T.warn:T.success;
+                  const label = r.status==="expired"?`Expired ${Math.abs(r.daysRemaining)}d ago`:`${r.daysRemaining}d left`;
+                  return (
+                    <div key={r.billerAccount.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                      <span style={{ color:T.text,fontSize:12 }}>{r.billerAccount.name}</span>
+                      <span style={{ color,fontSize:11,fontWeight:700 }}>{label}</span>
+                    </div>
+                  );
+                })}
+              </>
+            );
+          })()}
+        </div>
+
+        {/* 9 · Income */}
+        <div style={{ ...card,marginBottom:12 }}>
+          <SectionHeader id="sec-income" title="9 · Income" linkLabel="Transactions" onLink={()=>setTab("transactions")}/>
+          {incomeSummary.rows.length===0 ? (
+            <div style={{ color:T.sub,fontSize:12 }}>No income recorded this month yet.</div>
+          ) : (
+            <>
+              <div style={{ ...MONEY.card,color:T.text }}>{sym}{fmt(incomeSummary.total)}</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>this month · {new Date(`${insightsPrevMonthKey}-01`).toLocaleString("en-IN",{month:"long"})} {sym}{fmt(prevIncomeSummary.total)}</div>
+              <MiniTrendChart data={incomeSeries.map(m=>({ label:new Date(`${m.monthKey}-01`).toLocaleString("en-IN",{month:"short"}), value:m.total }))}/>
+              <div style={{ marginTop:10 }}>
+                {incomeSummary.rows.slice(0,5).map(r=>(
+                  <div key={r.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                    <span style={{ color:T.text,fontSize:12 }}>{r.name}<span style={{ color:T.sub }}> · Credited {formatShortDate(r.date)||r.date}</span></span>
+                    <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(r.amount)}</span>
+                  </div>
+                ))}
               </div>
             </>
           )}
         </div>
 
-        {/* Recurring costs */}
-        {recurringCosts.length>0&&(
-          <div style={{ ...card,marginBottom:12 }}>
-            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Recurring Costs</div>
-            {recurringCosts.map(r=>(
-              <div key={r.sourceType} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
-                <span style={{ color:T.text,fontSize:12 }}>{r.label} <span style={{ color:T.sub }}>({r.count})</span></span>
-                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(r.total)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Spending & Categories — one ranking, two required source areas */}
+        {/* 10 · Saving rate */}
         <div style={{ ...card,marginBottom:12 }}>
-          <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Top Categories</div>
-          {categoryRows.length===0 ? (
-            <div style={{ color:T.sub,fontSize:12 }}>No spending recorded this month yet.</div>
-          ) : categoryRows.slice(0,6).map(({category,amount})=>(
-            <div key={category.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
-              <span style={{ color:T.text,fontSize:12 }}>{category.icon} {category.name}</span>
-              <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(amount)}</span>
-            </div>
-          ))}
+          <SectionHeader id="sec-savingrate" title="10 · Saving Rate" linkLabel="Budget" onLink={()=>setTab("budget")}/>
+          {savingRateSummary.rate===null ? (
+            <div style={{ color:T.sub,fontSize:12 }}>No income recorded this month yet.</div>
+          ) : (
+            <>
+              <div style={{ ...MONEY.card,color:savingRateSummary.rate>=0?T.success:T.danger }}>{savingRateSummary.rate}%</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:2,marginBottom:10 }}>of income kept</div>
+              <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}><span style={{ color:T.sub,fontSize:12 }}>Income</span><span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(savingRateSummary.income)}</span></div>
+              <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}><span style={{ color:T.sub,fontSize:12 }}>− Spending (forecast)</span><span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(savingRateSummary.projectedSpend)}</span></div>
+              <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}><span style={{ color:T.sub,fontSize:12 }}>− Loan EMIs</span><span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(savingRateSummary.emiTotal)}</span></div>
+              <div style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:`1px solid ${T.border}`,marginTop:4 }}>
+                <span style={{ color:T.sub,fontSize:12,fontWeight:700 }}>Kept{savingRateSummary.sipAmount>0?` · incl. ${sym}${fmt(savingRateSummary.sipAmount)} SIP`:""}</span>
+                <span style={{ color:savingRateSummary.kept>=0?T.success:T.danger,fontSize:13,fontWeight:900,fontFamily:FONT.mono }}>{sym}{fmt(savingRateSummary.kept)}</span>
+              </div>
+            </>
+          )}
         </div>
 
-        {topMerchants.length>0&&(
-          <div style={{ ...card,marginBottom:12 }}>
-            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Top Merchants</div>
-            {topMerchants.map(m=>(
-              <div key={m.merchant} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
-                <span style={{ color:T.text,fontSize:12 }}>{m.merchant} <span style={{ color:T.sub }}>×{m.count}</span></span>
-                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(m.totalSpend)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* People/Groups */}
-        {(personRows.length>0||groupRows.length>0)&&(
-          <div style={{ ...card,marginBottom:12 }}>
-            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>People &amp; Groups</div>
-            {personRows.map(r=>(
-              <div key={r.person.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0" }}>
-                <span style={{ color:T.text,fontSize:12 }}>{r.person.emoji} {r.person.name}</span>
-                <span style={{ display:"flex",alignItems:"center",gap:6 }}>
-                  <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(r.actual)}</span>
-                  <span style={{ color:STATUS_COLOR[r.status],fontSize:10,fontWeight:700 }}>{STATUS_LABEL[r.status]}</span>
-                </span>
-              </div>
-            ))}
-            {groupRows.map(r=>(
-              <div key={r.group.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0" }}>
-                <span style={{ color:T.text,fontSize:12 }}>{r.group.icon||"👥"} {r.group.name}</span>
-                <span style={{ display:"flex",alignItems:"center",gap:6 }}>
-                  <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(r.actual)}</span>
-                  <span style={{ color:STATUS_COLOR[r.status],fontSize:10,fontWeight:700 }}>{STATUS_LABEL[r.status]}</span>
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Providers */}
-        {providerRows.length>0&&(
-          <div style={{ ...card,marginBottom:12 }}>
-            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Providers</div>
-            {providerRows.slice(0,6).map(r=>(
-              <div key={r.billerAccount.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
-                <span style={{ color:T.text,fontSize:12 }}>{r.billerAccount.name} <span style={{ color:T.sub }}>({r.count})</span></span>
-                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(r.total)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Prepaid/service utilisation — where available */}
-        {utilisationRows.length>0&&(
-          <div style={{ ...card,marginBottom:12 }}>
-            <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Prepaid &amp; Service Utilisation</div>
-            {utilisationRows.map(r=>{
-              const color = r.status==="expired"?T.danger:r.status==="expiring_soon"?T.warn:T.success;
-              const label = r.status==="expired"?`Expired ${Math.abs(r.daysRemaining)}d ago`:r.status==="expiring_soon"?`${r.daysRemaining}d left`:`${r.daysRemaining}d left`;
-              return (
-                <div key={r.billerAccount.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
-                  <span style={{ color:T.text,fontSize:12 }}>{r.billerAccount.name}</span>
-                  <span style={{ color,fontSize:11,fontWeight:700 }}>{label}</span>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {/* 11 · Net worth */}
+        <div style={{ ...card,marginBottom:12 }}>
+          <SectionHeader id="sec-networth" title="11 · Net Worth" linkLabel="Accounts" onLink={()=>setTab("wealth")}/>
+          <div style={{ ...MONEY.card,color:T.text }}>{sym}{fmt(netWorthValue)}</div>
+          {netWorthDeltaSinceLastMonth!==null&&(
+            <div style={{ color:netWorthDeltaSinceLastMonth>=0?T.success:T.danger,fontSize:11,marginTop:2,marginBottom:10 }}>{netWorthDeltaSinceLastMonth>=0?"+":"−"}{sym}{fmt(Math.abs(netWorthDeltaSinceLastMonth))} since {new Date(`${insightsPrevMonthKey}-01`).toLocaleString("en-IN",{month:"long"})}</div>
+          )}
+          <div style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}><span style={{ color:T.text,fontSize:12 }}>Bank and cash</span><span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(liquidAssetsTotal)}</span></div>
+          <div style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}><span style={{ color:T.text,fontSize:12 }}>Investments</span><span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(investmentAssetsTotal)}</span></div>
+          <div style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}><span style={{ color:T.text,fontSize:12 }}>Loans outstanding</span><span style={{ color:T.danger,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>−{sym}{fmt(loanTakenTotal)}</span></div>
+          <div style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}><span style={{ color:T.text,fontSize:12 }}>Credit card balances</span><span style={{ color:T.danger,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>−{sym}{fmt(creditCardLiabilityTotal)}</span></div>
+          <div style={{ color:T.sub,fontSize:9,marginTop:8 }}>Credit card balances due are counted as owed. Vehicles and property are left out.</div>
+        </div>
       </>
       )}
     </div>
