@@ -144,7 +144,12 @@ import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
-import BudgetInsights from "./screens/BudgetInsights";
+// BudgetInsights (./screens/BudgetInsights) no longer imported here — WP11 removed Budget's own
+// embedded Insights tab per the handoff ("Insights moves to the Insights page"). That component
+// still holds real, not-yet-ported capability (category -> subcategory drill-down with its
+// non-additive multi-tag accounting rule) that InsightsPage's Categories section doesn't have
+// yet — flagged for WP12, not deleted. The file itself is untouched; only this now-dead import
+// is removed.
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 // Wraps localStorage.setItem so a QuotaExceededError (or any other storage failure) never crashes
@@ -14471,7 +14476,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
   // ── BUDGET PAGE ──────────────────────────────────────────────────────────────
   const BudgetPage = ({ embedded = false, onBack }) => {
-    const [budgetSubTab, setBudgetSubTab] = useState("dashboard");
+    // WP11 (Budget redesign) — the four tabs (Dashboard, Annual, Insights, Budgets) merge into
+    // one page per the handoff: Annual becomes a "Year view" link (budgetView), Insights moves
+    // entirely to the top-level Insights page (setTab("insights")), and the old "Budgets" tab's
+    // Person/Group allocation rows now render inline as children of the Discretionary Pool card
+    // below — exactly where the mock puts them — instead of behind a separate tab.
+    const [budgetView, setBudgetView] = useState("main"); // "main" | "year"
     const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
     const [expandedBudgetCatId, setExpandedBudgetCatId] = useState(null);
     const [budgetPersonViewMode, setBudgetPersonViewMode] = useState("month");
@@ -14483,9 +14493,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // below) already documents for typing.
     const [showAddCommitment, setShowAddCommitment] = useState(false);
     const [editingCommitment, setEditingCommitment] = useState(null);
+    // WP11 — "Add as commitment" on a Not In Budget row opens the same sheet, pre-filled with
+    // that category, rather than a second creation path.
+    const [prefilledCommitmentCategoryId, setPrefilledCommitmentCategoryId] = useState(null);
     useEffect(()=>{
       if(budgetFocusPersonId){
-        setBudgetSubTab("budgets");
+        setBudgetView("main");
         setExpandedBudgetPersonId(budgetFocusPersonId);
         setBudgetFocusPersonId(null);
       }
@@ -14574,17 +14587,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     return (
       <div style={{ padding:"14px 16px 0" }}>
         <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:14 }}>
-          {embedded&&<button onClick={onBack} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>}
-          <div style={{ color:T.text,fontSize:20,fontWeight:900,flex:1 }}>💰 Budget</div>
+          {(embedded||budgetView==="year")&&<button onClick={()=>budgetView==="year"?setBudgetView("main"):onBack()} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>}
+          <div style={{ color:T.text,fontSize:20,fontWeight:900,flex:1 }}>💰 Budget{budgetView==="year"?` · ${fyLabel}`:""}</div>
         </div>
 
-        <div style={{ display:"flex",gap:0,borderBottom:`1px solid ${T.border}`,marginBottom:14,overflowX:"auto" }}>
-          {[["dashboard","Dashboard"],["overview","Annual"],["insights","Insights"],["budgets","Budgets"]].map(id=>(
-            <button key={id[0]} onClick={()=>setBudgetSubTab(id[0])} style={{ flex:1,textAlign:"center",background:"none",border:"none",padding:"10px 4px",fontSize:13,fontWeight:800,cursor:"pointer",color:budgetSubTab===id[0]?T.accent:T.sub,borderBottom:budgetSubTab===id[0]?`2px solid ${T.accent}`:"2px solid transparent",whiteSpace:"nowrap" }}>{id[1]}</button>
-          ))}
-        </div>
-
-        {budgetSubTab==="dashboard"&&(()=>{
+        {budgetView==="main"&&(()=>{
           // BUD-002 D.1 — Home (Observe). Every figure below is sourced exclusively
           // from the canonical Allocation Engine read functions (fbf4219) — no
           // monthly-value, variance, or forecast formula is reimplemented locally
@@ -14600,22 +14607,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const dashMonthly = resolveCarryForwardMonthly(budgetCarryForward, baseMonthly, prevBudget, prevSpend);
           const dashSpend = getHouseholdAttributedTotal({ periodTransactions: txns.filter(t=>t.date&&t.date.startsWith(viewMonth)), allTransactions: txns });
           const dashRemaining = getBudgetVariance(dashSpend, dashMonthly).variance;
-          const dashPct = getSpentPercentage(dashSpend, dashMonthly);
           const dashLeftDays = daysLeft(viewMonth);
           const dashSafePerDay = getSafeToSpendPerDay(dashRemaining, dashLeftDays, dashMonthly);
-          const daysInMonth = new Date(yy,mm,0).getDate();
-          const nowD = new Date();
-          const isCurrentMonth = viewMonth===`${nowD.getFullYear()}-${String(nowD.getMonth()+1).padStart(2,"0")}`;
-          const daysElapsed = isCurrentMonth ? nowD.getDate() : daysInMonth;
-          const { projectedMonthEnd, isProjectedOver, projectedMarginPct } = getMonthEndForecast(dashSpend, daysElapsed, daysInMonth, dashMonthly);
-          const { status: healthStatus } = getBudgetHealthStatus(isProjectedOver, projectedMarginPct);
-          const healthColor = healthStatus==="over" ? T.danger : healthStatus==="close" ? T.warn : T.success;
-          // WP7 — relabeled to the design handoff's honest-states framing (Within Budget /
-          // Approaching / Over / No Budget Set — the fourth, "No Budget Set", is the D.1 Empty
-          // State returned above when baseMonthly<=0). Same three getBudgetHealthStatus values,
-          // copy only, no change to the underlying classification.
-          const healthLabel = healthStatus==="over" ? "Over" : healthStatus==="close" ? "Approaching" : "Within Budget";
-          const healthNote = isProjectedOver ? `Projected to exceed budget by ${sym}${fmt(projectedMonthEnd-dashMonthly)}` : `${Math.abs(projectedMarginPct)}% ${projectedMarginPct>=0?"under":"over"} budget at this pace`;
+          // WP11 — dashPct and the month-end forecast/health classification (getMonthEndForecast/
+          // getBudgetHealthStatus) were only ever consumed by the Budget Health + Forecast cards
+          // removed below per the handoff (Flag 4: "month-end forecasting moves to Insights").
+          // Insights calls these exact same canonical functions independently for its own Budget
+          // performance section — removing the now-dead local call here doesn't touch that.
 
           // WP6 (Arth IA — Budget Core Model) — Mandatory Commitments / Discretionary Pool
           // hierarchy, layered on top of the existing dashMonthly figure above (never a second
@@ -14623,17 +14621,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // commitment's "remaining" — same getCategoryAttributedTotal every other screen already
           // uses, not a second spend engine.
           const monthTxns = txns.filter(t=>t.date&&t.date.startsWith(viewMonth));
-          // WP7 — a commitment skipped for viewMonth is excluded from mandatoryTotal, freeing
-          // its amount into the Discretionary Pool for this month only (same per-month opt-out
-          // semantics as the existing skippedInvestmentMonths pattern elsewhere in the app).
-          const activeMandatoryCommitments = mandatoryCommitments.filter(c=>!(c.skippedMonths||[]).includes(viewMonth));
-          const mandatoryTotal = getMandatoryCommitmentsTotal(activeMandatoryCommitments);
-          const discretionaryPool = getDiscretionaryPool(dashMonthly, mandatoryTotal);
-          const personAllocations = people.map(p=>getPersonPlanningAllocation(p, viewMonth));
-          const groupAllocations = groups.map(g=>getGroupPlanningAllocation(g, viewMonth));
-          const discretionaryAllocated = getDiscretionaryAllocatedTotal([...personAllocations, ...groupAllocations]);
-          const unallocatedDiscretionary = getUnallocatedDiscretionary(discretionaryPool, discretionaryAllocated);
-          const hierarchyWarning = getAllocationHierarchyWarning(discretionaryPool, discretionaryAllocated);
+          // WP11 — this used to duplicate liveActiveMandatory/liveDiscretionaryPool/
+          // liveDiscretionaryAllocated/liveHierarchyWarning (computed at BudgetPage's top level,
+          // for the exact same viewMonth) under local names, back when this content and the
+          // Budgets tab's were two separate render passes. Now that they're one page, reusing the
+          // top-level versions directly removes the duplicate computation — same functions, same
+          // inputs, so this changes no figure, only which variable name reads it.
+          const unallocatedDiscretionary = getUnallocatedDiscretionary(liveDiscretionaryPool, liveDiscretionaryAllocated);
           const mandatoryConfirmed = isMandatoryCommitmentsConfirmed(dismissedAlerts, viewMonth);
           const confirmMandatory = () => setDismissedAlerts(prev=>prev.includes(getMandatoryCommitmentsConfirmationId(viewMonth))?prev:[...prev, getMandatoryCommitmentsConfirmationId(viewMonth)]);
 
@@ -14661,7 +14655,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div style={{ display:"inline-block", background:T.mutedSoft, border:`1px solid ${T.border}`, borderRadius:20, padding:"3px 10px", marginBottom:10 }}><span style={{ color:T.sub, fontSize:10, fontWeight:800 }}>NO BUDGET SET</span></div>
                   <div style={{ color:T.text, fontSize:16, fontWeight:800, marginBottom:6 }}>Set up your household budget</div>
                   <div style={{ color:T.sub, fontSize:12, marginBottom:16, lineHeight:1.5 }}>Once you set a monthly amount, Home will show your Safe-to-Spend, Budget Health, and Forecast automatically.</div>
-                  <button onClick={()=>setBudgetSubTab("overview")} style={{ background:T.accent, border:"none", borderRadius:12, padding:"12px 20px", color:"#fff", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"Nunito,sans-serif" }}>Set Household Budget</button>
+                  <button onClick={()=>setBudgetView("year")} style={{ background:T.accent, border:"none", borderRadius:12, padding:"12px 20px", color:"#fff", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"Nunito,sans-serif" }}>Set Household Budget</button>
                 </div>
               </>
             );
@@ -14672,23 +14666,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               {/* WP-2 (ADR-037): shared Period Selector, prop-driven, no local period state. */}
               <PeriodSelector viewMonth={viewMonth} setViewMonth={setViewMonth} T={T}/>
 
-              {/* BUD-002 D.1 — Safe-to-Spend Card (Group 3, specializes KPI Card) */}
+              {/* WP11 — "Monthly budget" hero, restyled to the handoff's compact B1/B2 layout.
+                  Every number is exactly what the old "Safe to Spend" card showed (dashMonthly,
+                  dashSpend, dashRemaining, dashLeftDays, dashSafePerDay) — this is presentation
+                  only, no calculation changed. The progress bar and Budgeted/Spent/Remaining
+                  3-column grid are gone in favour of the mock's two-line form; the sign is still
+                  stated explicitly in text, never implied by colour alone. */}
               <div style={{ ...card }}>
-                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Safe to Spend</div>
-                <div style={{ color:T.text,fontSize:26,fontWeight:900,marginTop:6,marginBottom:2 }}>{dashSafePerDay===null?"—":`${sym}${fmt(dashSafePerDay)}/day`}</div>
-                <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>{dashLeftDays} day{dashLeftDays===1?"":"s"} left this period</div>
-                <div style={{ height:8,background:T.border,borderRadius:4,marginBottom:6 }}>
-                  <div style={{ height:"100%",width:`${dashPct}%`,background:dashPct>=100?T.danger:dashPct>80?T.warn:T.success,borderRadius:4 }}/>
-                </div>
-                <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:12 }}>
-                  <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{dashPct}% spent</span>
-                </div>
-                {/* D.1 Accessibility: sign stated explicitly in text, not implied by color alone */}
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
-                  <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Budgeted</div><div style={{ color:T.text,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(dashMonthly)}</div></div>
-                  <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Spent</div><div style={{ color:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(dashSpend)}</div></div>
-                  <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>{dashRemaining>=0?"Remaining":"Over Budget"}</div><div style={{ color:dashRemaining>=0?T.success:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{dashRemaining<0?"−":""}{sym}{fmt(Math.abs(dashRemaining))}</div></div>
-                </div>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Monthly budget</div>
+                <div style={{ ...MONEY.hero,color:T.text,margin:"4px 0 2px" }}>{sym}{fmt(dashMonthly)}</div>
+                <div style={{ color:dashRemaining>=0?T.sub:T.danger,fontSize:12,marginBottom:10 }}>{dashRemaining>=0?`${sym}${fmt(dashRemaining)} left`:`${sym}${fmt(Math.abs(dashRemaining))} over`} · {dashLeftDays} day{dashLeftDays===1?"":"s"}</div>
+                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>Spent {sym}{fmt(dashSpend)}<span style={{ color:T.sub,fontWeight:500 }}> · {dashSafePerDay===null?"—":`About ${sym}${fmt(dashSafePerDay)} a day`}</span></div>
               </div>
 
               {/* WP6 — monthly confirmation prompt, same pattern as the existing budget-alert
@@ -14698,7 +14686,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               {!mandatoryConfirmed&&mandatoryCommitments.length>0&&(
                 <div style={{ ...card,background:T.accentSoft,border:`1px solid ${T.accent}44`,marginBottom:12 }}>
                   <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>Confirm this month's commitments?</div>
-                  <div style={{ color:T.sub,fontSize:12,marginBottom:10 }}>{sym}{fmt(mandatoryTotal)} reserved, {sym}{fmt(discretionaryPool)} available</div>
+                  <div style={{ color:T.sub,fontSize:12,marginBottom:10 }}>{sym}{fmt(getMandatoryCommitmentsTotal(liveActiveMandatory))} reserved, {sym}{fmt(liveDiscretionaryPool)} available</div>
                   <button onClick={confirmMandatory} style={{ background:T.accent,border:"none",borderRadius:12,padding:"9px 16px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Confirm</button>
                 </div>
               )}
@@ -14706,123 +14694,192 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               {/* WP6 (Arth IA — Budget Core Model) — Mandatory Commitments card. Monthly Budget
                   (above) minus this total = Discretionary Pool (next card); never a second
                   Household figure, never a Bill (a commitment is a Budget/Planning fact — see
-                  the adapter's own doc). */}
+                  the adapter's own doc). WP11 — "Reserved" line added right under the header,
+                  matching the handoff's tree layout (parent shows its total on its own row,
+                  children hang off a rail below); the existing per-commitment rows already were
+                  those children, unchanged. */}
               <div style={{ ...card }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2 }}>
                   <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Mandatory Commitments</div>
                   <button onClick={()=>{ setEditingCommitment(null); setShowAddCommitment(true); }} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>+ Add</button>
                 </div>
+                <div style={{ color:T.text,fontSize:15,fontWeight:900,fontFamily:FONT.mono,marginBottom:10 }}>{sym}{fmt(getMandatoryCommitmentsTotal(liveActiveMandatory))}</div>
                 {mandatoryCommitments.length===0 ? (
                   <div style={{ color:T.sub,fontSize:12 }}>Nothing reserved yet. Add rent, support, or pocket money you always set aside first.</div>
                 ) : (
-                  <>
-                    {mandatoryCommitments.map(c=>{
-                      const cat = cats.find(x=>x.id===c.categoryId);
-                      const spent = getCategoryAttributedTotal(monthTxns, c.categoryId, { allTransactions: txns });
-                      const { remaining, isOver } = getMandatoryCommitmentRemaining(c, spent);
-                      // WP7 — Planned/Committed, Actual, Skipped: three of the four preserved
-                      // states (the fourth, Unplanned Actual, is household-level, surfaced below).
-                      const state = getMandatoryCommitmentState(c, spent, viewMonth);
-                      const STATE_BADGE = {
-                        skipped: { label:"Skipped", color:T.warn },
-                        actual: { label:"Actual", color:T.accent },
-                        planned: { label:"Planned", color:T.sub },
-                      }[state];
-                      return (
-                        <button key={c.id} onClick={()=>{ setEditingCommitment(c); setShowAddCommitment(true); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",background:"none",border:"none",borderBottom:`1px solid ${T.border}`,padding:"9px 0",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif",opacity:state==="skipped"?0.6:1 }}>
-                          <span style={{ minWidth:0 }}>
-                            <span style={{ display:"flex",alignItems:"center",gap:6 }}>
-                              <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{cat?.icon?`${cat.icon} `:""}{c.name}</span>
-                              <span style={{ color:STATE_BADGE.color,fontSize:8.5,fontWeight:800,textTransform:"uppercase",letterSpacing:0.4,border:`1px solid ${STATE_BADGE.color}55`,borderRadius:6,padding:"1px 5px" }}>{STATE_BADGE.label}</span>
-                            </span>
-                            <span style={{ display:"block",color:isOver?T.danger:T.sub,fontSize:10.5,marginTop:2 }}>{state==="skipped"?"Freed into Discretionary Pool this month":isOver?`${sym}${fmt(Math.abs(remaining))} over`:`${sym}${fmt(remaining)} left`}</span>
+                  mandatoryCommitments.map(c=>{
+                    const cat = cats.find(x=>x.id===c.categoryId);
+                    const spent = getCategoryAttributedTotal(monthTxns, c.categoryId, { allTransactions: txns });
+                    const { remaining, isOver } = getMandatoryCommitmentRemaining(c, spent);
+                    // WP7 — Planned/Committed, Actual, Skipped: three of the four preserved
+                    // states (the fourth, Unplanned Actual, is household-level, surfaced below).
+                    const state = getMandatoryCommitmentState(c, spent, viewMonth);
+                    const STATE_BADGE = {
+                      skipped: { label:"Skipped", color:T.warn },
+                      actual: { label:"Actual", color:T.accent },
+                      planned: { label:"Planned", color:T.sub },
+                    }[state];
+                    return (
+                      <button key={c.id} onClick={()=>{ setEditingCommitment(c); setShowAddCommitment(true); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",background:"none",border:"none",borderLeft:`2px ${state==="planned"?"dashed":"solid"} ${T.border}`,borderBottom:`1px solid ${T.border}`,padding:"9px 0 9px 10px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif",opacity:state==="skipped"?0.6:1 }}>
+                        <span style={{ minWidth:0 }}>
+                          <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                            <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{cat?.icon?`${cat.icon} `:""}{c.name}</span>
+                            <span style={{ color:STATE_BADGE.color,fontSize:8.5,fontWeight:800,textTransform:"uppercase",letterSpacing:0.4,border:`1px solid ${STATE_BADGE.color}55`,borderRadius:6,padding:"1px 5px" }}>{STATE_BADGE.label}</span>
                           </span>
-                          <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono,flexShrink:0 }}>{sym}{fmt(c.amount)}</span>
-                        </button>
-                      );
-                    })}
-                    <div style={{ display:"flex",justifyContent:"space-between",paddingTop:10 }}>
-                      <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Total reserved</span>
-                      <span style={{ color:T.text,fontSize:13,fontWeight:900,fontFamily:FONT.mono }}>{sym}{fmt(mandatoryTotal)}</span>
-                    </div>
-                  </>
+                          <span style={{ display:"block",color:isOver?T.danger:T.sub,fontSize:10.5,marginTop:2 }}>{state==="skipped"?"Freed into Discretionary Pool this month":isOver?`${sym}${fmt(Math.abs(remaining))} over`:`${sym}${fmt(remaining)} left`}</span>
+                        </span>
+                        <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono,flexShrink:0 }}>{sym}{fmt(c.amount)}</span>
+                      </button>
+                    );
+                  })
                 )}
               </div>
 
               {/* WP6 — Discretionary Pool: Monthly Budget − Mandatory Commitments, then
                   Person/Group Planning Allocations (already-existing envelopes, unchanged) carved
-                  out of it. hierarchyWarning is the new Σ(children) ≤ parent check the sibling
-                  dimensions never had. */}
+                  out of it. liveHierarchyWarning is the Σ(children) ≤ parent check the sibling
+                  dimensions never had. WP11 — the Person/Group allocation rows (previously behind
+                  a separate "Budgets" tab) now render inline as this card's children, exactly
+                  where the handoff's tree puts them; nothing about how they compute or save
+                  changed, only where they render. The duplicate Discretionary Pool banner the old
+                  Budgets tab showed above them is gone — this card's own numbers above already
+                  say the same thing once, not twice. */}
               <div style={{ ...card }}>
-                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6 }}>Discretionary Pool</div>
-                <div style={{ color:discretionaryPool<0?T.danger:T.text,fontSize:22,fontWeight:900,marginBottom:10 }}>{sym}{fmt(discretionaryPool)}</div>
-                <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}>
-                  <span style={{ color:T.sub,fontSize:12 }}>Allocated to people/groups</span>
-                  <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(discretionaryAllocated)}</span>
-                </div>
-                <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}>
-                  <span style={{ color:T.sub,fontSize:12 }}>Unallocated</span>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:2 }}>Discretionary Pool</div>
+                <div style={{ color:T.sub,fontSize:10,marginBottom:8 }}>Budget − commitments</div>
+                <div style={{ color:liveDiscretionaryPool<0?T.danger:T.text,fontSize:22,fontWeight:900,marginBottom:10 }}>{sym}{fmt(liveDiscretionaryPool)}</div>
+
+                {people.filter(p=>getPersonModules(p).includes("budget")).map(p=>{
+                  const personMonthBudget = getPersonPlanningAllocation(p, viewMonth);
+                  const personMonthSpend = monthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
+                  const personPct = personMonthBudget>0 ? Math.min(100,Math.round(personMonthSpend/personMonthBudget*100)) : 0;
+                  const personIsOver = personMonthSpend > personMonthBudget && personMonthBudget > 0;
+                  const personDraftInvalid = p.id in personBudgetDrafts
+                    ? wouldExceedDiscretionaryPool(liveDiscretionaryPool, personAllocationExcept(p.id), parseMoney(personBudgetDrafts[p.id]||"")||0)
+                    : null;
+                  return (
+                    <div key={p.id} style={{ borderLeft:`2px solid ${T.border}`,paddingLeft:10,marginBottom:10 }}>
+                      <div onClick={()=>{ setExpandedBudgetPersonId(prev=>prev===p.id?null:p.id); setExpandedBudgetCatId(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}>
+                        <div style={{ display:"flex",alignItems:"center",gap:6,minWidth:0 }}>
+                          <span style={{ color:T.sub,fontSize:11 }}>{expandedBudgetPersonId===p.id?"▾":"▸"}</span>
+                          <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{p.emoji} {p.name}</span>
+                        </div>
+                        <div style={{ display:"flex",alignItems:"center",gap:6 }} onClick={e=>e.stopPropagation()}>
+                          <span style={{ color:T.sub,fontSize:11 }}>{sym}</span>
+                          <input
+                            style={{ background:T.input,border:`1px solid ${personDraftInvalid?T.danger:T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:80,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
+                            type="text" inputMode="decimal" placeholder="0"
+                            value={p.id in personBudgetDrafts ? personBudgetDrafts[p.id] : (personMonthBudget?String(personMonthBudget):"")}
+                            onChange={e=>{ const val=cleanMoneyInput(e.target.value); setPersonBudgetDrafts(prev=>({...prev,[p.id]:val})); }}
+                            onBlur={()=>commitPersonBudget(p)}
+                            onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); commitPersonBudget(p); e.currentTarget.blur(); } }}
+                          />
+                        </div>
+                      </div>
+                      {personDraftInvalid&&(
+                        <div style={{ color:T.danger,fontSize:10.5,fontWeight:700,marginTop:4,textAlign:"right" }}>⚠️ Exceeds Discretionary Pool by {sym}{fmt(personDraftInvalid.overBy)} — reduce this to save.</div>
+                      )}
+                      {personMonthBudget>0&&(
+                        <div style={{ color:personIsOver?T.danger:T.sub,fontSize:10.5,marginTop:2 }}>{sym}{fmt(personMonthSpend)} spent · {personIsOver?`${sym}${fmt(personMonthSpend-personMonthBudget)} over`:`${sym}${fmt(personMonthBudget-personMonthSpend)} left`}</div>
+                      )}
+                      {expandedBudgetPersonId===p.id&&(
+                        <PersonBudgetDrilldown p={p} monthTxns={monthTxns} months={months} fyLabel={fyLabel} budgetPersonViewMode={budgetPersonViewMode} setBudgetPersonViewMode={setBudgetPersonViewMode} expandedBudgetCatId={expandedBudgetCatId} setExpandedBudgetCatId={setExpandedBudgetCatId}/>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Group budgets — flat `manualLimit` (edited on the group's own profile) is the
+                    default; `manualLimitOverrides[monthKey]` lets a specific month deviate. */}
+                {groups.map(g=>{
+                  const groupMonthBudget = Number(g.manualLimitOverrides?.[viewMonth] ?? g.manualLimit ?? 0);
+                  const groupOldStyle = monthTxns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id)).reduce((s,t)=>s+Number(t.amount||0),0);
+                  const groupAllocStyle = monthTxns.filter(t=>t.type==="expense"&&t.groupId!==g.id&&t.tagGroup!==g.id&&t.taggedGroupId!==g.id&&t.groupAllocations?.some(ga=>ga.groupId===g.id)).reduce((s,t)=>s+Number(t.groupAllocations.find(ga=>ga.groupId===g.id)?.amount||0),0);
+                  const groupMonthSpend = groupOldStyle + groupAllocStyle;
+                  const groupIsOver = groupMonthSpend > groupMonthBudget && groupMonthBudget > 0;
+                  const groupDraftInvalid = g.id in groupBudgetDrafts
+                    ? wouldExceedDiscretionaryPool(liveDiscretionaryPool, groupAllocationExcept(g.id), parseMoney(groupBudgetDrafts[g.id]||"")||0)
+                    : null;
+                  return (
+                    <div key={g.id} style={{ borderLeft:`2px solid ${T.border}`,paddingLeft:10,marginBottom:10 }}>
+                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{g.icon||"👥"} {g.name}</span>
+                        <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                          <span style={{ color:T.sub,fontSize:11 }}>{sym}</span>
+                          <input
+                            style={{ background:T.input,border:`1px solid ${groupDraftInvalid?T.danger:T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:80,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
+                            type="text" inputMode="decimal" placeholder="0"
+                            value={g.id in groupBudgetDrafts ? groupBudgetDrafts[g.id] : (groupMonthBudget?String(groupMonthBudget):"")}
+                            onChange={e=>{ const val=cleanMoneyInput(e.target.value); setGroupBudgetDrafts(prev=>({...prev,[g.id]:val})); }}
+                            onBlur={()=>commitGroupBudget(g)}
+                            onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); commitGroupBudget(g); e.currentTarget.blur(); } }}
+                          />
+                        </div>
+                      </div>
+                      {groupDraftInvalid&&(
+                        <div style={{ color:T.danger,fontSize:10.5,fontWeight:700,marginTop:4,textAlign:"right" }}>⚠️ Exceeds Discretionary Pool by {sym}{fmt(groupDraftInvalid.overBy)} — reduce this to save.</div>
+                      )}
+                      {groupMonthBudget>0&&(
+                        <div style={{ color:groupIsOver?T.danger:T.sub,fontSize:10.5,marginTop:2 }}>{sym}{fmt(groupMonthSpend)} spent · {groupIsOver?`${sym}${fmt(groupMonthSpend-groupMonthBudget)} over`:`${sym}${fmt(groupMonthBudget-groupMonthSpend)} left`}</div>
+                      )}
+                    </div>
+                  );
+                })}
+                <button onClick={()=>{ setTab("people"); setShowSettings(false); }} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 0",marginBottom:10 }}>Manage People/Groups →</button>
+
+                <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderTop:`1px solid ${T.border}`,paddingTop:8 }}>
+                  <span style={{ color:T.sub,fontSize:12,fontWeight:700 }}>Unallocated</span>
                   <span style={{ color:unallocatedDiscretionary<0?T.danger:T.success,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(unallocatedDiscretionary)}</span>
                 </div>
-                {hierarchyWarning&&(
-                  <div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",color:T.danger,fontSize:11,fontWeight:700,marginTop:10 }}>⚠️ Person/Group allocations exceed the Discretionary Pool by {sym}{fmt(hierarchyWarning.overBy)}.</div>
+                {liveHierarchyWarning&&(
+                  <div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",color:T.danger,fontSize:11,fontWeight:700,marginTop:10 }}>⚠️ Person/Group allocations exceed the Discretionary Pool by {sym}{fmt(liveHierarchyWarning.overBy)}.</div>
                 )}
               </div>
 
               {/* WP7 — Unplanned Actual: the fourth preserved state. Real spend this month in a
                   category no active Mandatory Commitment covers — money that left the household
                   with nothing planned behind it, surfaced honestly rather than folded into
-                  Discretionary or silently dropped. */}
+                  Discretionary or silently dropped. WP11 — "Not in budget" per the handoff's
+                  copy, with a real action: opens the existing Add Commitment sheet pre-filled
+                  with this category, so acting on it commits to the exact same mechanism as the
+                  Mandatory Commitments card above, not a second one. */}
               {unplannedSpend.length>0&&(
                 <div style={{ ...card }}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8 }}>
-                    <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Unplanned This Month</div>
+                    <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Not In Budget</div>
                     <span style={{ color:T.warn,fontSize:13,fontWeight:900,fontFamily:FONT.mono }}>{sym}{fmt(unplannedTotal)}</span>
                   </div>
                   <div style={{ color:T.sub,fontSize:11,marginBottom:10,lineHeight:1.4 }}>Spent this month in a category no Mandatory Commitment reserves for.</div>
                   {unplannedSpend.slice(0,5).map(x=>(
-                    <div key={x.category.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                    <div key={x.category.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0" }}>
                       <span style={{ color:T.text,fontSize:12 }}>{x.category.icon?`${x.category.icon} `:""}{x.category.name}</span>
-                      <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(x.amount)}</span>
+                      <span style={{ display:"flex",alignItems:"center",gap:8 }}>
+                        <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(x.amount)}</span>
+                        <button onClick={()=>{ setEditingCommitment(null); setPrefilledCommitmentCategoryId(x.category.id); setShowAddCommitment(true); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>Add as commitment</button>
+                      </span>
                     </div>
                   ))}
                   {unplannedSpend.length>5&&<div style={{ color:T.sub,fontSize:10,marginTop:2 }}>+{unplannedSpend.length-5} more</div>}
                 </div>
               )}
 
-              {/* BUD-002 D.1 — Budget Health (Progress Ring/tile) + Forecast Card, side by side per Sections layout */}
-              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12 }}>
-                <div style={{ background:`linear-gradient(135deg,${healthColor}12,${T.card})`,border:`1px solid ${healthColor}44`,borderRadius:16,padding:14 }}>
-                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Budget Health</div>
-                  <div style={{ color:healthColor,fontSize:13,fontWeight:800,marginBottom:8 }}>{healthNote}</div>
-                  {/* D.1 Accessibility: status conveyed via label text, not color alone */}
-                  <div style={{ display:"inline-block",background:healthColor+"22",border:`1px solid ${healthColor}44`,borderRadius:20,padding:"3px 10px" }}><span style={{ color:healthColor,fontSize:10,fontWeight:800 }}>{healthLabel.toUpperCase()}</span></div>
-                </div>
-                <div style={{ ...card,marginBottom:0 }}>
-                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Forecast · Month End</div>
-                  <div style={{ color:isProjectedOver?T.danger:T.text,fontSize:18,fontWeight:900,marginBottom:4 }}>{sym}{fmt(projectedMonthEnd)}</div>
-                  <div style={{ color:isProjectedOver?T.danger:T.success,fontSize:11,fontWeight:700 }}>{isProjectedOver?"⚠️":"✓"} {Math.abs(projectedMarginPct)}% {projectedMarginPct>=0?"under":"over"} budget</div>
-                </div>
-              </div>
-
-              {/* BUD-002 D.1 Secondary Action: Variance summary → Insights (Month View).
-                  Household-level only on Home — dimension-level detail stays in Insights,
-                  per D.1 Displayed Data ("with a path to Insights for dimension-level detail").
-                  No category/person breakdown rendered here (A.2 — Observe never edits or
-                  analyzes; that's Understand's job). */}
-              <button onClick={()=>setBudgetSubTab("insights")} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:14,padding:"14px",cursor:"pointer",color:T.accent,fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}>
-                See full breakdown in Insights →
+              {/* WP11 — Budget Health + Forecast cards removed here per the handoff (Flag 4):
+                  month-end forecasting moves to Insights, which already calls the exact same
+                  getMonthEndForecast function for its own "Budget performance" section (see
+                  InsightsPage) — nothing is lost, it's shown once, on the screen the handoff
+                  says owns it, not duplicated on both. */}
+              <button onClick={()=>setBudgetView("year")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,cursor:"pointer",border:`1px solid ${T.border}` }}>
+                <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>Year view</span>
+                <span style={{ color:T.accent,fontSize:16 }}>›</span>
               </button>
-
-              {/* BUD-002 D.1 Alert Banner: intentionally NOT rendered here. No verified
-                  household-level alert rule exists in the repository — only a person-level
-                  threshold (budgetAlerts, App.jsx ~L1741). Inventing a household-level
-                  threshold to fill this slot would violate the "no invented behavior"
-                  instruction; this is recorded as deferred, not silently omitted. */}
+              <button onClick={()=>setTab("insights")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,cursor:"pointer",border:`1px solid ${T.border}` }}>
+                <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>Budget performance in Insights</span>
+                <span style={{ color:T.accent,fontSize:16 }}>›</span>
+              </button>
             </>
           );
         })()}
-        {budgetSubTab==="overview"&&(<>
+        {budgetView==="year"&&(<>
         <div style={{ color:T.text,fontSize:15,fontWeight:900,marginBottom:2 }}>Annual Budget</div>
         <div style={{ ...card,padding:"10px 12px",marginBottom:12 }}>
           <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:8 }}>
@@ -14925,281 +14982,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         })}
         </>)}
 
-        {/* Gate 3 (BUD-002 D.3) — StatsPage embed replaced with the dedicated BudgetInsights
-            shell (Option B, locked at Gate 2). StatsPage itself is untouched and unmounted
-            here, not deleted — its Cash Flow/Credit/Investments content's fate is a deferred
-            product decision, not resolved by this change. */}
-        {budgetSubTab==="insights"&&<BudgetInsights viewMonth={viewMonth} setViewMonth={setViewMonth} cats={cats} txns={txns} people={people} T={T} sym={sym} fmt={fmt}/>}
-
-        {budgetSubTab==="budgets"&&(<>
-        {liveDiscretionaryPool>0&&(
-          <div style={{ ...card,background:liveHierarchyWarning?T.danger+"12":T.accentSoft,border:`1px solid ${liveHierarchyWarning?T.danger+"44":T.accent+"33"}`,marginTop:8,marginBottom:4 }}>
-            <div style={{ display:"flex",justifyContent:"space-between",fontSize:12 }}>
-              <span style={{ color:T.sub }}>Discretionary Pool</span>
-              <span style={{ color:T.text,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(liveDiscretionaryPool)}</span>
-            </div>
-            <div style={{ display:"flex",justifyContent:"space-between",fontSize:12,marginTop:4 }}>
-              <span style={{ color:T.sub }}>Allocated below</span>
-              <span style={{ color:liveHierarchyWarning?T.danger:T.text,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(liveDiscretionaryAllocated)}</span>
-            </div>
-            {liveHierarchyWarning&&<div style={{ color:T.danger,fontSize:11,fontWeight:700,marginTop:6 }}>⚠️ Over by {sym}{fmt(liveHierarchyWarning.overBy)} — one of the amounts below needs to come down.</div>}
-          </div>
-        )}
-        {/* Per-person budgets — the flat `spendBudget` field (edited on the person's own profile)
-            is the default; `spendBudgetOverrides[monthKey]` lets a specific month deviate from it,
-            the same default+override pattern the Annual Budget already uses via `monthOverrides`.
-            Falls back to the flat field when no override exists for the selected month. */}
-        <div style={{ marginTop:20 }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12 }}>
-            <div style={{ color:"#16a34a",fontSize:15,fontWeight:900 }}>👤 Per-Person Budgets</div>
-            <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
-          </div>
-          {people.filter(p=>getPersonModules(p).includes("budget")).map(p=>{
-                     const monthBudget = getPersonPlanningAllocation(p, viewMonth);
-            const monthSpend = thisMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
-            const pct = monthBudget>0 ? Math.min(100,Math.round(monthSpend/monthBudget*100)) : 0;
-            const isOver = monthSpend > monthBudget && monthBudget > 0;
-            // WP7 correction — live, blocking validation on the draft itself (not just on
-            // blur/commit): shown the moment the candidate would exceed the pool, so the person
-            // sees it before they even try to save.
-            const personDraftInvalid = p.id in personBudgetDrafts
-              ? wouldExceedDiscretionaryPool(liveDiscretionaryPool, personAllocationExcept(p.id), parseMoney(personBudgetDrafts[p.id]||"")||0)
-              : null;
-            return (
-              <div key={p.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,marginBottom:10,padding:"12px 14px" }}>
-                <div onClick={()=>{ setExpandedBudgetPersonId(prev=>prev===p.id?null:p.id); setExpandedBudgetCatId(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,cursor:"pointer" }}>
-                  <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                    <span style={{ color:T.sub,fontSize:11 }}>{expandedBudgetPersonId===p.id?"▾":"▸"}</span>
-                    <div style={{ width:30,height:30,borderRadius:"50%",background:"#f0fdf4",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{p.emoji}</div>
-                    <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{p.name}</div>
-                  </div>
-                  <div style={{ display:"flex",alignItems:"center",gap:6 }} onClick={e=>e.stopPropagation()}>
-                    <span style={{ color:T.sub,fontSize:11 }}>₹</span>
-                    <input
-                      style={{ background:T.input,border:`1px solid ${personDraftInvalid?T.danger:T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
-                      type="text" inputMode="decimal" placeholder="Budget"
-                      value={p.id in personBudgetDrafts ? personBudgetDrafts[p.id] : (monthBudget?String(monthBudget):"")}
-                      onChange={e=>{ const val=cleanMoneyInput(e.target.value); setPersonBudgetDrafts(prev=>({...prev,[p.id]:val})); }}
-                      onBlur={()=>commitPersonBudget(p)}
-                      onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); commitPersonBudget(p); e.currentTarget.blur(); } }}
-                    />
-                    <span style={{ color:T.sub,fontSize:10 }}>this mo.</span>
-                  </div>
-                </div>
-                {personDraftInvalid&&(
-                  <div style={{ color:T.danger,fontSize:10.5,fontWeight:700,marginBottom:8,textAlign:"right" }}>⚠️ Exceeds Discretionary Pool by {sym}{fmt(personDraftInvalid.overBy)} — reduce this to save.</div>
-                )}
-                {monthBudget>0&&(
-                  <>
-                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4 }}>
-                      <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(monthSpend)} of {sym}{fmt(monthBudget)}</span>
-                      <span style={{ color:isOver?T.danger:"#16a34a",fontSize:13,fontWeight:900 }}>{pct}%</span>
-                    </div>
-                    <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
-                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:"#16a34a",borderRadius:3 }}/>
-                    </div>
-                    {isOver&&<div style={{ textAlign:"right" }}><span style={{ color:T.danger,fontSize:10,fontWeight:700 }}>Over {sym}{fmtK(monthSpend-monthBudget)}</span></div>}
-                  </>
-                )}
-                {expandedBudgetPersonId===p.id&&(
-                  <div style={{ marginTop:10,borderTop:`1px solid ${T.border}`,paddingTop:10 }}>
-                    <div style={{ display:"flex",background:T.input,borderRadius:10,padding:2,marginBottom:10 }}>
-                      {[["month","This Month"],["year",fyLabel]].map(([id,label])=>(
-                        <button key={id} onClick={()=>setBudgetPersonViewMode(id)} style={{ flex:1,textAlign:"center",padding:"6px 4px",fontSize:11,fontWeight:800,borderRadius:8,border:"none",cursor:"pointer",background:budgetPersonViewMode===id?"#16a34a22":"none",color:budgetPersonViewMode===id?"#16a34a":T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
-                      ))}
-                    </div>
-
-                    {budgetPersonViewMode==="month"&&(()=>{
-                      const catTotals = {};
-                      const catTxns = {};
-                      thisMonthTxns.filter(t=>t.type==="expense").forEach(t=>{
-                        const amt = getPersonAttributedAmount(t,p.id);
-                        if(amt<=0) return;
-                        const tCats = (t.catIds||[t.catId]).filter(Boolean);
-                        tCats.forEach(cid=>{
-                          const share = amt/tCats.length;
-                          catTotals[cid] = (catTotals[cid]||0)+share;
-                          if(!catTxns[cid]) catTxns[cid]=[];
-                          catTxns[cid].push({t,share});
-                        });
-                      });
-                      const rows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt, txns:catTxns[cid] })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
-                      if(!rows.length) return <div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"12px 0" }}>No spend recorded for {p.name} this month yet.</div>;
-                      return (
-                        <div>
-                          {rows.map(r=>(
-                            <div key={r.cat.id}>
-                              <div onClick={()=>setExpandedBudgetCatId(prev=>prev===r.cat.id?null:r.cat.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",cursor:"pointer" }}>
-                                <span style={{ color:T.text,fontSize:12 }}>{r.cat.icon} {r.cat.name}</span>
-                                <span style={{ display:"flex",alignItems:"center",gap:6 }}>
-                                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(r.amt)}</span>
-                                  <span style={{ color:T.sub,fontSize:10 }}>{expandedBudgetCatId===r.cat.id?"▾":"▸"}</span>
-                                </span>
-                              </div>
-                              {expandedBudgetCatId===r.cat.id&&(
-                                <div style={{ background:T.input,borderRadius:10,padding:"6px 12px",marginBottom:6 }}>
-                                  {r.txns.map(({t,share},i)=>(
-                                    <div key={i} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:i<r.txns.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
-                                      <div>
-                                        <div style={{ color:T.text,fontSize:11,fontWeight:700 }}>{t.merchant||t.who||t.desc||"Expense"}</div>
-                                        <div style={{ color:T.sub,fontSize:9 }}>{formatShortDate(t.date)||t.date}</div>
-                                      </div>
-                                      <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{sym}{fmt(share)}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })()}
-
-                    {budgetPersonViewMode==="year"&&(()=>{
-                      // Annual budget for this person = sum of their 12 monthly budgets for the FY,
-                      // using each month's override where set and falling back to the flat default
-                      // (same default+override pattern as the household Annual Budget).
-                          const personAnnualBudget = months.reduce((s,m)=>s+getPersonPlanningAllocation(p, m.key),0);
-                      const monthSpends = months.map(m=>{
-                        const mTxns = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(m.key));
-                        const spend = mTxns.reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
-                        const budget = getPersonPlanningAllocation(p, m.key);
-                        return { ...m, spend, budget };
-                      });
-                      const ytdSpend = monthSpends.reduce((s,m)=>s+m.spend,0);
-                      const ytdRemaining = personAnnualBudget - ytdSpend;
-                      const ytdPct = personAnnualBudget>0 ? Math.min(100,Math.round(ytdSpend/personAnnualBudget*100)) : (ytdSpend>0?100:0);
-
-                      const catTotals = {};
-                      months.forEach(m=>{
-                        txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(m.key)).forEach(t=>{
-                          const amt = getPersonAttributedAmount(t,p.id);
-                          if(amt<=0) return;
-                          const tCats = (t.catIds||[t.catId]).filter(Boolean);
-                          tCats.forEach(cid=>{ catTotals[cid]=(catTotals[cid]||0)+amt/tCats.length; });
-                        });
-                      });
-                      const catRows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
-
-                      return (
-                        <div>
-                          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12 }}>
-                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Annual Budget</div><div style={{ color:T.text,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(personAnnualBudget)}</div></div>
-                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Spent (YTD)</div><div style={{ color:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(ytdSpend)}</div></div>
-                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>{ytdRemaining>=0?"Remaining":"Over Budget"}</div><div style={{ color:ytdRemaining>=0?"#16a34a":T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{ytdRemaining<0?"-":""}{sym}{fmt(Math.abs(ytdRemaining))}</div></div>
-                            <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Used</div><div style={{ color:ytdPct>100?T.danger:"#16a34a",fontSize:15,fontWeight:900,marginTop:2 }}>{ytdPct}%</div></div>
-                          </div>
-                          <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:14 }}>
-                            <div style={{ height:"100%",width:`${Math.min(100,ytdPct)}%`,background:ytdPct>100?T.danger:"#16a34a",borderRadius:3 }}/>
-                          </div>
-
-                          {catRows.length>0&&(
-                            <div style={{ marginBottom:14 }}>
-                              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Category Breakdown · {fyLabel}</div>
-                              {catRows.slice(0,8).map(r=>(
-                                <div key={r.cat.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
-                                  <span style={{ color:T.text,fontSize:12 }}>{r.cat.icon} {r.cat.name}</span>
-                                  <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(r.amt)}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Month by Month <span style={{ textTransform:"none",fontWeight:600 }}>· tap to edit that month's budget</span></div>
-                          {monthSpends.map(m=>{
-                            const mOver = m.budget>0 && m.spend>m.budget;
-                            return (
-                              <div key={m.key} onClick={()=>{ setViewMonth(m.key); setBudgetPersonViewMode("month"); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
-                                <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{m.label}</span>
-                                <span style={{ display:"flex",alignItems:"center",gap:6 }}>
-                                  <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(m.spend)}{m.budget>0?` / ${sym}${fmt(m.budget)}`:""}</span>
-                                  {mOver&&<span style={{ color:T.danger,fontSize:10 }}>⚠️</span>}
-                                  <span style={{ color:T.sub,fontSize:10 }}>›</span>
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          <button onClick={()=>{ setTab("people"); setShowSettings(false); }} style={{ background:"none",border:"none",color:"#16a34a",fontSize:12,fontWeight:700,cursor:"pointer",padding:"6px 0",display:"flex",alignItems:"center",gap:4 }}>Manage People →</button>
-        </div>
-
-        {/* Group budgets — flat `manualLimit` (edited on the group's own profile) is the default;
-            `manualLimitOverrides[monthKey]` lets a specific month deviate from it. */}
-        <div style={{ marginTop:20,paddingBottom:80 }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12 }}>
-            <div style={{ color:"#16a34a",fontSize:15,fontWeight:900 }}>👥 Group Budgets</div>
-            <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{new Date(viewMonth+"-01").toLocaleString("en-IN",{month:"long",year:"numeric"})}</div>
-          </div>
-          {groups.map(g=>{
-            const monthBudget = Number(g.manualLimitOverrides?.[viewMonth] ?? g.manualLimit ?? 0);
-            const oldStyle = thisMonthTxns.filter(t=>t.type==="expense"&&(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id)).reduce((s,t)=>s+Number(t.amount||0),0);
-            const allocStyle = thisMonthTxns.filter(t=>t.type==="expense"&&t.groupId!==g.id&&t.tagGroup!==g.id&&t.taggedGroupId!==g.id&&t.groupAllocations?.some(ga=>ga.groupId===g.id)).reduce((s,t)=>s+Number(t.groupAllocations.find(ga=>ga.groupId===g.id)?.amount||0),0);
-            const monthSpend = oldStyle + allocStyle;
-            const pct = monthBudget>0 ? Math.min(100,Math.round(monthSpend/monthBudget*100)) : 0;
-            const isOver = monthSpend > monthBudget && monthBudget > 0;
-            // WP7 correction — same live, blocking validation as the Person rows above.
-            const groupDraftInvalid = g.id in groupBudgetDrafts
-              ? wouldExceedDiscretionaryPool(liveDiscretionaryPool, groupAllocationExcept(g.id), parseMoney(groupBudgetDrafts[g.id]||"")||0)
-              : null;
-            return (
-              <div key={g.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,marginBottom:10,padding:"12px 14px" }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
-                  <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                    <div style={{ width:30,height:30,borderRadius:10,background:"#f0fdf4",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16 }}>{g.icon||"👥"}</div>
-                    <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{g.name}</div>
-                  </div>
-                  <div style={{ display:"flex",alignItems:"center",gap:6 }}>
-                    <span style={{ color:T.sub,fontSize:11 }}>₹</span>
-                    <input
-                      style={{ background:T.input,border:`1px solid ${groupDraftInvalid?T.danger:T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:90,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
-                      type="text" inputMode="decimal" placeholder="Budget"
-                      value={g.id in groupBudgetDrafts ? groupBudgetDrafts[g.id] : (monthBudget?String(monthBudget):"")}
-                      onChange={e=>{ const val=cleanMoneyInput(e.target.value); setGroupBudgetDrafts(prev=>({...prev,[g.id]:val})); }}
-                      onBlur={()=>commitGroupBudget(g)}
-                      onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); commitGroupBudget(g); e.currentTarget.blur(); } }}
-                    />
-                    <span style={{ color:T.sub,fontSize:10 }}>this mo.</span>
-                  </div>
-                </div>
-                {groupDraftInvalid&&(
-                  <div style={{ color:T.danger,fontSize:10.5,fontWeight:700,marginBottom:8,textAlign:"right" }}>⚠️ Exceeds Discretionary Pool by {sym}{fmt(groupDraftInvalid.overBy)} — reduce this to save.</div>
-                )}
-                {monthBudget>0&&(
-                  <>
-                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4 }}>
-                      <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(monthSpend)} of {sym}{fmt(monthBudget)}</span>
-                      <span style={{ color:isOver?T.danger:"#16a34a",fontSize:13,fontWeight:900 }}>{pct}%</span>
-                    </div>
-                    <div style={{ height:5,background:T.border,borderRadius:3,marginBottom:4 }}>
-                      <div style={{ height:"100%",width:`${pct}%`,background:isOver?T.danger:"#16a34a",borderRadius:3 }}/>
-                    </div>
-                    {isOver&&<div style={{ textAlign:"right" }}><span style={{ color:T.danger,fontSize:10,fontWeight:700 }}>Over {sym}{fmtK(monthSpend-monthBudget)}</span></div>}
-                  </>
-                )}
-              </div>
-            );
-          })}
-          <button onClick={()=>{ setTab("people"); setShowSettings(false); }} style={{ background:"none",border:"none",color:"#16a34a",fontSize:12,fontWeight:700,cursor:"pointer",padding:"6px 0",display:"flex",alignItems:"center",gap:4 }}>Manage Groups →</button>
-        </div>
-        </>)}
         {showAddCommitment&&<AddMandatoryCommitmentModal
           existing={editingCommitment}
           monthKey={viewMonth}
-          onClose={()=>{ setShowAddCommitment(false); setEditingCommitment(null); }}
+          prefilledCategoryId={prefilledCommitmentCategoryId}
+          onClose={()=>{ setShowAddCommitment(false); setEditingCommitment(null); setPrefilledCommitmentCategoryId(null); }}
           onSave={record=>{
             setMandatoryCommitments(prev=>editingCommitment ? prev.map(c=>c.id===record.id?record:c) : [record, ...prev]);
-            setShowAddCommitment(false); setEditingCommitment(null);
+            setShowAddCommitment(false); setEditingCommitment(null); setPrefilledCommitmentCategoryId(null);
           }}
           onDelete={id=>{
             setMandatoryCommitments(prev=>prev.filter(c=>c.id!==id));
-            setShowAddCommitment(false); setEditingCommitment(null);
+            setShowAddCommitment(false); setEditingCommitment(null); setPrefilledCommitmentCategoryId(null);
           }}
         />}
       </div>
@@ -15210,11 +15004,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Name + amount + a Category to attribute real spend against — "spending reduces exactly one
   // envelope, computed once," reusing getCategoryAttributedTotal (BudgetPage's own render), never
   // a new spend engine or a new transaction-tagging mechanism.
-  const AddMandatoryCommitmentModal = ({ existing, monthKey, onClose, onSave, onDelete }) => {
+  const AddMandatoryCommitmentModal = ({ existing, monthKey, prefilledCategoryId, onClose, onSave, onDelete }) => {
     const isEdit = Boolean(existing);
     const [name, setName] = useState(existing?.name || "");
     const [amount, setAmount] = useState(existing?.amount ? String(existing.amount) : "");
-    const [categoryId, setCategoryId] = useState(existing?.categoryId || cats[0]?.id || "");
+    // WP11 — "Add as commitment" on a Not In Budget row opens this same sheet pre-filled with
+    // that category, rather than a second creation path.
+    const [categoryId, setCategoryId] = useState(existing?.categoryId || prefilledCategoryId || cats[0]?.id || "");
     // WP7 — "Skipped" state, same per-month opt-out shape as the existing
     // skippedInvestmentMonths[] pattern: a commitment.skippedMonths array of monthKeys, not a
     // second confirmation mechanism. A skipped month is excluded from mandatoryTotal, which
@@ -15263,6 +15059,139 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {isEdit&&<button onClick={()=>onDelete(existing.id)} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"11px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete Commitment</button>}
           </div>
         </div>
+      </div>
+    );
+  };
+
+  // ── PERSON BUDGET DRILLDOWN (WP11 — extracted from the old "Budgets" tab's expanded-row
+  // content, unchanged logic) — Month/Year toggle, category breakdown, and the per-transaction
+  // drill-down under a category. Lives inline under the Discretionary Pool card's person row now
+  // instead of a separate tab; monthTxns is the same viewMonth-scoped array BudgetPage's main
+  // view already filters, replacing the old thisMonthTxns (which was always the real calendar
+  // "today" month regardless of which month PeriodSelector had navigated to — a real, pre-
+  // existing mismatch this merge fixes by construction, not by a special case).
+  const PersonBudgetDrilldown = ({ p, monthTxns, months, fyLabel, budgetPersonViewMode, setBudgetPersonViewMode, expandedBudgetCatId, setExpandedBudgetCatId }) => {
+    return (
+      <div style={{ marginTop:10,borderTop:`1px solid ${T.border}`,paddingTop:10 }}>
+        <div style={{ display:"flex",background:T.input,borderRadius:10,padding:2,marginBottom:10 }}>
+          {[["month","This Month"],["year",fyLabel]].map(([id,label])=>(
+            <button key={id} onClick={()=>setBudgetPersonViewMode(id)} style={{ flex:1,textAlign:"center",padding:"6px 4px",fontSize:11,fontWeight:800,borderRadius:8,border:"none",cursor:"pointer",background:budgetPersonViewMode===id?"#16a34a22":"none",color:budgetPersonViewMode===id?"#16a34a":T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
+          ))}
+        </div>
+
+        {budgetPersonViewMode==="month"&&(()=>{
+          const catTotals = {};
+          const catTxns = {};
+          monthTxns.filter(t=>t.type==="expense").forEach(t=>{
+            const amt = getPersonAttributedAmount(t,p.id);
+            if(amt<=0) return;
+            const tCats = (t.catIds||[t.catId]).filter(Boolean);
+            tCats.forEach(cid=>{
+              const share = amt/tCats.length;
+              catTotals[cid] = (catTotals[cid]||0)+share;
+              if(!catTxns[cid]) catTxns[cid]=[];
+              catTxns[cid].push({t,share});
+            });
+          });
+          const rows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt, txns:catTxns[cid] })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
+          if(!rows.length) return <div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"12px 0" }}>No spend recorded for {p.name} this month yet.</div>;
+          return (
+            <div>
+              {rows.map(r=>(
+                <div key={r.cat.id}>
+                  <div onClick={()=>setExpandedBudgetCatId(prev=>prev===r.cat.id?null:r.cat.id)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",cursor:"pointer" }}>
+                    <span style={{ color:T.text,fontSize:12 }}>{r.cat.icon} {r.cat.name}</span>
+                    <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(r.amt)}</span>
+                      <span style={{ color:T.sub,fontSize:10 }}>{expandedBudgetCatId===r.cat.id?"▾":"▸"}</span>
+                    </span>
+                  </div>
+                  {expandedBudgetCatId===r.cat.id&&(
+                    <div style={{ background:T.input,borderRadius:10,padding:"6px 12px",marginBottom:6 }}>
+                      {r.txns.map(({t,share},i)=>(
+                        <div key={i} onClick={()=>setTxnDetailId(t.id)} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:i<r.txns.length-1?`1px solid ${T.border}`:"none",cursor:"pointer" }}>
+                          <div>
+                            <div style={{ color:T.text,fontSize:11,fontWeight:700 }}>{t.merchant||t.who||t.desc||"Expense"}</div>
+                            <div style={{ color:T.sub,fontSize:9 }}>{formatShortDate(t.date)||t.date}</div>
+                          </div>
+                          <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{sym}{fmt(share)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+
+        {budgetPersonViewMode==="year"&&(()=>{
+          // Annual budget for this person = sum of their 12 monthly budgets for the FY,
+          // using each month's override where set and falling back to the flat default
+          // (same default+override pattern as the household Annual Budget).
+          const personAnnualBudget = months.reduce((s,m)=>s+getPersonPlanningAllocation(p, m.key),0);
+          const monthSpends = months.map(m=>{
+            const mTxns = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(m.key));
+            const spend = mTxns.reduce((s,t)=>s+getPersonAttributedAmount(t,p.id),0);
+            const budget = getPersonPlanningAllocation(p, m.key);
+            return { ...m, spend, budget };
+          });
+          const ytdSpend = monthSpends.reduce((s,m)=>s+m.spend,0);
+          const ytdRemaining = personAnnualBudget - ytdSpend;
+          const ytdPct = personAnnualBudget>0 ? Math.min(100,Math.round(ytdSpend/personAnnualBudget*100)) : (ytdSpend>0?100:0);
+
+          const catTotals = {};
+          months.forEach(m=>{
+            txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(m.key)).forEach(t=>{
+              const amt = getPersonAttributedAmount(t,p.id);
+              if(amt<=0) return;
+              const tCats = (t.catIds||[t.catId]).filter(Boolean);
+              tCats.forEach(cid=>{ catTotals[cid]=(catTotals[cid]||0)+amt/tCats.length; });
+            });
+          });
+          const catRows = Object.entries(catTotals).map(([cid,amt])=>({ cat:cats.find(c=>String(c.id)===String(cid)), amt })).filter(r=>r.cat).sort((a,b)=>b.amt-a.amt);
+
+          return (
+            <div>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12 }}>
+                <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Annual Budget</div><div style={{ color:T.text,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(personAnnualBudget)}</div></div>
+                <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Spent (YTD)</div><div style={{ color:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(ytdSpend)}</div></div>
+                <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>{ytdRemaining>=0?"Remaining":"Over Budget"}</div><div style={{ color:ytdRemaining>=0?"#16a34a":T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{ytdRemaining<0?"-":""}{sym}{fmt(Math.abs(ytdRemaining))}</div></div>
+                <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Used</div><div style={{ color:ytdPct>100?T.danger:"#16a34a",fontSize:15,fontWeight:900,marginTop:2 }}>{ytdPct}%</div></div>
+              </div>
+              <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:14 }}>
+                <div style={{ height:"100%",width:`${Math.min(100,ytdPct)}%`,background:ytdPct>100?T.danger:"#16a34a",borderRadius:3 }}/>
+              </div>
+
+              {catRows.length>0&&(
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Category Breakdown · {fyLabel}</div>
+                  {catRows.slice(0,8).map(r=>(
+                    <div key={r.cat.id} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0" }}>
+                      <span style={{ color:T.text,fontSize:12 }}>{r.cat.icon} {r.cat.name}</span>
+                      <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(r.amt)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6 }}>Month by Month <span style={{ textTransform:"none",fontWeight:600 }}>· tap to edit that month's budget</span></div>
+              {monthSpends.map(m=>{
+                const mOver = m.budget>0 && m.spend>m.budget;
+                return (
+                  <div key={m.key} onClick={()=>{ setViewMonth(m.key); setBudgetPersonViewMode("month"); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
+                    <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{m.label}</span>
+                    <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                      <span style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(m.spend)}{m.budget>0?` / ${sym}${fmt(m.budget)}`:""}</span>
+                      {mOver&&<span style={{ color:T.danger,fontSize:10 }}>⚠️</span>}
+                      <span style={{ color:T.sub,fontSize:10 }}>›</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
     );
   };
