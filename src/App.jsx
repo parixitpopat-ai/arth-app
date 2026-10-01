@@ -17483,7 +17483,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const validUntilCalc = validityDays && validFrom2 ? (()=>{ const d=new Date(validFrom2); d.setDate(d.getDate()+Number(validityDays)); return d.toISOString().split("T")[0]; })() : "";
     // Split state
     const [billSplitPeople,setBillSplitPeople]=useState({});
-    const [billGroup,setBillGroup]=useState("");
+    const [billGroup,setBillGroup]=useState(_preBA?.attributeType==="group" ? (_preBA.attributedTo||"") : "");
     const [splitCalc,setSplitCalc]=useState("equally");
     const [splitCustom,setSplitCustom]=useState({});
 
