@@ -643,6 +643,49 @@ export function getMandatoryCommitmentState(commitment, spent, monthKey) {
 }
 
 /**
+ * WP14 — Person/Group-scoped Mandatory Commitments. Locked product decision: a Mandatory
+ * Commitment "for Household" (categoryId only, no scope — every existing commitment, untouched)
+ * reduces the Household Discretionary Pool exactly as before. A commitment the person explicitly
+ * creates FOR a specific Person or Group (e.g. "Spouse's phone bill ₹699" carved out of her own
+ * envelope) is a DIFFERENT thing: it must reduce only THAT Person/Group's own envelope, never the
+ * household pool a second time (the envelope itself was already carved out of the household pool).
+ * Reuses the exact same record shape ({id, name, amount, categoryId, skippedMonths}) plus two new
+ * optional fields (scopeType: "person"|"group", scopeId) rather than a second commitments array —
+ * an existing record with neither field is implicitly household-scoped, zero migration needed.
+ * Every existing function above (getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining,
+ * getMandatoryCommitmentState, getDiscretionaryPool) is reused unchanged on the filtered subset —
+ * no new arithmetic, no second spend engine, just the same recursion one level deeper: a Person's
+ * own Discretionary = getDiscretionaryPool(personPlanningAllocation, that person's commitments
+ * total), the identical formula the Household already uses one level up.
+ */
+
+/**
+ * Is this commitment Household-scoped (the only kind that existed before WP14)? True for every
+ * commitment with no scopeType at all (all pre-existing data) or scopeType explicitly "household".
+ *
+ * @param {Object} commitment - {scopeType?}
+ * @returns {boolean}
+ */
+export function isHouseholdScopedCommitment(commitment) {
+  return !commitment?.scopeType || commitment.scopeType === "household";
+}
+
+/**
+ * The commitments created FOR one specific Person or Group — never includes Household-scoped
+ * commitments or a different Person/Group's own.
+ *
+ * @param {Array} mandatoryCommitments
+ * @param {"person"|"group"} scopeType
+ * @param {string} scopeId
+ * @returns {Array}
+ */
+export function getCommitmentsForScope(mandatoryCommitments, scopeType, scopeId) {
+  return (mandatoryCommitments || []).filter(
+    c => c?.scopeType === scopeType && String(c.scopeId) === String(scopeId)
+  );
+}
+
+/**
  * WP7 — the fourth state, "Unplanned Actual": which categories have NO
  * Mandatory Commitment covering them this month (skipped commitments don't
  * count as coverage — their category is exactly as unplanned as one with no

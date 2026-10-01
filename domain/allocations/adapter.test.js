@@ -23,6 +23,8 @@ import {
   getMandatoryCommitmentState,
   getUnplannedCategoryIds,
   wouldExceedDiscretionaryPool,
+  isHouseholdScopedCommitment,
+  getCommitmentsForScope,
 } from "./adapter.js";
 
 // --- Household: WP6 unified onto `??` semantics (explicit 0 is respected) ---
@@ -377,4 +379,60 @@ test("getUnplannedCategoryIds: every category covered — empty result", () => {
   const categories = [{ id: "rent" }];
   const commitments = [{ categoryId: "rent" }];
   assert.deepEqual(getUnplannedCategoryIds(categories, commitments, "2026-09"), []);
+});
+
+// --- WP14: Person/Group-scoped Mandatory Commitments ---
+
+test("isHouseholdScopedCommitment: true for a commitment with no scopeType at all (every pre-existing record)", () => {
+  assert.equal(isHouseholdScopedCommitment({ id: "c1", name: "Rent", amount: 20000, categoryId: "rent" }), true);
+});
+
+test("isHouseholdScopedCommitment: true for scopeType explicitly 'household'", () => {
+  assert.equal(isHouseholdScopedCommitment({ scopeType: "household" }), true);
+});
+
+test("isHouseholdScopedCommitment: false for a Person- or Group-scoped commitment", () => {
+  assert.equal(isHouseholdScopedCommitment({ scopeType: "person", scopeId: "p1" }), false);
+  assert.equal(isHouseholdScopedCommitment({ scopeType: "group", scopeId: "g1" }), false);
+});
+
+test("getCommitmentsForScope: returns only the commitments for that exact person/group, never household-scoped or a different person/group's own", () => {
+  const commitments = [
+    { id: "c1", name: "Rent", amount: 20000, categoryId: "rent" }, // household
+    { id: "c2", name: "Spouse pocket money", amount: 5000, categoryId: "personal", scopeType: "person", scopeId: "p1" },
+    { id: "c3", name: "Kid's allowance", amount: 1000, categoryId: "personal", scopeType: "person", scopeId: "p2" },
+    { id: "c4", name: "Family outing fund", amount: 3000, categoryId: "entertainment", scopeType: "group", scopeId: "g1" },
+  ];
+  assert.deepEqual(getCommitmentsForScope(commitments, "person", "p1").map(c => c.id), ["c2"]);
+  assert.deepEqual(getCommitmentsForScope(commitments, "person", "p2").map(c => c.id), ["c3"]);
+  assert.deepEqual(getCommitmentsForScope(commitments, "group", "g1").map(c => c.id), ["c4"]);
+  assert.deepEqual(getCommitmentsForScope(commitments, "person", "nobody"), []);
+});
+
+test("getCommitmentsForScope: ids compare as strings, same convention as every other scope/target lookup in this codebase", () => {
+  const commitments = [{ id: "c1", scopeType: "person", scopeId: 7 }];
+  assert.deepEqual(getCommitmentsForScope(commitments, "person", "7").map(c => c.id), ["c1"]);
+});
+
+test("getCommitmentsForScope: a safe empty array for no commitments at all", () => {
+  assert.deepEqual(getCommitmentsForScope([], "person", "p1"), []);
+  assert.deepEqual(getCommitmentsForScope(null, "person", "p1"), []);
+});
+
+test("WP14 worked example: Spouse's own ₹20,000 envelope with a ₹5,000 person-scoped commitment reduces HER discretionary to ₹15,000, and never touches the Household Discretionary Pool a second time", () => {
+  const allCommitments = [
+    { id: "c1", name: "Rent", amount: 20000, categoryId: "rent" }, // household-scoped
+    { id: "c2", name: "Spouse phone bill", amount: 5000, categoryId: "utilities", scopeType: "person", scopeId: "spouse1" },
+  ];
+  // Household Discretionary Pool must only ever see the household-scoped commitment.
+  const householdOnly = allCommitments.filter(isHouseholdScopedCommitment);
+  assert.equal(getMandatoryCommitmentsTotal(householdOnly), 20000, "the person-scoped commitment must not leak into the household total");
+  const householdMonthlyBudget = 100000;
+  assert.equal(getDiscretionaryPool(householdMonthlyBudget, getMandatoryCommitmentsTotal(householdOnly)), 80000);
+
+  // The Spouse's own envelope (already carved out of that 80,000 pool elsewhere) is reduced by
+  // HER OWN commitment only, via the exact same getDiscretionaryPool function, one level deeper.
+  const spouseCommitments = getCommitmentsForScope(allCommitments, "person", "spouse1");
+  const spouseEnvelope = 20000;
+  assert.equal(getDiscretionaryPool(spouseEnvelope, getMandatoryCommitmentsTotal(spouseCommitments)), 15000);
 });
