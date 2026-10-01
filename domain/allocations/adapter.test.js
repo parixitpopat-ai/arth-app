@@ -119,6 +119,36 @@ test("category attribution: ignores non-expense transactions", () => {
   assert.equal(getCategoryAttributedTotal(txns, "cat_food"), 0);
 });
 
+// --- WP16: includeTransfers — a Transfer tagged to a category fulfils a Mandatory Commitment ---
+
+test("category attribution: a tagged transfer is ignored by default (no behavior change for existing callers)", () => {
+  const txns = [{ type: "transfer", catId: "cat_rent", amount: 10000 }];
+  assert.equal(getCategoryAttributedTotal(txns, "cat_rent"), 0);
+});
+
+test("category attribution: includeTransfers:true counts a transfer tagged to this category", () => {
+  const txns = [{ type: "transfer", catId: "cat_rent", amount: 10000 }];
+  assert.equal(getCategoryAttributedTotal(txns, "cat_rent", { includeTransfers: true }), 10000);
+});
+
+test("category attribution: includeTransfers:true still ignores a transfer tagged to a different category", () => {
+  const txns = [{ type: "transfer", catId: "cat_food", amount: 10000 }];
+  assert.equal(getCategoryAttributedTotal(txns, "cat_rent", { includeTransfers: true }), 0);
+});
+
+test("category attribution: includeTransfers:true sums an expense and a tagged transfer together, no double-count", () => {
+  const txns = [
+    { type: "expense", catId: "cat_rent", amount: 4000 },
+    { type: "transfer", catId: "cat_rent", amount: 6000 },
+  ];
+  assert.equal(getCategoryAttributedTotal(txns, "cat_rent", { includeTransfers: true }), 10000);
+});
+
+test("category attribution: includeTransfers:true leaves an untagged transfer (no catId/catIds) uncounted", () => {
+  const txns = [{ type: "transfer", catId: null, catIds: [], amount: 10000 }];
+  assert.equal(getCategoryAttributedTotal(txns, "cat_rent", { includeTransfers: true }), 0);
+});
+
 // --- Person Attribution: t.people, mode-filtered per CR-ACC-BUD-001 ---
 
 test("person attribution: sums only mode:spent_on entries across matching transactions", () => {

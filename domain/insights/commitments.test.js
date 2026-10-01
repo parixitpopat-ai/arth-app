@@ -91,3 +91,14 @@ test("getCommitmentHistory: all months skipped is a safe zero average, not NaN o
   assert.equal(h.average, 0);
   assert.equal(h.consideredMonths, 0);
 });
+
+test("getCommitmentHistory: WP16 — a Transfer tagged to the commitment's category counts toward that month's spend", () => {
+  const commitment = { categoryId: "cat_rent", amount: 10000 };
+  const txns = [
+    { date: "2026-06-05", catIds: ["cat_rent"], type: "transfer", amount: 10000 },
+    { date: "2026-07-05", catIds: ["cat_rent"], type: "expense", amount: 10000 },
+  ];
+  const h = getCommitmentHistory(commitment, txns, ["2026-06", "2026-07"]);
+  assert.equal(h.average, 10000, "the tagged transfer month counts exactly like the expense month");
+  assert.equal(h.withinCount, 2);
+});

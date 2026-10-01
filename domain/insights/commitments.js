@@ -112,7 +112,9 @@ export function getCommitmentHistory(commitment, txns, monthKeys) {
   (monthKeys || []).forEach(monthKey => {
     if ((commitment.skippedMonths || []).includes(monthKey)) { skippedCount += 1; return; }
     const monthTxns = (txns || []).filter(t => t.date && t.date.startsWith(monthKey));
-    const spent = getCategoryAttributedTotal(monthTxns, commitment.categoryId, { allTransactions: txns });
+    // WP16 — includeTransfers:true: a Transfer tagged to this commitment's category counts
+    // toward its historical "spent" trend too, same as the live BudgetPage card.
+    const spent = getCategoryAttributedTotal(monthTxns, commitment.categoryId, { allTransactions: txns, includeTransfers: true });
     consideredMonths += 1;
     spendTotal += spent;
     if (spent <= Number(commitment.amount || 0)) withinCount += 1;

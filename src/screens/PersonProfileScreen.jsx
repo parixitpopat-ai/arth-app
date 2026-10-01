@@ -87,6 +87,11 @@ export function PersonProfileScreen({
                             // icon regardless of what it actually was (an Insurance
                             // policy showed as "Membership 🏋️" until this was caught).
   gifts = [],
+  budgetSection,            // WP16 — pre-rendered Planning Allocation + ScopedCommitmentsCard
+                            // (person-scoped Mandatory Commitments), built by the caller from the
+                            // SAME getPersonPlanningAllocation figure the Budget tab already uses —
+                            // never a second budget number. null/undefined renders nothing (the
+                            // person has no monthly budget allocated at all).
   giftsSection,          // full existing Gifts block (list, filters, +Gift button), passed through as-is
   debtTransferSection,      // existing rendered content/handler, passed through as-is
   taggedAccountsSection,    // existing rendered content/handler, passed through as-is
@@ -217,6 +222,20 @@ export function PersonProfileScreen({
             </div>
           );
         })()}
+      </SectionShell>
+    ),
+
+    // WP16 — Person-scoped Mandatory Commitments, visible on the person's own page but as part
+    // of the SAME household budget already shown on the Budget tab (getPersonPlanningAllocation),
+    // never a second/parallel number. Renders nothing when the caller passes no budgetSection
+    // (no budget allocated to this person this month) — same "omit, don't fabricate" rule every
+    // other section here follows.
+    budget: () => budgetSection && (
+      <SectionShell T={T} title="BUDGET & COMMITMENTS" badge={null}
+        isExpanded={isExpanded("budget")} onToggle={() => toggle("budget")}
+        arranging={arranging} onMoveUp={() => onSaveSectionOrder(moveSection(sectionOrder, "budget", "up"))} onMoveDown={() => onSaveSectionOrder(moveSection(sectionOrder, "budget", "down"))}
+        canMoveUp={sectionOrder.indexOf("budget") > 0} canMoveDown={sectionOrder.indexOf("budget") < sectionOrder.length - 1}>
+        {budgetSection}
       </SectionShell>
     ),
 
