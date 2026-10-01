@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mapMembershipToCommitment, projectMembershipsToCommitments } from "./futureMoney.js";
+import { mapMembershipToCommitment, projectMembershipsToCommitments, hasLiveMembershipRelationship } from "./futureMoney.js";
 
 const getCurrentPeriod = periodsByMembershipId => m => periodsByMembershipId[m.id] || null;
 
@@ -112,4 +112,38 @@ test("projectMembershipsToCommitments: a paused account is dropped, an active si
   const items = projectMembershipsToCommitments(billerAccounts, memberships, getCurrentPeriod({ m1: period, m2: period }), relationships);
   assert.equal(items.length, 1);
   assert.equal(items[0].sourceId, "ba2");
+});
+
+// WP15 (Membership Regression Audit) — the lifecycle gate must apply identically to all five
+// non-School membership types this app supports, not just Gym/Club (the two already covered
+// above). The gate function itself is type-agnostic (it only ever sees a billerAccountId), but
+// this confirms the real type strings this app uses don't accidentally fall outside
+// NON_SCHOOL_MEMBERSHIP_TYPES and slip past the gate unfiltered.
+for (const type of ["Gym / Fitness", "Club Membership", "Society Maintenance", "Rental", "Other Subscription"]) {
+  test(`mapMembershipToCommitment: Paused suppresses projection for type "${type}"`, () => {
+    const ba = { id: "baX", name: "Test", type };
+    const memberships = [{ id: "mX", billerAccountId: "baX", amount: 1000 }];
+    const relationships = [{ id: "rX", billerAccountId: "baX", status: "paused" }];
+    assert.equal(mapMembershipToCommitment(ba, memberships, gymPeriod, relationships), null);
+  });
+}
+
+test("Resume: a relationship that was Paused then Resumed (status flips back to active) projects again", () => {
+  // Mirrors the real lifecycle.js transition sequence (pause -> resume), not a separate concept —
+  // resumeMembership's only observable effect on this gate is status:"paused" -> status:"active".
+  const pausedThenResumed = [{ id: "r1", billerAccountId: "ba1", status: "active", statusHistory: [
+    { status: "active", effectiveDate: "2026-01-01" },
+    { status: "paused", effectiveDate: "2026-05-01" },
+    { status: "active", effectiveDate: "2026-06-01" },
+  ] }];
+  const commitment = mapMembershipToCommitment(gymBA, gymMemberships, gymPeriod, pausedThenResumed);
+  assert.equal(commitment.amount, 8499);
+});
+
+test("hasLiveMembershipRelationship: direct checks (exported for reuse by renewalReminders.js, same gate everywhere)", () => {
+  assert.equal(hasLiveMembershipRelationship("ba1", []), true, "no relationship at all is ungated");
+  assert.equal(hasLiveMembershipRelationship("ba1", undefined), true, "omitted is ungated");
+  assert.equal(hasLiveMembershipRelationship("ba1", [{ billerAccountId: "ba1", status: "active" }]), true);
+  assert.equal(hasLiveMembershipRelationship("ba1", [{ billerAccountId: "ba1", status: "paused" }]), false);
+  assert.equal(hasLiveMembershipRelationship("ba1", [{ billerAccountId: "ba1", status: "ended" }]), false);
 });

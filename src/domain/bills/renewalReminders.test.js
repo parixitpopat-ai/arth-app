@@ -2,6 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getMembershipRenewalReminders, getSchoolFeeReminders } from "./renewalReminders.js";
 
+// WP15 (Membership Regression Audit) — this function originally had no relationship-lifecycle
+// awareness at all, so a Paused/Ended membership still surfaced a renewal reminder in Payments
+// even though Outlook (WP13) correctly suppressed it for the same account. The following cases
+// use the exact same overdue gym fixture as the first test above, varying only the relationship.
+
 test("getMembershipRenewalReminders: overdue gym membership (the reported case) is surfaced", () => {
   const billerAccounts = [{ id: "ba1", name: "Parixit", type: "Gym / Fitness" }];
   const memberships = [{ id: "m1", billerAccountId: "ba1", amount: 8499 }];
@@ -34,6 +39,35 @@ test("getMembershipRenewalReminders: nothing due soon or overdue is omitted", ()
 test("getMembershipRenewalReminders: an account with no memberships at all is skipped, not crashed on", () => {
   const billerAccounts = [{ id: "ba1", name: "Empty gym", type: "Gym / Fitness" }];
   assert.deepEqual(getMembershipRenewalReminders({ billerAccounts, memberships: [], getCurrentPeriod: () => null, today: "2026-09-28" }), []);
+});
+
+// WP15 — lifecycle gate (same fixture as the first test: an overdue gym renewal).
+const gymBA = [{ id: "ba1", name: "Parixit", type: "Gym / Fitness" }];
+const gymMemberships = [{ id: "m1", billerAccountId: "ba1", amount: 8499 }];
+const gymPeriod = { from: "2026-06-16", to: "2026-09-15", graceDays: 0 };
+const gymGetCurrentPeriod = m => (m.id === "m1" ? gymPeriod : null);
+
+test("getMembershipRenewalReminders: an Active relationship still surfaces the reminder", () => {
+  const relationships = [{ id: "r1", billerAccountId: "ba1", status: "active" }];
+  const items = getMembershipRenewalReminders({ billerAccounts: gymBA, memberships: gymMemberships, getCurrentPeriod: gymGetCurrentPeriod, today: "2026-09-28", relationships });
+  assert.equal(items.length, 1);
+});
+
+test("getMembershipRenewalReminders: a Paused relationship suppresses the reminder", () => {
+  const relationships = [{ id: "r1", billerAccountId: "ba1", status: "paused" }];
+  assert.deepEqual(getMembershipRenewalReminders({ billerAccounts: gymBA, memberships: gymMemberships, getCurrentPeriod: gymGetCurrentPeriod, today: "2026-09-28", relationships }), []);
+});
+
+test("getMembershipRenewalReminders: an Ended relationship suppresses the reminder", () => {
+  const relationships = [{ id: "r1", billerAccountId: "ba1", status: "ended" }];
+  assert.deepEqual(getMembershipRenewalReminders({ billerAccounts: gymBA, memberships: gymMemberships, getCurrentPeriod: gymGetCurrentPeriod, today: "2026-09-28", relationships }), []);
+});
+
+test("getMembershipRenewalReminders: no relationship record at all is left ungated (legacy behavior, and omitting the argument entirely behaves the same)", () => {
+  const withEmptyArray = getMembershipRenewalReminders({ billerAccounts: gymBA, memberships: gymMemberships, getCurrentPeriod: gymGetCurrentPeriod, today: "2026-09-28", relationships: [] });
+  assert.equal(withEmptyArray.length, 1);
+  const withOmitted = getMembershipRenewalReminders({ billerAccounts: gymBA, memberships: gymMemberships, getCurrentPeriod: gymGetCurrentPeriod, today: "2026-09-28" });
+  assert.equal(withOmitted.length, 1);
 });
 
 test("getSchoolFeeReminders: an overdue, unsettled, DECLARED fee period is surfaced", () => {

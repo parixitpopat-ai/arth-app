@@ -50,7 +50,7 @@ import { pauseRelationship, resumeRelationship, endRelationship, isDateActiveMem
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { isWithinPaymentsHorizon, PAYMENTS_HORIZON_DAYS } from "./domain/futureMoney/horizon";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
-import { projectMembershipsToCommitments as getMembershipFutureMoneyEvents } from "./domain/membership/futureMoney";
+import { projectMembershipsToCommitments as getMembershipFutureMoneyEvents, hasLiveMembershipRelationship } from "./domain/membership/futureMoney";
 import { projectPoliciesToCommitments as getInsuranceFutureMoneyEvents } from "./domain/insurance/futureMoney";
 import { getPersonSpendingSummary, getPersonActiveConnections } from "./domain/person/personOverview";
 import { archivePerson, unarchivePerson, isPersonArchived, getActivePeople } from "./domain/person/archive";
@@ -15990,7 +15990,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   const allBills = bills.filter(b=>accs.some(a=>String(a.id)===String(b.billerAccountId)));
                   const unpaidCount = allBills.filter(b=>b.status==="unpaid").length;
                   const nextUnpaid = allBills.filter(b=>b.status==="unpaid"&&b.dueDate).sort((a,b2)=>a.dueDate.localeCompare(b2.dueDate))[0];
-                  const memsForShell = memberships.filter(m=>accs.some(a=>String(a.id)===String(m.billerAccountId)));
+                  // WP15 (Membership Regression Audit) — a membership whose own relationship is
+                  // Paused/Ended must not keep signaling a renewal here either, same WP13 gate
+                  // Outlook already applies; filtered per-account (not per-shell) since the shell
+                  // can group several Biller Accounts, each with its own independent relationship.
+                  const memsForShell = memberships.filter(m=>accs.some(a=>String(a.id)===String(m.billerAccountId)) && hasLiveMembershipRelationship(m.billerAccountId, membershipRelationships));
                   // Fix (audit finding): was a 7-day-forward-only nudge with no overdue/expired
                   // state at all once a period lapsed. getMembershipRenewalStatus adds that side
                   // without inventing a new Bill/Expected representation for memberships (a
@@ -16008,7 +16012,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   // Fix (audit finding): unshelled accounts — most personal Gym/Club/Society/Rental
                   // ones, since a billerId shell is only for known catalog brands — previously got
                   // NO membership renewal signal at all, shelled or not. Same helper as above.
-                  const memsForAcc = memberships.filter(m=>String(m.billerAccountId)===String(ba.id));
+                  // WP15 — same lifecycle gate as the shelled branch above.
+                  const memsForAcc = hasLiveMembershipRelationship(ba.id, membershipRelationships) ? memberships.filter(m=>String(m.billerAccountId)===String(ba.id)) : [];
                   const memStatus = memsForAcc.length ? getMembershipRenewalStatus(memsForAcc.map(m=>({ m, period:getCurrentPeriod(m) })), todayStrV) : null;
                   const needsAttention = Boolean((nextUnpaid&&nextUnpaid.dueDate<=in7) || memStatus);
                   const amount = nextUnpaid ? Number(nextUnpaid.amount||0) : (memStatus ? Number(memStatus.m.amount||0) : 0);
@@ -16136,7 +16141,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               // WP4 — widened from the functions' own 7-day default to PAYMENTS_HORIZON_DAYS (30),
               // so this window stays exactly complementary with Outlook's (isWithinPaymentsHorizon):
               // no renewal ever falls into the 8-29 day gap between the two screens.
-              ...getMembershipRenewalReminders({ billerAccounts, memberships, getCurrentPeriod, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
+              ...getMembershipRenewalReminders({ billerAccounts, memberships, getCurrentPeriod, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS, relationships:membershipRelationships }),
               ...getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
               ...getInsuranceRenewalReminders({ insurancePolicies, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
             ] })}
