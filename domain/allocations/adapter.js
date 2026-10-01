@@ -144,13 +144,25 @@ export function getGroupPlanningAllocation(group, monthKey) {
  * @param {Object} [options.refundTotalsByExpense] - precomputed via
  *   buildRefundTotalsByExpense, for callers reusing it across multiple
  *   category figures in one render.
+ * @param {boolean} [options.includeTransfers] - WP16: also count `type:
+ *   "transfer"` transactions tagged (via `catId`/`catIds`) to this
+ *   category. Default false - every existing caller (StatsPage's
+ *   catTotals, the "Not in budget" / Unplanned Actual figures, etc.)
+ *   keeps summing expense-only spend exactly as before. Pass true only
+ *   for a Mandatory Commitment's own "spent" figure: a Transfer tagged
+ *   to a commitment's category is an explicit, accepted product decision
+ *   that it fulfils that commitment the moment it's tagged, regardless
+ *   of what happens to the money afterward. The rest of this function's
+ *   netting/attribution logic (refunds, `mode:"owes"`, groupCollective)
+ *   applies unchanged - a tagged Transfer never populates those fields
+ *   today, so this is a pure widening of the type guard, not new math.
  * @returns {number}
  */
-export function getCategoryAttributedTotal(transactions, categoryId, { allTransactions, refundTotalsByExpense } = {}) {
+export function getCategoryAttributedTotal(transactions, categoryId, { allTransactions, refundTotalsByExpense, includeTransfers } = {}) {
   const refundMap = refundTotalsByExpense || buildRefundTotalsByExpense(allTransactions || transactions);
 
   return transactions.reduce((sum, t) => {
-    if (t.type !== "expense") return sum;
+    if (t.type !== "expense" && !(includeTransfers && t.type === "transfer")) return sum;
 
     // Path 1 - explicit split. Unnetted; see function doc.
     if (t.catAllocations && Object.prototype.hasOwnProperty.call(t.catAllocations, categoryId)) {

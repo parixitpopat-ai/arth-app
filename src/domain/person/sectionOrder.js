@@ -8,6 +8,7 @@
 export const DEFAULT_SECTION_ORDER = [
   "about",
   "financialPosition",
+  "budget",
   "groups",
   "organisations",
   "activity",

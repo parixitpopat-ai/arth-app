@@ -1376,6 +1376,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // underneath. Deriving the live bill from `bills` by id on every render (below) makes that class
   // of bug structurally impossible instead of something to remember to avoid.
   const [viewingCcStatementId, setViewingCcStatementId] = useState(null);
+  // WP16 — Add/Edit Commitment sheet opened from a Person's/Group's OWN profile page (not the
+  // Budget tab). Deliberately separate top-level state, not BudgetPage's own
+  // showAddCommitment/editingCommitment/commitmentScope (those are genuinely local to BudgetPage
+  // per its own comment — only ever opened from there — and the People/Group profile mounts are a
+  // different render branch entirely, with no closure access to BudgetPage's locals). Both reuse
+  // the exact same AddMandatoryCommitmentModal and setMandatoryCommitments — one commitments
+  // array, one modal component, just two independent places that can open it.
+  const [profileShowAddCommitment, setProfileShowAddCommitment] = useState(false);
+  const [profileEditingCommitment, setProfileEditingCommitment] = useState(null);
+  const [profileCommitmentScope, setProfileCommitmentScope] = useState(null); // { type:"person"|"group", id }
   const [editingPerson, setEditingPerson] = useState(null);
   const [editingTxn, setEditingTxn] = useState(null);
   const [showAddAccount, setShowAddAccount] = useState(false);
@@ -2259,6 +2269,37 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // sites, so nothing that currently counts stops counting once call sites migrate to this.
   const getGroupAttributedAmount = useCallback((t, groupId) => {
     if(t.type!=="expense") return 0;
+    if(t.groupId===groupId || t.tagGroup===groupId || t.taggedGroupId===groupId) return Number(t.amount||0);
+    const alloc = (t.groupAllocations||[]).find(ga=>ga.groupId===groupId);
+    if(alloc) return Number(alloc.amount||0);
+    return 0;
+  },[]);
+  // WP16 — transfer-inclusive counterparts used ONLY by Mandatory Commitment "spent" calculations.
+  // getPersonAttributedAmount/getGroupAttributedAmount above stay expense-only because dozens of
+  // other call sites (Budget tab spend%, Dashboard, Insights) depend on that. A tagged Transfer is
+  // deliberately treated as fulfilling a commitment the moment it's tagged (explicit product
+  // decision — "once I give that money, how it's used isn't my headache"), so these two functions
+  // are a parallel copy with only the type guard changed, not a generalization of the originals.
+  const getPersonCommitmentAmount = useCallback((t, pid) => {
+    if(t.type!=="expense" && t.type!=="transfer") return 0;
+    if(t.people?.[pid]?.mode==="spent_on" && !t.groupId){
+      return Number(t.people[pid].amount||0);
+    }
+    if(t.tagItems?.length){
+      const item = t.tagItems.find(i=>i.targetType==="person"&&i.targetId===pid);
+      if(item) return Number(item.amount||0);
+    }
+    if(t.allocations?.length){
+      const alloc = t.allocations.find(a=>a.targetType==="person"&&a.targetId===pid&&a.mode==="spent_on");
+      if(alloc) return Number(alloc.amount||0);
+    }
+    if(t.forPerson===pid){
+      return Number(t.tagPersonAmount||t.amount||0);
+    }
+    return 0;
+  },[]);
+  const getGroupCommitmentAmount = useCallback((t, groupId) => {
+    if(t.type!=="expense" && t.type!=="transfer") return 0;
     if(t.groupId===groupId || t.tagGroup===groupId || t.taggedGroupId===groupId) return Number(t.amount||0);
     const alloc = (t.groupAllocations||[]).find(ga=>ga.groupId===groupId);
     if(alloc) return Number(alloc.amount||0);
@@ -3854,6 +3895,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [paymentMethod, setPaymentMethod] = useState(isEditing ? (sourceTxn.paymentMethod||"") : "");
     const [fromAccId, setFromAccId] = useState(isEditing ? (sourceTxn.fromAccId || defaultFromAccId) : (safePrefill.fromAccId || defaultFromAccId));
     const [toAccId, setToAccId] = useState(isEditing ? (sourceTxn.toAccId || defaultToCardId) : (safePrefill.toAccId || defaultToCardId));
+    // WP16 — Transfer tagging ("Tag to (optional)"): lets a Transfer be tagged to a category
+    // and/or a Person/Group so it can fulfil a Mandatory Commitment (see getPersonCommitmentAmount/
+    // getGroupCommitmentAmount). Deliberately separate, new state — NOT catIds/forPerson/groupId
+    // above, which belong to the Expense-only split/tag machinery this WP does not touch. Person
+    // and Group are mutually exclusive, matching the save path's groupId precedence.
+    const [transferTagCatId, setTransferTagCatId] = useState(isEditing && sourceTxn?.type==="transfer" ? (sourceTxn.catId || (Array.isArray(sourceTxn.catIds) ? sourceTxn.catIds[0] : null) || "") : "");
+    const [transferTagPersonId, setTransferTagPersonId] = useState(isEditing && sourceTxn?.type==="transfer" ? (Object.keys(sourceTxn.people||{}).find(pid=>pid!=="__me__") || "") : "");
+    const [transferTagGroupId, setTransferTagGroupId] = useState(isEditing && sourceTxn?.type==="transfer" ? (sourceTxn.groupId || "") : "");
     const [note, setNote] = useState(isEditing ? (sourceTxn.note || "") : (refundPrefill ? `Refund for ${refundPrefill.desc||refundPrefill.merchant||"expense"}` : (safePrefill.note || "")));
     const [billerLinkId, setBillerLinkId] = useState(isEditing ? (sourceTxn.billerLinkId||"") : "");
     const [eventLinkId, setEventLinkId] = useState(isEditing ? (sourceTxn.eventId||"") : "");
@@ -5382,7 +5431,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           }
         }
       } else if(txnType==="transfer"){
-        upsertTxn({ ...base, amount:amt, fromAccId, toAccId, catId:null, catIds:[], subId:null, subIds:[] });
+        // WP16 — tagged Transfer fulfils a Mandatory Commitment. catId/catIds/people/groupId
+        // were previously always null/[]/{}/null here (Transfer had no tagging); now driven by
+        // the new transferTag* state, same null/[]/{} fallback when untagged — no behavior
+        // change for an untagged transfer. people/groupId are additive here only, never written
+        // elsewhere for this txnType, so no other field in `base` is touched.
+        upsertTxn({ ...base, amount:amt, fromAccId, toAccId,
+          catId:transferTagCatId||null,
+          catIds:transferTagCatId?[transferTagCatId]:[],
+          subId:null, subIds:[],
+          people:transferTagPersonId?{ [transferTagPersonId]:{ amount:amt, mode:"spent_on", settled:false } }:{},
+          groupId:transferTagPersonId?null:(transferTagGroupId||null),
+        });
       } else if(txnType==="cc_payment"){
         upsertTxn({ ...base, amount:amt, fromAccId, toAccId, catId:null, catIds:[], subId:null, subIds:[] });
         if(!isEditing){
@@ -5626,7 +5686,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             : <div>
                 <div style={{ display:"flex",gap:8,marginBottom:10,flexWrap:"wrap" }}>
                   {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["transfer","🔄","Transfer",T.info],["settlement_in","💼","Settlement",T.info],["investment","💹","Invest",T.info]].map(([v,ic,lb,col])=>(
-                    <button key={v} onClick={()=>{ setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
+                    <button key={v} onClick={()=>{ setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); if(v!=="transfer"){ setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId(""); } }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
                       <span style={{ fontSize:16 }}>{ic}</span>{lb}
                     </button>
                   ))}
@@ -5684,6 +5744,42 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
             )}
             {(txnType==="cc_payment"||txnType==="transfer")&&<input style={inp} placeholder="Note (optional)" value={who} onChange={e=>setWho(e.target.value)}/>}
+            {/* WP16 — Transfer tagging. Deliberately minimal chip rows (not the Expense split/
+                tag machinery): a transfer that's tagged to a Person/Group counts toward that
+                Person's/Group's Mandatory Commitment "spent" figure the moment it's saved,
+                regardless of what later happens to the money — an explicit, accepted product
+                decision, not a bug. Category tag is optional and independently usable (e.g. a
+                Household-level category commitment funded by a transfer). */}
+            {txnType==="transfer"&&(
+              <div style={{ marginTop:4 }}>
+                <span style={lbl}>Tag to (optional)</span>
+                <div style={{ marginBottom:6 }}>
+                  <div style={{ color:T.sub,fontSize:10,marginBottom:4 }}>Category</div>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                    {cats.map(c=>(
+                      <button key={c.id} onClick={()=>setTransferTagCatId(transferTagCatId===c.id?"":c.id)} style={{ background:transferTagCatId===c.id?c.color+"22":"none",border:`1px solid ${transferTagCatId===c.id?c.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:transferTagCatId===c.id?c.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{c.icon} {c.name.split(" ")[0]}</button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ marginBottom:6 }}>
+                  <div style={{ color:T.sub,fontSize:10,marginBottom:4 }}>Person</div>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                    {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=>(
+                      <button key={p.id} onClick={()=>{ const next = transferTagPersonId===p.id?"":p.id; setTransferTagPersonId(next); if(next) setTransferTagGroupId(""); }} style={{ background:transferTagPersonId===p.id?p.color+"22":"none",border:`1px solid ${transferTagPersonId===p.id?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:transferTagPersonId===p.id?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color:T.sub,fontSize:10,marginBottom:4 }}>Group</div>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                    {getActiveGroups(groups).map(g=>(
+                      <button key={g.id} onClick={()=>{ const next = transferTagGroupId===g.id?"":g.id; setTransferTagGroupId(next); if(next) setTransferTagPersonId(""); }} style={{ background:transferTagGroupId===g.id?g.color+"22":"none",border:`1px solid ${transferTagGroupId===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:transferTagGroupId===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>
+                    ))}
+                  </div>
+                </div>
+                {(transferTagPersonId||transferTagGroupId)&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Counts toward {(people.find(p=>p.id===transferTagPersonId)||getActiveGroups(groups).find(g=>g.id===transferTagGroupId))?.name}'s Mandatory Commitment this month — part of their existing budget, not a separate pool.</div>}
+              </div>
+            )}
 
 
             {/* Amount + collapsed Details trigger combined into one row to save a line, per
@@ -10708,9 +10804,27 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             const groupIOweMap = Object.fromEntries(
               personGroupsForBalance.map(g=>[g.id, getGroupMemberIOwe(g.id, p.id)])
             );
+            // WP16 — SAME getPersonPlanningAllocation figure the Budget tab already shows for
+            // this person (not a second/new budget number) and SAME thisMonthTxns (viewMonth-
+            // scoped, used by BudgetPage's own ScopedCommitmentsCard mounts) — just read again
+            // here so the person's own page can show it too.
+            const personMonthBudget = p.isMe ? 0 : getPersonPlanningAllocation(p, viewMonth);
+            const budgetSection = p.isMe ? null : (
+              personMonthBudget > 0 ? (
+                <div>
+                  <div style={{ color:T.sub, fontSize:11, marginBottom:8 }}>{sym}{fmt(personMonthBudget)} allocated this month — part of the household budget, not separate from it.</div>
+                  <ScopedCommitmentsCard scopeType="person" scopeId={p.id} scopeLabel={p.name} planningAllocation={personMonthBudget} monthTxns={thisMonthTxns} viewMonth={viewMonth}
+                    onAdd={()=>{ setProfileEditingCommitment(null); setProfileCommitmentScope({ type:"person", id:p.id }); setProfileShowAddCommitment(true); }}
+                    onEdit={c=>{ setProfileEditingCommitment(c); setProfileCommitmentScope({ type:"person", id:p.id }); setProfileShowAddCommitment(true); }}/>
+                </div>
+              ) : (
+                <div style={{ color:T.sub, fontSize:12 }}>No monthly budget allocated to {p.name} yet — set one in the Budget tab first.</div>
+              )
+            );
             return (
           <PersonProfileScreen
             person={p}
+            budgetSection={budgetSection}
             balance={s}
             topSection={p.isMe ? null : (()=>{
               // UI-2C P-4 — relationships as a list, capabilities as tiles. Tiles open the
@@ -11283,6 +11397,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div style={{ fontSize:11, fontWeight:700, color:groupOver?T.danger:T.sub }}>Group budget{groupBudget>0?`: ${sym}${fmt(groupBudget)}`:" (not set)"}</div>
                     <div style={{ fontSize:12, fontWeight:800, color:groupOver?T.danger:T.text, marginTop:3 }}>Spent: {sym}{fmt(groupTotalSpend)} {groupBudget>0 && `(remaining ${sym}${fmt(Math.max(0, groupBudget-groupTotalSpend))})`}</div>
                     {groupOver && <div style={{ color:T.danger, fontSize:11, fontWeight:700, marginTop:4 }}>⚠️ Over budget by {sym}{fmt(groupTotalSpend-groupBudget)}</div>}
+                  </div>
+                )}
+                {/* WP16 — Group-scoped Mandatory Commitments, visible on the group's own page.
+                    groupBudget (g.manualLimit, above) is the SAME figure the Budget tab reads —
+                    never a second number — and this card is debited only from it, never the
+                    Household pool a second time (see ScopedCommitmentsCard's own comment). Uses
+                    this block's own mTxns/shareMonth (its month nav), not viewMonth/monthTxns —
+                    this page navigates months independently of the Budget tab. */}
+                {groupBudget>0 && (
+                  <div style={{ marginTop:8 }}>
+                    <ScopedCommitmentsCard scopeType="group" scopeId={g.id} scopeLabel={g.name} planningAllocation={groupBudget} monthTxns={mTxns} viewMonth={shareMonth}
+                      onAdd={()=>{ setProfileEditingCommitment(null); setProfileCommitmentScope({ type:"group", id:g.id }); setProfileShowAddCommitment(true); }}
+                      onEdit={c=>{ setProfileEditingCommitment(c); setProfileCommitmentScope({ type:"group", id:g.id }); setProfileShowAddCommitment(true); }}/>
                   </div>
                 )}
                 {/* Overall / Monthly toggle */}
@@ -14951,7 +15078,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 ) : (
                   householdCommitments.map(c=>{
                     const cat = cats.find(x=>x.id===c.categoryId);
-                    const spent = getCategoryAttributedTotal(monthTxns, c.categoryId, { allTransactions: txns });
+                    // WP16 — includeTransfers:true: a Transfer tagged to this commitment's
+                    // category fulfils it too (explicit product decision), same as Scoped
+                    // Commitments below. Every other getCategoryAttributedTotal call on this
+                    // page (Unplanned Actual, StatsPage, etc.) is untouched — expense-only.
+                    const spent = getCategoryAttributedTotal(monthTxns, c.categoryId, { allTransactions: txns, includeTransfers: true });
                     const { remaining, isOver } = getMandatoryCommitmentRemaining(c, spent);
                     // WP7 — Planned/Committed, Actual, Skipped: three of the four preserved
                     // states (the fourth, Unplanned Actual, is household-level, surfaced below).
@@ -15480,10 +15611,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const activeCommitments = commitments.filter(c=>!(c.skippedMonths||[]).includes(viewMonth));
     const commitmentsTotal = getMandatoryCommitmentsTotal(activeCommitments);
     const discretionaryAfter = getDiscretionaryPool(planningAllocation, commitmentsTotal);
-    const getScopedCategorySpent = categoryId => monthTxns.filter(t=>t.type==="expense").reduce((s,t)=>{
+    // WP16 — a Transfer tagged to this Person/Group counts toward their commitment's "spent"
+    // figure too (getPersonCommitmentAmount/getGroupCommitmentAmount), not just Expenses.
+    const getScopedCategorySpent = categoryId => monthTxns.filter(t=>t.type==="expense"||t.type==="transfer").reduce((s,t)=>{
       const tCats = (t.catIds||[t.catId]).filter(Boolean);
       if(!tCats.includes(categoryId)) return s;
-      const amt = scopeType==="person" ? getPersonAttributedAmount(t,scopeId) : getGroupAttributedAmount(t,scopeId);
+      const amt = scopeType==="person" ? getPersonCommitmentAmount(t,scopeId) : getGroupCommitmentAmount(t,scopeId);
       if(amt<=0) return s;
       return s + amt/tCats.length;
     },0);
@@ -19432,6 +19565,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
         )}
         {editingPerson&&<EditPersonModal p={editingPerson} onClose={()=>setEditingPerson(null)}/>}
+        {/* WP16 — Add/Edit Commitment sheet opened from a Person's/Group's own profile page.
+            Same AddMandatoryCommitmentModal + setMandatoryCommitments BudgetPage's own sheet
+            uses — never a second commitment store — just a separate open/close state since
+            this mounts from a different render branch (see profileShowAddCommitment's own
+            comment above). */}
+        {profileShowAddCommitment&&<AddMandatoryCommitmentModal
+          existing={profileEditingCommitment}
+          monthKey={viewMonth}
+          scope={profileCommitmentScope}
+          scopeLabel={profileCommitmentScope ? (profileCommitmentScope.type==="person" ? getPerson(profileCommitmentScope.id)?.name : getGroup(profileCommitmentScope.id)?.name) : null}
+          onClose={()=>{ setProfileShowAddCommitment(false); setProfileEditingCommitment(null); setProfileCommitmentScope(null); }}
+          onSave={record=>{
+            setMandatoryCommitments(prev=>profileEditingCommitment ? prev.map(c=>c.id===record.id?record:c) : [record, ...prev]);
+            setProfileShowAddCommitment(false); setProfileEditingCommitment(null); setProfileCommitmentScope(null);
+          }}
+          onDelete={id=>{
+            setMandatoryCommitments(prev=>prev.filter(c=>c.id!==id));
+            setProfileShowAddCommitment(false); setProfileEditingCommitment(null); setProfileCommitmentScope(null);
+          }}
+        />}
         {/* UI-2C M1 — P-2 Add person, P-3 Person created, G-11 Add group */}
         {peopleSheet?.kind==="addPerson"&&<AddPersonSheet T={T} onClose={()=>setPeopleSheet(null)} onCreate={fields=>{
           const rec = buildNewPerson(fields, { genId, color:PALETTE[(people.length+1)%PALETTE.length] });
