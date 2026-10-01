@@ -4,32 +4,45 @@ import { deriveBillFor, withBillForSnapshot, withBillForSnapshots, getBillsFor, 
 
 const people = [{ id: "p1", name: "Nidhi" }];
 const groups = [{ id: "g1", name: "Goa Household" }];
+const vehicles = [{ id: "v1", name: "Swift" }];
 const billerAccounts = [
   { id: "ba1", name: "Jio", attributeType: "person", attributedTo: "p1" },
   { id: "ba2", name: "Electricity", attributeType: "group", attributedTo: "g1" },
-  { id: "ba3", name: "Home water", attributeType: "house", attributedTo: "h1" },
+  { id: "ba3", name: "Home water", attributeType: "house", attributedTo: "" },
   { id: "ba4", name: "Old phone", attributeType: "person", attributedTo: "gone" },
   { id: "ba5", name: "Unattributed" },
   { id: "ba6", name: "My gym", attributeType: "person", attributedTo: "__me__" },
   { id: 7, name: "Numeric id", attributeType: "group", attributedTo: "g1" },
+  { id: "ba8", name: "Fastag", attributeType: "vehicle", attributedTo: "v1" },
+  { id: "ba9", name: "Old fastag", attributeType: "vehicle", attributedTo: "gone" },
 ];
-const ctx = { billerAccounts, people, groups };
+const ctx = { billerAccounts, people, groups, vehicles };
 
-test("a confident person or group attribution is copied", () => {
+test("a confident person, group, house or vehicle attribution is copied", () => {
   assert.deepEqual(deriveBillFor({ billerAccountId: "ba1" }, ctx), { forType: "person", forId: "p1" });
   assert.deepEqual(deriveBillFor({ billerAccountId: "ba2" }, ctx), { forType: "group", forId: "g1" });
   assert.deepEqual(deriveBillFor({ billerAccountId: "ba6" }, ctx), { forType: "person", forId: "__me__" });
   assert.deepEqual(deriveBillFor({ billerAccountId: "7" }, ctx), { forType: "group", forId: "g1" }, "ids compare as strings");
+  assert.deepEqual(deriveBillFor({ billerAccountId: "ba3" }, ctx), { forType: "house", forId: null }, "house/Common Areas is a first-class For, not unassigned");
+  assert.deepEqual(deriveBillFor({ billerAccountId: "ba8" }, ctx), { forType: "vehicle", forId: "v1" });
 });
 
 test("anything not certain is left unassigned, never guessed", () => {
   const u = { forType: "unassigned", forId: null };
   assert.deepEqual(deriveBillFor({}, ctx), u, "no relationship");
   assert.deepEqual(deriveBillFor({ billerAccountId: "missing" }, ctx), u, "dangling relationship");
-  assert.deepEqual(deriveBillFor({ billerAccountId: "ba3" }, ctx), u, "house attribution");
   assert.deepEqual(deriveBillFor({ billerAccountId: "ba4" }, ctx), u, "dangling person");
   assert.deepEqual(deriveBillFor({ billerAccountId: "ba5" }, ctx), u, "no attribution");
+  assert.deepEqual(deriveBillFor({ billerAccountId: "ba9" }, ctx), u, "dangling vehicle");
   assert.deepEqual(deriveBillFor({ billerAccountId: "ba1", groupId: "g1" }, ctx), { forType: "person", forId: "p1" }, "groupId is split context, not For");
+});
+
+test("relationship attribution and a Bill's own For may legitimately diverge (locked product decision)", () => {
+  // The Goa Electricity example: the relationship (ba2) is attributed to a Group, but this
+  // specific Bill's own For was explicitly chosen as house/Common Areas at creation time and is
+  // never overwritten by what the relationship would currently derive.
+  const bill = { id: "b1", billerAccountId: "ba2", forType: "house", forId: null };
+  assert.equal(withBillForSnapshot(bill, ctx), bill, "explicit house For on a group-attributed relationship is left exactly as chosen");
 });
 
 test("a Bill that already has a For is never rewritten", () => {
