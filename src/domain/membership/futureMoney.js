@@ -26,7 +26,14 @@ const NON_SCHOOL_MEMBERSHIP_TYPES = ["Gym / Fitness", "Club Membership", "Other 
 // model, or one was simply never created for it) is left ungated, exactly as before this fix —
 // this never retroactively blocks an account nobody has ever paused. Historical memberships[]
 // payment records and bills/txns are never touched by this; only the forward projection is gated.
-function hasLiveMembershipRelationship(billerAccountId, relationships) {
+//
+// WP15 (Membership Regression Audit) — exported so every surface that signals an upcoming
+// membership renewal, not just this Outlook adapter, applies the identical gate. The audit found
+// two more call sites still showing a Paused/Ended membership's renewal with no lifecycle
+// awareness at all — the Payments renewal-reminders list (domain/bills/renewalReminders.js) and
+// the Bills-home biller "Due Soon" tiles (App.jsx) — because WP13's fix only ever reached this
+// one file. Same function, reused, not reimplemented, per the "one authoritative calculation" rule.
+export function hasLiveMembershipRelationship(billerAccountId, relationships) {
   const forAccount = (relationships || []).filter(r => String(r.billerAccountId) === String(billerAccountId));
   if (!forAccount.length) return true;
   return forAccount.some(r => r.status === "active");

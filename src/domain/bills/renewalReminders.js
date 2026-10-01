@@ -19,6 +19,7 @@
 import { getMembershipRenewalStatus } from "../membership/renewalStatus.js";
 import { calculateOutstanding } from "../schoolFees/outstanding.js";
 import { addDaysToDateStr } from "../../helpers/dateHelpers.js";
+import { hasLiveMembershipRelationship } from "../membership/futureMoney.js";
 
 // Insurance deliberately excluded: per its own dedicated screen/data path (setShowInsuranceList
 // in App.jsx — "don't write to billerAccountId in practice"), it doesn't populate memberships[]
@@ -39,11 +40,14 @@ const NON_SCHOOL_MEMBERSHIP_TYPES = ["Gym / Fitness", "Club Membership", "Other 
  * @param {Function} [params.forLabel] - (billerAccount) => display text of who it's for
  * @param {string} params.today - "YYYY-MM-DD"
  * @param {number} [params.forwardDays] - default 7, same default as getMembershipRenewalStatus
+ * @param {Array} [params.relationships] - membershipRelationships[]; a Paused/Ended relationship
+ *   suppresses this account's reminder, same WP13 lifecycle gate Outlook already applies. Omit to
+ *   leave ungated (legacy behavior, matches every existing call site/test).
  * @returns {Array<{billerAccountId, name, amount, kind, days, forText}>}
  */
-export function getMembershipRenewalReminders({ billerAccounts, memberships, getCurrentPeriod, forLabel, today, forwardDays = 7 }) {
+export function getMembershipRenewalReminders({ billerAccounts, memberships, getCurrentPeriod, forLabel, today, forwardDays = 7, relationships }) {
   return (billerAccounts || [])
-    .filter(ba => ba && NON_SCHOOL_MEMBERSHIP_TYPES.includes(ba.type))
+    .filter(ba => ba && NON_SCHOOL_MEMBERSHIP_TYPES.includes(ba.type) && hasLiveMembershipRelationship(ba.id, relationships))
     .map(ba => {
       const memsForAcc = (memberships || []).filter(m => String(m.billerAccountId) === String(ba.id));
       if (!memsForAcc.length) return null;
