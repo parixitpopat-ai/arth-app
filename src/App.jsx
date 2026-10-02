@@ -150,6 +150,7 @@ import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
+import { computeLineItemCategoryRollup, rollupToCatAllocations } from "./domain/transactions/lineItemCategoryRollup";
 // BudgetInsights (./screens/BudgetInsights) no longer imported here — WP11 removed Budget's own
 // embedded Insights tab per the handoff ("Insights moves to the Insights page"). That component
 // still holds real, not-yet-ported capability (category -> subcategory drill-down with its
@@ -5647,29 +5648,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Expense only. catIds ordered by summed item amount descending; catId = the largest
     // share. Live-recomputed (not just at save), no new fields -- existing catId/catIds/
     // lineItems[].catId are the only representations used.
+    // WP18c-fix: the actual rule now lives in domain/transactions/lineItemCategoryRollup.js
+    // (computeLineItemCategoryRollup) so School Fees' PayFeesModal fix can share this exact
+    // projection instead of a second one — this call is behaviorally identical to the inline
+    // version it replaces.
     const itemCategoryRollup = useMemo(() => {
       if(!(txnType==="expense" && useItemizedLines && lineItems.length>0)) return null;
-      const sums = {};
-      const subSums = {};
-      for(const item of lineItems){
-        if(!item.catId) continue;
-        const itemAmt = (parseFloat(item.qty)||0) * (parseFloat(item.unitPrice)||0);
-        sums[item.catId] = (sums[item.catId]||0) + itemAmt;
-        // T3.1 Part A follow-up: sub-categories preserved on switch-back, using the SAME
-        // amount-ordering principle as catIds above -- distinct subIds by summed item amount.
-        if(item.subId) subSums[item.subId] = (subSums[item.subId]||0) + itemAmt;
-      }
-      const orderedCatIds = Object.keys(sums).sort((a,b)=>sums[b]-sums[a]);
-      const orderedSubIds = Object.keys(subSums).sort((a,b)=>subSums[b]-subSums[a]);
-      const uncategorized = lineItems.filter(item=>!item.catId);
-      return {
-        catId: orderedCatIds[0]||null,
-        catIds: orderedCatIds,
-        subIds: orderedSubIds,
-        catAmounts: sums,
-        uncategorizedCount: uncategorized.length,
-        uncategorizedLabels: uncategorized.map(i=>i.label||"Unnamed item"),
-      };
+      return computeLineItemCategoryRollup(lineItems);
     }, [txnType, useItemizedLines, lineItems]);
 
     const canSubmit = hasTxnSubject && amt>0 && !(itemCategoryRollup && itemCategoryRollup.uncategorizedCount>0);
@@ -19206,13 +19191,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           feePeriods={feePeriods} setFeePeriods={setFeePeriods}
           selectedPeriodIds={selectedSchoolFeePeriodIds} setSelectedPeriodIds={setSelectedSchoolFeePeriodIds}
           accounts={accounts}
-          createRealTxn={({ amount, date, paymentLines, extraLines, linkedFeePeriods })=>{
+          cats={cats}
+          createRealTxn={({ amount, date, paymentLines, lineItems, linkedFeePeriods })=>{
             const txnId = genId();
-            // Payments v2 (WP18c) — Education's own category has no dedicated picker in Pay fees
-            // (E2/E3 never show one); resolved automatically from whatever spending category the
-            // household already named for school/education, same spirit as "Category comes from
-            // the connection, never a picker" (D3) — never defaulted to cats[0] by position.
-            const eduCatId = (cats.find(c=>/school|educat/i.test(c.name||""))||{}).id || null;
+            // WP18c-fix (Pay Fees mixed category) — replaces the old single-guess eduCatId regex
+            // (`/school|educat/i` against cats[].name) with the REAL mechanism every other
+            // Transaction uses: each line already carries its own real catId/subId (ticked fee
+            // lines are left uncategorized — no categoryId exists anywhere on a fee
+            // schedule/School Relationship to inherit from today, see this WP's investigation
+            // notes; a "not listed" line carries whatever real category the user actually
+            // picked in the sheet). The Transaction's top-level catId/catIds/subIds are the
+            // exact same deterministic projection AddTransactionModal's itemized flow already
+            // uses — computeLineItemCategoryRollup — never a second attribution rule.
+            const rollup = computeLineItemCategoryRollup(lineItems);
+            // getCategoryAttributedTotal (domain/allocations/adapter.js) falls back to an EVEN
+            // split across catIds when catAllocations is absent — wrong here, since a Pay Fees
+            // transaction routinely mixes uncategorized fee lines with one categorized line.
+            // catAllocations (an existing Transaction field, already read as this function's
+            // Path 1) pins each category to its own real summed line amount instead, so a
+            // category this transaction never touched gets exactly ₹0 from it.
+            const catAllocations = rollupToCatAllocations(rollup);
             setTxns(prev=>[{
               id: txnId, type:"expense", amount, date: date || todayStr(),
               merchant: viewingSchoolFeeSchedule?.schoolName || "School Fee",
@@ -19221,16 +19219,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               // line so every existing single-account read (ledgers, Insights, account balances via
               // the real transaction pipeline) still resolves to a real, correct account.
               accId: paymentLines?.[0]?.accId || null,
-              catId: eduCatId, catIds: eduCatId?[eduCatId]:[], subId:null, subIds:[],
+              catId: rollup.catId, catIds: rollup.catIds, subId: rollup.subIds[0]||null, subIds: rollup.subIds,
+              catAllocations,
               trackingMode:"none", people:{},
               paymentLines: paymentLines || [],
               // Reverse link, following the same linked*-field convention Insurance's Bill
               // already uses (paidBillId/linkedPolicyId) — array-shaped here since one School
               // Fee transaction can settle multiple periods, unlike a single Bill payment.
               linkedFeePeriods: linkedFeePeriods || [],
-              // E2/E4 — "Add something not listed": named Education lines with no fee period,
-              // stored on this same Transaction.
-              eduExtraLines: extraLines || [],
+              // WP18c-fix — every line (ticked fee lines AND "not listed" lines) now lives here,
+              // the one real Transaction line-item representation, replacing the old
+              // Education-only `eduExtraLines` field entirely (nothing else in the app read it).
+              lineItems: lineItems && lineItems.length ? lineItems : null,
               createdDate: todayStr(), createdAt: Date.now(),
             }, ...prev]);
             return txnId;

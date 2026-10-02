@@ -10,10 +10,22 @@
 // Rules this module enforces (brief's own words):
 // - a ticked line's amount can be anything from ₹1 to what is left on that fee;
 // - an unticked/omitted fee is not part of the Transaction at all — it is simply never passed in;
-// - "Add something not listed" needs a non-empty name and a positive amount, and carries no
-//   periodId — settlement never sees it, it is stored directly on the Transaction;
+// - "Add something not listed" needs a non-empty name, a positive amount, AND (WP18c-fix) a real
+//   category — the whole point of this fix is that it is no longer a bare free-text line. It
+//   still carries no periodId — settlement never sees it, it is stored directly on the
+//   Transaction;
 // - the Transaction total is always the sum of every ticked line's amount plus every extra line's
 //   amount — nothing here ever rounds or guesses that total.
+//
+// WP18c-fix (Pay Fees mixed category) — buildPayFeesLineItems is the one new export: it turns
+// this sheet's selection into the Transaction's REAL lineItems[] (the only category-attribution
+// representation the app has — see domain/transactions/lineItemCategoryRollup.js), replacing the
+// old Education-only `eduExtraLines` Transaction field. A ticked fee line's catId/subId are left
+// null (see this WP's own investigation notes: no categoryId exists anywhere on a fee
+// schedule/School Relationship to inherit from today), and it gets a `feePeriodId` stamped on —
+// additive to LineItem's existing {id,label,qty,unit,unitPrice,catId,subId} shape, purely for
+// traceability; settlement itself still runs off `linkedFeePeriods`/`toSettlementAllocations`
+// below, unchanged.
 
 import { calculateOutstanding } from "./outstanding.js";
 
@@ -63,11 +75,53 @@ export function toSettlementAllocations(tickedLines) {
 /**
  * @param {string} name
  * @param {number} amount
+ * @param {string|null|undefined} catId - WP18c-fix: a "not listed" line must carry a real
+ *   category, the same as any other line item in the app — no longer a bare free-text line.
  * @returns {string|null} an error message, or null if a new "not listed" line is valid
  */
-export function validateExtraLine(name, amount) {
+export function validateExtraLine(name, amount, catId) {
   if (!String(name || "").trim()) return "Give this item a name.";
   const n = Number(amount);
   if (!Number.isFinite(n) || n <= 0) return "Enter an amount of at least ₹1.";
+  if (!catId) return "Pick a category for this item.";
   return null;
+}
+
+/**
+ * Turns one Pay Fees selection into the Transaction's real lineItems[] — ticked fee lines first
+ * (in their original order), then "not listed" lines. The ONLY category-attribution
+ * representation this produces; see this file's header comment.
+ *
+ * @param {Array<{periodId:string, label:string, amount:number}>} tickedLines - one entry per
+ *   ticked fee line, already resolved to a display label (this module has no opinion on fee
+ *   naming — that stays the screen's `feeLineDisplayName`)
+ * @param {Array<{id:string, name:string, amount:number, catId?:string|null, subId?:string|null}>} extraLines
+ *   - one entry per "not listed" line, each with the real category the user picked
+ * @returns {Array<{id:string, label:string, qty:number, unit:string, unitPrice:number, catId:string|null, subId:string|null, feePeriodId?:string}>}
+ */
+export function buildPayFeesLineItems(tickedLines, extraLines) {
+  const feeItems = (tickedLines || []).map(l => ({
+    id: `fee-${l.periodId}`,
+    label: l.label || "Fee",
+    qty: 1,
+    unit: "nos",
+    unitPrice: Number(l.amount) || 0,
+    // No categoryId exists anywhere on a fee schedule/School Relationship to inherit from today
+    // (confirmed by this WP's own investigation) — left uncategorized, same as any other
+    // uncategorized line item in the app, rather than guessing a category id that may not exist
+    // in a given user's real category list.
+    catId: null,
+    subId: null,
+    feePeriodId: l.periodId,
+  }));
+  const extraItems = (extraLines || []).map(l => ({
+    id: l.id,
+    label: l.name,
+    qty: 1,
+    unit: "nos",
+    unitPrice: Number(l.amount) || 0,
+    catId: l.catId || null,
+    subId: l.subId || null,
+  }));
+  return [...feeItems, ...extraItems];
 }
