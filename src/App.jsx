@@ -87,7 +87,7 @@ import { getGroupReminders } from "./domain/group/reminders";
 import { getBillsFor } from "./domain/bills/billFor";
 import GroupSettingsEditor from "./components/people/GroupSettingsEditor";
 import { PersonProfileScreen } from "./screens/PersonProfileScreen";
-import { isSchoolRelationshipCurrent, getSchoolRelationships, migrateSchoolRelationshipsIntoCanonicalStore } from "./domain/school/relationship";
+import { isSchoolRelationshipCurrent, getSchoolRelationships, getCurrentSchoolBillerAccountIds, migrateSchoolRelationshipsIntoCanonicalStore } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { getCommitments, isRechargeBiller } from "./domain/bills/commitments";
 import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
@@ -152,10 +152,11 @@ import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
 import { computeLineItemCategoryRollup, rollupToCatAllocations } from "./domain/transactions/lineItemCategoryRollup";
 import * as schoolFeesService from "./domain/schoolFees/service";
+import { RangeFieldGrid, RangeField, MonthRangeSheet } from "./components/RangeFields";
 import {
   EDUCATION_CAT_ID, EDUCATION_SUB_DESC, EDU_SUB, findEducationCategory, roleOfEducationSub, ensureEducationCategory, feeKindForEducationSub, educationSubNeedsPeriod,
   selectionNeedsSchool, monthRangeToDates, dateRangeToDates, findApplicablePeriods, planFeeAllocation,
-  validateFeeAllocation, buildEducationLineItems, collectLinkedFeePeriods, applyEducationSettlement,
+  validateFeeAllocation, isMonthSettled, buildEducationLineItems, collectLinkedFeePeriods, applyEducationSettlement,
 } from "./domain/schoolFees/educationLines";
 // BudgetInsights (./screens/BudgetInsights) no longer imported here — WP11 removed Budget's own
 // embedded Insights tab per the handoff ("Insights moves to the Insights page"). That component
@@ -3945,6 +3946,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [eduFrom, setEduFrom] = useState("");
     const [eduTo, setEduTo] = useState("");
     const [eduAlloc, setEduAlloc] = useState({});
+    const [eduTouched, setEduTouched] = useState({});     // subIds whose amount the user typed (never auto-prefill those)
+    const [eduShowErrors, setEduShowErrors] = useState(false);
+    const [eduMonthSheet, setEduMonthSheet] = useState(false);
     const [eventLinkId, setEventLinkId] = useState(isEditing ? (sourceTxn.eventId||"") : "");
     const [settleSelectedIds, setSettleSelectedIds] = useState({});
     const [settleAmounts, setSettleAmounts] = useState({});
@@ -4878,7 +4882,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(kind && eduSchoolBA){
         const needsRange = kind==="tuition";
         if(needsRange && !eduRange){
-          error = "Choose the months School Fees covers.";
+          error = eduPeriodMode==="month" ? "Choose the months School Fees covers." : "Choose the dates School Fees covers.";
         } else {
           applicable = findApplicablePeriods({ feePeriods, feeSchedules, billerAccountId:eduSchoolBA.id, kind, from:eduRange?.from, to:eduRange?.to });
           plan = planFeeAllocation(applicable, amount);
@@ -4900,6 +4904,33 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const eduLinesValid = eduPlan.filter(l=>l.amount>0);
     const eduTotal = Math.round(eduLinesValid.reduce((sum,l)=>sum+l.amount,0)*100)/100;
     const eduMode = eduActive && eduPlan.length>0;
+    const eduFeeLine = eduPlan.find(l=>l.kind==="tuition") || null;
+    const eduFeeOutstanding = eduFeeLine ? Math.round(eduFeeLine.applicable.reduce((sum,x)=>sum+x.outstanding,0)*100)/100 : 0;
+    const eduSchoolsFor = pid => pid ? getCurrentSchoolBillerAccountIds(schoolRelationships, pid, todayStr()).map(id=>billerAccounts.find(b=>b.id===id)).filter(Boolean) : [];
+    const eduPersonSchools = eduSchoolsFor(eduPersonId);
+    const eduRangeError = !eduFeeLine ? null
+      : eduPeriodMode==="month" ? (eduStartYM && eduEndYM && eduEndYM<eduStartYM ? "End month is before start month" : null)
+      : (eduFrom && eduTo && eduTo<eduFrom ? "End date is before start date" : null);
+    const eduLineErrors = Object.fromEntries(eduPlan.map(l=>[l.subId, l.amount<=0 ? "Enter an amount" : (l.error || null)]));
+    const eduErrorCount = eduPlan.filter(l=>eduLineErrors[l.subId]).length + (eduRangeError ? 1 : 0);
+    const pickEduPerson = pid => {
+      setCategoryTouched(true);
+      setSplitMode("allocate");
+      setAllocRows([{ id:genId(), targetType:"person", targetId:String(pid), mode:"spent_on", amount:"", items:[] }]);
+      const schools = eduSchoolsFor(pid);
+      // Changing "For" clears a school that doesn't belong to the new person; a person with exactly
+      // one school gets it preselected. Nothing is invented for a person with none.
+      if(!schools.some(b=>b.id===billerLinkId)) setBillerLinkId(schools.length===1 ? schools[0].id : "");
+    };
+
+    // Header amount IS the sum of the Education lines (no second amount that can disagree).
+    useEffect(()=>{ if(eduActive && eduTotal>0 && String(eduTotal)!==String(amount)) setAmount(String(eduTotal)); },[eduActive, eduTotal]);
+    // School Fees amount is prefilled with what the chosen range has outstanding (editable; never
+    // overwrites an amount the user typed).
+    useEffect(()=>{
+      if(!eduFeeLine || !eduSchoolBA || eduTouched[eduFeeLine.subId] || !(eduFeeOutstanding>0)) return;
+      if(String(eduAmounts[eduFeeLine.subId]||"")!==String(eduFeeOutstanding)) setEduAmounts(prev=>({ ...prev, [eduFeeLine.subId]:String(eduFeeOutstanding) }));
+    },[eduFeeLine?.subId, eduFeeOutstanding, eduSchoolBA?.id]);
 
     const hasTxnSubject = Boolean(
       who.trim() ||
@@ -4917,6 +4948,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(!hasTxnSubject){ setRefDupWarning("Enter a vendor/note before saving."); return; }
       if(!amt){ setRefDupWarning("Enter an amount before saving."); return; }
       if(eduMode){
+        setEduShowErrors(true);
+        if(eduErrorCount>0) setTimeout(()=>document.querySelector("[data-edu-error]")?.scrollIntoView({ block:"center", behavior:"smooth" }),60);
+        if(eduRangeError){ setRefDupWarning(eduRangeError); return; }
         if(eduLinesValid.length===0){ setRefDupWarning("Enter an amount for each Education item you selected."); return; }
         if(eduPlan.some(l=>l.amount<=0)){ setRefDupWarning("Every selected Education item needs an amount — or untick it."); return; }
         const lineErr = eduPlan.find(l=>l.error);
@@ -5884,7 +5918,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ display:"flex",gap:8 }}>
               <div style={{ flex: (txnType==="expense"&&!showDetailsCard) ? 1 : "unset", width: (txnType==="expense"&&!showDetailsCard) ? "auto" : "100%" }}>
                 <span style={lbl}>Amount ({sym}) *</span>
-                <input style={{ ...inp,fontSize:22,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} onChange={e=>setAmount(cleanMoneyInput(e.target.value))}/>
+                <input style={{ ...inp,fontSize:22,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} readOnly={eduActive&&eduTotal>0} title={eduActive&&eduTotal>0?"Sum of the Education lines":undefined} onChange={e=>setAmount(cleanMoneyInput(e.target.value))}/>
               </div>
             {/* T3 slice 1: DetailsCard, per Arth UI-2B T3 Expense Shell.dc.html (T3-3/T3-4).
                 This slice: Paid Via + Date only. Collapsed row always shows the current value
@@ -6689,90 +6723,199 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   </div>
                 )}
 
-                {eduActive&&(
-                  <div data-testid="edu-panel" style={{ marginTop:10,background:T.input,borderRadius:10,padding:"10px 12px" }}>
-                    <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>🎓 What was this for? (pick all that apply)</div>
-                    <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
-                      {(eduCat?.subs||[]).map(sb=><Chip key={sb.id} color={eduCat.color} active={eduSelected.includes(sb.id)} onClick={()=>{ setCategoryTouched(true); setEduSelected(prev=>prev.includes(sb.id)?prev.filter(x=>x!==sb.id):[...prev,sb.id]); }}>{sb.name}</Chip>)}
+                {eduActive&&(()=>{
+                  const feeTag = role=>role===EDU_SUB.SCHOOL_FEES?"Period":(role===EDU_SUB.REGISTRATION||role===EDU_SUB.UNIFORM)?"One-time":"Education line";
+                  const tagStyle = tg=>({ flexShrink:0,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap",
+                    color:tg==="Period"?T.success:T.sub, background:tg==="Period"?T.success+"18":"transparent",
+                    border:tg==="Period"?`1px solid ${T.success}55`:tg==="One-time"?`1px solid ${T.border}`:`1px dashed ${T.border}` });
+                  const card = { background:T.input,border:`1px solid ${T.border}`,borderRadius:14,padding:"12px 14px",minWidth:0,boxSizing:"border-box" };
+                  const secLabel = { color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 };
+                  const personName = eduPersonId ? (getPerson(eduPersonId)?.name||"") : "";
+                  const rangeSummary = (a,b)=>{
+                    const r = eduPeriodMode==="month" ? monthRangeToDates(a,b) : null;
+                    if(!r || !eduSchoolBA) return { text: eduSchoolBA?"":"Link a school to see which fee periods this covers.", amountText:"" };
+                    const ap = findApplicablePeriods({ feePeriods, feeSchedules, billerAccountId:eduSchoolBA.id, kind:"tuition", from:r.from, to:r.to });
+                    return { text: `${ap.length} fee period${ap.length===1?"":"s"} in range`, amountText: ap.length?`${sym}${fmt(ap.reduce((sum,x)=>sum+x.outstanding,0))} due`:"" };
+                  };
+                  return (
+                  <div data-testid="edu-panel" style={{ marginTop:10,display:"flex",flexDirection:"column",gap:10,minWidth:0 }}>
+                    {/* ET1 — what are you paying for */}
+                    <div style={card}>
+                      <div style={{ color:T.text,fontSize:15,fontWeight:800 }}>What are you paying for?</div>
+                      <div style={{ color:T.sub,fontSize:12,margin:"2px 0 8px" }}>Pick one or more. Each becomes its own line in this transaction.</div>
+                      {(eduCat?.subs||[]).map(sb=>{
+                        const role = eduRoleOf(sb.id); const on = eduSelected.includes(sb.id); const tg = feeTag(role);
+                        return (
+                          <button key={sb.id} type="button" data-testid={`edu-pick-${sb.id}`} aria-pressed={on}
+                            onClick={()=>{ setCategoryTouched(true); setEduSelected(prev=>prev.includes(sb.id)?prev.filter(x=>x!==sb.id):[...prev,sb.id]); }}
+                            style={{ display:"flex",alignItems:"center",gap:10,width:"100%",minWidth:0,minHeight:52,padding:"6px 0",background:"none",border:"none",borderTop:`1px solid ${T.border}`,cursor:"pointer",textAlign:"left",fontFamily:"inherit" }}>
+                            <span style={{ width:22,height:22,flexShrink:0,borderRadius:6,display:"grid",placeItems:"center",background:on?T.accent:"transparent",border:`1.5px solid ${on?T.accent:T.border}`,color:"#fff",fontSize:13,fontWeight:900 }}>{on?"✓":""}</span>
+                            <span style={{ flex:1,minWidth:0 }}>
+                              <span style={{ display:"block",color:T.text,fontSize:15,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{sb.name}</span>
+                              <span style={{ display:"block",color:T.sub,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{role===EDU_SUB.SCHOOL_FEES?"Covers a month or date range":(tg==="One-time"?"Paid once":"Ordinary Education line")}</span>
+                            </span>
+                            <span style={tagStyle(tg)}>{tg}</span>
+                          </button>
+                        );
+                      })}
                     </div>
-                    {eduPlan.map(l=>(
-                      <div key={l.subId} data-testid={`edu-line-${l.subId}`} style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
-                        <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                          <div style={{ flex:1,minWidth:0 }}>
-                            <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{l.name}</div>
-                            <div style={{ color:T.sub,fontSize:11 }}>{l.kind==="tuition"?"Recurring · covers a period":l.kind?"One-time · no period":(EDUCATION_SUB_DESC[l.role]||"Education expense")}</div>
+
+                    {eduPlan.length>0&&(
+                      <>
+                        {/* ET2/ET9 — For + school (person-scoped) + Paid to (derived, read-only) */}
+                        <div style={card}>
+                          <div style={secLabel}>For</div>
+                          <div style={{ display:"flex",gap:6,flexWrap:"wrap",margin:"6px 0 10px" }}>
+                            {people.filter(pp=>!pp.archived).map(pp=>(
+                              <button key={pp.id} type="button" data-testid={`edu-for-${pp.id}`} onClick={()=>pickEduPerson(pp.id)}
+                                style={{ minHeight:36,padding:"0 14px",borderRadius:20,cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit",background:eduPersonId===String(pp.id)?T.accent:T.pill,color:eduPersonId===String(pp.id)?(T.accentInk||"#fff"):T.text,border:"none" }}>{pp.name}</button>
+                            ))}
                           </div>
-                          <input data-testid={`edu-amt-${l.subId}`} style={{ ...inpSm,width:110,textAlign:"right" }} type="number" inputMode="decimal" placeholder="Amount" value={eduAmounts[l.subId]??""} onChange={e=>setEduAmounts(prev=>({ ...prev,[l.subId]:e.target.value }))}/>
+                          {eduNeedsSchool&&(
+                            <>
+                              <div style={secLabel}>School</div>
+                              {eduPersonId&&eduPersonSchools.length===0 ? (
+                                <div data-testid="edu-no-school" style={{ border:`1px dashed ${T.border}`,borderRadius:12,padding:"12px",margin:"6px 0 0",textAlign:"center" }}>
+                                  <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{personName} has no school connected</div>
+                                  <div style={{ color:T.sub,fontSize:12,margin:"4px 0 10px" }}>School Fees needs a school relationship for {personName}. Other Education lines can still be recorded without one.</div>
+                                  <button type="button" data-testid="edu-link-school" onClick={()=>{ setLinkToInitialStage("school"); setShowLinkToSheet(true); }} style={{ ...btnG,minHeight:44,padding:"0 16px",fontSize:13 }}>Connect a school for {personName}</button>
+                                </div>
+                              ) : (
+                                <div style={{ display:"flex",flexDirection:"column",gap:6,margin:"6px 0 0" }}>
+                                  {eduPersonId ? eduPersonSchools.map(b=>(
+                                    <button key={b.id} type="button" data-testid={`edu-school-${b.id}`} onClick={()=>setBillerLinkId(b.id)}
+                                      style={{ display:"flex",alignItems:"center",gap:8,minHeight:48,minWidth:0,padding:"0 12px",borderRadius:12,cursor:"pointer",fontFamily:"inherit",textAlign:"left",background:T.pill,border:`1px solid ${billerLinkId===b.id?T.accent:T.border}`,color:T.text,fontSize:14,fontWeight:700 }}>
+                                      <span style={{ flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>🏫 {b.name}</span>
+                                      {billerLinkId===b.id&&<span style={{ color:T.accent,flexShrink:0 }}>✓</span>}
+                                    </button>
+                                  )) : (
+                                    <button type="button" data-testid="edu-link-school" onClick={()=>{ setLinkToInitialStage("school"); setShowLinkToSheet(true); }}
+                                      style={{ display:"flex",alignItems:"center",gap:8,minHeight:48,minWidth:0,padding:"0 12px",borderRadius:12,cursor:"pointer",fontFamily:"inherit",textAlign:"left",background:T.pill,border:`1px solid ${T.border}`,color:eduSchoolBA?T.text:T.sub,fontSize:14,fontWeight:700 }}>
+                                      <span style={{ flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{eduSchoolBA?`🏫 ${eduSchoolBA.name}`:"Pick who it's for, or link a school"}</span>
+                                      <span style={{ flexShrink:0 }}>›</span>
+                                    </button>
+                                  )}
+                                  {eduPersonId&&eduPersonSchools.length>0&&<div style={{ color:T.sub,fontSize:11 }}>Only {personName}'s school relationships are shown.</div>}
+                                </div>
+                              )}
+                              {eduSchoolBA&&(
+                                <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:10,minWidth:0 }}>
+                                  <span style={{ ...secLabel,flexShrink:0 }}>Paid to</span>
+                                  <span style={{ flex:1,minWidth:0,color:T.text,fontSize:14,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{eduSchoolBA.name}</span>
+                                  <span style={{ color:T.sub,fontSize:11,flexShrink:0 }}>from school</span>
+                                </div>
+                              )}
+                            </>
+                          )}
                         </div>
-                        {educationSubNeedsPeriod(l.role)&&(
-                          <div data-testid="edu-period" style={{ marginTop:8 }}>
-                            <div style={{ display:"flex",gap:6,marginBottom:6 }}>
-                              <Chip color={T.accent} active={eduPeriodMode==="month"} onClick={()=>setEduPeriodMode("month")}>By month</Chip>
-                              <Chip color={T.accent} active={eduPeriodMode==="date"} onClick={()=>setEduPeriodMode("date")}>By date</Chip>
+
+                        {/* ET3/ET4/ET10/ET12/ET14 — one card per line */}
+                        {eduPlan.map(l=>{
+                          const err = (eduShowErrors || l.amount>0) ? eduLineErrors[l.subId] : null;
+                          const showAmtErr = eduShowErrors && l.amount<=0;
+                          const isFee = l.kind==="tuition";
+                          const tg = feeTag(l.role);
+                          const planOK = l.plan && l.plan.status!=="none";
+                          const allocated = l.allocations.reduce((sum,a)=>sum+a.amount,0);
+                          const staying = isFee && l.plan?.status==="partial" ? l.applicable.filter(x=>{ const a=l.allocations.find(z=>z.periodId===x.period.id)?.amount||0; return x.outstanding-a>0.004; }).map(x=>x.period.label) : [];
+                          return (
+                            <div key={l.subId} data-testid={`edu-line-${l.subId}`} {...(err?{"data-edu-error":"1"}:{})} style={{ ...card,borderColor:(err||(isFee&&eduRangeError))?T.danger:T.border }}>
+                              <div style={{ display:"flex",alignItems:"center",gap:8,minWidth:0 }}>
+                                <div style={{ flex:1,minWidth:0,color:T.text,fontSize:15,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{l.name}</div>
+                                <span style={tagStyle(tg)}>{tg}</span>
+                              </div>
+                              {isFee&&(
+                                <div data-testid="edu-period" style={{ marginTop:10,minWidth:0 }}>
+                                  <Segmented T={T} value={eduPeriodMode} onChange={setEduPeriodMode} options={[{ value:"month",label:"By Month" },{ value:"date",label:"By Date" }]}/>
+                                  <div style={{ marginTop:10 }}>
+                                    <RangeFieldGrid>
+                                      {eduPeriodMode==="month" ? (<>
+                                        <RangeField T={T} kind="month" label="Start month" value={eduStartYM} testId="edu-start-month" error={!!eduRangeError} onPress={()=>setEduMonthSheet(true)}/>
+                                        <RangeField T={T} kind="month" label="End month" value={eduEndYM} testId="edu-end-month" error={!!eduRangeError} onPress={()=>setEduMonthSheet(true)}/>
+                                      </>) : (<>
+                                        <RangeField T={T} kind="date" label="Start date" value={eduFrom} testId="edu-start-date" error={!!eduRangeError} max={eduTo||undefined} onChange={setEduFrom}/>
+                                        <RangeField T={T} kind="date" label="End date" value={eduTo} testId="edu-end-date" error={!!eduRangeError} min={eduFrom||undefined} onChange={setEduTo}/>
+                                      </>)}
+                                    </RangeFieldGrid>
+                                  </div>
+                                  {eduRangeError&&<div style={{ color:T.danger,fontSize:12,marginTop:6 }}>{eduRangeError}</div>}
+                                  <div data-testid="edu-covers" style={{ color:T.sub,fontSize:11,marginTop:8 }}>{eduRange?`Covers ${eduRange.months} month${eduRange.months===1?"":"s"} · ${eduRange.label}`:"Pick the months this payment covers"}</div>
+                                  {eduPeriodMode==="date"&&eduRange&&<div style={{ color:T.sub,fontSize:11,marginTop:2 }}>Any fee period that overlaps these dates is included in full.</div>}
+                                </div>
+                              )}
+                              {l.kind&&eduSchoolBA&&planOK&&(
+                                <div data-testid={`edu-settle-${l.subId}`} style={{ marginTop:10,minWidth:0 }}>
+                                  <div style={{ ...secLabel,marginBottom:4 }}>{isFee?"Covers":"Applied to"}</div>
+                                  {l.applicable.map(x=>{
+                                    const al = l.allocations.find(a=>a.periodId===x.period.id);
+                                    return (
+                                      <div key={x.period.id} style={{ display:"flex",alignItems:"center",gap:8,padding:"4px 0",minWidth:0 }}>
+                                        <span style={{ flex:1,minWidth:0,color:T.text,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{x.period.label}{isFee?" · tuition":""}</span>
+                                        {l.plan.status==="partial" ? (
+                                          <span style={{ display:"flex",alignItems:"center",gap:4,flexShrink:0,color:T.sub,fontSize:12 }}>
+                                            <input aria-label={`Amount for ${x.period.label}`} style={{ ...inpSm,width:76,minWidth:0,textAlign:"right" }} type="number" inputMode="decimal" value={eduAlloc[x.period.id] ?? String(al?.amount ?? 0)} onChange={e=>setEduAlloc(prev=>({ ...prev,[x.period.id]:e.target.value }))}/>
+                                            <span>of {sym}{fmt(x.outstanding)}</span>
+                                          </span>
+                                        ) : <span style={{ color:T.text,fontSize:13,fontWeight:700,flexShrink:0 }}>{sym}{fmt(al?.amount||0)}</span>}
+                                      </div>
+                                    );
+                                  })}
+                                  {l.applicable.some(x=>x.needsDeclaration)&&<div style={{ color:T.warn,fontSize:11,marginTop:4 }}>Some of these fee periods haven't been marked paid or unpaid yet — they will be recorded as unpaid, then settled by this payment.</div>}
+                                  {isFee&&<div style={{ color:T.sub,fontSize:11,marginTop:4 }}>{l.applicable.length} fee period{l.applicable.length===1?"":"s"} in range · {sym}{fmt(l.plan.totalOutstanding)} due</div>}
+                                  {l.plan.status==="partial"&&<div style={{ color:T.text,fontSize:11,marginTop:4 }}>{sym}{fmt(allocated)} of {sym}{fmt(l.plan.totalOutstanding)} · {sym}{fmt(Math.round((l.plan.totalOutstanding-allocated)*100)/100)} stays due{staying.length?` on ${staying.join(" and ")}`:""}. Adjust the split if you like.</div>}
+                                </div>
+                              )}
+                              {isFee&&eduRange&&!eduSchoolBA&&<div style={{ color:T.sub,fontSize:11,marginTop:8 }}>Link a school to see which fee periods this covers.</div>}
+                              {l.notice&&<div data-testid={`edu-notice-${l.subId}`} style={{ marginTop:10,border:`1px solid ${T.warn}66`,background:T.warn+"12",borderRadius:12,padding:"10px 12px",color:T.warn,fontSize:12 }}>{l.notice}</div>}
+                              <div style={{ display:"flex",alignItems:"center",gap:10,marginTop:10,minWidth:0 }}>
+                                <span style={{ flex:1,color:T.sub,fontSize:13 }}>Amount</span>
+                                <input data-testid={`edu-amt-${l.subId}`} aria-label={`${l.name} amount`} style={{ ...inpSm,width:132,minWidth:0,minHeight:44,textAlign:"right",fontSize:15,borderColor:showAmtErr?T.danger:undefined }} type="text" inputMode="decimal" placeholder={`${sym}`} value={eduAmounts[l.subId]??""} onChange={e=>{ setEduTouched(prev=>({ ...prev,[l.subId]:true })); setEduAmounts(prev=>({ ...prev,[l.subId]:cleanMoneyInput(e.target.value) })); }}/>
+                              </div>
+                              {err&&<div style={{ color:T.danger,fontSize:12,marginTop:6 }}>{err}</div>}
                             </div>
-                            {eduPeriodMode==="month"?(
-                              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-                                <label style={{ color:T.sub,fontSize:10 }}>Start month<input data-testid="edu-start-month" style={{ ...inpSm,width:"100%",marginTop:2 }} type="month" value={eduStartYM} onChange={e=>{ setEduStartYM(e.target.value); if(!eduEndYM || eduEndYM<e.target.value) setEduEndYM(e.target.value); }}/></label>
-                                <label style={{ color:T.sub,fontSize:10 }}>End month<input data-testid="edu-end-month" style={{ ...inpSm,width:"100%",marginTop:2 }} type="month" value={eduEndYM} min={eduStartYM||undefined} onChange={e=>setEduEndYM(e.target.value)}/></label>
-                              </div>
-                            ):(
-                              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-                                <label style={{ color:T.sub,fontSize:10 }}>From<input style={{ ...inpSm,width:"100%",marginTop:2 }} type="date" value={eduFrom} onChange={e=>setEduFrom(e.target.value)}/></label>
-                                <label style={{ color:T.sub,fontSize:10 }}>To<input style={{ ...inpSm,width:"100%",marginTop:2 }} type="date" value={eduTo} min={eduFrom||undefined} onChange={e=>setEduTo(e.target.value)}/></label>
-                              </div>
-                            )}
-                            <div data-testid="edu-covers" style={{ color:T.sub,fontSize:11,marginTop:6 }}>{eduRange?`Covers ${eduRange.months} month${eduRange.months===1?"":"s"} · ${eduRange.label}`:"Pick the months this payment covers"}</div>
+                          );
+                        })}
+
+                        {/* ET4/ET8 — totals + review */}
+                        <div data-testid="edu-review" style={{ ...card }}>
+                          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8 }}>
+                            <span style={{ color:T.sub,fontSize:12 }}>1 transaction · {eduPlan.length} line{eduPlan.length===1?"":"s"}</span>
+                            <span data-testid="edu-total" style={{ color:T.text,fontSize:20,fontWeight:900 }}>{sym}{fmt(eduTotal)}</span>
                           </div>
-                        )}
-                        {l.kind&&eduSchoolBA&&l.plan&&l.plan.status!=="none"&&(
-                          <div data-testid={`edu-settle-${l.subId}`} style={{ marginTop:6,fontSize:11,color:T.sub }}>
-                            <div style={{ fontWeight:700,marginBottom:2 }}>Applied to</div>
-                            {l.applicable.map(x=>{
-                              const al = l.allocations.find(a=>a.periodId===x.period.id);
+                          <div style={{ borderTop:`1px solid ${T.border}`,marginTop:10,paddingTop:10 }}>
+                            <div style={{ ...secLabel,marginBottom:6 }}>Review · Education · {eduPlan.length} line{eduPlan.length===1?"":"s"}</div>
+                            {eduPlan.map(l=>{
+                              const sub = l.kind==="tuition"
+                                ? (l.coversLabel ? `Period · ${l.coversLabel}${eduSchoolBA?` · ${l.applicable.length?`${l.applicable.length} fee period${l.applicable.length===1?"":"s"}`:"no fee periods"}`:""}` : "Period")
+                                : l.kind ? "One-time" : "Education line";
                               return (
-                                <div key={x.period.id} style={{ display:"flex",alignItems:"center",gap:6,padding:"2px 0" }}>
-                                  <span style={{ flex:1 }}>{x.period.label} · {sym}{fmt(x.outstanding)} due{x.needsDeclaration?" (not yet marked as paid or unpaid — will be recorded as unpaid, then settled)":""}</span>
-                                  {l.plan.status==="partial"
-                                    ? <input style={{ ...inpSm,width:84,textAlign:"right" }} type="number" inputMode="decimal" value={eduAlloc[x.period.id] ?? String(al?.amount ?? 0)} onChange={e=>setEduAlloc(prev=>({ ...prev,[x.period.id]:e.target.value }))}/>
-                                    : <span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(al?.amount||0)}</span>}
+                                <div key={l.subId} style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,padding:"4px 0",minWidth:0 }}>
+                                  <span style={{ flex:1,minWidth:0 }}>
+                                    <span style={{ display:"block",color:T.text,fontSize:13,fontWeight:700 }}>{l.name}</span>
+                                    <span style={{ display:"block",color:T.sub,fontSize:11 }}>{sub}</span>
+                                  </span>
+                                  <span style={{ color:T.text,fontSize:13,fontWeight:700,flexShrink:0 }}>{l.amount>0?`${sym}${fmt(l.amount)}`:"—"}</span>
                                 </div>
                               );
                             })}
-                            {l.plan.status==="partial"&&<div style={{ marginTop:2 }}>Part payment — the rest of each month stays outstanding. Adjust the split if you like.</div>}
+                            {personName&&<div style={{ color:T.sub,fontSize:12,marginTop:6 }}>For: {personName}</div>}
+                            {eduSchoolBA&&<div style={{ color:T.sub,fontSize:12 }}>School: {eduSchoolBA.name}</div>}
+                            {eduSchoolBA&&<div style={{ color:T.sub,fontSize:12 }}>Paid to: {who.trim()||eduSchoolBA.name}</div>}
+                            <div style={{ color:T.sub,fontSize:12 }}>Paid with: {getAcc(accId)?.name||"—"}</div>
                           </div>
-                        )}
-                        {l.notice&&<div style={{ marginTop:6,fontSize:11,color:T.warn }}>{l.notice}</div>}
-                        {l.error&&<div style={{ marginTop:6,fontSize:11,color:T.danger }}>{l.error}</div>}
-                      </div>
-                    ))}
-                    {eduNeedsSchool&&(
-                      <div style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
-                        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6 }}>School</div>
-                        <button data-testid="edu-link-school" onClick={()=>{ setLinkToInitialStage("school"); setShowLinkToSheet(true); }} style={{ ...btnG,width:"100%",textAlign:"left",padding:"10px 12px",fontSize:13 }}>
-                          {eduSchoolBA ? `🏫 ${eduSchoolBA.name} · change` : (eduPersonId ? `Link ${getPerson(eduPersonId)?.name||"person"}'s school` : "Link a school")}
-                        </button>
-                        {eduPersonId&&<div style={{ color:T.sub,fontSize:11,marginTop:4 }}>Person: {getPerson(eduPersonId)?.name}</div>}
-                      </div>
-                    )}
-                    {eduPlan.length>0&&(
-                      <div data-testid="edu-review" style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}`,fontSize:12,color:T.text }}>
-                        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6 }}>Review</div>
-                        {eduPlan.map(l=>(
-                          <div key={l.subId} style={{ display:"flex",justifyContent:"space-between",padding:"2px 0" }}>
-                            <span>{l.name}{l.coversLabel?` · ${l.coversLabel}`:l.kind?" · One-time":""}</span>
-                            <span style={{ fontWeight:700 }}>{sym}{fmt(l.amount)}</span>
-                          </div>
-                        ))}
-                        {eduSchoolBA&&<div style={{ color:T.sub,marginTop:4 }}>School: {eduSchoolBA.name}</div>}
-                        {eduSchoolBA&&eduPersonId&&<div style={{ color:T.sub }}>Person: {getPerson(eduPersonId)?.name}</div>}
-                        {eduSchoolBA&&<div style={{ color:T.sub }}>Paid to: {who.trim()||eduSchoolBA.name}</div>}
-                        <div style={{ display:"flex",justifyContent:"space-between",marginTop:6,fontWeight:800 }}>
-                          <span>Total</span><span style={{ color:Math.abs(eduTotal-amt)<0.01?T.text:T.danger }}>{sym}{fmt(eduTotal)}{Math.abs(eduTotal-amt)>=0.01?` (amount is ${sym}${fmt(amt)})`:""}</span>
                         </div>
-                      </div>
+                      </>
+                    )}
+                    {eduMonthSheet&&(
+                      <MonthRangeSheet T={T} initialStart={eduStartYM} initialEnd={eduEndYM}
+                        isPaid={eduSchoolBA?(ym=>isMonthSettled({ feePeriods, feeSchedules, billerAccountId:eduSchoolBA.id, ym })):undefined}
+                        summarize={rangeSummary}
+                        onApply={(a,b)=>{ setEduStartYM(a); setEduEndYM(b); }}
+                        onClose={()=>setEduMonthSheet(false)}/>
                     )}
                   </div>
-                )}
+                  );
+                })()}
 
                 {txnType==="expense"&&catIds.includes("transport")&&(
                   <div style={{ marginTop:10,background:T.input,borderRadius:10,padding:"10px 12px" }}>
@@ -7264,7 +7407,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             )}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={closeModal} style={btnG}>Cancel</button>
-              <button onClick={()=>submit()} style={{ ...btnP,opacity:canSubmit?1:0.5 }}>{canSubmit?(isEditing?"Save Changes ✓":"Add ✓"):txnType==="investment"?"Fill name & amount":"Fill vendor & amount"}</button>
+              <button onClick={()=>submit()} style={{ ...btnP,opacity:canSubmit?1:0.5 }}>{eduMode&&eduShowErrors&&eduErrorCount>0?`Fix ${eduErrorCount} item${eduErrorCount===1?"":"s"}`:canSubmit?(isEditing?"Save Changes ✓":"Add ✓"):txnType==="investment"?"Fill name & amount":"Fill vendor & amount"}</button>
             </div>
           </div>
         </div>
@@ -19934,48 +20077,77 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   const coverage = getPrepaidCoverage(baBills);
                   const history = getPrepaidHistory(baBills);
                   const doRecharge = ()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); setActiveBillerForAction(null); };
-                  if(!coverage){
-                    return (
-                      <div data-testid="prepaid-coverage-empty" style={{ background:T.input,border:`1px dashed ${T.border}`,borderRadius:16,padding:16,marginBottom:12 }}>
-                        <div style={{ color:T.text,fontSize:14,fontWeight:900,marginBottom:6 }}>📶 Prepaid Coverage</div>
-                        <div style={{ color:T.sub,fontSize:12,marginBottom:12 }}>No recharge recorded yet. Add one to see plan coverage and days left.</div>
-                        <button onClick={doRecharge} style={{ width:"100%",background:T.accent,border:"none",borderRadius:12,padding:"11px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>🔁 Recharge</button>
-                      </div>
-                    );
-                  }
-                  const color = coverage.status==="expired"?T.danger:coverage.status==="expiring_soon"?T.warn:T.success;
-                  const statusLabel = coverage.status==="expired"?"Expired":coverage.status==="expiring_soon"?"Expiring Soon":"Active";
-                  return (
-                    <div data-testid="prepaid-coverage-card" style={{ background:`linear-gradient(135deg,${color}12,${T.card})`,border:`1px solid ${color}44`,borderRadius:16,padding:16,marginBottom:12 }}>
-                      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
-                        <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>📶 Prepaid Coverage</div>
-                        <div style={{ background:color+"22",border:`1px solid ${color}44`,borderRadius:20,padding:"3px 10px" }}>
-                          <span style={{ color,fontSize:10,fontWeight:800 }}>{statusLabel}</span>
-                        </div>
-                      </div>
-                      <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>{coverage.validFrom?`${formatShortDate(coverage.validFrom)||coverage.validFrom} → `:""}{formatShortDate(coverage.validUntil)||coverage.validUntil}</div>
-                      <div style={{ color,fontSize:13,fontWeight:800,marginBottom:6 }}>{coverage.daysRemaining>=0?`${coverage.daysRemaining} Day${coverage.daysRemaining===1?"":"s"} Left`:`Expired ${Math.abs(coverage.daysRemaining)} day${Math.abs(coverage.daysRemaining)===1?"":"s"} ago`}</div>
-                      {coverage.percentUsed!=null&&(
-                        <>
-                          <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:4 }}>
-                            <div style={{ height:"100%",width:`${coverage.percentUsed}%`,background:color,borderRadius:3 }}/>
-                          </div>
-                          <div style={{ color:T.sub,fontSize:10 }}>{coverage.percentUsed}% of this period used</div>
-                        </>
-                      )}
-                      <button onClick={doRecharge} style={{ width:"100%",marginTop:12,background:color,border:"none",borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>🔁 Recharge</button>
-                      {history.length>1&&(
-                        <div style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
-                          <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>PAST RECHARGES</div>
-                          {history.slice(1,4).map(b=>(
-                            <div key={b.id} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0" }}>
-                              <span style={{ color:T.sub,fontSize:10 }}>{formatShortDate(b.validFrom)||b.validFrom} → {formatShortDate(b.validUntil)||b.validUntil}</span>
-                              <span style={{ color:T.text,fontSize:10,fontWeight:700 }}>{sym}{fmt(b.amount)}</span>
+                  const kicker = { color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1 };
+                  const rechargeBtn = (
+                    <button data-testid="prepaid-recharge-btn" onClick={doRecharge} style={{ width:"100%",minHeight:48,marginTop:12,background:T.accent,border:"none",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"inherit" }}>Recharge</button>
+                  );
+                  // W1/W2 — same card frame in both states; zero recharges is a valid state, never "0 days left".
+                  const accName = b=>{ const tx = txns.find(t=>String(t.id)===String(b.paidByTxnId)); return tx ? (accounts.find(a=>String(a.id)===String(tx.accId))?.name||"") : ""; };
+                  const rechargesList = (
+                    <div data-testid="prepaid-recharges" style={{ marginBottom:12 }}>
+                      <div style={{ ...kicker,margin:"4px 2px 8px" }}>Recharges</div>
+                      {history.length===0 ? (
+                        <div style={{ color:T.sub,fontSize:13,padding:"4px 2px" }}>Recharges you record appear here.</div>
+                      ) : (
+                        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"0 12px" }}>
+                          {history.slice(0,6).map((b,i)=>(
+                            <div key={b.id} onClick={()=>{ setActiveBillerForAction(null); setViewingBillId(b.id); }} style={{ display:"flex",alignItems:"center",gap:8,minWidth:0,minHeight:56,cursor:"pointer",borderTop:i?`1px solid ${T.border}`:"none" }}>
+                              <span style={{ flex:1,minWidth:0 }}>
+                                <span style={{ display:"block",color:T.text,fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{sym}{fmt(b.amount)} plan</span>
+                                <span style={{ display:"block",color:T.sub,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{formatShortDate(b.paidDate||b.billDate||b.validFrom)||b.paidDate||b.billDate||b.validFrom}{accName(b)?` · ${accName(b)}`:""}</span>
+                              </span>
+                              <span style={{ color:T.text,fontSize:14,fontWeight:800,flexShrink:0 }}>{sym}{fmt(b.amount)}</span>
+                              <span style={{ color:T.sub,flexShrink:0 }}>›</span>
                             </div>
                           ))}
                         </div>
                       )}
                     </div>
+                  );
+                  if(!coverage){
+                    return (
+                      <>
+                        <div data-testid="prepaid-coverage-empty" style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:16,marginBottom:12 }}>
+                          <div style={kicker}>Prepaid coverage</div>
+                          <div style={{ color:T.text,fontSize:16,fontWeight:800,margin:"8px 0 4px" }}>No recharge recorded yet</div>
+                          <div style={{ color:T.sub,fontSize:13,lineHeight:1.5 }}>Coverage starts from your first recharge. Record one and Arth shows the plan, its validity and what's left.</div>
+                          {rechargeBtn}
+                        </div>
+                        {rechargesList}
+                      </>
+                    );
+                  }
+                  // Verified against the implementation: getPrepaidCoverage already flags "expiring_soon"
+                  // (<= 7 days remaining), so amber is used for exactly that state and nowhere else.
+                  const color = coverage.status==="expired"?T.danger:coverage.status==="expiring_soon"?T.warn:T.text;
+                  const barColor = coverage.status==="expired"?T.danger:coverage.status==="expiring_soon"?T.warn:T.sub;
+                  const latest = history[0];
+                  const rem = Math.max(0,coverage.daysRemaining);
+                  const used = coverage.totalDays!=null ? Math.max(0,coverage.totalDays-rem) : null;
+                  return (
+                    <>
+                      <div data-testid="prepaid-coverage-card" style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:16,marginBottom:12 }}>
+                        <div style={kicker}>Prepaid coverage</div>
+                        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,margin:"8px 0 6px",minWidth:0 }}>
+                          <span style={{ color:T.text,fontSize:14,fontWeight:800,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{sym}{fmt(latest.amount)} plan{coverage.totalDays?` · ${coverage.totalDays} days`:""}</span>
+                          <span style={{ color:T.sub,fontSize:12,flexShrink:0 }}>{coverage.status==="expired"?"Ended":"Ends"} {formatShortDate(coverage.validUntil)||coverage.validUntil}</span>
+                        </div>
+                        <div data-testid="prepaid-days-left" style={{ color,fontSize:26,fontWeight:800,marginBottom:8 }}>{coverage.daysRemaining>=0?`${coverage.daysRemaining} day${coverage.daysRemaining===1?"":"s"} left`:`Expired ${Math.abs(coverage.daysRemaining)} day${Math.abs(coverage.daysRemaining)===1?"":"s"} ago`}</div>
+                        {coverage.percentUsed!=null&&(
+                          <>
+                            <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:6 }}>
+                              <div style={{ height:"100%",width:`${coverage.percentUsed}%`,background:barColor,borderRadius:3 }}/>
+                            </div>
+                            <div style={{ display:"flex",justifyContent:"space-between",gap:8,color:T.sub,fontSize:12 }}>
+                              <span>{used} of {coverage.totalDays} days used</span>
+                              <span>{coverage.status==="expired"?"":`Remaining ${rem} day${rem===1?"":"s"}`}</span>
+                            </div>
+                          </>
+                        )}
+                        {rechargeBtn}
+                      </div>
+                      {rechargesList}
+                    </>
                   );
                 })()}
                 {!ba.accId&&actionType!=="membership"&&(()=>{
@@ -20127,6 +20299,38 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     </div>
                   );
                 })()}
+                {/* WP18d W7/W8 (UI pass) — pure Membership. The Quick Actions grid stays hidden for it (its
+                    tiles read bills[], see the F1 note above). With payments: one full-width Analytics row
+                    that jumps to the Lifetime / Expense-recognition blocks this screen ALREADY shows (there
+                    is no separate Membership analytics view to route to). With none: neutral History /
+                    Documents empty states — never "No bills recorded yet". */}
+                {actionType==="membership"&&!ba.accId&&baMemberships.length>0&&(
+                  <button type="button" data-testid="membership-analytics-row"
+                    onClick={()=>document.getElementById(`ba_membership_analytics_${ba.id}`)?.scrollIntoView({ behavior:"smooth", block:"start" })}
+                    style={{ display:"flex",alignItems:"center",gap:12,width:"100%",minHeight:72,minWidth:0,padding:"12px 14px",marginBottom:16,boxSizing:"border-box",background:T.card,border:`1px solid ${T.border}`,borderRadius:14,cursor:"pointer",textAlign:"left",fontFamily:"inherit" }}>
+                    <span aria-hidden="true" style={{ width:40,height:40,flexShrink:0,borderRadius:12,background:T.pill,display:"grid",placeItems:"center",fontSize:18 }}>📈</span>
+                    <span style={{ flex:1,minWidth:0 }}>
+                      <span style={{ display:"block",color:T.text,fontSize:15,fontWeight:800 }}>Analytics</span>
+                      <span style={{ display:"block",color:T.sub,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>Lifetime spend, payments and cost per month</span>
+                    </span>
+                    <span aria-hidden="true" style={{ color:T.sub,fontSize:18,flexShrink:0 }}>›</span>
+                  </button>
+                )}
+                {actionType==="membership"&&!ba.accId&&baMemberships.length===0&&(
+                  <div data-testid="membership-empty-states" style={{ marginBottom:16 }}>
+                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>History</div>
+                    <div style={{ border:`1px dashed ${T.border}`,borderRadius:14,padding:"16px 14px",textAlign:"center",marginBottom:16 }}>
+                      <div style={{ color:T.text,fontSize:15,fontWeight:800 }}>No payments recorded yet</div>
+                      <div style={{ color:T.sub,fontSize:13,margin:"4px 0 12px" }}>Payments you record for this membership appear here.</div>
+                      {!isSchoolLinkedAccount&&<button type="button" onClick={()=>setShowAddMembership(true)} style={{ ...btnG,minHeight:44,padding:"0 18px",fontSize:13 }}>Record a payment</button>}
+                    </div>
+                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Documents</div>
+                    <div style={{ border:`1px dashed ${T.border}`,borderRadius:14,padding:"16px 14px",textAlign:"center" }}>
+                      <div style={{ color:T.text,fontSize:15,fontWeight:800 }}>No documents yet</div>
+                      <div style={{ color:T.sub,fontSize:13,marginTop:4 }}>Nothing is attached to this membership.</div>
+                    </div>
+                  </div>
+                )}
                 {/* Membership: Hero Card, Renewal banner, Timeline, Lifetime Analytics */}
                 {actionType==="membership"&&baMemberships.length>0&&(()=>{
                   // Fix (reported): sorted by createdAt (when the record was entered) rather than
@@ -20199,7 +20403,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         })}
                       </div>
 
-                      <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>LIFETIME</div>
+                      <div id={`ba_membership_analytics_${ba.id}`} style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8,scrollMarginTop:12 }}>LIFETIME</div>
                       <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
                         <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
                           <div style={{ color:T.accent,fontSize:15,fontWeight:900 }}>{sym}{fmt(lifetimeSpend)}</div>

@@ -4,7 +4,7 @@ import {
   EDU_SUB, EDUCATION_CATEGORY, feeKindForEducationSub, educationSubNeedsPeriod, selectionNeedsSchool,
   monthRangeToDates, dateRangeToDates, findApplicablePeriods, planFeeAllocation, validateFeeAllocation,
   buildEducationLineItems, collectLinkedFeePeriods, applyEducationSettlement,
-  findEducationCategory, roleOfEducationSub, ensureEducationCategory, EDUCATION_SUBS,
+  findEducationCategory, roleOfEducationSub, ensureEducationCategory, EDUCATION_SUBS, isMonthSettled,
 } from "./educationLines.js";
 import { settleFeePeriods } from "./settlement.js";
 
@@ -207,4 +207,14 @@ test("line items use the Education category id passed in (a user's own id), not 
   const li = buildEducationLineItems([{ id: "l", subId: "my_sf", name: "School Fees", amount: 100 }], "cat_abc123");
   assert.equal(li[0].catId, "cat_abc123");
   assert.equal(li[0].subId, "my_sf");
+});
+
+test("isMonthSettled: only a fully paid, declared tuition month at THIS school counts", () => {
+  const ps = [per("jul", "2026-07-01", "2026-07-31", { paidAmount: 5000 }), per("aug", "2026-08-01", "2026-08-31"), per("sep", "2026-09-01", "2026-09-30", { startingStateDeclared: false })];
+  const a = ym => isMonthSettled({ feePeriods: ps, feeSchedules: schedules, billerAccountId: "b1", ym });
+  assert.equal(a("2026-07"), true);
+  assert.equal(a("2026-08"), false);
+  assert.equal(a("2026-09"), false, "undeclared is unknown, not paid");
+  assert.equal(a("2027-01"), false, "no period at all is not 'paid'");
+  assert.equal(isMonthSettled({ feePeriods: ps, feeSchedules: schedules, billerAccountId: "b2", ym: "2026-07" }), false, "another school's periods never count");
 });

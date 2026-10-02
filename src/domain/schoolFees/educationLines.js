@@ -231,6 +231,23 @@ export function findApplicablePeriods({ feePeriods, feeSchedules, billerAccountI
 const round2 = n => Math.round(n * 100) / 100;
 
 /**
+ * True when a calendar month ("YYYY-MM") is fully paid at this school: at least one tuition period
+ * touches it, every one that does is declared, and none has anything outstanding. UI hint only
+ * (struck-through months in the month picker) — it never blocks a range.
+ */
+export function isMonthSettled({ feePeriods, feeSchedules, billerAccountId, ym }) {
+  const first = `${ym}-01`;
+  const last = `${ym}-31`;
+  const scheduleIds = new Set(
+    (feeSchedules || []).filter(s => String(s.billerAccountId) === String(billerAccountId)).map(s => s.id)
+  );
+  const touching = (feePeriods || []).filter(
+    p => scheduleIds.has(p.scheduleId) && kindOf(p) === "tuition" && p.periodStart <= last && p.periodEnd >= first
+  );
+  return touching.length > 0 && touching.every(p => p.startingStateDeclared && calculateOutstanding(p) <= 0);
+}
+
+/**
  * How a line's amount relates to what is outstanding on its applicable periods.
  *  - "exact":   amount equals the total outstanding -> every period gets exactly its own
  *               outstanding; fully deterministic (settlement.js's own rule).

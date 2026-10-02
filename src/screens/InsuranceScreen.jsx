@@ -186,6 +186,26 @@ export const InsurancePolicyListModal = ({ onClose, T, sym, fmt, insurancePolici
   </BottomSheet>
 );
 
+// W4/W5/W6 — Expected renewal › Renewal notice › Bill. Purely visual: `stage` is derived by the
+// caller from state that already exists (linkedBillId / the sheet being open), never stored.
+// Steps before the current one are struck through; the current one is the filled pill.
+export const RenewalTracker = ({ stage, T }) => {
+  const steps = [["expected","Expected renewal"],["notice","Renewal notice"],["bill","Bill"]];
+  const at = steps.findIndex(([k])=>k===stage);
+  return (
+    <div data-testid="renewal-tracker" data-stage={stage} style={{ display:"flex",alignItems:"center",gap:4,flexWrap:"wrap",marginBottom:14 }}>
+      {steps.map(([k,label],i)=>(
+        <React.Fragment key={k}>
+          {i>0&&<span style={{ color:T.sub,fontSize:11 }}>›</span>}
+          <span aria-current={i===at?"step":undefined} style={{ borderRadius:20,padding:"4px 11px",fontSize:12,fontWeight:700,whiteSpace:"nowrap",
+            background:i===at?T.text:"transparent", color:i===at?T.bg:T.sub, border:i===at?"none":`1px solid ${T.border}`,
+            textDecoration:i<at?"line-through":"none" }}>{label}</span>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+};
+
 // F4 — "Add renewal notice". Opened from F2's Expected renewal block. Prefilled from the Expected
 // item itself (amount, due date, policy year) — Amount and Due date stay required, the document
 // is optional. The difference from the expected amount is plain text, never styled as a warning
@@ -215,6 +235,8 @@ export const AddInsuranceRenewalNoticeModal = ({ policy, expected, onClose, T, i
         <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Add renewal notice</div>
         <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
       </div>
+      <RenewalTracker stage="notice" T={T}/>
+      <div style={{ color:T.sub,fontSize:13,marginBottom:12 }}>Enter what the insurer's notice says. Saving creates the bill.</div>
       <div style={{ background:T.input,borderRadius:14,padding:14,marginBottom:16 }}>
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:4 }}>EXPECTED RENEWAL</div>
         <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{policy.renewalDate}</div>
@@ -226,11 +248,12 @@ export const AddInsuranceRenewalNoticeModal = ({ policy, expected, onClose, T, i
         <div>
           <span style={lbl}>Amount on notice *</span>
           <input style={inp} type="number" value={amount} onChange={e=>setAmount(e.target.value)} autoFocus/>
-          {diff && <div style={{ color:T.sub,fontSize:11,marginTop:4 }}>{sym}{fmt(diff.amount)} {diff.direction} than expected</div>}
+          <div style={{ color:T.sub,fontSize:11,marginTop:4 }}>{diff ? `${sym}${fmt(diff.amount)} ${diff.direction} than expected` : "Prefilled from the expected amount · edit if different"}</div>
         </div>
         <div>
           <span style={lbl}>Due date *</span>
-          <input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/>
+          <input style={{ ...inp,minWidth:0,maxWidth:"100%",boxSizing:"border-box" }} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/>
+          <div style={{ color:T.sub,fontSize:11,marginTop:4 }}>Prefilled from the renewal date · editable</div>
         </div>
         <div style={{ background:T.input,borderRadius:12,padding:"11px 14px",display:"flex",alignItems:"center",gap:10 }}>
           <span>📎</span>
@@ -251,7 +274,7 @@ export const AddInsuranceRenewalNoticeModal = ({ policy, expected, onClose, T, i
           <span style={{ color:T.sub,fontSize:12 }}>Sum insured</span>
           <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(policy.sumInsured)}</span>
         </div>
-        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>Save as bill</button>
+        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>Save · create bill</button>
       </div>
     </BottomSheet>
   );
@@ -300,6 +323,8 @@ export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, forma
         <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>x</button>
       </div>
 
+      <RenewalTracker stage={linkedBill?"bill":"expected"} T={T}/>
+
       {/* F5 — one-time confirmation strip, shown once right after Add renewal notice is saved. */}
       {justConverted && (
         <div style={{ background:T.success+"18",border:`1px solid ${T.success}44`,borderRadius:12,padding:"10px 12px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
@@ -324,35 +349,48 @@ export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, forma
           Open bill card (solid, Record payment, follows the 14-day badge rule). These two states
           are mutually exclusive and driven by the same linkedBillId this screen has always used. */}
       {linkedBill ? (
-        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:14,marginBottom:14 }}>
-          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>OPEN BILL</div>
-          <div onClick={()=>onOpenBill&&onOpenBill(linkedBill)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",cursor:onOpenBill?"pointer":"default",marginBottom:10 }}>
-            <div>
-              <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{linkedBill.name}</div>
-              <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{policy.renewalNoticeAddedDate?`Notice added ${fmtDate(policy.renewalNoticeAddedDate)}`:""}{linkedBill.dueDate?` · Due ${fmtDate(linkedBill.dueDate)}`:""}</div>
+        <div data-testid="renewal-bill-card" style={{ marginBottom:14 }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6 }}>RENEWAL BILL</div>
+          <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:14 }}>
+            <div onClick={()=>onOpenBill&&onOpenBill(linkedBill)} style={{ cursor:onOpenBill?"pointer":"default" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,minWidth:0 }}>
+                <div style={{ color:T.text,fontSize:14,fontWeight:800,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{linkedBill.name}</div>
+                {badgeText && <span style={{ flexShrink:0,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,border:`1px solid ${badgeText.tone==="negative"?T.danger:badgeText.tone==="attention"?T.warn:badgeText.tone==="positive"?T.success:T.border}`,color:badgeText.tone==="negative"?T.danger:badgeText.tone==="attention"?T.warn:badgeText.tone==="positive"?T.success:T.sub }}>{badgeText.text}</span>}
+              </div>
+              <div style={{ color:T.text,fontSize:26,fontWeight:800,margin:"6px 0 10px" }}>{sym}{fmt(linkedBill.amount)}</div>
             </div>
-            <div style={{ textAlign:"right" }}>
-              <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{sym}{fmt(linkedBill.amount)}</div>
-              {badgeText && <div style={{ color:badgeText.tone==="negative"?T.danger:badgeText.tone==="attention"?T.warn:badgeText.tone==="positive"?T.success:T.sub,fontSize:10,fontWeight:700,marginTop:2 }}>{badgeText.text}</div>}
+            <div style={{ background:T.input,borderRadius:12,padding:"2px 12px",marginBottom:12 }}>
+              {[["Provider · policy",[policy.provider,policy.name].filter(Boolean).join(" · ")],
+                ["Due",linkedBill.dueDate?fmtDate(linkedBill.dueDate):"—"],
+                ["Notice",policy.renewalNoticeAddedDate?`Added ${fmtDate(policy.renewalNoticeAddedDate)}`:"—"]].map(([k,v],i)=>(
+                <div key={k} style={{ display:"flex",justifyContent:"space-between",gap:10,minHeight:40,alignItems:"center",borderTop:i?`1px solid ${T.border}`:"none" }}>
+                  <span style={{ color:T.sub,fontSize:12,flexShrink:0 }}>{k}</span>
+                  <span style={{ color:T.text,fontSize:12,fontWeight:700,minWidth:0,textAlign:"right",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{v}</span>
+                </div>
+              ))}
             </div>
+            {badge && badge.kind!=="paid" && (
+              <button onClick={()=>onRecordPayment&&onRecordPayment(linkedBill)} style={{ width:"100%",minHeight:48,background:T.accent,border:"none",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Record payment</button>
+            )}
           </div>
-          {badge && badge.kind!=="paid" && (
-            <button onClick={()=>onRecordPayment&&onRecordPayment(linkedBill)} style={{ width:"100%",background:T.accent,border:"none",borderRadius:12,padding:"11px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Record payment</button>
-          )}
+          <div style={{ color:T.sub,fontSize:12,marginTop:8 }}>Also listed in Payments › Bills.</div>
         </div>
       ) : (
-        <div style={{ background:T.card,border:`1px dashed ${T.border}`,borderRadius:14,padding:14,marginBottom:14,opacity:0.85 }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
-            <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>RENEWAL · EXPECTED</div>
-            <div style={{ background:T.border,borderRadius:20,padding:"2px 9px" }}><span style={{ color:T.sub,fontSize:9,fontWeight:700 }}>{expected.kind==="overdue"?"Overdue":"Coming up"}</span></div>
+        <div data-testid="renewal-expected-card" style={{ marginBottom:14 }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1,marginBottom:6 }}>RENEWAL</div>
+          <div style={{ background:"transparent",border:`1px dashed ${T.border}`,borderRadius:14,padding:14 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
+              <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>Insurance renewal</div>
+              <span style={{ flexShrink:0,border:`1px solid ${T.border}`,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,color:T.sub }}>Expected</span>
+            </div>
+            {Number(expected?.amount||policy.premiumAmount)>0
+              ? <div style={{ color:T.sub,fontSize:26,fontWeight:800,margin:"6px 0" }}>~{sym}{fmt(expected?.amount||policy.premiumAmount)}</div>
+              : <div style={{ color:T.sub,fontSize:14,margin:"6px 0" }}>Amount on notice</div>}
+            <div style={{ color:T.sub,fontSize:12,lineHeight:1.5 }}>Renews {fmtDate(policy.renewalDate)}{expected?.kind==="overdue"?" (date has passed)":""} · expected from the policy schedule. Not a bill yet: nothing to pay until you add the renewal notice.</div>
+            {policy.status!=="archived"&&(
+              <button onClick={()=>onAddRenewalNotice&&onAddRenewalNotice(policy)} style={{ width:"100%",minHeight:48,marginTop:12,background:"transparent",border:`1px solid ${T.accent}`,borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add renewal notice</button>
+            )}
           </div>
-          <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{fmtDate(policy.renewalDate)}</div>
-          <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>Renewal premium · from the policy schedule</div>
-          <div style={{ color:T.sub,fontSize:14,fontWeight:800,marginTop:2 }}>~{sym}{fmt(policy.premiumAmount)}</div>
-          <div style={{ color:T.sub,fontSize:10,marginTop:8 }}>The renewal can't be paid until the notice is added, which turns it into a real Bill with Record payment.</div>
-          {policy.status!=="archived"&&(
-            <button onClick={()=>onAddRenewalNotice&&onAddRenewalNotice(policy)} style={{ width:"100%",marginTop:10,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add renewal notice</button>
-          )}
         </div>
       )}
 
