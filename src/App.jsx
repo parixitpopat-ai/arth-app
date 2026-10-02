@@ -6935,6 +6935,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       events={events}
                       vehicles={vehicles}
                       txns={txns}
+                      people={people}
                       billerLinkId={billerLinkId}
                       eventLinkId={eventLinkId}
                       vehicleId={vehicleId}
