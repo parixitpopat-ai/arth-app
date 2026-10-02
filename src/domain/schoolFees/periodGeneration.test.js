@@ -200,6 +200,27 @@ test("buildManualFeePeriods: an unrecognised kind falls back to tuition rather t
   assert.equal(p.kind, "tuition");
 });
 
+// --- School Fees audit (backward compatibility) -----------------------------
+// AddSchoolYearModal's Type dropdown no longer OFFERS books/activities/exams/other as something
+// a person can newly create (see SchoolFeesScreen.jsx's FEE_KIND_OPTIONS) — but this domain
+// function's own FEE_KINDS list, and its generic handling of whatever kind is passed, are
+// deliberately UNCHANGED. A period of one of those kinds may already exist in a real user's
+// stored data (created before this fix, or by any other caller) and must keep working exactly as
+// before: no silent rename, no silent drop, no thrown error.
+for (const legacyKind of ["books", "activities", "exams", "other"]) {
+  test(`buildManualFeePeriods: still accepts a pre-existing/legacy kind ("${legacyKind}") unchanged — no longer offered in the UI, but the domain never rejects it`, () => {
+    const [p] = buildManualFeePeriods([
+      { periodStart: "2026-10-10", periodEnd: "2026-10-10", obligationAmount: 1200, kind: legacyKind },
+    ], { todayStr: "2026-10-02" });
+    assert.equal(p.kind, legacyKind);
+    // Gets the exact same generic feePeriod shape as every other kind — no reduced/alternate
+    // record shape for a "no longer offered" kind.
+    assert.equal(p.obligationAmount, 1200);
+    assert.equal(p.paidAmount, 0);
+    assert.deepEqual(p.settlementLinks, []);
+  });
+}
+
 test("buildManualFeePeriods: every period gets the full generic feePeriod shape (settlementLinks, discount/write-off/credit fields)", () => {
   const [p] = buildManualFeePeriods([
     { periodStart: "2026-10-01", periodEnd: "2026-12-31", obligationAmount: 41800 },

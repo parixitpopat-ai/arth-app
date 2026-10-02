@@ -150,6 +150,13 @@ import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
+import { computeLineItemCategoryRollup, rollupToCatAllocations } from "./domain/transactions/lineItemCategoryRollup";
+import * as schoolFeesService from "./domain/schoolFees/service";
+import {
+  EDUCATION_CAT_ID, EDUCATION_SUB_DESC, EDU_SUB, findEducationCategory, roleOfEducationSub, ensureEducationCategory, feeKindForEducationSub, educationSubNeedsPeriod,
+  selectionNeedsSchool, monthRangeToDates, dateRangeToDates, findApplicablePeriods, planFeeAllocation,
+  validateFeeAllocation, buildEducationLineItems, collectLinkedFeePeriods, applyEducationSettlement,
+} from "./domain/schoolFees/educationLines";
 // BudgetInsights (./screens/BudgetInsights) no longer imported here — WP11 removed Budget's own
 // embedded Insights tab per the handoff ("Insights moves to the Insights page"). That component
 // still holds real, not-yet-ported capability (category -> subcategory drill-down with its
@@ -521,9 +528,14 @@ const normalizeCats = stored => {
   // whichever DEFAULT_CATS entries are actually missing get appended -- everything the user
   // already has is kept untouched, regardless of which specific categories they've changed.
   if(!list || !list.length) return DEFAULT_CATS;
-  const existingIds = new Set(list.map(c=>c.id));
-  const missingDefaults = DEFAULT_CATS.filter(c=>!existingIds.has(c.id));
-  return missingDefaults.length ? [...list, ...missingDefaults] : list;
+  // Education is initialised separately and idempotently (canonical -> reuse; a user's own
+  // "Education" -> reuse and only add the standard subcategories it lacks; none -> add once), so
+  // it is excluded from the generic by-id "missing defaults" step below — otherwise a user's own
+  // Education category would get a second, duplicate one.
+  const withEducation = ensureEducationCategory(list);
+  const existingIds = new Set(withEducation.map(c=>c.id));
+  const missingDefaults = DEFAULT_CATS.filter(c=>c.id!==EDUCATION_CAT_ID && !existingIds.has(c.id));
+  return missingDefaults.length ? [...withEducation, ...missingDefaults] : withEducation;
 };
 const normalizeAccounts = stored => (Array.isArray(stored) && stored.length ? stored : DEFAULT_ACCOUNTS).map(acc=>{
   const baseType = ACC_TYPES.some(item=>item.id===acc?.type) ? acc.type : "bank";
@@ -3923,6 +3935,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [transferTagGroupId, setTransferTagGroupId] = useState(isEditing && sourceTxn?.type==="transfer" ? (sourceTxn.groupId || "") : "");
     const [note, setNote] = useState(isEditing ? (sourceTxn.note || "") : (refundPrefill ? `Refund for ${refundPrefill.desc||refundPrefill.merchant||"expense"}` : (safePrefill.note || "")));
     const [billerLinkId, setBillerLinkId] = useState(isEditing ? (sourceTxn.billerLinkId||"") : "");
+    // Education flow (create only): which Education subcategories are ticked, each one's amount,
+    // the School Fees coverage range, and any hand-edited per-month split for a partial payment.
+    const [eduSelected, setEduSelected] = useState([]);
+    const [eduAmounts, setEduAmounts] = useState({});
+    const [eduPeriodMode, setEduPeriodMode] = useState("month");
+    const [eduStartYM, setEduStartYM] = useState("");
+    const [eduEndYM, setEduEndYM] = useState("");
+    const [eduFrom, setEduFrom] = useState("");
+    const [eduTo, setEduTo] = useState("");
+    const [eduAlloc, setEduAlloc] = useState({});
     const [eventLinkId, setEventLinkId] = useState(isEditing ? (sourceTxn.eventId||"") : "");
     const [settleSelectedIds, setSettleSelectedIds] = useState({});
     const [settleAmounts, setSettleAmounts] = useState({});
@@ -4831,8 +4853,57 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       }
     };
 
+    // ---- Education flow (create-mode Expense with Education as the only category) ----------------
+    // The Education category in use: the canonical one, or the user's own "Education" (reused, never duplicated).
+    const eduCat = findEducationCategory(cats);
+    const eduCatId = eduCat?.id || EDUCATION_CAT_ID;
+    const eduActive = Boolean(eduCat) && txnType==="expense" && !isEditing && catIds.length===1 && catIds[0]===eduCat.id;
+    const eduRoleOf = subId => roleOfEducationSub(eduCat, subId);
+    const eduNeedsSchool = eduActive && selectionNeedsSchool(eduSelected.map(eduRoleOf));
+    const eduSchoolBA = eduNeedsSchool && linkedIsSchoolBiller ? linkedBA : null;
+    const eduPersonId = (()=>{
+      const row = allocRows.find(r=>r.targetType==="person" && r.targetId && r.targetId!=="__me__");
+      return String(row?.targetId || attributePersonIds.find(pid=>pid!=="__me__") || (tagPerson && tagPerson!=="__me__" ? tagPerson : "") || "");
+    })();
+    const eduRange = eduActive && eduSelected.some(sid=>eduRoleOf(sid)===EDU_SUB.SCHOOL_FEES)
+      ? (eduPeriodMode==="month" ? monthRangeToDates(eduStartYM, eduEndYM) : dateRangeToDates(eduFrom, eduTo))
+      : null;
+    // One entry per ticked Education subcategory, with what (if anything) it settles at the linked school.
+    const eduPlan = eduActive ? eduSelected.map(subId=>{
+      const name = eduCat?.subs?.find(x=>x.id===subId)?.name || subId;
+      const amount = Math.round((parseFloat(eduAmounts[subId])||0)*100)/100;
+      const role = eduRoleOf(subId);
+      const kind = feeKindForEducationSub(role);
+      let applicable = [], plan = null, allocations = [], error = null, notice = null;
+      if(kind && eduSchoolBA){
+        const needsRange = kind==="tuition";
+        if(needsRange && !eduRange){
+          error = "Choose the months School Fees covers.";
+        } else {
+          applicable = findApplicablePeriods({ feePeriods, feeSchedules, billerAccountId:eduSchoolBA.id, kind, from:eduRange?.from, to:eduRange?.to });
+          plan = planFeeAllocation(applicable, amount);
+          if(plan.status==="none") notice = needsRange ? "No fee period on file for these months at this school — saved as a School Fees expense only." : `No ${name.toLowerCase()} obligation on file at this school — saved as an expense only.`;
+          else if(plan.status==="excess") error = `${sym}${fmt(plan.excess)} more than the ${sym}${fmt(plan.totalOutstanding)} outstanding for ${name}. Reduce the amount.`;
+          else {
+            allocations = applicable.map((x,i)=>{
+              const custom = plan.status==="partial" ? eduAlloc[x.period.id] : undefined;
+              return { periodId:x.period.id, amount: custom!==undefined && custom!=="" ? (parseFloat(custom)||0) : plan.suggested[i].amount };
+            });
+            const allocErr = amount>0 ? validateFeeAllocation(applicable, allocations, amount) : null;
+            if(allocErr) error = allocErr;
+          }
+        }
+      }
+      const coversLabel = kind==="tuition" && eduRange ? eduRange.label : "";
+      return { id:`edu_${subId}`, subId, role, name, amount, kind, applicable, plan, allocations, error, notice, coversLabel };
+    }) : [];
+    const eduLinesValid = eduPlan.filter(l=>l.amount>0);
+    const eduTotal = Math.round(eduLinesValid.reduce((sum,l)=>sum+l.amount,0)*100)/100;
+    const eduMode = eduActive && eduPlan.length>0;
+
     const hasTxnSubject = Boolean(
       who.trim() ||
+      (eduActive && eduSchoolBA) ||
       note.trim() ||
       (isEditing && (sourceTxn?.merchant || sourceTxn?.desc || sourceTxn?.note)) ||
       txnType==="cc_payment" ||
@@ -4845,6 +4916,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(submittingRef.current) return;
       if(!hasTxnSubject){ setRefDupWarning("Enter a vendor/note before saving."); return; }
       if(!amt){ setRefDupWarning("Enter an amount before saving."); return; }
+      if(eduMode){
+        if(eduLinesValid.length===0){ setRefDupWarning("Enter an amount for each Education item you selected."); return; }
+        if(eduPlan.some(l=>l.amount<=0)){ setRefDupWarning("Every selected Education item needs an amount — or untick it."); return; }
+        const lineErr = eduPlan.find(l=>l.error);
+        if(lineErr){ setRefDupWarning(`${lineErr.name}: ${lineErr.error}`); return; }
+        if(Math.abs(eduTotal-amt)>=0.01){ setRefDupWarning(`Education items add up to ${sym}${fmt(eduTotal)} but the amount is ${sym}${fmt(amt)}. They must match.`); return; }
+        try { applyEducationSettlement(feePeriods, collectLinkedFeePeriods(eduPlan), "dry-run", schoolFeesService.settlePeriods); }
+        catch(e){ setRefDupWarning(e.message || "Could not apply this payment to the school's fee periods."); return; }
+      }
       // QW-1: never save a bill payment whose amount no longer matches the chosen bill — that used
       // to rewrite the bill or (after the link silently dropped) create a duplicate. Partial
       // payments ("Keep link" with a remainder) arrive with ADR-038 / WP-4.
@@ -4877,7 +4957,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       }
       submittingRef.current = true;
       const resolvedTxnId = isEditing ? sourceTxn.id : Date.now();
-      const baseLabel = who.trim() || sourceTxn?.desc || sourceTxn?.merchant || note.trim() || "";
+      const baseLabel = who.trim() || (eduActive && eduSchoolBA ? eduSchoolBA.name : "") || sourceTxn?.desc || sourceTxn?.merchant || note.trim() || "";
       const base = {
         ...(sourceTxn || {}),
         id:resolvedTxnId,
@@ -5322,6 +5402,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // at all, regardless of whether it sums exactly (warned above, never blocked).
           catAllocations:catIds.length>1?catAllocNumeric:null,
           lineItems:normalizedLineItems?.length ? normalizedLineItems : null,
+          // Education flow — ONE Transaction, one real line per ticked Education subcategory. Overrides
+          // the generic category/line fields above (Education is the only category here by construction).
+          ...(eduMode ? {
+            catId:eduCatId, catIds:[eduCatId],
+            subIds:eduPlan.map(l=>l.subId), subId:eduPlan[0].subId,
+            catAllocations:null,
+            lineItems:buildEducationLineItems(eduPlan, eduCatId).map(i=>({ ...i, amount:i.unitPrice })),
+            linkedFeePeriods:collectLinkedFeePeriods(eduPlan),
+          } : {}),
           reimbursable:reimbursable||false,
           reimbursableAmount:(reimbursable && reimbursableAmount && Number(reimbursableAmount)>0) ? Number(reimbursableAmount) : null,
           paymentImageBase64:paymentImageBase64||null,
@@ -5333,6 +5422,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           priceGstAmt:showPriceBreakdown&&priceGstAmt>0?priceGstAmt:null,
         };
         if(!isEditing) submitCreateThroughBoundary(newTxn); else upsertTxn(newTxn);
+        if(eduMode && newTxn.linkedFeePeriods?.length){
+          setFeePeriods(prev=>applyEducationSettlement(prev, newTxn.linkedFeePeriods, resolvedTxnId, schoolFeesService.settlePeriods));
+        }
         if(!isEditing && getAcc(accId).type==="cc") setAccounts(prev=>prev.map(a=>a.id===accId?{...a,outstanding:(a.outstanding||0)+amt}:a));
 
         if(isBillPayment){
@@ -5651,29 +5743,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Expense only. catIds ordered by summed item amount descending; catId = the largest
     // share. Live-recomputed (not just at save), no new fields -- existing catId/catIds/
     // lineItems[].catId are the only representations used.
+    // WP18c-fix: the actual rule now lives in domain/transactions/lineItemCategoryRollup.js
+    // (computeLineItemCategoryRollup) so School Fees' PayFeesModal fix can share this exact
+    // projection instead of a second one — this call is behaviorally identical to the inline
+    // version it replaces.
     const itemCategoryRollup = useMemo(() => {
       if(!(txnType==="expense" && useItemizedLines && lineItems.length>0)) return null;
-      const sums = {};
-      const subSums = {};
-      for(const item of lineItems){
-        if(!item.catId) continue;
-        const itemAmt = (parseFloat(item.qty)||0) * (parseFloat(item.unitPrice)||0);
-        sums[item.catId] = (sums[item.catId]||0) + itemAmt;
-        // T3.1 Part A follow-up: sub-categories preserved on switch-back, using the SAME
-        // amount-ordering principle as catIds above -- distinct subIds by summed item amount.
-        if(item.subId) subSums[item.subId] = (subSums[item.subId]||0) + itemAmt;
-      }
-      const orderedCatIds = Object.keys(sums).sort((a,b)=>sums[b]-sums[a]);
-      const orderedSubIds = Object.keys(subSums).sort((a,b)=>subSums[b]-subSums[a]);
-      const uncategorized = lineItems.filter(item=>!item.catId);
-      return {
-        catId: orderedCatIds[0]||null,
-        catIds: orderedCatIds,
-        subIds: orderedSubIds,
-        catAmounts: sums,
-        uncategorizedCount: uncategorized.length,
-        uncategorizedLabels: uncategorized.map(i=>i.label||"Unnamed item"),
-      };
+      return computeLineItemCategoryRollup(lineItems);
     }, [txnType, useItemizedLines, lineItems]);
 
     const canSubmit = hasTxnSubject && amt>0 && !(itemCategoryRollup && itemCategoryRollup.uncategorizedCount>0);
@@ -5726,8 +5802,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {(txnType!=="cc_payment"&&txnType!=="transfer")&&(
               <div style={{ position:"relative" }}>
                 <input 
-                  style={{ ...inp, fontSize:18, fontWeight:700, border:`1px solid ${!who.trim()&&txnType!=="transfer"&&txnType!=="settlement_in"?T.danger+"66":T.border}` }} 
-                  placeholder={txnType==="income"?"Source (e.g. Salary, Freelance)":txnType==="settlement_in"?"Refund / settlement note (store, app, person, etc.)":txnType==="investment"?"Investment name *":"Vendor / Person / Place *"} 
+                  style={{ ...inp, fontSize:18, fontWeight:700, border:`1px solid ${!who.trim()&&!(eduActive&&eduSchoolBA)&&txnType!=="transfer"&&txnType!=="settlement_in"?T.danger+"66":T.border}` }} 
+                  placeholder={txnType==="income"?"Source (e.g. Salary, Freelance)":txnType==="settlement_in"?"Refund / settlement note (store, app, person, etc.)":txnType==="investment"?"Investment name *":(eduActive&&eduSchoolBA)?`Paid to: ${eduSchoolBA.name}`:"Vendor / Person / Place *"} 
                   value={who} 
                   onChange={e=>{setWho(e.target.value); setShowSuggestions(true);}}
                   onFocus={() => setShowSuggestions(true)}
@@ -6602,7 +6678,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
                 {catIds.length>0&&(
                   <div style={{ marginTop:8 }}>
-                    {catIds.map(cid=>{ const c=getCat(cid); if(!c.subs?.length) return null; return (
+                    {catIds.map(cid=>{ const c=getCat(cid); if(!c.subs?.length || (eduActive && cid===eduCatId)) return null; return (
                       <div key={cid} style={{ marginBottom:6 }}>
                         <div style={{ color:c.color,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:4 }}>{c.icon} {c.name}</div>
                         <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
@@ -6610,6 +6686,91 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         </div>
                       </div>
                     ); })}
+                  </div>
+                )}
+
+                {eduActive&&(
+                  <div data-testid="edu-panel" style={{ marginTop:10,background:T.input,borderRadius:10,padding:"10px 12px" }}>
+                    <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>🎓 What was this for? (pick all that apply)</div>
+                    <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
+                      {(eduCat?.subs||[]).map(sb=><Chip key={sb.id} color={eduCat.color} active={eduSelected.includes(sb.id)} onClick={()=>{ setCategoryTouched(true); setEduSelected(prev=>prev.includes(sb.id)?prev.filter(x=>x!==sb.id):[...prev,sb.id]); }}>{sb.name}</Chip>)}
+                    </div>
+                    {eduPlan.map(l=>(
+                      <div key={l.subId} data-testid={`edu-line-${l.subId}`} style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
+                        <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                          <div style={{ flex:1,minWidth:0 }}>
+                            <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{l.name}</div>
+                            <div style={{ color:T.sub,fontSize:11 }}>{l.kind==="tuition"?"Recurring · covers a period":l.kind?"One-time · no period":(EDUCATION_SUB_DESC[l.role]||"Education expense")}</div>
+                          </div>
+                          <input data-testid={`edu-amt-${l.subId}`} style={{ ...inpSm,width:110,textAlign:"right" }} type="number" inputMode="decimal" placeholder="Amount" value={eduAmounts[l.subId]??""} onChange={e=>setEduAmounts(prev=>({ ...prev,[l.subId]:e.target.value }))}/>
+                        </div>
+                        {educationSubNeedsPeriod(l.role)&&(
+                          <div data-testid="edu-period" style={{ marginTop:8 }}>
+                            <div style={{ display:"flex",gap:6,marginBottom:6 }}>
+                              <Chip color={T.accent} active={eduPeriodMode==="month"} onClick={()=>setEduPeriodMode("month")}>By month</Chip>
+                              <Chip color={T.accent} active={eduPeriodMode==="date"} onClick={()=>setEduPeriodMode("date")}>By date</Chip>
+                            </div>
+                            {eduPeriodMode==="month"?(
+                              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                                <label style={{ color:T.sub,fontSize:10 }}>Start month<input data-testid="edu-start-month" style={{ ...inpSm,width:"100%",marginTop:2 }} type="month" value={eduStartYM} onChange={e=>{ setEduStartYM(e.target.value); if(!eduEndYM || eduEndYM<e.target.value) setEduEndYM(e.target.value); }}/></label>
+                                <label style={{ color:T.sub,fontSize:10 }}>End month<input data-testid="edu-end-month" style={{ ...inpSm,width:"100%",marginTop:2 }} type="month" value={eduEndYM} min={eduStartYM||undefined} onChange={e=>setEduEndYM(e.target.value)}/></label>
+                              </div>
+                            ):(
+                              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                                <label style={{ color:T.sub,fontSize:10 }}>From<input style={{ ...inpSm,width:"100%",marginTop:2 }} type="date" value={eduFrom} onChange={e=>setEduFrom(e.target.value)}/></label>
+                                <label style={{ color:T.sub,fontSize:10 }}>To<input style={{ ...inpSm,width:"100%",marginTop:2 }} type="date" value={eduTo} min={eduFrom||undefined} onChange={e=>setEduTo(e.target.value)}/></label>
+                              </div>
+                            )}
+                            <div data-testid="edu-covers" style={{ color:T.sub,fontSize:11,marginTop:6 }}>{eduRange?`Covers ${eduRange.months} month${eduRange.months===1?"":"s"} · ${eduRange.label}`:"Pick the months this payment covers"}</div>
+                          </div>
+                        )}
+                        {l.kind&&eduSchoolBA&&l.plan&&l.plan.status!=="none"&&(
+                          <div data-testid={`edu-settle-${l.subId}`} style={{ marginTop:6,fontSize:11,color:T.sub }}>
+                            <div style={{ fontWeight:700,marginBottom:2 }}>Applied to</div>
+                            {l.applicable.map(x=>{
+                              const al = l.allocations.find(a=>a.periodId===x.period.id);
+                              return (
+                                <div key={x.period.id} style={{ display:"flex",alignItems:"center",gap:6,padding:"2px 0" }}>
+                                  <span style={{ flex:1 }}>{x.period.label} · {sym}{fmt(x.outstanding)} due{x.needsDeclaration?" (not yet marked as paid or unpaid — will be recorded as unpaid, then settled)":""}</span>
+                                  {l.plan.status==="partial"
+                                    ? <input style={{ ...inpSm,width:84,textAlign:"right" }} type="number" inputMode="decimal" value={eduAlloc[x.period.id] ?? String(al?.amount ?? 0)} onChange={e=>setEduAlloc(prev=>({ ...prev,[x.period.id]:e.target.value }))}/>
+                                    : <span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(al?.amount||0)}</span>}
+                                </div>
+                              );
+                            })}
+                            {l.plan.status==="partial"&&<div style={{ marginTop:2 }}>Part payment — the rest of each month stays outstanding. Adjust the split if you like.</div>}
+                          </div>
+                        )}
+                        {l.notice&&<div style={{ marginTop:6,fontSize:11,color:T.warn }}>{l.notice}</div>}
+                        {l.error&&<div style={{ marginTop:6,fontSize:11,color:T.danger }}>{l.error}</div>}
+                      </div>
+                    ))}
+                    {eduNeedsSchool&&(
+                      <div style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
+                        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6 }}>School</div>
+                        <button data-testid="edu-link-school" onClick={()=>{ setLinkToInitialStage("school"); setShowLinkToSheet(true); }} style={{ ...btnG,width:"100%",textAlign:"left",padding:"10px 12px",fontSize:13 }}>
+                          {eduSchoolBA ? `🏫 ${eduSchoolBA.name} · change` : (eduPersonId ? `Link ${getPerson(eduPersonId)?.name||"person"}'s school` : "Link a school")}
+                        </button>
+                        {eduPersonId&&<div style={{ color:T.sub,fontSize:11,marginTop:4 }}>Person: {getPerson(eduPersonId)?.name}</div>}
+                      </div>
+                    )}
+                    {eduPlan.length>0&&(
+                      <div data-testid="edu-review" style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}`,fontSize:12,color:T.text }}>
+                        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6 }}>Review</div>
+                        {eduPlan.map(l=>(
+                          <div key={l.subId} style={{ display:"flex",justifyContent:"space-between",padding:"2px 0" }}>
+                            <span>{l.name}{l.coversLabel?` · ${l.coversLabel}`:l.kind?" · One-time":""}</span>
+                            <span style={{ fontWeight:700 }}>{sym}{fmt(l.amount)}</span>
+                          </div>
+                        ))}
+                        {eduSchoolBA&&<div style={{ color:T.sub,marginTop:4 }}>School: {eduSchoolBA.name}</div>}
+                        {eduSchoolBA&&eduPersonId&&<div style={{ color:T.sub }}>Person: {getPerson(eduPersonId)?.name}</div>}
+                        {eduSchoolBA&&<div style={{ color:T.sub }}>Paid to: {who.trim()||eduSchoolBA.name}</div>}
+                        <div style={{ display:"flex",justifyContent:"space-between",marginTop:6,fontWeight:800 }}>
+                          <span>Total</span><span style={{ color:Math.abs(eduTotal-amt)<0.01?T.text:T.danger }}>{sym}{fmt(eduTotal)}{Math.abs(eduTotal-amt)>=0.01?` (amount is ${sym}${fmt(amt)})`:""}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -6948,12 +7109,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       T={T}
                       onClose={()=>setShowLinkToSheet(false)}
                       initialStage={linkToInitialStage}
+                      initialSchoolPersonId={eduPersonId}
                       billerAccounts={billerAccounts}
                       billers={billers}
                       schoolRelationships={schoolRelationships}
                       events={events}
                       vehicles={vehicles}
                       txns={txns}
+                      people={people}
                       billerLinkId={billerLinkId}
                       eventLinkId={eventLinkId}
                       vehicleId={vehicleId}
@@ -16763,7 +16926,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 { label:"Recharge", types:["Fastag","Mobile Postpaid","Mobile Prepaid","DTH","Broadband","Landline","Cable TV","Metro Recharge","NCMC Recharge","EV Recharge"] },
                 { label:"Utility Bills", types:["Electricity","LPG Gas","Piped Gas","Water"] },
                 { label:"Finances", types:["Credit Card","Recurring Deposit","NPS","Insurance","Forex"] },
-                { label:"Education & Fitness", types:["School Fees","Education Fees","Gym / Fitness","Club Membership","Hospital"] },
+                { label:"Education & Fitness", types:["Education Fees","Gym / Fitness","Club Membership","Hospital"] },
                 { label:"Others", types:["Donation","Municipal Services","Municipal Tax","Society Maintenance","Rental","Prepaid Meter","eChallan","Fleet Card","B2B","Other Subscription","Other"] },
               ].map(cat=>(
                 <div key={cat.label} style={{ padding:"8px 0 4px" }}>
@@ -19228,13 +19391,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           feePeriods={feePeriods} setFeePeriods={setFeePeriods}
           selectedPeriodIds={selectedSchoolFeePeriodIds} setSelectedPeriodIds={setSelectedSchoolFeePeriodIds}
           accounts={accounts}
-          createRealTxn={({ amount, date, paymentLines, extraLines, linkedFeePeriods })=>{
+          cats={cats}
+          createRealTxn={({ amount, date, paymentLines, lineItems, linkedFeePeriods })=>{
             const txnId = genId();
-            // Payments v2 (WP18c) — Education's own category has no dedicated picker in Pay fees
-            // (E2/E3 never show one); resolved automatically from whatever spending category the
-            // household already named for school/education, same spirit as "Category comes from
-            // the connection, never a picker" (D3) — never defaulted to cats[0] by position.
-            const eduCatId = (cats.find(c=>/school|educat/i.test(c.name||""))||{}).id || null;
+            // WP18c-fix (Pay Fees mixed category) — replaces the old single-guess eduCatId regex
+            // (`/school|educat/i` against cats[].name) with the REAL mechanism every other
+            // Transaction uses: each line already carries its own real catId/subId (ticked fee
+            // lines are left uncategorized — no categoryId exists anywhere on a fee
+            // schedule/School Relationship to inherit from today, see this WP's investigation
+            // notes; a "not listed" line carries whatever real category the user actually
+            // picked in the sheet). The Transaction's top-level catId/catIds/subIds are the
+            // exact same deterministic projection AddTransactionModal's itemized flow already
+            // uses — computeLineItemCategoryRollup — never a second attribution rule.
+            const rollup = computeLineItemCategoryRollup(lineItems);
+            // getCategoryAttributedTotal (domain/allocations/adapter.js) falls back to an EVEN
+            // split across catIds when catAllocations is absent — wrong here, since a Pay Fees
+            // transaction routinely mixes uncategorized fee lines with one categorized line.
+            // catAllocations (an existing Transaction field, already read as this function's
+            // Path 1) pins each category to its own real summed line amount instead, so a
+            // category this transaction never touched gets exactly ₹0 from it.
+            const catAllocations = rollupToCatAllocations(rollup);
             setTxns(prev=>[{
               id: txnId, type:"expense", amount, date: date || todayStr(),
               merchant: viewingSchoolFeeSchedule?.schoolName || "School Fee",
@@ -19243,16 +19419,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               // line so every existing single-account read (ledgers, Insights, account balances via
               // the real transaction pipeline) still resolves to a real, correct account.
               accId: paymentLines?.[0]?.accId || null,
-              catId: eduCatId, catIds: eduCatId?[eduCatId]:[], subId:null, subIds:[],
+              catId: rollup.catId, catIds: rollup.catIds, subId: rollup.subIds[0]||null, subIds: rollup.subIds,
+              catAllocations,
               trackingMode:"none", people:{},
               paymentLines: paymentLines || [],
               // Reverse link, following the same linked*-field convention Insurance's Bill
               // already uses (paidBillId/linkedPolicyId) — array-shaped here since one School
               // Fee transaction can settle multiple periods, unlike a single Bill payment.
               linkedFeePeriods: linkedFeePeriods || [],
-              // E2/E4 — "Add something not listed": named Education lines with no fee period,
-              // stored on this same Transaction.
-              eduExtraLines: extraLines || [],
+              // WP18c-fix — every line (ticked fee lines AND "not listed" lines) now lives here,
+              // the one real Transaction line-item representation, replacing the old
+              // Education-only `eduExtraLines` field entirely (nothing else in the app read it).
+              lineItems: lineItems && lineItems.length ? lineItems : null,
               createdDate: todayStr(), createdAt: Date.now(),
             }, ...prev]);
             return txnId;

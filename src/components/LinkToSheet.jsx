@@ -4,6 +4,8 @@ import AddVehicleModal from "./AddVehicleModal";
 import LinkPicker from "./LinkPicker";
 import { FONT, RADIUS, TOUCH } from "../constants/theme";
 import { getProviderAccountLabel } from "../domain/billers/accountLabel";
+import { getCurrentSchoolBillerAccountIds } from "../domain/school/relationship";
+import { isPersonArchived } from "../domain/person/archive";
 
 // T3.1 Part B2 — "Link to…" sheet. One BottomSheet, two stages: the type list (unchanged idea
 // from B1) and, per type, the real LinkPicker (Arth UI-2B T3.1 B2 Link To Pickers.dc.html).
@@ -26,8 +28,9 @@ export default function LinkToSheet({
   T,
   onClose,
   initialStage = "types",
+  initialSchoolPersonId = "", // Education flow: the Person already chosen on the transaction
   // Data
-  billerAccounts, billers, schoolRelationships, events, vehicles, txns,
+  billerAccounts, billers, schoolRelationships, events, vehicles, txns, people,
   billerLinkId, eventLinkId, vehicleId, showVehicle,
   detailsDate,
   // Helpers/lookups already owned by AddModal — reused, not reimplemented
@@ -45,6 +48,12 @@ export default function LinkToSheet({
 }) {
   const [stage, setStage] = useState(initialStage);
   const [showNewVehicle, setShowNewVehicle] = useState(false);
+  // School Fees audit — person-scoped linker. "" means no person chosen yet, so the full list of
+  // every School Fees connection in Arth still shows (today's pre-fix behavior, kept as the
+  // default so a household with one child/one school sees nothing new). Once a person is picked,
+  // the list narrows to only THEIR current School Relationship(s) — getCurrentSchoolBillerAccountIds
+  // (domain/school/relationship.js), never a second, local re-derivation of "whose school is this."
+  const [schoolForPersonId, setSchoolForPersonId] = useState(initialSchoolPersonId || "");
 
   // WP1 (Arth IA §2/§3) — Provider name is the title, "{nickname} · A/c ****{last4}" is the
   // account line, both from the one shared labeling function every Provider/account picker now
@@ -96,7 +105,12 @@ export default function LinkToSheet({
   const isMembershipBiller = ba => getBillerActionType(ba.type) === "membership" && !isSchoolBiller(ba);
   const billBillers = billerAccounts.filter(ba => !isMembershipBiller(ba) && !isSchoolBiller(ba));
   const membershipBillers = billerAccounts.filter(isMembershipBiller);
-  const schoolBillers = billerAccounts.filter(isSchoolBiller);
+  const allSchoolBillers = billerAccounts.filter(isSchoolBiller);
+  // Person-scoped linker: "" (no person picked) shows every school, same as before this fix.
+  // Picking a real person restricts the list to that person's own current School Relationship(s)
+  // — if John is selected, show John's school(s), not every school in Arth.
+  const schoolIdsForPerson = schoolForPersonId ? new Set(getCurrentSchoolBillerAccountIds(schoolRelationships, schoolForPersonId, todayStr())) : null;
+  const schoolBillers = schoolIdsForPerson ? allSchoolBillers.filter(ba => schoolIdsForPerson.has(ba.id)) : allSchoolBillers;
 
   const linkedBiller = billerLinkId ? billerAccounts.find(b => b.id === billerLinkId) : null;
   const linkedIsMembership = linkedBiller && isMembershipBiller(linkedBiller);
@@ -213,17 +227,39 @@ export default function LinkToSheet({
       />
     );
   } else if (stage === "school") {
+    // Person-scoped linker — picking a person here narrows `schoolBillers` (computed above) to
+    // only their own current School Relationship(s). The select sits above the picker, not
+    // inside LinkPicker's own search, since it changes WHAT's listed, not how it's searched.
+    const personOptions = (people || []).filter(p => !p.isMe && !isPersonArchived(p));
+    const personLabel = pid => pid === "__me__" ? "Me" : (personOptions.find(p => String(p.id) === String(pid))?.name || "them");
+    const noMatchesForPerson = schoolForPersonId && schoolBillers.length === 0 && allSchoolBillers.length > 0;
     body = (
-      <LinkPicker T={T} title="School fees" searchPlaceholder="Search Provider, nickname or account number"
-        linkedRow={linkedIsSchool ? billerRow(linkedBiller, [linkedBiller.type, getProviderAccountLabel(linkedBiller, billers).accountLine, attributionLabel(linkedBiller)].filter(Boolean).join(" · ")) : null}
-        groups={buildBillerSingleList(schoolBillers, { meta: ba => [ba.type, getProviderAccountLabel(ba, billers).accountLine, attributionLabel(ba)].filter(Boolean).join(" · ") })}
-        itemNoun="school" itemNounPlural="schools"
-        emptyTitle="No schools yet" emptySubtitle="Add the school once, and link fee payments to it."
-        onBack={effectiveClose}
-        onCommit={id => onCommitBiller(billerAccounts.find(b => b.id === id))}
-        onNewType={() => onNewBillerType("School Fees")}
-        extraContent={() => <div style={{ marginTop: 10, padding: "0 4px", color: T.sub, fontSize: 13, lineHeight: 1.5 }}>Which term or period this pays is assigned in School Fees.</div>}
-      />
+      <>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ color: T.sub, fontSize: 11, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 6 }}>For</div>
+          <select
+            data-testid="linkto-school-for-person"
+            value={schoolForPersonId}
+            onChange={e => setSchoolForPersonId(e.target.value)}
+            style={{ width: "100%", border: `1px solid ${T.border}`, background: T.input, borderRadius: 10, padding: "9px 12px", fontSize: 13, fontWeight: 700, color: T.text, fontFamily: FONT.sans, outline: "none" }}
+          >
+            <option value="">Everyone — show every school</option>
+            <option value="__me__">Me</option>
+            {personOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <LinkPicker T={T} title="School fees" searchPlaceholder="Search Provider, nickname or account number"
+          linkedRow={linkedIsSchool ? billerRow(linkedBiller, [linkedBiller.type, getProviderAccountLabel(linkedBiller, billers).accountLine, attributionLabel(linkedBiller)].filter(Boolean).join(" · ")) : null}
+          groups={buildBillerSingleList(schoolBillers, { meta: ba => [ba.type, getProviderAccountLabel(ba, billers).accountLine, attributionLabel(ba)].filter(Boolean).join(" · ") })}
+          itemNoun="school" itemNounPlural="schools"
+          emptyTitle={noMatchesForPerson ? `No schools for ${personLabel(schoolForPersonId)}` : "No schools yet"}
+          emptySubtitle={noMatchesForPerson ? "This person has no current School Relationship linked to a school yet. Pick Everyone, or link this school to them first." : "Add the school once, and link fee payments to it."}
+          onBack={effectiveClose}
+          onCommit={id => onCommitBiller(billerAccounts.find(b => b.id === id))}
+          onNewType={() => onNewBillerType("School Fees")}
+          extraContent={() => <div style={{ marginTop: 10, padding: "0 4px", color: T.sub, fontSize: 13, lineHeight: 1.5 }}>Which term or period this pays is assigned in School Fees.</div>}
+        />
+      </>
     );
   } else if (stage === "trip") {
     body = (

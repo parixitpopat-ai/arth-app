@@ -8,6 +8,7 @@ import {
   getHistoricalSchoolRelationships,
   getSchoolRelationships,
   migrateSchoolRelationshipsIntoCanonicalStore,
+  getCurrentSchoolBillerAccountIds,
 } from "./relationship.js";
 import { endMembership } from "../membership/lifecycle.js";
 
@@ -208,4 +209,37 @@ test("migrateSchoolRelationshipsIntoCanonicalStore never rewrites an existing ca
   const result = migrateSchoolRelationshipsIntoCanonicalStore(legacy, canonical);
   assert.equal(result, canonical);
   assert.equal(result[0].status, "ended");
+});
+
+// --- School Fees audit: person-scoped linker --------------------------------
+
+test("getCurrentSchoolBillerAccountIds returns only the given person's own CURRENT school(s), not every school in Arth", () => {
+  const vyomRel = createSchoolRelationship({ billerAccountId: "dps", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const rahulRel = createSchoolRelationship({ billerAccountId: "springdale", personId: "rahul_id", startDate: "2025-06-01", genId });
+  const relationships = [vyomRel, rahulRel];
+
+  assert.deepEqual(getCurrentSchoolBillerAccountIds(relationships, "vyom_id", "2026-01-01"), ["dps"]);
+  assert.deepEqual(getCurrentSchoolBillerAccountIds(relationships, "rahul_id", "2026-01-01"), ["springdale"]);
+});
+
+test("getCurrentSchoolBillerAccountIds excludes an ended relationship — a past school never leaks into the person-scoped list", () => {
+  const ended = endSchoolRelationship(
+    createSchoolRelationship({ billerAccountId: "old_school", personId: "vyom_id", startDate: "2024-06-01", genId }),
+    "Changed schools", "2025-04-30"
+  );
+  const current = createSchoolRelationship({ billerAccountId: "new_school", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const relationships = [ended, current];
+
+  assert.deepEqual(getCurrentSchoolBillerAccountIds(relationships, "vyom_id", "2026-01-01"), ["new_school"]);
+});
+
+test("getCurrentSchoolBillerAccountIds returns every current school when a person has more than one (e.g. two children under one profile is out of scope, but multiple concurrent relationships are still handled generically)", () => {
+  const relA = createSchoolRelationship({ billerAccountId: "school_a", personId: "vyom_id", startDate: "2025-06-01", genId });
+  const relB = createSchoolRelationship({ billerAccountId: "school_b", personId: "vyom_id", startDate: "2025-06-01", genId });
+  assert.deepEqual(getCurrentSchoolBillerAccountIds([relA, relB], "vyom_id", "2026-01-01").sort(), ["school_a", "school_b"]);
+});
+
+test("getCurrentSchoolBillerAccountIds returns an empty array, not an error, for a person with no School relationship at all", () => {
+  assert.deepEqual(getCurrentSchoolBillerAccountIds([], "vyom_id", "2026-01-01"), []);
+  assert.deepEqual(getCurrentSchoolBillerAccountIds(undefined, "vyom_id", "2026-01-01"), []);
 });
