@@ -152,6 +152,7 @@ import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
 import { computeLineItemCategoryRollup, rollupToCatAllocations } from "./domain/transactions/lineItemCategoryRollup";
 import * as schoolFeesService from "./domain/schoolFees/service";
+import { expandPaymentLines } from "./domain/payments/paymentLineSlices";
 import { RangeFieldGrid, RangeField, MonthRangeSheet } from "./components/RangeFields";
 import CashFlowScreen, { CashFlowCard } from "./screens/CashFlowScreen";
 import {
@@ -921,7 +922,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setAccounts(prev=>prev.map(a=>a.type==="cc" ? migrateLegacyBillingHistory(a) : a));
       return;
     }
-    const newBills = ccAccounts.flatMap(card=>generateDueStatements({ card, accounts, txns, bills, toDateOnly }));
+    const newBills = ccAccounts.flatMap(card=>generateDueStatements({ card, accounts, txns:expandPaymentLines(txns), bills, toDateOnly }));
     if(newBills.length>0){ setBills(prev=>[...prev, ...newBills]); return; }
     // Rule 10/test I: a cc_payment transaction pays a card regardless of a statement's
     // verification status — this reflects that payment onto the specific Bill record it closed,
@@ -2542,7 +2543,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       ? accounts.filter(a=>(a.type==="debit" && a.linkedBank===accId) || (a.type==="upi" && a.linkedAccount===accId)).map(a=>a.id)
       : [];
     let bal=Number(acc.openingBalance||0);
-    txns.forEach(t=>{
+    // A multi-method payment hits each paying account for ITS line only (see paymentLineSlices.js).
+    expandPaymentLines(txns).forEach(t=>{
       if(!isDateInRange(t.date, openingDate, endDate)) return;
       if(t.type==="income"&&t.accId===accId) bal+=Number(t.amount||0);
       if(t.type==="settlement_in"&&t.accId===accId) bal+=Number(t.amount||0);
@@ -2673,7 +2675,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const allIds = [cardId, ...linkedUpiIds];
     const today = todayStr();
     // Charges in the last billing cycle only (prevStatementDate < date ≤ lastStatementDate)
-    const lastCycleCharges = txns.reduce((sum,t)=>{
+    const lastCycleCharges = expandPaymentLines(txns).reduce((sum,t)=>{
       if((t.type!=="expense"&&t.type!=="investment"&&t.type!=="cc_emi")||!allIds.includes(t.accId)) return sum;
       if(!t.date||String(t.date)>today) return sum;
       const d=toDateOnly(t.date);
@@ -8541,7 +8543,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const linkedDebitIds = a.type==="bank"
       ? accounts.filter(x=>(x.type==="debit"&&x.linkedBank===a.id)||(x.type==="upi"&&x.linkedAccount===a.id)).map(x=>x.id)
       : [];
-    const cardSummary = a.type==="cc" ? getCardSummary(a, accounts, txns, toDateOnly) : null;
+    const cardSummary = a.type==="cc" ? getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly) : null;
     const util = a.type==="cc" && a.limit ? Math.round((((cardSummary?.currentCycleSpend)||0)/a.limit)*100) : 0;
     const utilLimit = cardSummary?.alertPct || 30;
     const currentBalance = a.type==="cc"
@@ -8559,7 +8561,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       ? Number(checkpoint.amount||0) - Number(expectedAtCheckpoint||0)
       : null;
 
-    const ledgerRows = [...txns].map(t=>{
+    const ledgerRows = expandPaymentLines(txns).map(t=>{
       let signed = 0;
       let secondary = txnLabel(t.type);
 
@@ -9766,7 +9768,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       : { icon:"🟢", label:"Comfortable", color:T.success };
 
     const ccList = accounts.filter(a=>a.type==="cc");
-    const ccSummaries = ccList.map(card=>({ card, ...getCardSummary(card, accounts, txns, toDateOnly) }));
+    const ccSummaries = ccList.map(card=>({ card, ...getCardSummary(card, accounts, expandPaymentLines(txns), toDateOnly) }));
     const totalDue = ccSummaries.reduce((s,item)=>s+item.currentDue,0);
     const totalUnbilled = ccSummaries.reduce((s,item)=>s+item.currentCycleSpend,0);
     const anyHighUtil = ccSummaries.some(item=>item.isOverAlert);
@@ -12777,7 +12779,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Spend, same root cause as the SIP bug. currentDue > 0 only, so a fully-paid card doesn't
     // show as a phantom commitment.
     const ccStatementsAsBills = accounts.filter(a=>a.type==="cc").map(a=>{
-      const summary = getCardSummary(a, accounts, txns, toDateOnly);
+      const summary = getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly);
       if(!summary.currentDue || summary.currentDue<=0) return null;
       return { id:`ccstmt_${a.id}`, type:"cc_statement", name:`${a.name} Statement`, amount:summary.currentDue, dueDate:toLocalDateStr(summary.dueOn), status:"unpaid" };
     }).filter(Boolean);
@@ -13850,7 +13852,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         color:T.purple,
       })),
       cc: accounts.filter(a=>a.type==="cc").map(a=>{
-        const summary = getCardSummary(a, accounts, txns, toDateOnly);
+        const summary = getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly);
         return {
           id:a.id,
           title:a.name,
@@ -14122,7 +14124,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         title:"💳 Credit card breakup",
         subtitle:"Current due vs total outstanding",
         items: accounts.filter(a=>a.type==="cc").map(a=>{
-          const summary = getCardSummary(a, accounts, txns, toDateOnly);
+          const summary = getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly);
           return {
             id:a.id,
             title:a.name,
@@ -14531,7 +14533,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {accs.map(a=>{
                   const bal=a.type==="cc"?null:(a.type==="bank" ? effectiveAccountBalance(a.id) : accountBalance(a.id));
                   const linkedB=a.type==="debit"?accounts.find(b=>b.id===a.linkedBank):null;
-                  const ccSummary = a.type==="cc" ? getCardSummary(a, accounts, txns, toDateOnly) : null;
+                  const ccSummary = a.type==="cc" ? getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly) : null;
                   return (
                     <div key={a.id} style={{ ...card,cursor:"pointer" }} onClick={()=>setShowAccDetail(a)}>
                       <div style={{ display:"flex",alignItems:"center",gap:12 }}>
@@ -19708,7 +19710,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               bill={liveBill}
               card={stmtCard}
               accounts={accounts}
-              txns={txns}
+              txns={expandPaymentLines(txns)}
               T={T}
               sym={sym}
               fmt={fmt}
