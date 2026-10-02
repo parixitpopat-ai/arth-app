@@ -153,6 +153,7 @@ import EntityCard from "./components/EntityCard";
 import { computeLineItemCategoryRollup, rollupToCatAllocations } from "./domain/transactions/lineItemCategoryRollup";
 import * as schoolFeesService from "./domain/schoolFees/service";
 import { RangeFieldGrid, RangeField, MonthRangeSheet } from "./components/RangeFields";
+import CashFlowScreen, { CashFlowCard } from "./screens/CashFlowScreen";
 import {
   EDUCATION_CAT_ID, EDUCATION_SUB_DESC, EDU_SUB, findEducationCategory, roleOfEducationSub, ensureEducationCategory, feeKindForEducationSub, educationSubNeedsPeriod,
   selectionNeedsSchool, monthRangeToDates, dateRangeToDates, findApplicablePeriods, planFeeAllocation,
@@ -1373,6 +1374,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
   // ── MODAL STATE ────────────────────────────────────────────────────────────
   const [showAdd, setShowAdd] = useState(false);
+  const [cashFlowMonth, setCashFlowMonth] = useState(null); // Money → Cash flow screen: the month it opened on (null = closed)
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [toast, setToast] = useState(null); // { message, icon } | null
   const [showFabSpeedMenu, setShowFabSpeedMenu] = useState(false);
@@ -3949,6 +3951,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [eduTouched, setEduTouched] = useState({});     // subIds whose amount the user typed (never auto-prefill those)
     const [eduShowErrors, setEduShowErrors] = useState(false);
     const [eduMonthSheet, setEduMonthSheet] = useState(false);
+    const [eduFeeOpen, setEduFeeOpen] = useState(false);   // ET4: with several lines the School Fees card collapses to its range summary
     const [eventLinkId, setEventLinkId] = useState(isEditing ? (sourceTxn.eventId||"") : "");
     const [settleSelectedIds, setSettleSelectedIds] = useState({});
     const [settleAmounts, setSettleAmounts] = useState({});
@@ -4921,6 +4924,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       // Changing "For" clears a school that doesn't belong to the new person; a person with exactly
       // one school gets it preselected. Nothing is invented for a person with none.
       if(!schools.some(b=>b.id===billerLinkId)) setBillerLinkId(schools.length===1 ? schools[0].id : "");
+      if(schools.length===0) setEduSelected(prev=>prev.filter(sid=>eduRoleOf(sid)!==EDU_SUB.SCHOOL_FEES));
     };
 
     // Header amount IS the sum of the Education lines (no second amount that can disagree).
@@ -6745,14 +6749,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       <div style={{ color:T.sub,fontSize:12,margin:"2px 0 8px" }}>Pick one or more. Each becomes its own line in this transaction.</div>
                       {(eduCat?.subs||[]).map(sb=>{
                         const role = eduRoleOf(sb.id); const on = eduSelected.includes(sb.id); const tg = feeTag(role);
+                        // ET9 — School Fees needs a school relationship; with a person chosen who has none it is
+                        // unavailable (Registration/Uniform/other lines stay available and save as ordinary lines).
+                        const needsSchool = role===EDU_SUB.SCHOOL_FEES && eduPersonId && eduPersonSchools.length===0;
                         return (
-                          <button key={sb.id} type="button" data-testid={`edu-pick-${sb.id}`} aria-pressed={on}
+                          <button key={sb.id} type="button" data-testid={`edu-pick-${sb.id}`} aria-pressed={on} disabled={needsSchool}
                             onClick={()=>{ setCategoryTouched(true); setEduSelected(prev=>prev.includes(sb.id)?prev.filter(x=>x!==sb.id):[...prev,sb.id]); }}
-                            style={{ display:"flex",alignItems:"center",gap:10,width:"100%",minWidth:0,minHeight:52,padding:"6px 0",background:"none",border:"none",borderTop:`1px solid ${T.border}`,cursor:"pointer",textAlign:"left",fontFamily:"inherit" }}>
+                            style={{ display:"flex",alignItems:"center",gap:10,width:"100%",minWidth:0,minHeight:52,padding:"6px 0",background:"none",border:"none",borderTop:`1px solid ${T.border}`,cursor:needsSchool?"not-allowed":"pointer",opacity:needsSchool?0.55:1,textAlign:"left",fontFamily:"inherit" }}>
                             <span style={{ width:22,height:22,flexShrink:0,borderRadius:6,display:"grid",placeItems:"center",background:on?T.accent:"transparent",border:`1.5px solid ${on?T.accent:T.border}`,color:"#fff",fontSize:13,fontWeight:900 }}>{on?"✓":""}</span>
                             <span style={{ flex:1,minWidth:0 }}>
                               <span style={{ display:"block",color:T.text,fontSize:15,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{sb.name}</span>
-                              <span style={{ display:"block",color:T.sub,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{role===EDU_SUB.SCHOOL_FEES?"Covers a month or date range":(tg==="One-time"?"Paid once":"Ordinary Education line")}</span>
+                              <span style={{ display:"block",color:T.sub,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{needsSchool?`Needs a school for ${personName}`:role===EDU_SUB.SCHOOL_FEES?"Covers a month or date range":(tg==="One-time"?"Paid once":"Ordinary Education line")}</span>
                             </span>
                             <span style={tagStyle(tg)}>{tg}</span>
                           </button>
@@ -6760,9 +6767,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       })}
                     </div>
 
-                    {eduPlan.length>0&&(
-                      <>
-                        {/* ET2/ET9 — For + school (person-scoped) + Paid to (derived, read-only) */}
+                    {/* ET2/ET9 — For + school (person-scoped) + Paid to (derived, read-only). For is picked first, so it shows as soon as Education is chosen. */}
                         <div style={card}>
                           <div style={secLabel}>For</div>
                           <div style={{ display:"flex",gap:6,flexWrap:"wrap",margin:"6px 0 10px" }}>
@@ -6809,6 +6814,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           )}
                         </div>
 
+                    {eduPlan.length>0&&(
+                      <>
                         {/* ET3/ET4/ET10/ET12/ET14 — one card per line */}
                         {eduPlan.map(l=>{
                           const err = (eduShowErrors || l.amount>0) ? eduLineErrors[l.subId] : null;
@@ -6816,6 +6823,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           const isFee = l.kind==="tuition";
                           const tg = feeTag(l.role);
                           const planOK = l.plan && l.plan.status!=="none";
+                          // ET4: several lines -> School Fees folds to its range summary (tap to expand) unless it needs attention.
+                          const feeCollapsed = isFee && eduPlan.length>1 && !!eduRange && !eduFeeOpen && !eduRangeError && !err && l.plan?.status==="exact";
                           const allocated = l.allocations.reduce((sum,a)=>sum+a.amount,0);
                           const staying = isFee && l.plan?.status==="partial" ? l.applicable.filter(x=>{ const a=l.allocations.find(z=>z.periodId===x.period.id)?.amount||0; return x.outstanding-a>0.004; }).map(x=>x.period.label) : [];
                           return (
@@ -6824,7 +6833,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                                 <div style={{ flex:1,minWidth:0,color:T.text,fontSize:15,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{l.name}</div>
                                 <span style={tagStyle(tg)}>{tg}</span>
                               </div>
-                              {isFee&&(
+                              {isFee&&feeCollapsed&&(
+                                <button type="button" data-testid="edu-fee-collapsed" onClick={()=>setEduFeeOpen(true)} style={{ display:"flex",alignItems:"center",gap:8,width:"100%",minWidth:0,marginTop:8,padding:0,background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"inherit" }}>
+                                  <span style={{ flex:1,minWidth:0,color:T.sub,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{eduPeriodMode==="month"?"By Month":"By Date"} · {eduRange.label}{eduSchoolBA?` · ${l.applicable.length} fee period${l.applicable.length===1?"":"s"}`:""}</span>
+                                  <span aria-hidden="true" style={{ color:T.sub,flexShrink:0 }}>›</span>
+                                </button>
+                              )}
+                              {isFee&&!feeCollapsed&&(
                                 <div data-testid="edu-period" style={{ marginTop:10,minWidth:0 }}>
                                   <Segmented T={T} value={eduPeriodMode} onChange={setEduPeriodMode} options={[{ value:"month",label:"By Month" },{ value:"date",label:"By Date" }]}/>
                                   <div style={{ marginTop:10 }}>
@@ -6843,7 +6858,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                                   {eduPeriodMode==="date"&&eduRange&&<div style={{ color:T.sub,fontSize:11,marginTop:2 }}>Any fee period that overlaps these dates is included in full.</div>}
                                 </div>
                               )}
-                              {l.kind&&eduSchoolBA&&planOK&&(
+                              {l.kind&&eduSchoolBA&&planOK&&!feeCollapsed&&(
                                 <div data-testid={`edu-settle-${l.subId}`} style={{ marginTop:10,minWidth:0 }}>
                                   <div style={{ ...secLabel,marginBottom:4 }}>{isFee?"Covers":"Applied to"}</div>
                                   {l.applicable.map(x=>{
@@ -6861,7 +6876,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                                     );
                                   })}
                                   {l.applicable.some(x=>x.needsDeclaration)&&<div style={{ color:T.warn,fontSize:11,marginTop:4 }}>Some of these fee periods haven't been marked paid or unpaid yet — they will be recorded as unpaid, then settled by this payment.</div>}
-                                  {isFee&&<div style={{ color:T.sub,fontSize:11,marginTop:4 }}>{l.applicable.length} fee period{l.applicable.length===1?"":"s"} in range · {sym}{fmt(l.plan.totalOutstanding)} due</div>}
+                                  {isFee&&<div style={{ color:T.sub,fontSize:11,marginTop:4 }}>{l.applicable.length} {l.applicable.every(x=>!x.needsDeclaration)?"declared ":""}fee period{l.applicable.length===1?"":"s"} in range · {sym}{fmt(l.plan.totalOutstanding)} due{l.plan.status==="exact"?" · this payment settles them":""}</div>}
                                   {l.plan.status==="partial"&&<div style={{ color:T.text,fontSize:11,marginTop:4 }}>{sym}{fmt(allocated)} of {sym}{fmt(l.plan.totalOutstanding)} · {sym}{fmt(Math.round((l.plan.totalOutstanding-allocated)*100)/100)} stays due{staying.length?` on ${staying.join(" and ")}`:""}. Adjust the split if you like.</div>}
                                 </div>
                               )}
@@ -6901,7 +6916,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                             {personName&&<div style={{ color:T.sub,fontSize:12,marginTop:6 }}>For: {personName}</div>}
                             {eduSchoolBA&&<div style={{ color:T.sub,fontSize:12 }}>School: {eduSchoolBA.name}</div>}
                             {eduSchoolBA&&<div style={{ color:T.sub,fontSize:12 }}>Paid to: {who.trim()||eduSchoolBA.name}</div>}
-                            <div style={{ color:T.sub,fontSize:12 }}>Paid with: {getAcc(accId)?.name||"—"}</div>
+                            <div style={{ color:T.sub,fontSize:12 }}>Paid from: {getAcc(accId)?.name||"—"}</div>
                           </div>
                         </div>
                       </>
@@ -13678,6 +13693,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
         </div>
 
+        <CashFlowCard T={T} sym={sym} fmt={fmt} txns={txns} cats={cats} todayMonthKey={todayStr().slice(0,7)}
+          todayLabel={`${Number(todayStr().slice(8,10))} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][Number(todayStr().slice(5,7))-1]}`}
+          onOpen={mk=>setCashFlowMonth(mk)}/>
+
         <Section title="Cash">
           <div style={{ ...card }}>
             {bankAccts.map(a=><Line key={a.id} label={a.name} value={`${sym}${fmt(accountBalance(a.id))}`} sub="Bank" onClick={()=>setShowAccDetail(a)}/>)}
@@ -19387,7 +19406,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="people"&&<People/>}
         {!showSettings&&tab==="budget"&&<BudgetPage/>}
         {!showSettings&&tab==="bills"&&<BillsPage/>}
-        {!showSettings&&tab==="wealth"&&wealthUnlocked&&<MoneyPage/>}
+        {!showSettings&&tab==="wealth"&&wealthUnlocked&&(cashFlowMonth
+          ? <CashFlowScreen T={T} sym={sym} fmt={fmt} txns={txns} cats={cats} todayMonthKey={todayStr().slice(0,7)}
+              todayLabel={`${Number(todayStr().slice(8,10))} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][Number(todayStr().slice(5,7))-1]}`}
+              initialMonthKey={cashFlowMonth} getIncomeLabel={formatIncomeTypeLabel} getAccountName={id=>getAcc(id)?.name||""}
+              onBack={()=>setCashFlowMonth(null)}
+              onOpenTxn={t=>{ setCashFlowMonth(null); setTab("transactions"); setTimeout(()=>setExpandedTxn(t.id),80); }}
+              onShowAllTransactions={mk=>{ setFType("All"); applyTxnDatePreset("current_month", mk); setTxnAmountFrom(""); setTxnAmountTo(""); setTxnCategoryFilter("all"); setTxnPersonFilter("all"); setExpenseSourceFilter("all"); setExpenseCardFilter("all"); setIncomeTypeFilter("all"); setIncomeAccountFilter("all"); setInvestmentTypeFilter("all"); setCashFlowMonth(null); setTab("transactions"); }}
+              onAddTransaction={()=>setShowAdd(true)}
+              forceError={import.meta.env.DEV && new URLSearchParams(window.location.search).get("cfError")==="1"}/>
+          : <MoneyPage/>)}
         {!showSettings&&tab==="outlook"&&<OutlookPage/>}
         {!showSettings&&tab==="insights"&&<InsightsPage/>}
         {showSettings&&<Settings/>}
@@ -20126,8 +20154,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   const used = coverage.totalDays!=null ? Math.max(0,coverage.totalDays-rem) : null;
                   return (
                     <>
-                      <div data-testid="prepaid-coverage-card" style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:16,marginBottom:12 }}>
-                        <div style={kicker}>Prepaid coverage</div>
+                      <div data-testid="prepaid-coverage-card" data-status={coverage.status} style={{ background:T.card,border:`1px solid ${coverage.status==="expiring_soon"?T.warn:T.border}`,borderRadius:16,padding:16,marginBottom:12 }}>
+                        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
+                          <div style={kicker}>Prepaid coverage</div>
+                          {coverage.status==="expiring_soon"&&<span data-testid="prepaid-expiring-badge" style={{ border:`1px solid ${T.warn}`,color:T.warn,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap" }}>Expiring soon</span>}
+                        </div>
                         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,margin:"8px 0 6px",minWidth:0 }}>
                           <span style={{ color:T.text,fontSize:14,fontWeight:800,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{sym}{fmt(latest.amount)} plan{coverage.totalDays?` · ${coverage.totalDays} days`:""}</span>
                           <span style={{ color:T.sub,fontSize:12,flexShrink:0 }}>{coverage.status==="expired"?"Ended":"Ends"} {formatShortDate(coverage.validUntil)||coverage.validUntil}</span>
@@ -20307,7 +20338,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {actionType==="membership"&&!ba.accId&&baMemberships.length>0&&(
                   <button type="button" data-testid="membership-analytics-row"
                     onClick={()=>document.getElementById(`ba_membership_analytics_${ba.id}`)?.scrollIntoView({ behavior:"smooth", block:"start" })}
-                    style={{ display:"flex",alignItems:"center",gap:12,width:"100%",minHeight:72,minWidth:0,padding:"12px 14px",marginBottom:16,boxSizing:"border-box",background:T.card,border:`1px solid ${T.border}`,borderRadius:14,cursor:"pointer",textAlign:"left",fontFamily:"inherit" }}>
+                    style={{ display:"flex",alignItems:"center",gap:12,width:"100%",minHeight:64,minWidth:0,padding:"10px 14px",marginBottom:16,boxSizing:"border-box",background:T.card,border:`1px solid ${T.border}`,borderRadius:14,cursor:"pointer",textAlign:"left",fontFamily:"inherit" }}>
                     <span aria-hidden="true" style={{ width:40,height:40,flexShrink:0,borderRadius:12,background:T.pill,display:"grid",placeItems:"center",fontSize:18 }}>📈</span>
                     <span style={{ flex:1,minWidth:0 }}>
                       <span style={{ display:"block",color:T.text,fontSize:15,fontWeight:800 }}>Analytics</span>
@@ -20319,15 +20350,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {actionType==="membership"&&!ba.accId&&baMemberships.length===0&&(
                   <div data-testid="membership-empty-states" style={{ marginBottom:16 }}>
                     <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>History</div>
-                    <div style={{ border:`1px dashed ${T.border}`,borderRadius:14,padding:"16px 14px",textAlign:"center",marginBottom:16 }}>
-                      <div style={{ color:T.text,fontSize:15,fontWeight:800 }}>No payments recorded yet</div>
-                      <div style={{ color:T.sub,fontSize:13,margin:"4px 0 12px" }}>Payments you record for this membership appear here.</div>
-                      {!isSchoolLinkedAccount&&<button type="button" onClick={()=>setShowAddMembership(true)} style={{ ...btnG,minHeight:44,padding:"0 18px",fontSize:13 }}>Record a payment</button>}
-                    </div>
-                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Documents</div>
                     <div style={{ border:`1px dashed ${T.border}`,borderRadius:14,padding:"16px 14px",textAlign:"center" }}>
-                      <div style={{ color:T.text,fontSize:15,fontWeight:800 }}>No documents yet</div>
-                      <div style={{ color:T.sub,fontSize:13,marginTop:4 }}>Nothing is attached to this membership.</div>
+                      <div style={{ color:T.text,fontSize:15,fontWeight:800 }}>Nothing recorded yet</div>
+                      <div style={{ color:T.sub,fontSize:13,marginTop:4 }}>Payments for this membership appear here once recorded.</div>
+                    </div>
+                  </div>
+                )}
+                {/* W8 / D7 — Documents appear only when something is already linked: memberships carry no
+                    document field of their own, so this is the attached photo/PDF of any Bill recorded
+                    against the same account. With none, the block is hidden (never shown empty) and there
+                    is no "Add document" action or new store. */}
+                {actionType==="membership"&&!ba.accId&&baBills.some(b=>b.imageBase64)&&(
+                  <div data-testid="membership-documents" style={{ marginBottom:16 }}>
+                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Documents</div>
+                    <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(88px, 1fr))",gap:8 }}>
+                      {baBills.filter(b=>b.imageBase64).map(b=>(
+                        <div key={b.id} onClick={()=>window.open(b.imageBase64,"_blank")} style={{ cursor:"pointer",minWidth:0 }}>
+                          <img alt="" src={b.imageBase64} style={{ width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:10,border:`1px solid ${T.border}` }}/>
+                          <div style={{ color:T.sub,fontSize:10,marginTop:3,textAlign:"center" }}>{formatShortDate(b.billDate)||b.billDate}</div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
