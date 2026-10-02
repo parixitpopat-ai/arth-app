@@ -4,6 +4,7 @@ import {
   EDU_SUB, EDUCATION_CATEGORY, feeKindForEducationSub, educationSubNeedsPeriod, selectionNeedsSchool,
   monthRangeToDates, dateRangeToDates, findApplicablePeriods, planFeeAllocation, validateFeeAllocation,
   buildEducationLineItems, collectLinkedFeePeriods, applyEducationSettlement,
+  findEducationCategory, roleOfEducationSub, ensureEducationCategory, EDUCATION_SUBS,
 } from "./educationLines.js";
 import { settleFeePeriods } from "./settlement.js";
 
@@ -131,4 +132,79 @@ test("undeclared periods are declared unpaid then settled", () => {
   const out = applyEducationSettlement(ps, [{ periodId: "jul", amount: 5000 }], 5, settleFeePeriods);
   assert.equal(out[0].paidAmount, 5000);
   assert.equal(out[0].startingStateDeclared, true);
+});
+
+// ---- Settlement representation (canonical = feePeriods[].settlementLinks via settleFeePeriods) ----
+
+test("linkedFeePeriods is only the explicit-allocation input / reverse link: identical to calling settleFeePeriods directly", () => {
+  const linked = collectLinkedFeePeriods(lines());
+  const viaEducation = applyEducationSettlement(periods, linked, 77, settleFeePeriods);
+  const direct = settleFeePeriods(periods, linked.map(a => a.periodId), 25000, 77, linked);
+  assert.deepEqual(viaEducation, direct, "no divergence from the one canonical settlement path");
+});
+
+test("each allocation becomes exactly ONE settlementLinks entry {txnId, amount} on its period; paidAmount matches", () => {
+  const linked = collectLinkedFeePeriods(lines());
+  const out = applyEducationSettlement(periods, linked, 77, settleFeePeriods);
+  for (const a of linked) {
+    const p = out.find(x => x.id === a.periodId);
+    const before = periods.find(x => x.id === a.periodId);
+    assert.deepEqual(p.settlementLinks.slice(before.settlementLinks.length), [{ txnId: 77, amount: a.amount }]);
+    assert.equal(p.paidAmount - before.paidAmount, a.amount);
+  }
+  // 15,000 across Jul/Aug/Sep = three separate 5,000 links, not one 15,000 link
+  assert.deepEqual(["jul", "aug", "sep"].map(id => out.find(p => p.id === id).settlementLinks.map(l => l.amount)), [[5000], [5000], [5000]]);
+  // periods not in the payment are untouched
+  assert.deepEqual(out.find(p => p.id === "oct"), periods.find(p => p.id === "oct"));
+});
+
+test("the amount outstanding is derived from the periods, never from linkedFeePeriods (clearing the txn field changes nothing)", () => {
+  const linked = collectLinkedFeePeriods(lines());
+  const out = applyEducationSettlement(periods, linked, 77, settleFeePeriods);
+  const later = findApplicablePeriods({ feePeriods: out, feeSchedules: schedules, billerAccountId: "b1", kind: "tuition", from: "2026-07-01", to: "2026-10-31" });
+  assert.deepEqual(later.map(x => x.period.id), ["oct"]);
+});
+
+// ---- Education category initialisation is idempotent ----
+
+const other = { id: "food", name: "Food", subs: [{ id: "f1", name: "Cafes" }] };
+const eduCount = cats => cats.filter(c => c.id === "education" || String(c.name).trim().toLowerCase() === "education").length;
+
+test("fresh user: Education is added exactly once, and re-running changes nothing", () => {
+  const once = ensureEducationCategory([other]);
+  assert.equal(eduCount(once), 1);
+  assert.equal(once[1], EDUCATION_CATEGORY);
+  assert.equal(ensureEducationCategory(once), once, "same array back: idempotent");
+});
+
+test("canonical Education already present: reused untouched (even with deleted subs)", () => {
+  const mine = [other, { ...EDUCATION_CATEGORY, subs: [EDUCATION_SUBS[0]] }];
+  assert.equal(ensureEducationCategory(mine), mine);
+});
+
+test("user-created Education (different id, any case/spacing): no second category; existing subs/ids preserved; only missing standard subs appended", () => {
+  const custom = { id: "cat_abc123", name: "  education ", icon: "📘", color: "#123456", budget: 7000, subs: [{ id: "my_sf", name: "School fee" }, { id: "my_x", name: "Tuition Classes" }] };
+  const out = ensureEducationCategory([other, custom]);
+  assert.equal(eduCount(out), 1, "no duplicate");
+  const e = out.find(c => c.id === "cat_abc123");
+  assert.equal(e.budget, 7000);
+  assert.deepEqual(e.subs.slice(0, 2), custom.subs, "existing subcategories and ids untouched");
+  assert.equal(e.subs.filter(s => roleOfEducationSub(e, s.id) === "edu_school_fees").length, 1, "School Fees not re-added");
+  assert.ok(e.subs.some(s => s.id === "edu_registration") && e.subs.some(s => s.id === "edu_uniform"));
+  assert.equal(ensureEducationCategory(out), out, "idempotent on the second run");
+  assert.equal(findEducationCategory(out).id, "cat_abc123");
+});
+
+test("a user's own subcategories map to standard roles by name; unknown ones are ordinary (no fee role)", () => {
+  const e = { id: "c", name: "Education", subs: [{ id: "a", name: "School Fees" }, { id: "b", name: "Uniforms" }, { id: "d", name: "Tuition Classes" }] };
+  assert.equal(roleOfEducationSub(e, "a"), "edu_school_fees");
+  assert.equal(roleOfEducationSub(e, "b"), "edu_uniform");
+  assert.equal(roleOfEducationSub(e, "d"), null);
+  assert.equal(roleOfEducationSub(e, "nope"), null);
+});
+
+test("line items use the Education category id passed in (a user's own id), not a hard-coded one", () => {
+  const li = buildEducationLineItems([{ id: "l", subId: "my_sf", name: "School Fees", amount: 100 }], "cat_abc123");
+  assert.equal(li[0].catId, "cat_abc123");
+  assert.equal(li[0].subId, "my_sf");
 });

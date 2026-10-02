@@ -133,3 +133,20 @@ test("a genuine validation failure after passing representability is returned as
   assert.equal(legacyCalled, false, "legacyUpsert must NOT have been called for a genuine validation error");
   assert.equal(port._peek().length, 0, "nothing should have been written anywhere for a failed submission");
 });
+
+test("Education multi-subcategory CREATE goes to the legacy path with subIds, lineItems and linkedFeePeriods intact", async () => {
+  const port = makeStatePort([]);
+  const { dispatcher } = wireTransactionApplication({ statePort: port });
+  let legacyCalledWith = null;
+  const draft = {
+    id: "t9", type: "expense", accId: "acc-1", catId: "education", catIds: ["education"],
+    subIds: ["edu_school_fees", "edu_registration", "edu_uniform"], subId: "edu_school_fees", catAllocations: null,
+    amount: 25000, date: "2026-10-02",
+    lineItems: [{ id: "l1", unitPrice: 15000, qty: 1, catId: "education", subId: "edu_school_fees", feePeriodIds: ["jul", "aug", "sep"] }],
+    linkedFeePeriods: [{ periodId: "jul", amount: 5000 }, { periodId: "aug", amount: 5000 }, { periodId: "sep", amount: 5000 }],
+  };
+  const outcome = await submitTransactionThroughBoundary({ operation: "create", draft, dispatcher, legacyUpsert: (d) => { legacyCalledWith = d; } });
+  assert.equal(outcome.usedLegacyPath, true);
+  assert.deepEqual(legacyCalledWith, draft, "nothing may be collapsed or dropped");
+  assert.equal(port._peek().length, 0);
+});

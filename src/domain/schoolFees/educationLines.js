@@ -63,6 +63,58 @@ export const EDUCATION_CATEGORY = {
   subs: EDUCATION_SUBS,
 };
 
+const norm = v => String(v || "").trim().toLowerCase().replace(/\s+/g, " ");
+
+// Name aliases used ONLY to recognise a user's own existing Education category/subcategories as
+// the standard ones (so we reuse them instead of creating duplicates).
+const ROLE_ALIASES = {
+  [EDU_SUB.SCHOOL_FEES]: ["school fees", "school fee"],
+  [EDU_SUB.REGISTRATION]: ["registration fees", "registration fee", "registration"],
+  [EDU_SUB.UNIFORM]: ["uniform", "uniforms"],
+  [EDU_SUB.BOOKS]: ["books", "book"],
+  [EDU_SUB.ACTIVITIES]: ["activities", "activity"],
+  [EDU_SUB.EXAMS]: ["exams", "exam"],
+  [EDU_SUB.OTHER]: ["other"],
+};
+
+/** The Education category to use: the canonical one, else a user-created one named "Education". */
+export function findEducationCategory(cats) {
+  const list = Array.isArray(cats) ? cats : [];
+  return list.find(c => c.id === EDUCATION_CAT_ID) || list.find(c => norm(c.name) === "education") || null;
+}
+
+/**
+ * Which standard Education role (EDU_SUB id) a subcategory of `cat` plays, or null for a
+ * user-defined subcategory that isn't one of the standard seven. Matches by stable id first,
+ * then by name — so a user's own "School Fees" subcategory keeps its own id and history.
+ */
+export function roleOfEducationSub(cat, subId) {
+  const sub = (cat?.subs || []).find(x => x.id === subId);
+  if (!sub) return null;
+  if (EDUCATION_SUBS.some(x => x.id === sub.id)) return sub.id;
+  const n = norm(sub.name);
+  return Object.keys(ROLE_ALIASES).find(role => ROLE_ALIASES[role].includes(n)) || null;
+}
+
+/**
+ * Idempotent initialisation of the Education category inside a categories list.
+ *  - canonical Education present            -> unchanged
+ *  - user-created "Education" present       -> reused; only standard subcategories it lacks are
+ *                                              appended (nothing renamed/removed/re-id'd)
+ *  - none                                   -> the standard Education category is added once
+ * Returns the SAME array when nothing needed to change.
+ */
+export function ensureEducationCategory(cats) {
+  const list = Array.isArray(cats) ? cats : [];
+  if (list.some(c => c.id === EDUCATION_CAT_ID)) return list;
+  const existing = findEducationCategory(list);
+  if (!existing) return [...list, EDUCATION_CATEGORY];
+  const have = new Set((existing.subs || []).map(x => roleOfEducationSub(existing, x.id)).filter(Boolean));
+  const missing = EDUCATION_SUBS.filter(x => !have.has(x.id));
+  if (missing.length === 0) return list;
+  return list.map(c => (c === existing ? { ...c, subs: [...(c.subs || []), ...missing] } : c));
+}
+
 // Only these three Education subcategories can be School Fee obligations. Everything else
 // (Books, Activities, Exams, Other) is an ordinary Education line — Education subcategory is not
 // the same thing as a School Fee obligation.
@@ -238,13 +290,14 @@ export function validateFeeAllocation(applicable, allocations, amount) {
 /**
  * Turn the Education lines into the Transaction's real lineItems[] — the one category-attribution
  * representation the whole app reads. Every line carries catId "education" and its own subId.
- * A fee-linked line also carries feePeriodId/feePeriodIds (traceability only; settlement runs off
- * the Transaction's linkedFeePeriods). Books/Activities/Exams/Other carry NO fee period.
+ * A fee-linked line also carries feePeriodId/feePeriodIds (traceability only; the canonical settlement
+ * record is each Fee Period's settlementLinks, written by settleFeePeriods). Books/Activities/Exams/Other carry NO fee period.
  *
  * @param {Array<{id:string, subId:string, name:string, amount:number, coversLabel?:string,
  *   allocations?:Array<{periodId:string,amount:number}>}>} lines
+ * @param {string} [catId] - the Education category id in use (canonical, or a user's own)
  */
-export function buildEducationLineItems(lines) {
+export function buildEducationLineItems(lines, catId = EDUCATION_CAT_ID) {
   return (lines || []).map(l => {
     const ids = (l.allocations || []).filter(a => a.amount > 0).map(a => a.periodId);
     const item = {
@@ -253,7 +306,7 @@ export function buildEducationLineItems(lines) {
       qty: 1,
       unit: "nos",
       unitPrice: Number(l.amount) || 0,
-      catId: EDUCATION_CAT_ID,
+      catId,
       subId: l.subId,
     };
     if (ids.length > 0) {
@@ -264,7 +317,13 @@ export function buildEducationLineItems(lines) {
   });
 }
 
-/** Merge every fee-linked line's allocations into the Transaction's one linkedFeePeriods array. */
+/**
+ * Merge every fee-linked line's allocations into the Transaction's one linkedFeePeriods array.
+ * linkedFeePeriods is NOT a settlement model: it is the Transaction's reverse link (same shape
+ * Pay Fees already writes) and the explicit-allocation INPUT handed to settleFeePeriods. The
+ * canonical record of what was settled is each Fee Period's settlementLinks[{txnId,amount}] and
+ * paidAmount; nothing reads linkedFeePeriods to compute an outstanding balance.
+ */
 export function collectLinkedFeePeriods(lines) {
   const byPeriod = new Map();
   for (const l of lines || []) {

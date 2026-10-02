@@ -93,3 +93,22 @@ test("transfer type is out of scope regardless of shape", () => {
   assert.equal(result.representable, false);
   assert.equal(result.code, NOT_YET_REPRESENTABLE);
 });
+
+test("multi-subcategory expense create is NOT_YET_REPRESENTABLE (subIds would collapse to the first)", () => {
+  const result = checkRepresentability({
+    operation: "create",
+    draft: { type: "expense", accId: "a", catId: "education", catIds: ["education"], subIds: ["edu_school_fees", "edu_uniform"], amount: 17000, date: "2026-10-02" },
+  });
+  assert.equal(result.representable, false);
+  assert.equal(result.code, NOT_YET_REPRESENTABLE);
+});
+
+test("single-subcategory (or the same sub repeated) expense create stays representable", () => {
+  for (const subIds of [["edu_uniform"], ["edu_uniform", "edu_uniform"], []]) {
+    const result = checkRepresentability({
+      operation: "create",
+      draft: { type: "expense", accId: "a", catId: "education", catIds: ["education"], subIds, amount: 2000, date: "2026-10-02" },
+    });
+    assert.equal(result.representable, true);
+  }
+});

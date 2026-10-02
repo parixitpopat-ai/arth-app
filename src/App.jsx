@@ -153,7 +153,7 @@ import EntityCard from "./components/EntityCard";
 import { computeLineItemCategoryRollup, rollupToCatAllocations } from "./domain/transactions/lineItemCategoryRollup";
 import * as schoolFeesService from "./domain/schoolFees/service";
 import {
-  EDUCATION_CAT_ID, EDUCATION_SUBS, EDUCATION_SUB_DESC, EDU_SUB, feeKindForEducationSub, educationSubNeedsPeriod,
+  EDUCATION_CAT_ID, EDUCATION_SUB_DESC, EDU_SUB, findEducationCategory, roleOfEducationSub, ensureEducationCategory, feeKindForEducationSub, educationSubNeedsPeriod,
   selectionNeedsSchool, monthRangeToDates, dateRangeToDates, findApplicablePeriods, planFeeAllocation,
   validateFeeAllocation, buildEducationLineItems, collectLinkedFeePeriods, applyEducationSettlement,
 } from "./domain/schoolFees/educationLines";
@@ -528,9 +528,14 @@ const normalizeCats = stored => {
   // whichever DEFAULT_CATS entries are actually missing get appended -- everything the user
   // already has is kept untouched, regardless of which specific categories they've changed.
   if(!list || !list.length) return DEFAULT_CATS;
-  const existingIds = new Set(list.map(c=>c.id));
-  const missingDefaults = DEFAULT_CATS.filter(c=>!existingIds.has(c.id));
-  return missingDefaults.length ? [...list, ...missingDefaults] : list;
+  // Education is initialised separately and idempotently (canonical -> reuse; a user's own
+  // "Education" -> reuse and only add the standard subcategories it lacks; none -> add once), so
+  // it is excluded from the generic by-id "missing defaults" step below — otherwise a user's own
+  // Education category would get a second, duplicate one.
+  const withEducation = ensureEducationCategory(list);
+  const existingIds = new Set(withEducation.map(c=>c.id));
+  const missingDefaults = DEFAULT_CATS.filter(c=>c.id!==EDUCATION_CAT_ID && !existingIds.has(c.id));
+  return missingDefaults.length ? [...withEducation, ...missingDefaults] : withEducation;
 };
 const normalizeAccounts = stored => (Array.isArray(stored) && stored.length ? stored : DEFAULT_ACCOUNTS).map(acc=>{
   const baseType = ACC_TYPES.some(item=>item.id===acc?.type) ? acc.type : "bank";
@@ -4845,21 +4850,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     };
 
     // ---- Education flow (create-mode Expense with Education as the only category) ----------------
-    const eduActive = txnType==="expense" && !isEditing && catIds.length===1 && catIds[0]===EDUCATION_CAT_ID;
-    const eduNeedsSchool = eduActive && selectionNeedsSchool(eduSelected);
+    // The Education category in use: the canonical one, or the user's own "Education" (reused, never duplicated).
+    const eduCat = findEducationCategory(cats);
+    const eduCatId = eduCat?.id || EDUCATION_CAT_ID;
+    const eduActive = Boolean(eduCat) && txnType==="expense" && !isEditing && catIds.length===1 && catIds[0]===eduCat.id;
+    const eduRoleOf = subId => roleOfEducationSub(eduCat, subId);
+    const eduNeedsSchool = eduActive && selectionNeedsSchool(eduSelected.map(eduRoleOf));
     const eduSchoolBA = eduNeedsSchool && linkedIsSchoolBiller ? linkedBA : null;
     const eduPersonId = (()=>{
       const row = allocRows.find(r=>r.targetType==="person" && r.targetId && r.targetId!=="__me__");
       return String(row?.targetId || attributePersonIds.find(pid=>pid!=="__me__") || (tagPerson && tagPerson!=="__me__" ? tagPerson : "") || "");
     })();
-    const eduRange = eduActive && eduSelected.includes(EDU_SUB.SCHOOL_FEES)
+    const eduRange = eduActive && eduSelected.some(sid=>eduRoleOf(sid)===EDU_SUB.SCHOOL_FEES)
       ? (eduPeriodMode==="month" ? monthRangeToDates(eduStartYM, eduEndYM) : dateRangeToDates(eduFrom, eduTo))
       : null;
     // One entry per ticked Education subcategory, with what (if anything) it settles at the linked school.
     const eduPlan = eduActive ? eduSelected.map(subId=>{
-      const name = EDUCATION_SUBS.find(x=>x.id===subId)?.name || subId;
+      const name = eduCat?.subs?.find(x=>x.id===subId)?.name || subId;
       const amount = Math.round((parseFloat(eduAmounts[subId])||0)*100)/100;
-      const kind = feeKindForEducationSub(subId);
+      const role = eduRoleOf(subId);
+      const kind = feeKindForEducationSub(role);
       let applicable = [], plan = null, allocations = [], error = null, notice = null;
       if(kind && eduSchoolBA){
         const needsRange = kind==="tuition";
@@ -4881,7 +4891,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         }
       }
       const coversLabel = kind==="tuition" && eduRange ? eduRange.label : "";
-      return { id:`edu_${subId}`, subId, name, amount, kind, applicable, plan, allocations, error, notice, coversLabel };
+      return { id:`edu_${subId}`, subId, role, name, amount, kind, applicable, plan, allocations, error, notice, coversLabel };
     }) : [];
     const eduLinesValid = eduPlan.filter(l=>l.amount>0);
     const eduTotal = Math.round(eduLinesValid.reduce((sum,l)=>sum+l.amount,0)*100)/100;
@@ -5391,10 +5401,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // Education flow — ONE Transaction, one real line per ticked Education subcategory. Overrides
           // the generic category/line fields above (Education is the only category here by construction).
           ...(eduMode ? {
-            catId:EDUCATION_CAT_ID, catIds:[EDUCATION_CAT_ID],
+            catId:eduCatId, catIds:[eduCatId],
             subIds:eduPlan.map(l=>l.subId), subId:eduPlan[0].subId,
             catAllocations:null,
-            lineItems:buildEducationLineItems(eduPlan).map(i=>({ ...i, amount:i.unitPrice })),
+            lineItems:buildEducationLineItems(eduPlan, eduCatId).map(i=>({ ...i, amount:i.unitPrice })),
             linkedFeePeriods:collectLinkedFeePeriods(eduPlan),
           } : {}),
           reimbursable:reimbursable||false,
@@ -6664,7 +6674,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
                 {catIds.length>0&&(
                   <div style={{ marginTop:8 }}>
-                    {catIds.map(cid=>{ const c=getCat(cid); if(!c.subs?.length || (eduActive && cid===EDUCATION_CAT_ID)) return null; return (
+                    {catIds.map(cid=>{ const c=getCat(cid); if(!c.subs?.length || (eduActive && cid===eduCatId)) return null; return (
                       <div key={cid} style={{ marginBottom:6 }}>
                         <div style={{ color:c.color,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:4 }}>{c.icon} {c.name}</div>
                         <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
@@ -6679,18 +6689,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div data-testid="edu-panel" style={{ marginTop:10,background:T.input,borderRadius:10,padding:"10px 12px" }}>
                     <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>🎓 What was this for? (pick all that apply)</div>
                     <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
-                      {EDUCATION_SUBS.map(sb=><Chip key={sb.id} color={getCat(EDUCATION_CAT_ID).color} active={eduSelected.includes(sb.id)} onClick={()=>{ setCategoryTouched(true); setEduSelected(prev=>prev.includes(sb.id)?prev.filter(x=>x!==sb.id):[...prev,sb.id]); }}>{sb.name}</Chip>)}
+                      {(eduCat?.subs||[]).map(sb=><Chip key={sb.id} color={eduCat.color} active={eduSelected.includes(sb.id)} onClick={()=>{ setCategoryTouched(true); setEduSelected(prev=>prev.includes(sb.id)?prev.filter(x=>x!==sb.id):[...prev,sb.id]); }}>{sb.name}</Chip>)}
                     </div>
                     {eduPlan.map(l=>(
                       <div key={l.subId} data-testid={`edu-line-${l.subId}`} style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
                         <div style={{ display:"flex",alignItems:"center",gap:8 }}>
                           <div style={{ flex:1,minWidth:0 }}>
                             <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{l.name}</div>
-                            <div style={{ color:T.sub,fontSize:11 }}>{l.kind==="tuition"?"Recurring · covers a period":l.kind?"One-time · no period":EDUCATION_SUB_DESC[l.subId]}</div>
+                            <div style={{ color:T.sub,fontSize:11 }}>{l.kind==="tuition"?"Recurring · covers a period":l.kind?"One-time · no period":(EDUCATION_SUB_DESC[l.role]||"Education expense")}</div>
                           </div>
                           <input data-testid={`edu-amt-${l.subId}`} style={{ ...inpSm,width:110,textAlign:"right" }} type="number" inputMode="decimal" placeholder="Amount" value={eduAmounts[l.subId]??""} onChange={e=>setEduAmounts(prev=>({ ...prev,[l.subId]:e.target.value }))}/>
                         </div>
-                        {educationSubNeedsPeriod(l.subId)&&(
+                        {educationSubNeedsPeriod(l.role)&&(
                           <div data-testid="edu-period" style={{ marginTop:8 }}>
                             <div style={{ display:"flex",gap:6,marginBottom:6 }}>
                               <Chip color={T.accent} active={eduPeriodMode==="month"} onClick={()=>setEduPeriodMode("month")}>By month</Chip>
