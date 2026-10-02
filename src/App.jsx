@@ -154,6 +154,7 @@ import { computeLineItemCategoryRollup, rollupToCatAllocations } from "./domain/
 import * as schoolFeesService from "./domain/schoolFees/service";
 import { RangeFieldGrid, RangeField, MonthRangeSheet } from "./components/RangeFields";
 import CashFlowScreen, { CashFlowCard } from "./screens/CashFlowScreen";
+import { computeLine, describeLine, reconcileLines, rateUnitsFor, defaultRateUnit } from "./domain/transactions/itemLineMath";
 import {
   EDUCATION_CAT_ID, EDUCATION_SUB_DESC, EDU_SUB, findEducationCategory, roleOfEducationSub, ensureEducationCategory, feeKindForEducationSub, educationSubNeedsPeriod,
   selectionNeedsSchool, monthRangeToDates, dateRangeToDates, findApplicablePeriods, planFeeAllocation,
@@ -1605,15 +1606,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const paidAmount = payment.amount!==undefined ? Number(payment.amount||0) : balanceBefore.remaining;
     const { applied } = planBillPayment(bill, contributions, paidAmount);
     const becomesPaid = bill.isCcStatement ? true : applied >= balanceBefore.remaining - 0.005;
-    setTxns(p=>[{id:paymentTxnId,type:"expense",desc:bill.name,merchant:bill.merchant||"",date:paymentDate,note:"Bill payment",catId:bill.catId,catIds:bill.catIds||[bill.catId],subId:bill.subId||null,accId,people:isFirstPayment?(bill.splitPeople||{}):{},forPerson:attributedPersonId,groupId:bill.groupId||null,groupCollectiveAmount:isFirstPayment?Number(bill.groupCollectiveAmount||0):0,amount:paidAmount,isBillPayment:true,billInvoiceNo:bill.invoiceNo||null,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null,imageBase64:bill.imageBase64||null,paymentImageBase64:bill.paymentImageBase64||null},...p]);
-    setBills(p=>p.map(x=>x.id===bill.id?{...x,
-      ...(becomesPaid?{status:"paid",paidDate:paymentDate}:{}),
-      ...(isFirstPayment?{paidByTxnId:paymentTxnId}:{}),
-      lastPaidAmount:paidAmount,lastPaidDate:paymentDate}:x));
-    // WP-OBL-04a: dual-write — also record a real Contribution alongside the
-    // legacy paidByTxnId/status write above. Full amount, since this path has
-    // no partial-payment concept yet.
-    setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:paymentTxnId, amount:applied, txnAmount:paidAmount }, genId));
+    // Payments v2 H2 — everything that can throw (payment planning, next-cycle dates) is computed BEFORE any
+    // write, so a failure leaves nothing half-saved and the Record payment sheet can say so honestly.
     // ADR-039 §7 — "the schedule becomes the only generation mechanism. Regeneration stops for
     // that relationship." Once this Bill's relationship has a complete schedule, Expected
     // (domain/obligations/expected.js) is what produces the next cycle, via Confirm amount — this
@@ -1624,6 +1618,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       return t.targetType===bill.forType && String(t.targetId)===String(bill.forId);
     });
     const scheduleOwnsRegeneration = billRelationship && billRelationship.billingMode==="regular" && hasCompleteSchedule(billRelationship);
+    let nextBill = null;
     if(becomesPaid && bill.recurring && bill.autoGenerate!==false && !scheduleOwnsRegeneration){
       const nextDue = computeNextDueDate(bill, paymentDate);
       const nextPeriod = computeNextPeriod(bill, paymentDate);
@@ -1631,7 +1626,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const nextValidUntil = bill.billingModel==="prorata" && bill.validityDays
         ? (() => { const d=new Date(nextDue); d.setDate(d.getDate()+Number(bill.validityDays)-1); return d.toISOString().split("T")[0]; })()
         : null;
-      setBills(p=>[{...bill,
+      nextBill = {...bill,
         id:genId(),status:"unpaid",
         dueDate:nextDue,
         billDate:paymentDate,
@@ -1644,8 +1639,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         ...(nextPeriod||{}),
         ...(nextValidFrom?{validFrom:nextValidFrom}:{}),
         ...(nextValidUntil?{validUntil:nextValidUntil}:{}),
-      },...p]);
+      };
     }
+    setTxns(p=>[{id:paymentTxnId,type:"expense",desc:bill.name,merchant:bill.merchant||"",date:paymentDate,note:"Bill payment",catId:bill.catId,catIds:bill.catIds||[bill.catId],subId:bill.subId||null,accId,people:isFirstPayment?(bill.splitPeople||{}):{},forPerson:attributedPersonId,groupId:bill.groupId||null,groupCollectiveAmount:isFirstPayment?Number(bill.groupCollectiveAmount||0):0,amount:paidAmount,isBillPayment:true,billInvoiceNo:bill.invoiceNo||null,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null,imageBase64:bill.imageBase64||null,paymentImageBase64:bill.paymentImageBase64||null},...p]);
+    setBills(p=>p.map(x=>x.id===bill.id?{...x,
+      ...(becomesPaid?{status:"paid",paidDate:paymentDate}:{}),
+      ...(isFirstPayment?{paidByTxnId:paymentTxnId}:{}),
+      lastPaidAmount:paidAmount,lastPaidDate:paymentDate}:x));
+    // WP-OBL-04a: dual-write — also record a real Contribution alongside the
+    // legacy paidByTxnId/status write above. Full amount, since this path has
+    // no partial-payment concept yet.
+    setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:paymentTxnId, amount:applied, txnAmount:paidAmount }, genId));
+    if(nextBill) setBills(p=>[nextBill,...p]);
     setMarkingBillPaid(null);
   }, [billerAccounts, contributions, membershipRelationships]);
 
@@ -3951,6 +3956,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [eduTouched, setEduTouched] = useState({});     // subIds whose amount the user typed (never auto-prefill those)
     const [eduShowErrors, setEduShowErrors] = useState(false);
     const [eduMonthSheet, setEduMonthSheet] = useState(false);
+    const [amountTyped, setAmountTyped] = useState(isEditing);   // false until the user types a total themselves
+    const learnQueueRef = useRef([]);   // item-catalogue writes deferred until this transaction is saved
     const [eduFeeOpen, setEduFeeOpen] = useState(false);   // ET4: with several lines the School Fees card collapses to its range summary
     const [eventLinkId, setEventLinkId] = useState(isEditing ? (sourceTxn.eventId||"") : "");
     const [settleSelectedIds, setSettleSelectedIds] = useState({});
@@ -4211,6 +4218,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     }));
     const lineItemAmount = item => (parseFloat(item.qty)||0) * (parseFloat(item.unitPrice)||0);
     const lineItemsTotal = lineItems.reduce((sum,item)=>sum+lineItemAmount(item),0);
+    // Payments v2 G1/G2 — in Itemised the ONLY check is that the lines add up to the transaction total.
+    const itemsRecon = reconcileLines(lineItems.map(lineItemAmount), parseFloat(amount)||0);
     const lineSplitQtyTotal = item => (item.splits||[]).reduce((sum,split)=>sum+(parseFloat(split.qty)||0),0);
 
     // ── auto-save draft ──
@@ -4927,6 +4936,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(schools.length===0) setEduSelected(prev=>prev.filter(sid=>eduRoleOf(sid)!==EDU_SUB.SCHOOL_FEES));
     };
 
+    // Itemised with no total typed yet: the lines' sum becomes the total (so entering lines first still works).
+    useEffect(()=>{ if(useItemizedLines && !amountTyped && lineItems.length>0 && !(parseFloat(amount)>0) && lineItemsTotal>0) setAmount(String(Math.round(lineItemsTotal*100)/100)); },[useItemizedLines, lineItems, lineItemsTotal, amount]);
     // Header amount IS the sum of the Education lines (no second amount that can disagree).
     useEffect(()=>{ if(eduActive && eduTotal>0 && String(eduTotal)!==String(amount)) setAmount(String(eduTotal)); },[eduActive, eduTotal]);
     // School Fees amount is prefilled with what the chosen range has outstanding (editable; never
@@ -4951,6 +4962,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(submittingRef.current) return;
       if(!hasTxnSubject){ setRefDupWarning("Enter a vendor/note before saving."); return; }
       if(!amt){ setRefDupWarning("Enter an amount before saving."); return; }
+      if(txnType==="expense" && useItemizedLines && lineItems.length>0 && !itemsRecon.matches){ setRefDupWarning(`Lines add up to ${sym}${fmt(itemsRecon.linesTotal)} but the total is ${sym}${fmt(amt)}.`); return; }
       if(eduMode){
         setEduShowErrors(true);
         if(eduErrorCount>0) setTimeout(()=>document.querySelector("[data-edu-error]")?.scrollIntoView({ block:"center", behavior:"smooth" }),60);
@@ -5460,6 +5472,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           priceGstAmt:showPriceBreakdown&&priceGstAmt>0?priceGstAmt:null,
         };
         if(!isEditing) submitCreateThroughBoundary(newTxn); else upsertTxn(newTxn);
+        learnQueueRef.current.forEach(fn=>fn()); learnQueueRef.current = [];
         if(eduMode && newTxn.linkedFeePeriods?.length){
           setFeePeriods(prev=>applyEducationSettlement(prev, newTxn.linkedFeePeriods, resolvedTxnId, schoolFeesService.settlePeriods));
         }
@@ -5790,7 +5803,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       return computeLineItemCategoryRollup(lineItems);
     }, [txnType, useItemizedLines, lineItems]);
 
-    const canSubmit = hasTxnSubject && amt>0 && !(itemCategoryRollup && itemCategoryRollup.uncategorizedCount>0);
+    const itemsBlock = txnType==="expense" && useItemizedLines && lineItems.length>0 && !itemsRecon.matches;
+    const canSubmit = hasTxnSubject && amt>0 && !(itemCategoryRollup && itemCategoryRollup.uncategorizedCount>0) && !itemsBlock;
 
     return (
       <>
@@ -5922,7 +5936,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ display:"flex",gap:8 }}>
               <div style={{ flex: (txnType==="expense"&&!showDetailsCard) ? 1 : "unset", width: (txnType==="expense"&&!showDetailsCard) ? "auto" : "100%" }}>
                 <span style={lbl}>Amount ({sym}) *</span>
-                <input style={{ ...inp,fontSize:22,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} readOnly={eduActive&&eduTotal>0} title={eduActive&&eduTotal>0?"Sum of the Education lines":undefined} onChange={e=>setAmount(cleanMoneyInput(e.target.value))}/>
+                <input style={{ ...inp,fontSize:22,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} readOnly={eduActive&&eduTotal>0} title={eduActive&&eduTotal>0?"Sum of the Education lines":undefined} onChange={e=>{ setAmountTyped(true); setAmount(cleanMoneyInput(e.target.value)); }}/>
               </div>
             {/* T3 slice 1: DetailsCard, per Arth UI-2B T3 Expense Shell.dc.html (T3-3/T3-4).
                 This slice: Paid Via + Date only. Collapsed row always shows the current value
@@ -6116,7 +6130,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                             <div key={item.id} style={{ display:"flex",alignItems:"center",gap:8,background:T.card||T.bg,borderRadius:10,padding:"8px 10px",border:`1px solid ${T.border}` }}>
                               <div style={{ flex:1,minWidth:0 }}>
                                 <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.label||"Unnamed item"}</div>
-                                <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{item.qty||1} {item.unit||"nos"} @ {sym}{fmt(item.unitPrice||0)} each</div>
+                                <div data-testid={`item-calc-${item.id}`} style={{ color:T.sub,fontSize:10,marginTop:2 }}>{item.basis==="unit"
+                                  ? describeLine({ basis:"unit", qty:item.qty||1, unit:item.unit||"nos", price:item.price, rateUnit:item.rateUnit }, sym, fmt)
+                                  : describeLine({ basis:"total", qty:item.qty||1, unit:item.unit||"nos", price:itemTotal }, sym, fmt)}</div>
                                 {/* T3-9b: identifies which item(s) block Save. */}
                                 {!item.catId&&<div style={{ color:T.warn,fontSize:10,marginTop:2,fontWeight:700 }}>⚠️ Needs a category</div>}
                               </div>
@@ -6126,9 +6142,21 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                             </div>
                           );
                         })}
-                        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4 }}>
-                          <span style={{ color:T.sub,fontSize:10 }}>Items total</span>
-                          <span style={{ color:Math.abs(lineItemsTotal-amt)<0.01?T.success:T.warn,fontSize:13,fontWeight:800 }}>{sym}{fmt(lineItemsTotal)}{Math.abs(lineItemsTotal-amt)>=0.01?` (\u2260 ${sym}${fmt(amt)} txn total)`:""}</span>
+                        <div data-testid="items-reconcile" style={{ marginTop:6,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
+                          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8 }}>
+                            <span style={{ color:T.sub,fontSize:11 }}>Lines add up to</span>
+                            <span style={{ color:T.text,fontSize:14,fontWeight:800 }}>{sym}{fmt(itemsRecon.linesTotal)}{itemsRecon.matches?" · matches total":""}</span>
+                          </div>
+                          {!itemsRecon.matches&&(
+                            <div data-testid="items-mismatch" style={{ marginTop:6 }}>
+                              <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{itemsRecon.difference>0?`${sym}${fmt(itemsRecon.difference)} not on any line`:`Lines are ${sym}${fmt(-itemsRecon.difference)} more than the total`}</div>
+                              <div style={{ color:T.sub,fontSize:11 }}>Expense total {sym}{fmt(amt)} − lines {sym}{fmt(itemsRecon.linesTotal)}</div>
+                              <div style={{ display:"flex",gap:8,marginTop:8,flexWrap:"wrap" }}>
+                                {itemsRecon.difference>0&&<button type="button" data-testid="items-add-line" onClick={()=>{ setItemPrefill({ unitPrice:String(itemsRecon.difference), catId:catIds[0]||null }); setEditingItemId(null); setShowItemSheet(true); }} style={{ minHeight:44,padding:"0 14px",background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>+ Add line · {sym}{fmt(itemsRecon.difference)}</button>}
+                                <button type="button" data-testid="items-set-total" onClick={()=>setAmount(String(itemsRecon.linesTotal))} style={{ minHeight:44,padding:"0 14px",background:"none",border:`1px solid ${T.border}`,borderRadius:12,color:T.text,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>Set total to {sym}{fmt(itemsRecon.linesTotal)}</button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -7422,7 +7450,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             )}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={closeModal} style={btnG}>Cancel</button>
-              <button onClick={()=>submit()} style={{ ...btnP,opacity:canSubmit?1:0.5 }}>{eduMode&&eduShowErrors&&eduErrorCount>0?`Fix ${eduErrorCount} item${eduErrorCount===1?"":"s"}`:canSubmit?(isEditing?"Save Changes ✓":"Add ✓"):txnType==="investment"?"Fill name & amount":"Fill vendor & amount"}</button>
+              <button onClick={()=>submit()} style={{ ...btnP,opacity:canSubmit?1:0.5 }}>{itemsBlock?`Save · lines must equal ${sym}${fmt(amt)}`:eduMode&&eduShowErrors&&eduErrorCount>0?`Fix ${eduErrorCount} item${eduErrorCount===1?"":"s"}`:canSubmit?(isEditing?"Save Changes ✓":"Add ✓"):txnType==="investment"?"Fill name & amount":"Fill vendor & amount"}</button>
             </div>
           </div>
         </div>
@@ -7474,6 +7502,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       )}
       {showItemSheet&&useItemizedLines&&(
         <ItemSheetModal
+          onLearn={fn=>learnQueueRef.current.push(fn)}
           editingItemId={editingItemId}
           lineItems={lineItems}
           prefill={itemPrefill}
@@ -7496,7 +7525,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   };
 
   // ── ITEM SHEET MODAL (B3) ───────────────────────────────────────────────────────
-  const ItemSheetModal = ({ editingItemId, lineItems, prefill, onClose, onSave, cats, getCat, measureUnits, formatMeasureUnitLabel, sym, fmt, T, inp, lbl }) => {
+  const ItemSheetModal = ({ editingItemId, lineItems, prefill, onClose, onSave, onLearn, cats, getCat, measureUnits, formatMeasureUnitLabel, sym, fmt, T, inp, lbl }) => {
     const editItem = editingItemId ? lineItems.find(x=>x.id===editingItemId) : null;
     const [iName, setIName] = useState(editItem?.label||"");
     // FIX (direct product decision): quantity no longer has its own visible input during entry
@@ -7507,7 +7536,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [iUnit, setIUnit] = useState(editItem?.unit||"nos");
     // T3.1 Part A, S-3: prefill only applies to a genuinely NEW item (editItem, when set,
     // always takes priority -- editing an existing item is completely unaffected).
-    const [iPrice, setIPrice] = useState(String(editItem?.unitPrice || (!editItem && prefill?.unitPrice) || ""));
+    // Payments v2 G1/G2 — what the price typed means: the line's TOTAL (default) or a price PER UNIT.
+    // The last basis used is remembered per phone; basis/rateUnit are UI-only (a saved line is still
+    // {qty, unit, unitPrice}), so an existing line re-opens on its amount as a total.
+    const [iBasis, setIBasis] = useState(()=>editItem?.basis || (()=>{ try{ return localStorage.getItem("arth_item_basis")==="unit"?"unit":"total"; }catch{ return "total"; } })());
+    const [iRateUnit, setIRateUnit] = useState(editItem?.rateUnit || defaultRateUnit(editItem?.unit||"nos"));
+    const [iPrice, setIPrice] = useState(String(
+      editItem ? (editItem.price ?? (editItem.basis==="unit" ? editItem.unitPrice : ((parseFloat(editItem.qty)||0)*(parseFloat(editItem.unitPrice)||0)))) || ""
+      : (prefill?.unitPrice || "")));
     const [iCatId, setICatId] = useState(editItem?.catId || (!editItem && prefill?.catId) || "");
     const [iSubId, setISubId] = useState(editItem?.subId||"");
     // FIX: Category/Sub-category are no longer always-visible dropdowns. A known item (catalog
@@ -7534,17 +7570,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [rememberForFuture, setRememberForFuture] = useState(false);
     const handleSave = () => {
       if(!iName.trim()) return;
-      onSave({ id: editingItemId||genId(), label:iName.trim(), qty:iQty, unit:iUnit, unitPrice:iPrice, catId:iCatId||null, subId:iSubId||null });
+      const calc = computeLine({ basis:iBasis, qty:iQty, unit:iUnit, price:iPrice, rateUnit:iRateUnit });
+      try{ localStorage.setItem("arth_item_basis", iBasis); }catch{}
+      onSave({ id: editingItemId||genId(), label:iName.trim(), qty:iQty, unit:iUnit, unitPrice:String(calc.unitPrice), basis:iBasis, price:iPrice, rateUnit:iRateUnit, catId:iCatId||null, subId:iSubId||null });
       // WP-A: the TRANSACTION's own lineItem above always gets whatever was chosen — unconditional,
       // unchanged. The CATALOG (Arth's future suggestion for this item name) is a separate
       // decision: a brand-new item is still auto-learned (no friction for genuinely new items,
       // per the locked spec); an EXISTING catalog entry is left untouched unless the user
       // explicitly opted in via the "Remember for future" checkbox below.
       const nameKey = iName.trim();
+      // Pre-existing bug, found while verifying Payments v2 G: writing the catalogue here is an
+      // AppContent state change, and AddModal is defined INSIDE AppContent, so it remounted the whole
+      // Add form and lost the item just added (reproduced on main). The write is now handed to the form
+      // (onLearn) which applies it when the transaction is actually saved.
+      const learn = fn => (onLearn ? onLearn(fn) : fn());
       if(!catalogMatch){
-        setItemCatalog(prev=>[...prev, { id: genId(), name:nameKey, unit:iUnit||"nos", catId:iCatId||"", subId:iSubId||"" }]);
+        learn(()=>setItemCatalog(prev=>[...prev, { id: genId(), name:nameKey, unit:iUnit||"nos", catId:iCatId||"", subId:iSubId||"" }]));
       } else if(rememberForFuture){
-        setItemCatalog(prev=>prev.map(it=>it.id===catalogMatch.id ? { ...it, unit:iUnit||"nos", catId:iCatId||"", subId:iSubId||"" } : it));
+        learn(()=>setItemCatalog(prev=>prev.map(it=>it.id===catalogMatch.id ? { ...it, unit:iUnit||"nos", catId:iCatId||"", subId:iSubId||"" } : it)));
       }
       // Stay open for continuous multi-item entry on a genuinely new item; edit mode still
       // closes as a single deliberate action.
@@ -7591,7 +7634,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
               <div style={{ width:82 }}>
                 <span style={lbl}>Unit</span>
-                <select style={inp} value={iUnit} onChange={e=>setIUnit(e.target.value)}>{(measureUnits||[]).map(u=><option key={u} value={u}>{formatMeasureUnitLabel?formatMeasureUnitLabel(u):u}</option>)}</select>
+                <select style={inp} value={iUnit} onChange={e=>{ setIUnit(e.target.value); setIRateUnit(defaultRateUnit(e.target.value)); }}>{(measureUnits||[]).map(u=><option key={u} value={u}>{formatMeasureUnitLabel?formatMeasureUnitLabel(u):u}</option>)}</select>
               </div>
             </div>
             {/* FIX: Category auto-applied silently for a known item -- compact one-line summary,
@@ -7625,12 +7668,37 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <button onClick={()=>setShowCategoryPicker(false)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"6px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Done</button>
               </div>
             )}
-            {/* Layout: Row 2 = Price/unit + the Add Item button, side by side. */}
+            {/* Payments v2 G1 — one basis toggle, one price field, and the calculation always shown. */}
+            <div>
+              <span style={lbl}>Price</span>
+              <Segmented T={T} value={iBasis} options={[{ value:"total",label:"Total" },{ value:"unit",label:"Per unit" }]}
+                onChange={v=>{
+                  if(v===iBasis) return;
+                  // keep the line amount the same across the switch
+                  const { amount } = computeLine({ basis:iBasis, qty:iQty, unit:iUnit, price:iPrice, rateUnit:iRateUnit });
+                  const q = parseFloat(iQty)||0;
+                  if(v==="total") setIPrice(amount?String(amount):"");
+                  else {
+                    const f = computeLine({ basis:"unit", qty:1, unit:iUnit, price:1, rateUnit:iRateUnit }).amount;
+                    setIPrice(amount&&q>0&&f>0 ? String(Math.round((amount/(q*f))*1e6)/1e6) : "");
+                  }
+                  setIBasis(v);
+                }}/>
+            </div>
             <div style={{ display:"flex",gap:8,alignItems:"flex-end" }}>
               <div style={{ flex:1 }}>
-                <span style={lbl}>Price/unit</span>
-                <input style={{ ...inp,textAlign:"right" }} type="number" min="0" placeholder="0" value={iPrice} onChange={e=>setIPrice(e.target.value)}/>
+                <span style={lbl}>{iBasis==="total" ? `Line total (${sym})` : `Price per ${iRateUnit}`}</span>
+                <input data-testid="item-price" style={{ ...inp,textAlign:"right" }} type="number" min="0" placeholder="0" value={iPrice} onChange={e=>setIPrice(e.target.value)}/>
               </div>
+              {iBasis==="unit"&&rateUnitsFor(iUnit).length>1&&(
+                <div style={{ width:82 }}>
+                  <span style={lbl}>per</span>
+                  <select data-testid="item-rate-unit" style={inp} value={iRateUnit} onChange={e=>setIRateUnit(e.target.value)}>{rateUnitsFor(iUnit).map(u=><option key={u} value={u}>{u}</option>)}</select>
+                </div>
+              )}
+            </div>
+            <div data-testid="item-calc" style={{ color:T.sub,fontSize:12 }}>{describeLine({ basis:iBasis, qty:iQty, unit:iUnit, price:iPrice, rateUnit:iRateUnit }, sym, fmt)}</div>
+            <div style={{ display:"flex",gap:8,alignItems:"flex-end" }}>
               <button onClick={handleSave} disabled={!iName.trim()} style={{ flex:1,background:iName.trim()?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:iName.trim()?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",height:48 }}>{editingItemId?"Save Changes ✓":"Add Item ✓"}</button>
             </div>
           </div>
@@ -16641,7 +16709,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {toPayRows.length === 0 ? (
           <div style={{ margin: "0 16px 16px",background: T.card,border: `1px solid ${T.border}`,borderRadius: 16,padding: 16,textAlign: "center" }}>
             <div style={{ color: T.text,fontSize: 13,fontWeight: 800,marginBottom: 4 }}>All bills paid</div>
-            <div style={{ color: T.sub,fontSize: 11.5 }}>Nothing due in the next 14 days.</div>
+            <div data-testid="home-all-paid-next" style={{ color: T.sub,fontSize: 11.5 }}>Nothing due in the next 14 days.{(()=>{
+              // H1 — name the next real bill beyond the window (open Bills only; Expected items are never "next").
+              const next = bills.filter(b=>b.status!=="cancelled" && b.dueDate && getBillBadge(b, contributions).kind==="unpaid")
+                .sort((a,b)=>String(a.dueDate).localeCompare(String(b.dueDate)))[0];
+              if(!next) return "";
+              const bal = getBillBalance(next, contributions).remaining;
+              return ` Next: ${next.name} · ${formatShortDate(next.dueDate)||next.dueDate} · ${sym}${fmt(bal)}.`;
+            })()}</div>
           </div>
         ) : (
           <div style={{ margin: "0 16px 16px",display: "flex",flexDirection: "column",gap: 8 }}>

@@ -17,11 +17,15 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
   const [transactionRef, setTransactionRef] = useState("");
   const [amountText, setAmountText] = useState(String(remaining || ""));
   const [date, setDate] = useState(today);
+  // Payments v2 H2 — if recording throws, nothing was saved (the caller writes only after its checks pass),
+  // the entries stay as typed, and the primary button stays off until "Try again" or an edit.
+  const [failed, setFailed] = useState(false);
+  const edit = setter => v => { setFailed(false); setter(v); };
 
   const amount = isCard ? remaining : Math.round((parseFloat(amountText) || 0) * 100) / 100;
   const applied = Math.min(amount, remaining);
   const unallocated = Math.max(0, Math.round((amount - remaining) * 100) / 100);
-  const canSave = Boolean(accId) && amount > 0 && Boolean(date);
+  const canSave = Boolean(accId) && amount > 0 && Boolean(date) && !failed;
 
   const eligibleAccounts = (accounts || []).filter(a => a.type !== "cc");
   const lbl = { color: T.sub, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", display: "block", marginBottom: 6 };
@@ -54,14 +58,14 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
         </label>
         <label>
           <span style={lbl}>Paid from</span>
-          <select data-testid="record-payment-account" value={accId} onChange={e => setAccId(e.target.value)} style={inp}>
+          <select data-testid="record-payment-account" value={accId} onChange={e => edit(setAccId)(e.target.value)} style={inp}>
             <option value="">Select an account…</option>
             {eligibleAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </label>
         <label>
           <span style={lbl}>Date</span>
-          <input data-testid="record-payment-date" type="date" value={date} max={today} onChange={e => setDate(e.target.value)} style={inp} />
+          <input data-testid="record-payment-date" type="date" value={date} max={today} onChange={e => edit(setDate)(e.target.value)} style={inp} />
         </label>
         <label>
           <span style={lbl}>Reference · optional</span>
@@ -69,9 +73,16 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
         </label>
       </div>
 
+      {failed && (
+        <div data-testid="record-payment-error" role="alert" style={{ marginTop: 14, background: T.card, border: `1px solid ${T.danger || T.border}`, borderRadius: RADIUS.md, padding: "12px 14px" }}>
+          <div style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>Couldn't record payment</div>
+          <div style={{ color: T.sub, fontSize: 12, margin: "2px 0 8px" }}>Nothing was saved. Your entries are kept.</div>
+          <button data-testid="record-payment-retry" onClick={() => setFailed(false)} style={{ minHeight: 44, padding: "0 16px", background: T.pill, border: `1px solid ${T.border}`, borderRadius: RADIUS.md, color: T.text, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Try again</button>
+        </div>
+      )}
       <button
         data-testid="record-payment-confirm"
-        onClick={() => canSave && onConfirm(accId, transactionRef.trim(), { amount, date })}
+        onClick={() => { if (!canSave) return; try { onConfirm(accId, transactionRef.trim(), { amount, date }); } catch (e) { setFailed(true); } }}
         disabled={!canSave}
         style={{ marginTop: 16, width: "100%", minHeight: TOUCH.min, background: canSave ? T.accent : T.border, border: "none", borderRadius: RADIUS.md, color: T.accentInk || "#fff", fontWeight: 700, fontSize: 15, cursor: canSave ? "pointer" : "not-allowed", fontFamily: FONT.sans }}
       >
