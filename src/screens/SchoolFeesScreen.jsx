@@ -28,6 +28,11 @@ import { calculateAnnualSummary } from "../domain/schoolFees/annualSummary";
 import { isPersonArchived } from "../domain/person/archive";
 import { resolveSchoolAttribution, attemptSchoolAttributionChange } from "./SchoolFeesScreen.helpers";
 import { reconcileScheduleEdit } from "../domain/schoolFees/startingState";
+// Payments v2 (WP18c) — E1/E2/E3/E4/E5 additions.
+import { groupFeePeriodsForDisplay } from "../domain/schoolFees/periodGrouping";
+import { defaultLineAmount, validatePayFeesLineAmount, sumPayFeesTotal, toSettlementAllocations, validateExtraLine } from "../domain/schoolFees/payFeesSelection";
+import { PAYMENT_METHODS, sumPaymentLines, paidWithDifference, isPaidWithBalanced, blankPaymentLine } from "../domain/payments/paidWith";
+import { DUE_SOON_DAYS } from "../domain/obligations/dueSoonWindow";
 
 // Checkpoint 5 restyle: this screen used to declare its own local colour palette
 // (TEAL/TEAL_TEXT/GREEN/GREEN_TEXT/RED/RED_TEXT/AMBER/AMBER_TEXT as raw OKLCH values) instead of
@@ -37,6 +42,37 @@ import { reconcileScheduleEdit } from "../domain/schoolFees/startingState";
 // use FONT.mono + tabular-nums (the same treatment MONEY.* in constants/theme.js uses) instead of
 // a bare "monospace" string, and labels are at the 11px type floor instead of 9.5px.
 const money = (sym, fmt, n) => `${sym}${fmt(n)}`;
+
+// E1 — a one-time fee line's own display name. If the person creating the schedule gave it a
+// real label (AddSchoolYearModal's "Label (optional)" field), that wins; if they left it blank,
+// buildManualFeePeriods defaults `label` to the period's own date range — fine for a tuition
+// period (whose date range IS its identity) but confusing for a one-time fee sharing that same
+// range (it would otherwise repeat the group card's own header verbatim). Falling back to the
+// fee kind's name here is display-only — the stored `label` field itself is untouched.
+const KIND_DISPLAY = { tuition:"Tuition", transport:"Transport", registration:"Registration", uniform:"Uniform", books:"Books", activities:"Activities", exams:"Exams", other:"Other" };
+// Recognizes buildManualFeePeriods' own two auto-label shapes ("Oct – Dec 2026" / "Oct 2026 –
+// Jan 2027" / a single "October 2026") — never a "Q#" shape, there isn't one to recognize.
+const AUTO_RANGE_LABEL_RE = /^[A-Za-z]+( \d{4})?( – [A-Za-z]+ \d{4})?$/;
+// Every auto-generated label always carries exactly one 4-digit year — a real custom label like
+// "Books" or "Annual registration" never does, so requiring a year rules out accidentally
+// overriding a genuinely custom, date-free, single-word label.
+const isAutoRangeLabel = (label) => /\d{4}/.test(label) && AUTO_RANGE_LABEL_RE.test(label);
+function feeLineDisplayName(p) {
+  if (p.kind==="tuition"||!p.kind) return "Tuition";
+  if (p.label && !isAutoRangeLabel(p.label)) return p.label; // a real, custom name was given
+  return KIND_DISPLAY[p.kind] || p.label;
+}
+
+// Small local date formatter ("10 Oct") — this screen has never imported App.jsx's own
+// formatShortDate (it stays decoupled, same as every other helper here), so this mirrors just the
+// one display need E1/E5 add: a due date next to a fee line.
+const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function formatShortDateSF(dateStr) {
+  if (!dateStr) return "—";
+  const [y, m, d] = String(dateStr).slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return dateStr;
+  return `${d} ${MONTH_ABBR[m - 1]}`;
+}
 
 // ============================================================================
 // List — every School Fee schedule, entry point for adding a new school year
@@ -409,6 +445,8 @@ export const SchoolFeeScheduleDetailModal = ({
   );
   const needingDeclaration = useMemo(()=>schoolFeesService.getPeriodsNeedingDeclaration(periods), [periods]);
   const availableCredit = summary.availableCredit;
+  // E1 — grouped-by-real-period display, never a flat list.
+  const grouped = useMemo(()=>groupFeePeriodsForDisplay(periods), [periods]);
 
   // P1 — Person attribution now lives inside the combined Edit screen
   // (AddSchoolYearModal, existing=schedule). This box is read-only display
@@ -496,35 +534,77 @@ export const SchoolFeeScheduleDetailModal = ({
 
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"4px 2px 8px" }}>
         <span style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>Fee periods</span>
-        <span style={{ color:T.sub,fontSize:10 }}>Tap to open · select to settle</span>
+        <span style={{ color:T.sub,fontSize:10 }}>Tap to open · select to pay</span>
       </div>
 
-      {periods.map(p=>{
-        const und = !p.startingStateDeclared;
-        const out = calculateOutstanding(p);
-        const selected = selectedPeriodIds.includes(p.id);
-        const selectable = !und && out>0;
-        const settled = !und && out<=0;
-        return (
-          <div key={p.id} style={{ display:"flex",gap:9,marginBottom:7 }}>
-            {selectable && (
-              <button onClick={()=>toggleSelect(p.id)} style={{ width:26,flexShrink:0,display:"grid",placeItems:"center",background:selected?T.accent:T.card,border:`1.5px solid ${selected?T.accent:T.border}`,borderRadius:8,cursor:"pointer",color:"#fff" }}>{selected?"✓":""}</button>
-            )}
-            <button onClick={()=>setViewingPeriod(p)} style={{ flex:1,minWidth:0,display:"flex",alignItems:"center",gap:11,padding:"13px 14px",background:und?"transparent":T.card,border:und?`1px dashed ${T.border}`:`1px solid ${T.border}`,borderRadius:16,cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
-              <span style={{ flex:1,minWidth:0 }}>
-                <div style={{ color:und?T.sub:T.text,fontSize:14,fontWeight:700 }}>{p.label}</div>
-                <div style={{ color:und?T.sub:(settled?T.success:(out<p.obligationAmount?T.dangerText:T.sub)),fontSize:10.5,marginTop:2 }}>
-                  {und ? "Status not established · set status" : settled ? "Settled in full" : (p.paidAmount>0 ? `Part paid · ${sym}${fmt(out)} outstanding` : "Unpaid")}
-                </div>
+      {/* E1 — grouped by real fee period (never a "Q#" label: groupFeePeriodsForDisplay only ever
+          surfaces the label buildManualFeePeriods already produced, a real date range). A period's
+          one-time fees (kind!=="tuition") sit inside the same card, tagged "One-time", since they
+          were created against the same stretch of the year. */}
+      {grouped.current.map(group=>(
+        <div key={group.key} style={{ marginBottom:12,background:T.card,border:`1px solid ${T.border}`,borderRadius:16,overflow:"hidden" }}>
+          <div style={{ padding:"10px 14px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"baseline" }}>
+            <span style={{ color:T.text,fontSize:12.5,fontWeight:800 }}>{group.label}</span>
+            {!group.anyUndeclared && <span style={{ color:group.totalOutstanding>0?T.sub:T.success,fontSize:10.5,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{group.totalOutstanding>0?`${sym}${fmt(group.totalOutstanding)} due`:"Settled"}</span>}
+          </div>
+          {group.lines.map(p=>{
+            const und = p.undeclared;
+            const out = p.outstanding;
+            const selected = selectedPeriodIds.includes(p.id);
+            const selectable = !und && out>0;
+            const settled = p.settled;
+            const isOneTime = p.kind && p.kind!=="tuition";
+            return (
+              <div key={p.id} style={{ display:"flex",gap:9,alignItems:"center",padding:"10px 14px",borderTop:group.lines[0]===p?"none":`1px solid ${T.border}` }}>
+                {selectable && (
+                  <button data-testid={`fee-line-select-${p.id}`} onClick={()=>toggleSelect(p.id)} style={{ width:24,height:24,flexShrink:0,display:"grid",placeItems:"center",background:selected?T.accent:T.input,border:`1.5px solid ${selected?T.accent:T.border}`,borderRadius:7,cursor:"pointer",color:"#fff",fontSize:12 }}>{selected?"✓":""}</button>
+                )}
+                {!selectable && <span style={{ width:24,flexShrink:0 }}/>}
+                <button onClick={()=>setViewingPeriod(p)} style={{ flex:1,minWidth:0,display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif",padding:0 }}>
+                  <span style={{ flex:1,minWidth:0 }}>
+                    <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                      <span style={{ color:und?T.sub:T.text,fontSize:13.5,fontWeight:700 }}>{feeLineDisplayName(p)}</span>
+                      {isOneTime && <span style={{ color:T.infoText,background:T.info+"18",borderRadius:6,padding:"1px 6px",fontSize:9,fontWeight:800,letterSpacing:0.3,textTransform:"uppercase" }}>One-time</span>}
+                    </div>
+                    <div style={{ color:und?T.sub:(settled?T.success:(out<p.obligationAmount?T.dangerText:T.sub)),fontSize:10.5,marginTop:2 }}>
+                      {und ? "Status not established · set status" : settled ? "Settled in full" : (p.paidAmount>0 ? `Part paid · ${sym}${fmt(out)} outstanding` : `Due ${formatShortDateSF(p.dueDate)}`)}
+                    </div>
+                  </span>
+                  <span style={{ textAlign:"right" }}>
+                    <div style={{ color:und?T.sub:T.text,fontSize:13.5,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(p.obligationAmount)}</div>
+                    <div style={{ color:und?T.sub:(settled?T.success:T.sub),fontSize:10,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{und ? "not counted" : settled ? "settled" : `${sym}${fmt(out)} due`}</div>
+                  </span>
+                  <span style={{ color:T.sub,fontSize:13 }}>›</span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+
+      {grouped.current.length===0 && grouped.earlier.length===0 && (
+        <div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"14px 0" }}>No fee periods yet.</div>
+      )}
+
+      {/* "Earlier" — fully-settled periods collapse to one summary row each, not a repeat of every
+          line inside them. */}
+      {grouped.earlier.length>0 && (
+        <div style={{ marginTop:4 }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",padding:"6px 2px 8px" }}>Earlier</div>
+          {grouped.earlier.map(group=>(
+            <button key={group.key} onClick={()=>setViewingPeriod(group.lines[0])} style={{ width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:52,padding:"11px 14px",background:T.card,border:`1px solid ${T.border}`,borderRadius:14,cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif",marginBottom:7 }}>
+              <span style={{ minWidth:0 }}>
+                <span style={{ display:"block",color:T.text,fontSize:13,fontWeight:700 }}>{group.label}{group.lines.length>1?` · ${group.lines.length} fees`:""}</span>
+                <span style={{ display:"block",color:T.success,fontSize:10.5,marginTop:2 }}>Paid in full</span>
               </span>
               <span style={{ textAlign:"right" }}>
-                <div style={{ color:und?T.sub:T.text,fontSize:14,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(p.obligationAmount)}</div>
-                <div style={{ color:und?T.sub:(settled?T.success:T.sub),fontSize:10.5,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{und ? "not counted" : settled ? "settled" : `${sym}${fmt(out)} due`}</div>
+                <span style={{ display:"block",color:T.text,fontSize:13,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(group.totalObligation)}</span>
+                <span style={{ display:"block",color:T.success,fontSize:10,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>Paid</span>
               </span>
             </button>
-          </div>
-        );
-      })}
+          ))}
+        </div>
+      )}
 
       <div style={{ color:T.sub,fontSize:10.5,lineHeight:1.5,margin:"8px 0 4px" }}>Open a period below to record a discount or write-off against it specifically.</div>
       <button onClick={()=>setShowCreditNote(true)} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",marginTop:8,width:"100%" }}>+ New Credit Note</button>
@@ -536,7 +616,7 @@ export const SchoolFeeScheduleDetailModal = ({
             <span style={{ color:T.text,fontSize:18,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(selectedTotal)}</span>
           </div>
           <div style={{ display:"flex",gap:8 }}>
-            <button onClick={()=>setShowSettle(true)} style={{ flex:1,padding:13,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Record payment</button>
+            <button data-testid="schedule-pay-fees-btn" onClick={()=>setShowSettle(true)} style={{ flex:1,padding:13,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Pay fees</button>
             <button onClick={()=>setSelectedPeriodIds([])} style={{ padding:"13px 16px",borderRadius:12,background:"none",border:`1px solid ${T.border}`,fontSize:13,fontWeight:600,color:T.sub,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Clear</button>
           </div>
         </div>
@@ -546,64 +626,84 @@ export const SchoolFeeScheduleDetailModal = ({
 };
 
 // ============================================================================
-// Settle Payment — deterministic when amount matches selection, explicit
-// allocation required when it doesn't. No auto-allocation is ever applied.
+// Pay Fees — E2/E3/E4. Several fee lines ticked together become ONE
+// Transaction; each ticked line's amount is independently editable from ₹1
+// to what's left on that fee (the rest stays due); "+ Add something not
+// listed" stores a named Education line on the same Transaction with no fee
+// period; "Paid with" takes one or more payment methods (each from an
+// account) that must sum exactly to the total before Record is enabled.
 // ============================================================================
 
-export const SettlePaymentModal = ({
+export const PayFeesModal = ({
   onClose, T, sym, fmt,
+  schoolName,
   feePeriods, setFeePeriods, selectedPeriodIds, setSelectedPeriodIds,
-  accounts, // real Arth accounts[], for the account picker — payment must record where it came from
-  cats, // real Arth cats[] (spending categories) — required so this transaction is a normal,
-        // categorized expense like any other, never Uncategorized. Never defaulted/guessed —
-        // the real category list is the only source of truth for what's appropriate here.
-  createRealTxn, // (amount, accId, catId, linkedFeePeriods) => txnId
+  accounts, // real Arth accounts[] — every payment method is backed by one of these
+  createRealTxn, // ({ amount, date, paymentLines, extraLines, linkedFeePeriods }) => txnId
 }) => {
-  const selectedTotal = useMemo(()=>{
-    try { return schoolFeesService.calculateSelectedTotal(feePeriods, selectedPeriodIds); } catch { return 0; }
-  }, [feePeriods, selectedPeriodIds]);
-
-  const [payAmount, setPayAmount] = useState(String(selectedTotal));
-  const [accId, setAccId] = useState("");
-  const [catId, setCatId] = useState("");
-  const [alloc, setAlloc] = useState({});
+  const todayStrV = todayStr();
+  // Captured once, at open time, via a lazy useState initializer (never a useMemo with an
+  // intentionally-incomplete dep array) — feePeriods/selectedPeriodIds only change again after
+  // Record, by which point this sheet is closing anyway.
+  const [lines, setLines] = useState(() => selectedPeriodIds
+    .map(id => feePeriods.find(p => p.id === id))
+    .filter(Boolean)
+    .map(p => ({ periodId: p.id, period: p, ticked: true, amount: String(defaultLineAmount(p)) })));
+  const [extraLines, setExtraLines] = useState([]);
+  const [addingExtra, setAddingExtra] = useState(false);
+  const [extraName, setExtraName] = useState("");
+  const [extraAmount, setExtraAmount] = useState("");
+  const [date, setDate] = useState(todayStrV);
+  const [paymentLines, setPaymentLines] = useState(() => [{ id: genId(), method: PAYMENT_METHODS[0], accId: "", amount: "" }]);
   const [error, setError] = useState("");
 
-  const payNum = parseInt(payAmount||"0", 10) || 0;
-  const needsAllocation = payNum>0 && payNum!==selectedTotal && selectedPeriodIds.length>1;
-  const allocSum = Object.values(alloc).reduce((s,v)=>s+(parseInt(v||"0",10)||0), 0);
-  const unalloc = payNum - allocSum;
+  const toggleLine = (periodId) => setLines(prev => prev.map(l => l.periodId===periodId ? { ...l, ticked: !l.ticked } : l));
+  const setLineAmount = (periodId, amount) => setLines(prev => prev.map(l => l.periodId===periodId ? { ...l, amount } : l));
 
-  const selectedPeriods = feePeriods.filter(p=>selectedPeriodIds.includes(p.id));
+  const tickedLines = lines.filter(l=>l.ticked);
+  const lineErrors = {};
+  tickedLines.forEach(l => { const err = validatePayFeesLineAmount(l.period, parseFloat(l.amount)||0); if (err) lineErrors[l.periodId] = err; });
 
-  const autoSuggest = () => {
-    let rest = payNum;
-    const next = {};
-    selectedPeriods.forEach(p=>{
-      const out = calculateOutstanding(p);
-      const take = Math.min(rest, out);
-      next[p.id] = String(take);
-      rest -= take;
-    });
-    setAlloc(next);
+  const total = useMemo(
+    () => sumPayFeesTotal(tickedLines.map(l=>({ amount: parseFloat(l.amount)||0 })), extraLines),
+    [tickedLines, extraLines]
+  );
+
+  const addExtraLine = () => {
+    const amt = parseFloat(extraAmount)||0;
+    const err = validateExtraLine(extraName, amt);
+    if (err) { setError(err); return; }
+    setExtraLines(prev=>[...prev, { id: genId(), name: extraName.trim(), amount: amt }]);
+    setExtraName(""); setExtraAmount(""); setAddingExtra(false); setError("");
   };
+  const removeExtraLine = (id) => setExtraLines(prev=>prev.filter(l=>l.id!==id));
 
-  const confirmDisabled = payNum<=0 || !accId || !catId || (needsAllocation && unalloc!==0);
+  const addPaymentLine = () => setPaymentLines(prev=>[...prev, { ...blankPaymentLine(genId), amount: String(Math.max(0, paidWithDifference(prev, total))) }]);
+  const removePaymentLine = (id) => setPaymentLines(prev=>prev.filter(l=>l.id!==id));
+  const updatePaymentLine = (id, field, value) => setPaymentLines(prev=>prev.map(l=>l.id===id?{...l,[field]:value}:l));
+  const paidWithLines = paymentLines.map(l=>({ ...l, amount: parseFloat(l.amount)||0 }));
+  const diff = paidWithDifference(paidWithLines, total);
+  const balanced = isPaidWithBalanced(paidWithLines, total);
+
+  const hasAnyLine = tickedLines.length>0 || extraLines.length>0;
+  const recordDisabled = !hasAnyLine || total<=0 || Object.keys(lineErrors).length>0 || !balanced || !date;
 
   const confirm = () => {
     setError("");
     try {
-      const explicitAllocations = needsAllocation
-        ? selectedPeriodIds.map(id=>({ periodId:id, amount: parseInt(alloc[id]||"0",10)||0 }))
-        : undefined; // exact-match case: resolved below, deterministically, same logic settlePeriods itself uses
-      // Resolve the FINAL per-period allocation before the transaction exists — this is what
-      // makes the reverse link (linkedFeePeriods) correct even in the deterministic case, where
-      // this screen doesn't otherwise know the per-period split until settlement runs it.
-      const resolved = schoolFeesService.resolveAllocations(feePeriods, selectedPeriodIds, payNum, explicitAllocations);
-      const linkedFeePeriods = resolved.filter(a=>a.amount>0); // symmetric with settlementLinks' own zero-skip
-      const txnId = createRealTxn(payNum, accId, catId, linkedFeePeriods); // real Transaction, real category, real reverse link
-      const updated = schoolFeesService.settlePeriods(feePeriods, selectedPeriodIds, payNum, txnId, explicitAllocations);
-      setFeePeriods(updated);
+      const allocations = toSettlementAllocations(tickedLines.map(l=>({ periodId:l.periodId, amount: parseFloat(l.amount)||0 })));
+      const resolvedPaymentLines = paidWithLines.map(({ id, method, accId, amount })=>({ id, method, accId, amount }));
+      const txnId = createRealTxn({
+        amount: total, date,
+        paymentLines: resolvedPaymentLines,
+        extraLines: extraLines.map(({ id, name, amount })=>({ id, name, amount })),
+        linkedFeePeriods: allocations,
+      });
+      if (allocations.length>0) {
+        const periodsTotal = allocations.reduce((s,a)=>s+a.amount, 0);
+        const updated = schoolFeesService.settlePeriods(feePeriods, allocations.map(a=>a.periodId), periodsTotal, txnId, allocations);
+        setFeePeriods(updated);
+      }
       setSelectedPeriodIds([]);
       onClose();
     } catch(e) {
@@ -612,70 +712,98 @@ export const SettlePaymentModal = ({
   };
 
   return (
-    <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="88vh" padding="20px 16px 48px" zIndex={350}>
+    <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="90vh" padding="20px 16px 48px" zIndex={350}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-        <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Record Payment</div>
+        <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Pay {schoolName||"fees"}</div>
         <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
       </div>
 
-      <div style={{ background:T.input,borderRadius:16,padding:15,marginBottom:12 }}>
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:11 }}>
-          <span style={{ color:T.sub,fontSize:12 }}>Outstanding on {selectedPeriodIds.length} period(s)</span>
-          <span style={{ color:T.text,fontSize:16,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(selectedTotal)}</span>
-        </div>
-        <span style={{ display:"block",color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",marginBottom:6 }}>Amount actually paid</span>
-        <input type="number" value={payAmount} onChange={e=>{ setPayAmount(e.target.value); setAlloc({}); }} placeholder="0" style={{ width:"100%",border:`1.5px solid ${T.accent}55`,background:T.bg,borderRadius:12,padding:"11px 14px",fontSize:20,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",outline:"none" }}/>
-        <div style={{ color:T.sub,fontSize:11,marginTop:8 }}>
-          {payNum===0 ? "Enter what was actually paid."
-            : payNum===selectedTotal ? "Covers the selection in full — no allocation needed."
-            : selectedPeriodIds.length>1 ? "Less than the total. Allocate it below."
-            : `Leaves ${sym}${fmt(Math.max(0,selectedTotal-payNum))} outstanding on this period.`}
-        </div>
-        <span style={{ display:"block",color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",margin:"12px 0 6px" }}>Paid from</span>
-        <select value={accId} onChange={e=>setAccId(e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
-          <option value="">Select an account…</option>
-          {(accounts||[]).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-        <span style={{ display:"block",color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",margin:"12px 0 6px" }}>Category</span>
-        <select value={catId} onChange={e=>setCatId(e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
-          <option value="">Select a category…</option>
-          {(cats||[]).map(c=><option key={c.id} value={c.id}>{c.name||c.id}</option>)}
-        </select>
-        <div style={{ color:T.sub,fontSize:10,marginTop:6 }}>This makes the payment a normal expense — it'll show up in Budget and Insights like any other spend.</div>
-      </div>
-
-      {needsAllocation && (
-        <div style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:16,padding:15,marginBottom:12 }}>
-          <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:4 }}>Allocate this payment</div>
-          <div style={{ color:T.sub,fontSize:11,lineHeight:1.5,marginBottom:13 }}>You are paying {sym}{fmt(payNum)} toward {sym}{fmt(selectedTotal)} outstanding. Arth will not decide how it splits — set each period yourself.</div>
-          {selectedPeriods.map(p=>{
-            const out = calculateOutstanding(p);
-            const v = parseInt(alloc[p.id]||"0",10) || 0;
-            const left = out - v;
-            return (
-              <div key={p.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"12px 13px",marginBottom:8 }}>
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8 }}>
-                  <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{p.label}</span>
-                  <span style={{ color:T.sub,fontSize:11,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(out)} outstanding</span>
-                </div>
-                <input type="number" value={alloc[p.id]||""} onChange={e=>setAlloc(prev=>({...prev,[p.id]:e.target.value}))} placeholder="0" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"8px 11px",fontSize:14,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",outline:"none" }}/>
-                <div style={{ color:v===0?T.sub:(left<=0?T.success:T.dangerText),fontSize:10.5,marginTop:6 }}>
-                  {v===0 ? `Nothing allocated — stays ${sym}${fmt(out)} outstanding` : left<=0 ? `Settles ${p.label.split(" ")[0]} in full` : `${sym}${fmt(left)} will remain outstanding`}
-                </div>
+      <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",padding:"2px 2px 8px" }}>What you're paying</div>
+      {lines.map(l=>{
+        const err = lineErrors[l.periodId];
+        return (
+          <div key={l.periodId} style={{ background:l.ticked?T.card:"transparent",border:`1px solid ${T.border}`,borderRadius:14,padding:"11px 13px",marginBottom:8,opacity:l.ticked?1:0.6 }}>
+            <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+              <button data-testid={`payfees-toggle-${l.periodId}`} onClick={()=>toggleLine(l.periodId)} style={{ width:24,height:24,flexShrink:0,display:"grid",placeItems:"center",background:l.ticked?T.accent:T.input,border:`1.5px solid ${l.ticked?T.accent:T.border}`,borderRadius:7,cursor:"pointer",color:"#fff",fontSize:13 }}>{l.ticked?"✓":"+"}</button>
+              <div style={{ flex:1,minWidth:0 }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{feeLineDisplayName(l.period)}</div>
+                <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>{l.ticked ? `Applies to ${l.period.label}` : "Not included · stays due"}</div>
               </div>
-            );
-          })}
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 13px",background:unalloc===0?T.accentSoft:"transparent",borderRadius:12 }}>
-            <span style={{ color:unalloc===0?T.success:T.dangerText,fontSize:12,fontWeight:700 }}>{unalloc===0?"Fully allocated":unalloc>0?"Still to allocate":"Over-allocated"}</span>
-            <span style={{ color:unalloc===0?T.success:T.dangerText,fontSize:14,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(Math.abs(unalloc))}</span>
+              {l.ticked ? (
+                <input data-testid={`payfees-amount-${l.periodId}`} type="number" value={l.amount} onChange={e=>setLineAmount(l.periodId, e.target.value)} style={{ width:84,border:`1px solid ${err?T.danger:T.border}`,background:T.bg,borderRadius:9,padding:"7px 9px",fontSize:13,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",textAlign:"right",outline:"none" }}/>
+              ) : (
+                <span style={{ color:T.sub,fontSize:13,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(l.period.obligationAmount)}</span>
+              )}
+            </div>
+            {err && <div style={{ color:T.danger,fontSize:10,marginTop:6,marginLeft:34 }}>{err}</div>}
+            {l.ticked && !err && Number(l.amount) < defaultLineAmount(l.period) && (
+              <div style={{ color:T.dangerText,fontSize:10,marginTop:6,marginLeft:34 }}>{sym}{fmt(defaultLineAmount(l.period)-(parseFloat(l.amount)||0))} stays due on this fee</div>
+            )}
           </div>
-          <button onClick={autoSuggest} style={{ width:"100%",marginTop:9,padding:10,borderRadius:10,background:"none",border:`1px dashed ${T.accent}88`,fontSize:11.5,fontWeight:700,color:T.infoText,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Suggest a split (oldest period first)</button>
+        );
+      })}
+
+      {extraLines.map(l=>(
+        <div key={l.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"11px 13px",marginBottom:8,display:"flex",alignItems:"center",gap:10 }}>
+          <span style={{ width:24,height:24,flexShrink:0,display:"grid",placeItems:"center",background:T.accent,borderRadius:7,color:"#fff",fontSize:13 }}>✓</span>
+          <div style={{ flex:1,minWidth:0 }}>
+            <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{l.name}</div>
+            <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>Education · not applied to a fee</div>
+          </div>
+          <span style={{ color:T.text,fontSize:13,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(l.amount)}</span>
+          <button onClick={()=>removeExtraLine(l.id)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:13,padding:0 }}>✕</button>
         </div>
+      ))}
+
+      {addingExtra ? (
+        <div style={{ background:T.input,borderRadius:14,padding:12,marginBottom:10,display:"flex",flexDirection:"column",gap:8 }}>
+          <input data-testid="payfees-extra-name" value={extraName} onChange={e=>setExtraName(e.target.value)} placeholder="e.g. Books" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"9px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}/>
+          <input data-testid="payfees-extra-amount" type="number" value={extraAmount} onChange={e=>setExtraAmount(e.target.value)} placeholder="Amount" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"9px 12px",fontSize:13,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",outline:"none" }}/>
+          <div style={{ display:"flex",gap:8 }}>
+            <button onClick={()=>{ setAddingExtra(false); setExtraName(""); setExtraAmount(""); }} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
+            <button onClick={addExtraLine} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Add</button>
+          </div>
+        </div>
+      ) : (
+        <button data-testid="payfees-add-extra-btn" onClick={()=>setAddingExtra(true)} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",marginBottom:12 }}>+ Add something not listed</button>
       )}
 
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"4px 2px 14px",borderTop:`1px solid ${T.border}`,marginTop:2 }}>
+        <span style={{ color:T.sub,fontSize:11.5 }}>Total · {tickedLines.length + extraLines.length} item{(tickedLines.length+extraLines.length)===1?"":"s"}</span>
+        <span style={{ color:T.text,fontSize:18,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(total)}</span>
+      </div>
+
+      {/* E3 — Paid with: one or more methods, each from an account, must sum exactly to the total. */}
+      <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",padding:"2px 2px 8px" }}>Paid with</div>
+      {paymentLines.map(pl=>(
+        <div key={pl.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"11px 13px",marginBottom:8,display:"flex",flexDirection:"column",gap:8 }}>
+          <div style={{ display:"flex",gap:8 }}>
+            <select data-testid={`paidwith-method-${pl.id}`} value={pl.method} onChange={e=>updatePaymentLine(pl.id,"method",e.target.value)} style={{ flex:1,border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:12.5,fontWeight:700,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
+              {PAYMENT_METHODS.map(m=><option key={m} value={m}>{m}</option>)}
+            </select>
+            {paymentLines.length>1 && <button onClick={()=>removePaymentLine(pl.id)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:13 }}>✕</button>}
+          </div>
+          <select data-testid={`paidwith-acc-${pl.id}`} value={pl.accId} onChange={e=>updatePaymentLine(pl.id,"accId",e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:12.5,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
+            <option value="">Select an account…</option>
+            {(accounts||[]).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+          <input data-testid={`paidwith-amount-${pl.id}`} type="number" value={pl.amount} onChange={e=>updatePaymentLine(pl.id,"amount",e.target.value)} placeholder="0" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:14,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",outline:"none" }}/>
+        </div>
+      ))}
+      <button data-testid="payfees-add-method-btn" onClick={addPaymentLine} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:12,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",marginBottom:10 }}>+ Add payment method</button>
+
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px",background:diff===0?T.accentSoft:"transparent",borderRadius:12,marginBottom:12 }}>
+        <span style={{ color:diff===0?T.success:T.dangerText,fontSize:12,fontWeight:700 }}>{diff===0?"Adds up to the total":diff>0?`${sym}${fmt(diff)} not assigned yet`:`${sym}${fmt(Math.abs(diff))} over the total`}</span>
+      </div>
+
+      <div style={{ marginBottom:14 }}>
+        <span style={{ display:"block",color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",marginBottom:6 }}>Date</span>
+        <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"9px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}/>
+      </div>
+
       {error && <div style={{ color:T.warn,fontSize:11,marginBottom:10 }}>{error}</div>}
-      <button onClick={confirm} disabled={confirmDisabled} style={{ width:"100%",padding:15,borderRadius:12,background:confirmDisabled?T.border:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:confirmDisabled?T.sub:"#fff",cursor:confirmDisabled?"not-allowed":"pointer",fontFamily:"Nunito,sans-serif" }}>
-        {needsAllocation && unalloc!==0 ? "Allocate the full amount to continue" : `Confirm payment of ${sym}${fmt(payNum)}`}
+      <button data-testid="payfees-record-btn" onClick={confirm} disabled={recordDisabled} style={{ width:"100%",padding:15,borderRadius:12,background:recordDisabled?T.border:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:recordDisabled?T.sub:"#fff",cursor:recordDisabled?"not-allowed":"pointer",fontFamily:"Nunito,sans-serif" }}>
+        {!hasAnyLine ? "Select at least one fee" : !balanced ? "Paid with must add up to the total" : `Record ${sym}${fmt(total)}`}
       </button>
     </BottomSheet>
   );
@@ -686,7 +814,21 @@ export const SettlePaymentModal = ({
 // and the Future Money projection this period contributes (or doesn't).
 // ============================================================================
 
-export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setFeePeriods, feePeriods, setShowAdjust, setAdjustKind, setAdjustTargetPeriodId, txns, accounts, onViewTransaction }) => {
+// E5 — "Fee period" detail, not Bill detail: no bill number/statement fields, remaining leads
+// the screen whenever something's been paid, due/status reuses the 14-day badge rule, and "Pay
+// remaining" opens Pay fees with only this line pre-ticked.
+function feePeriodBadge(period, todayStrV) {
+  const out = calculateOutstanding(period);
+  if (!period.startingStateDeclared) return null;
+  if (out<=0) return { kind:"paid", text:"Paid" };
+  if (!period.dueDate) return { kind:"unpaid", text:"Unpaid" };
+  const days = Math.round((new Date(period.dueDate) - new Date(todayStrV)) / 86400000);
+  if (days<0) return { kind:"overdue", text:`${-days} day${-days===1?"":"s"} overdue` };
+  if (days<=DUE_SOON_DAYS) return { kind:"due", text: days===0 ? "Due today" : `Due in ${days} day${days===1?"":"s"}` };
+  return { kind:"unpaid", text:"Unpaid" };
+}
+
+export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setFeePeriods, feePeriods, setShowAdjust, setAdjustKind, setAdjustTargetPeriodId, txns, accounts, onViewTransaction, onPayRemaining }) => {
   const [feeDraft, setFeeDraft] = useState(String(period.obligationAmount));
   const [error, setError] = useState("");
   const [correctionReason, setCorrectionReason] = useState("");
@@ -766,11 +908,40 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14 }}>
         <div>
           <div style={{ color:T.accent,fontSize:10,fontWeight:800,letterSpacing:0.5,textTransform:"uppercase" }}>Fee period</div>
-          <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{period.label}</div>
-          <div style={{ color:T.sub,fontSize:11.5,marginTop:2 }}>{schedule?.schoolName}</div>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{feeLineDisplayName(period)}</div>
+          <div style={{ color:T.sub,fontSize:11.5,marginTop:2 }}>{schedule?.schoolName} · {period.label}</div>
         </div>
         <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
       </div>
+
+      {/* E5 — remaining leads the screen whenever paid>0; due/status reuses the 14-day badge rule
+          (dueSoonWindow.DUE_SOON_DAYS, same constant Bills use) and the badge disappears once
+          remaining is 0 (shown as "settled" by the ledger's Outstanding row below instead). */}
+      {!und && (()=>{
+        const badge = feePeriodBadge(period, todayStr());
+        return (
+          <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:"14px 16px",marginBottom:12 }}>
+            {period.paidAmount>0 && out>0 ? (
+              <>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>Remaining on this fee</div>
+                <div style={{ color:T.dangerText,fontSize:26,fontWeight:800,margin:"4px 0 4px",fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(out)}</div>
+                <div style={{ color:T.sub,fontSize:11 }}>{sym}{fmt(period.paidAmount)} paid of {sym}{fmt(period.obligationAmount)}</div>
+              </>
+            ) : (
+              <>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>Fee total</div>
+                <div style={{ color:T.text,fontSize:26,fontWeight:800,margin:"4px 0 4px",fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(period.obligationAmount)}</div>
+              </>
+            )}
+            {badge && badge.kind!=="paid" && (
+              <div style={{ marginTop:8,display:"inline-block",background:(badge.kind==="overdue"?T.danger:T.warn)+"18",color:badge.kind==="overdue"?T.danger:T.warn,borderRadius:8,padding:"3px 9px",fontSize:10.5,fontWeight:800 }}>{badge.kind==="overdue"?"Overdue":badge.text}</div>
+            )}
+            {out>0 && onPayRemaining && (
+              <button onClick={()=>onPayRemaining(period)} style={{ width:"100%",marginTop:12,background:T.accent,border:"none",borderRadius:12,padding:"11px",cursor:"pointer",fontSize:13,fontWeight:700,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Pay {sym}{fmt(out)} remaining</button>
+            )}
+          </div>
+        );
+      })()}
 
       {und && (
         <div style={{ border:`1px dashed ${T.border}`,borderRadius:16,padding:15,marginBottom:12 }}>
