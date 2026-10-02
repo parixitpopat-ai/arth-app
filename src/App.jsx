@@ -39,7 +39,7 @@ import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/Go
 import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/EventsScreen";
 import { AddExpectedIncomeModal, ExpectedIncomeListModal } from "./screens/ExpectedIncomeScreen";
 import { AddInsurancePolicyModal, InsurancePolicyListModal, InsurancePolicyDetailModal } from "./screens/InsuranceScreen";
-import { SchoolFeeScheduleListModal, AddSchoolYearModal, SchoolFeeScheduleDetailModal, SettlePaymentModal, PeriodDetailModal, AdjustmentModal, CreditNoteModal } from "./screens/SchoolFeesScreen";
+import { SchoolFeeScheduleListModal, AddSchoolYearModal, SchoolFeeScheduleDetailModal, PayFeesModal, PeriodDetailModal, AdjustmentModal, CreditNoteModal } from "./screens/SchoolFeesScreen";
 import { attemptSchoolAttributionChange, pickMostRecentSchedule } from "./screens/SchoolFeesScreen.helpers";
 import { getFeeSchedulesForRelationship } from "./domain/school/feeScheduleLink";
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
@@ -128,6 +128,7 @@ import { buildPaymentsView, getBillPeriodLabel, getBadgeText, getCardVerificatio
 import { DUE_SOON_DAYS } from "./domain/obligations/dueSoonWindow";
 import { calculateOutstanding } from "./domain/schoolFees/outstanding";
 import { groupConnectionsByCategory, categoryForBillerType } from "./domain/payments/homeCategories";
+import { buildWhichConnectionList } from "./domain/payments/whichConnection";
 import BillsList from "./screens/payments/BillsList";
 import BillDetailSheet from "./screens/payments/BillDetailSheet";
 import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
@@ -1027,6 +1028,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Home. This is the only state this screen needs to add — every catalogue tap's own routing
   // (Insurance/School Fees/Credit Card/generic Add Biller/category accounts view) is unchanged.
   const [showAddActivateSheet, setShowAddActivateSheet] = useState(false);
+  // Payments v2 (WP18c) — D6 "Add bill · Which connection?", reached from the global + → Add bill
+  // entry point. Picking a connection sets defaultBillerAccountId and opens AddBillModal exactly
+  // as the existing per-connection "+ Add bill" button already does (D2) — this sheet only adds
+  // the one missing step in front of that, it changes nothing about AddBillModal's own prefill.
+  const [showWhichConnection, setShowWhichConnection] = useState(false);
   const [activeBillerShell, setActiveBillerShell] = useState(null);
   const [editingBillerShell, setEditingBillerShell] = useState(null);
   const [showAddYouOwe, setShowAddYouOwe] = useState(null); // holds personId when open
@@ -16262,6 +16268,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ color: T.text,fontSize: 15,fontWeight: 800,marginBottom: 6 }}>Nothing connected yet</div>
           <div style={{ color: T.sub,fontSize: 12.5,lineHeight: 1.5,marginBottom: 18 }}>Add the bills and services you pay for. They show here grouped by type, with anything due at the top.</div>
           <button onClick={() => setShowAddActivateSheet(true)} style={{ background: T.accent,border: "none",borderRadius: 14,padding: "12px 20px",cursor: "pointer",fontSize: 13,fontWeight: 800,color: "#fff",fontFamily: "Nunito,sans-serif" }}>+ Add / Activate</button>
+          {/* A3's own secondary CTA (WP18b left this unwired — no connectionless add-bill flow was
+              found anywhere else in the app under investigation, so this opens the one that
+              already exists: AddBillModal with no defaultBillerAccountId, which already shows a
+              real, working form with no provider prefill and a real category picker — the exact
+              "no connection" shape D1's own "Add a one-off bill with no connection" line asks for. */}
+          <div style={{ marginTop: 10 }}>
+            <button data-testid="home-add-one-off-bill" onClick={() => { setDefaultBillerAccountId(""); setShowAddBill(true); }} style={{ background: "none",border: "none",color: T.accent,fontSize: 12.5,fontWeight: 700,cursor: "pointer" }}>Add a one-off bill</button>
+          </div>
         </div>
       );
     }
@@ -16768,6 +16782,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
               ))}
             </div>
+            {/* D1 — "Add a one-off bill with no connection": the genuinely connectionless case,
+                distinct from D6's Which-connection step above. Opens the same AddBillModal with no
+                defaultBillerAccountId — no provider prefill, a real category picker shown. */}
+            <div style={{ padding:"14px 0 0",textAlign:"center",borderTop:`1px solid ${T.border}`,marginTop:16 }}>
+              <button onClick={()=>{ setShowAddActivateSheet(false); setDefaultBillerAccountId(""); setShowAddBill(true); }} style={{ background:"none",border:"none",color:T.accent,fontSize:12.5,fontWeight:700,cursor:"pointer",padding:"8px 0" }}>Add a one-off bill with no connection</button>
+            </div>
           </div>
         )}
 
@@ -16797,6 +16817,79 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             }}
             onAddBill={null} txns={txns}/>
         )}
+      </div>
+    );
+  };
+
+  // Payments v2 (WP18c) — D6 "Add bill · Which connection?". Lists active connections eligible
+  // for a generic Add Bill (Education, Prepaid and Membership connections excluded — they use Pay
+  // fees, Recharge and renewal notice instead; Credit Card excluded too, following the same CC-8
+  // rule AddBillModal already enforces), grouped/ordered like Home, "Recent" first (max 3).
+  const WhichConnectionModal = ({ onClose }) => {
+    const [search, setSearch] = useState("");
+    const source = useMemo(() => {
+      return billerAccounts
+        .filter(ba => !ba.accId) // Credit Card accounts never surface here — isEligibleForAddBill excludes the type too, this just skips building badge data for them
+        .filter(ba => {
+          const rels = membershipRelationships.filter(r => String(r.billerAccountId) === String(ba.id));
+          const latestRel = [...rels].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+          return !(latestRel && latestRel.status === "ended");
+        })
+        .map(ba => {
+          const baBills = bills.filter(b => String(b.billerAccountId) === String(ba.id));
+          const hasOverdueOrDueBill = baBills.some(b => { const k = getBillBadge(b, contributions).kind; return k === "overdue" || k === "due"; });
+          const lastActivity = baBills.reduce((max, b) => Math.max(max, b.createdAt || 0), 0);
+          return { id: ba.id, billerType: ba.type, categoryLabel: categoryForBillerType(ba.type), name: ba.name, hasOverdueOrDueBill, lastActivity, ba };
+        });
+    }, [billerAccounts, membershipRelationships, bills, contributions]);
+    const recentIds = useMemo(() => [...source].sort((a, b) => b.lastActivity - a.lastActivity).map(c => c.id), [source]);
+    const filtered = search.trim() ? source.filter(c => (c.name + " " + c.categoryLabel).toLowerCase().includes(search.trim().toLowerCase())) : source;
+    const { recent, categories } = useMemo(() => buildWhichConnectionList(filtered, recentIds), [filtered, recentIds]);
+
+    const pick = (c) => { setDefaultBillerAccountId(c.id); setShowWhichConnection(false); setShowAddBill(true); };
+
+    return (
+      <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:310 }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Which connection?</div>
+            <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
+          </div>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search connections" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.input,borderRadius:12,padding:"10px 14px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none",marginBottom:14 }}/>
+          {source.length===0 ? (
+            <div style={{ textAlign:"center",padding:"20px 0",color:T.sub,fontSize:12.5 }}>Nothing eligible yet — activate a connection first.</div>
+          ) : (<>
+            {recent.length>0 && (
+              <div style={{ marginBottom:14 }}>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",marginBottom:8 }}>Recent</div>
+                {recent.map(c=>(
+                  <button key={c.id} onClick={()=>pick(c)} style={{ width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:56,padding:"10px 14px",background:T.input,border:"none",borderRadius:14,cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif",marginBottom:7 }}>
+                    <span style={{ minWidth:0 }}>
+                      <span style={{ display:"block",color:T.text,fontSize:13,fontWeight:700 }}>{c.name}</span>
+                      <span style={{ display:"block",color:T.sub,fontSize:11,marginTop:2 }}>{c.categoryLabel}</span>
+                    </span>
+                    <span style={{ color:T.sub,fontSize:14 }}>›</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {categories.map(cat=>(
+              <div key={cat.label} style={{ marginBottom:12 }}>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",marginBottom:8 }}>{cat.label}</div>
+                {cat.connections.map(c=>(
+                  <button key={c.id} onClick={()=>pick(c)} style={{ width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:56,padding:"10px 14px",background:T.input,border:"none",borderRadius:14,cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif",marginBottom:7 }}>
+                    <span style={{ minWidth:0 }}>
+                      <span style={{ display:"block",color:T.text,fontSize:13,fontWeight:700 }}>{c.name}</span>
+                      <span style={{ display:"block",color:T.sub,fontSize:11,marginTop:2 }}>{cat.label}</span>
+                    </span>
+                    <span style={{ color:T.sub,fontSize:14 }}>›</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </>)}
+          <button onClick={()=>{ setShowWhichConnection(false); setShowAddActivateSheet(true); }} style={{ width:"100%",background:"none",border:"none",color:T.accent,fontSize:12.5,fontWeight:700,cursor:"pointer",padding:"10px 0",marginTop:4 }}>Not listed? Activate a new connection</button>
+        </div>
       </div>
     );
   };
@@ -18253,6 +18346,29 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [billForType,setBillForType]=useState(_preBA?.attributeType || "unassigned");
     const [billForId,setBillForId]=useState(_preBA?.attributeType && _preBA.attributeType!=="house" ? (_preBA.attributedTo||"") : "");
 
+    // Payments v2 (WP18c) — D2/D3/D4/D5: opened from a connection (defaultBillerAccountId set),
+    // this form shows only Amount/Due date/For/Split/More details, with provider, category and For
+    // already prefilled from the connection. Captured once at open — never re-derived off
+    // billerAccountId, which the "Change provider" dropdown below is still free to edit without
+    // flipping the whole form back to the generic, connectionless layout.
+    const [hasConnectionPrefill] = useState(!!_preBA0);
+    const [showMoreDetails,setShowMoreDetails] = useState(false);
+    const [showForChange,setShowForChange] = useState(false);
+    const [showSplitSheet,setShowSplitSheet] = useState(false);
+    const [showPrefillOverrides,setShowPrefillOverrides] = useState(false);
+    const [forSearch,setForSearch] = useState("");
+    // D3 — "only fields that fit the connection appear": the meter-specific fields (reading/
+    // units/period) only make sense for a utility-meter type connection, e.g. Electricity shows
+    // them, a gym or a water... no, water DOES get them too — any metered utility does. A generic
+    // Bill (e.g. a club subscription) never did and still doesn't.
+    const showsMeterFields = ["Electricity","Water","LPG Gas","Piped Gas"].includes(billerCategory);
+    const forLabelText = billForType==="unassigned" ? "Unassigned"
+      : billForType==="house" ? "Common Areas"
+      : billForType==="person" ? (getPerson(billForId)?.isMe ? "Me" : (getPerson(billForId)?.name || "—"))
+      : billForType==="group" ? (getGroup(billForId)?.name || "—")
+      : billForType==="vehicle" ? (vehicles.find(v=>String(v.id)===String(billForId))?.name || "—")
+      : "—";
+
     const selectedPids=Object.entries(billSplitPeople).filter(([,v])=>v).map(([k])=>k);
     const amt=parseFloat(amount)||0;
     const normalizedInvoiceNo = String(invoiceNo||"").trim().toLowerCase();
@@ -18299,17 +18415,30 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     return (
       <div onClick={e=>e.target===e.currentTarget&&setShowAddBill(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"92vh",overflowY:"auto" }}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>📅 Add Bill</div>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:hasConnectionPrefill?4:16 }}>
+            {/* D2 — the known title/button-text gap, fixed here: a bill added from a connection
+                says so, instead of the same generic "Add Bill" every context used to show. */}
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>📅 Add bill{hasConnectionPrefill?"":""}</div>
             <button onClick={()=>setShowAddBill(false)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
           </div>
+          {hasConnectionPrefill && _preBA && (
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"10px 12px",marginBottom:16 }}>
+              <span style={{ minWidth:0 }}>
+                <span style={{ display:"block",color:T.text,fontSize:14,fontWeight:800 }}>{_preBA.name}</span>
+                {merchant && merchant!==_preBA.name && <span style={{ display:"block",color:T.sub,fontSize:11,marginTop:1 }}>{merchant}</span>}
+              </span>
+              <button data-testid="addbill-change-connection" onClick={()=>setShowPrefillOverrides(v=>!v)} style={{ background:"none",border:"none",color:T.accent,fontSize:11.5,fontWeight:700,cursor:"pointer" }}>Change</button>
+            </div>
+          )}
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
 
-            {/* Pick an existing biller account — was missing entirely from this general Add Bill
-                flow (only pre-filled if opened from inside a specific biller's own screen). Picking
-                one auto-fills name/merchant AND links billerAccountId, instead of leaving you to
-                retype a name that creates a disconnected bill with no real link. */}
-            {billers.length>0&&(()=>{
+            {/* Pick an existing biller account — the generic, connectionless path (no
+                defaultBillerAccountId): no provider prefill, this picker and the real category
+                picker further down are both shown so the user chooses directly (A3/D1's "one-off
+                bill" case). Hidden once a connection has already prefilled everything (D2) — it
+                re-appears if "Change" above is tapped, letting the user re-link without reopening
+                Which-connection (D6). */}
+            {billers.length>0&&(!hasConnectionPrefill||showPrefillOverrides)&&(()=>{
               const accountsForSelectedBiller = billerAccounts.filter(ba=>ba.billerId===selectedBillerId);
               return (
                 <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
@@ -18396,137 +18525,189 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {(selectedBillerId && (billers.find(b=>b.id===selectedBillerId)?.type==="Credit Card" || getBillerActionType(billers.find(b=>b.id===selectedBillerId)?.type)==="membership")) ? null : (<>
 
             <input style={{ ...inp,fontSize:17,fontWeight:700,border:`1px solid ${!name.trim()?T.danger+"66":T.border}` }} placeholder="Bill name * e.g. Common Meter Electric" value={name} onChange={e=>setName(e.target.value)}/>
-            <input style={inp} placeholder="Provider / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
-            <input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>
-            {duplicateInvoiceBill && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:-4 }}>This invoice number already exists for {duplicateInvoiceBill.name}.</div>}
 
-            {/* Bill "For" (domain/bills/billFor.js) — pre-filled from the relationship's own
-                attribution when opened from one, but always changeable: this specific Bill's cost
-                may belong somewhere other than the relationship itself (e.g. a Family-attributed
-                electricity relationship can still produce one bill that's For: Common Areas). */}
-            <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
-              <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>FOR (WHO THIS BILL BELONGS TO)</span>
-              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:8 }}>
-                <button onClick={()=>{setBillForType("unassigned");setBillForId("");}} style={{ background:billForType==="unassigned"?"#88888822":"none",border:`1px solid ${billForType==="unassigned"?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Unassigned</button>
-                <button onClick={()=>{setBillForType("house");setBillForId("");}} style={{ background:billForType==="house"?T.accent+"22":"none",border:`1px solid ${billForType==="house"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="house"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🏠 Common Areas</button>
-                {getActivePeople(people).map(p=>(
-                  <button key={p.id} onClick={()=>{setBillForType("person");setBillForId(p.id);}} style={{ background:billForType==="person"&&String(billForId)===String(p.id)?p.color+"22":"none",border:`1px solid ${billForType==="person"&&String(billForId)===String(p.id)?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="person"&&String(billForId)===String(p.id)?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.isMe?"Me":p.name}</button>
-                ))}
-                {groups.map(g=>(
-                  <button key={g.id} onClick={()=>{setBillForType("group");setBillForId(g.id);}} style={{ background:billForType==="group"&&String(billForId)===String(g.id)?g.color+"22":"none",border:`1px solid ${billForType==="group"&&String(billForId)===String(g.id)?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="group"&&String(billForId)===String(g.id)?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>
-                ))}
-                {vehicles.map(v=>(
-                  <button key={v.id} onClick={()=>{setBillForType("vehicle");setBillForId(v.id);}} style={{ background:billForType==="vehicle"&&String(billForId)===String(v.id)?T.accent+"22":"none",border:`1px solid ${billForType==="vehicle"&&String(billForId)===String(v.id)?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="vehicle"&&String(billForId)===String(v.id)?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🚗 {v.name}</button>
-                ))}
+            {/* D4 — "For · Change": prefilled from the connection, collapsed to one row until
+                "Change" is tapped, which opens the full picker (search is a simple client-side
+                filter over the same lists this form already had — people/groups/homes/vehicles —
+                plus the explicit "No one → shows as Unassigned" option). The generic/one-off path
+                (no connection) always shows the full picker directly, same as before. */}
+            {hasConnectionPrefill && !showForChange ? (
+              <button data-testid="addbill-for-row" onClick={()=>setShowForChange(true)} style={{ width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:TOUCH.min,background:T.input,border:"none",borderRadius:12,padding:"10px 14px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
+                <span style={{ minWidth:0 }}>
+                  <span style={{ display:"block",color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>For</span>
+                  <span style={{ display:"block",color:T.text,fontSize:13,fontWeight:700,marginTop:2 }}>{forLabelText}</span>
+                </span>
+                <span style={{ color:T.accent,fontSize:11.5,fontWeight:700 }}>Change</span>
+              </button>
+            ) : (
+              <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                  <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>FOR (WHO THIS BILL BELONGS TO)</span>
+                  {hasConnectionPrefill && <button onClick={()=>setShowForChange(false)} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>Done</button>}
+                </div>
+                {hasConnectionPrefill && (
+                  <input value={forSearch} onChange={e=>setForSearch(e.target.value)} placeholder="Search people, groups, homes, vehicles" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"8px 11px",fontSize:12.5,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none",marginBottom:8 }}/>
+                )}
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                  <button onClick={()=>{setBillForType("unassigned");setBillForId("");}} style={{ background:billForType==="unassigned"?"#88888822":"none",border:`1px solid ${billForType==="unassigned"?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>No one · Unassigned</button>
+                  <button onClick={()=>{setBillForType("house");setBillForId("");}} style={{ background:billForType==="house"?T.accent+"22":"none",border:`1px solid ${billForType==="house"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="house"?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🏠 Common Areas</button>
+                  {getActivePeople(people).filter(p=>!forSearch.trim()||p.name.toLowerCase().includes(forSearch.trim().toLowerCase())).map(p=>(
+                    <button key={p.id} onClick={()=>{setBillForType("person");setBillForId(p.id);}} style={{ background:billForType==="person"&&String(billForId)===String(p.id)?p.color+"22":"none",border:`1px solid ${billForType==="person"&&String(billForId)===String(p.id)?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="person"&&String(billForId)===String(p.id)?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.isMe?"Me":p.name}</button>
+                  ))}
+                  {groups.filter(g=>!forSearch.trim()||g.name.toLowerCase().includes(forSearch.trim().toLowerCase())).map(g=>(
+                    <button key={g.id} onClick={()=>{setBillForType("group");setBillForId(g.id);}} style={{ background:billForType==="group"&&String(billForId)===String(g.id)?g.color+"22":"none",border:`1px solid ${billForType==="group"&&String(billForId)===String(g.id)?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="group"&&String(billForId)===String(g.id)?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>
+                  ))}
+                  {vehicles.filter(v=>!forSearch.trim()||v.name.toLowerCase().includes(forSearch.trim().toLowerCase())).map(v=>(
+                    <button key={v.id} onClick={()=>{setBillForType("vehicle");setBillForId(v.id);}} style={{ background:billForType==="vehicle"&&String(billForId)===String(v.id)?T.accent+"22":"none",border:`1px solid ${billForType==="vehicle"&&String(billForId)===String(v.id)?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="vehicle"&&String(billForId)===String(v.id)?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>🚗 {v.name}</button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             <div>
               <span style={lbl}>Amount ({sym}) *</span>
               <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center",border:`1px solid ${amount&&parseFloat(amount)>0?T.border:T.danger+"66"}` }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
             </div>
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-              {/* Prepaid recharge fields */}
-              {isRecharge&&(
-                <div style={{ gridColumn:"1/-1",background:T.input,borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:8 }}>
-                  <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>RECHARGE DETAILS</div>
-                  <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-                    <div><span style={lbl}>Recharge Date</span><input style={inp} type="date" value={validFrom2} onChange={e=>setValidFrom2(e.target.value)}/></div>
-                    <div><span style={lbl}>Validity (days)</span><input style={inp} type="number" placeholder="28, 84, 365" value={validityDays} onChange={e=>setValidityDays(e.target.value)}/></div>
-                  </div>
-                  {validUntilCalc&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(validUntilCalc)||validUntilCalc}</span></div>}
-                  <div><span style={lbl}>Plan Type</span><div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>{["Voice+Data","Data Only","Unlimited Calls","SMS+Voice"].map(pt=>(<button key={pt} onClick={()=>setPlanType(p=>p===pt?"":pt)} style={{ background:planType===pt?T.accent+"22":"none",border:`1px solid ${planType===pt?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:planType===pt?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pt}</button>))}</div></div>
-                  <div><span style={lbl}>Plan Details</span><input style={inp} placeholder="e.g. 1.5GB/day + unlimited calls" value={planDesc} onChange={e=>setPlanDesc(e.target.value)}/></div>
-                </div>
-              )}
-              <div><span style={lbl}>Bill Date (generated on)</span><input style={inp} type="date" value={billDate} onChange={e=>setBillDate(e.target.value)}/></div>
-              <div><span style={lbl}>Due Date (pay by)</span><input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
-              <div><span style={lbl}>Period From (optional)</span><input style={inp} type="date" value={billPeriodFrom} onChange={e=>setBillPeriodFrom(e.target.value)}/></div>
-              <div><span style={lbl}>Period To (optional)</span><input style={inp} type="date" value={billPeriodTo} onChange={e=>setBillPeriodTo(e.target.value)}/></div>
-              <div><span style={lbl}>Units Consumed (optional)</span><input style={inp} type="number" placeholder="e.g. 412" value={unitsConsumed} onChange={e=>setUnitsConsumed(e.target.value)}/></div>
-              <div><span style={lbl}>Meter Reading (optional)</span><input style={inp} type="number" placeholder="e.g. 25890" value={meterReading} onChange={e=>setMeterReading(e.target.value)}/></div>
+            <div>
+              <span style={lbl}>Due Date (pay by) *</span>
+              <input style={{ ...inp,border:`1px solid ${!dueDate?T.danger+"66":T.border}` }} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/>
             </div>
 
-            <div>
-              <span style={lbl}>Categories (select one or more)</span>
-              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                {cats.map(c=><button key={c.id} onClick={()=>setBillCatIds(prev=>prev.includes(c.id)?prev.filter(x=>x!==c.id):[...prev,c.id])} style={{ background:billCatIds.includes(c.id)?c.color+"22":"none",border:`1px solid ${billCatIds.includes(c.id)?c.color:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:billCatIds.includes(c.id)?c.color:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>{c.icon} {c.name.split(" ")[0]}</button>)}
-              </div>
-              {billCatIds.length>0&&<div style={{ marginTop:8 }}>
-                {billCatIds.map(cid=>{ const c=getCat(cid); if(!c.subs?.length) return null; return (
-                  <div key={cid} style={{ marginBottom:6 }}>
-                    <div style={{ color:c.color,fontSize:10,fontWeight:700,marginBottom:4 }}>{c.icon} {c.name}</div>
-                    <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
-                      {c.subs.map(s=><button key={s.id} onClick={()=>setSubId(prev=>prev===s.id?"":s.id)} style={{ background:subId===s.id?c.color+"22":"none",border:`1px solid ${subId===s.id?c.color:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,color:subId===s.id?c.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{s.name}</button>)}
-                    </div>
-                  </div>
-                ); })}
-              </div>}
-            </div>
-
-            {/* Split section */}
-            <div>
-              <span style={lbl}>Split with (optional)</span>
-              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
-                <button onClick={()=>{setBillSplitPeople({});setBillGroup("");}} style={{ background:selectedPids.length===0&&!billGroup?"#88888822":"none",border:`1px solid ${selectedPids.length===0&&!billGroup?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>None — just me</button>
-                {getActiveGroups(groups).map(g=><button key={g.id} onClick={()=>handleGroupSelect(billGroup===g.id?"":g.id)} style={{ background:billGroup===g.id?g.color+"22":"none",border:`1px solid ${billGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>)}
-              </div>
-              <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:selectedPids.length>0?10:0 }}>
-                {(billGroup ? people.filter(p=>!p.isMe && !isPersonArchived(p) && (getGroup(billGroup)?.members||[]).includes(p.id)) : people.filter(p=>!p.isMe && !isPersonArchived(p))).map(p=><button key={p.id} onClick={()=>setBillSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:billSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${billSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
-              </div>
-
-              {selectedPids.length>0&&<>
-                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
-                  {[["equally","= Equal"],["amount","₹ Amount"],["percent","% Percent"],["share","⚖️ Share"]].map(([v,l])=>(
-                    <button key={v} onClick={()=>setSplitCalc(v)} style={{ background:splitCalc===v?T.accent+"22":"none",border:`1px solid ${splitCalc===v?T.accent:T.border}`,borderRadius:20,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:splitCalc===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
-                  ))}
+            {/* D5 — Split stays a single row reading "Just me" until it's tapped; this is the
+                existing Person/Group allocation (equal/amount/percent/share) already built for
+                this form, just moved behind that collapsed row instead of always being open. */}
+            {!showSplitSheet ? (
+              <button data-testid="addbill-split-row" onClick={()=>setShowSplitSheet(true)} style={{ width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:TOUCH.min,background:T.input,border:"none",borderRadius:12,padding:"10px 14px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
+                <span style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>Split</span>
+                <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{selectedPids.length===0&&!billGroup ? "Just me" : billGroup ? `${getGroup(billGroup)?.name||"Group"} · ${selectedPids.length} more` : `Split with ${selectedPids.length}`}</span>
+              </button>
+            ) : (
+              <div style={{ background:T.input,borderRadius:12,padding:"12px" }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                  <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>SPLIT {amount?`· ${sym}${fmt(amt)}`:""}</span>
+                  <button onClick={()=>setShowSplitSheet(false)} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>Done</button>
                 </div>
-                <div style={{ background:T.input,borderRadius:10,padding:"10px 12px" }}>
-                  {/* My share row */}
-                  {(()=>{ const shares=calcShares(); const myS=amt-Object.values(shares).reduce((s,v)=>s+v,0); return <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}`,marginBottom:6 }}><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>🧑 My share</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{sym}{fmt(Math.max(0,myS))}</span></div>; })()}
-                  {selectedPids.map(pid=>{
-                    const p=getPerson(pid);
-                    const shares=calcShares();
-                    return (
-                      <div key={pid} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:6 }}>
-                        <span style={{ color:T.text,fontSize:12,flex:1 }}>{p.emoji} {p.name}</span>
-                        {splitCalc!=="equally"&&<input type="number" placeholder={splitCalc==="percent"?"%":splitCalc==="share"?"shares":"0"} value={splitCustom[pid]||""} onChange={e=>setSplitCustom(prev=>({...prev,[pid]:e.target.value}))} style={{ ...inp,width:70,padding:"6px 8px",textAlign:"right" }}/>}
-                        <span style={{ color:T.accent,fontSize:12,fontWeight:700,minWidth:60,textAlign:"right" }}>{sym}{fmt(shares[pid]||0)}</span>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
+                  <button onClick={()=>{setBillSplitPeople({});setBillGroup("");}} style={{ background:selectedPids.length===0&&!billGroup?"#88888822":"none",border:`1px solid ${selectedPids.length===0&&!billGroup?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Just me</button>
+                  {getActiveGroups(groups).map(g=><button key={g.id} onClick={()=>handleGroupSelect(billGroup===g.id?"":g.id)} style={{ background:billGroup===g.id?g.color+"22":"none",border:`1px solid ${billGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billGroup===g.id?g.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{g.icon} {g.name}</button>)}
+                </div>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:selectedPids.length>0?10:0 }}>
+                  {(billGroup ? people.filter(p=>!p.isMe && !isPersonArchived(p) && (getGroup(billGroup)?.members||[]).includes(p.id)) : people.filter(p=>!p.isMe && !isPersonArchived(p))).map(p=><button key={p.id} onClick={()=>setBillSplitPeople(prev=>({...prev,[p.id]:!prev[p.id]}))} style={{ background:billSplitPeople[p.id]?p.color+"22":"none",border:`1px solid ${billSplitPeople[p.id]?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billSplitPeople[p.id]?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>)}
+                </div>
+
+                {selectedPids.length>0&&<>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
+                    {[["equally","= Equal"],["amount","₹ Amount"],["percent","% Percent"],["share","⚖️ Share"]].map(([v,l])=>(
+                      <button key={v} onClick={()=>setSplitCalc(v)} style={{ background:splitCalc===v?T.accent+"22":"none",border:`1px solid ${splitCalc===v?T.accent:T.border}`,borderRadius:20,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:splitCalc===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
+                    ))}
+                  </div>
+                  <div style={{ background:T.bg,borderRadius:10,padding:"10px 12px" }}>
+                    {/* My share row */}
+                    {(()=>{ const shares=calcShares(); const myS=amt-Object.values(shares).reduce((s,v)=>s+v,0); return <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}`,marginBottom:6 }}><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>🧑 My share</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{sym}{fmt(Math.max(0,myS))}</span></div>; })()}
+                    {selectedPids.map(pid=>{
+                      const p=getPerson(pid);
+                      const shares=calcShares();
+                      return (
+                        <div key={pid} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:6 }}>
+                          <span style={{ color:T.text,fontSize:12,flex:1 }}>{p.emoji} {p.name}</span>
+                          {splitCalc!=="equally"&&<input type="number" placeholder={splitCalc==="percent"?"%":splitCalc==="share"?"shares":"0"} value={splitCustom[pid]||""} onChange={e=>setSplitCustom(prev=>({...prev,[pid]:e.target.value}))} style={{ ...inp,width:70,padding:"6px 8px",textAlign:"right" }}/>}
+                          <span style={{ color:T.accent,fontSize:12,fontWeight:700,minWidth:60,textAlign:"right" }}>{sym}{fmt(shares[pid]||0)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>}
+              </div>
+            )}
+
+            {/* D3 — a real category picker only when there's no connection to supply one;
+                when there is, Category reads from the connection and only "More details" shows
+                it, read-only with a Change link (never a grid to work through). */}
+            {!hasConnectionPrefill && (
+              <div>
+                <span style={lbl}>Categories (select one or more)</span>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                  {cats.map(c=><button key={c.id} onClick={()=>setBillCatIds(prev=>prev.includes(c.id)?prev.filter(x=>x!==c.id):[...prev,c.id])} style={{ background:billCatIds.includes(c.id)?c.color+"22":"none",border:`1px solid ${billCatIds.includes(c.id)?c.color:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:billCatIds.includes(c.id)?c.color:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",alignItems:"center",gap:4 }}>{c.icon} {c.name.split(" ")[0]}</button>)}
+                </div>
+                {billCatIds.length>0&&<div style={{ marginTop:8 }}>
+                  {billCatIds.map(cid=>{ const c=getCat(cid); if(!c.subs?.length) return null; return (
+                    <div key={cid} style={{ marginBottom:6 }}>
+                      <div style={{ color:c.color,fontSize:10,fontWeight:700,marginBottom:4 }}>{c.icon} {c.name}</div>
+                      <div style={{ display:"flex",gap:5,flexWrap:"wrap" }}>
+                        {c.subs.map(s=><button key={s.id} onClick={()=>setSubId(prev=>prev===s.id?"":s.id)} style={{ background:subId===s.id?c.color+"22":"none",border:`1px solid ${subId===s.id?c.color:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,color:subId===s.id?c.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{s.name}</button>)}
                       </div>
-                    );
-                  })}
-                </div>
-              </>}
-            </div>
-
-            {/* Recurring */}
-            <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
-              <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:recurring?12:0 }}>
-                <input type="checkbox" id="recurring" checked={recurring} onChange={e=>setRecurring(e.target.checked)} style={{ width:18,height:18,accentColor:T.accent,cursor:"pointer" }}/>
-                <label htmlFor="recurring" style={{ color:T.text,fontSize:14,fontWeight:700,cursor:"pointer" }}>🔁 Recurring bill</label>
+                    </div>
+                  ); })}
+                </div>}
               </div>
-              {recurring&&<div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                {[["monthly","Monthly"],["quarterly","Quarterly"],["halfyearly","Half-yearly"],["yearly","Yearly"]].map(([v,l])=>(
-                  <button key={v} onClick={()=>setFrequency(v)} style={{ background:frequency===v?T.accent+"22":"none",border:`1px solid ${frequency===v?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:frequency===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
-                ))}
-              </div>}
-            </div>
+            )}
 
-            {/* Bill photo — optional */}
-            <div style={{ background:T.input,borderRadius:12,padding:"11px 14px",display:"flex",alignItems:"center",gap:10 }}>
-              <span>📷</span>
-              <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1 }}>Attach Bill Photo (optional)</span>
-              <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>
-                {billPhoto?"Change":"Upload"}
-                <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setBillPhoto(ev.target.result); r.readAsDataURL(f); }}/>
-              </label>
-              {billPhoto&&<button onClick={()=>setBillPhoto(null)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:16 }}>✕</button>}
-            </div>
-            {billPhoto&&<img src={billPhoto} alt="bill" style={{ width:"100%",borderRadius:10,maxHeight:160,objectFit:"cover" }} onError={e=>{ e.target.style.display="none"; setBillPhoto(null); }}/>}
+            {/* D3 — "More details": collapsed by default, only fields that fit the connection
+                appear (meter reading/units/period for a metered utility; a gym or a water... any
+                non-metered connection simply never shows them). */}
+            <button onClick={()=>setShowMoreDetails(v=>!v)} style={{ width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"none",border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontSize:12.5,fontWeight:700,color:T.text,fontFamily:"Nunito,sans-serif" }}>
+              <span>More details</span><span style={{ color:T.sub }}>{showMoreDetails?"▾":"▸"}</span>
+            </button>
+            {showMoreDetails && (
+              <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+                {hasConnectionPrefill && (
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:10,padding:"9px 12px" }}>
+                    <span style={{ minWidth:0 }}>
+                      <span style={{ display:"block",color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>Category</span>
+                      <span style={{ display:"block",color:T.text,fontSize:12.5,fontWeight:700,marginTop:1 }}>{billerCategory||"—"} · from connection</span>
+                    </span>
+                    <button onClick={()=>setShowPrefillOverrides(true)} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>Change</button>
+                  </div>
+                )}
+                <input style={inp} placeholder="Provider / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
+                <input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>
+                {duplicateInvoiceBill && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:-4 }}>This invoice number already exists for {duplicateInvoiceBill.name}.</div>}
+                {isRecharge&&(
+                  <div style={{ background:T.input,borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:8 }}>
+                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>RECHARGE DETAILS</div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                      <div><span style={lbl}>Recharge Date</span><input style={inp} type="date" value={validFrom2} onChange={e=>setValidFrom2(e.target.value)}/></div>
+                      <div><span style={lbl}>Validity (days)</span><input style={inp} type="number" placeholder="28, 84, 365" value={validityDays} onChange={e=>setValidityDays(e.target.value)}/></div>
+                    </div>
+                    {validUntilCalc&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(validUntilCalc)||validUntilCalc}</span></div>}
+                    <div><span style={lbl}>Plan Type</span><div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>{["Voice+Data","Data Only","Unlimited Calls","SMS+Voice"].map(pt=>(<button key={pt} onClick={()=>setPlanType(p=>p===pt?"":pt)} style={{ background:planType===pt?T.accent+"22":"none",border:`1px solid ${planType===pt?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:planType===pt?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pt}</button>))}</div></div>
+                    <div><span style={lbl}>Plan Details</span><input style={inp} placeholder="e.g. 1.5GB/day + unlimited calls" value={planDesc} onChange={e=>setPlanDesc(e.target.value)}/></div>
+                  </div>
+                )}
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                  <div><span style={lbl}>Bill Date (generated on)</span><input style={inp} type="date" value={billDate} onChange={e=>setBillDate(e.target.value)}/></div>
+                  <div><span style={lbl}>Bill period from</span><input style={inp} type="date" value={billPeriodFrom} onChange={e=>setBillPeriodFrom(e.target.value)}/></div>
+                  <div><span style={lbl}>Bill period to</span><input style={inp} type="date" value={billPeriodTo} onChange={e=>setBillPeriodTo(e.target.value)}/></div>
+                  {showsMeterFields && <div><span style={lbl}>Units Consumed</span><input style={inp} type="number" placeholder="e.g. 412" value={unitsConsumed} onChange={e=>setUnitsConsumed(e.target.value)}/></div>}
+                  {showsMeterFields && <div><span style={lbl}>Meter Reading</span><input style={inp} type="number" placeholder="e.g. 25890" value={meterReading} onChange={e=>setMeterReading(e.target.value)}/></div>}
+                </div>
+                <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:recurring?12:0 }}>
+                    <input type="checkbox" id="recurring" checked={recurring} onChange={e=>setRecurring(e.target.checked)} style={{ width:18,height:18,accentColor:T.accent,cursor:"pointer" }}/>
+                    <label htmlFor="recurring" style={{ color:T.text,fontSize:14,fontWeight:700,cursor:"pointer" }}>🔁 Recurring bill</label>
+                  </div>
+                  {recurring&&<div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                    {[["monthly","Monthly"],["quarterly","Quarterly"],["halfyearly","Half-yearly"],["yearly","Yearly"]].map(([v,l])=>(
+                      <button key={v} onClick={()=>setFrequency(v)} style={{ background:frequency===v?T.accent+"22":"none",border:`1px solid ${frequency===v?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:frequency===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
+                    ))}
+                  </div>}
+                </div>
+                <div style={{ background:T.input,borderRadius:12,padding:"11px 14px",display:"flex",alignItems:"center",gap:10 }}>
+                  <span>📷</span>
+                  <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1 }}>Attach Bill Photo (optional)</span>
+                  <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>
+                    {billPhoto?"Change":"Upload"}
+                    <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setBillPhoto(ev.target.result); r.readAsDataURL(f); }}/>
+                  </label>
+                  {billPhoto&&<button onClick={()=>setBillPhoto(null)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:16 }}>✕</button>}
+                </div>
+                {billPhoto&&<img src={billPhoto} alt="bill" style={{ width:"100%",borderRadius:10,maxHeight:160,objectFit:"cover" }} onError={e=>{ e.target.style.display="none"; setBillPhoto(null); }}/>}
+              </div>
+            )}
 
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={()=>setShowAddBill(false)} style={btnG}>Cancel</button>
-              <button onClick={submit} disabled={!name.trim()||!parseFloat(amount)||!dueDate} style={{ ...btnP,opacity:(name.trim()&&parseFloat(amount)&&dueDate)?1:0.5 }}>{!dueDate&&name.trim()&&parseFloat(amount)?"Enter a due date":"Add Bill"}</button>
+              <button onClick={submit} disabled={!name.trim()||!parseFloat(amount)||!dueDate} style={{ ...btnP,opacity:(name.trim()&&parseFloat(amount)&&dueDate)?1:0.5 }}>{!dueDate&&name.trim()&&parseFloat(amount)?"Enter a due date":"Add bill"}</button>
             </div>
             </>)}
           </div>
@@ -19018,25 +19199,38 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           people={people} billerAccounts={billerAccounts}
           setEditingSchoolSchedule={setEditingSchoolSchedule}
         />}
-        {showSettleSchoolFee&&<SettlePaymentModal
+        {showSettleSchoolFee&&<PayFeesModal
           onClose={()=>setShowSettleSchoolFee(false)}
           T={T} sym={sym} fmt={fmt}
+          schoolName={viewingSchoolFeeSchedule?.schoolName}
           feePeriods={feePeriods} setFeePeriods={setFeePeriods}
           selectedPeriodIds={selectedSchoolFeePeriodIds} setSelectedPeriodIds={setSelectedSchoolFeePeriodIds}
           accounts={accounts}
-          cats={cats}
-          createRealTxn={(amount, accId, catId, linkedFeePeriods)=>{
+          createRealTxn={({ amount, date, paymentLines, extraLines, linkedFeePeriods })=>{
             const txnId = genId();
+            // Payments v2 (WP18c) — Education's own category has no dedicated picker in Pay fees
+            // (E2/E3 never show one); resolved automatically from whatever spending category the
+            // household already named for school/education, same spirit as "Category comes from
+            // the connection, never a picker" (D3) — never defaulted to cats[0] by position.
+            const eduCatId = (cats.find(c=>/school|educat/i.test(c.name||""))||{}).id || null;
             setTxns(prev=>[{
-              id: txnId, type:"expense", amount, date: todayStr(),
+              id: txnId, type:"expense", amount, date: date || todayStr(),
               merchant: viewingSchoolFeeSchedule?.schoolName || "School Fee",
               desc: `School fee payment — ${viewingSchoolFeeSchedule?.schoolName || ""}`,
-              accId, catId, catIds:catId?[catId]:[], subId:null, subIds:[],
+              // E3 — several payment methods, each from its own account; accId mirrors the first
+              // line so every existing single-account read (ledgers, Insights, account balances via
+              // the real transaction pipeline) still resolves to a real, correct account.
+              accId: paymentLines?.[0]?.accId || null,
+              catId: eduCatId, catIds: eduCatId?[eduCatId]:[], subId:null, subIds:[],
               trackingMode:"none", people:{},
+              paymentLines: paymentLines || [],
               // Reverse link, following the same linked*-field convention Insurance's Bill
               // already uses (paidBillId/linkedPolicyId) — array-shaped here since one School
               // Fee transaction can settle multiple periods, unlike a single Bill payment.
               linkedFeePeriods: linkedFeePeriods || [],
+              // E2/E4 — "Add something not listed": named Education lines with no fee period,
+              // stored on this same Transaction.
+              eduExtraLines: extraLines || [],
               createdDate: todayStr(), createdAt: Date.now(),
             }, ...prev]);
             return txnId;
@@ -19054,6 +19248,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           txns={txns}
           accounts={accounts}
           onViewTransaction={(txnId)=>{ setViewingSchoolFeePeriod(null); setTxnDetailId(txnId); }}
+          onPayRemaining={(p)=>{ setSelectedSchoolFeePeriodIds([p.id]); setViewingSchoolFeePeriod(null); setShowSettleSchoolFee(true); }}
         />}
         {showAdjustSchoolFee&&<AdjustmentModal
           kind={adjustSchoolFeeKind}
@@ -19083,7 +19278,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   { icon:"🔄", label:"Transfer", onClick:()=>{ setShowFabSpeedMenu(false); setDefaultAddType("transfer"); setShowAdd(true); } },
                   { icon:"📈", label:"Investment", onClick:()=>{ setShowFabSpeedMenu(false); setDefaultAddType("investment"); setShowAdd(true); } },
                   { icon:"🎯", label:"Goal", onClick:()=>{ setShowFabSpeedMenu(false); setShowGoalsList(true); } },
-                  { icon:"📅", label:"Bill", onClick:()=>{ setShowFabSpeedMenu(false); setShowAddBill(true); } },
+                  // D6 — global + → Add bill opens "Which connection?" first, not the form
+                  // directly; D1's own bottom link is still the way to a genuinely connectionless
+                  // one-off bill (see the Add/Activate sheet below).
+                  { icon:"📅", label:"Bill", onClick:()=>{ setShowFabSpeedMenu(false); setDefaultBillerAccountId(""); setShowWhichConnection(true); } },
                 ].map(item=>(
                   <button key={item.label} onClick={item.onClick} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:8,background:T.input,border:`1px solid ${T.border}`,borderRadius:16,padding:"16px 8px",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
                     <span style={{ fontSize:24 }}>{item.icon}</span>
@@ -19095,6 +19293,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
         )}
         {showAdd&&<AddModal defaultType={editTxn?editTxn.type||"expense":defaultAddType} prefillTxn={refundSourceTxn} prefill={addPrefill} editTxn={editTxn} onClose={()=>{ setShowAdd(false); setEditTxn(null); setAddPrefill(null); setRefundSourceTxn(null); }}/>}
+        {showWhichConnection&&<WhichConnectionModal onClose={()=>setShowWhichConnection(false)}/>}
         {showInvestments&&(
           <div onClick={e=>{ if(e.target===e.currentTarget){ setShowInvestments(false); setSelectedInvestmentTypeView("all"); } }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
             <div style={{ background:T.card,borderRadius:"22px 22px 0 0",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto",paddingBottom:40 }}>
