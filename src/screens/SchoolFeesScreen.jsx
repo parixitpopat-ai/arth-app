@@ -101,6 +101,26 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
   // decided whether to track a Person relationship for it at all.
   const [selectedPersonId, setSelectedPersonId] = useState(existing?.personId || "");
 
+  // Payments v2 (WP18) — manual periods, CREATE mode only. "School fees have
+  // a manual structure... sometimes it's 3 months, sometimes 2 and
+  // sometimes 5" — no frequency/cycle picker, no "No. of cycles": the
+  // product owner decides each period's own date range and amount
+  // directly. isEdit keeps the pre-existing rateRules-based schedule edit
+  // path entirely untouched (an already-created schedule already has
+  // rateRules behind it; reconcileScheduleEdit's whole mechanism depends on
+  // that shape and is out of scope for this change).
+  const FEE_KIND_OPTIONS = [
+    ["tuition","Tuition"], ["transport","Transport"], ["registration","Registration"],
+    ["uniform","Uniform"], ["books","Books"], ["activities","Activities"],
+    ["exams","Exams"], ["other","Other"],
+  ];
+  const blankPeriodRow = () => ({ label:"", start:"", end:"", amount:"", kind:"tuition" });
+  const [periodRows, setPeriodRows] = useState([blankPeriodRow()]);
+  const addPeriodRow = () => setPeriodRows(prev=>[...prev, blankPeriodRow()]);
+  const updatePeriodRow = (idx, field, value) => setPeriodRows(prev=>prev.map((r,i)=>i===idx?{...r,[field]:value}:r));
+  const removePeriodRow = (idx) => setPeriodRows(prev=>prev.filter((_,i)=>i!==idx));
+  const periodRowsValid = periodRows.length>0 && periodRows.every(r=>r.start && r.end && r.start<=r.end && Number(r.amount)>0);
+
   // P1 — impact-summary confirmation, shown only when reconcileScheduleEdit
   // finds real impact (per your "never confirm a no-op" decision).
   const [pendingImpact, setPendingImpact] = useState(null);
@@ -109,7 +129,9 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
   const updateExtraRule = (idx, field, value) => setExtraRules(prev=>prev.map((r,i)=>i===idx?{...r,[field]:value}:r));
   const removeExtraRule = (idx) => setExtraRules(prev=>prev.filter((_,i)=>i!==idx));
 
-  const canSave = schoolName.trim() && schoolYearStart && schoolYearEnd && Number(baseRate)>0;
+  const canSave = isEdit
+    ? (schoolName.trim() && schoolYearStart && schoolYearEnd && Number(baseRate)>0)
+    : (schoolName.trim() && periodRowsValid);
 
   const buildRateRules = () => [
     // Base rate covers the whole range by default; extra rules layered on top
@@ -188,8 +210,16 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
       return;
     }
 
-    // --- Create (unchanged from WP-4) ---
-    const rateRules = buildRateRules();
+    // --- Create: manual periods (Payments v2 / WP18) ---
+    if (!periodRowsValid) return;
+    const manualPeriods = periodRows.map(r => ({
+      label: r.label.trim() || undefined,
+      periodStart: r.start,
+      periodEnd: r.end,
+      obligationAmount: Number(r.amount),
+      kind: r.kind || "tuition",
+    }));
+    const earliestStart = manualPeriods.map(p=>p.periodStart).sort()[0];
 
     // PPL-006 WP-4 — resolve the canonical School identity (billerAccounts.id)
     // via the extracted, tested helper. No person selected returns exactly
@@ -198,7 +228,7 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
       resolveSchoolAttribution({
         personId: selectedPersonId || null,
         schoolName: trimmedName,
-        startDate: schoolYearStart,
+        startDate: earliestStart,
         billerAccounts,
         schoolRelationships,
         genId,
@@ -208,15 +238,15 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
 
     try {
       const { schedule, periods } = schoolFeesService.createSchoolFeeSchedule(
-        { billerAccountId: resolvedBillerAccountId, personId: selectedPersonId||null, schoolYearStart, schoolYearEnd, rateRules },
-        genId
+        { billerAccountId: resolvedBillerAccountId, personId: selectedPersonId||null, periods: manualPeriods },
+        genId, todayStr()
       );
       const scheduleWithName = { ...schedule, schoolName: trimmedName };
       setFeeSchedules(prev=>[scheduleWithName, ...prev]);
       setFeePeriods(prev=>[...periods, ...prev]);
       onClose();
     } catch(e) {
-      setError(e.message || "Could not create this schedule — check the school year and rate coverage.");
+      setError(e.message || "Could not create this schedule — check each period's dates and amount.");
     }
   };
 
@@ -292,33 +322,66 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
           </select>
           <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Optional — the schedule works either way. Link a person only if you want this school to show up on their profile.</div>
         </div>
-        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-          <div><span style={lbl}>School Year Start *</span><input style={inp} type="date" value={schoolYearStart} onChange={e=>setSchoolYearStart(e.target.value)}/></div>
-          <div><span style={lbl}>School Year End *</span><input style={inp} type="date" value={schoolYearEnd} onChange={e=>setSchoolYearEnd(e.target.value)}/></div>
-        </div>
-        <div>
-          <span style={lbl}>Base Monthly Fee *</span>
-          <input style={inp} type="number" placeholder="e.g. 4500" value={baseRate} onChange={e=>setBaseRate(e.target.value)}/>
-          <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Applied to every month in range unless overridden below.</div>
-        </div>
+        {isEdit ? (
+          <>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+              <div><span style={lbl}>School Year Start *</span><input style={inp} type="date" value={schoolYearStart} onChange={e=>setSchoolYearStart(e.target.value)}/></div>
+              <div><span style={lbl}>School Year End *</span><input style={inp} type="date" value={schoolYearEnd} onChange={e=>setSchoolYearEnd(e.target.value)}/></div>
+            </div>
+            <div>
+              <span style={lbl}>Base Monthly Fee *</span>
+              <input style={inp} type="number" placeholder="e.g. 4500" value={baseRate} onChange={e=>setBaseRate(e.target.value)}/>
+              <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Applied to every month in range unless overridden below.</div>
+            </div>
 
-        {extraRules.map((r,idx)=>(
-          <div key={idx} style={{ background:T.input,borderRadius:12,padding:10,display:"flex",flexDirection:"column",gap:6 }}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-              <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>RATE OVERRIDE</span>
-              <button onClick={()=>removeExtraRule(idx)} style={{ background:"none",border:"none",color:T.warn,cursor:"pointer",fontSize:11,fontFamily:"Nunito,sans-serif" }}>Remove</button>
-            </div>
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-              <input style={inp} type="month" value={r.from} onChange={e=>updateExtraRule(idx,"from",e.target.value)}/>
-              <input style={inp} type="month" value={r.to} onChange={e=>updateExtraRule(idx,"to",e.target.value)}/>
-            </div>
-            <input style={inp} type="number" placeholder="Monthly fee for this range" value={r.monthlyRate} onChange={e=>updateExtraRule(idx,"monthlyRate",e.target.value)}/>
-          </div>
-        ))}
-        <button onClick={addExtraRule} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Add a rate override for part of the year</button>
+            {extraRules.map((r,idx)=>(
+              <div key={idx} style={{ background:T.input,borderRadius:12,padding:10,display:"flex",flexDirection:"column",gap:6 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>RATE OVERRIDE</span>
+                  <button onClick={()=>removeExtraRule(idx)} style={{ background:"none",border:"none",color:T.warn,cursor:"pointer",fontSize:11,fontFamily:"Nunito,sans-serif" }}>Remove</button>
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                  <input style={inp} type="month" value={r.from} onChange={e=>updateExtraRule(idx,"from",e.target.value)}/>
+                  <input style={inp} type="month" value={r.to} onChange={e=>updateExtraRule(idx,"to",e.target.value)}/>
+                </div>
+                <input style={inp} type="number" placeholder="Monthly fee for this range" value={r.monthlyRate} onChange={e=>updateExtraRule(idx,"monthlyRate",e.target.value)}/>
+              </div>
+            ))}
+            <button onClick={addExtraRule} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Add a rate override for part of the year</button>
+          </>
+        ) : (
+          <>
+            {/* Payments v2 (WP18) — manual periods. No frequency/cycle picker: each
+                period is an arbitrary date range the parent decides directly, e.g.
+                "Apr 1 – Jun 30, ₹30,000" then "Jul 1 – Sep 30, ₹30,000" then
+                "Oct 1 – Dec 31, ₹41,800" — 3 months, 3 months, 3 months, or any mix. */}
+            <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",padding:"2px 2px 0" }}>Fee periods</div>
+            {periodRows.map((r,idx)=>(
+              <div key={idx} style={{ background:T.input,borderRadius:12,padding:10,display:"flex",flexDirection:"column",gap:6 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                  <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>PERIOD {idx+1}</span>
+                  {periodRows.length>1 && <button onClick={()=>removePeriodRow(idx)} style={{ background:"none",border:"none",color:T.warn,cursor:"pointer",fontSize:11,fontFamily:"Nunito,sans-serif" }}>Remove</button>}
+                </div>
+                <input style={inp} placeholder="Label (optional — defaults to the date range, e.g. “Oct – Dec”)" value={r.label} onChange={e=>updatePeriodRow(idx,"label",e.target.value)}/>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                  <div><span style={{ color:T.sub,fontSize:9.5 }}>Start *</span><input style={inp} type="date" value={r.start} onChange={e=>updatePeriodRow(idx,"start",e.target.value)}/></div>
+                  <div><span style={{ color:T.sub,fontSize:9.5 }}>End *</span><input style={inp} type="date" value={r.end} onChange={e=>updatePeriodRow(idx,"end",e.target.value)}/></div>
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                  <input style={inp} type="number" placeholder="Amount *" value={r.amount} onChange={e=>updatePeriodRow(idx,"amount",e.target.value)}/>
+                  <select style={inp} value={r.kind} onChange={e=>updatePeriodRow(idx,"kind",e.target.value)}>
+                    {FEE_KIND_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+              </div>
+            ))}
+            <button onClick={addPeriodRow} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Add another period</button>
+            <div style={{ color:T.sub,fontSize:10,lineHeight:1.5 }}>Each period is whatever length you decide — 1, 2, 3, 5 months, however many — with its own amount. Covers Tuition, or add a separate period/row per one-off fee (Registration, Uniform, Books…) using its type.</div>
+          </>
+        )}
 
         {error && <div style={{ color:T.warn,fontSize:11 }}>{error}</div>}
-        <div style={{ color:T.sub,fontSize:10 }}>{isEdit?"Changes to dates or rates apply to every unpaid, unprotected period — including past months — but never rewrite a period that's already been paid, discounted, or written off.":"Saving generates one fee period per month in range. Each period can be individually corrected, discounted, or written off later — nothing here is final."}</div>
+        <div style={{ color:T.sub,fontSize:10 }}>{isEdit?"Changes to dates or rates apply to every unpaid, unprotected period — including past months — but never rewrite a period that's already been paid, discounted, or written off.":"Each row becomes one fee period exactly as entered. Every period can be individually corrected, discounted, or written off later — nothing here is final."}</div>
         <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Schedule"}</button>
       </div>
     </BottomSheet>

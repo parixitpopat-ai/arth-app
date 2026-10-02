@@ -31,13 +31,16 @@
 // were never the source of the ambiguity this WP resolves. Do not conflate
 // the two query shapes.
 //
-// CURRENT PRODUCTION STATE, confirmed by direct re-trace before writing
-// this file: App.jsx's one call site (AddSchoolYearModal) still hardcodes
-// both billerAccountId={null} and personId={null}. Every real feeSchedule
-// in production today has both fields null, so every function in this
-// module still correctly finds ZERO connections for real data until WP-3/4
-// wire a real Person/biller-account picker into that modal — unaffected by
-// this WP.
+// STALE NOTE, corrected (Payments v2 / WP18) — this comment used to claim
+// App.jsx's one call site (AddSchoolYearModal) still hardcodes both
+// billerAccountId={null} and personId={null}. That stopped being true once
+// PPL-006 WP-4 wired resolveSchoolAttribution (a real Person/biller-account
+// picker) into that modal's save path; it has resolved a real
+// billerAccountId/personId since then whenever a person is selected, same
+// through WP18's own manual-periods creation path. Left here only as a
+// pointer to where that wiring lives (SchoolFeesScreen.jsx's AddSchoolYearModal
+// → SchoolFeesScreen.helpers.js's resolveSchoolAttribution), not as a current
+// limitation.
 
 /**
  * Which of a person's existing fee schedules connect to a given School

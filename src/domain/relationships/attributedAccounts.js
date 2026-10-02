@@ -24,8 +24,12 @@
 // is not derived here yet. Cancelled Bills are ignored.
 
 import { getRelationshipTarget } from "../membership/relationship.js";
+import { DUE_SOON_DAYS } from "../obligations/dueSoonWindow.js";
 
-const DUE_WINDOW_DAYS = 14;
+// Payments v2 (WP18) Decision #5 — "Keep 14 as a single constant." This used
+// to be its own local DUE_WINDOW_DAYS = 14, duplicating billBalance.js's
+// (then also inline) 14. Both now read the one shared constant.
+const DUE_WINDOW_DAYS = DUE_SOON_DAYS;
 const DAY_MS = 86400000;
 
 const localYMD = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
