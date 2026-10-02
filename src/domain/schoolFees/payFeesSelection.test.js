@@ -6,6 +6,7 @@ import {
   sumPayFeesTotal,
   toSettlementAllocations,
   validateExtraLine,
+  buildPayFeesLineItems,
 } from "./payFeesSelection.js";
 
 const period = (over = {}) => ({
@@ -42,8 +43,48 @@ test("toSettlementAllocations drops zero/omitted lines, keeping only periodId+am
   assert.deepEqual(out, [{ periodId: "a", amount: 18000 }]);
 });
 
-test("validateExtraLine requires both a name and a positive amount", () => {
-  assert.ok(validateExtraLine("", 1200));
-  assert.ok(validateExtraLine("Books", 0));
-  assert.equal(validateExtraLine("Books", 1200), null);
+test("validateExtraLine requires a name, a positive amount, and (WP18c-fix) a real category", () => {
+  assert.ok(validateExtraLine("", 1200, "cat-misc"));
+  assert.ok(validateExtraLine("Books", 0, "cat-misc"));
+  assert.ok(validateExtraLine("Books", 1200, null), "no longer valid without a real category");
+  assert.ok(validateExtraLine("Books", 1200, ""));
+  assert.equal(validateExtraLine("Books", 1200, "cat-misc"), null);
+});
+
+// WP18c-fix (Pay Fees mixed category) — buildPayFeesLineItems
+test("buildPayFeesLineItems: fee lines are uncategorized and carry a feePeriodId; the extra line carries its own real category and no feePeriodId", () => {
+  const items = buildPayFeesLineItems(
+    [
+      { periodId: "term1-tuition", label: "Tuition", amount: 18000 },
+      { periodId: "term1-registration", label: "Registration", amount: 2000 },
+    ],
+    [{ id: "extra-1", name: "Books", amount: 1200, catId: "cat-books", subId: "sub-stationery" }]
+  );
+  assert.equal(items.length, 3);
+  const tuition = items.find(i => i.feePeriodId === "term1-tuition");
+  const registration = items.find(i => i.feePeriodId === "term1-registration");
+  const books = items.find(i => i.label === "Books");
+  assert.ok(tuition && registration && books);
+  assert.equal(tuition.unitPrice, 18000);
+  assert.equal(tuition.catId, null);
+  assert.equal(registration.unitPrice, 2000);
+  assert.equal(registration.catId, null);
+  assert.equal(books.unitPrice, 1200);
+  assert.equal(books.catId, "cat-books");
+  assert.equal(books.subId, "sub-stationery");
+  assert.equal(books.feePeriodId, undefined);
+});
+
+test("buildPayFeesLineItems: total across lineItems equals the sum of every input line", () => {
+  const items = buildPayFeesLineItems(
+    [{ periodId: "p1", label: "Tuition", amount: 18000 }, { periodId: "p2", label: "Registration", amount: 2000 }],
+    [{ id: "e1", name: "Books", amount: 1200, catId: "cat-books" }]
+  );
+  const total = items.reduce((s, i) => s + i.qty * i.unitPrice, 0);
+  assert.equal(total, 21200);
+});
+
+test("buildPayFeesLineItems: no ticked lines and no extra lines yields an empty array", () => {
+  assert.deepEqual(buildPayFeesLineItems([], []), []);
+  assert.deepEqual(buildPayFeesLineItems(undefined, undefined), []);
 });

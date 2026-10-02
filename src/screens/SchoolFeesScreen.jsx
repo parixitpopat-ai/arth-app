@@ -30,7 +30,7 @@ import { resolveSchoolAttribution, attemptSchoolAttributionChange } from "./Scho
 import { reconcileScheduleEdit } from "../domain/schoolFees/startingState";
 // Payments v2 (WP18c) — E1/E2/E3/E4/E5 additions.
 import { groupFeePeriodsForDisplay } from "../domain/schoolFees/periodGrouping";
-import { defaultLineAmount, validatePayFeesLineAmount, sumPayFeesTotal, toSettlementAllocations, validateExtraLine } from "../domain/schoolFees/payFeesSelection";
+import { defaultLineAmount, validatePayFeesLineAmount, sumPayFeesTotal, toSettlementAllocations, validateExtraLine, buildPayFeesLineItems } from "../domain/schoolFees/payFeesSelection";
 import { PAYMENT_METHODS, sumPaymentLines, paidWithDifference, isPaidWithBalanced, blankPaymentLine } from "../domain/payments/paidWith";
 import { DUE_SOON_DAYS } from "../domain/obligations/dueSoonWindow";
 
@@ -639,7 +639,9 @@ export const PayFeesModal = ({
   schoolName,
   feePeriods, setFeePeriods, selectedPeriodIds, setSelectedPeriodIds,
   accounts, // real Arth accounts[] — every payment method is backed by one of these
-  createRealTxn, // ({ amount, date, paymentLines, extraLines, linkedFeePeriods }) => txnId
+  cats, // WP18c-fix: real, user-configurable categories[] — for "+ Add something not listed"'s
+        // category picker, the same cats[] every other category picker in the app reads.
+  createRealTxn, // ({ amount, date, paymentLines, lineItems, linkedFeePeriods }) => txnId
 }) => {
   const todayStrV = todayStr();
   // Captured once, at open time, via a lazy useState initializer (never a useMemo with an
@@ -653,6 +655,11 @@ export const PayFeesModal = ({
   const [addingExtra, setAddingExtra] = useState(false);
   const [extraName, setExtraName] = useState("");
   const [extraAmount, setExtraAmount] = useState("");
+  // WP18c-fix: "+ Add something not listed" now picks a REAL category — same catId/subId shape
+  // every other line item in the app carries, not a bespoke Education-only field.
+  const [extraCatId, setExtraCatId] = useState("");
+  const [extraSubId, setExtraSubId] = useState("");
+  const extraCat = extraCatId ? (cats||[]).find(c=>c.id===extraCatId) : null;
   const [date, setDate] = useState(todayStrV);
   const [paymentLines, setPaymentLines] = useState(() => [{ id: genId(), method: PAYMENT_METHODS[0], accId: "", amount: "" }]);
   const [error, setError] = useState("");
@@ -671,10 +678,10 @@ export const PayFeesModal = ({
 
   const addExtraLine = () => {
     const amt = parseFloat(extraAmount)||0;
-    const err = validateExtraLine(extraName, amt);
+    const err = validateExtraLine(extraName, amt, extraCatId);
     if (err) { setError(err); return; }
-    setExtraLines(prev=>[...prev, { id: genId(), name: extraName.trim(), amount: amt }]);
-    setExtraName(""); setExtraAmount(""); setAddingExtra(false); setError("");
+    setExtraLines(prev=>[...prev, { id: genId(), name: extraName.trim(), amount: amt, catId: extraCatId, subId: extraSubId||null }]);
+    setExtraName(""); setExtraAmount(""); setExtraCatId(""); setExtraSubId(""); setAddingExtra(false); setError("");
   };
   const removeExtraLine = (id) => setExtraLines(prev=>prev.filter(l=>l.id!==id));
 
@@ -693,10 +700,17 @@ export const PayFeesModal = ({
     try {
       const allocations = toSettlementAllocations(tickedLines.map(l=>({ periodId:l.periodId, amount: parseFloat(l.amount)||0 })));
       const resolvedPaymentLines = paidWithLines.map(({ id, method, accId, amount })=>({ id, method, accId, amount }));
+      // WP18c-fix: every line — ticked fee lines AND "not listed" lines — becomes a real
+      // lineItems[] entry (buildPayFeesLineItems), the one category-attribution representation
+      // the rest of the app reads, replacing the old Education-only `eduExtraLines` field.
+      const lineItems = buildPayFeesLineItems(
+        tickedLines.map(l=>({ periodId: l.periodId, label: feeLineDisplayName(l.period), amount: parseFloat(l.amount)||0 })),
+        extraLines.map(({ id, name, amount, catId, subId })=>({ id, name, amount, catId, subId }))
+      );
       const txnId = createRealTxn({
         amount: total, date,
         paymentLines: resolvedPaymentLines,
-        extraLines: extraLines.map(({ id, name, amount })=>({ id, name, amount })),
+        lineItems,
         linkedFeePeriods: allocations,
       });
       if (allocations.length>0) {
@@ -743,24 +757,49 @@ export const PayFeesModal = ({
         );
       })}
 
-      {extraLines.map(l=>(
+      {extraLines.map(l=>{
+        const lCat = l.catId ? (cats||[]).find(c=>c.id===l.catId) : null;
+        const lSub = lCat?.subs?.find(s=>s.id===l.subId) || null;
+        return (
         <div key={l.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"11px 13px",marginBottom:8,display:"flex",alignItems:"center",gap:10 }}>
           <span style={{ width:24,height:24,flexShrink:0,display:"grid",placeItems:"center",background:T.accent,borderRadius:7,color:"#fff",fontSize:13 }}>✓</span>
           <div style={{ flex:1,minWidth:0 }}>
             <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{l.name}</div>
-            <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>Education · not applied to a fee</div>
+            {/* WP18c-fix: shows the real category the user picked — no longer a hardcoded
+                "Education" label, since this line may have nothing to do with Education. */}
+            <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>{lCat?`${lCat.icon||"📁"} ${lCat.name}${lSub?` → ${lSub.name}`:""}`:"Uncategorized"} · not applied to a fee</div>
           </div>
           <span style={{ color:T.text,fontSize:13,fontWeight:700,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(l.amount)}</span>
           <button onClick={()=>removeExtraLine(l.id)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:13,padding:0 }}>✕</button>
         </div>
-      ))}
+        );
+      })}
 
       {addingExtra ? (
         <div style={{ background:T.input,borderRadius:14,padding:12,marginBottom:10,display:"flex",flexDirection:"column",gap:8 }}>
           <input data-testid="payfees-extra-name" value={extraName} onChange={e=>setExtraName(e.target.value)} placeholder="e.g. Books" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"9px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}/>
           <input data-testid="payfees-extra-amount" type="number" value={extraAmount} onChange={e=>setExtraAmount(e.target.value)} placeholder="Amount" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"9px 12px",fontSize:13,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",outline:"none" }}/>
+          {/* WP18c-fix: the real category-picker pattern (Category + Sub-category selects),
+              reused exactly as App.jsx's ItemSheetModal itemization UI already does it — this
+              line is no longer free-text-only. */}
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+            <div>
+              <span style={{ display:"block",color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>Category</span>
+              <select data-testid="payfees-extra-catid" value={extraCatId} onChange={e=>{ setExtraCatId(e.target.value); setExtraSubId(""); }} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:12.5,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
+                <option value="">Select</option>
+                {(cats||[]).map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <span style={{ display:"block",color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>Sub-category</span>
+              <select data-testid="payfees-extra-subid" value={extraSubId} onChange={e=>setExtraSubId(e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:12.5,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
+                <option value="">Select</option>
+                {(extraCat?.subs||[]).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          </div>
           <div style={{ display:"flex",gap:8 }}>
-            <button onClick={()=>{ setAddingExtra(false); setExtraName(""); setExtraAmount(""); }} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
+            <button onClick={()=>{ setAddingExtra(false); setExtraName(""); setExtraAmount(""); setExtraCatId(""); setExtraSubId(""); }} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
             <button onClick={addExtraLine} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Add</button>
           </div>
         </div>
