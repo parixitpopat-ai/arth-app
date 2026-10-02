@@ -124,7 +124,10 @@ import { getMembershipRenewalReminders, getSchoolFeeReminders } from "./domain/b
 import { getInsuranceRenewalReminders } from "./domain/insurance/renewalReminders";
 import { getBillBalance, planBillPayment, withProjectedBillStatuses, getPartialRemainingByBill, getBillBadge, getBillLedger } from "./domain/obligations/billBalance";
 import { hasCompleteSchedule, setRelationshipSchedule, getExpectedForRelationship, getExpectedItems, buildBillFieldsFromExpected } from "./domain/obligations/expected";
-import { buildPaymentsView, getBillPeriodLabel, getBadgeText } from "./domain/bills/paymentsView";
+import { buildPaymentsView, getBillPeriodLabel, getBadgeText, getCardVerificationText } from "./domain/bills/paymentsView";
+import { DUE_SOON_DAYS } from "./domain/obligations/dueSoonWindow";
+import { calculateOutstanding } from "./domain/schoolFees/outstanding";
+import { groupConnectionsByCategory, categoryForBillerType } from "./domain/payments/homeCategories";
 import BillsList from "./screens/payments/BillsList";
 import BillDetailSheet from "./screens/payments/BillDetailSheet";
 import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
@@ -16073,6 +16076,605 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     );
   };
 
+  // Payments v2 (WP18b) — A1/A2/A3 "Payments home". Replaces the old Due Soon / Quick Summary /
+  // Favourite Providers layout with the spec's own structure: a "To pay · next 14 days" list of
+  // real Bill rows (B2 grammar — never Expected/renewal reminders, which are never payable and
+  // never counted here per Decision #6), then "Connected · N" — every active connection grouped
+  // by category, a category auto-expanded only if one of its connections has a real Overdue/Due
+  // Bill (domain/payments/homeCategories.js's groupConnectionsByCategory does the pure
+  // grouping/ordering/expand-default; every number here is read straight off bills[]/
+  // memberships[]/insurancePolicies[]/feeSchedules[] via the existing, unmodified read models —
+  // nothing new is computed about money here).
+  //
+  // Membership/Insurance/Prepaid/Credit-Card/School-Fees connections all still appear as rows
+  // here (so Home stays complete), but every one of them still opens its own existing, untouched
+  // detail screen (MembershipDetailModal-equivalent sheet, InsurancePolicyDetailModal,
+  // CreditCardsListScreen, SchoolFeeScheduleDetailModal) — only a plain Bill-type connection
+  // (BILL_TYPES minus isRechargeBiller, minus Credit Card) opens the new Connection Detail (B1)
+  // built below. Credit-Card connections are left out of "Connected" entirely (matching the A1
+  // mockup's own count, and "reused, not redrawn" — Payments → Credit Cards is still the one
+  // place that flow lives); their due statement still appears in "To pay" like any other Bill.
+  const PaymentsHomeSection = ({ onViewAllBills }) => {
+    const [expandedOverrides, setExpandedOverrides] = useState({}); // { [categoryLabel]: bool } — only once the user has tapped a header
+    const today = todayStr();
+    const search = (billSearch || "").toLowerCase();
+
+    // ── "To pay · next 14 days" — real Bills only (Decision #6: renewals/estimates are Expected,
+    // never counted here). Credit-card statements are already generated into bills[] as
+    // isCcStatement Bill records (see the CC statement-generation effect above), so a plain
+    // getBillBadge pass already includes them — no separate card-summary read needed here.
+    const toPayRows = useMemo(() => {
+      const rows = [];
+      bills.forEach(b => {
+        if (b.status === "cancelled") return;
+        const badge = getBillBadge(b, contributions);
+        if (badge.kind !== "overdue" && badge.kind !== "due") return;
+        const ba = billerAccounts.find(x => String(x.id) === String(b.billerAccountId));
+        const shell = ba?.billerId ? billers.find(x => x.id === ba.billerId) : null;
+        const connName = b.isCcStatement ? (shell?.name || ba?.name || b.name) : (ba?.name || b.name);
+        const categoryText = b.isCcStatement
+          ? `Credit card · ${getCardVerificationText(b)}`
+          : `${ba?.type || ""}${ba ? ` · ${getBillerOwnerLabel(ba)}` : ""}`;
+        rows.push({
+          id: `bill-${b.id}`,
+          kind: badge.kind,
+          sortDate: b.dueDate || "9999-99-99",
+          name: connName,
+          period: getBillPeriodLabel(b),
+          categoryText,
+          amount: badge.balance.remaining,
+          badgeText: getBadgeText(badge, b).text,
+          onClick: () => { if (b.isCcStatement) setViewingCcStatementId(b.id); else setViewingBillId(b.id); },
+        });
+      });
+      // School Fees — real, already-incurred obligations with their own due dates (unlike a
+      // Membership/Insurance renewal, which stays Expected until invoiced), so per B2 they read as
+      // Bill rows, not Expected. Several due periods for the same school bundle into one row, per
+      // the A1 mockup ("Tiny Trees Playschool · 4 fees · Vyom · ₹41,800 · Due").
+      const schoolReminders = getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts, forLabel: getBillerOwnerLabel, today, forwardDays: DUE_SOON_DAYS });
+      const byBa = new Map();
+      schoolReminders.forEach(r => {
+        const key = String(r.billerAccountId);
+        if (!byBa.has(key)) byBa.set(key, []);
+        byBa.get(key).push(r);
+      });
+      byBa.forEach((items, baId) => {
+        const ba = billerAccounts.find(x => String(x.id) === String(baId));
+        const schedule = feeSchedules.find(s => String(s.billerAccountId) === String(baId));
+        const amount = items.reduce((s, i) => s + Number(i.amount || 0), 0);
+        const anyOverdue = items.some(i => i.kind === "overdue");
+        // getSchoolFeeReminders doesn't carry each period's own dueDate on its returned item, so
+        // the earliest due date among this school's actually-outstanding, due/overdue periods is
+        // read straight from feePeriods — the same records the reminder itself was computed from.
+        const duePeriods = feePeriods.filter(p => p.scheduleId === schedule?.id && p.startingStateDeclared && calculateOutstanding(p) > 0 && p.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+        rows.push({
+          id: `school-${baId}`,
+          kind: anyOverdue ? "overdue" : "due",
+          sortDate: duePeriods[0]?.dueDate || "9999-99-99",
+          name: ba?.name || "School Fees",
+          period: `${items.length} fee${items.length === 1 ? "" : "s"}`,
+          categoryText: `Education · ${items[0]?.forText || ""}`,
+          amount,
+          badgeText: anyOverdue ? "Overdue" : "Due",
+          onClick: () => { if (schedule) setViewingSchoolFeeSchedule(schedule); else setShowSchoolFeesList(true); },
+        });
+      });
+      return rows.sort((a, b) => (a.kind === "overdue" ? 0 : 1) - (b.kind === "overdue" ? 0 : 1) || a.sortDate.localeCompare(b.sortDate));
+    }, [bills, contributions, billerAccounts, billers, feeSchedules, feePeriods, today]);
+
+    const totalToPay = Math.round(toPayRows.reduce((s, r) => s + Number(r.amount || 0), 0) * 100) / 100;
+    const overdueCount = toPayRows.filter(r => r.kind === "overdue").length;
+    // "All bills · N" — every still-open obligation, not just the next-14-days ones above (the
+    // existing "bills" tab/BillsList this links to already shows the full horizon).
+    const allOpenBillsCount = bills.filter(b => { const k = getBillBadge(b, contributions).kind; return k !== "paid" && k !== "cancelled"; }).length;
+    const allOpenSchoolCount = feePeriods.filter(p => p.startingStateDeclared && calculateOutstanding(p) > 0).length;
+    const allOpenCount = allOpenBillsCount + allOpenSchoolCount;
+
+    // ── "Connected · N" — one row per active connection, grouped by category.
+    const connections = useMemo(() => {
+      const out = [];
+      billerAccounts.forEach(ba => {
+        if (ba.accId || ba.type === "Credit Card") return; // CC — its own list screen, not here
+        const rels = membershipRelationships.filter(r => String(r.billerAccountId) === String(ba.id));
+        const latestRel = [...rels].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+        if (latestRel && latestRel.status === "ended") return; // ended connections drop off Home
+        if (ba.type === "School Fees" || ba.type === "Education Fees") return; // handled separately below, one row per schedule
+        if (!search || (ba.name + ba.type + (ba.provider || "")).toLowerCase().includes(search)) {
+          const baBills = bills.filter(b => String(b.billerAccountId) === String(ba.id));
+          const hasOverdueOrDueBill = baBills.some(b => { const k = getBillBadge(b, contributions).kind; return k === "overdue" || k === "due"; });
+          let statusLine;
+          if (isRechargeBiller(ba.type)) {
+            const coverage = getPrepaidCoverage(baBills);
+            statusLine = coverage
+              ? (coverage.status === "expired" ? `Expired ${formatShortDate(coverage.validUntil) || coverage.validUntil}` : `Ends ${formatShortDate(coverage.validUntil) || coverage.validUntil}`)
+              : "No recharge yet";
+          } else if (MEMBERSHIP_TYPES.includes(ba.type)) {
+            const nextUnpaid = baBills.filter(b => b.status === "unpaid" && b.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
+            if (nextUnpaid) {
+              const badge = getBillBadge(nextUnpaid, contributions);
+              statusLine = badge.kind === "overdue" ? `Overdue · ${sym}${fmt(badge.balance.remaining)} left` : `Due ${formatShortDate(nextUnpaid.dueDate) || nextUnpaid.dueDate} · ${sym}${fmt(badge.balance.remaining)}`;
+            } else {
+              const memsForAcc = hasLiveMembershipRelationship(ba.id, membershipRelationships) ? memberships.filter(m => String(m.billerAccountId) === String(ba.id)) : [];
+              const status = memsForAcc.length ? getMembershipRenewalStatus(memsForAcc.map(m => ({ m, period: getCurrentPeriod(m) })), today) : null;
+              statusLine = status ? (status.kind === "overdue" ? `Overdue renewal · ${status.days}d` : `Renews ${formatShortDate(addDaysToDateStr(today, status.days)) || ""}`) : "Active";
+            }
+          } else {
+            const nextUnpaid = baBills.filter(b => b.status === "unpaid" && b.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
+            if (nextUnpaid) {
+              const badge = getBillBadge(nextUnpaid, contributions);
+              statusLine = badge.kind === "overdue" ? `Overdue · ${sym}${fmt(badge.balance.remaining)} left` : `Due ${formatShortDate(nextUnpaid.dueDate) || nextUnpaid.dueDate} · ${sym}${fmt(badge.balance.remaining)}`;
+            } else {
+              const lastPaid = baBills.filter(b => b.status === "paid").sort((a, b) => String(b.paidDate || "").localeCompare(String(a.paidDate || "")))[0];
+              if (lastPaid) {
+                const expected = latestRel ? getExpectedForRelationship(latestRel, bills) : null;
+                statusLine = expected ? `Paid · next bill around ${formatShortDate(expected.dueDate) || expected.dueDate}` : "Paid";
+              } else {
+                statusLine = "No bills yet";
+              }
+            }
+          }
+          out.push({ id: ba.id, categoryLabel: categoryForBillerType(ba.type), name: ba.name, statusLine, hasOverdueOrDueBill, onClick: () => setActiveBillerForAction(ba) });
+        }
+      });
+      // Education — one row per school schedule (whatever the school's attached Biller Account is).
+      feeSchedules.forEach(sch => {
+        const ba = billerAccounts.find(x => String(x.id) === String(sch.billerAccountId));
+        const rel = schoolRelationships.find(r => String(r.billerAccountId) === String(sch.billerAccountId));
+        if (rel && !isSchoolRelationshipCurrent(rel.statusHistory, today)) return;
+        const name = ba?.name || "School Fees";
+        if (search && !(name + "education").toLowerCase().includes(search)) return;
+        const periods = feePeriods.filter(p => p.scheduleId === sch.id);
+        const outstanding = periods.filter(p => p.startingStateDeclared).reduce((s, p) => s + calculateOutstanding(p), 0);
+        const dueItems = getSchoolFeeReminders({ feeSchedules: [sch], feePeriods, billerAccounts, forLabel: getBillerOwnerLabel, today, forwardDays: DUE_SOON_DAYS });
+        const forText = ba ? getBillerOwnerLabel(ba) : "";
+        out.push({
+          id: `school-${sch.id}`, categoryLabel: "Education", name,
+          statusLine: outstanding > 0 ? `${sym}${fmt(outstanding)} outstanding${forText ? ` · ${forText}` : ""}` : "No fees due",
+          hasOverdueOrDueBill: dueItems.length > 0,
+          onClick: () => setViewingSchoolFeeSchedule(sch),
+        });
+      });
+      // Insurance — its own policies[] store, never billerAccounts (WP18). Renewal is Expected
+      // only (Decision #6) — it never counts toward a category's attention unless it has already
+      // become a real Bill (linkedBillId).
+      insurancePolicies.filter(p => p.status !== "archived").forEach(p => {
+        if (search && !(p.name || "").toLowerCase().includes(search)) return;
+        const linkedBill = p.linkedBillId ? bills.find(b => String(b.id) === String(p.linkedBillId)) : null;
+        const hasOverdueOrDueBill = linkedBill ? ["overdue", "due"].includes(getBillBadge(linkedBill, contributions).kind) : false;
+        const reminder = getInsuranceRenewalReminders({ insurancePolicies: [p], today, forwardDays: DUE_SOON_DAYS })[0];
+        const statusLine = reminder
+          ? (reminder.kind === "overdue" ? "Overdue renewal" : `Renews ${formatShortDate(p.renewalDate) || p.renewalDate}`)
+          : (p.renewalDate ? `Renews ${formatShortDate(p.renewalDate) || p.renewalDate}` : "Active");
+        out.push({ id: `insurance-${p.id}`, categoryLabel: "Insurance", name: p.name || "Insurance", statusLine, hasOverdueOrDueBill, onClick: () => setViewingPolicy(p) });
+      });
+      return out;
+    }, [billerAccounts, bills, contributions, membershipRelationships, memberships, feeSchedules, feePeriods, schoolRelationships, insurancePolicies, search, today]);
+
+    const categories = useMemo(() => groupConnectionsByCategory(connections), [connections]);
+    const totalConnected = connections.length;
+    const hasAnyConnection = billerAccounts.length > 0 || feeSchedules.length > 0 || insurancePolicies.some(p => p.status !== "archived");
+
+    if (!hasAnyConnection) {
+      // A3 — Nothing connected yet.
+      return (
+        <div style={{ padding: "40px 24px",textAlign: "center" }}>
+          <div style={{ fontSize: 40,marginBottom: 12 }}>💳</div>
+          <div style={{ color: T.text,fontSize: 15,fontWeight: 800,marginBottom: 6 }}>Nothing connected yet</div>
+          <div style={{ color: T.sub,fontSize: 12.5,lineHeight: 1.5,marginBottom: 18 }}>Add the bills and services you pay for. They show here grouped by type, with anything due at the top.</div>
+          <button onClick={() => setShowAddActivateSheet(true)} style={{ background: T.accent,border: "none",borderRadius: 14,padding: "12px 20px",cursor: "pointer",fontSize: 13,fontWeight: 800,color: "#fff",fontFamily: "Nunito,sans-serif" }}>+ Add / Activate</button>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ paddingBottom: 20 }}>
+        {/* To pay · next 14 days */}
+        <div style={{ margin: "8px 16px 4px" }}>
+          <div style={{ color: T.text,fontSize: 20,fontWeight: 900 }}>{sym}{fmt(totalToPay)}</div>
+          <div style={{ color: T.sub,fontSize: 12,marginTop: 2 }}>to pay in the next 14 days{overdueCount > 0 ? ` · ${overdueCount} overdue` : ""}</div>
+        </div>
+        <div style={{ display: "flex",justifyContent: "space-between",alignItems: "center",margin: "14px 16px 6px" }}>
+          <div style={{ color: T.text,fontSize: 13,fontWeight: 800 }}>To pay · next 14 days</div>
+          <button onClick={onViewAllBills} style={{ background: "none",border: "none",color: T.accent,fontSize: 11,fontWeight: 700,cursor: "pointer" }}>All bills · {allOpenCount} ›</button>
+        </div>
+        {toPayRows.length === 0 ? (
+          <div style={{ margin: "0 16px 16px",background: T.card,border: `1px solid ${T.border}`,borderRadius: 16,padding: 16,textAlign: "center" }}>
+            <div style={{ color: T.text,fontSize: 13,fontWeight: 800,marginBottom: 4 }}>All bills paid</div>
+            <div style={{ color: T.sub,fontSize: 11.5 }}>Nothing due in the next 14 days.</div>
+          </div>
+        ) : (
+          <div style={{ margin: "0 16px 16px",display: "flex",flexDirection: "column",gap: 8 }}>
+            {toPayRows.slice(0, 5).map(row => (
+              <button key={row.id} data-testid={`home-bill-row-${row.id}`} onClick={row.onClick} style={{ display: "flex",gap: 12,width: "100%",minHeight: 56,alignItems: "center",background: T.card,border: `1px solid ${row.kind === "overdue" ? T.danger + "55" : T.border}`,borderRadius: 14,padding: "10px 14px",cursor: "pointer",textAlign: "left",fontFamily: "Nunito,sans-serif" }}>
+                <div style={{ flexShrink: 0,width: 38,textAlign: "center" }}>
+                  <div style={{ color: T.sub,fontSize: 9,fontWeight: 800,letterSpacing: 0.5 }}>{row.sortDate && row.sortDate !== "9999-99-99" ? (formatShortDate(row.sortDate) || "").split(" ")[1] : ""}</div>
+                  <div style={{ color: T.text,fontSize: 15,fontWeight: 900 }}>{row.sortDate && row.sortDate !== "9999-99-99" ? (formatShortDate(row.sortDate) || "").split(" ")[0] : "—"}</div>
+                </div>
+                <div style={{ flex: 1,minWidth: 0 }}>
+                  <div style={{ color: T.text,fontSize: 13,fontWeight: 800,overflow: "hidden",textOverflow: "ellipsis",whiteSpace: "nowrap" }}>{row.name}{row.period ? ` · ${row.period}` : ""}</div>
+                  <div style={{ color: T.sub,fontSize: 10.5,marginTop: 2,overflow: "hidden",textOverflow: "ellipsis",whiteSpace: "nowrap" }}>{row.categoryText}</div>
+                </div>
+                <div style={{ textAlign: "right",flexShrink: 0 }}>
+                  <div style={{ color: T.text,fontSize: 13,fontWeight: 800 }}>{sym}{fmt(row.amount)}</div>
+                  <div style={{ color: row.kind === "overdue" ? T.danger : T.warn,fontSize: 10,fontWeight: 700,marginTop: 2 }}>{row.badgeText}</div>
+                </div>
+                <span style={{ color: T.sub,fontSize: 14,flexShrink: 0 }}>›</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Connected · N */}
+        <div style={{ margin: "10px 16px 6px",color: T.text,fontSize: 13,fontWeight: 800 }}>Connected · {totalConnected}</div>
+        <div style={{ margin: "0 16px" }}>
+          {categories.map(cat => {
+            const isExpanded = expandedOverrides[cat.label] !== undefined ? expandedOverrides[cat.label] : cat.expanded;
+            return (
+              <div key={cat.label} style={{ marginBottom: 10,background: T.card,border: `1px solid ${T.border}`,borderRadius: 16,overflow: "hidden" }}>
+                <button data-testid={`home-category-${cat.label}`} onClick={() => setExpandedOverrides(prev => ({ ...prev, [cat.label]: !isExpanded }))} style={{ width: "100%",display: "flex",justifyContent: "space-between",alignItems: "center",minHeight: 48,padding: "12px 14px",background: "none",border: "none",cursor: "pointer",textAlign: "left",fontFamily: "Nunito,sans-serif" }}>
+                  <span style={{ color: T.text,fontSize: 13,fontWeight: 800 }}>{cat.label} · {cat.count}</span>
+                  <span style={{ color: T.sub,fontSize: 12 }}>{isExpanded ? "▾" : "▸"}</span>
+                </button>
+                {!isExpanded && (
+                  <div style={{ padding: "0 14px 12px",color: T.sub,fontSize: 11.5 }}>{cat.connections[0]?.name}{cat.connections[0]?.statusLine ? ` · ${cat.connections[0].statusLine}` : ""}{cat.count > 1 ? ` +${cat.count - 1} more` : ""}</div>
+                )}
+                {isExpanded && cat.connections.map(c => (
+                  <button key={c.id} data-testid={`home-connection-${c.id}`} onClick={c.onClick} style={{ width: "100%",display: "flex",justifyContent: "space-between",alignItems: "center",minHeight: 56,padding: "10px 14px",background: "none",border: "none",borderTop: `1px solid ${T.border}`,cursor: "pointer",textAlign: "left",fontFamily: "Nunito,sans-serif" }}>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: "block",color: T.text,fontSize: 13,fontWeight: 700,overflow: "hidden",textOverflow: "ellipsis",whiteSpace: "nowrap" }}>{c.name}</span>
+                      <span style={{ display: "block",color: c.statusLine?.startsWith("Overdue") ? T.danger : (c.hasOverdueOrDueBill ? T.warn : T.sub),fontSize: 11,marginTop: 2 }}>{c.statusLine}</span>
+                    </span>
+                    <span style={{ color: T.sub,fontSize: 14,flexShrink: 0,marginLeft: 8 }}>›</span>
+                  </button>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ padding: "4px 16px 8px",textAlign: "right" }}>
+          <button onClick={() => setShowAddActivateSheet(true)} style={{ background: "none",border: "none",color: T.accent,fontSize: 12,fontWeight: 700,cursor: "pointer" }}>+ Add / Activate</button>
+        </div>
+      </div>
+    );
+  };
+
+  // Payments v2 (WP18b) B1-B8 — Connection Detail for a plain Bill-type connection (B1), with its
+  // three sub-lists (B3-B8: the spec describes the same three lists twice under two numbering
+  // passes — All bills/Payments & history/Documents — built once here, correctly, not twice).
+  // Mounted inside the existing `activeBillerForAction` sheet in place of its generic body, for
+  // exactly the connections the WP18b brief scopes in; every entry point into this sheet (Home,
+  // People/Group pages, "+ Attach to person/group", etc.) keeps working unchanged. Every action
+  // below reuses an existing, unmodified flow — Bill detail (`setViewingBillId`), Record payment
+  // (`setMarkingBillPaid`), Edit bill account, Attach past expenses, Relationship Pause/End
+  // (RelationshipStatusPanel) and Schedule (ExpectedSchedulePanel) — this file adds no new money
+  // calculation, only the B1-B8 presentation and the row grammar (B2) they share with Home.
+  const ConnectionDetailBillType = ({ ba: baProp, onClose }) => {
+    // Re-resolve from the live billerAccounts[] array on every render — `baProp` is a snapshot
+    // captured by whoever called `setActiveBillerForAction(ba)`, and never refreshes itself, so
+    // reading documents (or anything else mutated via `setBillerAccounts`) straight off that prop
+    // would keep showing the pre-mutation value even after a successful write.
+    const ba = billerAccounts.find(x => String(x.id) === String(baProp.id)) || baProp;
+    const [subView, setSubView] = useState(null); // null | "allBills" | "payments" | "documents"
+    const [billsSubTab, setBillsSubTab] = useState("topay"); // "topay" | "paid" | "all" (B6)
+    const [viewingConnTxn, setViewingConnTxn] = useState(null); // a Payments & history row (B4/B7 — "opens its Transaction")
+    const [addingDoc, setAddingDoc] = useState(false);
+
+    const baBills = useMemo(() => bills.filter(b => String(b.billerAccountId) === String(ba.id)), [bills, ba.id]);
+    const rel = useMemo(() => [...membershipRelationships].filter(r => String(r.billerAccountId) === String(ba.id)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0] || null, [membershipRelationships, ba.id]);
+    const forLabel = getBillerOwnerLabel(ba);
+    const statusLabel = rel ? (rel.status === "active" ? "Active" : rel.status === "paused" ? "Paused" : "Ended") : "Active";
+
+    const openBill = useMemo(() => [...baBills].filter(b => b.status === "unpaid" && b.status !== "cancelled").sort((a, b) => String(a.dueDate || "9999").localeCompare(String(b.dueDate || "9999")))[0] || null, [baBills]);
+    const recentPaid = useMemo(() => [...baBills].filter(b => b.status === "paid").sort((a, b) => String(b.paidDate || "").localeCompare(String(a.paidDate || ""))).slice(0, 2), [baBills]);
+    const allOpenOrPaidCount = baBills.filter(b => b.status !== "cancelled").length;
+
+    // Payments and history (B4/B7) — every payment recorded against one of this connection's
+    // Bills (via its Contribution), plus any Transaction attached directly to the connection
+    // (billerLinkId) that wasn't already counted as a Bill payment — an advance, per B7's own
+    // wording ("not applied to a bill").
+    const paymentRows = useMemo(() => {
+      const billIds = new Set(baBills.map(b => String(b.id)));
+      const rows = [];
+      const countedTxnIds = new Set();
+      contributions.filter(c => c.obligationType === "bill" && billIds.has(String(c.obligationId))).forEach(c => {
+        const txn = txns.find(t => String(t.id) === String(c.txnId));
+        const bill = baBills.find(b => String(b.id) === String(c.obligationId));
+        countedTxnIds.add(String(c.txnId));
+        rows.push({ id: `c-${c.id}`, txn, amount: Number(c.amount || 0), date: txn?.date || null, label: bill ? `for ${getBillPeriodLabel(bill) || bill.name}` : "payment", isAdvance: false });
+      });
+      txns.filter(t => String(t.billerLinkId) === String(ba.id) && !countedTxnIds.has(String(t.id))).forEach(t => {
+        rows.push({ id: `t-${t.id}`, txn: t, amount: Number(t.amount || 0), date: t.date, label: "advance · not applied to a bill", isAdvance: true });
+      });
+      return rows.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    }, [baBills, contributions, txns, ba.id]);
+
+    // "Usually paid from" — not a stored field (none exists for a plain Bill connection); derived
+    // from whichever account most of this connection's real payments actually came out of, same
+    // data Payments & history itself reads, never a new domain field.
+    const usuallyPaidFrom = useMemo(() => {
+      const counts = {};
+      paymentRows.filter(r => !r.isAdvance && r.txn?.accId).forEach(r => { counts[r.txn.accId] = (counts[r.txn.accId] || 0) + 1; });
+      const topId = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0];
+      return topId ? accounts.find(a => String(a.id) === String(topId))?.name : null;
+    }, [paymentRows, accounts]);
+
+    const latestUnits = useMemo(() => [...baBills].filter(b => b.unitsConsumed != null).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0] || null, [baBills]);
+
+    // Documents (B5/B8) — connection-level documents (a new, minimal `ba.documents[]` field; no
+    // document store existed before this WP) plus every Bill's own attached photo, each tagged
+    // with its source so the list never hides which is which.
+    const docs = useMemo(() => [
+      ...(ba.documents || []).map(d => ({ ...d, source: "connection" })),
+      ...baBills.filter(b => b.imageBase64).map(b => ({ id: `bill-${b.id}`, name: `${getBillPeriodLabel(b) || b.name} bill`, dataUrl: b.imageBase64, source: "bill", addedAt: b.billDate || b.paidDate })),
+    ], [ba.documents, baBills]);
+
+    const openDoc = d => { if (String(d.dataUrl || "").startsWith("data:image")) setImageViewSrc(d.dataUrl); else window.open(d.dataUrl, "_blank"); };
+    const addDocFile = e => {
+      const f = e.target.files?.[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = ev => {
+        setBillerAccounts(prev => prev.map(x => x.id === ba.id ? { ...x, documents: [...(x.documents || []), { id: genId(), name: f.name || "Document", dataUrl: ev.target.result, addedAt: todayStr() }] } : x));
+        setAddingDoc(false);
+      };
+      r.readAsDataURL(f);
+    };
+
+    const rowBtn = { width: "100%",display: "flex",justifyContent: "space-between",alignItems: "center",minHeight: 56,padding: "12px 14px",background: T.card,border: `1px solid ${T.border}`,borderRadius: 14,cursor: "pointer",textAlign: "left",fontFamily: "Nunito,sans-serif",marginBottom: 8 };
+
+    // ── B3/B6 — All bills, tabbed (To pay / Paid / All), grouped by year, newest first.
+    if (subView === "allBills") {
+      const yearOf = b => { const d = b.dueDate || b.billDate || b.paidDate; const y = d ? Number(String(d).slice(0, 4)) : new Date().getFullYear(); return y; };
+      const live = baBills.filter(b => b.status !== "cancelled");
+      const topay = live.filter(b => b.status === "unpaid").sort((a, b) => String(a.dueDate || "9999").localeCompare(String(b.dueDate || "9999")));
+      const paid = live.filter(b => b.status === "paid").sort((a, b) => String(b.paidDate || "").localeCompare(String(a.paidDate || "")));
+      const all = [...topay, ...paid];
+      const shown = billsSubTab === "topay" ? topay : billsSubTab === "paid" ? paid : all;
+      const byYear = new Map();
+      shown.forEach(b => { const y = yearOf(b); if (!byYear.has(y)) byYear.set(y, []); byYear.get(y).push(b); });
+      const years = [...byYear.keys()].sort((a, b) => b - a);
+      return (
+        <div>
+          <div style={{ display: "flex",alignItems: "center",gap: 8,marginBottom: 12 }}>
+            <button data-testid="conn-subview-back" onClick={() => setSubView(null)} style={{ background: "none",border: "none",color: T.accent,fontSize: 16,cursor: "pointer",padding: 0 }}>‹</button>
+            <div style={{ color: T.text,fontSize: 15,fontWeight: 900 }}>All bills</div>
+          </div>
+          <div style={{ color: T.sub,fontSize: 11,marginBottom: 10 }}>{ba.name}{ba.billerId ? ` · ${billers.find(x => x.id === ba.billerId)?.name || ""}` : ""}</div>
+          <div style={{ display: "flex",gap: 6,marginBottom: 12 }}>
+            {[["topay", `To pay · ${topay.length}`], ["paid", `Paid · ${paid.length}`], ["all", `All · ${all.length}`]].map(([id, label]) => (
+              <button key={id} onClick={() => setBillsSubTab(id)} style={{ background: billsSubTab === id ? T.accentSoft : "none",border: `1px solid ${billsSubTab === id ? T.accent : T.border}`,borderRadius: 20,padding: "6px 12px",cursor: "pointer",fontSize: 11,fontWeight: 700,color: billsSubTab === id ? T.accent : T.sub }}>{label}</button>
+            ))}
+          </div>
+          {shown.length === 0 && (
+            <div style={{ textAlign: "center",padding: "24px 0" }}>
+              <div style={{ color: T.text,fontSize: 13,fontWeight: 800,marginBottom: 4 }}>{billsSubTab === "topay" ? "All bills paid" : "No bills here yet"}</div>
+              {billsSubTab === "topay" && <div style={{ color: T.sub,fontSize: 11.5 }}>Everything on {ba.name} is paid.</div>}
+            </div>
+          )}
+          {years.map(y => (
+            <div key={y} style={{ marginBottom: 14 }}>
+              <div style={{ color: T.sub,fontSize: 11,fontWeight: 800,marginBottom: 6 }}>{y}</div>
+              {byYear.get(y).map(b => {
+                const badge = getBillBadge(b, contributions);
+                const badgeText = getBadgeText(badge, b);
+                return (
+                  <button key={b.id} data-testid={`conn-bill-row-${b.id}`} onClick={() => setViewingBillId(b.id)} style={{ ...rowBtn,border: `1px solid ${badge.kind === "overdue" ? T.danger + "55" : T.border}` }}>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: "block",color: T.text,fontSize: 13,fontWeight: 800 }}>{getBillPeriodLabel(b) || b.name}</span>
+                      <span style={{ display: "block",color: T.sub,fontSize: 11,marginTop: 2 }}>{b.status === "paid" ? `Paid ${formatShortDate(b.paidDate) || b.paidDate || ""}` : `Due ${formatShortDate(b.dueDate) || b.dueDate || "—"}`}</span>
+                    </span>
+                    <span style={{ textAlign: "right",flexShrink: 0 }}>
+                      <span style={{ display: "block",color: T.text,fontSize: 13,fontWeight: 800 }}>{sym}{fmt(badge.balance.amount)}</span>
+                      <span style={{ display: "block",color: badge.kind === "overdue" ? T.danger : badge.kind === "paid" ? T.success : T.warn,fontSize: 10,fontWeight: 700,marginTop: 2 }}>{badgeText.text}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ── B4/B7 — Payments and history, as Transactions grouped by year, newest first.
+    if (subView === "payments") {
+      const byYear = new Map();
+      paymentRows.forEach(r => { const y = r.date ? Number(String(r.date).slice(0, 4)) : new Date().getFullYear(); if (!byYear.has(y)) byYear.set(y, []); byYear.get(y).push(r); });
+      const years = [...byYear.keys()].sort((a, b) => b - a);
+      const totalThisYear = paymentRows.filter(r => !r.isAdvance && String(r.date || "").startsWith(String(todayStr().slice(0, 4)))).reduce((s, r) => s + r.amount, 0);
+      return (
+        <div>
+          <div style={{ display: "flex",alignItems: "center",gap: 8,marginBottom: 12 }}>
+            <button data-testid="conn-subview-back" onClick={() => setSubView(null)} style={{ background: "none",border: "none",color: T.accent,fontSize: 16,cursor: "pointer",padding: 0 }}>‹</button>
+            <div style={{ color: T.text,fontSize: 15,fontWeight: 900 }}>Payments</div>
+          </div>
+          <div style={{ color: T.sub,fontSize: 11,marginBottom: 10 }}>{ba.name} ›</div>
+          {paymentRows.length === 0 ? (
+            <div style={{ textAlign: "center",padding: "24px 0" }}>
+              <div style={{ color: T.text,fontSize: 13,fontWeight: 800,marginBottom: 4 }}>No payments yet</div>
+              <div style={{ color: T.sub,fontSize: 11.5,marginBottom: 14 }}>Payments you record against this connection's bills appear here.</div>
+              <button onClick={() => { setAttachExpensesFor(ba); onClose(); }} style={{ background: T.purple + "22",border: `1px solid ${T.purple}33`,borderRadius: 14,padding: "10px 16px",cursor: "pointer",fontSize: 12,fontWeight: 800,color: T.purple,fontFamily: "Nunito,sans-serif" }}>🔗 Attach past expenses</button>
+            </div>
+          ) : (<>
+            <div style={{ color: T.sub,fontSize: 11.5,marginBottom: 10 }}>{sym}{fmt(totalThisYear)} paid this year · {paymentRows.filter(r => !r.isAdvance).length} payment{paymentRows.filter(r => !r.isAdvance).length === 1 ? "" : "s"}</div>
+            {years.map(y => (
+              <div key={y} style={{ marginBottom: 14 }}>
+                <div style={{ color: T.sub,fontSize: 11,fontWeight: 800,marginBottom: 6 }}>{y}</div>
+                {byYear.get(y).map(r => (
+                  <button key={r.id} data-testid={`conn-payment-row-${r.id}`} onClick={() => setViewingConnTxn(r)} style={rowBtn}>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: "block",color: T.text,fontSize: 13,fontWeight: 700 }}>{accounts.find(a => String(a.id) === String(r.txn?.accId))?.name || "Payment"}{r.txn?.paymentMethod ? ` · ${r.txn.paymentMethod}` : ""}</span>
+                      <span style={{ display: "block",color: T.sub,fontSize: 11,marginTop: 2 }}>{formatShortDate(r.date) || r.date || "—"} · {r.label}</span>
+                    </span>
+                    <span style={{ color: r.isAdvance ? T.sub : T.text,fontSize: 13,fontWeight: 800,flexShrink: 0 }}>−{sym}{fmt(r.amount)}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </>)}
+        </div>
+      );
+    }
+
+    // ── B5/B8 — Documents: connection-level plus whatever's attached to its bills.
+    if (subView === "documents") {
+      return (
+        <div>
+          <div style={{ display: "flex",justifyContent: "space-between",alignItems: "center",marginBottom: 12 }}>
+            <div style={{ display: "flex",alignItems: "center",gap: 8 }}>
+              <button data-testid="conn-subview-back" onClick={() => setSubView(null)} style={{ background: "none",border: "none",color: T.accent,fontSize: 16,cursor: "pointer",padding: 0 }}>‹</button>
+              <div style={{ color: T.text,fontSize: 15,fontWeight: 900 }}>Documents</div>
+            </div>
+            <label style={{ background: T.accentSoft,border: `1px solid ${T.accent}33`,borderRadius: 10,padding: "6px 12px",cursor: "pointer",fontSize: 11,fontWeight: 700,color: T.accent }}>+ Add<input data-testid="conn-doc-add-input" type="file" accept="image/*" style={{ display: "none" }} onChange={addDocFile}/></label>
+          </div>
+          <div style={{ color: T.sub,fontSize: 11,marginBottom: 10 }}>{ba.name} ›</div>
+          {docs.length === 0 ? (
+            <div style={{ textAlign: "center",padding: "24px 0" }}>
+              <div style={{ color: T.text,fontSize: 13,fontWeight: 800,marginBottom: 4 }}>No documents</div>
+              <div style={{ color: T.sub,fontSize: 11.5 }}>Add the agreement, a bill scan or a receipt. Photos attached to bills also show here.</div>
+            </div>
+          ) : docs.map(d => (
+            <button key={d.id} data-testid={`conn-doc-row-${d.id}`} onClick={() => openDoc(d)} style={rowBtn}>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: "block",color: T.text,fontSize: 13,fontWeight: 700,overflow: "hidden",textOverflow: "ellipsis",whiteSpace: "nowrap" }}>{d.name}</span>
+                <span style={{ display: "block",color: T.sub,fontSize: 11,marginTop: 2 }}>{d.source === "bill" ? `Linked to bill · ${formatShortDate(d.addedAt) || d.addedAt || ""}` : `Connection · ${formatShortDate(d.addedAt) || d.addedAt || ""}`}</span>
+              </span>
+              <span style={{ color: T.sub,fontSize: 14,flexShrink: 0 }}>›</span>
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    // ── B1 — main Connection Detail.
+    const openBadge = openBill ? getBillBadge(openBill, contributions) : null;
+    return (
+      <div>
+        <div style={{ display: "flex",gap: 8,marginBottom: 14 }}>
+          <button onClick={() => { setEditingBillerAccount(ba); onClose(); }} style={{ flex: 1,background: T.accentSoft,border: `1px solid ${T.accent}33`,borderRadius: 12,padding: "9px",cursor: "pointer",fontSize: 12,fontWeight: 700,color: T.accent,fontFamily: "Nunito,sans-serif" }}>✏️ Edit</button>
+        </div>
+        <div style={{ color: T.sub,fontSize: 11,marginBottom: 12 }}>For · {forLabel} · <span style={{ color: statusLabel === "Active" ? T.success : statusLabel === "Paused" ? T.warn : T.sub,fontWeight: 700 }}>{statusLabel}</span></div>
+
+        {baBills.length === 0 ? (
+          // H1 — a connection with no Bills yet.
+          <div style={{ background: T.card,border: `1px solid ${T.border}`,borderRadius: 16,padding: 18,textAlign: "center",marginBottom: 14 }}>
+            <div style={{ color: T.text,fontSize: 13,fontWeight: 800,marginBottom: 4 }}>No bills for {ba.name} yet</div>
+            <div style={{ color: T.sub,fontSize: 11.5,marginBottom: 12 }}>Add this month's bill, or attach payments you've already made.</div>
+            <div style={{ display: "flex",gap: 8,justifyContent: "center" }}>
+              <button onClick={() => { setDefaultBillerAccountId(ba.id); setShowAddBill(true); onClose(); }} style={{ background: T.info + "22",border: `1px solid ${T.info}33`,borderRadius: 12,padding: "9px 14px",cursor: "pointer",fontSize: 12,fontWeight: 800,color: T.info,fontFamily: "Nunito,sans-serif" }}>+ Add bill</button>
+              <button onClick={() => { setAttachExpensesFor(ba); onClose(); }} style={{ background: T.purple + "22",border: `1px solid ${T.purple}33`,borderRadius: 12,padding: "9px 14px",cursor: "pointer",fontSize: 12,fontWeight: 800,color: T.purple,fontFamily: "Nunito,sans-serif" }}>🔗 Attach past expenses</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {openBill && openBadge && (
+              <div style={{ background: `${openBadge.kind === "overdue" ? T.danger : T.warn}14`,border: `1px solid ${openBadge.kind === "overdue" ? T.danger : T.warn}44`,borderRadius: 16,padding: 16,marginBottom: 14 }}>
+                <div style={{ color: T.text,fontSize: 13,fontWeight: 800,marginBottom: 2 }}>{getBillPeriodLabel(openBill) || openBill.name}</div>
+                <div style={{ color: T.sub,fontSize: 11,marginBottom: 8 }}>{openBadge.kind === "overdue" ? `Due ${formatShortDate(openBill.dueDate) || openBill.dueDate} · ${openBadge.days} day${openBadge.days === 1 ? "" : "s"} overdue` : `Due ${formatShortDate(openBill.dueDate) || openBill.dueDate}`}</div>
+                <div style={{ color: T.text,fontSize: 20,fontWeight: 900 }}>{sym}{fmt(openBadge.balance.amount)}</div>
+                {openBadge.balance.paid > 0 && <div style={{ color: T.sub,fontSize: 11,marginTop: 2 }}>{sym}{fmt(openBadge.balance.paid)} of {sym}{fmt(openBadge.balance.amount)}</div>}
+                <div style={{ color: openBadge.kind === "overdue" ? T.danger : T.warn,fontSize: 11,fontWeight: 800,marginTop: 4 }}>{openBadge.kind === "overdue" ? "Overdue" : openBadge.balance.status === "partial" ? "Partially paid" : "Due"}</div>
+                <button data-testid="conn-record-payment" onClick={() => { setMarkingBillPaid(openBill); }} style={{ width: "100%",marginTop: 10,background: T.accent,border: "none",borderRadius: 12,padding: "11px",cursor: "pointer",fontSize: 13,fontWeight: 800,color: "#fff",fontFamily: "Nunito,sans-serif" }}>Record payment {sym}{fmt(openBadge.balance.remaining)}</button>
+              </div>
+            )}
+
+            <div style={{ display: "flex",justifyContent: "space-between",alignItems: "center",margin: "0 0 8px" }}>
+              <div style={{ color: T.text,fontSize: 13,fontWeight: 800 }}>Bills</div>
+              <button onClick={() => { setDefaultBillerAccountId(ba.id); setShowAddBill(true); onClose(); }} style={{ background: "none",border: "none",color: T.accent,fontSize: 11,fontWeight: 700,cursor: "pointer" }}>+ Add bill</button>
+            </div>
+            {recentPaid.map(b => {
+              const badge = getBillBadge(b, contributions);
+              return (
+                <button key={b.id} onClick={() => setViewingBillId(b.id)} style={rowBtn}>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: "block",color: T.text,fontSize: 13,fontWeight: 700 }}>{getBillPeriodLabel(b) || b.name}</span>
+                    <span style={{ display: "block",color: T.sub,fontSize: 11,marginTop: 2 }}>Paid {formatShortDate(b.paidDate) || b.paidDate || ""}</span>
+                  </span>
+                  <span style={{ textAlign: "right",flexShrink: 0 }}>
+                    <span style={{ display: "block",color: T.text,fontSize: 13,fontWeight: 800 }}>{sym}{fmt(badge.balance.amount)}</span>
+                    <span style={{ display: "block",color: T.success,fontSize: 10,fontWeight: 700,marginTop: 2 }}>Paid</span>
+                  </span>
+                </button>
+              );
+            })}
+            <button onClick={() => setSubView("allBills")} style={{ width: "100%",background: "none",border: "none",color: T.accent,fontSize: 12,fontWeight: 700,cursor: "pointer",textAlign: "right",padding: "4px 0 14px" }}>All bills · {allOpenOrPaidCount} ›</button>
+
+            <div style={{ color: T.text,fontSize: 13,fontWeight: 800,marginBottom: 8 }}>This connection</div>
+            <div style={{ background: T.card,border: `1px solid ${T.border}`,borderRadius: 16,padding: 14,marginBottom: 14 }}>
+              {rel ? (
+                <ExpectedSchedulePanel T={T} relationship={rel} targetLabel={getRelationshipTargetLabel(rel)}
+                  expected={getExpectedForRelationship(rel, bills)} sym={sym} fmt={fmt}
+                  onSetSchedule={input => setMembershipRelationships(prev => prev.map(x => x.id === rel.id ? setRelationshipSchedule(x, input) : x))}
+                  onConfirm={expected => confirmExpectedToBill(expected)}/>
+              ) : (
+                <button onClick={() => { setAttachBillerTarget(ba); onClose(); }} style={{ display: "block",width: "100%",textAlign: "left",background: "none",border: `1px dashed ${T.borderStrong}`,borderRadius: 14,padding: "10px 14px",cursor: "pointer",color: T.accent,fontSize: 12,fontWeight: 700,marginBottom: 8 }}>+ Attach to person/group to set a schedule</button>
+              )}
+              {usuallyPaidFrom && (
+                <div style={{ display: "flex",justifyContent: "space-between",padding: "6px 0" }}>
+                  <span style={{ color: T.sub,fontSize: 11 }}>Usually paid from</span>
+                  <span style={{ color: T.text,fontSize: 12,fontWeight: 700 }}>{usuallyPaidFrom}</span>
+                </div>
+              )}
+              {latestUnits && (
+                <div style={{ display: "flex",justifyContent: "space-between",padding: "6px 0" }}>
+                  <span style={{ color: T.sub,fontSize: 11 }}>Usage</span>
+                  <span style={{ color: T.text,fontSize: 12,fontWeight: 700 }}>{latestUnits.unitsConsumed} units{getBillPeriodLabel(latestUnits) ? ` in ${getBillPeriodLabel(latestUnits)}` : ""}</span>
+                </div>
+              )}
+            </div>
+
+            <button onClick={() => setSubView("payments")} style={rowBtn}>
+              <span style={{ color: T.text,fontSize: 13,fontWeight: 700 }}>Payments and history</span>
+              <span style={{ color: T.sub,fontSize: 11 }}>{paymentRows.filter(r => !r.isAdvance).length} payment{paymentRows.filter(r => !r.isAdvance).length === 1 ? "" : "s"} ›</span>
+            </button>
+            <button onClick={() => setSubView("documents")} style={rowBtn}>
+              <span style={{ color: T.text,fontSize: 13,fontWeight: 700 }}>Documents · {docs.length}</span>
+              <span style={{ color: T.sub,fontSize: 11 }}>›</span>
+            </button>
+            <button onClick={() => { setAttachExpensesFor(ba); onClose(); }} style={{ ...rowBtn,justifyContent: "flex-start",gap: 8 }}>
+              <span style={{ color: T.purple,fontSize: 13,fontWeight: 700 }}>🔗 Attach past expenses</span>
+            </button>
+          </>
+        )}
+
+        {rel && (
+          <RelationshipStatusPanel T={T} relationship={rel} targetLabel={getRelationshipTargetLabel(rel)}
+            onPause={(reason, effectiveDate) => setMembershipRelationships(prev => prev.map(x => x.id === rel.id ? pauseRelationship(x, reason, effectiveDate) : x))}
+            onResume={effectiveDate => setMembershipRelationships(prev => prev.map(x => x.id === rel.id ? resumeRelationship(x, effectiveDate) : x))}
+            onEnd={(reason, effectiveDate) => setMembershipRelationships(prev => prev.map(x => x.id === rel.id ? endRelationship(x, reason, effectiveDate) : x))}/>
+        )}
+        <button onClick={() => {
+          const blockers = getBillerAccountDeleteBlockers(ba.id, { bills, memberships, feePayments, txns });
+          if (blockers.total > 0) { askConfirm(`Cannot delete: ${ba.name} is still linked to ${describeBillerAccountDeleteBlockers(blockers)}. Remove or relink those first.`, null); return; }
+          askConfirm(`Delete ${ba.name}?`, () => { setBillerAccounts(prev => prev.filter(x => x.id !== ba.id)); onClose(); });
+        }} style={{ width: "100%",background: "none",border: `1px solid ${T.danger}44`,borderRadius: 12,padding: "10px",cursor: "pointer",fontSize: 12,fontWeight: 700,color: T.danger,fontFamily: "Nunito,sans-serif",marginTop: 4 }}>🗑 Delete Account</button>
+
+        {viewingConnTxn && (
+          <div onClick={e => { if (e.target === e.currentTarget) setViewingConnTxn(null); }} style={{ position: "fixed",inset: 0,background: "rgba(0,0,0,0.75)",zIndex: 320,display: "flex",alignItems: "flex-end",justifyContent: "center" }}>
+            <div style={{ background: T.card,borderRadius: "22px 22px 0 0",padding: "20px 16px 40px",width: "100%",maxWidth: 430 }}>
+              <div style={{ display: "flex",justifyContent: "space-between",alignItems: "center",marginBottom: 14 }}>
+                <div style={{ color: T.text,fontSize: 15,fontWeight: 900 }}>Transaction</div>
+                <button onClick={() => setViewingConnTxn(null)} style={{ background: T.input,border: "none",color: T.sub,borderRadius: 8,padding: "5px 12px",cursor: "pointer",fontSize: 16 }}>x</button>
+              </div>
+              <div style={{ color: T.text,fontSize: 22,fontWeight: 900,marginBottom: 6 }}>{sym}{fmt(viewingConnTxn.amount)}</div>
+              <div style={{ color: T.sub,fontSize: 12,marginBottom: 10 }}>{formatShortDate(viewingConnTxn.date) || viewingConnTxn.date || "—"} · {viewingConnTxn.label}</div>
+              <div style={{ display: "flex",justifyContent: "space-between",padding: "8px 0",borderTop: `1px solid ${T.border}` }}>
+                <span style={{ color: T.sub,fontSize: 12 }}>Account</span>
+                <span style={{ color: T.text,fontSize: 12,fontWeight: 700 }}>{accounts.find(a => String(a.id) === String(viewingConnTxn.txn?.accId))?.name || "—"}</span>
+              </div>
+              {viewingConnTxn.txn?.paymentMethod && (
+                <div style={{ display: "flex",justifyContent: "space-between",padding: "8px 0",borderTop: `1px solid ${T.border}` }}>
+                  <span style={{ color: T.sub,fontSize: 12 }}>Method</span>
+                  <span style={{ color: T.text,fontSize: 12,fontWeight: 700 }}>{viewingConnTxn.txn.paymentMethod}</span>
+                </div>
+              )}
+              {viewingConnTxn.txn?.imageBase64 && <img src={viewingConnTxn.txn.imageBase64} alt="receipt" onClick={() => setImageViewSrc(viewingConnTxn.txn.imageBase64)} style={{ width: "100%",borderRadius: 10,maxHeight: 160,objectFit: "cover",marginTop: 10,cursor: "zoom-in" }}/>}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const BillsPage = () => {
     const [billsTab, setBillsTab] = useState("bills");
     return (
@@ -16086,7 +16688,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               that name, showing connections first, undercut that. Relabelled to what it
               actually shows. */}
           {[["bills","Bills"],["mybills","Billers"]].map(([t,l])=>(
-            <button key={t} onClick={()=>setBillsTab(t)} style={{ flex:1,padding:"14px 8px",background:"none",border:"none",borderBottom:`2px solid ${billsTab===t?T.accent:"transparent"}`,cursor:"pointer",fontSize:13,fontWeight:800,color:billsTab===t?T.accent:T.sub,fontFamily:"Nunito,sans-serif",transition:"all 0.2s" }}>{l}</button>
+            <button key={t} data-testid={`payments-subtab-${t}`} onClick={()=>setBillsTab(t)} style={{ flex:1,padding:"14px 8px",background:"none",border:"none",borderBottom:`2px solid ${billsTab===t?T.accent:"transparent"}`,cursor:"pointer",fontSize:13,fontWeight:800,color:billsTab===t?T.accent:T.sub,fontFamily:"Nunito,sans-serif",transition:"all 0.2s" }}>{l}</button>
           ))}
         </div>
 
@@ -16106,139 +16708,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
             </div>
 
-            {/* Bills Home — Due Soon (list, with amounts) → Quick Summary → Favourite Billers
-                (list, with connection counts) → Browse Categories below. Non-favourited billers
-                not due soon are reached via category browse (tapping a type already shows its
-                existing billers), not dumped in an exhaustive list here. */}
-            {billerAccounts.length>0&&(()=>{
-              const filtered = billerAccounts.filter(ba=>!billSearch||(ba.name+ba.type+ba.consumerNo+(ba.provider||"")).toLowerCase().includes(billSearch.toLowerCase()));
-              const shelled = filtered.filter(ba=>ba.billerId);
-              const unshelled = filtered.filter(ba=>!ba.billerId);
-              const shellGroups = {};
-              shelled.forEach(ba=>{ if(!shellGroups[ba.billerId]) shellGroups[ba.billerId]=[]; shellGroups[ba.billerId].push(ba); });
-              const in7 = toLocalDateStr(new Date(Date.now()+7*24*60*60*1000));
-              const todayStrV = todayStr();
-              const dueSoonText = (dueDate) => {
-                if(!dueDate) return "";
-                if(dueDate===todayStrV) return "Due Today";
-                if(dueDate===toLocalDateStr(new Date(Date.now()+86400000))) return "Due Tomorrow";
-                if(dueDate<todayStrV) return "Overdue";
-                return `Due ${formatShortDate(dueDate)||dueDate}`;
-              };
-              const items = [
-                ...Object.entries(shellGroups).map(([billerId,accs])=>{
-                  const shell = billers.find(b=>b.id===billerId);
-                  if(!shell) return null;
-                  // CC-linked connection — due amount/date comes from the account's own statement
-                  // cycle (getCardSummary), not the bills array, since card statements aren't
-                  // stored as Bill records.
-                  const ccAcc = accs.find(a=>a.accId) ? accounts.find(a=>a.id===accs.find(x=>x.accId).accId) : null;
-                  if(ccAcc){
-                    const summary = getCardSummary(ccAcc, accounts, txns, toDateOnly);
-                    const hasDue = summary?.currentDue>0;
-                    const needsAttention = Boolean(hasDue && summary.daysToDue!=null && summary.daysToDue<=7);
-                    return { key:"shell-"+billerId, billerId, icon:getBillerIcon(shell.type), name:shell.name, connLabel:shell.type, unpaidCount:hasDue?1:0, pinned:Boolean(shell.pinned), needsAttention, amount:hasDue?Number(summary.currentDue):0, dueText:hasDue?dueSoonText(ccAcc.dueDate||summary.dueOn):"", onClick:()=>setActiveBillerForAction(accs[0]) };
-                  }
-                  const allBills = bills.filter(b=>accs.some(a=>String(a.id)===String(b.billerAccountId)));
-                  const unpaidCount = allBills.filter(b=>b.status==="unpaid").length;
-                  const nextUnpaid = allBills.filter(b=>b.status==="unpaid"&&b.dueDate).sort((a,b2)=>a.dueDate.localeCompare(b2.dueDate))[0];
-                  // WP15 (Membership Regression Audit) — a membership whose own relationship is
-                  // Paused/Ended must not keep signaling a renewal here either, same WP13 gate
-                  // Outlook already applies; filtered per-account (not per-shell) since the shell
-                  // can group several Biller Accounts, each with its own independent relationship.
-                  const memsForShell = memberships.filter(m=>accs.some(a=>String(a.id)===String(m.billerAccountId)) && hasLiveMembershipRelationship(m.billerAccountId, membershipRelationships));
-                  // Fix (audit finding): was a 7-day-forward-only nudge with no overdue/expired
-                  // state at all once a period lapsed. getMembershipRenewalStatus adds that side
-                  // without inventing a new Bill/Expected representation for memberships (a
-                  // separate, still-open decision) — this only extends the existing "how close"
-                  // read.
-                  const memStatus = getMembershipRenewalStatus(memsForShell.map(m=>({ m, period:getCurrentPeriod(m) })), todayStrV);
-                  const needsAttention = Boolean((nextUnpaid&&nextUnpaid.dueDate<=in7) || memStatus);
-                  const amount = nextUnpaid ? Number(nextUnpaid.amount||0) : (memStatus ? Number(memStatus.m.amount||0) : 0);
-                  const dueText = nextUnpaid ? dueSoonText(nextUnpaid.dueDate) : (memStatus ? (memStatus.kind==="overdue" ? `Overdue ${memStatus.days}d` : `Renewal in ${memStatus.days} days`) : "");
-                  return { key:"shell-"+billerId, billerId, icon:getBillerIcon(shell.type), name:shell.name, connLabel:accs.length>1?`${accs.length} Connections`:shell.type, unpaidCount, pinned:Boolean(shell.pinned), needsAttention, amount, dueText, onClick:()=>setActiveBillerShell(shell) };
-                }).filter(Boolean),
-                ...unshelled.map(ba=>{
-                  const billsForAcc = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
-                  const nextUnpaid = billsForAcc.filter(b=>b.status==="unpaid"&&b.dueDate).sort((a,b2)=>a.dueDate.localeCompare(b2.dueDate))[0];
-                  // Fix (audit finding): unshelled accounts — most personal Gym/Club/Society/Rental
-                  // ones, since a billerId shell is only for known catalog brands — previously got
-                  // NO membership renewal signal at all, shelled or not. Same helper as above.
-                  // WP15 — same lifecycle gate as the shelled branch above.
-                  const memsForAcc = hasLiveMembershipRelationship(ba.id, membershipRelationships) ? memberships.filter(m=>String(m.billerAccountId)===String(ba.id)) : [];
-                  const memStatus = memsForAcc.length ? getMembershipRenewalStatus(memsForAcc.map(m=>({ m, period:getCurrentPeriod(m) })), todayStrV) : null;
-                  const needsAttention = Boolean((nextUnpaid&&nextUnpaid.dueDate<=in7) || memStatus);
-                  const amount = nextUnpaid ? Number(nextUnpaid.amount||0) : (memStatus ? Number(memStatus.m.amount||0) : 0);
-                  const dueText = nextUnpaid ? dueSoonText(nextUnpaid.dueDate) : (memStatus ? (memStatus.kind==="overdue" ? `Overdue ${memStatus.days}d` : `Renewal in ${memStatus.days} days`) : "");
-                  return { key:"acc-"+ba.id, billerId:null, icon:getBillerIcon(ba.type), name:ba.name, connLabel:ba.type, unpaidCount:billsForAcc.filter(b=>b.status==="unpaid").length, pinned:false, needsAttention, amount, dueText, onClick:()=>setActiveBillerForAction(ba) };
-                }),
-              ];
-              const dueSoon = items.filter(i=>i.needsAttention);
-              const favourites = items.filter(i=>i.pinned && !i.needsAttention);
-              const totalBills = bills.length;
-              const paidCount = bills.filter(b=>b.status==="paid").length;
-              const upcomingCount = bills.filter(b=>b.status==="unpaid"&&(!b.dueDate||b.dueDate>=todayStrV)).length;
-              const overdueCount = bills.filter(b=>b.status==="unpaid"&&b.dueDate&&b.dueDate<todayStrV).length;
-              const renderListRow = (item) => (
-                <div key={item.key} onClick={item.onClick} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",cursor:"pointer",borderBottom:`1px solid ${T.border}` }}>
-                  <div style={{ display:"flex",alignItems:"center",gap:12,flex:1,minWidth:0 }}>
-                    {item.billerId&&<button onClick={e=>{ e.stopPropagation(); setBillers(prev=>prev.map(b=>b.id===item.billerId?{...b,pinned:!b.pinned}:b)); }} style={{ background:"none",border:"none",cursor:"pointer",fontSize:14,color:item.pinned?T.accent:T.border,padding:0,flexShrink:0 }}>{item.pinned?"★":"☆"}</button>}
-                    <span style={{ fontSize:22,flexShrink:0 }}>{item.icon}</span>
-                    <div style={{ minWidth:0 }}>
-                      <div style={{ color:T.text,fontSize:13,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{item.name}</div>
-                      <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{item.dueText || item.connLabel}</div>
-                    </div>
-                  </div>
-                  {item.amount>0&&<div style={{ color:item.dueText?.startsWith("Overdue")?T.danger:T.text,fontSize:13,fontWeight:800,flexShrink:0,marginLeft:8 }}>{sym}{fmt(item.amount)}</div>}
-                </div>
-              );
-              return (
-                <>
-                  {dueSoon.length>0&&(
-                    <div style={{ margin:"8px 16px",background:T.danger+"0c",border:`1px solid ${T.danger}33`,borderRadius:16,overflow:"hidden" }}>
-                      <div style={{ color:T.danger,fontSize:12,fontWeight:900,padding:"12px 16px 4px" }}>⚠ Due Soon ({dueSoon.length})</div>
-                      {dueSoon.map(renderListRow)}
-                    </div>
-                  )}
-
-                  <div style={{ margin:"16px 16px 8px" }}>
-                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>QUICK SUMMARY</div>
-                    <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8 }}>
-                      {[["Bills",totalBills,T.text],["Paid",paidCount,T.success],["Upcoming",upcomingCount,T.warn],["Overdue",overdueCount,T.danger]].map(([label,count,color])=>(
-                        <StatCard key={label} value={count} label={label} color={color} T={T} valueSize={18}/>
-                      ))}
-                    </div>
-                  </div>
-
-                  {favourites.length>0&&(
-                    <div style={{ margin:"8px 16px",background:T.card,border:`1px solid ${T.border}`,borderRadius:16,overflow:"hidden" }}>
-                      <div style={{ color:T.text,fontSize:12,fontWeight:900,padding:"12px 16px 4px" }}>★ Favourite Providers</div>
-                      {favourites.map(renderListRow)}
-                    </div>
-                  )}
-
-                  {!billerAccounts.length&&null}
-                  <div style={{ padding:"4px 16px 8px",textAlign:"right" }}>
-                    {/* Payments v2 (WP18) A1/A3/D1 — the service catalogue (every type, connected
-                        or not) no longer renders inline on Payments Home. "+ Add / Activate" is
-                        now the only entry point into it; this just opens that catalogue in a
-                        sheet instead of browsing it as a grid on the main scroll. */}
-                    <button onClick={()=>setShowAddActivateSheet(true)} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>+ Add / Activate</button>
-                  </div>
-                </>
-              );
-            })()}
-
-            {billerAccounts.length===0 && (
-              /* A3 — Nothing connected yet. No empty category headings, no catalogue grid here
-                 either: the only way in is the same + Add / Activate entry point. */
-              <div style={{ padding:"40px 24px",textAlign:"center" }}>
-                <div style={{ fontSize:40,marginBottom:12 }}>💳</div>
-                <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:6 }}>Nothing connected yet</div>
-                <div style={{ color:T.sub,fontSize:12.5,lineHeight:1.5,marginBottom:18 }}>Add the bills and services you pay for. They show here grouped by type, with anything due at the top.</div>
-                <button onClick={()=>setShowAddActivateSheet(true)} style={{ background:T.accent,border:"none",borderRadius:14,padding:"12px 20px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>+ Add / Activate</button>
-              </div>
-            )}
+            <PaymentsHomeSection onViewAllBills={()=>setBillsTab("bills")}/>
           </div>
         )}
 
@@ -18929,6 +19399,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const isSchoolLinkedAccount = ba.type==="School Fees" && schoolRelationships.some(r=>r.billerAccountId===ba.id && isSchoolRelationshipCurrent(r.statusHistory, todayStr()));
           const baMemberships = memberships.filter(m=>m.billerAccountId===ba.id);
           const baBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
+          // Payments v2 (WP18b) B1-B8 scope line: the new Connection Detail only replaces this
+          // sheet's body for a plain Bill-type connection (BILL_TYPES minus the recharge
+          // categories, minus Credit Card — exactly the brief's own boundary). Membership,
+          // Insurance (never reaches here — WP18 already keeps it out of billerAccounts),
+          // Prepaid/recharge and Credit-Card-linked connections all keep this sheet's existing,
+          // untouched rendering below.
+          const isPlainBillConnection = actionType==="bill" && !isRechargeBiller(ba.type) && ba.type!=="Credit Card" && !ba.accId;
           return (
             <div onClick={e=>{ if(e.target===e.currentTarget) setActiveBillerForAction(null); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:300,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
               <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
@@ -18940,8 +19417,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       <div style={{ color:T.sub,fontSize:11 }}>{ba.billerId&&billers.find(b=>b.id===ba.billerId)?.name || ba.type}{ba.consumerNo?` · #${ba.consumerNo}`:""}</div>
                     </div>
                   </div>
-                  <button onClick={()=>setActiveBillerForAction(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>x</button>
+                  <button data-testid="connection-sheet-close" onClick={()=>setActiveBillerForAction(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>x</button>
                 </div>
+                {isPlainBillConnection ? (
+                  <ConnectionDetailBillType ba={ba} onClose={()=>setActiveBillerForAction(null)}/>
+                ) : (<>
                 {/* Arth 2.0 IA step 5 — every Financial Relationship this Provider has (1:N,
                     step 1-4), each with its own status and Pause/Resume/End. Generalizes the
                     action UI that used to exist only inside MembershipDetailModal. School Fees
@@ -19423,6 +19903,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     </div>
                   );
                 })()}
+                </>)}
               </div>
             </div>
           );
