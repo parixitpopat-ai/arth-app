@@ -1019,6 +1019,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [preselectedBillerId, setPreselectedBillerId] = useState("");
   const [showAddBillerModal, setShowAddBillerModal] = useState(false);
   const [addBillerPresetType, setAddBillerPresetType] = useState("");
+  // Payments v2 (WP18) — A1/A3/D1: the service catalogue (the type grid below) moves behind
+  // one explicit "+ Add / Activate" entry point instead of being browsable inline on Payments
+  // Home. This is the only state this screen needs to add — every catalogue tap's own routing
+  // (Insurance/School Fees/Credit Card/generic Add Biller/category accounts view) is unchanged.
+  const [showAddActivateSheet, setShowAddActivateSheet] = useState(false);
   const [activeBillerShell, setActiveBillerShell] = useState(null);
   const [editingBillerShell, setEditingBillerShell] = useState(null);
   const [showAddYouOwe, setShowAddYouOwe] = useState(null); // holds personId when open
@@ -15932,6 +15937,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const BILL_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Hospital","Other","Mobile Prepaid","Mobile Postpaid","Credit Card","Recurring Deposit","NPS","Municipal Tax","Municipal Services","OTT / Streaming"];
   const BILLER_TYPES = ["Electricity","Water","LPG Gas","Piped Gas","Broadband","Landline","Cable TV","Mobile Postpaid","Mobile Prepaid","DTH","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","OTT / Streaming","Insurance","Credit Card","Recurring Deposit","NPS","School Fees","Education Fees","Municipal Tax","Municipal Services","Society Maintenance","Gym / Fitness","Club Membership","Hospital","Rental","Prepaid Meter","eChallan","Fleet Card","Donation","B2B","Other Subscription","Other"];
   const HYBRID_TYPES = ["Mobile Postpaid","Mobile Prepaid","OTT / Streaming","NPS","Recurring Deposit","Loan EMI","Credit Card","Municipal Tax","Municipal Services"];
+  // Payments v2 (WP18) — real bug fix: Insurance, School Fees and Education Fees, and Credit Card
+  // don't participate in the generic billers[]/billerAccounts[] hierarchy at all — each has its
+  // own dedicated flow (Insurance screen, School Fees "+Add School Year", Credit Card add-account)
+  // that creates the real relationship/policy/schedule behind it. AddBillerModal/BillerAccountModal
+  // used to render the full, unfiltered BILLER_TYPES list, letting one of these be picked directly
+  // here and creating an orphan billers[]/billerAccounts[] row with nothing real behind it — the
+  // exact same reasoning the category-tile click handler below (Payments Home) already applies.
+  const PICKABLE_BILLER_TYPES = BILLER_TYPES.filter(t => !["Insurance","School Fees","Education Fees","Credit Card"].includes(t));
   const getBillerActionType = type => {
     if(MEMBERSHIP_TYPES.includes(type)) return "membership";
     if(BILL_TYPES.includes(type)) return "bill";
@@ -16066,7 +16079,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       <div style={{ padding:"0 0 120px" }}>
         {/* Tab bar */}
         <div style={{ display:"flex",background:T.card,borderBottom:`1px solid ${T.border}`,position:"sticky",top:0,zIndex:10 }}>
-          {[["bills","Bills"],["mybills","+ Add / Activate"]].map(([t,l])=>(
+          {/* Payments v2 (WP18) — this tab previously doubled as "+ Add / Activate" itself
+              (a leftover rename from an earlier WP), which collided with the real + Add /
+              Activate entry point now inside it (below) and contradicted the spec's own rule
+              that + Add / Activate is the ONE way into the catalogue — a whole tab sharing
+              that name, showing connections first, undercut that. Relabelled to what it
+              actually shows. */}
+          {[["bills","Bills"],["mybills","Billers"]].map(([t,l])=>(
             <button key={t} onClick={()=>setBillsTab(t)} style={{ flex:1,padding:"14px 8px",background:"none",border:"none",borderBottom:`2px solid ${billsTab===t?T.accent:"transparent"}`,cursor:"pointer",fontSize:13,fontWeight:800,color:billsTab===t?T.accent:T.sub,fontFamily:"Nunito,sans-serif",transition:"all 0.2s" }}>{l}</button>
           ))}
         </div>
@@ -16200,40 +16219,57 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
                   {!billerAccounts.length&&null}
                   <div style={{ padding:"4px 16px 8px",textAlign:"right" }}>
-                    <button onClick={()=>setShowAddBillerModal(true)} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>+ Add Provider</button>
+                    {/* Payments v2 (WP18) A1/A3/D1 — the service catalogue (every type, connected
+                        or not) no longer renders inline on Payments Home. "+ Add / Activate" is
+                        now the only entry point into it; this just opens that catalogue in a
+                        sheet instead of browsing it as a grid on the main scroll. */}
+                    <button onClick={()=>setShowAddActivateSheet(true)} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>+ Add / Activate</button>
                   </div>
                 </>
               );
             })()}
 
-            {/* ALL SERVICES divider */}
-            <div style={{ display:"flex",alignItems:"center",gap:10,padding:"12px 16px 8px" }}>
-              <div style={{ flex:1,height:1,background:T.border }}/>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>ALL SERVICES</div>
-              <div style={{ flex:1,height:1,background:T.border }}/>
-            </div>
+            {billerAccounts.length===0 && (
+              /* A3 — Nothing connected yet. No empty category headings, no catalogue grid here
+                 either: the only way in is the same + Add / Activate entry point. */
+              <div style={{ padding:"40px 24px",textAlign:"center" }}>
+                <div style={{ fontSize:40,marginBottom:12 }}>💳</div>
+                <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:6 }}>Nothing connected yet</div>
+                <div style={{ color:T.sub,fontSize:12.5,lineHeight:1.5,marginBottom:18 }}>Add the bills and services you pay for. They show here grouped by type, with anything due at the top.</div>
+                <button onClick={()=>setShowAddActivateSheet(true)} style={{ background:T.accent,border:"none",borderRadius:14,padding:"12px 20px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>+ Add / Activate</button>
+              </div>
+            )}
+          </div>
+        )}
 
-            {/* Service categories grid */}
-            {[
-              { label:"Recharge", types:["Fastag","Mobile Postpaid","Mobile Prepaid","DTH","Broadband","Landline","Cable TV","Metro Recharge","NCMC Recharge","EV Recharge"] },
-              { label:"Utility Bills", types:["Electricity","LPG Gas","Piped Gas","Water"] },
-              { label:"Finances", types:["Credit Card","Recurring Deposit","NPS","Insurance","Forex"] },
-              { label:"Education & Fitness", types:["School Fees","Education Fees","Gym / Fitness","Club Membership","Hospital"] },
-              { label:"Others", types:["Donation","Municipal Services","Municipal Tax","Society Maintenance","Rental","Prepaid Meter","eChallan","Fleet Card","B2B","Other Subscription","Other"] },
-            ].map(cat=>{
-              const filtered2 = billSearch ? cat.types.filter(t=>t.toLowerCase().includes(billSearch.toLowerCase())) : cat.types;
-              if(filtered2.length===0) return null;
-              return (
-                <div key={cat.label} style={{ padding:"8px 16px 4px" }}>
+        {/* Payments v2 (WP18) D1 — Add / Activate: the service catalogue, now reached only from
+            here (the one explicit entry point), never browsed inline on Payments Home. Every
+            tile's own routing (Insurance/School Fees/Credit Card/generic Add Biller/category
+            accounts view) is unchanged from before — only where it's reachable from changed. */}
+        {showAddActivateSheet && (
+          <div onClick={e=>{ if(e.target===e.currentTarget) setShowAddActivateSheet(false); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:305,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+            <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+                <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Add / Activate</div>
+                <button onClick={()=>setShowAddActivateSheet(false)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+              </div>
+              {[
+                { label:"Recharge", types:["Fastag","Mobile Postpaid","Mobile Prepaid","DTH","Broadband","Landline","Cable TV","Metro Recharge","NCMC Recharge","EV Recharge"] },
+                { label:"Utility Bills", types:["Electricity","LPG Gas","Piped Gas","Water"] },
+                { label:"Finances", types:["Credit Card","Recurring Deposit","NPS","Insurance","Forex"] },
+                { label:"Education & Fitness", types:["School Fees","Education Fees","Gym / Fitness","Club Membership","Hospital"] },
+                { label:"Others", types:["Donation","Municipal Services","Municipal Tax","Society Maintenance","Rental","Prepaid Meter","eChallan","Fleet Card","B2B","Other Subscription","Other"] },
+              ].map(cat=>(
+                <div key={cat.label} style={{ padding:"8px 0 4px" }}>
                   <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:12 }}>{cat.label}</div>
                   <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12 }}>
-                    {filtered2.map(type=>{
+                    {cat.types.map(type=>{
                       const billersOfType = billers.filter(b=>b.type===type);
                       const accsOfType = billerAccounts.filter(ba=>ba.type===type);
                       const unpaid = accsOfType.reduce((sum,ba)=>sum+bills.filter(b=>String(b.billerAccountId)===String(ba.id)&&b.status==="unpaid").length,0);
-                      const actionType = getBillerActionType(type);
                       return (
                         <div key={type} onClick={()=>{
+                          setShowAddActivateSheet(false);
                           // Insurance and School/Education Fees don't participate in the
                           // billerAccounts hierarchy (neither writes to billerAccountId in
                           // practice) — routing them into the generic flow would be a dead end.
@@ -16253,15 +16289,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           }
                         }} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:6,cursor:"pointer",position:"relative" }}>
                           {unpaid>0&&<div style={{ position:"absolute",top:-4,right:4,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 5px",fontSize:8,fontWeight:800 }}>{unpaid}</div>}
-                          <div style={{ width:56,height:56,background:T.card,borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,border:`1px solid ${T.border}` }}>{getBillerIcon(type)}</div>
+                          <div style={{ width:56,height:56,background:T.input,borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,border:`1px solid ${T.border}` }}>{getBillerIcon(type)}</div>
                           <div style={{ color:T.sub,fontSize:9,fontWeight:600,textAlign:"center",lineHeight:1.2 }}>{type}</div>
                         </div>
                       );
                     })}
                   </div>
                 </div>
-              );
-            })}
+              ))}
+            </div>
           </div>
         )}
 
@@ -17143,7 +17179,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
               ) : (
                 <div style={{ display:"flex",flexWrap:"wrap",gap:8 }}>
-                  {BILLER_TYPES.map(t=>{
+                  {PICKABLE_BILLER_TYPES.map(t=>{
                     const isSelected = type===t;
                     return (
                       <button key={t} onClick={()=>{ setType(t); setShowTypePicker(false); }} style={{ display:"flex",alignItems:"center",gap:5,background:isSelected?T.accent+"22":T.input,border:`1px solid ${isSelected?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>
@@ -17268,7 +17304,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
               ) : (
                 <div style={{ display:"flex",flexWrap:"wrap",gap:8 }}>
-                  {BILLER_TYPES.map(t=>{
+                  {PICKABLE_BILLER_TYPES.map(t=>{
                     const isSelected = baType===t;
                     return (
                       <button key={t} onClick={()=>setBaType(t)} style={{ display:"flex",alignItems:"center",gap:5,background:isSelected?T.accent+"22":T.input,border:`1px solid ${isSelected?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:isSelected?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>

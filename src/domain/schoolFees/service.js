@@ -29,7 +29,7 @@
 //   untouched; this file only computes how that payment distributes
 //   across the selected periods once a real transaction exists.
 
-import { generateFeePeriods } from "./periodGeneration.js";
+import { generateFeePeriods, buildManualFeePeriods } from "./periodGeneration.js";
 import {
   declareFeePeriodStartingState,
   getPeriodsNeedingDeclaration,
@@ -54,17 +54,59 @@ export { getPeriodsNeedingDeclaration };
  * fee periods in the same step. Each new school year is its own schedule
  * — this function never looks at or touches any other schedule.
  *
- * @param {Object} input - { billerAccountId, personId, schoolYearStart, schoolYearEnd, rateRules }
+ * Two input shapes, both still "this function never looks at any other
+ * schedule":
+ *
+ * 1. LEGACY (unchanged behavior, kept for backward compatibility with
+ *    however existing callers/data already use this):
+ *    { billerAccountId, personId, schoolYearStart, schoolYearEnd, rateRules }
+ *    — generates one period per calendar month via generateFeePeriods,
+ *    exactly as before.
+ *
+ * 2. MANUAL PERIODS (Payments v2 / WP18 — the real creation path going
+ *    forward; no frequency/cycle concept at all):
+ *    { billerAccountId, personId, schoolName, periods }
+ *    where periods is the caller-supplied list buildManualFeePeriods takes
+ *    — each an arbitrary-length {label?, periodStart, periodEnd,
+ *    obligationAmount, kind?}. schoolYearStart/schoolYearEnd are derived
+ *    from the supplied periods' own min/max dates (purely for display/
+ *    sorting — e.g. "latest schoolYearEnd" — nothing downstream treats them
+ *    as implying calendar-month structure). rateRules is stored as null:
+ *    a manually-created schedule has no rate-rule concept to reconcile
+ *    against later (editing one of its periods goes through
+ *    editFeePeriodObligationAmount directly, per period, same as any other
+ *    schedule's already-settled-period correction path).
+ *
+ * @param {Object} input
  * @param {Function} genId - real id generator, injected (App.jsx's own genId)
+ * @param {string} [todayStr] - "YYYY-MM-DD", injectable for deterministic
+ *   tests of the manual-periods path's startingStateDeclared fix.
  * @returns {{schedule:Object, periods:Array}} the new schedule record and
  *   its generated periods — caller appends both to feeSchedules[]/feePeriods[]
  */
-export function createSchoolFeeSchedule(input, genId) {
+export function createSchoolFeeSchedule(input, genId, todayStr) {
   if (typeof genId !== "function") {
     throw new Error("createSchoolFeeSchedule: genId function is required");
   }
-  const { billerAccountId, personId, schoolYearStart, schoolYearEnd, rateRules } = input || {};
+  const { billerAccountId, personId, schoolYearStart, schoolYearEnd, rateRules, periods: manualPeriods } = input || {};
   const scheduleId = genId();
+
+  if (Array.isArray(manualPeriods)) {
+    const built = buildManualFeePeriods(manualPeriods, { todayStr }).map(p => ({ ...p, scheduleId }));
+    const starts = built.map(p => p.periodStart).sort();
+    const ends = built.map(p => p.periodEnd).sort();
+    const schedule = {
+      id: scheduleId,
+      billerAccountId: billerAccountId || null,
+      personId: personId || null,
+      schoolYearStart: starts[0],
+      schoolYearEnd: ends[ends.length - 1],
+      rateRules: null,
+      createdAt: Date.now(),
+    };
+    return { schedule, periods: built };
+  }
+
   const schedule = {
     id: scheduleId,
     billerAccountId: billerAccountId || null,

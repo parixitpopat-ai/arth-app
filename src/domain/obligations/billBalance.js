@@ -25,6 +25,8 @@
 // reader of status === "unpaid" keeps treating it as a Bill with money due.
 // "Partially paid" is derived here and shown by the UI.
 
+import { DUE_SOON_DAYS } from "./dueSoonWindow.js";
+
 const BILL = "bill";
 const EPS = 0.005;
 const sameId = (a, b) => a != null && b != null && String(a) === String(b);
@@ -99,7 +101,7 @@ export function getBillBadge(bill, contributions, refDate = new Date()) {
     const days = Math.round((noon(bill.dueDate) - noon(localYMD(refDate))) / 86400000);
     if (days < 0) return { kind: "overdue", days: -days, balance };
     if (balance.status === "partial") return { kind: "partial", days, balance };
-    if (days <= 14) return { kind: "due", days, balance };
+    if (days <= DUE_SOON_DAYS) return { kind: "due", days, balance };
     return { kind: "unpaid", days, balance };
   }
   return { kind: balance.status === "partial" ? "partial" : "unpaid", days: null, balance };

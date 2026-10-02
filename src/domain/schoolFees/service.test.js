@@ -184,3 +184,70 @@ test("P1: correctStartingState targets only the named period within the array, p
     /no starting-state declaration/
   );
 });
+
+// ============================================================================
+// createSchoolFeeSchedule — manual-periods path (Payments v2 / WP18)
+// ============================================================================
+
+test("createSchoolFeeSchedule: manual-periods path builds exactly the supplied periods, no calendar-month expansion", () => {
+  const { schedule, periods } = schoolFeesService.createSchoolFeeSchedule({
+    billerAccountId: "ba1", personId: "child1",
+    periods: [
+      { periodStart: "2026-04-01", periodEnd: "2026-06-30", obligationAmount: 30000 },
+      { periodStart: "2026-07-01", periodEnd: "2026-09-30", obligationAmount: 30000 },
+      { periodStart: "2026-10-01", periodEnd: "2026-12-31", obligationAmount: 41800 },
+    ],
+  }, genId, "2026-10-02");
+  assert.equal(periods.length, 3); // not 9 (one per month)
+  assert.equal(periods.every(p => p.scheduleId === schedule.id), true);
+  assert.equal(schedule.rateRules, null);
+  // schoolYearStart/End derived from the supplied periods, for display/sorting only.
+  assert.equal(schedule.schoolYearStart, "2026-04-01");
+  assert.equal(schedule.schoolYearEnd, "2026-12-31");
+});
+
+test("createSchoolFeeSchedule: manual-periods path applies the startingStateDeclared fix per period", () => {
+  const { periods } = schoolFeesService.createSchoolFeeSchedule({
+    periods: [
+      { periodStart: "2026-01-01", periodEnd: "2026-03-31", obligationAmount: 30000 }, // past
+      { periodStart: "2026-10-01", periodEnd: "2026-12-31", obligationAmount: 41800 }, // future
+    ],
+  }, genId, "2026-10-02");
+  assert.equal(periods[0].startingStateDeclared, false); // past, undeclared
+  assert.equal(periods[1].startingStateDeclared, true); // not yet elapsed, declared
+});
+
+test("createSchoolFeeSchedule: manual-periods path carries each period's kind through, for one-time fee items alongside tuition", () => {
+  const { periods } = schoolFeesService.createSchoolFeeSchedule({
+    periods: [
+      { periodStart: "2026-10-01", periodEnd: "2026-12-31", obligationAmount: 18000, kind: "tuition" },
+      { periodStart: "2026-10-10", periodEnd: "2026-10-10", obligationAmount: 3300, kind: "uniform" },
+      { periodStart: "2026-10-10", periodEnd: "2026-10-10", obligationAmount: 8500, kind: "registration" },
+    ],
+  }, genId, "2026-10-02");
+  assert.deepEqual(periods.map(p => p.kind), ["tuition", "uniform", "registration"]);
+});
+
+test("createSchoolFeeSchedule: manual-periods path's periods go through the same settlement/discount/credit functions untouched", () => {
+  const { schedule, periods: created } = schoolFeesService.createSchoolFeeSchedule({
+    periods: [{ periodStart: "2026-10-01", periodEnd: "2026-12-31", obligationAmount: 41800 }],
+  }, genId, "2026-10-02");
+  const period = created[0];
+  const settled = schoolFeesService.settlePeriods(created, [period.id], 41800, "txn1");
+  assert.equal(settled[0].paidAmount, 41800);
+  assert.equal(settled[0].settlementLinks.length, 1);
+  const discounted = schoolFeesService.discountPeriod(created, period.id, 1000, "sibling discount");
+  assert.equal(discounted[0].discountAmount, 1000);
+  assert.equal(schedule.id, created[0].scheduleId);
+});
+
+test("createSchoolFeeSchedule: legacy rateRules path is completely unaffected by the new manual-periods branch", () => {
+  const { schedule, periods } = schoolFeesService.createSchoolFeeSchedule({
+    billerAccountId: "ba1", personId: "child1",
+    schoolYearStart: "2026-06-01", schoolYearEnd: "2026-08-31",
+    rateRules: [{ from: "2026-06", to: "2026-08", monthlyRate: 4500 }],
+  }, genId);
+  assert.equal(periods.length, 3);
+  assert.equal(schedule.rateRules.length, 1);
+  assert.equal(periods.every(p => p.startingStateDeclared === false), true); // legacy behavior unchanged
+});
