@@ -38,7 +38,7 @@ import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/GoalsScreen";
 import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/EventsScreen";
 import { AddExpectedIncomeModal, ExpectedIncomeListModal } from "./screens/ExpectedIncomeScreen";
-import { AddInsurancePolicyModal, InsurancePolicyListModal, InsurancePolicyDetailModal } from "./screens/InsuranceScreen";
+import { AddInsurancePolicyModal, InsurancePolicyListModal, InsurancePolicyDetailModal, AddInsuranceRenewalNoticeModal } from "./screens/InsuranceScreen";
 import { SchoolFeeScheduleListModal, AddSchoolYearModal, SchoolFeeScheduleDetailModal, PayFeesModal, PeriodDetailModal, AdjustmentModal, CreditNoteModal } from "./screens/SchoolFeesScreen";
 import { attemptSchoolAttributionChange, pickMostRecentSchedule } from "./screens/SchoolFeesScreen.helpers";
 import { getFeeSchedulesForRelationship } from "./domain/school/feeScheduleLink";
@@ -959,6 +959,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [addPolicyPrefill, setAddPolicyPrefill] = useState(null);
   const [editingPolicy, setEditingPolicy] = useState(null);
   const [viewingPolicy, setViewingPolicy] = useState(null);
+  // Payments v2 (WP18d) F4/F5 — "Add renewal notice" target policy, and which policy just had its
+  // Expected renewal converted to a Bill (drives F5's one-time confirmation strip).
+  const [addingRenewalNoticeForPolicy, setAddingRenewalNoticeForPolicy] = useState(null);
+  const [justConvertedPolicyId, setJustConvertedPolicyId] = useState(null);
   const [showAddExpectedIncome, setShowAddExpectedIncome] = useState(false);
   const [editingExpectedIncome, setEditingExpectedIncome] = useState(null);
   const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
@@ -16117,9 +16121,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         if (badge.kind !== "overdue" && badge.kind !== "due") return;
         const ba = billerAccounts.find(x => String(x.id) === String(b.billerAccountId));
         const shell = ba?.billerId ? billers.find(x => x.id === ba.billerId) : null;
-        const connName = b.isCcStatement ? (shell?.name || ba?.name || b.name) : (ba?.name || b.name);
+        // F5 — an Insurance renewal Bill (created via F4) has no billerAccountId at all (Insurance
+        // stays on its own insurancePolicies[], never joins billerAccounts[]); fall back to the
+        // policy it's linked to so this row reads like every other one, not blank.
+        const linkedPolicy = b.insurancePolicyId ? insurancePolicies.find(p => String(p.id) === String(b.insurancePolicyId)) : null;
+        const connName = b.isCcStatement ? (shell?.name || ba?.name || b.name) : (ba?.name || linkedPolicy?.name || b.name);
         const categoryText = b.isCcStatement
           ? `Credit card · ${getCardVerificationText(b)}`
+          : linkedPolicy ? `Insurance · ${linkedPolicy.insuredPerson || ""}`
           : `${ba?.type || ""}${ba ? ` · ${getBillerOwnerLabel(ba)}` : ""}`;
         rows.push({
           id: `bill-${b.id}`,
@@ -16245,10 +16254,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       // become a real Bill (linkedBillId).
       insurancePolicies.filter(p => p.status !== "archived").forEach(p => {
         if (search && !(p.name || "").toLowerCase().includes(search)) return;
-        const linkedBill = p.linkedBillId ? bills.find(b => String(b.id) === String(p.linkedBillId)) : null;
+        // Resolved the same way InsuranceScreen.jsx's detail card does — the latest-due-date Bill
+        // tied to this policy, not strictly the id F4 stored, so a second (or later) renewal
+        // cycle's auto-regenerated Bill (via the pre-existing recurring mechanism) is what Home
+        // reflects too, once the first cycle's Bill is paid — never the stale, already-paid one.
+        const policyBillsForHome = p.linkedBillId ? bills.filter(b => b.insurancePolicyId === p.id) : [];
+        const linkedBill = policyBillsForHome.length ? [...policyBillsForHome].sort((a, b) => String(b.dueDate || "").localeCompare(String(a.dueDate || "")))[0] : null;
         const hasOverdueOrDueBill = linkedBill ? ["overdue", "due"].includes(getBillBadge(linkedBill, contributions).kind) : false;
         const reminder = getInsuranceRenewalReminders({ insurancePolicies: [p], today, forwardDays: DUE_SOON_DAYS })[0];
-        const statusLine = reminder
+        // F5 — once the renewal notice is added, this policy's own real Bill (not the Expected
+        // reminder, which getInsuranceRenewalReminders no longer returns for it) decides the
+        // status line, the same way a plain Bill-type connection's row already does above.
+        const linkedBadge = linkedBill ? getBillBadge(linkedBill, contributions) : null;
+        const statusLine = linkedBadge
+          ? (linkedBadge.kind === "overdue" ? `Overdue · ${sym}${fmt(linkedBadge.balance.remaining)} left`
+            : linkedBadge.kind === "paid" ? "Paid"
+            : `Due ${formatShortDate(linkedBill.dueDate) || linkedBill.dueDate} · ${sym}${fmt(linkedBadge.balance.remaining)}`)
+          : reminder
           ? (reminder.kind === "overdue" ? "Overdue renewal" : `Renews ${formatShortDate(p.renewalDate) || p.renewalDate}`)
           : (p.renewalDate ? `Renews ${formatShortDate(p.renewalDate) || p.renewalDate}` : "Active");
         out.push({ id: `insurance-${p.id}`, categoryLabel: "Insurance", name: p.name || "Insurance", statusLine, hasOverdueOrDueBill, onClick: () => setViewingPolicy(p) });
@@ -19265,7 +19287,29 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           T={T} inp={inp} lbl={lbl}
         />}
 
-        {viewingPolicy&&<InsurancePolicyDetailModal policy={viewingPolicy} onClose={()=>setViewingPolicy(null)} T={T} sym={sym} fmt={fmt} bills={bills} setEditingPolicy={setEditingPolicy} setShowAddPolicy={setShowAddPolicy} setInsurancePolicies={setInsurancePolicies} askConfirm={askConfirm}/>}
+        {viewingPolicy&&(()=>{
+          // Payments v2 (WP18d) F4/F5 — resolve the LIVE policy by id rather than reusing the
+          // snapshot object `viewingPolicy` was opened with, so saving a renewal notice (which
+          // updates insurancePolicies[] elsewhere) is reflected here immediately — the Expected
+          // block becomes the Open bill card without needing to close and reopen this sheet.
+          const livePolicy = insurancePolicies.find(p=>String(p.id)===String(viewingPolicy.id)) || viewingPolicy;
+          return (
+            <InsurancePolicyDetailModal policy={livePolicy} onClose={()=>{ setViewingPolicy(null); setJustConvertedPolicyId(null); }} T={T} sym={sym} fmt={fmt} formatShortDate={formatShortDate}
+              bills={bills} contributions={contributions} txns={txns} accounts={accounts}
+              setEditingPolicy={setEditingPolicy} setShowAddPolicy={setShowAddPolicy} setInsurancePolicies={setInsurancePolicies} askConfirm={askConfirm}
+              onAddRenewalNotice={p=>{ setAddingRenewalNoticeForPolicy(p); setViewingPolicy(null); }}
+              onRecordPayment={bill=>{ setViewingPolicy(null); setMarkingBillPaid(bill); }}
+              onOpenBill={bill=>{ setViewingPolicy(null); setViewingBillId(bill.id); }}
+              justConverted={justConvertedPolicyId===livePolicy.id}
+              onDismissJustConverted={()=>setJustConvertedPolicyId(null)}/>
+          );
+        })()}
+        {addingRenewalNoticeForPolicy&&(
+          <AddInsuranceRenewalNoticeModal policy={addingRenewalNoticeForPolicy} expected={getInsuranceRenewalReminders({ insurancePolicies:[addingRenewalNoticeForPolicy], today:todayStr(), forwardDays:36500 })[0]}
+            onClose={()=>{ setAddingRenewalNoticeForPolicy(null); setViewingPolicy(addingRenewalNoticeForPolicy); }}
+            T={T} inp={inp} lbl={lbl} sym={sym} fmt={fmt} setBills={setBills} setInsurancePolicies={setInsurancePolicies}
+            onSaved={bill=>{ setJustConvertedPolicyId(addingRenewalNoticeForPolicy.id); setViewingPolicy(addingRenewalNoticeForPolicy); }}/>
+        )}
         {showAddExpectedIncome&&<AddExpectedIncomeModal existing={editingExpectedIncome} onClose={()=>{ setShowAddExpectedIncome(false); setEditingExpectedIncome(null); }} T={T} inp={inp} lbl={lbl} setExpectedIncome={setExpectedIncome}/>}
         {showFabSpeedMenu&&(
           <div onClick={()=>setShowFabSpeedMenu(false)} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:355,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
@@ -19700,15 +19744,31 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     utilisation and remaining are derived here from that one record via
                     getPrepaidCoverage, never stored as a separate synthetic record. Same
                     derivation the Insights page's Prepaid & Service Utilisation card already
-                    uses, now surfaced where a person actually checks a specific connection. */}
+                    uses, now surfaced where a person actually checks a specific connection.
+                    Payments v2 (WP18d) F3 bug fix — getPrepaidCoverage correctly returns null when
+                    there's no real recharge on record yet (it never fabricates a period from
+                    nothing); the card used to simply disappear in that case (`if(!coverage) return
+                    null`), so a brand-new Prepaid connection showed nothing at all and fell through
+                    to generic empty content. Per F3 ("Prepaid shows coverage and what's left..."),
+                    the card itself must always render — this now shows an explicit "no recharge
+                    recorded yet" state with its own Recharge action instead of vanishing. */}
                 {isRechargeBiller(ba.type)&&(()=>{
                   const coverage = getPrepaidCoverage(baBills);
-                  if(!coverage) return null;
+                  const history = getPrepaidHistory(baBills);
+                  const doRecharge = ()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); setActiveBillerForAction(null); };
+                  if(!coverage){
+                    return (
+                      <div data-testid="prepaid-coverage-empty" style={{ background:T.input,border:`1px dashed ${T.border}`,borderRadius:16,padding:16,marginBottom:12 }}>
+                        <div style={{ color:T.text,fontSize:14,fontWeight:900,marginBottom:6 }}>📶 Prepaid Coverage</div>
+                        <div style={{ color:T.sub,fontSize:12,marginBottom:12 }}>No recharge recorded yet. Add one to see plan coverage and days left.</div>
+                        <button onClick={doRecharge} style={{ width:"100%",background:T.accent,border:"none",borderRadius:12,padding:"11px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>🔁 Recharge</button>
+                      </div>
+                    );
+                  }
                   const color = coverage.status==="expired"?T.danger:coverage.status==="expiring_soon"?T.warn:T.success;
                   const statusLabel = coverage.status==="expired"?"Expired":coverage.status==="expiring_soon"?"Expiring Soon":"Active";
-                  const history = getPrepaidHistory(baBills);
                   return (
-                    <div style={{ background:`linear-gradient(135deg,${color}12,${T.card})`,border:`1px solid ${color}44`,borderRadius:16,padding:16,marginBottom:12 }}>
+                    <div data-testid="prepaid-coverage-card" style={{ background:`linear-gradient(135deg,${color}12,${T.card})`,border:`1px solid ${color}44`,borderRadius:16,padding:16,marginBottom:12 }}>
                       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
                         <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>📶 Prepaid Coverage</div>
                         <div style={{ background:color+"22",border:`1px solid ${color}44`,borderRadius:20,padding:"3px 10px" }}>
@@ -19725,6 +19785,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           <div style={{ color:T.sub,fontSize:10 }}>{coverage.percentUsed}% of this period used</div>
                         </>
                       )}
+                      <button onClick={doRecharge} style={{ width:"100%",marginTop:12,background:color,border:"none",borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>🔁 Recharge</button>
                       {history.length>1&&(
                         <div style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}` }}>
                           <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5,marginBottom:6 }}>PAST RECHARGES</div>
@@ -19799,7 +19860,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <button onClick={()=>setShowAddMembership(true)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>💪 Add Membership / Renew</button>
                   )}
                   {(actionType==="bill"||actionType==="hybrid")&&(
-                    <button onClick={()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); setActiveBillerForAction(null); }} style={{ background:T.info+"22",border:`1px solid ${T.info}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>📄 Add Bill</button>
+                    // F3 — recharge-type connections (Mobile Prepaid, Fastag, DTH, ...) frame this
+                    // as "Recharge" instead of the generic "Add Bill" label; it's the exact same
+                    // flow underneath (AddBillModal's isRecharge fields), reused, not redrawn.
+                    <button onClick={()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); setActiveBillerForAction(null); }} style={{ background:T.info+"22",border:`1px solid ${T.info}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>{isRechargeBiller(ba.type)?"🔁 Recharge":"📄 Add Bill"}</button>
                   )}
                   {/* Attach Past Expenses is for reconciling bill-style payments already recorded elsewhere —
                       doesn't apply to pure memberships, which are self-contained payment+allocation records. */}
@@ -19818,8 +19882,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     duplicated into a new page. Reminder isn't included: there's no reminder system
                     in Arth yet, and a button that does nothing is worse than no button. CC-linked
                     connections skip this entirely — Analytics/History/Documents all read the bills
-                    array, which has nothing for a card (statements aren't Bill records). */}
-                {!ba.accId&&
+                    array, which has nothing for a card (statements aren't Bill records).
+                    Payments v2 (WP18d) F1 polish fix — a pure-Membership account (actionType
+                    "membership") skips this grid entirely too, for the same reason as CC: every
+                    tile here reads bills[], which a Membership payment never touches (it lives in
+                    memberships[] instead). Before this fix, Analytics rendered but its content was
+                    separately gated off below (`actionType!=="membership"&&...`) — a dead click
+                    that set UI state nothing read. History/Documents rendered too, but could only
+                    ever show "No bills recorded yet", a misleading claim when this same screen's
+                    own Hero Card / Timeline / Lifetime Analytics block (just above) already shows
+                    that same account's real payment history richly. Hiding the whole grid here
+                    removes the dead click and the misleading empty states in one step, without
+                    touching any other connection type. */}
+                {!ba.accId&&actionType!=="membership"&&
                 <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:16 }}>
                   {[
                     { id:"analytics", icon:"📈", label:"Analytics" },
