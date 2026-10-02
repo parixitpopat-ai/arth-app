@@ -209,3 +209,12 @@ test("getTopMerchants: delegates to getFrequentVendors, no independent calculati
   assert.equal(rows[0].count, 2);
   assert.equal(rows[0].totalSpend, 800);
 });
+
+test("subcategory: an Education payment tagged to several subcategories is a multi-tag bucket, never credited wholly to one subcategory", () => {
+  const EDU = { id: "education", name: "Education", subs: [{ id: "edu_school_fees", name: "School Fees" }, { id: "edu_registration", name: "Registration Fees" }, { id: "edu_uniform", name: "Uniform" }] };
+  const txns = [{ id: "e1", type: "expense", date: "2026-08-10", catId: "education", catIds: ["education"], amount: 25000, subIds: ["edu_school_fees", "edu_registration", "edu_uniform"] }];
+  const b = buildSubcategoryBreakdown(EDU, txns, txns);
+  assert.equal(b.subcategories.find(s => s.subId === "edu_school_fees").attributedAmount, 0);
+  assert.equal(b.multiTagAmount, 25000);
+  assert.equal(b.multiTagCount, 1);
+});

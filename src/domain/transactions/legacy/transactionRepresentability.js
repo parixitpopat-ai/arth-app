@@ -31,6 +31,15 @@ function hasCategorySplit(draft) {
   return catIds.length > 1 || Boolean(draft.catAllocations);
 }
 
+// The aggregate has exactly one subcategoryId. A record tagged to several subcategories (e.g. an
+// Education payment with School Fees + Uniform + Registration lines) cannot be stored there
+// without silently collapsing subIds to the first one — which then makes the Insights
+// subcategory breakdown (domain/insights/spending.js reads top-level subIds) credit the WHOLE
+// amount to that one subcategory. Such records stay on the legacy path, which keeps subIds intact.
+function hasMultipleSubcategories(draft) {
+  return Array.isArray(draft.subIds) && new Set(draft.subIds.filter(Boolean)).size > 1;
+}
+
 // Every non-"__me__" entry in a legacy `people` dict must use a mode the
 // aggregate's TransactionPersonShare actually accepts. Real legacy data is
 // confirmed (by direct trace) to also use "spent_on" for attribution/tagging
@@ -76,6 +85,10 @@ export function checkRepresentability({ operation, draft, priorStoredRecord = nu
 
   if (hasCategorySplit(draft)) {
     return notRepresentable("category split (catIds.length > 1 or catAllocations) has no Transaction.categoryId equivalent");
+  }
+
+  if (hasMultipleSubcategories(draft)) {
+    return notRepresentable("multiple subcategories (subIds.length > 1) have no Transaction.subcategoryId equivalent");
   }
 
   if (hasUnrepresentablePersonShareMode(draft.people)) {

@@ -28,6 +28,7 @@ export default function LinkToSheet({
   T,
   onClose,
   initialStage = "types",
+  initialSchoolPersonId = "", // Education flow: the Person already chosen on the transaction
   // Data
   billerAccounts, billers, schoolRelationships, events, vehicles, txns, people,
   billerLinkId, eventLinkId, vehicleId, showVehicle,
@@ -52,7 +53,7 @@ export default function LinkToSheet({
   // default so a household with one child/one school sees nothing new). Once a person is picked,
   // the list narrows to only THEIR current School Relationship(s) — getCurrentSchoolBillerAccountIds
   // (domain/school/relationship.js), never a second, local re-derivation of "whose school is this."
-  const [schoolForPersonId, setSchoolForPersonId] = useState("");
+  const [schoolForPersonId, setSchoolForPersonId] = useState(initialSchoolPersonId || "");
 
   // WP1 (Arth IA §2/§3) — Provider name is the title, "{nickname} · A/c ****{last4}" is the
   // account line, both from the one shared labeling function every Provider/account picker now
