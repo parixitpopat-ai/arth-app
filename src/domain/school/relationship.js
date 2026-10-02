@@ -147,6 +147,31 @@ export function getHistoricalSchoolRelationships(relationships, personId, date) 
   return mine.filter(r => !isSchoolRelationshipCurrent(r.statusHistory, date));
 }
 
+/**
+ * School-fees audit (person-scoped linker) — every billerAccountId of a CURRENT School
+ * relationship belonging to this person, as of the given date. This is the read primitive the
+ * generic "Link to… School fees" picker (components/LinkToSheet.jsx) uses to restrict its list
+ * to one person's own school(s) once a person is selected, instead of every School Fees biller
+ * account in Arth regardless of whose child it is for.
+ *
+ * Deliberately returns ids, not full relationship records or biller accounts — the caller
+ * already has billerAccounts[] and only needs this set to filter it. A person with no current
+ * School relationship gets an empty array (a real, legitimate state — not an error), which a
+ * caller renders as "no schools for this person" rather than falling back to showing everyone.
+ *
+ * @param {Array} relationships - schoolRelationships[]/canonical relationships, any mix of people
+ * @param {string} personId
+ * @param {string} date - date string to check currency as of
+ * @returns {Array<string>} billerAccountIds, one per current relationship (never deduped against
+ *   a billerAccounts[] list — a person is never expected to have two current relationships with
+ *   the same billerAccountId, so no dedup logic is needed here)
+ */
+export function getCurrentSchoolBillerAccountIds(relationships, personId, date) {
+  return (relationships || [])
+    .filter(r => r && r.personId === personId && isSchoolRelationshipCurrent(r.statusHistory, date))
+    .map(r => r.billerAccountId);
+}
+
 // --- Arth 2.0 IA consolidation: School as a canonical-store slice ---------
 //
 // This was the third, independent relationship store the mapping doc found

@@ -145,10 +145,35 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
   // path entirely untouched (an already-created schedule already has
   // rateRules behind it; reconcileScheduleEdit's whole mechanism depends on
   // that shape and is out of scope for this change).
+  //
+  // School Fees audit (correction) — this Type dropdown had drifted into offering every
+  // domain/schoolFees/periodGeneration.js FEE_KINDS value uniformly, which meant Books,
+  // Activities, Exams and Other could each be created here as a full, date-ranged, tracked Fee
+  // Period — due-date tracking, overdue badges, selectable in Pay Fees, discount/write-off,
+  // credit-note machinery — the exact same obligation-lifecycle machinery Tuition gets, with no
+  // evidenced reason any of those four need it. Per the owner's own explicit decision:
+  // - Tuition and Transport: kept — genuinely recurring/structured obligations (Transport can
+  //   also be billed one-time; this manual, arbitrary-date-range row already supports both
+  //   shapes identically to Tuition, so no further change is needed for either).
+  // - Registration and Uniform: kept — the coder-handoff spec (Decisions #2) explicitly decided
+  //   both are legitimate ONE-TIME fee items that still belong on the school's fee schedule as
+  //   their own tracked Fee Period (spec E1/E5: "Annual registration · due 10 Oct", its own Fee
+  //   Period detail screen) — removing them would contradict that locked decision.
+  // - Books, Activities, Exams, Other: REMOVED from this dropdown. Nothing in this domain gives
+  //   them a real due-date/overdue/settlement lifecycle distinct from a plain itemized expense —
+  //   they have no evidenced basis as tracked obligations. The already-merged Pay Fees fix's
+  //   "+ Add something not listed" (PayFeesModal, buildPayFeesLineItems) is the correct, already-
+  //   built mechanism for a named, category-tagged, one-off line with no fee period — this is
+  //   additive, not a new parallel path.
+  // Backward compatible: periodGeneration.js's FEE_KINDS and buildManualFeePeriods are UNCHANGED
+  // — an already-stored period with kind:"books"/"activities"/"exams"/"other" (from before this
+  // fix, or created programmatically) still loads, displays (feeLineDisplayName/KIND_DISPLAY
+  // below have no opinion on which kinds are "offered," only on how to show whatever kind is
+  // actually there), settles, and projects to Future Money exactly as before. Only the ability to
+  // CREATE a new one through this specific row UI is removed.
   const FEE_KIND_OPTIONS = [
     ["tuition","Tuition"], ["transport","Transport"], ["registration","Registration"],
-    ["uniform","Uniform"], ["books","Books"], ["activities","Activities"],
-    ["exams","Exams"], ["other","Other"],
+    ["uniform","Uniform"],
   ];
   const blankPeriodRow = () => ({ label:"", start:"", end:"", amount:"", kind:"tuition" });
   const [periodRows, setPeriodRows] = useState([blankPeriodRow()]);
@@ -412,7 +437,7 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
               </div>
             ))}
             <button onClick={addPeriodRow} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Add another period</button>
-            <div style={{ color:T.sub,fontSize:10,lineHeight:1.5 }}>Each period is whatever length you decide — 1, 2, 3, 5 months, however many — with its own amount. Covers Tuition, or add a separate period/row per one-off fee (Registration, Uniform, Books…) using its type.</div>
+            <div style={{ color:T.sub,fontSize:10,lineHeight:1.5 }}>Each period is whatever length you decide — 1, 2, 3, 5 months, however many — with its own amount. Covers Tuition and Transport (recurring or billed once), or a one-time Registration/Uniform fee as its own row. For Books, Activities, Exams or anything else, add them later from Pay fees → + Add something not listed — they don't need their own tracked fee period.</div>
           </>
         )}
 
