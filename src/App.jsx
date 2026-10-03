@@ -51,6 +51,7 @@ import { planNudge } from "./domain/budget/nudge";
 import { createGroup as createPayGroup, removeItem as removePayGroupItem, listPayableInstalments, liveItems as livePayGroupItems } from "./domain/payTogether/group";
 import { planGroupPayment } from "./domain/payTogether/payPlan";
 import PayGroupSheet from "./screens/PayGroupSheet";
+import SpreadSheet from "./screens/SpreadSheet";
 import PayTogetherScreen from "./screens/PayTogetherScreen";
 import { createSpread } from "./domain/budget/spread";
 import ReadinessScreen from "./screens/ReadinessScreen";
@@ -1410,6 +1411,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [payTogetherOpen, setPayTogetherOpen] = useState(false);
   const [payGroupSchedule, setPayGroupSchedule] = useState(null); // the school whose periods a Pay together group is paying (no schedule screen opens)
   const [payGroupChooser, setPayGroupChooser] = useState(null); // groupId while the per-part Pay sheet is open
+  const [spreadSheetFor, setSpreadSheetFor] = useState(null); // { key, label, amount, cashDate, existing } while "Spread in budget" is open from a bill / payment
   const cloudActiveRef = useRef(false); // set once cloudUser is known (declared further down)
   const [showFabSpeedMenu, setShowFabSpeedMenu] = useState(false);
   const [showDuplicateFinder, setShowDuplicateFinder] = useState(false);
@@ -9920,6 +9922,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(plan.parts.length===1 && plan.parts[0].kind==="fees" && plan.unpayable.length===0){ payFeePart(plan.parts[0]); return; }
     setPayGroupChooser(groupId);
   };
+
+  // "Spread in budget" from a Bill or a payment (PA14). `key` ties the plan to the bill or transaction so the
+  // button can say "Spread x3" and open the same plan again; cash is never touched.
+  const openSpreadFor = ({ key, label, amount, cashDate }) => {
+    if(!(Number(amount)>0)){ setToast({ message:"There is no amount to spread.", icon:"!" }); return; }
+    setSpreadSheetFor({ key, label, amount:Number(amount), cashDate:cashDate||null, existing:budgetSpreads.find(x=>x.key===key)||null });
+  };
+  const spreadButtonLabel = (key) => { const sp = budgetSpreads.find(x=>x.key===key); return sp ? `Spread ×${sp.months} in budget · change` : "Spread in budget"; };
 
   const nudgeForReadiness = (r) => planNudge({ budgetUsed:r.budgetUsed, monthBudget:r.monthBudget, over:r.over, record:planNudges[r.monthKey] });
   const raiseMonthBudget = (monthKey, to) => {
@@ -20906,11 +20916,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             accountName={t=>accounts.find(a=>String(a.id)===String(t?.accId))?.name || ""}
             onClose={()=>setViewingBillId(null)}
             onRecordPayment={()=>setMarkingBillPaid(vb)}
+            spreadLabel={spreadButtonLabel(`bill:${vb.id}`)}
+            onSpread={()=>openSpreadFor({ key:`bill:${vb.id}`, label:vb.name, amount:ledger.amount, cashDate:vb.status==="paid"?(vb.paidDate||vb.lastPaidDate||vb.dueDate):vb.dueDate })}
             onEdit={()=>{ setViewingBillId(null); setEditingBill(vb); }}
             onOpenProvider={ba?()=>{ setViewingBillId(null); setActiveBillerForAction(ba); }:undefined}
             onShare={shareBill} txns={txns}
             extras={renderBillExtras(vb)}/>;
         })()}
+        {spreadSheetFor&&<SpreadSheet T={T} sym={sym} fmt={fmt} title={spreadSheetFor.label} amount={spreadSheetFor.amount}
+          cashMonth={String(spreadSheetFor.cashDate||todayStr()).slice(0,7)} initial={spreadSheetFor.existing}
+          onClose={()=>setSpreadSheetFor(null)}
+          onSave={({ months, startMonth })=>{ saveBudgetSpread({ ...spreadSheetFor, months, startMonth }); setSpreadSheetFor(null); }}
+          onRemove={spreadSheetFor.existing?()=>{ removeBudgetSpread(spreadSheetFor.existing.id); setSpreadSheetFor(null); }:undefined}/>}
         {payGroupChooser&&(()=>{
           const plan = payGroupPlan(payGroupChooser);
           if(!plan) return null;
@@ -21312,6 +21329,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     </div>
                   )}
                 </div>
+                {t.type==="expense"&&Number(t.amount)>0&&(
+                  <button data-testid="txn-spread" onClick={()=>openSpreadFor({ key:`txn:${t.id}`, label:t.merchant||t.desc||"Payment", amount:t.amount, cashDate:t.date })} style={{ width:"100%",minHeight:44,marginTop:12,background:"none",border:`1px solid ${T.border}`,borderRadius:12,color:T.text,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit" }}>{spreadButtonLabel(`txn:${t.id}`)}</button>
+                )}
                 <div style={{ display:"flex",gap:8,marginTop:16 }}>
                   <button onClick={()=>{ setTxnDetailId(null); setEditTxn(t); setShowAdd(true); }} style={{ flex:1,background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
                   <button onClick={()=>askConfirm("Delete this transaction?",()=>{ removeTxnAndLinkedInvestment(t); setTxnDetailId(null); })} style={{ background:T.danger+"18",border:`1px solid ${T.danger}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
