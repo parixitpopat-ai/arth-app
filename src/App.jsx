@@ -46,6 +46,12 @@ import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVa
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import useOnline from "./hooks/useOnline";
 import { splitAllocation } from "./domain/budget/commitmentSplit";
+import { buildReadiness, shiftMonthKey } from "./domain/budget/readiness";
+import { planNudge } from "./domain/budget/nudge";
+import { createGroup as createPayGroup, removeItem as removePayGroupItem, listPayableInstalments } from "./domain/payTogether/group";
+import PayTogetherScreen from "./screens/PayTogetherScreen";
+import { createSpread } from "./domain/budget/spread";
+import ReadinessScreen from "./screens/ReadinessScreen";
 import { isPendingSync, offlineStripText, offlineSavedText } from "./domain/payments/syncState";
 import { allocateCcPaymentToEmiInstallments, mergeEmiSettlementInto } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
@@ -1388,6 +1394,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // allocation row stays open after e.g. skipping a commitment.
   const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
   const [expandedBudgetGroupId, setExpandedBudgetGroupId] = useState(null);
+  const [readinessMonth, setReadinessMonth] = useState(null); // "YYYY-MM" while the Plan ahead screen is open
+  // Plan Ahead PA8/PA9 — per month: { dismissedAtUsed } after "Not now", or { raisedFrom, raisedTo, hadOverride, prevOverride } after accepting.
+  const [planNudges, setPlanNudges] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("arth_plan_nudges")||"{}"); }catch{ return {}; } });
+  useEffect(()=>safeSetLocalStorage("arth_plan_nudges",JSON.stringify(planNudges)),[planNudges]);
+  // Plan Ahead PA10-PA13 - Pay together groups: [{ id, date, items:[{sourceType, sourceId}] }]. A plan on top of
+  // existing instalments; never changes a due date or pays anything.
+  const [payGroups, setPayGroups] = useState(()=>{ try{ const v=JSON.parse(localStorage.getItem("arth_pay_groups")||"[]"); return Array.isArray(v)?v:[]; }catch{ return []; } });
+  useEffect(()=>safeSetLocalStorage("arth_pay_groups",JSON.stringify(payGroups)),[payGroups]);
+  // Plan Ahead PA14/PA15 - Spread over months: [{ id, key, label, amount, startMonth, months, cashDate }]. Budget shares only; cash is never changed.
+  const [budgetSpreads, setBudgetSpreads] = useState(()=>{ try{ const v=JSON.parse(localStorage.getItem("arth_budget_spreads")||"[]"); return Array.isArray(v)?v:[]; }catch{ return []; } });
+  useEffect(()=>safeSetLocalStorage("arth_budget_spreads",JSON.stringify(budgetSpreads)),[budgetSpreads]);
+  const [payTogetherOpen, setPayTogetherOpen] = useState(false);
   const cloudActiveRef = useRef(false); // set once cloudUser is known (declared further down)
   const [showFabSpeedMenu, setShowFabSpeedMenu] = useState(false);
   const [showDuplicateFinder, setShowDuplicateFinder] = useState(false);
@@ -9154,6 +9172,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     lastFYTarget,
     monthOverrides,
     mandatoryCommitments,
+    payGroups,
+    budgetSpreads,
     cardOrder,
     // Previously restored-to-empty (liabilities) or never synced at all; now saved like the rest.
     liabilities,
@@ -9163,7 +9183,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     budgetCarryForward,
     defaultGroupId,
     hiddenCards:[...hiddenCards],
-  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, mandatoryCommitments, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards]);
+  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, mandatoryCommitments, payGroups, budgetSpreads, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -9209,6 +9229,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(Array.isArray(snapshot.expectedIncome)) setExpectedIncome(snapshot.expectedIncome);
     if(Array.isArray(snapshot.insurancePolicies)) setInsurancePolicies(snapshot.insurancePolicies);
     if(Array.isArray(snapshot.mandatoryCommitments)) setMandatoryCommitments(snapshot.mandatoryCommitments);
+    if(Array.isArray(snapshot.payGroups)) setPayGroups(snapshot.payGroups);
+    if(Array.isArray(snapshot.budgetSpreads)) setBudgetSpreads(snapshot.budgetSpreads);
     if(Array.isArray(snapshot.gymCheckIns)) setGymCheckIns(snapshot.gymCheckIns);
     if(Array.isArray(snapshot.arthHolidays)) setArthHolidays(snapshot.arthHolidays);
     if(Array.isArray(snapshot.feeSchedules)) setFeeSchedules(snapshot.feeSchedules);
@@ -9769,7 +9791,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, mandatoryCommitments, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards, pushCloudSnapshot]);
+  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, mandatoryCommitments, payGroups, budgetSpreads, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards, pushCloudSnapshot]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
@@ -9823,6 +9845,73 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     getMembershipFutureMoneyEvents(billerAccounts, memberships, getCurrentPeriod, membershipRelationships),
     getInsuranceFutureMoneyEvents(insurancePolicies),
   ]);
+
+  // Plan Ahead (PA6) — next-month readiness for any month. Composition only: the same Future Money events
+  // Outlook uses, the Mandatory Commitments, and that month's budget; the arithmetic is in domain/budget/readiness.js.
+  const buildReadinessFor = (monthKey) => buildReadiness({
+    events: [...(futureMoney.committedSpending||[]), ...(futureMoney.committedSaving||[]), ...(futureMoney.debtService||[])],
+    commitments: mandatoryCommitments,
+    monthKey,
+    monthBudget: getHouseholdPlanningAllocation(annualBudget, monthOverrides, monthKey),
+    today: todayStr(),
+    catIdOf: e => e.sourceType==="bill" ? (bills.find(b=>String(b.id)===String(e.sourceId))?.catId ?? null) : null,
+    groups: payGroups,
+    spreads: budgetSpreads,
+  });
+
+  const allFutureEvents = () => [...(futureMoney.committedSpending||[]), ...(futureMoney.committedSaving||[]), ...(futureMoney.debtService||[])];
+  const confirmPayTogether = ({ keys, date }) => {
+    const res = createPayGroup({ events:allFutureEvents(), keys, date, genId });
+    if(!res.ok) return res;
+    setPayGroups(p=>[...p, res.group]);
+    setPayTogetherOpen(false);
+    setReadinessMonth(date.slice(0,7));
+    setToast({ message:`${res.group.items.length} instalments planned together`, icon:"✓" });
+    return res;
+  };
+  const removeFromPayGroup = (groupId, key, name) => {
+    const g = payGroups.find(x=>String(x.id)===String(groupId));
+    if(!g) return;
+    const next = removePayGroupItem(g, key);
+    setPayGroups(p=>next ? p.map(x=>x.id===g.id?next:x) : p.filter(x=>x.id!==g.id));
+    setToast({ message:next?`${name} removed from group`:"Group dissolved - fewer than two left", icon:"✓", actionLabel:"Undo", onAction:()=>setPayGroups(p=>p.some(x=>x.id===g.id)?p.map(x=>x.id===g.id?g:x):[...p,g]) });
+  };
+  const undoPayGroup = (groupId) => {
+    const g = payGroups.find(x=>String(x.id)===String(groupId));
+    if(!g) return;
+    setPayGroups(p=>p.filter(x=>x.id!==g.id));
+    setToast({ message:"Pay together undone", icon:"✓", actionLabel:"Undo", onAction:()=>setPayGroups(p=>p.some(x=>x.id===g.id)?p:[...p,g]) });
+  };
+
+  const saveBudgetSpread = (spec) => {
+    const res = createSpread({ key:spec.key||null, label:spec.label, amount:spec.amount, startMonth:spec.startMonth, months:spec.months, cashDate:spec.cashDate, genId });
+    if(!res.ok){ setToast({ message:res.reason, icon:"!" }); return; }
+    const replaced = spec.existing;
+    setBudgetSpreads(p=>[...p.filter(x=>!replaced||x.id!==replaced.id), res.spread]);
+    setToast({ message:`Spread ${res.spread.months} months in budget`, icon:"✓", actionLabel:"Undo", onAction:()=>setBudgetSpreads(p=>[...p.filter(x=>x.id!==res.spread.id), ...(replaced?[replaced]:[])]) });
+  };
+  const removeBudgetSpread = (id) => {
+    const sp = budgetSpreads.find(x=>x.id===id);
+    if(!sp) return;
+    setBudgetSpreads(p=>p.filter(x=>x.id!==id));
+    setToast({ message:"Spread removed", icon:"✓", actionLabel:"Undo", onAction:()=>setBudgetSpreads(p=>p.some(x=>x.id===id)?p:[...p,sp]) });
+  };
+
+  const nudgeForReadiness = (r) => planNudge({ budgetUsed:r.budgetUsed, monthBudget:r.monthBudget, over:r.over, record:planNudges[r.monthKey] });
+  const raiseMonthBudget = (monthKey, to) => {
+    const r = buildReadinessFor(monthKey);
+    const hadOverride = monthOverrides[monthKey]!=null;
+    setPlanNudges(p=>({ ...p, [monthKey]:{ raisedFrom:r.monthBudget, raisedTo:to, hadOverride, prevOverride:hadOverride?monthOverrides[monthKey]:null } }));
+    setMonthOverrides(p=>({ ...p, [monthKey]:to }));
+    setToast({ message:`${new Date(`${monthKey}-01T00:00:00`).toLocaleString("en-IN",{ month:"long" })} budget raised to ${sym}${fmt(to)}`, icon:"✓", actionLabel:"Undo", onAction:()=>undoRaiseMonthBudget(monthKey, { raisedFrom:r.monthBudget, hadOverride, prevOverride:hadOverride?monthOverrides[monthKey]:null }) });
+  };
+  const undoRaiseMonthBudget = (monthKey, rec) => {
+    const r = rec || planNudges[monthKey];
+    if(!r) return;
+    setMonthOverrides(p=>{ const n={ ...p }; if(r.hadOverride) n[monthKey]=r.prevOverride; else delete n[monthKey]; return n; });
+    setPlanNudges(p=>{ const n={ ...p }; delete n[monthKey]; return n; });
+  };
+  const dismissNudge = (monthKey) => { const r = buildReadinessFor(monthKey); setPlanNudges(p=>({ ...p, [monthKey]:{ dismissedAtUsed:r.budgetUsed } })); };
 
   const Home = () => {
     // Safe to Spend / Protected Money — same calculations as OutlookPage (ADR-024), duplicated
@@ -15508,6 +15597,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   matching the handoff's tree layout (parent shows its total on its own row,
                   children hang off a rail below); the existing per-commitment rows already were
                   those children, unchanged. */}
+              {(()=>{
+                const nextMonthKey = shiftMonthKey(viewMonth, 1);
+                const nr = buildReadinessFor(nextMonthKey);
+                const nm = new Date(`${nextMonthKey}-01T00:00:00`).toLocaleString("en-IN",{ month:"long" });
+                return (
+                  <button data-testid="plan-ahead-card" onClick={()=>setReadinessMonth(nextMonthKey)} style={{ ...card,width:"100%",textAlign:"left",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,fontFamily:"inherit" }}>
+                    <span style={{ minWidth:0 }}>
+                      <span style={{ display:"block",color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>{nm} · plan ahead</span>
+                      <span style={{ display:"block",color:T.text,fontSize:13,fontWeight:700,marginTop:3 }}>{nr.empty?`Nothing planned for ${nm} yet`:`${nr.spendingEstimated?"~":""}${sym}${fmt(nr.cashNeeded)} cash to keep ready`}</span>
+                    </span>
+                    <span style={{ color:T.sub,fontSize:16 }}>›</span>
+                  </button>
+                );
+              })()}
               <div style={{ ...card }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2 }}>
                   <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Mandatory Commitments</div>
@@ -19549,7 +19652,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="home"&&<Home/>}
         {!showSettings&&tab==="transactions"&&<Transactions/>}
         {!showSettings&&tab==="people"&&<People/>}
-        {!showSettings&&tab==="budget"&&<BudgetPage/>}
+        {!showSettings&&tab==="budget"&&(payTogetherOpen
+          ? <PayTogetherScreen T={T} sym={sym} fmt={fmt} today={todayStr()} instalments={listPayableInstalments(allFutureEvents(), payGroups, todayStr())}
+              onBack={()=>setPayTogetherOpen(false)} onConfirm={confirmPayTogether}/>
+          : readinessMonth
+          ? <ReadinessScreen T={T} sym={sym} fmt={fmt} monthKey={readinessMonth} buildFor={buildReadinessFor} nudgeFor={nudgeForReadiness}
+              onRaise={to=>raiseMonthBudget(readinessMonth, to)} onNotNow={()=>dismissNudge(readinessMonth)} onUndoRaise={()=>undoRaiseMonthBudget(readinessMonth)}
+              onPayTogether={()=>setPayTogetherOpen(true)} onRemoveFromGroup={removeFromPayGroup} onUndoGroup={undoPayGroup}
+              onSaveSpread={saveBudgetSpread} onRemoveSpread={removeBudgetSpread}
+              onBack={()=>setReadinessMonth(null)} onMonth={setReadinessMonth} onAddUpcoming={()=>{ setReadinessMonth(null); setShowAddBill(true); }}/>
+          : <BudgetPage/>)}
         {!showSettings&&tab==="bills"&&<BillsPage/>}
         {!showSettings&&tab==="wealth"&&wealthUnlocked&&(cashFlowMonth
           ? <CashFlowScreen T={T} sym={sym} fmt={fmt} txns={txns} cats={cats} todayMonthKey={todayStr().slice(0,7)}
