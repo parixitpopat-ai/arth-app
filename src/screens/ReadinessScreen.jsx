@@ -44,7 +44,7 @@ function Row({ T, sym, fmt, row, onOpen }) {
   );
 }
 
-export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudgeFor, onRaise, onNotNow, onUndoRaise, onBack, onMonth, onAddUpcoming, onOpenSource, onPayTogether, onRemoveFromGroup, onUndoGroup, onSaveSpread, onRemoveSpread }) {
+export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudgeFor, onRaise, onNotNow, onUndoRaise, onBack, onMonth, onAddUpcoming, onOpenSource, onPayTogether, onRemoveFromGroup, onUndoGroup, onSaveSpread, onRemoveSpread, onPayGroup }) {
   const r = buildFor(monthKey);
   const [detail, setDetail] = useState(null);
   const [spreadFor, setSpreadFor] = useState(null); // { key, label, amount, cashDate, existing }
@@ -165,7 +165,8 @@ export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudge
                     <button type="button" aria-label={`Remove ${e.name} from the group`} data-testid={`pt-remove-${e.sourceId}`} onClick={() => { onRemoveFromGroup(detail.groupId, itemKey(e), e.name); setDetail(null); }} style={{ minWidth: 44, minHeight: 44, background: "none", border: "none", color: T.sub, fontSize: 18, cursor: "pointer" }}>×</button>
                   </div>
                 ))}
-                <div style={{ color: T.sub, fontSize: 12, margin: "8px 0" }}>× puts an instalment back on its own due date. Pay each from its own screen; once paid it leaves the group.</div>
+                {onPayGroup && <button type="button" data-testid="pt-pay-group" onClick={() => { onPayGroup(detail.groupId); setDetail(null); }} style={{ width: "100%", minHeight: 52, margin: "10px 0 4px", background: T.accent, border: "none", borderRadius: 14, color: T.accentInk || "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer", fontFamily: "inherit" }}>Pay {sym}{fmt(total)}</button>}
+                <div style={{ color: T.sub, fontSize: 12, margin: "8px 0" }}>× puts an instalment back on its own due date. In the payment screen, untick any instalment to pay only part — the rest stay in the group.</div>
                 <button type="button" data-testid="pt-undo-group" onClick={() => { onUndoGroup(detail.groupId); setDetail(null); }} style={{ width: "100%", minHeight: 48, marginTop: 6, background: "none", border: `1px solid ${T.border}`, borderRadius: 14, color: T.text, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Undo pay together</button>
               </div>
             );
