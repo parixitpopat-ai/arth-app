@@ -63,11 +63,12 @@ function Row({ T, sym, fmt, row, onOpen }) {
   );
 }
 
-export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, onBack, onMonth, onAddUpcoming, onOpenSource }) {
+export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudgeFor, onRaise, onNotNow, onUndoRaise, onBack, onMonth, onAddUpcoming, onOpenSource }) {
   const r = buildFor(monthKey);
   const [detail, setDetail] = useState(null);
   const tilde = r.spendingEstimated ? "~" : "";
   const over = r.over > 0;
+  const nudge = nudgeFor ? nudgeFor(r) : null;
   const block = { background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: "14px 14px", minWidth: 0 };
   const big = { fontFamily: FONT.mono, fontSize: 24, fontWeight: 800, marginTop: 6, overflowWrap: "anywhere" };
   const nav = { background: T.input, border: "none", color: T.text, borderRadius: 10, minWidth: 44, minHeight: 44, cursor: "pointer", fontSize: 18, fontFamily: "inherit" };
@@ -83,6 +84,16 @@ export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, onBac
         </span>
       </div>
 
+      {nudge && nudge.kind === "card" && (
+        <div data-testid="readiness-nudge" style={{ background: T.card, border: `1px solid ${T.attention}`, borderRadius: 16, padding: "14px 14px", marginBottom: 12 }}>
+          <div style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>Planned spending {r.spendingEstimated ? "~" : ""}{sym}{fmt(r.budgetUsed)} vs budget {sym}{fmt(r.monthBudget)}</div>
+          <div style={{ color: T.sub, fontSize: 13, margin: "4px 0 12px" }}>Raise {monthName(monthKey)}’s budget? Investments aren’t included.</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" data-testid="nudge-raise" onClick={() => onRaise(nudge.raiseTo)} style={{ minHeight: 48, padding: "0 16px", background: T.accent, border: "none", borderRadius: 14, color: T.accentInk || "#fff", fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>Raise to {sym}{fmt(nudge.raiseTo)}</button>
+            <button type="button" data-testid="nudge-not-now" onClick={onNotNow} style={{ minHeight: 48, padding: "0 16px", background: "none", border: `1px solid ${T.border}`, borderRadius: 14, color: T.text, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Not now</button>
+          </div>
+        </div>
+      )}
       {r.empty ? (
         <div data-testid="readiness-empty" style={{ ...block, textAlign: "center", padding: "28px 18px" }}>
           <div style={{ color: T.text, fontSize: 15, fontWeight: 800 }}>Nothing planned for {monthName(monthKey)} yet</div>
@@ -104,6 +115,13 @@ export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, onBac
             <div style={{ ...big, color: over ? T.attention : T.text }}>{tilde}{sym}{fmt(r.budgetUsed)}</div>
             <div style={{ color: T.sub, fontSize: 12, marginTop: 4 }}>{r.monthBudget > 0 ? `of ${sym}${fmt(r.monthBudget)} budget` : "No budget set"}</div>
             {over && <div data-testid="readiness-over" style={{ color: T.attention, fontSize: 12, fontWeight: 700, marginTop: 2 }}>{tilde}{sym}{fmt(r.over)} over</div>}
+            {nudge && nudge.kind === "dismissed" && <button type="button" data-testid="nudge-quiet-raise" onClick={() => onRaise(nudge.raiseTo)} style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", minHeight: 44, padding: 0, fontFamily: "inherit" }}>Raise budget</button>}
+            {nudge && nudge.kind === "raised" && (
+              <div data-testid="nudge-raised" style={{ color: T.sub, fontSize: 12, marginTop: 4 }}>
+                {monthName(monthKey)} budget raised from {sym}{fmt(nudge.raisedFrom)}{" "}
+                <button type="button" onClick={onUndoRaise} style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", minHeight: 44, padding: "0 4px", fontFamily: "inherit" }}>Undo</button>
+              </div>
+            )}
           </div>
         </div>
 

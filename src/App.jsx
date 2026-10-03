@@ -47,6 +47,7 @@ import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalc
 import useOnline from "./hooks/useOnline";
 import { splitAllocation } from "./domain/budget/commitmentSplit";
 import { buildReadiness, shiftMonthKey } from "./domain/budget/readiness";
+import { planNudge } from "./domain/budget/nudge";
 import ReadinessScreen from "./screens/ReadinessScreen";
 import { isPendingSync, offlineStripText, offlineSavedText } from "./domain/payments/syncState";
 import { allocateCcPaymentToEmiInstallments, mergeEmiSettlementInto } from "./domain/cards/emiSettlement";
@@ -1391,6 +1392,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
   const [expandedBudgetGroupId, setExpandedBudgetGroupId] = useState(null);
   const [readinessMonth, setReadinessMonth] = useState(null); // "YYYY-MM" while the Plan ahead screen is open
+  // Plan Ahead PA8/PA9 — per month: { dismissedAtUsed } after "Not now", or { raisedFrom, raisedTo, hadOverride, prevOverride } after accepting.
+  const [planNudges, setPlanNudges] = useState(()=>{ try{ return JSON.parse(localStorage.getItem("arth_plan_nudges")||"{}"); }catch{ return {}; } });
+  useEffect(()=>safeSetLocalStorage("arth_plan_nudges",JSON.stringify(planNudges)),[planNudges]);
   const cloudActiveRef = useRef(false); // set once cloudUser is known (declared further down)
   const [showFabSpeedMenu, setShowFabSpeedMenu] = useState(false);
   const [showDuplicateFinder, setShowDuplicateFinder] = useState(false);
@@ -9837,6 +9841,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     today: todayStr(),
     catIdOf: e => e.sourceType==="bill" ? (bills.find(b=>String(b.id)===String(e.sourceId))?.catId ?? null) : null,
   });
+
+  const nudgeForReadiness = (r) => planNudge({ budgetUsed:r.budgetUsed, monthBudget:r.monthBudget, over:r.over, record:planNudges[r.monthKey] });
+  const raiseMonthBudget = (monthKey, to) => {
+    const r = buildReadinessFor(monthKey);
+    const hadOverride = monthOverrides[monthKey]!=null;
+    setPlanNudges(p=>({ ...p, [monthKey]:{ raisedFrom:r.monthBudget, raisedTo:to, hadOverride, prevOverride:hadOverride?monthOverrides[monthKey]:null } }));
+    setMonthOverrides(p=>({ ...p, [monthKey]:to }));
+    setToast({ message:`${new Date(`${monthKey}-01T00:00:00`).toLocaleString("en-IN",{ month:"long" })} budget raised to ${sym}${fmt(to)}`, icon:"✓", actionLabel:"Undo", onAction:()=>undoRaiseMonthBudget(monthKey, { raisedFrom:r.monthBudget, hadOverride, prevOverride:hadOverride?monthOverrides[monthKey]:null }) });
+  };
+  const undoRaiseMonthBudget = (monthKey, rec) => {
+    const r = rec || planNudges[monthKey];
+    if(!r) return;
+    setMonthOverrides(p=>{ const n={ ...p }; if(r.hadOverride) n[monthKey]=r.prevOverride; else delete n[monthKey]; return n; });
+    setPlanNudges(p=>{ const n={ ...p }; delete n[monthKey]; return n; });
+  };
+  const dismissNudge = (monthKey) => { const r = buildReadinessFor(monthKey); setPlanNudges(p=>({ ...p, [monthKey]:{ dismissedAtUsed:r.budgetUsed } })); };
 
   const Home = () => {
     // Safe to Spend / Protected Money — same calculations as OutlookPage (ADR-024), duplicated
@@ -19578,7 +19598,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="transactions"&&<Transactions/>}
         {!showSettings&&tab==="people"&&<People/>}
         {!showSettings&&tab==="budget"&&(readinessMonth
-          ? <ReadinessScreen T={T} sym={sym} fmt={fmt} monthKey={readinessMonth} buildFor={buildReadinessFor}
+          ? <ReadinessScreen T={T} sym={sym} fmt={fmt} monthKey={readinessMonth} buildFor={buildReadinessFor} nudgeFor={nudgeForReadiness}
+              onRaise={to=>raiseMonthBudget(readinessMonth, to)} onNotNow={()=>dismissNudge(readinessMonth)} onUndoRaise={()=>undoRaiseMonthBudget(readinessMonth)}
               onBack={()=>setReadinessMonth(null)} onMonth={setReadinessMonth} onAddUpcoming={()=>{ setReadinessMonth(null); setShowAddBill(true); }}/>
           : <BudgetPage/>)}
         {!showSettings&&tab==="bills"&&<BillsPage/>}
