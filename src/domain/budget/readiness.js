@@ -19,6 +19,9 @@
 import { isMonthlyRhythm } from "../futureMoney/rhythm.js";
 import { isEstimatedOccurrence } from "../futureMoney/sourceTypeMeta.js";
 
+/** "YYYY-MM" shifted by whole months. */
+export const shiftMonthKey = (mk, delta) => { const [y, m] = mk.split("-").map(Number); const d = new Date(y, m - 1 + delta, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+
 const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
 const monthKeyOf = d => String(d || "").slice(0, 7);
 const daysBetween = (fromStr, toStr) => Math.ceil((new Date(`${toStr}T00:00:00`) - new Date(`${fromStr}T00:00:00`)) / 86400000);

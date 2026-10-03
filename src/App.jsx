@@ -46,8 +46,8 @@ import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVa
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import useOnline from "./hooks/useOnline";
 import { splitAllocation } from "./domain/budget/commitmentSplit";
-import { buildReadiness } from "./domain/budget/readiness";
-import ReadinessScreen, { shiftMonthKey } from "./screens/ReadinessScreen";
+import { buildReadiness, shiftMonthKey } from "./domain/budget/readiness";
+import ReadinessScreen from "./screens/ReadinessScreen";
 import { isPendingSync, offlineStripText, offlineSavedText } from "./domain/payments/syncState";
 import { allocateCcPaymentToEmiInstallments, mergeEmiSettlementInto } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";

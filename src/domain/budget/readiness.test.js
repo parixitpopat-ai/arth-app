@@ -77,3 +77,9 @@ test("no budget set -> never reports over; an event may carry a different budget
 test("nothing planned -> empty", () => {
   assert.equal(buildReadiness({ ...base, commitments: [], events: [] }).empty, true);
 });
+
+import { shiftMonthKey } from "./readiness.js";
+test("shiftMonthKey crosses year boundaries", () => {
+  assert.equal(shiftMonthKey("2026-12", 1), "2027-01");
+  assert.equal(shiftMonthKey("2026-01", -1), "2025-12");
+});

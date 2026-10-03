@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import BottomSheet from "../components/BottomSheet";
 import { FONT, RADIUS } from "../constants/theme";
+import { shiftMonthKey } from "../domain/budget/readiness";
 
 // Plan Ahead PA6/PA7/PA16 — Next-month readiness. Presentation only: every figure comes from
 // domain/budget/readiness.js. CASH (solid chip) and BUDGET (outline chip) are always two labelled
@@ -10,7 +11,6 @@ import { FONT, RADIUS } from "../constants/theme";
 const MONTH_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const monthName = mk => MONTH_LONG[Number(mk.split("-")[1]) - 1];
-export const shiftMonthKey = (mk, delta) => { const [y, m] = mk.split("-").map(Number); const d = new Date(y, m - 1 + delta, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
 
 function Chip({ T, solid, children }) {
   return (
