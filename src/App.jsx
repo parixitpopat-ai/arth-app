@@ -1653,7 +1653,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setLoans(updatedLoans);
       setTxns(prev=>mergeEmiSettlementInto(prev, updatedTxns, txns));
     } else
-    setTxns(p=>[{id:paymentTxnId,type:"expense",desc:bill.name,merchant:bill.merchant||"",date:paymentDate,note:"Bill payment",catId:bill.catId,catIds:bill.catIds||[bill.catId],subId:bill.subId||null,accId,people:isFirstPayment?(bill.splitPeople||{}):{},forPerson:attributedPersonId,groupId:bill.groupId||null,groupCollectiveAmount:isFirstPayment?Number(bill.groupCollectiveAmount||0):0,amount:paidAmount,isBillPayment:true,billInvoiceNo:bill.invoiceNo||null,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null,imageBase64:bill.imageBase64||null,paymentImageBase64:bill.paymentImageBase64||null},...p]);
+    setTxns(p=>[{id:paymentTxnId,type:"expense",desc:bill.name,merchant:bill.merchant||"",date:paymentDate,note:"Bill payment",catId:bill.catId,catIds:bill.catIds||[bill.catId],subId:bill.subId||null,accId,...(payment.paymentLines&&payment.paymentLines.length>1?{paymentLines:payment.paymentLines}:{}),people:isFirstPayment?(bill.splitPeople||{}):{},forPerson:attributedPersonId,groupId:bill.groupId||null,groupCollectiveAmount:isFirstPayment?Number(bill.groupCollectiveAmount||0):0,amount:paidAmount,isBillPayment:true,billInvoiceNo:bill.invoiceNo||null,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null,imageBase64:bill.imageBase64||null,paymentImageBase64:bill.paymentImageBase64||null},...p]);
     setBills(p=>p.map(x=>x.id===bill.id?{...x,
       ...(becomesPaid?{status:"paid",paidDate:paymentDate}:{}),
       ...(isFirstPayment?{paidByTxnId:paymentTxnId}:{}),
