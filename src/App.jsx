@@ -46,6 +46,8 @@ import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVa
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import useOnline from "./hooks/useOnline";
 import { splitAllocation } from "./domain/budget/commitmentSplit";
+import { buildReadiness } from "./domain/budget/readiness";
+import ReadinessScreen, { shiftMonthKey } from "./screens/ReadinessScreen";
 import { isPendingSync, offlineStripText, offlineSavedText } from "./domain/payments/syncState";
 import { allocateCcPaymentToEmiInstallments, mergeEmiSettlementInto } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
@@ -1388,6 +1390,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // allocation row stays open after e.g. skipping a commitment.
   const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
   const [expandedBudgetGroupId, setExpandedBudgetGroupId] = useState(null);
+  const [readinessMonth, setReadinessMonth] = useState(null); // "YYYY-MM" while the Plan ahead screen is open
   const cloudActiveRef = useRef(false); // set once cloudUser is known (declared further down)
   const [showFabSpeedMenu, setShowFabSpeedMenu] = useState(false);
   const [showDuplicateFinder, setShowDuplicateFinder] = useState(false);
@@ -9824,6 +9827,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     getInsuranceFutureMoneyEvents(insurancePolicies),
   ]);
 
+  // Plan Ahead (PA6) — next-month readiness for any month. Composition only: the same Future Money events
+  // Outlook uses, the Mandatory Commitments, and that month's budget; the arithmetic is in domain/budget/readiness.js.
+  const buildReadinessFor = (monthKey) => buildReadiness({
+    events: [...(futureMoney.committedSpending||[]), ...(futureMoney.committedSaving||[]), ...(futureMoney.debtService||[])],
+    commitments: mandatoryCommitments,
+    monthKey,
+    monthBudget: getHouseholdPlanningAllocation(annualBudget, monthOverrides, monthKey),
+    today: todayStr(),
+    catIdOf: e => e.sourceType==="bill" ? (bills.find(b=>String(b.id)===String(e.sourceId))?.catId ?? null) : null,
+  });
+
   const Home = () => {
     // Safe to Spend / Protected Money — same calculations as OutlookPage (ADR-024), duplicated
     // here since Home and Outlook are separate component closures. Flagging the duplication
@@ -15508,6 +15522,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   matching the handoff's tree layout (parent shows its total on its own row,
                   children hang off a rail below); the existing per-commitment rows already were
                   those children, unchanged. */}
+              {(()=>{
+                const nextMonthKey = shiftMonthKey(viewMonth, 1);
+                const nr = buildReadinessFor(nextMonthKey);
+                const nm = new Date(`${nextMonthKey}-01T00:00:00`).toLocaleString("en-IN",{ month:"long" });
+                return (
+                  <button data-testid="plan-ahead-card" onClick={()=>setReadinessMonth(nextMonthKey)} style={{ ...card,width:"100%",textAlign:"left",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,fontFamily:"inherit" }}>
+                    <span style={{ minWidth:0 }}>
+                      <span style={{ display:"block",color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>{nm} · plan ahead</span>
+                      <span style={{ display:"block",color:T.text,fontSize:13,fontWeight:700,marginTop:3 }}>{nr.empty?`Nothing planned for ${nm} yet`:`${nr.spendingEstimated?"~":""}${sym}${fmt(nr.cashNeeded)} cash to keep ready`}</span>
+                    </span>
+                    <span style={{ color:T.sub,fontSize:16 }}>›</span>
+                  </button>
+                );
+              })()}
               <div style={{ ...card }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2 }}>
                   <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Mandatory Commitments</div>
@@ -19549,7 +19577,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="home"&&<Home/>}
         {!showSettings&&tab==="transactions"&&<Transactions/>}
         {!showSettings&&tab==="people"&&<People/>}
-        {!showSettings&&tab==="budget"&&<BudgetPage/>}
+        {!showSettings&&tab==="budget"&&(readinessMonth
+          ? <ReadinessScreen T={T} sym={sym} fmt={fmt} monthKey={readinessMonth} buildFor={buildReadinessFor}
+              onBack={()=>setReadinessMonth(null)} onMonth={setReadinessMonth} onAddUpcoming={()=>{ setReadinessMonth(null); setShowAddBill(true); }}/>
+          : <BudgetPage/>)}
         {!showSettings&&tab==="bills"&&<BillsPage/>}
         {!showSettings&&tab==="wealth"&&wealthUnlocked&&(cashFlowMonth
           ? <CashFlowScreen T={T} sym={sym} fmt={fmt} txns={txns} cats={cats} todayMonthKey={todayStr().slice(0,7)}
