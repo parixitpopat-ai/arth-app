@@ -280,7 +280,7 @@ export const AddInsuranceRenewalNoticeModal = ({ policy, expected, onClose, T, i
   );
 };
 
-export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, formatShortDate, bills, contributions, txns, accounts, setEditingPolicy, setShowAddPolicy, setInsurancePolicies, askConfirm, onAddRenewalNotice, onRecordPayment, onOpenBill, justConverted, onDismissJustConverted }) => {
+export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, formatShortDate, bills, contributions, txns, accounts, billerAccounts, setBills, setEditingPolicy, setShowAddPolicy, setInsurancePolicies, askConfirm, onAddRenewalNotice, onRecordPayment, onOpenBill, justConverted, onDismissJustConverted }) => {
   // The CURRENT open-bill cycle, not necessarily the exact Bill F4 created: once that Bill is
   // paid, its own `recurring:true` regenerates the next cycle as a new Bill (the same pre-
   // existing mechanism a pre-WP2 linked policy already relied on) — but that regeneration never
@@ -298,6 +298,17 @@ export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, forma
   // already uses, so this can never offer the action on a policy that isn't actually Expected
   // (e.g. linkedBillId already set, or archived).
   const expected = linkedBill ? null : getInsuranceRenewalReminders({ insurancePolicies: [policy], today: todayStr(), forwardDays: 36500 })[0] || { amount: policy.premiumAmount, dueDate: policy.renewalDate, kind: "renewing", days: null };
+  // The same real-world policy is sometimes tracked twice: as this policy record (Expected renewal) AND as
+  // a Bill on an older Insurance connection. Nothing is guessed — the person can say "this bill is it", which
+  // links them with the exact fields Add renewal notice sets, so the Expected renewal is replaced, not doubled.
+  const linkableBills = (!linkedBill && billerAccounts && setBills)
+    ? (bills||[]).filter(b=>b.status==="unpaid" && !b.insurancePolicyId && (billerAccounts||[]).find(a=>String(a.id)===String(b.billerAccountId))?.type==="Insurance")
+        .sort((a,b2)=>String(a.dueDate||"9999").localeCompare(String(b2.dueDate||"9999"))).slice(0,3)
+    : [];
+  const linkBill = bill => askConfirm(`Use the ${bill.name} bill${bill.dueDate?` (due ${fmtDate(bill.dueDate)})`:""} as ${policy.name}'s renewal? The Expected renewal is replaced by this bill, not shown twice.`, ()=>{
+    setBills(prev=>prev.map(b=>b.id===bill.id?{...b,insurancePolicyId:policy.id}:b));
+    setInsurancePolicies(prev=>prev.map(p=>p.id===policy.id?applyRenewalNoticeToPolicy(p,bill):p));
+  });
   const badge = linkedBill ? getBillBadge(linkedBill, contributions||[]) : null;
   const badgeText = badge ? getBadgeText(badge, linkedBill) : null;
   // "Premiums paid" — every paid Bill this policy's renewal notice (or its own recurring
@@ -387,6 +398,17 @@ export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, forma
               ? <div style={{ color:T.sub,fontSize:26,fontWeight:800,margin:"6px 0" }}>~{sym}{fmt(expected?.amount||policy.premiumAmount)}</div>
               : <div style={{ color:T.sub,fontSize:14,margin:"6px 0" }}>Amount on notice</div>}
             <div style={{ color:T.sub,fontSize:12,lineHeight:1.5 }}>Renews {fmtDate(policy.renewalDate)}{expected?.kind==="overdue"?" (date has passed)":""} · expected from the policy schedule. Not a bill yet: nothing to pay until you add the renewal notice.</div>
+            {linkableBills.length>0&&policy.status!=="archived"&&(
+              <div data-testid="link-existing-bill" style={{ marginTop:12,paddingTop:10,borderTop:`1px dashed ${T.border}` }}>
+                <div style={{ color:T.sub,fontSize:12,marginBottom:6 }}>Already tracking this renewal as a bill?</div>
+                {linkableBills.map(b=>(
+                  <button key={b.id} type="button" data-testid={`link-bill-${b.id}`} onClick={()=>linkBill(b)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,width:"100%",minHeight:44,marginBottom:6,padding:"0 12px",background:T.input,border:`1px solid ${T.border}`,borderRadius:12,color:T.text,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",textAlign:"left" }}>
+                    <span style={{ minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>Use {b.name}{b.dueDate?` · due ${fmtDate(b.dueDate)}`:""}</span>
+                    <span style={{ flexShrink:0 }}>{sym}{fmt(b.amount)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {policy.status!=="archived"&&(
               <button onClick={()=>onAddRenewalNotice&&onAddRenewalNotice(policy)} style={{ width:"100%",minHeight:48,marginTop:12,background:"transparent",border:`1px solid ${T.accent}`,borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add renewal notice</button>
             )}
