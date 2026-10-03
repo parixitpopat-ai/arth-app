@@ -150,3 +150,23 @@ export function calculateExpectedLoanOutstanding(loan, txns) {
   const totalSettled = installments.reduce((sum, t) => sum + Number(t.emiAmountSettled || 0), 0);
   return Math.max(0, Number(loan.principal || 0) - totalSettled);
 }
+
+/**
+ * Apply the EMI-settlement result onto the CURRENT transaction list without replacing it.
+ * `allocateCcPaymentToEmiInstallments` returns a full copy of the list it was given; writing that
+ * copy back wholesale drops anything added after it was read (e.g. the cc_payment being saved in
+ * the same handler). This copies only the two settlement fields onto matching ids in `current`.
+ */
+export function mergeEmiSettlementInto(current, updatedTxns, originalTxns) {
+  const before = new Map((originalTxns || []).map(t => [t.id, t]));
+  const changed = new Map();
+  for (const t of updatedTxns || []) {
+    const o = before.get(t.id);
+    if (o && (o.emiAmountSettled !== t.emiAmountSettled || o.paidInBill !== t.paidInBill)) changed.set(t.id, t);
+  }
+  if (changed.size === 0) return current;
+  return (current || []).map(t => {
+    const u = changed.get(t.id);
+    return u ? { ...t, emiAmountSettled: u.emiAmountSettled, paidInBill: u.paidInBill } : t;
+  });
+}

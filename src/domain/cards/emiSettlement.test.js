@@ -230,3 +230,21 @@ test("does not rewrite any core historical fact on the installment transaction â
   assert.equal(updated.type, original.type);
   assert.equal(updated.ccEmiPlanId, original.ccEmiPlanId);
 });
+
+test("mergeEmiSettlementInto keeps rows added after the allocation snapshot (cc_payment not dropped)", async () => {
+  const { mergeEmiSettlementInto } = await import("./emiSettlement.js");
+  const original = [makeInstallment({ id: "e1" })];
+  const updated = original.map(t => ({ ...t, emiAmountSettled: 4500, paidInBill: true }));
+  const live = [{ id: "pay1", type: "cc_payment", amount: 4500 }, ...original];
+  const merged = mergeEmiSettlementInto(live, updated, original);
+  assert.equal(merged.length, 2);
+  assert.ok(merged.some(t => t.id === "pay1"));
+  assert.equal(merged.find(t => t.id === "e1").paidInBill, true);
+});
+
+test("mergeEmiSettlementInto with no EMI change returns the live list untouched", async () => {
+  const { mergeEmiSettlementInto } = await import("./emiSettlement.js");
+  const original = [{ id: "x", type: "expense" }];
+  const live = [{ id: "pay1", type: "cc_payment" }, ...original];
+  assert.equal(mergeEmiSettlementInto(live, original, original), live);
+});

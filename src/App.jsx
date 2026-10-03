@@ -44,7 +44,7 @@ import { attemptSchoolAttributionChange, pickMostRecentSchedule } from "./screen
 import { getFeeSchedulesForRelationship } from "./domain/school/feeScheduleLink";
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
-import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
+import { allocateCcPaymentToEmiInstallments, mergeEmiSettlementInto } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
 import { pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel, createRelationship, migrateBillerAccountAttributions, backfillBillerAccountAttributionFromRelationships, getRelationshipTarget } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
@@ -1607,6 +1607,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const paidAmount = payment.amount!==undefined ? Number(payment.amount||0) : balanceBefore.remaining;
     const { applied } = planBillPayment(bill, contributions, paidAmount);
     const becomesPaid = bill.isCcStatement ? true : applied >= balanceBefore.remaining - 0.005;
+    if(bill.isCcStatement && bill.accId){
+      // A card statement is settled by a cc_payment (bank -> card), exactly like the Add form's
+      // Card payment. Writing it as an expense would count the same card spends a second time and
+      // leave the card ledger/outstanding untouched.
+      setTxns(p=>[{id:paymentTxnId,type:"cc_payment",desc:bill.name,merchant:"",date:paymentDate,note:"Statement payment",fromAccId:accId,toAccId:bill.accId,accId:null,catId:null,catIds:[],subId:null,subIds:[],people:{},amount:paidAmount,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null},...p]);
+      setAccounts(prev=>prev.map(a=>String(a.id)===String(bill.accId)?{...a,outstanding:Math.max(0,(a.outstanding||0)-paidAmount)}:a));
+      const { updatedLoans, updatedTxns } = allocateCcPaymentToEmiInstallments(loans, txns, bill.accId, paidAmount, paymentDate, genId);
+      setLoans(updatedLoans);
+      setTxns(prev=>mergeEmiSettlementInto(prev, updatedTxns, txns));
+    } else
     setTxns(p=>[{id:paymentTxnId,type:"expense",desc:bill.name,merchant:bill.merchant||"",date:paymentDate,note:"Bill payment",catId:bill.catId,catIds:bill.catIds||[bill.catId],subId:bill.subId||null,accId,people:isFirstPayment?(bill.splitPeople||{}):{},forPerson:attributedPersonId,groupId:bill.groupId||null,groupCollectiveAmount:isFirstPayment?Number(bill.groupCollectiveAmount||0):0,amount:paidAmount,isBillPayment:true,billInvoiceNo:bill.invoiceNo||null,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null,imageBase64:bill.imageBase64||null,paymentImageBase64:bill.paymentImageBase64||null},...p]);
     setBills(p=>p.map(x=>x.id===bill.id?{...x,
       ...(becomesPaid?{status:"paid",paidDate:paymentDate}:{}),
@@ -1649,7 +1659,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       },...p]);
     }
     setMarkingBillPaid(null);
-  }, [billerAccounts, contributions, membershipRelationships]);
+  }, [billerAccounts, contributions, membershipRelationships, loans, txns]);
 
   // ADR-039 §6 — "Confirm amount": `bill.fromSchedule`. Creates one real, normal Bill from an
   // Expected item, through the same path every other Bill uses — this is the only writer;
@@ -5603,7 +5613,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // paid than was actually paid. See domain/cards/emiSettlement.js.
           const { updatedLoans, updatedTxns } = allocateCcPaymentToEmiInstallments(loans, txns, toAccId, amt, date||todayStr(), genId);
           setLoans(updatedLoans);
-          setTxns(updatedTxns);
+          // Merge onto the live list: `updatedTxns` is a copy of the pre-save `txns`, so writing it
+          // back wholesale would drop the cc_payment upserted just above.
+          setTxns(prev=>mergeEmiSettlementInto(prev, updatedTxns, txns));
         }
       } else if(txnType==="investment"){
         const invId = (isEditing ? (sourceTxn?.linkedInvestmentId || linkedInvestment?.id) : null) || genId();
