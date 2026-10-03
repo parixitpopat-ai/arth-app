@@ -105,6 +105,7 @@ export function getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts
       items.push({
         id: `school:${p.id}`,
         billerAccountId: sch.billerAccountId,
+        schoolName: ba?.name || sch.schoolName || "",
         sourceType: "school",
         name: p.label || ba?.name || "School Fees",
         amount: outstanding,
