@@ -24,7 +24,7 @@ function Row({ T, k, v }) {
   );
 }
 
-export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, provider, relationship, accountName, sym, fmt, onClose, onRecordPayment, onEdit, onShare, onOpenProvider, extras, txns }) {
+export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, provider, relationship, accountName, sym, fmt, onClose, onRecordPayment, onSpread, spreadLabel, onEdit, onShare, onOpenProvider, extras, txns }) {
   const bt = getBadgeText(badge, bill);
   const open = badge.kind !== "paid" && badge.kind !== "cancelled";
   const dueLine = (() => {
@@ -109,6 +109,10 @@ export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, prov
           <button data-testid="bill-record-payment" onClick={onRecordPayment} style={{ marginTop: 16, width: "100%", minHeight: 48, background: T.accent, border: "none", borderRadius: RADIUS.md, color: T.accentInk || "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
             Record payment {sym}{fmt(ledger.remaining)}
           </button>
+        ) : null}
+
+        {onSpread ? (
+          <button data-testid="bill-spread" onClick={onSpread} style={{ marginTop: 10, width: "100%", minHeight: 44, background: "none", border: `1px solid ${T.border}`, borderRadius: RADIUS.md, color: T.text, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>{spreadLabel || "Spread in budget"}</button>
         ) : null}
 
         {extras ? <div style={{ marginTop: 18, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>{extras}</div> : null}
