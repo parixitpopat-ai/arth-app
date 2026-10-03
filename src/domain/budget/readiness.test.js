@@ -131,3 +131,39 @@ test("a grouped instalment that is paid leaves the group's total", () => {
   assert.equal(r.spendingRows[0].cash, 20000);
   assert.equal(r.spendingRows[0].budget, 0);
 });
+
+import { createSpread } from "./spread.js";
+const gymEvent = { category: "committedSpending", status: "unpaid", recurs: true, sourceType: "membership", sourceId: "gym", name: "Gym XYZ", amount: 9000, date: "2026-11-15" };
+const gymSpread = createSpread({ key: "membership:gym", label: "Gym XYZ", amount: 9000, startMonth: "2026-11", months: 3, cashDate: "2026-11-15", genId: () => "sp1" }).spread;
+const withSpread = (monthKey, spreads = [gymSpread]) => buildReadiness({ events: [gymEvent], commitments: [], monthKey, monthBudget: 65000, today, spreads });
+
+test("PA6/PA14: in the cash month the full ₹9,000 is CASH and only the ₹3,000 share is BUDGET", () => {
+  const r = withSpread("2026-11");
+  assert.equal(r.spendingCash, 9000);
+  assert.equal(r.budgetUsed, 3000);
+  assert.equal(r.spendingRows.length, 1);
+});
+
+test("PA15: later months show CASH ₹0 and the ₹3,000 BUDGET share, with 'Spread 2 of 3'", () => {
+  const dec = withSpread("2026-12");
+  assert.equal(dec.spendingCash, 0);
+  assert.equal(dec.budgetUsed, 3000);
+  assert.equal(dec.spendingRows.length, 1, "the recurring projection must not also count");
+  assert.match(dec.spendingRows[0].sub, /Spread 2 of 3/);
+  assert.match(dec.spendingRows[0].sub, /15 Nov/);
+  assert.equal(withSpread("2027-01").spendingRows[0].sub.startsWith("Spread 3 of 3"), true);
+});
+
+test("after the spread ends the item is an ordinary monthly estimate again; without a spread nothing changes", () => {
+  assert.equal(withSpread("2027-02").spendingCash, 9000);
+  assert.equal(withSpread("2026-12", []).spendingCash, 9000);
+  assert.equal(withSpread("2026-11", []).budgetUsed, 9000);
+});
+
+test("a spread of an already-paid payment (no event) still shows its budget share, with CASH 0", () => {
+  const paid = createSpread({ label: "Insurance", amount: 24600, startMonth: "2026-10", months: 12, cashDate: "2026-10-01", genId: () => "sp2" }).spread;
+  const r = buildReadiness({ events: [], commitments: [], monthKey: "2026-11", monthBudget: 65000, today, spreads: [paid] });
+  assert.equal(r.spendingCash, 0);
+  assert.equal(r.budgetUsed, 2050);
+  assert.match(r.spendingRows[0].sub, /Spread 2 of 12 · paid 1 Oct/);
+});

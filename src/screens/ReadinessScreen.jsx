@@ -3,6 +3,9 @@ import BottomSheet from "../components/BottomSheet";
 import { FONT, RADIUS } from "../constants/theme";
 import { shiftMonthKey } from "../domain/budget/readiness";
 import { itemKey } from "../domain/payTogether/group";
+import { spreadMonths } from "../domain/budget/spread";
+import SpreadSheet from "./SpreadSheet";
+import { Chip, CashBudgetStrip } from "../components/CashBudgetStrip";
 
 // Plan Ahead PA6/PA7/PA16 — Next-month readiness. Presentation only: every figure comes from
 // domain/budget/readiness.js. CASH (solid chip) and BUDGET (outline chip) are always two labelled
@@ -12,33 +15,6 @@ import { itemKey } from "../domain/payTogether/group";
 const MONTH_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const monthName = mk => MONTH_LONG[Number(mk.split("-")[1]) - 1];
-
-function Chip({ T, solid, children }) {
-  return (
-    <span style={{ display: "inline-block", fontSize: 10, fontWeight: 800, letterSpacing: "0.1em", padding: "2px 8px", borderRadius: RADIUS.pill || 999,
-      background: solid ? T.text : "transparent", color: solid ? T.bg : T.text, border: `1px solid ${solid ? T.text : T.borderStrong || T.border}` }}>{children}</span>
-  );
-}
-
-// More than three months side by side use a short form (₹5K) so the strip never scrolls sideways.
-const short = n => { const v = Math.abs(Number(n) || 0); if (v >= 100000) return `${(v / 100000).toFixed(2).replace(/\.?0+$/, "")}L`; if (v >= 1000) return `${(v / 1000).toFixed(1).replace(/\.0$/, "")}K`; return String(Math.round(v)); };
-
-/** CASH row + BUDGET row across the months involved (PA7). `months` = [{key, cash, budget}]; null = dashed empty cell. */
-export function CashBudgetStrip({ T, sym, fmt, months }) {
-  const compact = months.length > 3;
-  const cell = (v, T, note) => (
-    <div style={{ minWidth: 0, textAlign: "right", fontFamily: FONT.mono, fontSize: compact ? 12 : 13, fontWeight: 700, color: v == null ? T.sub : T.text,
-      border: v == null ? `1px dashed ${T.border}` : "none", borderRadius: 8, padding: "6px 2px", overflowWrap: "anywhere" }}>{v == null ? (note || "—") : `${sym}${compact ? short(v) : fmt(v)}`}</div>
-  );
-  const cols = `${compact ? 52 : 56}px repeat(${months.length}, minmax(0, 1fr))`;
-  return (
-    <div data-testid="cash-budget-strip" style={{ display: "grid", gridTemplateColumns: cols, gap: 6, alignItems: "center" }}>
-      <span />{months.map(m => <div key={m.key} style={{ color: T.sub, fontSize: 11, fontWeight: 700, textAlign: "right" }}>{MONTH_SHORT[Number(m.key.split("-")[1]) - 1]}</div>)}
-      <Chip T={T} solid>CASH</Chip>{months.map(m => <React.Fragment key={m.key}>{cell(m.cash, T, m.cashNote)}</React.Fragment>)}
-      <Chip T={T}>BUDGET</Chip>{months.map(m => <React.Fragment key={m.key}>{cell(m.budget, T)}</React.Fragment>)}
-    </div>
-  );
-}
 
 function ColumnHead({ T, title }) {
   return (
@@ -68,9 +44,10 @@ function Row({ T, sym, fmt, row, onOpen }) {
   );
 }
 
-export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudgeFor, onRaise, onNotNow, onUndoRaise, onBack, onMonth, onAddUpcoming, onOpenSource, onPayTogether, onRemoveFromGroup, onUndoGroup }) {
+export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudgeFor, onRaise, onNotNow, onUndoRaise, onBack, onMonth, onAddUpcoming, onOpenSource, onPayTogether, onRemoveFromGroup, onUndoGroup, onSaveSpread, onRemoveSpread }) {
   const r = buildFor(monthKey);
   const [detail, setDetail] = useState(null);
+  const [spreadFor, setSpreadFor] = useState(null); // { key, label, amount, cashDate, existing }
   const tilde = r.spendingEstimated ? "~" : "";
   const tCash = r.spendingEstimated && r.cashNeeded > 0 ? "~" : "";
   const tSpend = r.spendingEstimated && r.spendingCash > 0 ? "~" : "";
@@ -152,6 +129,13 @@ export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudge
         <div style={{ color: T.sub, fontSize: 12, lineHeight: 1.5 }}>~ = estimate, not yet a bill. Cash counts money in the month it leaves. Budget counts the month’s share.</div>
       </>)}
 
+      {spreadFor && (
+        <SpreadSheet T={T} sym={sym} fmt={fmt} title={spreadFor.label} amount={spreadFor.amount}
+          cashMonth={String(spreadFor.cashDate || `${monthKey}-01`).slice(0, 7)} initial={spreadFor.existing}
+          onClose={() => setSpreadFor(null)}
+          onSave={({ months, startMonth }) => { onSaveSpread({ ...spreadFor, months, startMonth }); setSpreadFor(null); setDetail(null); }}
+          onRemove={spreadFor.existing ? () => { onRemoveSpread(spreadFor.existing.id); setSpreadFor(null); setDetail(null); } : undefined} />
+      )}
       {detail && (
         <BottomSheet onClose={() => setDetail(null)} T={T} maxWidth={430} maxHeight="80vh" padding="20px 16px 32px" zIndex={360}>
           {detail.groupId ? (() => {
@@ -192,15 +176,30 @@ export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudge
               <button type="button" onClick={() => setDetail(null)} style={{ background: T.input, border: "none", color: T.sub, borderRadius: 8, padding: "5px 12px", cursor: "pointer" }}>Done</button>
             </div>
             <div style={{ color: T.sub, fontSize: 13, marginBottom: 12 }}>{detail.sub}</div>
-            <CashBudgetStrip T={T} sym={sym} fmt={fmt} months={[{ key: monthKey, cash: detail.cash, budget: detail.budget }]} />
+            <CashBudgetStrip T={T} sym={sym} fmt={fmt} months={detail.kind === "spread" ? spreadMonths(detail.spread).slice(0, 4).map(m => ({ key: m.monthKey, cash: m.monthKey === String(detail.spread.cashDate || "").slice(0, 7) ? detail.spread.amount : null, budget: m.share })) : [{ key: monthKey, cash: detail.cash, budget: detail.budget }]} />
+            {detail.kind === "spread" ? (
+              <div data-testid="spread-explain">
+                <div style={{ color: T.text, fontSize: 13, fontWeight: 700, margin: "12px 0 2px" }}>Why {sym}0 cash?</div>
+                <div style={{ color: T.sub, fontSize: 12, marginBottom: 12 }}>The full {sym}{fmt(detail.spread.amount)} {detail.spread.cashDate && detail.spread.cashDate <= new Date().toISOString().slice(0, 10) ? "left" : "leaves"} on {Number(String(detail.spread.cashDate || "").slice(8, 10)) || "—"} {MONTH_SHORT[Number(String(detail.spread.cashDate || "").slice(5, 7)) - 1] || ""}. This month’s budget counts its {sym}{fmt(detail.budget)} share.</div>
+                {onSaveSpread && <button type="button" data-testid="spread-change" onClick={() => setSpreadFor({ key: detail.spread.key, label: detail.spread.label, amount: detail.spread.amount, cashDate: detail.spread.cashDate, existing: detail.spread })} style={{ width: "100%", minHeight: 48, background: "none", border: `1px solid ${T.border}`, borderRadius: 14, color: T.text, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Change or remove spread</button>}
+              </div>
+            ) : (
             <div style={{ color: T.sub, fontSize: 12, margin: "12px 0" }}>{detail.budget == null ? "Investments leave your accounts but aren’t part of the spending budget." : "Cash leaves in this month, and the budget counts the same amount."}</div>
-            {detail.items?.length > 0 && detail.items.map((e, i) => (
-              <button key={`${e.sourceType}:${e.sourceId}:${i}`} type="button" disabled={!onOpenSource} onClick={() => onOpenSource && onOpenSource(e)}
-                style={{ display: "flex", justifyContent: "space-between", gap: 10, width: "100%", minHeight: 44, padding: "6px 0", background: "none", border: "none", borderTop: `1px solid ${T.border}`, color: T.text, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
-                <span style={{ minWidth: 0, overflowWrap: "anywhere", fontSize: 13 }}>{e.name || e.sourceType}</span>
-                <span style={{ fontFamily: FONT.mono, fontSize: 13, fontWeight: 700 }}>{sym}{fmt(e.amount)}</span>
-              </button>
-            ))}
+            )}
+            {detail.items?.length > 0 && detail.items.map((e, i) => {
+              const k = itemKey(e); const sp = detail.itemSpreads && detail.itemSpreads[k];
+              return (
+                <div key={`${k}:${i}`} style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 48, borderTop: `1px solid ${T.border}` }}>
+                  <button type="button" disabled={!onOpenSource} onClick={() => onOpenSource && onOpenSource(e)} style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "space-between", gap: 10, background: "none", border: "none", padding: "6px 0", color: T.text, cursor: onOpenSource ? "pointer" : "default", fontFamily: "inherit", textAlign: "left" }}>
+                    <span style={{ minWidth: 0, overflowWrap: "anywhere", fontSize: 13 }}>{e.name || e.sourceType}{sp ? ` · spread ×${sp.months}` : ""}</span>
+                    <span style={{ fontFamily: FONT.mono, fontSize: 13, fontWeight: 700 }}>{sym}{fmt(e.amount)}</span>
+                  </button>
+                  {onSaveSpread && detail.budget != null && e.category !== "committedSaving" && (
+                    <button type="button" data-testid={`spread-open-${e.sourceId}`} onClick={() => setSpreadFor({ key: k, label: e.name || "Payment", amount: Number(e.amount), cashDate: e.date, existing: sp || null })} style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", minHeight: 44, padding: "0 4px", fontFamily: "inherit", flexShrink: 0 }}>{sp ? "Change spread" : "Spread in budget"}</button>
+                  )}
+                </div>
+              );
+            })}
           </div>
           )}
         </BottomSheet>

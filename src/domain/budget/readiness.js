@@ -19,6 +19,7 @@
 import { isMonthlyRhythm } from "../futureMoney/rhythm.js";
 import { isEstimatedOccurrence } from "../futureMoney/sourceTypeMeta.js";
 import { itemKey, liveItems } from "../payTogether/group.js";
+import { spreadInMonth } from "./spread.js";
 
 /** "YYYY-MM" shifted by whole months. */
 export const shiftMonthKey = (mk, delta) => { const [y, m] = mk.split("-").map(Number); const d = new Date(y, m - 1 + delta, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
@@ -55,9 +56,10 @@ function typeKeyOf(e) {
  * @param {number} p.monthBudget   that month's budget (0 when none is set)
  * @param {string} p.today         "YYYY-MM-DD"
  * @param {(e:Object)=>string|null} [p.catIdOf] category id of an event, when known
+ * @param {Array}  [p.spreads]     Spread-over-months plans: budget shares per month, cash untouched (see spread.js)
  * @param {Array}  [p.groups]      Pay together groups ({id,date,items}); cash moves to the group's date, budget stays in each due month
  */
-export function buildReadiness({ events, commitments, monthKey, monthBudget, today, catIdOf = () => null, groups = [] }) {
+export function buildReadiness({ events, commitments, monthKey, monthBudget, today, catIdOf = () => null, groups = [], spreads = [] }) {
   const active = (commitments || []).filter(c => !(c.skippedMonths || []).includes(monthKey) && Number(c.amount) > 0);
   const byCat = new Map(active.filter(c => c.categoryId).map(c => [String(c.categoryId), c]));
 
@@ -83,6 +85,9 @@ export function buildReadiness({ events, commitments, monthKey, monthBudget, tod
     }
   }
 
+  const spreadByKey = new Map((spreads || []).filter(x => x.key).map(x => [x.key, x]));
+  const spreadUsed = new Set();
+
   // 1 · which events count in this month, and whether each is an estimate
   const counted = [];
   for (const e of events || []) {
@@ -98,12 +103,16 @@ export function buildReadiness({ events, commitments, monthKey, monthBudget, tod
       const section = daysBetween(today, e.date) <= 30 ? "next30" : "later";
       estimate = isEstimatedOccurrence(e.sourceType, section);
     } else if (isMonthlyRhythm(e) && eMonth < monthKey) {
+      const sp0 = spreadByKey.get(itemKey(e));
+      if (sp0 && spreadInMonth(sp0, monthKey)) continue; // its spread rows already cover this month
       estimate = true; // the same item recurring into this month: a projection, not a bill yet
     } else continue;
     const grp2 = groupOf.get(itemKey(e));
     const cash = grp2 ? 0 : amount; // grouped: the cash is in the group's month
-    const budget = e.category === "committedSaving" ? null : (e.budgetAmount != null ? Number(e.budgetAmount) : amount);
-    counted.push({ event: e, cash, budget, estimate, paidTogether: grp2 ? grp2.date : null });
+    let budget = e.category === "committedSaving" ? null : (e.budgetAmount != null ? Number(e.budgetAmount) : amount);
+    const sp = eMonth === monthKey ? spreadByKey.get(itemKey(e)) : null;
+    if (sp && budget != null) { const pos = spreadInMonth(sp, monthKey); budget = pos ? pos.share : 0; spreadUsed.add(sp.id); }
+    counted.push({ event: e, cash, budget, estimate, paidTogether: grp2 ? grp2.date : null, spread: sp || null });
   }
 
   // 2 · commitments cover bills in their category
@@ -141,10 +150,24 @@ export function buildReadiness({ events, commitments, monthKey, monthBudget, tod
       key, kind, label: TYPE_LABEL[key] || key,
       sub: together ? `Paid together ${dayMonth(together)}` : items.length === 1 ? (names[0] || "") : `${items.length} items`,
       cash, budget, estimate: items.some(i => i.estimate), items: items.map(i => i.event),
+      itemSpreads: Object.fromEntries(items.filter(i => i.spread).map(i => [itemKey(i.event), i.spread])),
     };
   };
   for (const key of TYPE_ORDER) if (typeGroups.has(key)) spendingRows.push(rowFor(key, typeGroups.get(key), "spending"));
   const investmentRows = typeGroups.has("sips") ? [rowFor("sips", typeGroups.get("sips"), "investment")] : [];
+
+  // Spread plans: months after (or before) the cash month carry the budget share with CASH 0
+  for (const sp of spreads || []) {
+    if (spreadUsed.has(sp.id)) continue;
+    const pos = spreadInMonth(sp, monthKey);
+    if (!pos) continue;
+    const verb = sp.cashDate && sp.cashDate <= today ? "paid" : "due";
+    spendingRows.push({
+      key: `spread:${sp.id}`, kind: "spread", spreadId: sp.id, label: sp.label,
+      sub: `Spread ${pos.index + 1} of ${pos.of}${sp.cashDate ? ` · ${verb} ${dayMonth(sp.cashDate)}` : ""}`,
+      cash: 0, budget: pos.share, estimate: false, items: [], spread: sp,
+    });
+  }
 
   spendingRows.unshift(...groupRows.spending);
   investmentRows.unshift(...groupRows.saving);
