@@ -44,6 +44,8 @@ import { attemptSchoolAttributionChange, pickMostRecentSchedule } from "./screen
 import { getFeeSchedulesForRelationship } from "./domain/school/feeScheduleLink";
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
+import useOnline from "./hooks/useOnline";
+import { isPendingSync, offlineStripText, offlineSavedText } from "./domain/payments/syncState";
 import { allocateCcPaymentToEmiInstallments, mergeEmiSettlementInto } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
 import { pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel, createRelationship, migrateBillerAccountAttributions, backfillBillerAccountAttributionFromRelationships, getRelationshipTarget } from "./domain/membership/relationship";
@@ -1380,6 +1382,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [cashFlowMonth, setCashFlowMonth] = useState(null); // Money → Cash flow screen: the month it opened on (null = closed)
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [toast, setToast] = useState(null); // { message, icon } | null
+  const online = useOnline();
+  const cloudActiveRef = useRef(false); // set once cloudUser is known (declared further down)
   const [showFabSpeedMenu, setShowFabSpeedMenu] = useState(false);
   const [showDuplicateFinder, setShowDuplicateFinder] = useState(false);
   const [showExpectedIncome, setShowExpectedIncome] = useState(false);
@@ -1657,7 +1661,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     setBills(p=>p.map(x=>x.id===bill.id?{...x,
       ...(becomesPaid?{status:"paid",paidDate:paymentDate}:{}),
       ...(isFirstPayment?{paidByTxnId:paymentTxnId}:{}),
-      lastPaidAmount:paidAmount,lastPaidDate:paymentDate}:x));
+      lastPaidAmount:paidAmount,lastPaidDate:paymentDate,lastPaidAt:paymentTxnId}:x));
     // WP-OBL-04a: dual-write — also record a real Contribution alongside the
     // legacy paidByTxnId/status write above. Full amount, since this path has
     // no partial-payment concept yet.
@@ -1669,6 +1673,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const extra = payment.applyExtraToNext ? Math.min(Math.max(0, paidAmount-applied), Number(nextBill.amount||0)) : 0;
       if(extra>0) setContributions(prev=>withBillContributionForTxn(prev, { billId:nextBill.id, txnId:paymentTxnId, amount:extra, txnAmount:paidAmount }, genId));
     }
+    if(typeof navigator!=="undefined" && navigator.onLine===false) setToast({ message:offlineSavedText(bill.name, cloudActiveRef.current), icon:"📴" });
     setMarkingBillPaid(null);
   }, [billerAccounts, contributions, membershipRelationships, loans, txns]);
 
@@ -9024,6 +9029,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [syncEmail, setSyncEmail] = useState("");
   const [syncPassword, setSyncPassword] = useState("");
   const [cloudUser, setCloudUser] = useState(null);
+  cloudActiveRef.current = Boolean(cloudUser?.id && isCloudSyncConfigured);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudHydrated, setCloudHydrated] = useState(!isCloudSyncConfigured);
   const [lastSyncedAt, setLastSyncedAt] = useState("");
@@ -17148,6 +17154,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <button key={t} data-testid={`payments-subtab-${t}`} onClick={()=>setBillsTab(t)} style={{ flex:1,padding:"14px 8px",background:"none",border:"none",borderBottom:`2px solid ${billsTab===t?T.accent:"transparent"}`,cursor:"pointer",fontSize:13,fontWeight:800,color:billsTab===t?T.accent:T.sub,fontFamily:"Nunito,sans-serif",transition:"all 0.2s" }}>{l}</button>
           ))}
         </div>
+        {!online&&(
+          <div data-testid="offline-strip" role="status" style={{ background:T.card,borderBottom:`1px solid ${T.border}`,color:T.sub,fontSize:12,fontWeight:700,padding:"8px 16px",textAlign:"center" }}>
+            {offlineStripText(lastSyncedAt?formatBackupStamp(lastSyncedAt):"", Boolean(cloudUser?.id && isCloudSyncConfigured))}
+          </div>
+        )}
 
         {/* MY BILLS TAB - PhonePe style */}
         {billsTab==="mybills"&&(
@@ -17238,7 +17249,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {/* UI-2C M2 PY-18 / PY-27 — the Bills list. Rows open Bill detail; card statements open
             their existing reconciliation sheet. */}
         {billsTab==="bills"&&(
-          <BillsList T={T} sym={sym} fmt={fmt}
+          <BillsList T={T} sym={sym} fmt={fmt} pendingSync={b=>isPendingSync(b.lastPaidAt, lastSyncedAt, Boolean(cloudUser?.id && isCloudSyncConfigured))}
             view={buildPaymentsView({ bills, contributions, forFilter:paymentsForFilter, forLabel:getBillForLabel, expectedItems:getExpectedItems(membershipRelationships, bills), renewalItems:[
               // WP4 — widened from the functions' own 7-day default to PAYMENTS_HORIZON_DAYS (30),
               // so this window stays exactly complementary with Outlook's (isWithinPaymentsHorizon):
