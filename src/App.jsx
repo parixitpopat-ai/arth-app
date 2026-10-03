@@ -48,7 +48,9 @@ import useOnline from "./hooks/useOnline";
 import { splitAllocation } from "./domain/budget/commitmentSplit";
 import { buildReadiness, shiftMonthKey } from "./domain/budget/readiness";
 import { planNudge } from "./domain/budget/nudge";
-import { createGroup as createPayGroup, removeItem as removePayGroupItem, listPayableInstalments } from "./domain/payTogether/group";
+import { createGroup as createPayGroup, removeItem as removePayGroupItem, listPayableInstalments, liveItems as livePayGroupItems } from "./domain/payTogether/group";
+import { planGroupPayment } from "./domain/payTogether/payPlan";
+import PayGroupSheet from "./screens/PayGroupSheet";
 import PayTogetherScreen from "./screens/PayTogetherScreen";
 import { createSpread } from "./domain/budget/spread";
 import ReadinessScreen from "./screens/ReadinessScreen";
@@ -1406,6 +1408,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [budgetSpreads, setBudgetSpreads] = useState(()=>{ try{ const v=JSON.parse(localStorage.getItem("arth_budget_spreads")||"[]"); return Array.isArray(v)?v:[]; }catch{ return []; } });
   useEffect(()=>safeSetLocalStorage("arth_budget_spreads",JSON.stringify(budgetSpreads)),[budgetSpreads]);
   const [payTogetherOpen, setPayTogetherOpen] = useState(false);
+  const [payGroupSchedule, setPayGroupSchedule] = useState(null); // the school whose periods a Pay together group is paying (no schedule screen opens)
+  const [payGroupChooser, setPayGroupChooser] = useState(null); // groupId while the per-part Pay sheet is open
   const cloudActiveRef = useRef(false); // set once cloudUser is known (declared further down)
   const [showFabSpeedMenu, setShowFabSpeedMenu] = useState(false);
   const [showDuplicateFinder, setShowDuplicateFinder] = useState(false);
@@ -9895,6 +9899,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(!sp) return;
     setBudgetSpreads(p=>p.filter(x=>x.id!==id));
     setToast({ message:"Spread removed", icon:"✓", actionLabel:"Undo", onAction:()=>setBudgetSpreads(p=>p.some(x=>x.id===id)?p:[...p,sp]) });
+  };
+
+  // Pay together -> Pay. Reuses the existing payment flows unchanged: School fee periods go through Pay fees
+  // (several periods, several payment methods, untick to pay part), Bills through Record payment. SIP
+  // instalments aren't payable from here.
+  const payGroupPlan = (groupId) => {
+    const g = payGroups.find(x=>String(x.id)===String(groupId));
+    return g ? planGroupPayment({ live:livePayGroupItems(g, allFutureEvents()), feePeriods, feeSchedules, bills }) : null;
+  };
+  const payFeePart = (part) => {
+    setPayGroupChooser(null);
+    setPayGroupSchedule(part.schedule);
+    setSelectedSchoolFeePeriodIds(part.periodIds);
+    setShowSettleSchoolFee(true);
+  };
+  const startPayGroup = (groupId) => {
+    const plan = payGroupPlan(groupId);
+    if(!plan) return;
+    if(plan.parts.length===1 && plan.parts[0].kind==="fees" && plan.unpayable.length===0){ payFeePart(plan.parts[0]); return; }
+    setPayGroupChooser(groupId);
   };
 
   const nudgeForReadiness = (r) => planNudge({ budgetUsed:r.budgetUsed, monthBudget:r.monthBudget, over:r.over, record:planNudges[r.monthKey] });
@@ -19659,7 +19683,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           ? <ReadinessScreen T={T} sym={sym} fmt={fmt} monthKey={readinessMonth} buildFor={buildReadinessFor} nudgeFor={nudgeForReadiness}
               onRaise={to=>raiseMonthBudget(readinessMonth, to)} onNotNow={()=>dismissNudge(readinessMonth)} onUndoRaise={()=>undoRaiseMonthBudget(readinessMonth)}
               onPayTogether={()=>setPayTogetherOpen(true)} onRemoveFromGroup={removeFromPayGroup} onUndoGroup={undoPayGroup}
-              onSaveSpread={saveBudgetSpread} onRemoveSpread={removeBudgetSpread}
+              onSaveSpread={saveBudgetSpread} onRemoveSpread={removeBudgetSpread} onPayGroup={startPayGroup}
               onBack={()=>setReadinessMonth(null)} onMonth={setReadinessMonth} onAddUpcoming={()=>{ setReadinessMonth(null); setShowAddBill(true); }}/>
           : <BudgetPage/>)}
         {!showSettings&&tab==="bills"&&<BillsPage/>}
@@ -19813,9 +19837,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           setEditingSchoolSchedule={setEditingSchoolSchedule}
         />}
         {showSettleSchoolFee&&<PayFeesModal
-          onClose={()=>setShowSettleSchoolFee(false)}
+          onClose={()=>{ setShowSettleSchoolFee(false); if(!viewingSchoolFeeSchedule){ setPayGroupSchedule(null); setSelectedSchoolFeePeriodIds([]); } }}
           T={T} sym={sym} fmt={fmt}
-          schoolName={viewingSchoolFeeSchedule?.schoolName}
+          schoolName={(viewingSchoolFeeSchedule||payGroupSchedule)?.schoolName}
           feePeriods={feePeriods} setFeePeriods={setFeePeriods}
           selectedPeriodIds={selectedSchoolFeePeriodIds} setSelectedPeriodIds={setSelectedSchoolFeePeriodIds}
           accounts={accounts}
@@ -19841,8 +19865,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             const catAllocations = rollupToCatAllocations(rollup);
             setTxns(prev=>[{
               id: txnId, type:"expense", amount, date: date || todayStr(),
-              merchant: viewingSchoolFeeSchedule?.schoolName || "School Fee",
-              desc: `School fee payment — ${viewingSchoolFeeSchedule?.schoolName || ""}`,
+              merchant: (viewingSchoolFeeSchedule||payGroupSchedule)?.schoolName || "School Fee",
+              desc: `School fee payment — ${(viewingSchoolFeeSchedule||payGroupSchedule)?.schoolName || ""}`,
               // E3 — several payment methods, each from its own account; accId mirrors the first
               // line so every existing single-account read (ledgers, Insights, account balances via
               // the real transaction pipeline) still resolves to a real, correct account.
@@ -20886,6 +20910,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             onOpenProvider={ba?()=>{ setViewingBillId(null); setActiveBillerForAction(ba); }:undefined}
             onShare={shareBill} txns={txns}
             extras={renderBillExtras(vb)}/>;
+        })()}
+        {payGroupChooser&&(()=>{
+          const plan = payGroupPlan(payGroupChooser);
+          if(!plan) return null;
+          return <PayGroupSheet T={T} sym={sym} fmt={fmt} plan={plan} onClose={()=>setPayGroupChooser(null)}
+            onPayFees={payFeePart} onPayBill={bill=>{ setPayGroupChooser(null); setMarkingBillPaid(bill); }}/>;
         })()}
         {markingBillPaid&&(
           <MarkBillPaidModal
