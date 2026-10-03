@@ -127,7 +127,8 @@ export function getBillLedger(bill, contributions, txns) {
       date: txn?.date || null,
       applied,
       paidAmount,
-      unallocated: money(Math.max(0, paidAmount - applied)),
+      // What is left of the whole payment after EVERY Bill it paid (an extra can be applied to the next Bill).
+      unallocated: txn ? getTxnUnallocated(txn, contributions) : money(Math.max(0, paidAmount - applied)),
     };
   }).sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
   const unallocated = money(rows.reduce((s, r) => s + r.unallocated, 0));

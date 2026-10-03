@@ -24,6 +24,9 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
   const edit = setter => v => { setFailed(false); setter(v); };
   // Payments v2 C3 — pay one Bill with several methods/accounts ("Split across methods"). The lines must add up to
   // the amount exactly (same rule as Pay Fees' "Paid with"); a card statement keeps its single account.
+  // Payments v2 H4 — an extra beyond the balance stays Unallocated unless the person chooses to put it on the
+  // next bill (only offered for a Bill that renews). Nothing is applied unless this is switched on.
+  const [applyNext, setApplyNext] = useState(false);
   const [split, setSplit] = useState(false);
   const [lines, setLines] = useState([]);
   const lineId = () => `pl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -71,6 +74,12 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
             <div data-testid="record-payment-unallocated" style={{ color: T.attention, fontSize: 12, fontWeight: 600, marginTop: 6 }}>
               {sym}{fmt(applied)} will be applied · {sym}{fmt(unallocated)} Unallocated
             </div>
+          )}
+          {!isCard && unallocated > 0 && bill.recurring && bill.autoGenerate !== false && (
+            <label data-testid="record-payment-apply-next" style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, color: T.text, fontSize: 13, fontWeight: 600, minHeight: 44 }}>
+              <input type="checkbox" checked={applyNext} onChange={e => edit(setApplyNext)(e.target.checked)} />
+              Apply the extra {sym}{fmt(unallocated)} to the next bill
+            </label>
           )}
           {!isCard && amount > 0 && amount < remaining && (
             <div style={{ color: T.sub, fontSize: 12, marginTop: 6 }}>Partially paid · {sym}{fmt(Math.round((remaining - amount) * 100) / 100)} will remain</div>
@@ -132,7 +141,7 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
       )}
       <button
         data-testid="record-payment-confirm"
-        onClick={() => { if (!canSave) return; try { onConfirm(split ? splitLines[0].accId : accId, transactionRef.trim(), split ? { amount, date, paymentLines: splitLines.map(({ id, method, accId: a, amount: n }) => ({ id, method, accId: a, amount: n })) } : { amount, date }); } catch (e) { setFailed(true); } }}
+        onClick={() => { if (!canSave) return; try { onConfirm(split ? splitLines[0].accId : accId, transactionRef.trim(), split ? { amount, date, applyExtraToNext: applyNext && unallocated > 0, paymentLines: splitLines.map(({ id, method, accId: a, amount: n }) => ({ id, method, accId: a, amount: n })) } : { amount, date, applyExtraToNext: applyNext && unallocated > 0 }); } catch (e) { setFailed(true); } }}
         disabled={!canSave}
         style={{ marginTop: 16, width: "100%", minHeight: TOUCH.min, background: canSave ? T.accent : T.border, border: "none", borderRadius: RADIUS.md, color: T.accentInk || "#fff", fontWeight: 700, fontSize: 15, cursor: canSave ? "pointer" : "not-allowed", fontFamily: FONT.sans }}
       >

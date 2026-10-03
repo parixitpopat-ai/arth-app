@@ -1662,7 +1662,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // legacy paidByTxnId/status write above. Full amount, since this path has
     // no partial-payment concept yet.
     setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:paymentTxnId, amount:applied, txnAmount:paidAmount }, genId));
-    if(nextBill) setBills(p=>[nextBill,...p]);
+    if(nextBill){
+      setBills(p=>[nextBill,...p]);
+      // Payments v2 H4 — an extra the person chose to carry forward becomes a Contribution on the next Bill
+      // (same Transaction, so the payment's own Unallocated shrinks by the same amount). Never more than it owes.
+      const extra = payment.applyExtraToNext ? Math.min(Math.max(0, paidAmount-applied), Number(nextBill.amount||0)) : 0;
+      if(extra>0) setContributions(prev=>withBillContributionForTxn(prev, { billId:nextBill.id, txnId:paymentTxnId, amount:extra, txnAmount:paidAmount }, genId));
+    }
     setMarkingBillPaid(null);
   }, [billerAccounts, contributions, membershipRelationships, loans, txns]);
 

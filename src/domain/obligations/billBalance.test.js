@@ -123,3 +123,13 @@ test("the same payment stored twice for a Bill counts once (legacy duplicates)",
   assert.equal(ledger.remaining, 0);
   assert.equal(ledger.unallocated, 0);
 });
+
+test("an extra applied to the next Bill is no longer Unallocated on the first Bill's ledger", () => {
+  const b1 = { id: "b1", amount: 1000, status: "unpaid" };
+  const txns = [{ id: "t1", amount: 1300, date: "2026-10-03" }];
+  const contribs = [c("c1", "b1", "t1", 1000, 1300), c("c2", "b2", "t1", 300, 1300)];
+  assert.equal(getBillLedger(b1, contribs, txns).unallocated, 0);
+  assert.equal(getTxnUnallocated(txns[0], contribs), 0);
+  // without the carry-forward the same 300 stays Unallocated
+  assert.equal(getBillLedger(b1, [contribs[0]], txns).unallocated, 300);
+});
