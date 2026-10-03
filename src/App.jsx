@@ -153,6 +153,7 @@ import EntityCard from "./components/EntityCard";
 import { computeLineItemCategoryRollup, rollupToCatAllocations } from "./domain/transactions/lineItemCategoryRollup";
 import * as schoolFeesService from "./domain/schoolFees/service";
 import { expandPaymentLines } from "./domain/payments/paymentLineSlices";
+import { tagRenewalsWithFor } from "./domain/bills/renewalFor";
 import { RangeFieldGrid, RangeField, MonthRangeSheet } from "./components/RangeFields";
 import CashFlowScreen, { CashFlowCard } from "./screens/CashFlowScreen";
 import {
@@ -17149,9 +17150,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               // WP4 — widened from the functions' own 7-day default to PAYMENTS_HORIZON_DAYS (30),
               // so this window stays exactly complementary with Outlook's (isWithinPaymentsHorizon):
               // no renewal ever falls into the 8-29 day gap between the two screens.
-              ...getMembershipRenewalReminders({ billerAccounts, memberships, getCurrentPeriod, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS, relationships:membershipRelationships }),
-              ...getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
-              ...getInsuranceRenewalReminders({ insurancePolicies, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
+              ...tagRenewalsWithFor([
+                ...getMembershipRenewalReminders({ billerAccounts, memberships, getCurrentPeriod, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS, relationships:membershipRelationships }),
+                ...getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
+                ...getInsuranceRenewalReminders({ insurancePolicies, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
+              ], { billerAccounts, insurancePolicies, people }),
             ] })}
             forFilter={paymentsForFilter} onForFilter={setPaymentsForFilter}
             showCancelled={paymentsShowCancelled} onToggleCancelled={()=>setPaymentsShowCancelled(v=>!v)}
@@ -19646,7 +19649,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const livePolicy = insurancePolicies.find(p=>String(p.id)===String(viewingPolicy.id)) || viewingPolicy;
           return (
             <InsurancePolicyDetailModal policy={livePolicy} onClose={()=>{ setViewingPolicy(null); setJustConvertedPolicyId(null); }} T={T} sym={sym} fmt={fmt} formatShortDate={formatShortDate}
-              bills={bills} contributions={contributions} txns={txns} accounts={accounts}
+              bills={bills} contributions={contributions} txns={txns} accounts={accounts} billerAccounts={billerAccounts} setBills={setBills}
               setEditingPolicy={setEditingPolicy} setShowAddPolicy={setShowAddPolicy} setInsurancePolicies={setInsurancePolicies} askConfirm={askConfirm}
               onAddRenewalNotice={p=>{ setAddingRenewalNoticeForPolicy(p); setViewingPolicy(null); }}
               onRecordPayment={bill=>{ setViewingPolicy(null); setMarkingBillPaid(bill); }}
