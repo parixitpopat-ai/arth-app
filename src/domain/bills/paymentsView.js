@@ -132,7 +132,9 @@ export function buildPaymentsView({ bills, contributions, refDate = new Date(), 
     .sort((a, b) => String(a.expected.dueDate || "9999").localeCompare(String(b.expected.dueDate || "9999")));
   groups.expected = expectedRows;
 
-  groups.renewals = [...(renewalItems || [])].sort((a, b) => {
+  // The For filter applies to renewals/fees too: an item carries forType/forId when its owner is known and is
+  // otherwise "Unassigned" — selecting a person or group must not keep showing everyone else's.
+  groups.renewals = [...(renewalItems || [])].filter(r => matchesFor(r, forFilter)).sort((a, b) => {
     if (a.kind === "overdue" && b.kind !== "overdue") return -1;
     if (a.kind !== "overdue" && b.kind === "overdue") return 1;
     return (b.days || 0) - (a.days || 0);

@@ -44,7 +44,7 @@ import { attemptSchoolAttributionChange, pickMostRecentSchedule } from "./screen
 import { getFeeSchedulesForRelationship } from "./domain/school/feeScheduleLink";
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
-import { allocateCcPaymentToEmiInstallments } from "./domain/cards/emiSettlement";
+import { allocateCcPaymentToEmiInstallments, mergeEmiSettlementInto } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
 import { pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel, createRelationship, migrateBillerAccountAttributions, backfillBillerAccountAttributionFromRelationships, getRelationshipTarget } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
@@ -152,6 +152,8 @@ import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
 import { computeLineItemCategoryRollup, rollupToCatAllocations } from "./domain/transactions/lineItemCategoryRollup";
 import * as schoolFeesService from "./domain/schoolFees/service";
+import { expandPaymentLines } from "./domain/payments/paymentLineSlices";
+import { tagRenewalsWithFor } from "./domain/bills/renewalFor";
 import { RangeFieldGrid, RangeField, MonthRangeSheet } from "./components/RangeFields";
 import CashFlowScreen, { CashFlowCard } from "./screens/CashFlowScreen";
 import { computeLine, describeLine, reconcileLines, rateUnitsFor, defaultRateUnit } from "./domain/transactions/itemLineMath";
@@ -922,7 +924,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setAccounts(prev=>prev.map(a=>a.type==="cc" ? migrateLegacyBillingHistory(a) : a));
       return;
     }
-    const newBills = ccAccounts.flatMap(card=>generateDueStatements({ card, accounts, txns, bills, toDateOnly }));
+    const newBills = ccAccounts.flatMap(card=>generateDueStatements({ card, accounts, txns:expandPaymentLines(txns), bills, toDateOnly }));
     if(newBills.length>0){ setBills(prev=>[...prev, ...newBills]); return; }
     // Rule 10/test I: a cc_payment transaction pays a card regardless of a statement's
     // verification status — this reflects that payment onto the specific Bill record it closed,
@@ -1641,6 +1643,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         ...(nextValidUntil?{validUntil:nextValidUntil}:{}),
       };
     }
+    if(bill.isCcStatement && bill.accId){
+      // A card statement is settled by a cc_payment (bank -> card), exactly like the Add form's
+      // Card payment. Writing it as an expense would count the same card spends a second time and
+      // leave the card ledger/outstanding untouched.
+      setTxns(p=>[{id:paymentTxnId,type:"cc_payment",desc:bill.name,merchant:"",date:paymentDate,note:"Statement payment",fromAccId:accId,toAccId:bill.accId,accId:null,catId:null,catIds:[],subId:null,subIds:[],people:{},amount:paidAmount,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null},...p]);
+      setAccounts(prev=>prev.map(a=>String(a.id)===String(bill.accId)?{...a,outstanding:Math.max(0,(a.outstanding||0)-paidAmount)}:a));
+      const { updatedLoans, updatedTxns } = allocateCcPaymentToEmiInstallments(loans, txns, bill.accId, paidAmount, paymentDate, genId);
+      setLoans(updatedLoans);
+      setTxns(prev=>mergeEmiSettlementInto(prev, updatedTxns, txns));
+    } else
     setTxns(p=>[{id:paymentTxnId,type:"expense",desc:bill.name,merchant:bill.merchant||"",date:paymentDate,note:"Bill payment",catId:bill.catId,catIds:bill.catIds||[bill.catId],subId:bill.subId||null,accId,people:isFirstPayment?(bill.splitPeople||{}):{},forPerson:attributedPersonId,groupId:bill.groupId||null,groupCollectiveAmount:isFirstPayment?Number(bill.groupCollectiveAmount||0):0,amount:paidAmount,isBillPayment:true,billInvoiceNo:bill.invoiceNo||null,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null,imageBase64:bill.imageBase64||null,paymentImageBase64:bill.paymentImageBase64||null},...p]);
     setBills(p=>p.map(x=>x.id===bill.id?{...x,
       ...(becomesPaid?{status:"paid",paidDate:paymentDate}:{}),
@@ -1652,7 +1664,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:paymentTxnId, amount:applied, txnAmount:paidAmount }, genId));
     if(nextBill) setBills(p=>[nextBill,...p]);
     setMarkingBillPaid(null);
-  }, [billerAccounts, contributions, membershipRelationships]);
+  }, [billerAccounts, contributions, membershipRelationships, loans, txns]);
 
   // ADR-039 §6 — "Confirm amount": `bill.fromSchedule`. Creates one real, normal Bill from an
   // Expected item, through the same path every other Bill uses — this is the only writer;
@@ -2547,7 +2559,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       ? accounts.filter(a=>(a.type==="debit" && a.linkedBank===accId) || (a.type==="upi" && a.linkedAccount===accId)).map(a=>a.id)
       : [];
     let bal=Number(acc.openingBalance||0);
-    txns.forEach(t=>{
+    // A multi-method payment hits each paying account for ITS line only (see paymentLineSlices.js).
+    expandPaymentLines(txns).forEach(t=>{
       if(!isDateInRange(t.date, openingDate, endDate)) return;
       if(t.type==="income"&&t.accId===accId) bal+=Number(t.amount||0);
       if(t.type==="settlement_in"&&t.accId===accId) bal+=Number(t.amount||0);
@@ -2678,7 +2691,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const allIds = [cardId, ...linkedUpiIds];
     const today = todayStr();
     // Charges in the last billing cycle only (prevStatementDate < date ≤ lastStatementDate)
-    const lastCycleCharges = txns.reduce((sum,t)=>{
+    const lastCycleCharges = expandPaymentLines(txns).reduce((sum,t)=>{
       if((t.type!=="expense"&&t.type!=="investment"&&t.type!=="cc_emi")||!allIds.includes(t.accId)) return sum;
       if(!t.date||String(t.date)>today) return sum;
       const d=toDateOnly(t.date);
@@ -5613,7 +5626,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // paid than was actually paid. See domain/cards/emiSettlement.js.
           const { updatedLoans, updatedTxns } = allocateCcPaymentToEmiInstallments(loans, txns, toAccId, amt, date||todayStr(), genId);
           setLoans(updatedLoans);
-          setTxns(updatedTxns);
+          // Merge onto the live list: `updatedTxns` is a copy of the pre-save `txns`, so writing it
+          // back wholesale would drop the cc_payment upserted just above.
+          setTxns(prev=>mergeEmiSettlementInto(prev, updatedTxns, txns));
         }
       } else if(txnType==="investment"){
         const invId = (isEditing ? (sourceTxn?.linkedInvestmentId || linkedInvestment?.id) : null) || genId();
@@ -8609,7 +8624,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const linkedDebitIds = a.type==="bank"
       ? accounts.filter(x=>(x.type==="debit"&&x.linkedBank===a.id)||(x.type==="upi"&&x.linkedAccount===a.id)).map(x=>x.id)
       : [];
-    const cardSummary = a.type==="cc" ? getCardSummary(a, accounts, txns, toDateOnly) : null;
+    const cardSummary = a.type==="cc" ? getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly) : null;
     const util = a.type==="cc" && a.limit ? Math.round((((cardSummary?.currentCycleSpend)||0)/a.limit)*100) : 0;
     const utilLimit = cardSummary?.alertPct || 30;
     const currentBalance = a.type==="cc"
@@ -8627,7 +8642,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       ? Number(checkpoint.amount||0) - Number(expectedAtCheckpoint||0)
       : null;
 
-    const ledgerRows = [...txns].map(t=>{
+    const ledgerRows = expandPaymentLines(txns).map(t=>{
       let signed = 0;
       let secondary = txnLabel(t.type);
 
@@ -9834,7 +9849,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       : { icon:"🟢", label:"Comfortable", color:T.success };
 
     const ccList = accounts.filter(a=>a.type==="cc");
-    const ccSummaries = ccList.map(card=>({ card, ...getCardSummary(card, accounts, txns, toDateOnly) }));
+    const ccSummaries = ccList.map(card=>({ card, ...getCardSummary(card, accounts, expandPaymentLines(txns), toDateOnly) }));
     const totalDue = ccSummaries.reduce((s,item)=>s+item.currentDue,0);
     const totalUnbilled = ccSummaries.reduce((s,item)=>s+item.currentCycleSpend,0);
     const anyHighUtil = ccSummaries.some(item=>item.isOverAlert);
@@ -12845,7 +12860,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Spend, same root cause as the SIP bug. currentDue > 0 only, so a fully-paid card doesn't
     // show as a phantom commitment.
     const ccStatementsAsBills = accounts.filter(a=>a.type==="cc").map(a=>{
-      const summary = getCardSummary(a, accounts, txns, toDateOnly);
+      const summary = getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly);
       if(!summary.currentDue || summary.currentDue<=0) return null;
       return { id:`ccstmt_${a.id}`, type:"cc_statement", name:`${a.name} Statement`, amount:summary.currentDue, dueDate:toLocalDateStr(summary.dueOn), status:"unpaid" };
     }).filter(Boolean);
@@ -13918,7 +13933,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         color:T.purple,
       })),
       cc: accounts.filter(a=>a.type==="cc").map(a=>{
-        const summary = getCardSummary(a, accounts, txns, toDateOnly);
+        const summary = getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly);
         return {
           id:a.id,
           title:a.name,
@@ -14190,7 +14205,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         title:"💳 Credit card breakup",
         subtitle:"Current due vs total outstanding",
         items: accounts.filter(a=>a.type==="cc").map(a=>{
-          const summary = getCardSummary(a, accounts, txns, toDateOnly);
+          const summary = getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly);
           return {
             id:a.id,
             title:a.name,
@@ -14599,7 +14614,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {accs.map(a=>{
                   const bal=a.type==="cc"?null:(a.type==="bank" ? effectiveAccountBalance(a.id) : accountBalance(a.id));
                   const linkedB=a.type==="debit"?accounts.find(b=>b.id===a.linkedBank):null;
-                  const ccSummary = a.type==="cc" ? getCardSummary(a, accounts, txns, toDateOnly) : null;
+                  const ccSummary = a.type==="cc" ? getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly) : null;
                   return (
                     <div key={a.id} style={{ ...card,cursor:"pointer" }} onClick={()=>setShowAccDetail(a)}>
                       <div style={{ display:"flex",alignItems:"center",gap:12 }}>
@@ -17222,9 +17237,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               // WP4 — widened from the functions' own 7-day default to PAYMENTS_HORIZON_DAYS (30),
               // so this window stays exactly complementary with Outlook's (isWithinPaymentsHorizon):
               // no renewal ever falls into the 8-29 day gap between the two screens.
-              ...getMembershipRenewalReminders({ billerAccounts, memberships, getCurrentPeriod, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS, relationships:membershipRelationships }),
-              ...getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
-              ...getInsuranceRenewalReminders({ insurancePolicies, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
+              ...tagRenewalsWithFor([
+                ...getMembershipRenewalReminders({ billerAccounts, memberships, getCurrentPeriod, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS, relationships:membershipRelationships }),
+                ...getSchoolFeeReminders({ feeSchedules, feePeriods, billerAccounts, forLabel:getBillerOwnerLabel, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
+                ...getInsuranceRenewalReminders({ insurancePolicies, today:todayStr(), forwardDays:PAYMENTS_HORIZON_DAYS }),
+              ], { billerAccounts, insurancePolicies, people }),
             ] })}
             forFilter={paymentsForFilter} onForFilter={setPaymentsForFilter}
             showCancelled={paymentsShowCancelled} onToggleCancelled={()=>setPaymentsShowCancelled(v=>!v)}
@@ -19719,7 +19736,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const livePolicy = insurancePolicies.find(p=>String(p.id)===String(viewingPolicy.id)) || viewingPolicy;
           return (
             <InsurancePolicyDetailModal policy={livePolicy} onClose={()=>{ setViewingPolicy(null); setJustConvertedPolicyId(null); }} T={T} sym={sym} fmt={fmt} formatShortDate={formatShortDate}
-              bills={bills} contributions={contributions} txns={txns} accounts={accounts}
+              bills={bills} contributions={contributions} txns={txns} accounts={accounts} billerAccounts={billerAccounts} setBills={setBills}
               setEditingPolicy={setEditingPolicy} setShowAddPolicy={setShowAddPolicy} setInsurancePolicies={setInsurancePolicies} askConfirm={askConfirm}
               onAddRenewalNotice={p=>{ setAddingRenewalNoticeForPolicy(p); setViewingPolicy(null); }}
               onRecordPayment={bill=>{ setViewingPolicy(null); setMarkingBillPaid(bill); }}
@@ -19783,7 +19800,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               bill={liveBill}
               card={stmtCard}
               accounts={accounts}
-              txns={txns}
+              txns={expandPaymentLines(txns)}
               T={T}
               sym={sym}
               fmt={fmt}
