@@ -1,3 +1,4 @@
+import { groupSchoolRenewals } from "../../domain/bills/schoolFeeRows";
 import React from "react";
 import { FONT, RADIUS, statusStyle } from "../../constants/theme";
 import { DUE_SOON_DAYS } from "../../domain/obligations/dueSoonWindow";
@@ -65,10 +66,10 @@ function ExpectedRow({ T, row, sym, fmt, onOpen }) {
 function RenewalRow({ T, row, sym, fmt, onOpen }) {
   const overdue = row.kind === "overdue";
   return (
-    <button data-testid={`renewal-row-${row.id}`} onClick={() => onOpen(row)} style={{ display: "flex", gap: 12, width: "100%", background: "transparent", border: `1px dashed ${overdue ? T.danger + "88" : T.borderStrong}`, borderRadius: 14, padding: "12px 14px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: FONT.sans }}>
+    <button data-testid={`renewal-row-${row.id}`} data-grouped={row.grouped ? "1" : undefined} onClick={() => onOpen(row)} style={{ display: "flex", gap: 12, width: "100%", background: "transparent", border: `1px dashed ${overdue ? T.danger + "88" : T.borderStrong}`, borderRadius: 14, padding: "12px 14px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: FONT.sans }}>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: "block", color: T.text, fontSize: 14, fontWeight: 700 }}>{row.name}{row.forText ? ` · ${row.forText}` : ""}</span>
-        <span style={{ display: "block", color: overdue ? T.danger : T.sub, fontSize: 12, marginTop: 2 }}>{overdue ? `${row.days} day${row.days === 1 ? "" : "s"} overdue` : `Renewing in ${row.days} day${row.days === 1 ? "" : "s"}`}</span>
+        <span style={{ display: "block", color: overdue ? T.danger : T.sub, fontSize: 12, marginTop: 2 }}>{row.grouped ? (row.overdueCount > 0 ? `${row.overdueCount} of ${row.count} overdue · oldest ${row.days} day${row.days === 1 ? "" : "s"}` : `Next in ${row.days} day${row.days === 1 ? "" : "s"}`) : (overdue ? `${row.days} day${row.days === 1 ? "" : "s"} overdue` : `Renewing in ${row.days} day${row.days === 1 ? "" : "s"}`)}</span>
       </span>
       <span style={{ color: T.sub, fontSize: 15, fontWeight: 600, fontFamily: FONT.mono, flexShrink: 0 }}>{sym}{fmt(row.amount)}</span>
     </button>
@@ -138,7 +139,7 @@ export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, o
       {groups.renewals?.length ? (
         <div data-testid="group-Renewals">
           <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", margin: "16px 0 8px" }}>Subscriptions & Fees</div>
-          {groups.renewals.map(row => <RenewalRow key={row.id} T={T} row={row} sym={sym} fmt={fmt} onOpen={onOpenRenewal} />)}
+          {groupSchoolRenewals(groups.renewals).map(row => <RenewalRow key={row.id} T={T} row={row} sym={sym} fmt={fmt} onOpen={r => onOpenRenewal(r.grouped ? r.rows[0] : r)} />)}
         </div>
       ) : null}
       <Group T={T} title="Paid" rows={paidRows} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />
