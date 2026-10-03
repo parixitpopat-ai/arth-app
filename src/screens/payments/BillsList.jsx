@@ -1,5 +1,6 @@
 import React from "react";
 import { FONT, RADIUS, statusStyle } from "../../constants/theme";
+import { DUE_SOON_DAYS } from "../../domain/obligations/dueSoonWindow";
 import { getBillPeriodLabel, getSplitProgressText, getCardVerificationText, formatDayMonth } from "../../domain/bills/paymentsView";
 
 // UI-2C M2 PY-18 Bills and PY-27 "All bills paid". Read-only: the caller passes the view model
@@ -11,7 +12,7 @@ function Badge({ T, row }) {
   return <span data-testid={`badge-${row.bill.id}`} style={statusStyle(BADGE_STATUS[row.badge.kind], T)}>{row.badgeText.text}</span>;
 }
 
-function BillRow({ T, row, sym, fmt, onOpen, txns }) {
+function BillRow({ T, row, sym, fmt, onOpen, txns, pendingSync }) {
   const b = row.bill;
   const bal = row.badge.balance;
   const unassigned = row.forText === "Unassigned";
@@ -19,11 +20,16 @@ function BillRow({ T, row, sym, fmt, onOpen, txns }) {
   const showDueInSub = row.badge.kind === "overdue" || row.badge.kind === "partial" || row.badge.kind === "unpaid";
   return (
     <button data-testid={`bill-row-${b.id}`} onClick={() => onOpen(b)} style={{ display: "flex", gap: 12, width: "100%", background: T.card, border: `1px solid ${row.badge.kind === "overdue" ? T.danger + "55" : T.border}`, borderRadius: 14, padding: "12px 14px", marginBottom: 8, cursor: "pointer", textAlign: "left", fontFamily: FONT.sans }}>
+      <span data-testid={`bill-date-${b.id}`} style={{ flexShrink: 0, width: 38, textAlign: "center" }}>
+        <span style={{ display: "block", color: T.sub, fontSize: 9, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase" }}>{b.dueDate ? new Date(`${b.dueDate}T00:00:00`).toLocaleString("en-IN", { month: "short" }) : ""}</span>
+        <span style={{ display: "block", color: T.text, fontSize: 15, fontWeight: 900 }}>{b.dueDate ? Number(String(b.dueDate).slice(8, 10)) : "—"}</span>
+      </span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: "block", color: T.text, fontSize: 14, fontWeight: 700 }}>{b.name}{getBillPeriodLabel(b) ? ` · ${getBillPeriodLabel(b)}` : ""}</span>
         <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 4, color: T.sub, fontSize: 12 }}>
           <span style={unassigned ? { border: `1px dashed ${T.borderStrong}`, borderRadius: RADIUS.pill, padding: "0 8px" } : null}>{row.forText}</span>
           {extra ? <span>· {extra}</span> : null}
+          {pendingSync && pendingSync(b) ? <span data-testid={`will-sync-${b.id}`} style={{ border: `1px solid ${T.border}`, borderRadius: RADIUS.pill, padding: "0 8px", fontSize: 11 }}>Will sync</span> : null}
           {showDueInSub && b.dueDate ? <span>· due {formatDayMonth(b.dueDate)}</span> : null}
         </span>
       </span>
@@ -79,8 +85,13 @@ function Group({ T, title, rows, ...rest }) {
   );
 }
 
-export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, onOpen, onOpenExpected, onOpenRenewal, onAddBill, showCancelled, onToggleCancelled, showAllPaid, onToggleAllPaid, txns }) {
+export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, onOpen, onOpenExpected, onOpenRenewal, onAddBill, showCancelled, onToggleCancelled, showAllPaid, onToggleAllPaid, txns, pendingSync }) {
   const { groups, forChips, totalUnpaid, openCount, lastPaid } = view;
+  // Payments v2 C1: Overdue · Due · Later. "Due" is the shared 14-day window (DUE_SOON_DAYS, the same
+  // constant the badge uses) — it replaces the old Due today / Due tomorrow / Upcoming split.
+  const notOverdue = [...groups.dueToday, ...groups.dueTomorrow, ...groups.upcoming].sort((a, b) => String(a.bill.dueDate || "9999").localeCompare(String(b.bill.dueDate || "9999")));
+  const dueRows = notOverdue.filter(r => r.badge.days <= DUE_SOON_DAYS);
+  const laterRows = notOverdue.filter(r => !(r.badge.days <= DUE_SOON_DAYS));
   const paidRows = showAllPaid ? groups.paid : groups.paid.slice(0, 5);
   return (
     <div style={{ padding: "14px 16px 24px" }}>
@@ -103,20 +114,24 @@ export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, o
         </div>
       ) : null}
 
-      {openCount === 0 ? (
+      {openCount === 0 && forFilter && forFilter !== "all" ? (
+        <div data-testid="payments-filter-empty" style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: "22px 16px", textAlign: "center", marginTop: 12 }}>
+          <div style={{ color: T.text, fontSize: 16, fontWeight: 800 }}>Nothing to pay for {forChips.find(c => c.id === forFilter)?.label || "this filter"}</div>
+          <button data-testid="payments-filter-show-everyone" onClick={() => onForFilter("all")} style={{ marginTop: 12, minHeight: 44, padding: "0 18px", background: T.pill, border: `1px solid ${T.border}`, borderRadius: RADIUS.pill, color: T.text, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Show everyone</button>
+        </div>
+      ) : openCount === 0 ? (
         <div data-testid="payments-all-paid" style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: "22px 16px", textAlign: "center", marginTop: 12 }}>
           <div style={{ color: T.accent, fontSize: 16, fontWeight: 800 }}>All bills paid</div>
           <div style={{ color: T.sub, fontSize: 12, marginTop: 6 }}>Nothing is due or overdue.{lastPaid ? ` Last payment: ${lastPaid.bill.name}, ${formatDayMonth(lastPaid.bill.paidDate)}.` : ""}</div>
         </div>
       ) : null}
 
-      <Group T={T} title="Overdue" rows={groups.overdue} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />
-      <Group T={T} title="Due today" rows={groups.dueToday} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />
-      <Group T={T} title="Due tomorrow" rows={groups.dueTomorrow} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />
-      <Group T={T} title="Upcoming" rows={groups.upcoming} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />
+      <Group T={T} title="Overdue" rows={groups.overdue} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />
+      <Group T={T} title="Due" rows={dueRows} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />
+      <Group T={T} title="Later" rows={laterRows} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />
       {groups.expected?.length ? (
         <div data-testid="group-Expected">
-          <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", margin: "16px 0 8px" }}>Expected · not bills yet</div>
+          <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", margin: "16px 0 8px" }}>Coming up · not bills yet</div>
           {groups.expected.map(row => <ExpectedRow key={row.expected.relationshipId} T={T} row={row} sym={sym} fmt={fmt} onOpen={onOpenExpected} />)}
         </div>
       ) : null}
@@ -126,7 +141,7 @@ export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, o
           {groups.renewals.map(row => <RenewalRow key={row.id} T={T} row={row} sym={sym} fmt={fmt} onOpen={onOpenRenewal} />)}
         </div>
       ) : null}
-      <Group T={T} title="Paid" rows={paidRows} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />
+      <Group T={T} title="Paid" rows={paidRows} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />
       {groups.paid.length > 5 ? <button onClick={onToggleAllPaid} style={{ background: "none", border: "none", color: T.accent, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: "4px 0" }}>{showAllPaid ? "Show fewer paid bills" : `See all ${groups.paid.length} paid bills`}</button> : null}
 
       {groups.cancelled.length ? (
@@ -134,7 +149,7 @@ export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, o
           <button data-testid="payments-cancelled-toggle" onClick={onToggleCancelled} style={{ display: "flex", justifyContent: "space-between", width: "100%", background: "none", border: `1px dashed ${T.borderStrong}`, borderRadius: 14, padding: "12px 14px", marginTop: 16, color: T.sub, fontSize: 13, cursor: "pointer" }}>
             <span>Cancelled</span><span>{groups.cancelled.length} bill{groups.cancelled.length === 1 ? "" : "s"} · not in totals {showCancelled ? "▴" : "▾"}</span>
           </button>
-          {showCancelled ? <div style={{ marginTop: 8 }}>{groups.cancelled.map(r => <BillRow key={r.bill.id} T={T} row={r} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} />)}</div> : null}
+          {showCancelled ? <div style={{ marginTop: 8 }}>{groups.cancelled.map(r => <BillRow key={r.bill.id} T={T} row={r} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />)}</div> : null}
         </>
       ) : null}
     </div>
