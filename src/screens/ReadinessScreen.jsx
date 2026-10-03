@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import BottomSheet from "../components/BottomSheet";
 import { FONT, RADIUS } from "../constants/theme";
 import { shiftMonthKey } from "../domain/budget/readiness";
+import { itemKey } from "../domain/payTogether/group";
 
 // Plan Ahead PA6/PA7/PA16 — Next-month readiness. Presentation only: every figure comes from
 // domain/budget/readiness.js. CASH (solid chip) and BUDGET (outline chip) are always two labelled
@@ -19,17 +20,21 @@ function Chip({ T, solid, children }) {
   );
 }
 
+// More than three months side by side use a short form (₹5K) so the strip never scrolls sideways.
+const short = n => { const v = Math.abs(Number(n) || 0); if (v >= 100000) return `${(v / 100000).toFixed(2).replace(/\.?0+$/, "")}L`; if (v >= 1000) return `${(v / 1000).toFixed(1).replace(/\.0$/, "")}K`; return String(Math.round(v)); };
+
 /** CASH row + BUDGET row across the months involved (PA7). `months` = [{key, cash, budget}]; null = dashed empty cell. */
 export function CashBudgetStrip({ T, sym, fmt, months }) {
-  const cell = (v, T) => (
-    <div style={{ minWidth: 0, textAlign: "right", fontFamily: FONT.mono, fontSize: 13, fontWeight: 700, color: v == null ? T.sub : T.text,
-      border: v == null ? `1px dashed ${T.border}` : "none", borderRadius: 8, padding: "6px 4px" }}>{v == null ? "—" : `${sym}${fmt(v)}`}</div>
+  const compact = months.length > 3;
+  const cell = (v, T, note) => (
+    <div style={{ minWidth: 0, textAlign: "right", fontFamily: FONT.mono, fontSize: compact ? 12 : 13, fontWeight: 700, color: v == null ? T.sub : T.text,
+      border: v == null ? `1px dashed ${T.border}` : "none", borderRadius: 8, padding: "6px 2px", overflowWrap: "anywhere" }}>{v == null ? (note || "—") : `${sym}${compact ? short(v) : fmt(v)}`}</div>
   );
-  const cols = `56px repeat(${months.length}, minmax(0, 1fr))`;
+  const cols = `${compact ? 52 : 56}px repeat(${months.length}, minmax(0, 1fr))`;
   return (
     <div data-testid="cash-budget-strip" style={{ display: "grid", gridTemplateColumns: cols, gap: 6, alignItems: "center" }}>
       <span />{months.map(m => <div key={m.key} style={{ color: T.sub, fontSize: 11, fontWeight: 700, textAlign: "right" }}>{MONTH_SHORT[Number(m.key.split("-")[1]) - 1]}</div>)}
-      <Chip T={T} solid>CASH</Chip>{months.map(m => <React.Fragment key={m.key}>{cell(m.cash, T)}</React.Fragment>)}
+      <Chip T={T} solid>CASH</Chip>{months.map(m => <React.Fragment key={m.key}>{cell(m.cash, T, m.cashNote)}</React.Fragment>)}
       <Chip T={T}>BUDGET</Chip>{months.map(m => <React.Fragment key={m.key}>{cell(m.budget, T)}</React.Fragment>)}
     </div>
   );
@@ -46,7 +51,7 @@ function ColumnHead({ T, title }) {
 }
 
 function Row({ T, sym, fmt, row, onOpen }) {
-  const tilde = row.estimate ? "~" : "";
+  const tl = v => (row.estimate && Number(v) > 0 ? "~" : "");
   const num = { fontFamily: FONT.mono, fontSize: 14, fontWeight: 700, color: T.text, textAlign: "right", minWidth: 0 };
   return (
     <button type="button" data-testid={`readiness-row-${row.key}`} onClick={() => onOpen(row)}
@@ -55,18 +60,21 @@ function Row({ T, sym, fmt, row, onOpen }) {
         <span style={{ display: "block", color: T.text, fontSize: 14, fontWeight: 700, overflowWrap: "anywhere" }}>{row.label}</span>
         {row.sub ? <span style={{ display: "block", color: T.sub, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.sub}</span> : null}
       </span>
-      <span style={num}>{tilde}{sym}{fmt(row.cash)}</span>
+      <span style={num}>{tl(row.cash)}{sym}{fmt(row.cash)}</span>
       <span style={{ ...num, color: row.budget == null ? T.sub : T.text, fontWeight: row.budget == null ? 500 : 700, fontSize: row.budget == null ? 12 : 14 }}>
-        {row.budget == null ? "Not in budget" : `${tilde}${sym}${fmt(row.budget)}`}
+        {row.budget == null ? "Not in budget" : `${tl(row.budget)}${sym}${fmt(row.budget)}`}
       </span>
     </button>
   );
 }
 
-export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudgeFor, onRaise, onNotNow, onUndoRaise, onBack, onMonth, onAddUpcoming, onOpenSource }) {
+export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudgeFor, onRaise, onNotNow, onUndoRaise, onBack, onMonth, onAddUpcoming, onOpenSource, onPayTogether, onRemoveFromGroup, onUndoGroup }) {
   const r = buildFor(monthKey);
   const [detail, setDetail] = useState(null);
   const tilde = r.spendingEstimated ? "~" : "";
+  const tCash = r.spendingEstimated && r.cashNeeded > 0 ? "~" : "";
+  const tSpend = r.spendingEstimated && r.spendingCash > 0 ? "~" : "";
+  const tBudget = r.spendingEstimated && r.budgetUsed > 0 ? "~" : "";
   const over = r.over > 0;
   const nudge = nudgeFor ? nudgeFor(r) : null;
   const block = { background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: "14px 14px", minWidth: 0 };
@@ -84,6 +92,9 @@ export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudge
         </span>
       </div>
 
+      {onPayTogether && (
+        <button type="button" data-testid="readiness-pay-together" onClick={onPayTogether} style={{ display: "block", width: "100%", minHeight: 48, marginBottom: 12, background: "none", border: `1px dashed ${T.borderStrong || T.border}`, borderRadius: 14, color: T.accent, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Pay together · plan several instalments on one date</button>
+      )}
       {nudge && nudge.kind === "card" && (
         <div data-testid="readiness-nudge" style={{ background: T.card, border: `1px solid ${T.attention}`, borderRadius: 16, padding: "14px 14px", marginBottom: 12 }}>
           <div style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>Planned spending {r.spendingEstimated ? "~" : ""}{sym}{fmt(r.budgetUsed)} vs budget {sym}{fmt(r.monthBudget)}</div>
@@ -105,14 +116,14 @@ export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudge
           <div data-testid="readiness-cash" style={block}>
             <Chip T={T} solid>CASH</Chip>
             <div style={{ color: T.sub, fontSize: 12, marginTop: 8 }}>Cash needed</div>
-            <div style={{ ...big, color: T.text }}>{tilde}{sym}{fmt(r.cashNeeded)}</div>
+            <div style={{ ...big, color: T.text }}>{tCash}{sym}{fmt(r.cashNeeded)}</div>
             <div style={{ color: T.sub, fontSize: 12, marginTop: 4 }}>to keep ready</div>
-            <div style={{ color: T.sub, fontSize: 12, marginTop: 2 }}>{tilde}{sym}{fmt(r.spendingCash)} spending{r.investments > 0 ? ` + ${sym}${fmt(r.investments)} investments` : ""}</div>
+            <div style={{ color: T.sub, fontSize: 12, marginTop: 2 }}>{tSpend}{sym}{fmt(r.spendingCash)} spending{r.investments > 0 ? ` + ${sym}${fmt(r.investments)} investments` : ""}</div>
           </div>
           <div data-testid="readiness-budget" style={block}>
             <Chip T={T}>BUDGET</Chip>
             <div style={{ color: T.sub, fontSize: 12, marginTop: 8 }}>Budget used</div>
-            <div style={{ ...big, color: over ? T.attention : T.text }}>{tilde}{sym}{fmt(r.budgetUsed)}</div>
+            <div style={{ ...big, color: over ? T.attention : T.text }}>{tBudget}{sym}{fmt(r.budgetUsed)}</div>
             <div style={{ color: T.sub, fontSize: 12, marginTop: 4 }}>{r.monthBudget > 0 ? `of ${sym}${fmt(r.monthBudget)} budget` : "No budget set"}</div>
             {over && <div data-testid="readiness-over" style={{ color: T.attention, fontSize: 12, fontWeight: 700, marginTop: 2 }}>{tilde}{sym}{fmt(r.over)} over</div>}
             {nudge && nudge.kind === "dismissed" && <button type="button" data-testid="nudge-quiet-raise" onClick={() => onRaise(nudge.raiseTo)} style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", minHeight: 44, padding: 0, fontFamily: "inherit" }}>Raise budget</button>}
@@ -135,14 +146,46 @@ export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudge
 
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 84px 84px", gap: 8, alignItems: "center", borderTop: `2px solid ${T.borderStrong || T.border}`, marginTop: 4, padding: "10px 0" }}>
           <span style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>Total</span>
-          <span style={{ fontFamily: FONT.mono, fontSize: 14, fontWeight: 800, color: T.text, textAlign: "right" }}>{tilde}{sym}{fmt(r.cashNeeded)}</span>
-          <span style={{ fontFamily: FONT.mono, fontSize: 14, fontWeight: 800, color: over ? T.attention : T.text, textAlign: "right" }}>{tilde}{sym}{fmt(r.budgetUsed)}</span>
+          <span style={{ fontFamily: FONT.mono, fontSize: 14, fontWeight: 800, color: T.text, textAlign: "right" }}>{tCash}{sym}{fmt(r.cashNeeded)}</span>
+          <span style={{ fontFamily: FONT.mono, fontSize: 14, fontWeight: 800, color: over ? T.attention : T.text, textAlign: "right" }}>{tBudget}{sym}{fmt(r.budgetUsed)}</span>
         </div>
         <div style={{ color: T.sub, fontSize: 12, lineHeight: 1.5 }}>~ = estimate, not yet a bill. Cash counts money in the month it leaves. Budget counts the month’s share.</div>
       </>)}
 
       {detail && (
         <BottomSheet onClose={() => setDetail(null)} T={T} maxWidth={430} maxHeight="80vh" padding="20px 16px 32px" zIndex={360}>
+          {detail.groupId ? (() => {
+            const items = detail.items || [];
+            const gmk = (detail.sub.match(/Paid together (\d+ \w+)/) || [])[1];
+            const months = [...new Set([monthKey, ...items.map(e => String(e.date).slice(0, 7))])].sort();
+            const total = Math.round(items.reduce((a, e) => a + Number(e.amount), 0) * 100) / 100;
+            const strip = months.map(mk => ({ key: mk, cash: mk === monthKey ? total : null, cashNote: mk === monthKey ? null : `in ${MONTH_SHORT[Number(monthKey.split("-")[1]) - 1]}`, budget: items.filter(e => String(e.date).slice(0, 7) === mk).reduce((a, e) => a + Number(e.amount), 0) || null }));
+            return (
+              <div data-testid="pt-group-detail">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <div style={{ color: T.text, fontSize: 16, fontWeight: 800 }}>{detail.label}</div>
+                  <button type="button" onClick={() => setDetail(null)} style={{ background: T.input, border: "none", color: T.sub, borderRadius: 8, padding: "5px 12px", cursor: "pointer" }}>Done</button>
+                </div>
+                <div style={{ fontFamily: FONT.mono, fontSize: 24, fontWeight: 800, color: T.text }}>{sym}{fmt(total)}</div>
+                <div style={{ color: T.sub, fontSize: 12, margin: "2px 0 12px" }}>Planned for {gmk} · planned together</div>
+                <CashBudgetStrip T={T} sym={sym} fmt={fmt} months={strip} />
+                <div style={{ color: T.sub, fontSize: 12, margin: "10px 0" }}>Each month’s budget still counts its own instalment; the cash all leaves on {gmk}.</div>
+                <div style={{ color: T.sub, fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", margin: "12px 0 4px" }}>In this group · original due dates</div>
+                {items.map(e => (
+                  <div key={itemKey(e)} style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 48, borderTop: `1px solid ${T.border}` }}>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", color: T.text, fontSize: 13, fontWeight: 700, overflowWrap: "anywhere" }}>{e.name}</span>
+                      <span style={{ display: "block", color: T.sub, fontSize: 12 }}>Due {Number(String(e.date).slice(8, 10))} {MONTH_SHORT[Number(String(e.date).slice(5, 7)) - 1]}</span>
+                    </span>
+                    <span style={{ fontFamily: FONT.mono, fontSize: 13, fontWeight: 700, color: T.text }}>{sym}{fmt(e.amount)}</span>
+                    <button type="button" aria-label={`Remove ${e.name} from the group`} data-testid={`pt-remove-${e.sourceId}`} onClick={() => { onRemoveFromGroup(detail.groupId, itemKey(e), e.name); setDetail(null); }} style={{ minWidth: 44, minHeight: 44, background: "none", border: "none", color: T.sub, fontSize: 18, cursor: "pointer" }}>×</button>
+                  </div>
+                ))}
+                <div style={{ color: T.sub, fontSize: 12, margin: "8px 0" }}>× puts an instalment back on its own due date. Pay each from its own screen; once paid it leaves the group.</div>
+                <button type="button" data-testid="pt-undo-group" onClick={() => { onUndoGroup(detail.groupId); setDetail(null); }} style={{ width: "100%", minHeight: 48, marginTop: 6, background: "none", border: `1px solid ${T.border}`, borderRadius: 14, color: T.text, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Undo pay together</button>
+              </div>
+            );
+          })() : (
           <div data-testid="readiness-detail">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <div style={{ color: T.text, fontSize: 16, fontWeight: 800 }}>{detail.label}</div>
@@ -159,6 +202,7 @@ export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudge
               </button>
             ))}
           </div>
+          )}
         </BottomSheet>
       )}
     </div>

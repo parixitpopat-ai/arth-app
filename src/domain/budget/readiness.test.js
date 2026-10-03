@@ -83,3 +83,51 @@ test("shiftMonthKey crosses year boundaries", () => {
   assert.equal(shiftMonthKey("2026-12", 1), "2027-01");
   assert.equal(shiftMonthKey("2026-01", -1), "2025-12");
 });
+
+const fee = (id, date, amount = 5000) => ({ category: "committedSpending", status: "unpaid", recurs: false, sourceType: "feePeriod", sourceId: id, name: id, amount, date });
+const feeEvents = [fee("nov", "2026-11-10"), fee("dec", "2026-12-10"), fee("jan", "2027-01-10"), fee("feb", "2027-02-10"), fee("mar", "2027-03-10")];
+const grp = { id: "g1", date: "2026-11-10", items: feeEvents.map(e => ({ sourceType: "feePeriod", sourceId: e.sourceId })) };
+const month = (monthKey, groups) => buildReadiness({ events: feeEvents, commitments: [], monthKey, monthBudget: 65000, today, groups });
+
+test("PA12: grouped instalments are one CASH line in the group's month; BUDGET keeps only that month's own share", () => {
+  const r = month("2026-11", [grp]);
+  assert.equal(r.spendingRows.length, 1);
+  const row = r.spendingRows[0];
+  assert.equal(row.label, "School fees ×5");
+  assert.equal(row.cash, 25000);
+  assert.equal(row.budget, 5000);
+  assert.match(row.sub, /Paid together 10 Nov/);
+  assert.equal(r.cashNeeded, 25000);
+  assert.equal(r.budgetUsed, 5000);
+});
+
+test("PA12: later months drop the grouped instalments from CASH but still count their own BUDGET share", () => {
+  const dec = month("2026-12", [grp]);
+  assert.equal(dec.spendingCash, 0);
+  assert.equal(dec.budgetUsed, 5000);
+  assert.equal(dec.spendingRows[0].cash, 0);
+  assert.match(dec.spendingRows[0].sub, /Paid together 10 Nov/);
+  assert.equal(month("2027-03", [grp]).spendingCash, 0);
+});
+
+test("without the group nothing changes: each month carries its own instalment", () => {
+  assert.equal(month("2026-12", []).spendingCash, 5000);
+  assert.equal(month("2026-11", []).cashNeeded, 5000);
+});
+
+test("a group paid later than due: cash in the payment month, budget in the due month", () => {
+  const late = { id: "g2", date: "2026-12-20", items: [{ sourceType: "feePeriod", sourceId: "nov" }, { sourceType: "feePeriod", sourceId: "dec" }] };
+  const nov = month("2026-11", [late]);
+  assert.equal(nov.spendingCash, 0);
+  assert.equal(nov.budgetUsed, 5000);
+  const dec = month("2026-12", [late]);
+  assert.equal(dec.spendingCash, 10000);
+  assert.equal(dec.budgetUsed, 5000);
+});
+
+test("a grouped instalment that is paid leaves the group's total", () => {
+  const paidNov = feeEvents.map(e => e.sourceId === "nov" ? { ...e, status: "paid" } : e);
+  const r = buildReadiness({ events: paidNov, commitments: [], monthKey: "2026-11", monthBudget: 65000, today, groups: [grp] });
+  assert.equal(r.spendingRows[0].cash, 20000);
+  assert.equal(r.spendingRows[0].budget, 0);
+});

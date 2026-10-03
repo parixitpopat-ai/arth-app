@@ -18,10 +18,14 @@
 
 import { isMonthlyRhythm } from "../futureMoney/rhythm.js";
 import { isEstimatedOccurrence } from "../futureMoney/sourceTypeMeta.js";
+import { itemKey, liveItems } from "../payTogether/group.js";
 
 /** "YYYY-MM" shifted by whole months. */
 export const shiftMonthKey = (mk, delta) => { const [y, m] = mk.split("-").map(Number); const d = new Date(y, m - 1 + delta, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
 
+const SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const shortMonth = mk => SHORT[Number(String(mk).slice(5, 7)) - 1] || "";
+const dayMonth = d => `${Number(String(d).slice(8, 10))} ${shortMonth(d)}`;
 const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
 const monthKeyOf = d => String(d || "").slice(0, 7);
 const daysBetween = (fromStr, toStr) => Math.ceil((new Date(`${toStr}T00:00:00`) - new Date(`${fromStr}T00:00:00`)) / 86400000);
@@ -51,15 +55,41 @@ function typeKeyOf(e) {
  * @param {number} p.monthBudget   that month's budget (0 when none is set)
  * @param {string} p.today         "YYYY-MM-DD"
  * @param {(e:Object)=>string|null} [p.catIdOf] category id of an event, when known
+ * @param {Array}  [p.groups]      Pay together groups ({id,date,items}); cash moves to the group's date, budget stays in each due month
  */
-export function buildReadiness({ events, commitments, monthKey, monthBudget, today, catIdOf = () => null }) {
+export function buildReadiness({ events, commitments, monthKey, monthBudget, today, catIdOf = () => null, groups = [] }) {
   const active = (commitments || []).filter(c => !(c.skippedMonths || []).includes(monthKey) && Number(c.amount) > 0);
   const byCat = new Map(active.filter(c => c.categoryId).map(c => [String(c.categoryId), c]));
+
+  // 0 · Pay together: the whole group's CASH lands in the group's date month; BUDGET stays in each due month
+  const groupOf = new Map();
+  for (const g of groups || []) for (const it of g.items || []) groupOf.set(itemKey(it), g);
+  const groupRows = { spending: [], saving: [] };
+  for (const g of groups || []) {
+    if (monthKeyOf(g.date) !== monthKey) continue;
+    const live = liveItems(g, events);
+    for (const [cls, list] of [["spending", live.filter(e => e.category !== "committedSaving")], ["saving", live.filter(e => e.category === "committedSaving")]]) {
+      if (!list.length) continue;
+      const cash = r2(list.reduce((a, e) => a + Number(e.amount), 0));
+      const budget = cls === "saving" ? null : r2(list.filter(e => monthKeyOf(e.date) === monthKey).reduce((a, e) => a + Number(e.amount), 0));
+      const sameType = list.every(e => typeKeyOf(e) === typeKeyOf(list[0]));
+      const months = [...new Set(list.map(e => monthKeyOf(e.date)))].sort();
+      const span = months.length > 1 ? ` · ${shortMonth(months[0])}–${shortMonth(months[months.length - 1])}` : ` · ${shortMonth(months[0])}`;
+      groupRows[cls].push({
+        key: `group:${g.id}:${cls}`, kind: cls === "saving" ? "investment" : "group", groupId: g.id,
+        label: `${sameType ? (TYPE_LABEL[typeKeyOf(list[0])] || "Instalments") : "Paid together"} ×${list.length}`,
+        sub: `Paid together ${dayMonth(g.date)}${span}`, cash, budget, estimate: false, items: list,
+      });
+    }
+  }
 
   // 1 · which events count in this month, and whether each is an estimate
   const counted = [];
   for (const e of events || []) {
     if (!e || !e.date || e.status === "paid") continue;
+    const grp = groupOf.get(itemKey(e));
+    if (grp && monthKeyOf(grp.date) === monthKey) continue; // already inside this month's group row
+    if (grp && monthKeyOf(e.date) !== monthKey) continue;   // grouped, and not due here: nothing to show
     const amount = Number(e.amount) || 0;
     if (!(amount > 0)) continue;
     const eMonth = monthKeyOf(e.date);
@@ -70,9 +100,10 @@ export function buildReadiness({ events, commitments, monthKey, monthBudget, tod
     } else if (isMonthlyRhythm(e) && eMonth < monthKey) {
       estimate = true; // the same item recurring into this month: a projection, not a bill yet
     } else continue;
-    const cash = amount;
+    const grp2 = groupOf.get(itemKey(e));
+    const cash = grp2 ? 0 : amount; // grouped: the cash is in the group's month
     const budget = e.category === "committedSaving" ? null : (e.budgetAmount != null ? Number(e.budgetAmount) : amount);
-    counted.push({ event: e, cash, budget, estimate });
+    counted.push({ event: e, cash, budget, estimate, paidTogether: grp2 ? grp2.date : null });
   }
 
   // 2 · commitments cover bills in their category
@@ -95,24 +126,28 @@ export function buildReadiness({ events, commitments, monthKey, monthBudget, tod
     });
   }
 
-  const groups = new Map();
+  const typeGroups = new Map();
   for (const it of free) {
     const key = typeKeyOf(it.event);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(it);
+    if (!typeGroups.has(key)) typeGroups.set(key, []);
+    typeGroups.get(key).push(it);
   }
   const rowFor = (key, items, kind) => {
     const cash = r2(items.reduce((s, i) => s + i.cash, 0));
     const budget = kind === "investment" ? null : r2(items.reduce((s, i) => s + (i.budget ?? i.cash), 0));
     const names = items.map(i => i.event.name).filter(Boolean);
+    const together = items.every(i => i.paidTogether) ? items[0].paidTogether : null;
     return {
       key, kind, label: TYPE_LABEL[key] || key,
-      sub: items.length === 1 ? (names[0] || "") : `${items.length} items`,
+      sub: together ? `Paid together ${dayMonth(together)}` : items.length === 1 ? (names[0] || "") : `${items.length} items`,
       cash, budget, estimate: items.some(i => i.estimate), items: items.map(i => i.event),
     };
   };
-  for (const key of TYPE_ORDER) if (groups.has(key)) spendingRows.push(rowFor(key, groups.get(key), "spending"));
-  const investmentRows = groups.has("sips") ? [rowFor("sips", groups.get("sips"), "investment")] : [];
+  for (const key of TYPE_ORDER) if (typeGroups.has(key)) spendingRows.push(rowFor(key, typeGroups.get(key), "spending"));
+  const investmentRows = typeGroups.has("sips") ? [rowFor("sips", typeGroups.get("sips"), "investment")] : [];
+
+  spendingRows.unshift(...groupRows.spending);
+  investmentRows.unshift(...groupRows.saving);
 
   const spendingCash = r2(spendingRows.reduce((s, r) => s + r.cash, 0));
   const budgetUsed = r2(spendingRows.reduce((s, r) => s + r.budget, 0));
