@@ -45,6 +45,7 @@ import { getFeeSchedulesForRelationship } from "./domain/school/feeScheduleLink"
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
 import useOnline from "./hooks/useOnline";
+import { splitAllocation } from "./domain/budget/commitmentSplit";
 import { isPendingSync, offlineStripText, offlineSavedText } from "./domain/payments/syncState";
 import { allocateCcPaymentToEmiInstallments, mergeEmiSettlementInto } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
@@ -1383,6 +1384,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [toast, setToast] = useState(null); // { message, icon } | null
   const online = useOnline();
+  // Held here (not inside BudgetPage, which is re-created whenever AppContent state changes) so an open
+  // allocation row stays open after e.g. skipping a commitment.
+  const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
+  const [expandedBudgetGroupId, setExpandedBudgetGroupId] = useState(null);
   const cloudActiveRef = useRef(false); // set once cloudUser is known (declared further down)
   const [showFabSpeedMenu, setShowFabSpeedMenu] = useState(false);
   const [showDuplicateFinder, setShowDuplicateFinder] = useState(false);
@@ -15278,11 +15283,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Person/Group allocation rows now render inline as children of the Discretionary Pool card
     // below — exactly where the mock puts them — instead of behind a separate tab.
     const [budgetView, setBudgetView] = useState("main"); // "main" | "year"
-    const [expandedBudgetPersonId, setExpandedBudgetPersonId] = useState(null);
     // WP14 — Groups get the same lightweight expand affordance as Person rows, scoped to just the
     // Commitments list (not the heavier category-by-category PersonBudgetDrilldown, which wasn't
     // asked for here).
-    const [expandedBudgetGroupId, setExpandedBudgetGroupId] = useState(null);
     const [expandedBudgetCatId, setExpandedBudgetCatId] = useState(null);
     const [budgetPersonViewMode, setBudgetPersonViewMode] = useState("month");
     const [showAffordModal, setShowAffordModal] = useState(false);
@@ -15594,7 +15597,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         <div style={{ color:personIsOver?T.danger:T.sub,fontSize:10.5,marginTop:2 }}>{sym}{fmt(personMonthSpend)} spent · {personIsOver?`${sym}${fmt(personMonthSpend-personMonthBudget)} over`:`${sym}${fmt(personMonthBudget-personMonthSpend)} left`}</div>
                       )}
                       {expandedBudgetPersonId===p.id&&(<>
-                        <ScopedCommitmentsCard scopeType="person" scopeId={p.id} scopeLabel={p.name} planningAllocation={personMonthBudget} monthTxns={monthTxns} viewMonth={viewMonth}
+                        <ScopedCommitmentsCard scopeType="person" scopeId={p.id} scopeLabel={p.name} planningAllocation={personMonthBudget} monthTxns={monthTxns} viewMonth={viewMonth} spent={personMonthSpend}
                           onAdd={()=>{ setEditingCommitment(null); setCommitmentScope({ type:"person", id:p.id }); setShowAddCommitment(true); }}
                           onEdit={c=>{ setEditingCommitment(c); setCommitmentScope({ type:"person", id:p.id }); setShowAddCommitment(true); }}/>
                         <PersonBudgetDrilldown p={p} monthTxns={monthTxns} months={months} fyLabel={fyLabel} budgetPersonViewMode={budgetPersonViewMode} setBudgetPersonViewMode={setBudgetPersonViewMode} expandedBudgetCatId={expandedBudgetCatId} setExpandedBudgetCatId={setExpandedBudgetCatId}/>
@@ -15640,7 +15643,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         <div style={{ color:groupIsOver?T.danger:T.sub,fontSize:10.5,marginTop:2 }}>{sym}{fmt(groupMonthSpend)} spent · {groupIsOver?`${sym}${fmt(groupMonthSpend-groupMonthBudget)} over`:`${sym}${fmt(groupMonthBudget-groupMonthSpend)} left`}</div>
                       )}
                       {expandedBudgetGroupId===g.id&&(
-                        <ScopedCommitmentsCard scopeType="group" scopeId={g.id} scopeLabel={g.name} planningAllocation={groupMonthBudget} monthTxns={monthTxns} viewMonth={viewMonth}
+                        <ScopedCommitmentsCard scopeType="group" scopeId={g.id} scopeLabel={g.name} planningAllocation={groupMonthBudget} monthTxns={monthTxns} viewMonth={viewMonth} spent={groupMonthSpend}
                           onAdd={()=>{ setEditingCommitment(null); setCommitmentScope({ type:"group", id:g.id }); setShowAddCommitment(true); }}
                           onEdit={c=>{ setEditingCommitment(c); setCommitmentScope({ type:"group", id:g.id }); setShowAddCommitment(true); }}/>
                       )}
@@ -16044,7 +16047,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // attributed spend in that category, not the whole household's) differ. A scoped commitment
   // reduces only this envelope; it is filtered out of every Household-level figure elsewhere on
   // this page (see householdCommitments in BudgetPage) so nothing is ever debited twice.
-  const ScopedCommitmentsCard = ({ scopeType, scopeId, scopeLabel, planningAllocation, monthTxns, viewMonth, onAdd, onEdit }) => {
+  const ScopedCommitmentsCard = ({ scopeType, scopeId, scopeLabel, planningAllocation, monthTxns, viewMonth, onAdd, onEdit, spent }) => {
     const commitments = getCommitmentsForScope(mandatoryCommitments, scopeType, scopeId);
     const activeCommitments = commitments.filter(c=>!(c.skippedMonths||[]).includes(viewMonth));
     const commitmentsTotal = getMandatoryCommitmentsTotal(activeCommitments);
@@ -16058,37 +16061,70 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(amt<=0) return s;
       return s + amt/tCats.length;
     },0);
+    // Plan Ahead PA1-PA5 — the same commitments, shown as Committed (locked) + Free to spend. Display only:
+    // amounts, skipped months and over-spend all come from the data above via splitAllocation.
+    const spentByCommitment = Object.fromEntries(commitments.map(c=>[c.id, getScopedCategorySpent(c.categoryId)]));
+    const split = splitAllocation({ allocation:planningAllocation, commitments, monthKey:viewMonth, totalSpent:spent==null?null:spent, spentByCommitment });
+    const monthShort = new Date(`${viewMonth}-01T00:00:00`).toLocaleString("en-IN",{ month:"short" });
+    const setSkip = (c, skip) => setMandatoryCommitments(prev=>prev.map(x=>x.id!==c.id ? x : { ...x, skippedMonths: skip ? [...new Set([...(x.skippedMonths||[]), viewMonth])] : (x.skippedMonths||[]).filter(m=>m!==viewMonth) }));
+    const skipFor = c => { setSkip(c, true); setToast({ message:`${c.name} commitment skipped for ${monthShort}`, icon:"⏭", actionLabel:"Undo", onAction:()=>setSkip(c, false) }); };
+    const hatch = (color, dim) => ({ background:`repeating-linear-gradient(45deg, ${color}${dim?"33":"99"} 0 4px, transparent 4px 8px)`, border:`1px solid ${color}${dim?"44":"88"}` });
+    const overFree = split.over > 0;
+    const tile = { border:`1px solid ${T.border}`, borderRadius:12, padding:"10px 12px", minWidth:0 };
+    const smallLbl = { color:T.sub, fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5 };
+    const toggle = on => (
+      <span role="switch" aria-checked={on} aria-label="Commitment" style={{ width:40, height:24, borderRadius:12, background:on?T.accent:T.border, position:"relative", flexShrink:0, display:"inline-block" }}>
+        <span style={{ position:"absolute", top:3, left:on?19:3, width:18, height:18, borderRadius:9, background:"#fff", transition:"left 0.15s" }}/>
+      </span>
+    );
+    if(!split.hasCommitments){
+      return (
+        <button data-testid={`commitment-switch-${scopeType}-${scopeId}`} onClick={onAdd} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, width:"100%", minHeight:48, background:T.card, border:"none", borderRadius:10, padding:"8px 10px", marginTop:8, cursor:"pointer", textAlign:"left", fontFamily:"inherit" }}>
+          <span style={{ minWidth:0 }}>
+            <span style={{ display:"block", color:T.text, fontSize:13, fontWeight:700 }}>Commitment</span>
+            <span style={{ display:"block", color:T.sub, fontSize:11, marginTop:1 }}>Lock part of this budget</span>
+          </span>
+          {toggle(false)}
+        </button>
+      );
+    }
     return (
-      <div style={{ background:T.card,borderRadius:10,padding:"8px 10px",marginTop:8 }}>
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4 }}>
-          <span style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5 }}>Commitments</span>
-          <button onClick={onAdd} style={{ background:"none",border:"none",color:T.accent,fontSize:10.5,fontWeight:700,cursor:"pointer" }}>+ Add</button>
-        </div>
-        {commitments.length===0 ? (
-          <div style={{ color:T.sub,fontSize:10.5 }}>Nothing committed yet — e.g. pocket money or a phone bill, debited from {scopeLabel}'s own budget, not the Household pool.</div>
-        ) : (
-          <>
-            {commitments.map(c=>{
-              const cat = cats.find(x=>x.id===c.categoryId);
-              const spent = getScopedCategorySpent(c.categoryId);
-              const { remaining, isOver } = getMandatoryCommitmentRemaining(c, spent);
-              const state = getMandatoryCommitmentState(c, spent, viewMonth);
-              return (
-                <button key={c.id} onClick={()=>onEdit(c)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%",background:"none",border:"none",borderBottom:`1px solid ${T.border}`,padding:"6px 0",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif",opacity:state==="skipped"?0.6:1 }}>
-                  <span style={{ minWidth:0 }}>
-                    <span style={{ color:T.text,fontSize:11.5,fontWeight:700 }}>{cat?.icon?`${cat.icon} `:""}{c.name}</span>
-                    <span style={{ display:"block",color:isOver?T.danger:T.sub,fontSize:9.5,marginTop:1 }}>{state==="skipped"?"Skipped this month":isOver?`${sym}${fmt(Math.abs(remaining))} over`:`${sym}${fmt(remaining)} left`}</span>
-                  </span>
-                  <span style={{ color:T.text,fontSize:11.5,fontWeight:800,fontFamily:FONT.mono,flexShrink:0 }}>{sym}{fmt(c.amount)}</span>
-                </button>
-              );
-            })}
-            <div style={{ display:"flex",justifyContent:"space-between",padding:"6px 0 0" }}>
-              <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>Discretionary after commitments</span>
-              <span style={{ color:discretionaryAfter<0?T.danger:T.text,fontSize:10,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(discretionaryAfter)}</span>
-            </div>
-          </>
+      <div data-testid={`commitment-card-${scopeType}-${scopeId}`} style={{ background:T.card, borderRadius:10, padding:"10px 12px", marginTop:8 }}>
+        {planningAllocation>0&&(
+          <div aria-hidden="true" style={{ display:"flex", height:10, borderRadius:5, overflow:"hidden", background:T.border, marginBottom:10 }}>
+            <div style={{ width:`${Math.round(split.committedShare*100)}%`, ...hatch(T.accent, split.allSkipped) }}/>
+            {split.spentFree!=null&&<div style={{ width:`${Math.min(100-Math.round(split.committedShare*100), Math.round(split.spentFree/planningAllocation*100))}%`, background:overFree?T.attention:T.accent }}/>}
+          </div>
         )}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(2, minmax(0,1fr))", gap:8 }}>
+          <div data-testid="commitment-tile-committed" style={tile}>
+            <div style={smallLbl}>Committed</div>
+            <div style={{ color:T.text, fontSize:18, fontWeight:800, fontFamily:FONT.mono, marginTop:2, textDecoration:split.allSkipped?"line-through":"none", opacity:split.allSkipped?0.6:1 }}>{sym}{fmt(split.allSkipped?split.skippedTotal:split.committed)}</div>
+            <div style={{ color:T.sub, fontSize:11, marginTop:2 }}>{split.allSkipped?`Skipped for ${monthShort}`:`Locked${commitments.length===1?` · ${commitments[0].name}`:` · ${commitments.length} commitments`}`}</div>
+          </div>
+          <div data-testid="commitment-tile-free" style={{ ...tile, borderColor:overFree?T.attention:T.border }}>
+            <div style={smallLbl}>Free to spend</div>
+            <div style={{ color:overFree?T.attention:T.text, fontSize:18, fontWeight:800, fontFamily:FONT.mono, marginTop:2 }}>{overFree?`${sym}${fmt(split.over)} over`:`${sym}${fmt(split.free)}`}</div>
+            <div style={{ color:T.sub, fontSize:11, marginTop:2 }}>{split.spentFree==null?"After commitments":overFree?`${sym}${fmt(split.spentFree)} spent of ${sym}${fmt(split.free)}`:`${sym}${fmt(split.spentFree)} spent · ${sym}${fmt(split.leftFree)} left`}</div>
+          </div>
+        </div>
+        {split.overCommitted&&<div style={{ color:T.attention, fontSize:11, fontWeight:700, marginTop:8 }}>Commitments are more than this budget.</div>}
+        <div style={{ marginTop:8 }}>
+          {commitments.map(c=>{
+            const skipped = (c.skippedMonths||[]).includes(viewMonth);
+            const cat = cats.find(x=>x.id===c.categoryId);
+            return (
+              <div key={c.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8, borderTop:`1px solid ${T.border}`, minHeight:44 }}>
+                <button onClick={()=>onEdit(c)} style={{ flex:1, minWidth:0, background:"none", border:"none", padding:"6px 0", cursor:"pointer", textAlign:"left", fontFamily:"inherit" }}>
+                  <span style={{ display:"block", color:T.text, fontSize:12, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{cat?.icon?`${cat.icon} `:""}{c.name}</span>
+                  <span style={{ display:"block", color:T.sub, fontSize:11, textDecoration:skipped?"line-through":"none" }}>{sym}{fmt(c.amount)} each month{skipped?` · skipped for ${monthShort}`:""}</span>
+                </button>
+                <button data-testid={`commitment-skip-${c.id}`} onClick={()=>skipped?setSkip(c,false):skipFor(c)} style={{ background:"none", border:"none", color:T.accent, fontSize:12, fontWeight:700, cursor:"pointer", minHeight:44, padding:"0 4px", fontFamily:"inherit", flexShrink:0 }}>{skipped?"Undo skip":`Skip ${monthShort}`}</button>
+              </div>
+            );
+          })}
+          <button onClick={onAdd} style={{ background:"none", border:"none", borderTop:`1px solid ${T.border}`, width:"100%", textAlign:"left", color:T.accent, fontSize:12, fontWeight:700, cursor:"pointer", minHeight:44, padding:0, fontFamily:"inherit" }}>+ Add commitment</button>
+        </div>
       </div>
     );
   };
@@ -19618,7 +19654,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
         )}
         {showQuickAdd&&<QuickAddModal onClose={()=>setShowQuickAdd(false)}/>}
-        {toast&&<Toast message={toast.message} icon={toast.icon} T={T} onDone={()=>setToast(null)}/>}
+        {toast&&<Toast message={toast.message} icon={toast.icon} actionLabel={toast.actionLabel} onAction={toast.onAction} T={T} onDone={()=>setToast(null)}/>}
         {showDuplicateFinder&&<DuplicateFinderModal onClose={()=>setShowDuplicateFinder(false)}/>}
         {showExpectedIncome&&<ExpectedIncomeListModal onClose={()=>setShowExpectedIncome(false)} T={T} sym={sym} fmt={fmt} formatShortDate={formatShortDate} expectedIncome={expectedIncome} setExpectedIncome={setExpectedIncome} setTxns={setTxns} accounts={accounts} setToast={setToast} setEditingExpectedIncome={setEditingExpectedIncome} setShowAddExpectedIncome={setShowAddExpectedIncome}/>}
         {showInsuranceList&&<InsurancePolicyListModal onClose={()=>setShowInsuranceList(false)} T={T} sym={sym} fmt={fmt} insurancePolicies={insurancePolicies.filter(p=>p.status!=="archived")} setEditingPolicy={setEditingPolicy} setShowAddPolicy={setShowAddPolicy} setViewingPolicy={setViewingPolicy}/>}
