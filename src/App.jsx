@@ -52,6 +52,7 @@ import { createGroup as createPayGroup, removeItem as removePayGroupItem, listPa
 import { planGroupPayment } from "./domain/payTogether/payPlan";
 import PayGroupSheet from "./screens/PayGroupSheet";
 import SpreadSheet from "./screens/SpreadSheet";
+import { getCardUsage } from "./domain/cards/usage";
 import { suggestBillPaymentVendors } from "./domain/bills/billVendorSuggestions";
 import PayTogetherScreen from "./screens/PayTogetherScreen";
 import { createSpread } from "./domain/budget/spread";
@@ -8738,7 +8739,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           { l:"Limit", v:`${sym}${fmt(a.limit)}`, c:T.text },
           { l:"Due Now", v:`${sym}${fmt(cardSummary?.currentDue||0)}`, c:(cardSummary?.currentDue||0)>0?T.danger:T.success },
           { l:"Unbilled", v:`${sym}${fmt(cardSummary?.currentCycleSpend||0)}`, c:T.warn },
-          { l:"Outstanding", v:`${sym}${fmt(cardSummary?.totalOutstanding||0)}`, c:(cardSummary?.totalOutstanding||0)>0?T.danger:T.success },
+          // "Outstanding" used to repeat "Due Now" (the same figure); this tile is current utilisation instead:
+          // billed + unbilled, the amount the bank counts against the limit (domain/cards/usage.js).
+          (()=>{ const u = getCardUsage({ limit:a.limit, billedOutstanding:cardSummary?.totalOutstanding, unbilled:cardSummary?.currentCycleSpend }); return { l:"In use", v:`${sym}${fmt(u.used)}${u.utilisationPct!=null?` · ${u.utilisationPct}%`:""}`, c:u.utilisationPct==null?T.text:u.utilisationPct>80?T.danger:u.utilisationPct>50?T.warn:T.success }; })(),
         ]
       : [
           { l:a.type==="debit"?"Linked Bank":a.type==="upi"&&linkedUpiAcc?"Linked Account":"Live Balance",
@@ -11702,7 +11705,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div key={loan.id} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:idx<arr.length-1?`1px solid ${T.border}`:"none" }}>
                     <div>
                       <div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{loan.name||"Loan"}</div>
-                      <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(loan.startDate)||loan.startDate}{loan.dueDate?` · due ${formatShortDate(loan.dueDate)||loan.dueDate}`:""}{loan.hasInterest?` · ${loan.interestRate}% p.a.`:""}</div>
+                      <div style={{ color:T.sub,fontSize:10 }}>{formatShortDate(loan.startDate)||loan.startDate}{loan.dueDate?` · expected back ${formatShortDate(loan.dueDate)||loan.dueDate}${loan.dueDate<todayStr()?" · overdue":""}`:""}{loan.hasInterest?` · ${loan.interestRate}% p.a.`:""}</div>
                     </div>
                     <div style={{ color:T.success,fontSize:13,fontWeight:700 }}>{sym}{fmt(Number(loan.outstanding||0))}</div>
                   </div>
@@ -12705,8 +12708,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <input style={inp} type="date" value={startDate} onChange={e=>setStartDate(e.target.value)}/>
               </div>
               <div>
-                <span style={lbl}>Due Date</span>
+                <span style={lbl}>{direction==="given"?"Expected return date":"Due Date"}</span>
                 <input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/>
+                {direction==="given"&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>When you expect it back, so Arth can show when it is due.</div>}
               </div>
             </div>
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
@@ -13954,9 +13958,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               // accounts, showing "Not set"/"—" as if that were an honest gap. It wasn't - a.limit
               // is a real field, already collected in Add Account for CC type and already used by
               // a utilization calculation elsewhere (line ~6588). Fixed to use it here too.
-              const hasLimit = a.limit && a.limit>0;
-              const availableLimit = hasLimit ? Math.max(0, a.limit - Math.abs(bal)) : null;
-              const utilPct = hasLimit ? Math.min(100, Math.round((Math.abs(bal)/a.limit)*100)) : null;
+              // Used = billed outstanding + unbilled (domain/cards/usage.js): the bank counts unbilled spend against the limit.
+              const rowUsage = getCardUsage({ limit:a.limit, billedOutstanding:Math.abs(bal), unbilled:getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly).currentCycleSpend });
+              const hasLimit = rowUsage.hasLimit;
+              const availableLimit = rowUsage.available;
+              const utilPct = rowUsage.utilisationPct;
               // Credit Card WP, rule 14: Money links to the relevant Bill in Payments — it never
               // hosts verification itself. "Relevant" = the nearest unpaid generated statement.
               const relevantBill = bills.filter(b=>b.isCcStatement && b.accId===a.id && b.status==="unpaid").sort((x,y)=>String(x.dueDate).localeCompare(String(y.dueDate)))[0] || null;
@@ -13964,10 +13970,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div key={a.id} style={{ padding:"10px 0",borderBottom:`1px solid ${T.border}` }}>
                   <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>{a.name}</div>
                   <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,fontSize:11 }}>
-                    <div><span style={{ color:T.sub }}>Outstanding: </span><span style={{ color:T.danger,fontWeight:800 }}>{sym}{fmt(Math.abs(bal))}</span></div>
+                    <div><span style={{ color:T.sub }}>Outstanding: </span><span style={{ color:rowUsage.billed>0?T.danger:T.success,fontWeight:800 }}>{sym}{fmt(rowUsage.billed)}</span></div>
                     <div><span style={{ color:T.sub }}>Available Limit: </span><span style={{ color:hasLimit?T.text:T.sub,fontWeight:hasLimit?800:400 }}>{hasLimit?`${sym}${fmt(availableLimit)}`:"Not set"}</span></div>
                     <div><span style={{ color:T.sub }}>Utilisation: </span><span style={{ color:hasLimit?(utilPct>80?T.danger:utilPct>50?T.warn:T.success):T.sub,fontWeight:hasLimit?800:400 }}>{hasLimit?`${utilPct}%`:"—"}</span></div>
-                    <div><span style={{ color:T.sub }}>Total Exposure: </span><span style={{ color:T.danger,fontWeight:800 }}>{sym}{fmt(Math.abs(bal))}</span></div>
+                    <div><span style={{ color:T.sub }}>Unbilled: </span><span style={{ color:rowUsage.unbilled>0?T.warn:T.success,fontWeight:800 }}>{sym}{fmt(rowUsage.unbilled)}</span></div>
                   </div>
                   {relevantBill&&<div onClick={()=>setViewingCcStatementId(relevantBill.id)} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>View statement in Payments ›</div>}
                 </div>
@@ -14775,7 +14781,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                                 return <div style={{ color:Math.abs(gap)<0.01?T.success:T.warn,fontSize:10,marginTop:2 }}>Actual {formatShortDate(balanceCheckpoints[a.id].date)} · {Math.abs(gap)<0.01?"Matched":`Gap ${gap>=0?"+":"−"}${sym}${fmt(Math.abs(gap))}`}</div>;
                               })()}
                             </>}
-                            {a.type==="cc"&&`${sym}${fmt(ccSummary?.currentDue||0)} due now · ${sym}${fmt(ccSummary?.totalOutstanding||0)} total`}
+                            {a.type==="cc"&&`${sym}${fmt(ccSummary?.currentDue||0)} due now · ${sym}${fmt(ccSummary?.currentCycleSpend||0)} unbilled`}
                             {a.type==="debit"&&`Linked: ${linkedB?.name||"?"}`}
                             {a.type==="upi"&&`${a.handle||"UPI"} · ${sym}${fmt(bal)}`}
                             {a.type==="cash"&&<>
@@ -17643,7 +17649,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             const ccAccs = accounts.filter(a=>a.type==="cc");
             if(!ccAccs.length) return null;
             const totalLimit = ccAccs.reduce((s,a)=>s+Number(a.limit||0),0);
-            const totalOutstanding = ccAccs.reduce((s,a)=>s+cardOutstanding(a),0);
+            const usageOf = a => getCardUsage({ limit:a.limit, billedOutstanding:cardOutstanding(a), unbilled:getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly).currentCycleSpend });
+            const totalOutstanding = ccAccs.reduce((s,a)=>s+usageOf(a).used,0); // billed + unbilled
             const utilPct = totalLimit>0 ? Math.round((totalOutstanding/totalLimit)*100) : 0;
             const utilColor = utilPct>=70 ? T.danger : utilPct>=40 ? T.warn : T.success;
             return (
@@ -17662,7 +17669,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div style={{ position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:900,color:utilColor }}>{utilPct}%</div>
                   </div>
                   <div style={{ flex:1 }}>
-                    <div style={{ color:T.sub,fontSize:11 }}>Credit Balance</div>
+                    <div style={{ color:T.sub,fontSize:11 }}>In use (billed + unbilled)</div>
                     <div style={{ color:T.text,fontSize:16,fontWeight:800,marginBottom:8 }}>{sym}{fmt(totalOutstanding)}</div>
                     <div style={{ color:T.sub,fontSize:11 }}>Total Credit Limit</div>
                     <div style={{ color:T.text,fontSize:16,fontWeight:800 }}>{sym}{fmt(totalLimit)}</div>
@@ -17671,7 +17678,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5,marginBottom:8 }}>BY CARD</div>
                 <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
                   {ccAccs.map(a=>{
-                    const out = cardOutstanding(a);
+                    const out = usageOf(a).used;
                     const lim = Number(a.limit||0);
                     const pct = lim>0 ? Math.round((out/lim)*100) : 0;
                     const c = pct>=70 ? T.danger : pct>=40 ? T.warn : T.success;
