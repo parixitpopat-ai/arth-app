@@ -16,7 +16,7 @@ Capacitor packages are aligned at 8.3.0 (`@capacitor/android` is pinned exactly)
 
 ## Application ID — every place it is configured
 
-The current value everywhere is the Capacitor placeholder `com.example.arth`. It is **not** a production identity.
+The application ID is `com.parixitpopat.arth` (chosen 4 Oct 2026; it replaced the Capacitor placeholder `com.example.arth`). The table lists every place it is configured.
 
 | File | What | Edit by hand? |
 | --- | --- | --- |
@@ -27,8 +27,8 @@ The current value everywhere is the Capacitor placeholder `com.example.arth`. It
 | `android/app/src/main/assets/capacitor.config.json` -> `appId` | Generated copy written by `cap sync` | No (regenerated) |
 | `android/app/src/main/AndroidManifest.xml` -> `${applicationId}.fileprovider` | Derived from `applicationId` | No |
 
-The final id is decided separately and applied to all the "Yes" rows together. A changed `applicationId` installs as a different
-app and does not upgrade an existing install; once published to Play it cannot change.
+A changed `applicationId` installs as a different app and does not upgrade an existing install, so APKs built before 4 Oct 2026
+(placeholder id) must be uninstalled first. Once published to Play the id cannot change.
 
 ## Not in this milestone
 

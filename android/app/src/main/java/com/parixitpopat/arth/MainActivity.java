@@ -1,4 +1,4 @@
-package com.example.arth;
+package com.parixitpopat.arth;
 
 import com.getcapacitor.BridgeActivity;
 
