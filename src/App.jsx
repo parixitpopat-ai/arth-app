@@ -53,6 +53,7 @@ import { planGroupPayment } from "./domain/payTogether/payPlan";
 import PayGroupSheet from "./screens/PayGroupSheet";
 import SpreadSheet from "./screens/SpreadSheet";
 import { getCardUsage } from "./domain/cards/usage";
+import { shouldDebitOnLoanGiven, buildLoanDisbursalTxn } from "./domain/loans/disbursal";
 import { suggestBillPaymentVendors } from "./domain/bills/billVendorSuggestions";
 import PayTogetherScreen from "./screens/PayTogetherScreen";
 import { createSpread } from "./domain/budget/spread";
@@ -12593,6 +12594,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [interestRate,setInterestRate]=useState(String(item?.interestRate||""));
     const [note,setNote]=useState(item?.note||"");
     const [loanPersonId,setLoanPersonId]=useState(item?.personId||"");
+    // Loan Given only: the account the money was lent from. Empty = not from one of your accounts, nothing is debited.
+    const [lentFromAccId,setLentFromAccId]=useState("");
 
     useEffect(()=>{
       if(!dueDay && startDate){
@@ -12649,6 +12652,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         convertedDate:item?.convertedDate||"",
       };
       setLoans(prev=>isEditing?prev.map(x=>x.id===item.id?{...x,...nextItem}:x):[nextItem,...prev]);
+      // Lent from one of your accounts -> take it out of that account (a non-spending transfer; domain/loans/disbursal.js).
+      if(shouldDebitOnLoanGiven({ direction, isEditing, lentFromAccId, principal:principalNum })){
+        setTxns(prev=>[buildLoanDisbursalTxn({ loanId:nextItem.id, personName:effectiveName, fromAccId:lentFromAccId, amount:principalNum, date:nextItem.startDate }),...prev]);
+        const lentAcc = accounts.find(a=>a.id===lentFromAccId);
+        setToast({ message:`${sym}${fmt(principalNum)} taken out of ${lentAcc?.name||"the account"}`, icon:"✓" });
+      }
       setEditingLoan(null);
       setShowAddLoan(false);
       onClose();
@@ -12702,6 +12711,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <input style={inp} type="text" inputMode="decimal" value={outstanding||""} onChange={e=>setOutstanding(cleanMoneyInput(e.target.value))}/>
               </div>
             </div>
+            {direction==="given"&&!isEditing&&(
+              <div data-testid="loan-lent-from">
+                <span style={lbl}>Lent from</span>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                  <Chip color={T.sub} active={!lentFromAccId} onClick={()=>setLentFromAccId("")}>Not from an account</Chip>
+                  {paidViaAccounts.filter(a=>a.type!=="cc").map(a=><Chip key={a.id} color={a.color||T.accent} active={lentFromAccId===a.id} onClick={()=>setLentFromAccId(a.id)}>{a.name}</Chip>)}
+                </div>
+                <div style={{ color:T.sub,fontSize:10,marginTop:4 }}>{lentFromAccId?"This amount will be taken out of that account when you save.":"Pick the account the money came from to take it out of that balance. Leave as is if it was already recorded."}</div>
+              </div>
+            )}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
               <div>
                 <span style={lbl}>Start Date</span>
@@ -14781,7 +14800,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                                 return <div style={{ color:Math.abs(gap)<0.01?T.success:T.warn,fontSize:10,marginTop:2 }}>Actual {formatShortDate(balanceCheckpoints[a.id].date)} · {Math.abs(gap)<0.01?"Matched":`Gap ${gap>=0?"+":"−"}${sym}${fmt(Math.abs(gap))}`}</div>;
                               })()}
                             </>}
-                            {a.type==="cc"&&`${sym}${fmt(ccSummary?.currentDue||0)} due now · ${sym}${fmt(ccSummary?.currentCycleSpend||0)} unbilled`}
+                            {a.type==="cc"&&(()=>{ const cfg = getEffectiveBillingConfig(a, todayStr()) || {}; return `${a.limit>0?`Limit ${sym}${fmt(a.limit)} · `:""}Statement day ${cfg.statementDay||a.statementDate||"-"} · Due day ${cfg.dueDay||a.dueDate||"-"}`; })()}
                             {a.type==="debit"&&`Linked: ${linkedB?.name||"?"}`}
                             {a.type==="upi"&&`${a.handle||"UPI"} · ${sym}${fmt(bal)}`}
                             {a.type==="cash"&&<>
