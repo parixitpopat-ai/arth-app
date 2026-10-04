@@ -33,12 +33,22 @@ jobs:
           cache: npm
 
       # Capacitor 8's Android code compiles for Java 21.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
 
-      - uses: android-actions/setup-android@v3
+      # The GitHub Ubuntu runner already has the Android SDK ($ANDROID_HOME); we only accept its licences so
+      # Gradle can fetch any missing platform/build-tools (compileSdk 36). The notices make the SDK state
+      # visible in the run's annotations.
+      - name: Android SDK licences and diagnostics
+        run: |
+          echo "::notice title=SDK::ANDROID_HOME=${ANDROID_HOME:-unset}"
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDKM" ]; then yes | "$SDKM" --licenses > /dev/null 2>&1 || true; else echo "::warning title=SDK::sdkmanager not found at $SDKM"; fi
+          echo "::notice title=SDK platforms::$(ls "$ANDROID_HOME/platforms" 2>/dev/null | tr '\n' ' ')"
+          echo "::notice title=SDK build-tools::$(ls "$ANDROID_HOME/build-tools" 2>/dev/null | tr '\n' ' ')"
+          java -version 2>&1 | head -1 | sed 's/^/::notice title=Java::/'
 
       - uses: gradle/actions/setup-gradle@v4
 
