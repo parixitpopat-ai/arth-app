@@ -1,8 +1,8 @@
 # Builds an installable DEBUG APK of the current Web app (Web build -> Capacitor -> Gradle).
 # It needs nothing on the developer machine: no Android Studio, no local SDK.
 #
-# Run it: GitHub -> Actions -> "Android debug APK" -> Run workflow (any branch), or push to the
-# branches listed below. Download the APK from the run's "Artifacts" section (arth-debug-apk).
+# Run it: GitHub -> Actions -> "Android debug APK" -> Run workflow (any branch), or push to one of the
+# branches listed below (main builds on every push). Download the APK from the run's "Artifacts" section (arth-debug-apk).
 #
 # Scope: debug build only. No signing key, no release/AAB, no Play Store steps.
 name: Android debug APK
@@ -11,6 +11,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - wp-android-debug-apk
 
 permissions:
