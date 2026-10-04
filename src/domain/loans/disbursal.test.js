@@ -34,3 +34,9 @@ test("the debit takes the amount off the source account only (same rule accountB
   assert.equal(balance("cash1", 700), 700);
   assert.equal(t.desc, "Loan given");
 });
+
+test("disbursal txn carries isLoanDisbursal so the UI labels it Loan given (formatters.js keys on it)", () => {
+  const t = buildLoanDisbursalTxn({ loanId: 1, personName: "Ravi", fromAccId: "a", amount: 500, date: "2026-10-04" });
+  assert.equal(t.isLoanDisbursal, true);
+  assert.equal(t.type, "transfer");
+});
