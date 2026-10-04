@@ -52,6 +52,7 @@ import { createGroup as createPayGroup, removeItem as removePayGroupItem, listPa
 import { planGroupPayment } from "./domain/payTogether/payPlan";
 import PayGroupSheet from "./screens/PayGroupSheet";
 import SpreadSheet from "./screens/SpreadSheet";
+import { suggestBillPaymentVendors } from "./domain/bills/billVendorSuggestions";
 import PayTogetherScreen from "./screens/PayTogetherScreen";
 import { createSpread } from "./domain/budget/spread";
 import ReadinessScreen from "./screens/ReadinessScreen";
@@ -4375,8 +4376,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const autoDetectEnabled = autoDetectExpenseCategory;
     const filteredSuggestions = useMemo(() => {
       if (!who.trim() || txnType === "cc_payment" || txnType === "transfer") return [];
-      return uniqueVendors.filter(v => v.toLowerCase().includes(who.toLowerCase())).slice(0, 5);
-    }, [who, txnType]);
+      const vendorMatches = uniqueVendors.filter(v => v.toLowerCase().includes(who.toLowerCase()));
+      // Expenses also offer bill-payment labels ("Electricity Bill Payment for Home") built from the user's bills;
+      // text only - choosing one fills this box and nothing else (see domain/bills/billVendorSuggestions.js).
+      const billMatches = txnType === "expense" ? suggestBillPaymentVendors({ query: who, bills, getForLabel: b => { const l = getBillForLabel(b); return l === "Common Areas" ? "Home" : l; }, limit: 3 }) : [];
+      const seen = new Set();
+      return [...billMatches, ...vendorMatches].filter(v => { const k = v.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 5);
+    }, [who, txnType, bills]);
     const vendorCategorySuggestion = useMemo(() => {
       if(txnType !== "expense" || !autoDetectEnabled) return null;
       const vendorText = normalizeVendorText(who);
