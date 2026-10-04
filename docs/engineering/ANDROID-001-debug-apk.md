@@ -22,7 +22,7 @@ The application ID is `com.parixitpopat.arth` (chosen 4 Oct 2026; it replaced th
 | --- | --- | --- |
 | `capacitor.config.json` -> `appId` | Source of truth that `npx cap add android` read | Yes |
 | `android/app/build.gradle` -> `namespace` and `applicationId` | The installed package id (`applicationId`) and the code namespace | Yes |
-| `android/app/src/main/java/com/example/arth/MainActivity.java` -> `package` line, and the folder path `com/example/arth` | Must match `namespace`; changing the id means moving the file | Yes |
+| `android/app/src/main/java/com/parixitpopat/arth/MainActivity.java` -> `package` line, and the folder path `com/parixitpopat/arth` | Must match `namespace`; changing the id means moving the file | Yes |
 | `android/app/src/main/res/values/strings.xml` -> `package_name`, `custom_url_scheme` | Same value; the scheme is the app's deep-link scheme | Yes |
 | `android/app/src/main/assets/capacitor.config.json` -> `appId` | Generated copy written by `cap sync` | No (regenerated) |
 | `android/app/src/main/AndroidManifest.xml` -> `${applicationId}.fileprovider` | Derived from `applicationId` | No |
