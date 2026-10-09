@@ -108,7 +108,7 @@ import { getCommitments, isRechargeBiller } from "./domain/bills/commitments";
 import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
-import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope } from "../domain/allocations/adapter";
+import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCarryForwardPrevSpend, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope } from "../domain/allocations/adapter";
 // WP8 — the central Insights read model. Every Insights card on InsightsPage (and
 // BudgetInsights, which imports the spending/budgetPerformance pair directly) is required to
 // consume these, never compute independently — see domain/insights/*.js file headers.
@@ -9955,7 +9955,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const [y,m] = viewMonth.split("-").map(Number);
       const prevMonth = m===1 ? `${y-1}-12` : `${y}-${String(m-1).padStart(2,"0")}`;
       const prevBudget = monthOverrides[prevMonth] || Math.round(annualBudget/12);
-      const prevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(prevMonth)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
+      const prevSpend = getCarryForwardPrevSpend(txns, prevMonth);
       const carry = prevBudget - prevSpend;
       return Math.max(0, baseMonthly + carry);
     })();
@@ -13417,7 +13417,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const insightsBaseMonthly = getHouseholdPlanningAllocation(annualBudget, monthOverrides, insightsMonth);
     const insightsPrevMonthKey = insightsMM===1 ? `${insightsYY-1}-12` : `${insightsYY}-${String(insightsMM-1).padStart(2,"0")}`;
     const insightsPrevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, insightsPrevMonthKey);
-    const insightsPrevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(insightsPrevMonthKey)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
+    const insightsPrevSpend = getCarryForwardPrevSpend(txns, insightsPrevMonthKey);
     const insightsMonthly = resolveCarryForwardMonthly(budgetCarryForward, insightsBaseMonthly, insightsPrevBudget, insightsPrevSpend);
     const insightsSpend = getHouseholdAttributedTotal({ periodTransactions: periodTxns, allTransactions: txns });
     const insightsToday = new Date();
@@ -15426,7 +15426,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const liveBaseMonthly = getHouseholdPlanningAllocation(annualBudget, monthOverrides, viewMonth);
     const livePrevMonthKey = liveMM===1 ? `${liveYY-1}-12` : `${liveYY}-${String(liveMM-1).padStart(2,"0")}`;
     const livePrevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, livePrevMonthKey);
-    const livePrevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(livePrevMonthKey)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
+    const livePrevSpend = getCarryForwardPrevSpend(txns, livePrevMonthKey);
     const liveMonthly = resolveCarryForwardMonthly(budgetCarryForward, liveBaseMonthly, livePrevBudget, livePrevSpend);
     // WP14 — Person/Group-scoped commitments (e.g. "Spouse phone bill") reduce only that
     // Person/Group's own envelope, never the Household Discretionary Pool a second time; every
@@ -15508,11 +15508,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const [yy,mm] = viewMonth.split("-").map(Number);
           const baseMonthly = getHouseholdPlanningAllocation(annualBudget, monthOverrides, viewMonth);
           const prevMonthKey = mm===1 ? `${yy-1}-12` : `${yy}-${String(mm-1).padStart(2,"0")}`;
-          // NOTE: prevSpend is the legacy raw filter, NOT getHouseholdAttributedTotal —
-          // preserved exactly per WP-4's characterization pass (fbf4219). The carry-forward
-          // discrepancy this represents (BUD-000A finding) is not corrected in this ticket.
+          // prevSpend is getHouseholdAttributedTotal for the previous month (getCarryForwardPrevSpend),
+          // the same "Spent" definition as dashSpend below.
           const prevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, prevMonthKey);
-          const prevSpend = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(prevMonthKey)&&!t.groupId).reduce((s,t)=>s+Number(t.amount||0),0);
+          const prevSpend = getCarryForwardPrevSpend(txns, prevMonthKey);
           const dashMonthly = resolveCarryForwardMonthly(budgetCarryForward, baseMonthly, prevBudget, prevSpend);
           const dashSpend = getHouseholdAttributedTotal({ periodTransactions: txns.filter(t=>t.date&&t.date.startsWith(viewMonth)), allTransactions: txns });
           const dashRemaining = getBudgetVariance(dashSpend, dashMonthly).variance;
