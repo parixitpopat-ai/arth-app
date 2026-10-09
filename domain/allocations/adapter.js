@@ -384,16 +384,9 @@ export function getMyExpenseShare(expense, refundMap) {
  * (characterized against the live formula before this extraction —
  * see domain/allocations/home.characterization.test.js).
  *
- * KNOWN DISCREPANCY, deliberately NOT corrected here (see engineering
- * decision log / Budget correctness finding): `prevMonthSpend` passed
- * into this function by the caller is computed via a raw
- * `type==="expense" && !groupId` sum, NOT getHouseholdAttributedTotal's
- * refund-netting / mode:"owes" attributed-away logic. This means
- * carry-forward's notion of "what did I spend last month" can disagree
- * with the canonical household spend figure shown elsewhere on the same
- * screen. This function preserves that exact legacy behavior — it does
- * not resolve the discrepancy, per explicit instruction not to mix a
- * behavior change into this repoint.
+ * `prevMonthSpend` is the previous month's household spend from
+ * getCarryForwardPrevSpend (below) - the same attributed figure shown as
+ * "Spent" everywhere else, not a separate gross-expense sum.
  *
  * @param {boolean} carryForwardEnabled
  * @param {number} baseMonthly - this period's base allocation (no carry-forward)
@@ -402,6 +395,23 @@ export function getMyExpenseShare(expense, refundMap) {
  *   the legacy (non-canonical) filter — caller's responsibility, unchanged
  * @returns {number}
  */
+/**
+ * Previous month's household spend for budget carry-forward. This IS getHouseholdAttributedTotal over
+ * that month's transactions (refunds netted, excluded expenses and receivables left out, group
+ * attribution applied) - carry-forward must not keep its own gross definition of "spent".
+ *
+ * @param {Array} allTransactions
+ * @param {string} prevMonthKey - "YYYY-MM"
+ * @returns {number}
+ */
+export function getCarryForwardPrevSpend(allTransactions, prevMonthKey) {
+  const all = allTransactions || [];
+  return getHouseholdAttributedTotal({
+    periodTransactions: all.filter((t) => (t.date || "").startsWith(prevMonthKey)),
+    allTransactions: all,
+  });
+}
+
 export function resolveCarryForwardMonthly(carryForwardEnabled, baseMonthly, prevMonthPlanning, prevMonthSpend) {
   if (!carryForwardEnabled) return baseMonthly;
   return Math.max(0, baseMonthly + (prevMonthPlanning - prevMonthSpend));
