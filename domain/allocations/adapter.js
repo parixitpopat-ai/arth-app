@@ -256,12 +256,26 @@ export function getPersonAttributedTotal(transactions, personId) {
  * @returns {Object} map of expenseId (string) -> total refunded amount
  */
 export function buildRefundTotalsByExpense(allTransactions) {
-  return allTransactions.reduce((map, txn) => {
-    if (txn.type !== "settlement_in" || !txn.againstTxnId) return map;
+  return (allTransactions || []).reduce((map, txn) => {
+    if (!isRefundAgainstExpense(txn)) return map;
     const key = String(txn.againstTxnId);
     map[key] = (map[key] || 0) + Number(txn.amount || 0);
     return map;
   }, {});
+}
+
+/**
+ * Money that comes back against a specific expense and so lowers what that expense cost me: a refund
+ * (isRefund), or - for older rows saved before that flag - a settlement linked to the expense that did
+ * not come from a person or a group. A repayment from a person/group is NOT a refund: their share was
+ * already taken out of my spend by the split, so counting the repayment again would reduce the same
+ * expense twice (ADR-017: refund is a flag, repayment is a relationship). Loan repayments carry no
+ * againstTxnId and never reach this.
+ */
+export function isRefundAgainstExpense(txn) {
+  if (!txn || txn.type !== "settlement_in" || !txn.againstTxnId) return false;
+  if (txn.isRefund) return true;
+  return !txn.fromPersonId && !txn.fromGroupId;
 }
 
 /**
