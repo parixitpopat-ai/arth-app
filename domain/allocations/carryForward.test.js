@@ -53,3 +53,45 @@ test("effect on the carried amount: budget 10,000, base 10,000, with a ₹300 re
 test("carry-forward off: the previous month's spend has no effect (default unchanged)", () => {
   assert.equal(resolveCarryForwardMonthly(false, 10000, 10000, 12345), 10000);
 });
+
+// ---- getEffectiveMonthlyBudget: the one entry point for Home, Budget and Insights (D4) ----
+import { getEffectiveMonthlyBudget } from "./adapter.js";
+
+const oct = (over = {}) => ({ annualBudget: 120000, monthOverrides: {}, monthKey: "2026-10", transactions: [exp("a", 1000), refund("a", 300)], ...over });
+
+test("carry-forward off (the default): effective = base; prev spend is still reported", () => {
+  const r = getEffectiveMonthlyBudget(oct());
+  assert.equal(r.base, 10000);
+  assert.equal(r.effective, 10000);
+  assert.equal(r.carry, 0);
+  assert.equal(r.prevMonthKey, "2026-09");
+  assert.equal(r.prevSpend, 700);
+});
+
+test("carry-forward on: last month's allocation less its attributed spend is added", () => {
+  const r = getEffectiveMonthlyBudget(oct({ carryForwardEnabled: true }));
+  assert.equal(r.carry, 9300);
+  assert.equal(r.effective, 19300);
+});
+
+test("carry uses last month's own override; an overspent month carries a negative amount", () => {
+  const r = getEffectiveMonthlyBudget(oct({ carryForwardEnabled: true, monthOverrides: { "2026-09": 500 } }));
+  assert.equal(r.carry, -200); // 500 planned - 700 spent
+  assert.equal(r.effective, 9800);
+});
+
+test("the effective budget never goes below zero", () => {
+  assert.equal(getEffectiveMonthlyBudget(oct({ carryForwardEnabled: true, annualBudget: 1200 })).effective, 0); // base 100, carry 100 - 700
+});
+
+test("January looks back to December of the previous year", () => {
+  const r = getEffectiveMonthlyBudget({ annualBudget: 120000, monthOverrides: {}, monthKey: "2027-01", carryForwardEnabled: true, transactions: [{ id: "d", type: "expense", amount: 4000, date: "2026-12-05" }] });
+  assert.equal(r.prevMonthKey, "2026-12");
+  assert.equal(r.effective, 16000);
+});
+
+test("every screen calling it with the same inputs gets the same budget", () => {
+  const a = getEffectiveMonthlyBudget(oct({ carryForwardEnabled: true }));
+  const b = getEffectiveMonthlyBudget(oct({ carryForwardEnabled: true }));
+  assert.deepEqual(a, b);
+});

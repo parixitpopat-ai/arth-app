@@ -395,6 +395,31 @@ export function getMyExpenseShare(expense, refundMap) {
  *   the legacy (non-canonical) filter — caller's responsibility, unchanged
  * @returns {number}
  */
+const previousMonthKey = (monthKey) => {
+  const [y, m] = String(monthKey).split("-").map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+};
+
+/**
+ * The monthly budget a screen should measure spending against: the month's planning allocation, plus
+ * (only when carry-forward is enabled) last month's allocation less last month's attributed spend, never
+ * below zero. The one entry point for Home, Budget and Insights, so they cannot drift (BUD-001: carry-forward
+ * stays Budget-owned and is implemented once). Carry-forward is off unless the caller says otherwise.
+ *
+ * @returns {{base:number, effective:number, carry:number, prevMonthKey:string, prevPlanning:number, prevSpend:number}}
+ *   prevSpend is always reported (Insights shows it even when carry-forward is off); it only affects
+ *   `effective` when carryForwardEnabled is true.
+ */
+export function getEffectiveMonthlyBudget({ annualBudget, monthOverrides, monthKey, carryForwardEnabled = false, transactions }) {
+  const overrides = monthOverrides || {};
+  const base = getHouseholdPlanningAllocation(annualBudget, overrides, monthKey);
+  const prevMonthKey = previousMonthKey(monthKey);
+  const prevPlanning = getHouseholdPlanningAllocation(annualBudget, overrides, prevMonthKey);
+  const prevSpend = getCarryForwardPrevSpend(transactions, prevMonthKey);
+  const effective = resolveCarryForwardMonthly(Boolean(carryForwardEnabled), base, prevPlanning, prevSpend);
+  return { base, effective, carry: effective - base, prevMonthKey, prevPlanning, prevSpend };
+}
+
 /**
  * Previous month's household spend for budget carry-forward. This IS getHouseholdAttributedTotal over
  * that month's transactions (refunds netted, excluded expenses and receivables left out, group
