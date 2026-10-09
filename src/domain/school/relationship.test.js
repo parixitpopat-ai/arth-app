@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import {
   createSchoolRelationship,
@@ -43,9 +43,16 @@ test("createSchoolRelationship works correctly for a self-attributed relationshi
 
 test("endSchoolRelationship IS lifecycle.js's endMembership — proven by behavioral equivalence, confirming no School-specific transition logic exists", () => {
   const rel = createSchoolRelationship({ billerAccountId: "dps", personId: "p1", startDate: "2025-06-01", genId });
-  const viaWrapper = endSchoolRelationship(rel, "Left the school", "2027-04-30");
-  const viaDirect = endMembership(rel, "Left the school", "2027-04-30");
-  assert.deepEqual(viaWrapper, viaDirect);
+  // Both calls stamp Date.now() into statusHistory; freeze the clock so a millisecond tick between them
+  // can't make an otherwise-identical pair differ (this test used to fail intermittently under load).
+  mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
+  try {
+    const viaWrapper = endSchoolRelationship(rel, "Left the school", "2027-04-30");
+    const viaDirect = endMembership(rel, "Left the school", "2027-04-30");
+    assert.deepEqual(viaWrapper, viaDirect);
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 // --- Continuous relationship across academic years --------------------------
