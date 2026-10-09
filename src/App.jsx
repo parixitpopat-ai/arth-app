@@ -155,6 +155,7 @@ import { nextBillMatchChoice, getBillChoicesToShow, getBillLinkAmountMismatch, m
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
+import { getExpectedSpendByToday, getSpendPaceState } from "./domain/budget/pace";
 import TransactionsCalendar from "./screens/TransactionsCalendar";
 import { buildMonthCalendar, getDayEntries } from "./domain/transactions/calendarSummary";
 import EmptyState from "./components/EmptyState";
@@ -10045,30 +10046,33 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       })(),
       safeToSpend: (
         <div key="safeToSpend" onClick={()=>setTab("outlook")} style={{ ...card,textAlign:"center",cursor:"pointer",background:`linear-gradient(135deg,${T.accent}1c,${T.card})`,border:`1px solid ${T.accent}33`,padding:20 }}>
-          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND</div>
+          <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND · {homeTodayDate.toLocaleString("en-IN",{month:"long"}).toUpperCase()}</div>
           {homeMonthBudget<=0 ? (
-            <div style={{ color:T.sub,fontSize:11,padding:"8px 0" }}>No budget set yet.</div>
-          ) : (
-            <>
-              <div style={{ color:homeSafeToSpend>=0?T.accent:T.danger,fontSize:34,fontWeight:900,margin:"6px 0" }}>{sym}{fmt(homeSafeToSpend)}</div>
-              {/* Progress bar — same spent/budget ratio already shown in the Budget/Spent rows
-                  below, just visualized. No new calculation, reuses homeMonthSpend/homeMonthBudget. */}
-              <div style={{ height:6,background:T.border,borderRadius:3,margin:"8px 0" }}>
-                <div style={{ height:"100%",width:`${Math.max(0,Math.min(100,Math.round(homeMonthSpend/homeMonthBudget*100)))}%`,background:homeSafeToSpend>=0?T.accent:T.danger,borderRadius:3 }}/>
-              </div>
-              <div style={{ color:T.sub,fontSize:10 }}>~{sym}{fmt(Math.round(homeSafeToSpendPerDay))}/day</div>
-              {/* Month-end date — display-only formatting, no new business logic. */}
-              <div style={{ color:T.sub,fontSize:9,marginTop:2 }}>Available until {new Date(homeTodayDate.getFullYear(),homeTodayDate.getMonth()+1,0).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</div>
-              {/* Budget vs Spent breakdown - real fix: the net figure alone (e.g. "-10000")
-                  didn't say whether that's from a low budget or high spending. */}
-              <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:T.sub,marginTop:8,paddingTop:8,borderTop:`1px dashed ${T.border}` }}>
-                <span>Budget</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeMonthBudget)}</span>
-              </div>
-              <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:T.sub,marginTop:2 }}>
-                <span>Spent</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(homeMonthSpend)}</span>
-              </div>
-            </>
-          )}
+            <div style={{ color:T.sub,fontSize:12,padding:"8px 0" }}>No budget set yet.</div>
+          ) : (()=>{
+            // Spent is the second figure on the card (it was a 10px footnote). The tick is the straight-line
+            // pace for today (domain/budget/pace.js); the fill is red over budget, amber ahead of pace.
+            const expected = getExpectedSpendByToday({ budget:homeMonthBudget, today:todayStr(), monthKey:homeMonthKey });
+            const paceState = getSpendPaceState({ spent:homeMonthSpend, budget:homeMonthBudget, expected });
+            const fill = paceState==="over" ? T.danger : paceState==="ahead" ? T.warn : T.accent;
+            const pct = v => `${Math.max(0,Math.min(100,(v/homeMonthBudget)*100))}%`;
+            return (
+              <>
+                <div style={{ color:homeSafeToSpend>=0?T.accent:T.danger,fontSize:34,fontWeight:900,margin:"6px 0 2px",fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(homeSafeToSpend)}</div>
+                <div style={{ display:"flex",alignItems:"baseline",justifyContent:"center",gap:8 }}>
+                  <span style={{ color:T.text,fontSize:20,fontWeight:900,fontVariantNumeric:"tabular-nums" }}>Spent {sym}{fmt(homeMonthSpend)}</span>
+                  <span style={{ color:T.sub,fontSize:14,fontWeight:600 }}>of {sym}{fmt(homeMonthBudget)}</span>
+                </div>
+                <div role="img" aria-label={`Spent ${sym}${fmt(homeMonthSpend)} of ${sym}${fmt(homeMonthBudget)}${expected!=null?`. Expected by today ${sym}${fmt(expected)}.`:""}`} style={{ position:"relative",height:12,background:T.border,borderRadius:6,margin:"12px 0 4px" }}>
+                  <div style={{ height:"100%",width:pct(homeMonthSpend),background:fill,borderRadius:6 }}/>
+                  {expected!=null&&<div style={{ position:"absolute",top:-3,bottom:-3,left:pct(expected),width:2,marginLeft:-1,background:T.text,borderRadius:1 }}/>}
+                </div>
+                <div style={{ display:"flex",justifyContent:"space-between",color:T.sub,fontSize:11,fontVariantNumeric:"tabular-nums" }}><span>{sym}0</span><span>{sym}{fmt(homeMonthBudget)}</span></div>
+                {expected!=null&&<div style={{ color:T.sub,fontSize:12,marginTop:6 }}>Expected by today <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmt(expected)}</span></div>}
+                <div style={{ color:T.sub,fontSize:12,marginTop:6 }}>~{sym}{fmt(Math.round(homeSafeToSpendPerDay))}/day · available until {new Date(homeTodayDate.getFullYear(),homeTodayDate.getMonth()+1,0).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</div>
+              </>
+            );
+          })()}
           <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:4,marginTop:8 }}>
             <span style={{ fontSize:12 }}>{homeStatus.icon}</span><span style={{ color:homeStatus.color,fontSize:11,fontWeight:700 }}>{homeStatus.label}</span>
           </div>
@@ -15578,12 +15582,49 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   only, no calculation changed. The progress bar and Budgeted/Spent/Remaining
                   3-column grid are gone in favour of the mock's two-line form; the sign is still
                   stated explicitly in text, never implied by colour alone. */}
-              <div style={{ ...card }}>
-                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Monthly budget</div>
-                <div style={{ ...MONEY.hero,color:T.text,margin:"4px 0 2px" }}>{sym}{fmt(dashMonthly)}</div>
-                <div style={{ color:dashRemaining>=0?T.sub:T.danger,fontSize:12,marginBottom:10 }}>{dashRemaining>=0?`${sym}${fmt(dashRemaining)} left`:`${sym}${fmt(Math.abs(dashRemaining))} over`} · {dashLeftDays} day{dashLeftDays===1?"":"s"}</div>
-                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>Spent {sym}{fmt(dashSpend)}<span style={{ color:T.sub,fontWeight:500 }}> · {dashSafePerDay===null?"—":`About ${sym}${fmt(dashSafePerDay)} a day`}</span></div>
-              </div>
+              {(()=>{
+                // Spent is the headline (it was a 13px line under the budget figure). Budget and left support it.
+                const monthName = new Date(`${viewMonth}-01T00:00:00`).toLocaleString("en-IN",{ month:"long" });
+                const expected = getExpectedSpendByToday({ budget:dashMonthly, today:todayStr(), monthKey:viewMonth });
+                const paceState = getSpendPaceState({ spent:dashSpend, budget:dashMonthly, expected });
+                const fill = paceState==="over" ? T.danger : paceState==="ahead" ? T.warn : T.accent;
+                const pct = v => `${Math.max(0,Math.min(100,dashMonthly>0?(v/dashMonthly)*100:(v>0?100:0)))}%`;
+                const catRows = cats.map(c=>({ c, budget:Number(getCategoryPlanningAllocation(c)||0), spent:getCategoryAttributedTotal(monthTxns, c.id, { allTransactions: txns }) }))
+                  .filter(r=>r.budget>0&&r.spent>0).sort((x,y)=>(y.spent/y.budget)-(x.spent/x.budget)); // only categories with spending this month
+                return (
+                  <>
+                    <div style={{ ...card }}>
+                      <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1 }}>Spent · {monthName}</div>
+                      <div style={{ ...MONEY.hero,color:T.text,margin:"4px 0 2px",fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(dashSpend)}</div>
+                      <div style={{ color:dashRemaining>=0?T.sub:T.danger,fontSize:14,fontWeight:600,marginBottom:10 }}>of {sym}{fmt(dashMonthly)} · {dashRemaining>=0?`${sym}${fmt(dashRemaining)} left`:`${sym}${fmt(Math.abs(dashRemaining))} over`} · {dashLeftDays} day{dashLeftDays===1?"":"s"}</div>
+                      <div role="img" aria-label={`Spent ${sym}${fmt(dashSpend)} of ${sym}${fmt(dashMonthly)}${expected!=null?`. Expected by today ${sym}${fmt(expected)}.`:""}`} style={{ position:"relative",height:12,background:T.border,borderRadius:6 }}>
+                        <div style={{ height:"100%",width:pct(dashSpend),background:fill,borderRadius:6 }}/>
+                        {expected!=null&&<div style={{ position:"absolute",top:-3,bottom:-3,left:pct(expected),width:2,marginLeft:-1,background:T.text,borderRadius:1 }}/>}
+                      </div>
+                      <div style={{ display:"flex",justifyContent:"space-between",color:T.sub,fontSize:11,marginTop:4,fontVariantNumeric:"tabular-nums" }}><span>{sym}0</span><span>{sym}{fmt(dashMonthly)}</span></div>
+                      <div style={{ color:T.sub,fontSize:12,marginTop:8 }}>{expected!=null?<>Expected by today <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmt(expected)}</span> · </>:null}{dashSafePerDay===null?"—":`about ${sym}${fmt(dashSafePerDay)} a day`}</div>
+                    </div>
+                    {catRows.length>0&&(
+                      <div style={{ ...card }}>
+                        <div style={{ color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>By category</div>
+                        {catRows.map(({c,budget,spent})=>{
+                          const over = spent>budget;
+                          return (
+                            <div key={c.id} style={{ padding:"8px 0",borderTop:`1px solid ${T.border}` }}>
+                              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline" }}>
+                                <span style={{ color:T.text,fontSize:14,fontWeight:700 }}>{c.icon?`${c.icon} `:""}{c.name}</span>
+                                <span style={{ color:over?T.danger:T.text,fontSize:16,fontWeight:800,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(spent)}</span>
+                              </div>
+                              <div style={{ height:6,background:T.border,borderRadius:3,margin:"6px 0 4px" }}><div style={{ height:"100%",width:`${Math.min(100,(spent/budget)*100)}%`,background:over?T.danger:T.sub,borderRadius:3 }}/></div>
+                              <div style={{ display:"flex",justifyContent:"space-between",color:T.sub,fontSize:12 }}><span>of {sym}{fmt(budget)}</span><span style={{ color:over?T.danger:T.sub,fontWeight:over?800:500 }}>{over?`Over by ${sym}${fmt(spent-budget)}`:`${sym}${fmt(budget-spent)} left`}</span></div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               {/* WP6 — monthly confirmation prompt, same pattern as the existing budget-alert
                   dismissedAlerts[] mechanism: a month-scoped id, nothing new to persist. Only
