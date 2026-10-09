@@ -128,7 +128,7 @@ import { mergeEditedSplitPeople } from "./domain/bills/mergeEditedSplitPeople";
 import { getBillSplitSource } from "./domain/bills/splitSource";
 import { withNewContribution, withoutContribution, getContributionsForObligation, getContributionsForTransaction, getTotalContributed, hasProtectedContributions } from "./domain/obligations/contribution";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
-import { computeAccountBalance } from "./domain/accounts/accountBalance";
+import { computeAccountBalance, isLinkedPaymentMethod, getParentAccountId } from "./domain/accounts/accountBalance";
 import { getFrequentVendors, getFrequentItemsForVendor, getVendorAggregate } from "./domain/transactions/vendorInsights";
 import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVersion, migrateLegacyBillingHistory } from "./domain/cards/billingConfig";
@@ -13981,7 +13981,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         color:accountBalance(a.id)>=0?T.success:T.danger,
         onClick:()=>setShowAccDetail(a),
       })),
-      upi: accounts.filter(a=>a.type==="upi" && !isInvestmentAccount(a)).map(a=>({
+      upi: accounts.filter(a=>a.type==="upi" && !isInvestmentAccount(a) && !isLinkedPaymentMethod(a,accounts)).map(a=>({
         id:a.id,
         title:a.name,
         meta:`${a.handle||"UPI"} · ${sym}${fmt(accountBalance(a.id))}`,
@@ -14245,7 +14245,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       upi: {
         title:"📱 UPI balance",
         subtitle:"App-wise breakup",
-        items: accounts.filter(a=>a.type==="upi").map(a=>({
+        items: accounts.filter(a=>a.type==="upi" && !isLinkedPaymentMethod(a,accounts)).map(a=>({
           id:a.id,
           title:a.name,
           meta:`${a.handle||"UPI"} · ${sym}${fmt(accountBalance(a.id))}`,
@@ -14718,7 +14718,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                             </>}
                             {a.type==="cc"&&(()=>{ const cfg = getEffectiveBillingConfig(a, todayStr()) || {}; return `${a.limit>0?`Limit ${sym}${fmt(a.limit)} · `:""}Statement day ${cfg.statementDay||a.statementDate||"-"} · Due day ${cfg.dueDay||a.dueDate||"-"}`; })()}
                             {a.type==="debit"&&`Linked: ${linkedB?.name||"?"}`}
-                            {a.type==="upi"&&`${a.handle||"UPI"} · ${sym}${fmt(bal)}`}
+                            {a.type==="upi"&&(isLinkedPaymentMethod(a,accounts) ? `${a.handle||"UPI"} · payment method of ${accounts.find(x=>x.id===getParentAccountId(a,accounts))?.name||"linked account"}` : `${a.handle||"UPI"} · ${sym}${fmt(bal)}`)}
                             {a.type==="cash"&&<>
                               <div>Cash in hand: {sym}{fmt(bal)}</div>
                               {balanceCheckpoints[a.id]?.date&&(()=>{
