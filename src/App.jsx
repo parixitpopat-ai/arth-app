@@ -127,6 +127,7 @@ import { mergeEditedSplitPeople } from "./domain/bills/mergeEditedSplitPeople";
 import { getBillSplitSource } from "./domain/bills/splitSource";
 import { withNewContribution, withoutContribution, getContributionsForObligation, getContributionsForTransaction, getTotalContributed, hasProtectedContributions } from "./domain/obligations/contribution";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
+import { computeAccountBalance } from "./domain/accounts/accountBalance";
 import { getFrequentVendors, getFrequentItemsForVendor, getVendorAggregate } from "./domain/transactions/vendorInsights";
 import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVersion, migrateLegacyBillingHistory } from "./domain/cards/billingConfig";
@@ -2564,33 +2565,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     return tieDesc;
   }),[txns,fType,txnDateFrom,txnDateTo,txnAmountFrom,txnAmountTo,txnCategoryFilter,txnPersonFilter,txnGroupFilter,accounts,expenseSourceFilter,expenseCardFilter,incomeTypeFilter,incomeAccountFilter,investmentTypeFilter,txnSort,txnReimbursableOnly,txnSearch]);
 
-  const accountBalance = useCallback((accId, endDate=null)=>{
-    const acc=accounts.find(a=>a.id===accId);
-    if(!acc||acc.type==="cc") return 0;
-    const openingDate = acc.openingBalanceDate || "";
-    const linkedDebitIds = acc.type==="bank"
-      ? accounts.filter(a=>(a.type==="debit" && a.linkedBank===accId) || (a.type==="upi" && a.linkedAccount===accId)).map(a=>a.id)
-      : [];
-    let bal=Number(acc.openingBalance||0);
-    // A multi-method payment hits each paying account for ITS line only (see paymentLineSlices.js).
-    expandPaymentLines(txns).forEach(t=>{
-      if(!isDateInRange(t.date, openingDate, endDate)) return;
-      if(t.type==="income"&&t.accId===accId) bal+=Number(t.amount||0);
-      if(t.type==="settlement_in"&&t.accId===accId) bal+=Number(t.amount||0);
-      if(t.type==="expense"){
-        if(t.accId===accId || linkedDebitIds.includes(t.accId)) bal-=Number(t.amount||0);
-      }
-      if(t.type==="investment"){
-        if(t.accId===accId || linkedDebitIds.includes(t.accId)) bal-=Number(t.amount||0);
-      }
-      if(t.type==="transfer"){
-        if(t.fromAccId===accId || linkedDebitIds.includes(t.fromAccId)) bal-=Number(t.amount||0);
-        if(t.toAccId===accId || linkedDebitIds.includes(t.toAccId)) bal+=Number(t.amount||0);
-      }
-      if(t.type==="cc_payment" && (t.fromAccId===accId || linkedDebitIds.includes(t.fromAccId))) bal-=Number(t.amount||0);
-    });
-    return bal;
-  },[txns,accounts]);
+  // Cash balance: domain/accounts/accountBalance.js (a linked UPI/debit is a rail with no balance of its own).
+  const accountBalance = useCallback((accId, endDate=null)=>computeAccountBalance({ accId, accounts, txns, endDate, isDateInRange }),[txns,accounts]);
 
   const bankBalance = useCallback(accId=>{
     const acc=accounts.find(a=>a.id===accId);
