@@ -28,6 +28,11 @@ export const getCardCycleDates = (card, refDate = new Date()) => {
   return { prevStatementDate, lastStatementDate, nextStatementDate, dueOn };
 };
 
+// What a card is charged for. Billed and unbilled use this one list, so a charge is on the statement
+// that covers its date or waiting for the next one, never missing from either. Transaction type is
+// untouched: an Investment stays an Investment (spending/budget classification is a separate concern).
+const isCardCharge = t => t.type==="expense" || t.type==="investment" || t.type==="cc_emi";
+
 export const getCardSummary = (card, accounts, txns, toDateOnly) => {
   const { prevStatementDate, lastStatementDate, nextStatementDate, dueOn } = getCardCycleDates(card, new Date());
   const linkedUpiIds = accounts.filter(a=>a.type==="upi"&&a.linkedAccount===card.id).map(a=>a.id);
@@ -36,7 +41,7 @@ export const getCardSummary = (card, accounts, txns, toDateOnly) => {
   const todayMid = new Date(today.getFullYear(),today.getMonth(),today.getDate(),12,0,0,0);
   const todayS = toLocalDateStr(today);
   const lastCycleCharges = txns.reduce((sum,t)=>{
-    if((t.type!=="expense"&&t.type!=="investment"&&t.type!=="cc_emi")||!allIds.includes(t.accId)) return sum;
+    if(!isCardCharge(t)||!allIds.includes(t.accId)) return sum;
     if(!t.date||String(t.date)>todayS) return sum;
     const d=toDateOnly(t.date);
     if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
@@ -58,7 +63,7 @@ export const getCardSummary = (card, accounts, txns, toDateOnly) => {
   },0);
   const totalOutstanding = Math.max(0, lastCycleCharges - inCycleRefunds - paymentsSinceStatement);
   const currentCycleSpend = Math.max(0, txns.reduce((sum,t)=>{
-    if((t.type!=="expense"&&t.type!=="cc_emi")||!allIds.includes(t.accId)) return sum;
+    if(!isCardCharge(t)||!allIds.includes(t.accId)) return sum;
     const txnDate=toDateOnly(t.date);
     if(!txnDate||!lastStatementDate||txnDate<=lastStatementDate||txnDate>todayMid) return sum;
     return sum+Number(t.amount||0);

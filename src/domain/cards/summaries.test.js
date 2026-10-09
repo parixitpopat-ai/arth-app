@@ -57,10 +57,40 @@ test("a multi-method expense charges only the card's own slice", () => {
   assert.equal(summary([t]).totalOutstanding, 600);
 });
 
-test("CURRENT BEHAVIOUR (open question): an investment on the card is billed but never shown as unbilled", () => {
-  const inv = (id, date) => ({ id, type: "investment", date, amount: 1000, accId: "cc" });
-  assert.equal(summary([inv(1, "2026-09-20")]).totalOutstanding, 1000);
-  assert.equal(summary([inv(2, "2026-10-18")]).currentCycleSpend, 0);
+test("an investment on the card counts as billed before the statement date and unbilled after it", () => {
+  const inv = (id, date, amount = 1000) => ({ id, type: "investment", date, amount, accId: "cc" });
+  const before = summary([inv(1, "2026-09-20")]);
+  assert.equal(before.totalOutstanding, 1000);
+  assert.equal(before.currentCycleSpend, 0);
+  const after = summary([inv(2, "2026-10-18")]);
+  assert.equal(after.totalOutstanding, 0);
+  assert.equal(after.currentCycleSpend, 1000);
+});
+
+test("statement-date transition: a charge is in exactly one of billed / unbilled", () => {
+  // statement day = 15 Oct. Previous statement = 15 Sep.
+  const cases = [
+    ["2026-09-15", 0, 0], // on the previous statement date: belongs to the statement before (already issued)
+    ["2026-09-16", 1000, 0], // first day of the billed window
+    ["2026-10-15", 1000, 0], // statement day itself: billed
+    ["2026-10-16", 0, 1000], // day after: unbilled
+    ["2026-10-20", 0, 1000], // today: unbilled
+  ];
+  for (const type of ["expense", "investment", "cc_emi"]) {
+    for (const [date, billed, unbilled] of cases) {
+      const s = summary([{ id: 1, type, date, amount: 1000, accId: "cc" }]);
+      assert.equal(s.totalOutstanding, billed, `${type} ${date} billed`);
+      assert.equal(s.currentCycleSpend, unbilled, `${type} ${date} unbilled`);
+    }
+  }
+});
+
+test("an investment keeps its type and does not reach other card figures: usage adds billed + unbilled once", () => {
+  const txns = [{ id: 1, type: "investment", date: "2026-09-20", amount: 1000, accId: "cc" }, { id: 2, type: "investment", date: "2026-10-18", amount: 500, accId: "cc" }];
+  const s = summary(txns);
+  assert.equal(txns[0].type, "investment");
+  const u = getCardUsage({ limit: card.limit, billedOutstanding: s.totalOutstanding, unbilled: s.currentCycleSpend });
+  assert.equal(u.used, 1500);
 });
 
 test("utilisation uses billed + unbilled together", () => {
