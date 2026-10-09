@@ -128,7 +128,7 @@ import { mergeEditedSplitPeople } from "./domain/bills/mergeEditedSplitPeople";
 import { getBillSplitSource } from "./domain/bills/splitSource";
 import { withNewContribution, withoutContribution, getContributionsForObligation, getContributionsForTransaction, getTotalContributed, hasProtectedContributions } from "./domain/obligations/contribution";
 import { getCardCycleDates, getCardSummary } from "./domain/cards/summaries";
-import { computeAccountBalance } from "./domain/accounts/accountBalance";
+import { computeAccountBalance, isLinkedPaymentMethod, getParentAccountId } from "./domain/accounts/accountBalance";
 import { getFrequentVendors, getFrequentItemsForVendor, getVendorAggregate } from "./domain/transactions/vendorInsights";
 import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVersion, migrateLegacyBillingHistory } from "./domain/cards/billingConfig";
@@ -2926,7 +2926,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const realMonthTxns = txns.filter(t=>t.date&&t.date.startsWith(realMonth));
     const monthSpend = realMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
     const monthIncome = realMonthTxns.filter(t=>t.type==="income").reduce((s,t)=>s+Number(t.amount||0),0);
-    const monthBudget = monthOverrides[realMonth] || Math.round(Number(annualBudget||0)/12);
+    const monthBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, realMonth);
     setWealthSnapshots(prev=>{
       if(prev.some(s=>s.date===today)) return prev;
       const snapshot = {
@@ -9908,7 +9908,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // same shape as Outlook's "Next Month Cash Outflow" lens, just not month-scoped here (Home
     // shows the immediate/ongoing figure, not a next-month preview).
     // One calculation shared with Outlook (domain/futureMoney/moneyRequired.js): unpaid spending + saving + loan EMIs.
-    const homeMoneyRequired = getMoneyRequiredForPeriod({ futureMoney });
+    // Explicit period: everything overdue plus everything due within the next 30 days (day 30 included; undated items count as due now).
+    const HOME_REQUIRED_DAYS = 30;
+    const homeMoneyRequired = getMoneyRequiredForPeriod({ futureMoney, today:todayStr(), horizonDays:HOME_REQUIRED_DAYS });
+    const homeRequiredUntil = new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth(), homeTodayDate.getDate()+HOME_REQUIRED_DAYS);
     const homeCashRequired = homeMoneyRequired.total;
     const homeBuffer = homeOpeningBalance - homeCashRequired;
     const homeHasCommitmentData = homeMoneyRequired.count>0 || (expectedIncome||[]).filter(e=>e.status!=="received").length>0;
@@ -10074,7 +10077,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>MONEY REQUIRED</div>
           </div>
           <div style={{ color:T.text,fontSize:22,fontWeight:900,marginBottom:1 }}>{sym}{fmt(homeCashRequired)}</div>
-          <div style={{ color:T.sub,fontSize:10 }}>Next 30 days</div>
+          <div style={{ color:T.sub,fontSize:10 }}>Overdue + due by {homeRequiredUntil.toLocaleString("en-IN",{day:"numeric",month:"short"})}</div>
         </div>
       ),
       // Reuses homeStatus — the same classifier already computed for Safe to Spend
@@ -13177,7 +13180,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:14,paddingTop:14,borderTop:`1px solid ${T.border}` }}>
             <span style={{ fontSize:18 }}>{forecastStatus.icon}</span>
             <div>
-              <div style={{ color:statusColor,fontSize:12,fontWeight:800 }}>Next 30 days {forecastStatus.level==="comfortable"?"are covered":"need attention"} · {forecastStatus.label}</div>
+              <div style={{ color:statusColor,fontSize:12,fontWeight:800 }}>Open commitments {forecastStatus.level==="comfortable"?"are covered":"need attention"} · {forecastStatus.label}</div>
               <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{forecastStatus.detail}</div>
             </div>
           </div>
@@ -13186,7 +13189,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {hasEnoughData&&(
           <>
             <div style={{ display:"flex",justifyContent:"space-between",marginTop:14,paddingTop:14,borderTop:`1px solid ${T.border}` }}>
-              <span style={{ color:T.sub,fontSize:11 }}>Needed</span>
+              <span style={{ color:T.sub,fontSize:11 }}>Needed · all open commitments</span>
               <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(cashRequired)}</span>
             </div>
             <div style={{ display:"flex",justifyContent:"space-between",marginTop:6 }}>
@@ -13978,7 +13981,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         color:accountBalance(a.id)>=0?T.success:T.danger,
         onClick:()=>setShowAccDetail(a),
       })),
-      upi: accounts.filter(a=>a.type==="upi" && !isInvestmentAccount(a)).map(a=>({
+      upi: accounts.filter(a=>a.type==="upi" && !isInvestmentAccount(a) && !isLinkedPaymentMethod(a,accounts)).map(a=>({
         id:a.id,
         title:a.name,
         meta:`${a.handle||"UPI"} · ${sym}${fmt(accountBalance(a.id))}`,
@@ -14242,7 +14245,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       upi: {
         title:"📱 UPI balance",
         subtitle:"App-wise breakup",
-        items: accounts.filter(a=>a.type==="upi").map(a=>({
+        items: accounts.filter(a=>a.type==="upi" && !isLinkedPaymentMethod(a,accounts)).map(a=>({
           id:a.id,
           title:a.name,
           meta:`${a.handle||"UPI"} · ${sym}${fmt(accountBalance(a.id))}`,
@@ -14715,7 +14718,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                             </>}
                             {a.type==="cc"&&(()=>{ const cfg = getEffectiveBillingConfig(a, todayStr()) || {}; return `${a.limit>0?`Limit ${sym}${fmt(a.limit)} · `:""}Statement day ${cfg.statementDay||a.statementDate||"-"} · Due day ${cfg.dueDay||a.dueDate||"-"}`; })()}
                             {a.type==="debit"&&`Linked: ${linkedB?.name||"?"}`}
-                            {a.type==="upi"&&`${a.handle||"UPI"} · ${sym}${fmt(bal)}`}
+                            {a.type==="upi"&&(isLinkedPaymentMethod(a,accounts) ? `${a.handle||"UPI"} · payment method of ${accounts.find(x=>x.id===getParentAccountId(a,accounts))?.name||"linked account"}` : `${a.handle||"UPI"} · ${sym}${fmt(bal)}`)}
                             {a.type==="cash"&&<>
                               <div>Cash in hand: {sym}{fmt(bal)}</div>
                               {balanceCheckpoints[a.id]?.date&&(()=>{
@@ -15846,7 +15849,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:10 }}>Month by Month</div>
         {months.map(m=>{
           const mSpend = txns.filter(t=>t.type==="expense"&&t.date?.startsWith(m.key)).reduce((s,t)=>s+getNetExpenseAmount(t),0);
-          const mBudget = monthOverrides[m.key]||monthlySlice;
+          const mBudget = monthOverrides[m.key]??monthlySlice;
           const diff = mBudget - mSpend;
           const isOver = diff < 0;
           const pct = mBudget>0 ? Math.min(100,Math.round(mSpend/mBudget*100)) : (mSpend>0 ? 100 : 0);
@@ -17685,7 +17688,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             for(let i=5;i>=0;i--){
               const d = new Date(nowD.getFullYear(), nowD.getMonth()-i, 1);
               const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-              const mBudget = monthOverrides[key] || Math.round(Number(annualBudget||0)/12);
+              const mBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, key);
               const mTxns = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(key));
               const mSpend = mTxns.reduce((s,t)=>s+getMyExpenseAmount(t),0);
               const pct = mBudget>0 ? Math.min(100,Math.round(mSpend/mBudget*100)) : 0;
