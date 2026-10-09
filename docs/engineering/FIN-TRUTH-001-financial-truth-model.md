@@ -78,3 +78,11 @@ Not changing: transaction types (ADR-017), bill balance model (ADR-038), collect
 
 ## 6. Verification notes
 Every number above marked "Browser" was produced by seeding the stated records into the running app. D1's repayment record was seeded in the shape the app's save code writes; I did not drive the repayment UI end to end. Nothing here was tested against real user data or on a device.
+
+## 7. Rules locked after review, and what was built
+
+Locked: (1) a loan given is a receivable, not an expense; repayments reduce the receivable and never reduce past spending; an explicit write-off is recognised as Bad Debts, never automatic on a late or overdue loan; later recovery must not double-count or rewrite history. (2) The real source is a bank, wallet or card account; UPI/debit/Mastercard are rails, so spend through a linked rail moves the funding account once. (3) Money Required is one calculation shared by Home and Outlook and includes loan EMIs; it is not spending or budget used. (4) `getMoneyRequiredForPeriod` and `getEffectiveMonthlyBudget` own those measures; carry-forward stays off by default.
+
+Built, each on its own branch: D1 `wp-d1-refund-rule`, D2 `wp-d2-funding-account`, D3 `wp-d3-money-required`, D4 `wp-d4-effective-budget` (stacked on `wp-d-carry-forward-attributed`).
+
+Loan audit (existing architecture): loan disbursal is a transfer out of the lending account with no destination (never an expense; `domain/loans/disbursal.js`); a repayment is a `settlement_in` with `linkedLoanId` and no `againstTxnId`, so it never reaches the spending refund map. Loans carry the statuses `written_off` and `converted_to_expense` and the UI labels them, **but nothing in the app sets them** and there is no Bad Debts category or recognition. Person-split write-off exists (`writtenOff`, `settled:true`) but only hides the receivable; it recognises no loss. Explicit loan write-off with Bad Debts and post-write-off recovery is therefore **not supported today and is a separate work package (WP-F)**, not part of D1-D4.
