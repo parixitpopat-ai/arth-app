@@ -155,6 +155,8 @@ import { nextBillMatchChoice, getBillChoicesToShow, getBillLinkAmountMismatch, m
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
+import TransactionsCalendar from "./screens/TransactionsCalendar";
+import { buildMonthCalendar, getDayEntries } from "./domain/transactions/calendarSummary";
 import EmptyState from "./components/EmptyState";
 import Toast from "./components/Toast";
 import ConfirmDialog from "./components/ConfirmDialog";
@@ -1394,6 +1396,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
   // ── MODAL STATE ────────────────────────────────────────────────────────────
   const [showAdd, setShowAdd] = useState(false);
+  const [txnViewMode, setTxnViewMode] = useState("list"); // Transactions: "list" | "calendar"
+  const [txnCalMonth, setTxnCalMonth] = useState(()=>todayStr().slice(0,7));
+  const [txnCalDate, setTxnCalDate] = useState(null);
   const [cashFlowMonth, setCashFlowMonth] = useState(null); // Money → Cash flow screen: the month it opened on (null = closed)
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [toast, setToast] = useState(null); // { message, icon } | null
@@ -10492,8 +10497,38 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setTxnReimbursableOnly(false);
     };
 
+    const txnViewToggle = (
+      <div role="tablist" aria-label="Transactions view" style={{ display:"flex",padding:3,borderRadius:12,background:T.input,gap:2,marginBottom:12 }}>
+        {[["list","List"],["calendar","Calendar"]].map(([id,label])=>(
+          <button key={id} type="button" role="tab" aria-selected={txnViewMode===id} onClick={()=>setTxnViewMode(id)} style={{ flex:1,minHeight:40,border:`1px solid ${txnViewMode===id?T.border:"transparent"}`,borderRadius:9,background:txnViewMode===id?T.card:"none",color:txnViewMode===id?T.text:T.sub,fontSize:14,fontWeight:txnViewMode===id?800:600,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>{label}</button>
+        ))}
+      </div>
+    );
+    if(txnViewMode==="calendar"){
+      const calToday = todayStr();
+      const calSummary = buildMonthCalendar({ txns, monthKey:txnCalMonth, today:calToday, dueDates:bills.filter(b=>b.status==="unpaid"&&b.dueDate).map(b=>String(b.dueDate).slice(0,10)) });
+      const calEntries = txnCalDate ? getDayEntries({ txns, date:txnCalDate }).map(e=>({ ...e, title:getTxnDisplayTitle(e.txn), kindText:txnLabel(e.txn) })) : [];
+      const shiftCal = delta => { const [yy,mm]=txnCalMonth.split("-").map(Number); const d=new Date(yy,mm-1+delta,1); setTxnCalMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); setTxnCalDate(null); };
+      return (
+        <div style={{ padding:"14px 16px 0" }}>
+          <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:12 }}>Transactions</div>
+          {txnViewToggle}
+          <TransactionsCalendar
+            T={T} sym={sym} summary={calSummary}
+            canNext={txnCalMonth<calToday.slice(0,7)} showToday={txnCalMonth!==calToday.slice(0,7)}
+            onPrev={()=>shiftCal(-1)} onNext={()=>shiftCal(1)} onToday={()=>{ setTxnCalMonth(calToday.slice(0,7)); setTxnCalDate(null); }}
+            selectedDate={txnCalDate} onSelectDate={setTxnCalDate} entries={calEntries}
+            onAddForDate={date=>{ setAddPrefill({ date }); setDefaultAddType("expense"); setShowAdd(true); }}
+            onEditEntry={id=>{ const t=txns.find(x=>String(x.id)===String(id)); if(t) setEditingTxn(t); }}
+            sheetHidden={showAdd||Boolean(editingTxn)}
+          />
+        </div>
+      );
+    }
+
     return (
       <div style={{ padding:"14px 16px 0" }}>
+        {txnViewToggle}
         {/* Search bar */}
         <div style={{ background:T.input,borderRadius:24,padding:"10px 16px",display:"flex",alignItems:"center",gap:8,marginBottom:12 }}>
           <span style={{ fontSize:15,color:T.sub }}>🔍</span>
