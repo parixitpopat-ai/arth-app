@@ -133,3 +133,13 @@ test("an extra applied to the next Bill is no longer Unallocated on the first Bi
   // without the carry-forward the same 300 stays Unallocated
   assert.equal(getBillLedger(b1, [contribs[0]], txns).unallocated, 300);
 });
+
+test("group 'Spent' adds an open Bill at its REMAINING, so the part already paid (already a payment transaction) is not counted twice", () => {
+  const bill = { id: "P", amount: 2000, status: "unpaid" };
+  const contribs = [{ id: "c", obligationType: "bill", obligationId: "P", txnId: 101, amount: 800 }];
+  const paymentTxn = 800;
+  const openPart = getBillBalance(bill, contribs).remaining;
+  assert.equal(openPart, 1200);
+  assert.equal(paymentTxn + openPart, 2000); // not 2800
+  assert.equal(getBillBalance({ id: "U", amount: 1000, status: "unpaid" }, []).remaining, 1000); // untouched bill: full amount
+});

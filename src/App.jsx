@@ -11757,7 +11757,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       };
 
       // month-filtered stats
-      const groupTotalSpend = mTxns.filter(t=>t.type==="expense").reduce((sum,t)=>sum+getGroupTxnAmt(t,g.id),0) + gBills.reduce((sum,b)=>sum+Number(b.amount||0),0);
+      const groupTotalSpend = mTxns.filter(t=>t.type==="expense").reduce((sum,t)=>sum+getGroupTxnAmt(t,g.id),0) + gBills.reduce((sum,b)=>sum+getBillBalance(b,contributions).remaining,0);
       const groupBudget = Number(g.manualLimit||0);
       const groupOver = groupBudget>0 && groupTotalSpend>groupBudget;
       const groupPaidByMe = mTxns.filter(t=>t.type==="expense").reduce((sum,t)=>sum+getGroupTxnAmt(t,g.id),0);
@@ -11785,7 +11785,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const otherOwed=Object.entries(t.people||{}).filter(([pid])=>pid!=="__me__").reduce((s,[,info])=>s+Number(info.amount||0),0);
         return sum+Math.max(0,txnAmt-otherOwed-getGroupCollectiveDue(t));
       },0);
-      const overallTotalSpend = overallPaidByMe + gBills.filter(b=>(b.dueDate||b.billDate||"")>=fyStart&&(b.dueDate||b.billDate||"")<=fyEnd).reduce((sum,b)=>sum+Number(b.amount||0),0);
+      const overallTotalSpend = overallPaidByMe + gBills.filter(b=>(b.dueDate||b.billDate||"")>=fyStart&&(b.dueDate||b.billDate||"")<=fyEnd).reduce((sum,b)=>sum+getBillBalance(b,contributions).remaining,0);
       const displayPaidByMe = groupViewMode==="overall" ? overallPaidByMe : groupPaidByMe;
       const displayMySpend  = groupViewMode==="overall" ? overallMySpend  : groupMySpend;
       // owe/owes-me are all-time outstanding balances, not month-filtered
@@ -12394,7 +12394,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,marginBottom:10 }}>{gtype}</div>
                 {grps.map(g=>{
                   const gCurMonth = todayStr().slice(0,7);
-                  const gTotalSpend = txns.filter(t=>t.groupId===g.id&&t.type==="expense"&&(t.date||"").startsWith(gCurMonth)).reduce((sum,t)=>sum+Number(t.amount||0),0) + bills.filter(b=>b.groupId===g.id&&b.status==="unpaid"&&(b.billDate||"").startsWith(gCurMonth)).reduce((sum,b)=>sum+Number(b.amount||0),0);
+                  const gTotalSpend = txns.filter(t=>t.groupId===g.id&&t.type==="expense"&&(t.date||"").startsWith(gCurMonth)).reduce((sum,t)=>sum+Number(t.amount||0),0) + bills.filter(b=>b.groupId===g.id&&b.status==="unpaid"&&(b.billDate||"").startsWith(gCurMonth)).reduce((sum,b)=>sum+getBillBalance(b,contributions).remaining,0);
                   const gBudget = Number(g.manualLimit||0);
                   const gOver = gBudget>0 && gTotalSpend>gBudget;
                   return (
