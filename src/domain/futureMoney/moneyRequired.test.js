@@ -42,3 +42,18 @@ test("buffer classification uses one set of thresholds", () => {
   assert.equal(classifyCashBuffer({ available: 100000, required: 36000, forecastNegative: true }).level, "risk");
   assert.equal(classifyCashBuffer({ available: 100, required: 36000 }).buffer, -35900);
 });
+
+test("Home's 30-day range: overdue and day 30 included, day 31 excluded, undated counted as due now", () => {
+  const f = {
+    committedSpending: [
+      ev("committedSpending", 100, { date: "2026-09-01" }), // overdue
+      ev("committedSpending", 200, { date: "2026-11-08" }), // exactly 30 days after 9 Oct
+      ev("committedSpending", 400, { date: "2026-11-09" }), // day 31
+      ev("committedSpending", 800, {}), // no date
+    ],
+    committedSaving: [], debtService: [ev("debtService", 1600, { date: "2026-11-20" })],
+  };
+  const r = getMoneyRequiredForPeriod({ futureMoney: f, today: "2026-10-09", horizonDays: 30 });
+  assert.equal(r.total, 100 + 200 + 800);
+  assert.equal(getMoneyRequiredForPeriod({ futureMoney: f }).total, 100 + 200 + 400 + 800 + 1600); // broader (Outlook) period
+});

@@ -9908,7 +9908,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // same shape as Outlook's "Next Month Cash Outflow" lens, just not month-scoped here (Home
     // shows the immediate/ongoing figure, not a next-month preview).
     // One calculation shared with Outlook (domain/futureMoney/moneyRequired.js): unpaid spending + saving + loan EMIs.
-    const homeMoneyRequired = getMoneyRequiredForPeriod({ futureMoney });
+    // Explicit period: everything overdue plus everything due within the next 30 days (day 30 included; undated items count as due now).
+    const HOME_REQUIRED_DAYS = 30;
+    const homeMoneyRequired = getMoneyRequiredForPeriod({ futureMoney, today:todayStr(), horizonDays:HOME_REQUIRED_DAYS });
+    const homeRequiredUntil = new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth(), homeTodayDate.getDate()+HOME_REQUIRED_DAYS);
     const homeCashRequired = homeMoneyRequired.total;
     const homeBuffer = homeOpeningBalance - homeCashRequired;
     const homeHasCommitmentData = homeMoneyRequired.count>0 || (expectedIncome||[]).filter(e=>e.status!=="received").length>0;
@@ -10074,7 +10077,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:0.5 }}>MONEY REQUIRED</div>
           </div>
           <div style={{ color:T.text,fontSize:22,fontWeight:900,marginBottom:1 }}>{sym}{fmt(homeCashRequired)}</div>
-          <div style={{ color:T.sub,fontSize:10 }}>Next 30 days</div>
+          <div style={{ color:T.sub,fontSize:10 }}>Overdue + due by {homeRequiredUntil.toLocaleString("en-IN",{day:"numeric",month:"short"})}</div>
         </div>
       ),
       // Reuses homeStatus — the same classifier already computed for Safe to Spend
@@ -13177,7 +13180,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:14,paddingTop:14,borderTop:`1px solid ${T.border}` }}>
             <span style={{ fontSize:18 }}>{forecastStatus.icon}</span>
             <div>
-              <div style={{ color:statusColor,fontSize:12,fontWeight:800 }}>Next 30 days {forecastStatus.level==="comfortable"?"are covered":"need attention"} · {forecastStatus.label}</div>
+              <div style={{ color:statusColor,fontSize:12,fontWeight:800 }}>Open commitments {forecastStatus.level==="comfortable"?"are covered":"need attention"} · {forecastStatus.label}</div>
               <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{forecastStatus.detail}</div>
             </div>
           </div>
@@ -13186,7 +13189,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {hasEnoughData&&(
           <>
             <div style={{ display:"flex",justifyContent:"space-between",marginTop:14,paddingTop:14,borderTop:`1px solid ${T.border}` }}>
-              <span style={{ color:T.sub,fontSize:11 }}>Needed</span>
+              <span style={{ color:T.sub,fontSize:11 }}>Needed · all open commitments</span>
               <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(cashRequired)}</span>
             </div>
             <div style={{ display:"flex",justifyContent:"space-between",marginTop:6 }}>
