@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildMonthCalendar, getDayEntries, formatCellAmount, calendarKind } from "./calendarSummary.js";
+import { buildMonthCalendar, getDayEntries, formatCellAmount, calendarKind, projectDueItems, describeOtherKind } from "./calendarSummary.js";
 import { getHouseholdAttributedTotal } from "../../../domain/allocations/adapter.js";
 
 const M = "2026-10";
@@ -49,6 +49,7 @@ test("a friend's repayment, a transfer, an investment, a card payment and a loan
   assert.equal(day(c, 5).income, 0);
   assert.equal(day(c, 5).count, 4);
   assert.equal(day(c, 5).otherCount, 4);
+  assert.equal(day(c, 5).countedCount, 0);
   assert.equal(c.spentTotal, 600);
 });
 
@@ -72,7 +73,7 @@ test("only the requested month is counted", () => {
 });
 
 test("unpaid dues mark their day; other months are ignored", () => {
-  const c = cal([], { dueDates: ["2026-10-14", "2026-10-14", "2026-11-02"] });
+  const c = cal([], { dueItems: [{ date: "2026-10-14" }, { date: "2026-10-14" }, { date: "2026-11-02" }] });
   assert.equal(day(c, 14).dueCount, 2);
   assert.equal(c.days.reduce((s, d) => s + d.dueCount, 0), 2);
 });
@@ -94,4 +95,33 @@ test("cell amounts shorten to fit", () => {
   assert.equal(formatCellAmount(85000, "+", 8), "+85,000");
   assert.equal(formatCellAmount(1200000, "", 4), "12L");
   assert.equal(calendarKind({ type: "cc_emi" }), "other");
+});
+
+const fmEv = (category, amount, date, extra = {}) => ({ sourceType: "x", sourceId: String(Math.random()), category, amount, date, status: "upcoming", name: "n" + amount, ...extra });
+const dueFm = {
+  committedSpending: [fmEv("committedSpending", 30000, "2026-10-15", { recurs: true, name: "Rent" }), fmEv("committedSpending", 45000, "2026-10-12", { name: "School fee" }), fmEv("committedSpending", 5, "2026-10-01", { status: "paid" })],
+  committedSaving: [fmEv("committedSaving", 15000, "2026-11-01", { recurs: true, name: "SIP" })],
+  debtService: [fmEv("debtService", 5000, "2026-10-31", { recurs: true, name: "Loan EMI" })],
+};
+
+test("due items: this month on their own date; a repeating item continues on the same day next month", () => {
+  const oct = projectDueItems({ futureMoney: dueFm, monthKey: "2026-10" });
+  assert.deepEqual(oct.map(d => [d.date, d.name]), [["2026-10-12", "School fee"], ["2026-10-15", "Rent"], ["2026-10-31", "Loan EMI"]]);
+  const nov = projectDueItems({ futureMoney: dueFm, monthKey: "2026-11" });
+  assert.deepEqual(nov.map(d => [d.date, d.name]), [["2026-11-01", "SIP"], ["2026-11-15", "Rent"], ["2026-11-30", "Loan EMI"]]); // 31st clamps to 30 Nov; one-off school fee not repeated
+});
+
+test("due items: nothing projected backwards and paid items never appear", () => {
+  assert.deepEqual(projectDueItems({ futureMoney: dueFm, monthKey: "2026-09" }), []);
+  assert.ok(!projectDueItems({ futureMoney: dueFm, monthKey: "2026-10" }).some(d => d.amount === 5));
+});
+
+test("describing entries that are not spending or income", () => {
+  assert.equal(describeOtherKind({ type: "settlement_in", isRefund: true }), "Refund");
+  assert.equal(describeOtherKind({ type: "settlement_in", fromPersonId: "p1" }, "Rohan"), "Repayment from Rohan");
+  assert.equal(describeOtherKind({ type: "settlement_in", fromPersonId: "p1" }), "Repayment from a friend");
+  assert.equal(describeOtherKind({ type: "transfer", isLoanDisbursal: true }), "Loan given");
+  assert.equal(describeOtherKind({ type: "transfer" }), "Transfer between your accounts");
+  assert.equal(describeOtherKind({ type: "investment" }), "Investment");
+  assert.equal(describeOtherKind({ type: "cc_payment" }), "Credit card payment");
 });

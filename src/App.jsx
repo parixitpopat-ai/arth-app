@@ -160,7 +160,7 @@ import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
 import { getExpectedSpendByToday, getSpendPaceState } from "./domain/budget/pace";
 import TransactionsCalendar from "./screens/TransactionsCalendar";
-import { buildMonthCalendar, getDayEntries } from "./domain/transactions/calendarSummary";
+import { buildMonthCalendar, getDayEntries, projectDueItems, describeOtherKind, calendarKind } from "./domain/transactions/calendarSummary";
 import EmptyState from "./components/EmptyState";
 import Toast from "./components/Toast";
 import ConfirmDialog from "./components/ConfirmDialog";
@@ -10511,8 +10511,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     );
     if(txnViewMode==="calendar"){
       const calToday = todayStr();
-      const calSummary = buildMonthCalendar({ txns, monthKey:txnCalMonth, today:calToday, dueDates:bills.filter(b=>b.status==="unpaid"&&b.dueDate).map(b=>String(b.dueDate).slice(0,10)) });
-      const calEntries = txnCalDate ? getDayEntries({ txns, date:txnCalDate }).map(e=>({ ...e, title:getTxnDisplayTitle(e.txn), kindText:txnLabel(e.txn) })) : [];
+      // Open commitments (unpaid bills, statements, fees, SIPs, EMIs) mark their day; repeating ones continue next month.
+      const calDueItems = projectDueItems({ futureMoney, monthKey:txnCalMonth });
+      const calSummary = buildMonthCalendar({ txns, monthKey:txnCalMonth, today:calToday, dueItems:calDueItems });
+      const calEntries = txnCalDate ? getDayEntries({ txns, date:txnCalDate }).map(e=>({ ...e, title:getTxnDisplayTitle(e.txn), kindText:calendarKind(e.txn)==="other" ? describeOtherKind(e.txn, e.txn.fromPersonId?(people.find(pp=>pp.id===e.txn.fromPersonId)?.name||null):null) : txnLabel(e.txn) })) : [];
+      const calDues = txnCalDate ? calDueItems.filter(d=>d.date===txnCalDate) : [];
+      const calNextMonth = (()=>{ const [yy,mm]=calToday.slice(0,7).split("-").map(Number); const d=new Date(yy,mm,1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; })();
       const shiftCal = delta => { const [yy,mm]=txnCalMonth.split("-").map(Number); const d=new Date(yy,mm-1+delta,1); setTxnCalMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); setTxnCalDate(null); };
       return (
         <div style={{ padding:"14px 16px 0" }}>
@@ -10520,7 +10524,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {txnViewToggle}
           <TransactionsCalendar
             T={T} sym={sym} summary={calSummary}
-            canNext={txnCalMonth<calToday.slice(0,7)} showToday={txnCalMonth!==calToday.slice(0,7)}
+            canNext={txnCalMonth<calNextMonth} showToday={txnCalMonth!==calToday.slice(0,7)} isFutureMonth={txnCalMonth>calToday.slice(0,7)} dues={calDues}
             onPrev={()=>shiftCal(-1)} onNext={()=>shiftCal(1)} onToday={()=>{ setTxnCalMonth(calToday.slice(0,7)); setTxnCalDate(null); }}
             selectedDate={txnCalDate} onSelectDate={setTxnCalDate} entries={calEntries}
             onAddForDate={date=>{ setAddPrefill({ date }); setDefaultAddType("expense"); setShowAdd(true); }}
