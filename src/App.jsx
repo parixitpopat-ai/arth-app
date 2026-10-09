@@ -2725,39 +2725,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     };
   }).filter(Boolean),[investmentDashboardGroups]);
   const trackedAssetsTotal = useMemo(()=>trackedAssets.reduce((sum,a)=>sum+Number(a.currentValue||0),0),[trackedAssets]);
+  // Billed-and-unpaid amount on a card. Thin delegation: getCardSummary().totalOutstanding is the one
+  // definition (domain/cards/summaries.js); this used to be a hand-copied duplicate of it.
   const cardOutstanding = useCallback((card)=>{
-    if(!card) return 0;
-    const cardId = typeof card === "string" ? card : card.id;
     const cardObj = typeof card === "string" ? accounts.find(a=>a.id===card) : card;
-    const { prevStatementDate, lastStatementDate } = getCardCycleDates(cardObj||{}, new Date());
-    const linkedUpiIds = accounts.filter(a=>a.type==="upi"&&a.linkedAccount===cardId).map(a=>a.id);
-    const allIds = [cardId, ...linkedUpiIds];
-    const today = todayStr();
-    // Charges in the last billing cycle only (prevStatementDate < date ≤ lastStatementDate)
-    const lastCycleCharges = expandPaymentLines(txns).reduce((sum,t)=>{
-      if((t.type!=="expense"&&t.type!=="investment"&&t.type!=="cc_emi")||!allIds.includes(t.accId)) return sum;
-      if(!t.date||String(t.date)>today) return sum;
-      const d=toDateOnly(t.date);
-      if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
-      return sum+Number(t.amount||0);
-    },0);
-    // Refunds within cycle reduce charges
-    const inCycleRefunds = txns.reduce((sum,t)=>{
-      if(t.type!=="settlement_in"||!t.isRefund||!allIds.includes(t.accId)) return sum;
-      const d=toDateOnly(t.date);
-      if(!d||!lastStatementDate||d<=prevStatementDate||d>lastStatementDate) return sum;
-      return sum+Number(t.amount||0);
-    },0);
-    // Payments AFTER statement date reduce outstanding
-    const paymentsSinceStatement = txns.reduce((sum,t)=>{
-      const isCcPayment = t.type==="cc_payment" && t.toAccId===cardId;
-      const isCcRefund = t.type==="settlement_in" && t.isRefund && allIds.includes(t.accId);
-      if(!isCcPayment && !isCcRefund) return sum;
-      const d=toDateOnly(t.date);
-      if(!d||!lastStatementDate||d<=lastStatementDate) return sum;
-      return sum+Number(t.amount||0);
-    },0);
-    return Math.max(0, lastCycleCharges - inCycleRefunds - paymentsSinceStatement);
+    if(!cardObj) return 0;
+    return getCardSummary(cardObj, accounts, expandPaymentLines(txns), toDateOnly).totalOutstanding;
   },[txns,accounts]);
   const creditCardLiabilityTotal = useMemo(()=>accounts.reduce((sum,a)=>sum+(a.type==="cc"?cardOutstanding(a):0),0),[accounts,cardOutstanding]);
   const otherLiabilityTotal = useMemo(()=>liabilities.reduce((sum,l)=>sum+Number(l.outstanding||0),0),[liabilities]);
