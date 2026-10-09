@@ -108,7 +108,7 @@ import { getCommitments, isRechargeBiller } from "./domain/bills/commitments";
 import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
-import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCarryForwardPrevSpend, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope } from "../domain/allocations/adapter";
+import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getEffectiveMonthlyBudget, getCarryForwardPrevSpend, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope } from "../domain/allocations/adapter";
 // WP8 — the central Insights read model. Every Insights card on InsightsPage (and
 // BudgetInsights, which imports the spending/budgetPerformance pair directly) is required to
 // consume these, never compute independently — see domain/insights/*.js file headers.
@@ -2995,7 +2995,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const billsScore = recentPaidBills.length===0 ? 20 : (onTimeCount/recentPaidBills.length)*20;
 
     // Budget Adherence — 15 pts. Full marks at or under budget, tapers to 0 by 150% of budget.
-    const monthBudget = monthOverrides[thisMonthKey] || Math.round(Number(annualBudget||0)/12);
+    const monthBudget = getEffectiveMonthlyBudget({ annualBudget, monthOverrides, monthKey:thisMonthKey, carryForwardEnabled:budgetCarryForward, transactions:txns }).effective;
     const budgetRatio = monthBudget>0 ? monthSpend/monthBudget : null;
     const budgetScore = budgetRatio===null ? 7.5 : budgetRatio<=1 ? 15 : Math.max(0, 15*(1-((budgetRatio-1)/0.5)));
 
@@ -9926,7 +9926,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const homeUnpaidSpending = homeCommittedSpending.filter(c=>c.status!=="paid");
     const homeThisMonthTxns = txns.filter(t=>t.date&&t.date.startsWith(homeMonthKey));
     const homeMonthSpend = getHouseholdAttributedTotal({ periodTransactions: homeThisMonthTxns, allTransactions: txns });
-    const homeMonthBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, homeMonthKey);
+    const homeMonthBudget = getEffectiveMonthlyBudget({ annualBudget, monthOverrides, monthKey:homeMonthKey, carryForwardEnabled:budgetCarryForward, transactions:txns }).effective;
     const homeSafeToSpend = homeMonthBudget - homeMonthSpend;
     const homeDaysLeftInMonth = new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth()+1, 0).getDate() - homeTodayDate.getDate() + 1;
     const homeSafeToSpendPerDay = homeDaysLeftInMonth>0 ? homeSafeToSpend/homeDaysLeftInMonth : homeSafeToSpend;
@@ -9949,16 +9949,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const totalUnbilled = ccSummaries.reduce((s,item)=>s+item.currentCycleSpend,0);
     const anyHighUtil = ccSummaries.some(item=>item.isOverAlert);
     const nextDueCard = [...ccSummaries].filter(item=>item.currentDue>0).sort((a,b)=>a.dueOn-b.dueOn)[0] || null;
-    const baseMonthly = monthOverrides[viewMonth] || Math.round(annualBudget/12);
-    const monthly = (() => {
-      if(!budgetCarryForward) return baseMonthly;
-      const [y,m] = viewMonth.split("-").map(Number);
-      const prevMonth = m===1 ? `${y-1}-12` : `${y}-${String(m-1).padStart(2,"0")}`;
-      const prevBudget = monthOverrides[prevMonth] || Math.round(annualBudget/12);
-      const prevSpend = getCarryForwardPrevSpend(txns, prevMonth);
-      const carry = prevBudget - prevSpend;
-      return Math.max(0, baseMonthly + carry);
-    })();
+    const monthly = getEffectiveMonthlyBudget({ annualBudget, monthOverrides, monthKey:viewMonth, carryForwardEnabled:budgetCarryForward, transactions:txns }).effective;
     const budgetPct = Math.min(100,Math.round(myActual/Math.max(1,monthly)*100));
     const diff = monthly - myActual;
     const isOver = diff < 0;
@@ -13414,11 +13405,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // ("will I stay within budget?") — Outlook's separate cash-solvency forecast intentionally
     // stays on Outlook, per the explicit decision not to unify two different questions.
     const [insightsYY,insightsMM] = insightsMonth.split("-").map(Number);
-    const insightsBaseMonthly = getHouseholdPlanningAllocation(annualBudget, monthOverrides, insightsMonth);
-    const insightsPrevMonthKey = insightsMM===1 ? `${insightsYY-1}-12` : `${insightsYY}-${String(insightsMM-1).padStart(2,"0")}`;
-    const insightsPrevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, insightsPrevMonthKey);
-    const insightsPrevSpend = getCarryForwardPrevSpend(txns, insightsPrevMonthKey);
-    const insightsMonthly = resolveCarryForwardMonthly(budgetCarryForward, insightsBaseMonthly, insightsPrevBudget, insightsPrevSpend);
+    const insightsBudget = getEffectiveMonthlyBudget({ annualBudget, monthOverrides, monthKey:insightsMonth, carryForwardEnabled:budgetCarryForward, transactions:txns });
+    const insightsPrevMonthKey = insightsBudget.prevMonthKey;
+    const insightsPrevSpend = insightsBudget.prevSpend;
+    const insightsMonthly = insightsBudget.effective;
     const insightsSpend = getHouseholdAttributedTotal({ periodTransactions: periodTxns, allTransactions: txns });
     const insightsToday = new Date();
     const isCurrentInsightsMonth = insightsMonth === todayStr().slice(0,7);
@@ -15423,11 +15413,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // own viewMonth, matching this page's existing per-tab pattern (e.g. getPersonPlanningAllocation
     // is already called independently per-tab, not lifted).
     const [liveYY,liveMM] = viewMonth.split("-").map(Number);
-    const liveBaseMonthly = getHouseholdPlanningAllocation(annualBudget, monthOverrides, viewMonth);
-    const livePrevMonthKey = liveMM===1 ? `${liveYY-1}-12` : `${liveYY}-${String(liveMM-1).padStart(2,"0")}`;
-    const livePrevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, livePrevMonthKey);
-    const livePrevSpend = getCarryForwardPrevSpend(txns, livePrevMonthKey);
-    const liveMonthly = resolveCarryForwardMonthly(budgetCarryForward, liveBaseMonthly, livePrevBudget, livePrevSpend);
+    const liveMonthly = getEffectiveMonthlyBudget({ annualBudget, monthOverrides, monthKey:viewMonth, carryForwardEnabled:budgetCarryForward, transactions:txns }).effective;
     // WP14 — Person/Group-scoped commitments (e.g. "Spouse phone bill") reduce only that
     // Person/Group's own envelope, never the Household Discretionary Pool a second time; every
     // Household-level figure on this page must read this filtered subset, not the raw array.
@@ -15506,13 +15492,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // monthly-value, variance, or forecast formula is reimplemented locally
           // here, per D.1 Engineering Notes / H.1 module-level criterion M-7.
           const [yy,mm] = viewMonth.split("-").map(Number);
-          const baseMonthly = getHouseholdPlanningAllocation(annualBudget, monthOverrides, viewMonth);
-          const prevMonthKey = mm===1 ? `${yy-1}-12` : `${yy}-${String(mm-1).padStart(2,"0")}`;
-          // prevSpend is getHouseholdAttributedTotal for the previous month (getCarryForwardPrevSpend),
-          // the same "Spent" definition as dashSpend below.
-          const prevBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, prevMonthKey);
-          const prevSpend = getCarryForwardPrevSpend(txns, prevMonthKey);
-          const dashMonthly = resolveCarryForwardMonthly(budgetCarryForward, baseMonthly, prevBudget, prevSpend);
+          const dashBudget = getEffectiveMonthlyBudget({ annualBudget, monthOverrides, monthKey:viewMonth, carryForwardEnabled:budgetCarryForward, transactions:txns });
+          const baseMonthly = dashBudget.base;
+          const dashMonthly = dashBudget.effective;
           const dashSpend = getHouseholdAttributedTotal({ periodTransactions: txns.filter(t=>t.date&&t.date.startsWith(viewMonth)), allTransactions: txns });
           const dashRemaining = getBudgetVariance(dashSpend, dashMonthly).variance;
           const dashLeftDays = daysLeft(viewMonth);
