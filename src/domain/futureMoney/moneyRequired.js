@@ -25,9 +25,10 @@ const sum = list => r2(list.reduce((s, e) => s + (Number(e?.amount) || 0), 0));
  */
 export function getMoneyRequiredForPeriod({ futureMoney, today = null, horizonDays = null } = {}) {
   const scoped = horizonDays != null && today ? (e => isWithinPaymentsHorizon(e, today, horizonDays)) : (() => true);
-  const spending = (futureMoney?.committedSpending || []).filter(c => c?.status !== "paid").filter(scoped);
-  const saving = (futureMoney?.committedSaving || []).filter(scoped);
-  const debtService = (futureMoney?.debtService || []).filter(scoped);
+  const owed = e => (Number(e?.amount) || 0) > 0; // a zero-amount entry (e.g. an empty card statement) is nothing to pay
+  const spending = (futureMoney?.committedSpending || []).filter(c => c?.status !== "paid").filter(owed).filter(scoped);
+  const saving = (futureMoney?.committedSaving || []).filter(owed).filter(scoped);
+  const debtService = (futureMoney?.debtService || []).filter(owed).filter(scoped);
   const spendingTotal = sum(spending);
   const savingTotal = sum(saving);
   const debtServiceTotal = sum(debtService);
