@@ -65,6 +65,8 @@ import { pauseRelationship, resumeRelationship, endRelationship, isDateActiveMem
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { getMoneyRequiredForPeriod, classifyCashBuffer } from "./domain/futureMoney/moneyRequired";
 import { buildCommitmentTimeline } from "./domain/futureMoney/commitmentTimeline";
+import { getAvailableCash } from "./domain/accounts/availableCash";
+import { getEssentialMonthlyOutflow, getFinancialRunway, toMonthlyAmount } from "../domain/cashflow/runway";
 import { isWithinPaymentsHorizon, PAYMENTS_HORIZON_DAYS } from "./domain/futureMoney/horizon";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { projectMembershipsToCommitments as getMembershipFutureMoneyEvents, hasLiveMembershipRelationship } from "./domain/membership/futureMoney";
@@ -9888,9 +9890,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // a shared hook would be the right fix, not done here to keep this change scoped to Home.
     const homeMonthKey = todayStr().slice(0,7);
     const homeTodayDate = new Date(); homeTodayDate.setHours(0,0,0,0);
-    const homeOpeningBalance = accounts
-      .filter(a=>["bank","cash","upi"].includes(a.type) && !isInvestmentAccount(a))
-      .reduce((sum,a)=>sum+accountBalance(a.id), 0);
+    const homeOpeningBalance = getAvailableCash({ accounts, txns, checkpoints:balanceCheckpoints, isDateInRange, isInvestmentAccount }); // same Available Cash as Outlook
     // Repointed to getCommitments() (Commitment Read Model, Phase 5) — replaces the old
     // homeSipsAsBills/homeCcStatementsAsBills/homeBillsForForecast/homeGetMyBillShare block.
     // Also fixes, as a side effect, the previously-confirmed drift where Home's synthetic
@@ -12956,9 +12956,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // O014 Cash Forecast — real, using the Forecast Engine functions. openingBalance = liquid
     // accounts only (bank/cash/upi), excluding investments and credit cards, per Balance Engine's
     // ownership of the actual balance figure.
-    const openingBalance = accounts
-      .filter(a=>["bank","cash","upi"].includes(a.type) && !isInvestmentAccount(a))
-      .reduce((sum,a)=>sum+accountBalance(a.id), 0);
+    // Available Cash: confirmed bank checkpoint + later movements (domain/accounts/availableCash.js); expected income is never included.
+    const openingBalance = getAvailableCash({ accounts, txns, checkpoints:balanceCheckpoints, isDateInRange, isInvestmentAccount });
     const monthKey = todayStr().slice(0,7);
 
     // SIPs are tracked via a genuinely separate entity (recurringSchedules), not Bill.type="sip" —
@@ -13028,12 +13027,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // didn't exist yet when this formula was first written (see the stale "Debt Service is
     // honestly empty" comment this WP also removes below) and was never revisited once the debt
     // adapter shipped.
-    const moneyRequired = getMoneyRequiredForPeriod({ futureMoney }); // same calculation as Home's Money Required
+    // Forecast period = overdue + due in the next 30 days: the same figure and period as Home's Money Required.
+    const OUTLOOK_PERIOD_DAYS = 30;
+    const moneyRequired = getMoneyRequiredForPeriod({ futureMoney, today:todayStr(), horizonDays:OUTLOOK_PERIOD_DAYS });
     const debtServiceTotal = moneyRequired.debtServiceTotal;
     const cashRequired = moneyRequired.total;
     const cashAvailable = openingBalance;
     // One dated list of every open commitment (overdue first) with the balance after each; its last balance = Buffer.
-    const commitmentTimeline = buildCommitmentTimeline({ futureMoney, openingBalance:cashAvailable, today:todayStr() });
+    const commitmentTimeline = buildCommitmentTimeline({ futureMoney, openingBalance:cashAvailable, today:todayStr(), horizonDays:OUTLOOK_PERIOD_DAYS });
+    // Financial Runway: how long Available Cash lasts on essential outflows if expected income stops (domain/cashflow/runway.js).
+    const essentialOutflow = getEssentialMonthlyOutflow({ txns, cats, loans, mandatoryCommitments:mandatoryCommitments.filter(isHouseholdScopedCommitment).filter(c=>!(c.skippedMonths||[]).includes(monthKey)), monthKey });
+    const runwayIncomeStops = getFinancialRunway({ availableCash:cashAvailable, essentialMonthly:essentialOutflow.total });
+    const expectedMonthlyIncome = (expectedIncome||[]).reduce((sum,e2)=>sum+toMonthlyAmount(e2.amount,e2.frequency),0);
+    const runwayIncomeContinues = expectedMonthlyIncome>0 ? getFinancialRunway({ availableCash:cashAvailable, essentialMonthly:essentialOutflow.total, expectedMonthlyIncome, incomeStops:false }) : null;
+    const runwayText = r => r.status==="limited" ? (r.months<1?`${r.days} days`:`${r.months} months`) : r.status==="sustained" ? "Covered" : r.status==="none" ? "No cash" : "—";
     const buffer = cashAvailable - cashRequired;
     const bufferPerDay = daysLeftInMonth>0 ? buffer/daysLeftInMonth : buffer;
     const negativeCheck = hasTransientNegativeBalance(timeline);
@@ -13221,11 +13228,29 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           )}
         </div>
 
+        {hasEnoughData&&(
+          <div style={{ marginTop:14,paddingTop:14,borderTop:`1px solid ${T.border}` }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8 }}>
+              <div>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>FINANCIAL RUNWAY</div>
+                <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>if income stops</div>
+              </div>
+              <div data-testid="runway-value" style={{ color:runwayIncomeStops.status==="none"?T.danger:T.text,fontSize:22,fontWeight:900,fontVariantNumeric:"tabular-nums" }}>{runwayText(runwayIncomeStops)}</div>
+            </div>
+            <div style={{ color:T.sub,fontSize:12,marginTop:6,lineHeight:1.45 }}>
+              {essentialOutflow.total>0
+                ? <>Available cash {sym}{fmt(cashAvailable)} ÷ essentials {sym}{fmt(essentialOutflow.total)} a month (living {sym}{fmt(essentialOutflow.livingCost)}{essentialOutflow.emi>0?` + EMIs ${sym}${fmt(essentialOutflow.emi)}`:""}).</>
+                : <>Mark essential categories in Settings › Categories, or reserve Mandatory Commitments in Budget, to see how long your cash lasts.</>}
+              {runwayIncomeContinues&&essentialOutflow.total>0&&<> With your expected income of {sym}{fmt(expectedMonthlyIncome)} a month: <b style={{ color:T.text }}>{runwayIncomeContinues.status==="sustained"?"covered":runwayText(runwayIncomeContinues)}</b>.</>}
+            </div>
+          </div>
+        )}
+
         {forecastStatus&&(
           <div style={{ display:"flex",alignItems:"center",gap:8,marginTop:14,paddingTop:14,borderTop:`1px solid ${T.border}` }}>
             <span style={{ fontSize:18 }}>{forecastStatus.icon}</span>
             <div>
-              <div style={{ color:statusColor,fontSize:12,fontWeight:800 }}>Open commitments {forecastStatus.level==="comfortable"?"are covered":"need attention"} · {forecastStatus.label}</div>
+              <div style={{ color:statusColor,fontSize:12,fontWeight:800 }}>Next {OUTLOOK_PERIOD_DAYS} days {forecastStatus.level==="comfortable"?"are covered":"need attention"} · {forecastStatus.label}</div>
               <div style={{ color:T.sub,fontSize:10,marginTop:1 }}>{forecastStatus.detail}</div>
             </div>
           </div>
@@ -13234,7 +13259,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {hasEnoughData&&(
           <>
             <div style={{ display:"flex",justifyContent:"space-between",marginTop:14,paddingTop:14,borderTop:`1px solid ${T.border}` }}>
-              <span style={{ color:T.sub,fontSize:11 }}>Needed · all open commitments</span>
+              <span style={{ color:T.sub,fontSize:11 }}>Needed · overdue + next {OUTLOOK_PERIOD_DAYS} days</span>
               <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(cashRequired)}</span>
             </div>
             {commitmentTimeline.overdueTotal>0&&(
@@ -13248,7 +13273,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(commitmentTimeline.upcomingTotal)}</span>
             </div>
             <div style={{ display:"flex",justifyContent:"space-between",marginTop:6 }}>
-              <span style={{ color:T.sub,fontSize:11 }}>Available</span>
+              <span style={{ color:T.sub,fontSize:11 }}>Available cash</span>
               <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(cashAvailable)}</span>
             </div>
             <div style={{ display:"flex",justifyContent:"space-between",marginTop:6,paddingTop:6,borderTop:`1px solid ${T.border}` }}>
@@ -13261,11 +13286,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ display:"flex",flexDirection:"column",gap:6,marginTop:14,paddingTop:14,borderTop:`1px solid ${T.border}` }}>
               <div style={{ display:"flex",justifyContent:"space-between" }}>
                 <span style={{ color:T.sub,fontSize:11 }}>Spending · bills, statements, fees</span>
-                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(unpaidSpending.reduce((s,c)=>s+c.amount,0))}</span>
+                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(moneyRequired.spendingTotal)}</span>
               </div>
               <div style={{ display:"flex",justifyContent:"space-between" }}>
                 <span style={{ color:T.sub,fontSize:11 }}>Saving · SIPs</span>
-                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(committedSaving.reduce((s,c)=>s+c.amount,0))}</span>
+                <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(moneyRequired.savingTotal)}</span>
               </div>
               <div style={{ display:"flex",justifyContent:"space-between" }}>
                 <span style={{ color:T.sub,fontSize:11 }}>Debt · EMIs</span>
@@ -13283,7 +13308,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           Replaces "Next 30 days" + "Forecast timeline" (same items twice, and the timeline left out EMIs and
           overdue items). Rows still open their real source. domain/futureMoney/commitmentTimeline.js. */}
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6 }}>
-        <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>OVERDUE + NEXT 30 DAYS · CASH LEFT AFTER EACH</span>
+        <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>OVERDUE + NEXT {OUTLOOK_PERIOD_DAYS} DAYS · CASH LEFT AFTER EACH</span>
         <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{commitmentTimeline.rows.length} item{commitmentTimeline.rows.length===1?"":"s"}</span>
       </div>
       {commitmentTimeline.rows.length===0 ? (
@@ -13296,7 +13321,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
           {commitmentTimeline.rows.map(r=><RhythmRow key={`${r.event.sourceType}:${r.event.sourceId}`} e={r.event} section="next30" showDate balanceAfter={r.balanceAfter} overdue={r.overdue}/>)}
           {commitmentTimeline.laterCount>0&&(
-            <div style={{ color:T.sub,fontSize:12,paddingTop:10 }}>Plus {sym}{fmt(commitmentTimeline.laterTotal)} in {commitmentTimeline.laterCount} later item{commitmentTimeline.laterCount===1?"":"s"} (below) → {commitmentTimeline.buffer<0?"short by":"buffer"} <span style={{ color:commitmentTimeline.buffer<0?T.danger:T.text,fontWeight:800 }}>{sym}{fmt(Math.abs(commitmentTimeline.buffer))}</span></div>
+            <div style={{ color:T.sub,fontSize:12,paddingTop:10 }}>Ends at {commitmentTimeline.buffer<0?"short by":"buffer"} <span style={{ color:commitmentTimeline.buffer<0?T.danger:T.text,fontWeight:800 }}>{sym}{fmt(Math.abs(commitmentTimeline.buffer))}</span>. Another {sym}{fmt(commitmentTimeline.laterTotal)} in {commitmentTimeline.laterCount} item{commitmentTimeline.laterCount===1?"":"s"} falls after {formatShortDate(toLocalDateStr(rhythm.next30CutoffDate))||"30 days"} (below) and is not in the Buffer.</div>
           )}
         </div>
       )}

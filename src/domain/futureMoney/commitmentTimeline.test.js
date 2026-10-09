@@ -31,7 +31,7 @@ test("the loan EMI is in the list, and the last balance equals the Buffer", () =
   assert.equal(t.rows[t.rows.length - 1].balanceAfter, t.buffer);
 });
 
-test("overdue + upcoming = Needed; paid items are never counted", () => {
+test("Needed = overdue + upcoming within the period; paid items are never counted", () => {
   const t = tl({});
   assert.equal(t.neededTotal, 135000);
   assert.equal(t.overdueTotal, 12000);
@@ -39,12 +39,14 @@ test("overdue + upcoming = Needed; paid items are never counted", () => {
   assert.equal(t.overdueTotal + t.upcomingTotal, t.neededTotal);
 });
 
-test("items beyond the horizon are summed as 'later', so available - shown - later = Buffer", () => {
-  const t = tl({ horizonDays: 15 }); // 1 Nov (23 days) and 22 Oct (13 days -> shown) ... 1 Nov is later
-  assert.equal(t.laterCount, 1);
-  assert.equal(t.laterTotal, 15000);
-  const shownTotal = t.rows.reduce((s, r) => s + r.amount, 0);
-  assert.equal(112000 - shownTotal - t.laterTotal, t.buffer);
+test("items beyond the period are reported as 'later' and are not in Needed or Buffer", () => {
+  const t = tl({ horizonDays: 10 }); // up to 19 Oct: 22 Oct and 1 Nov are outside
+  assert.equal(t.laterCount, 2);
+  assert.equal(t.laterTotal, 28000 + 15000);
+  assert.equal(t.neededTotal, 12000 + 45000 + 30000 + 5000);
+  assert.equal(t.buffer, 112000 - t.neededTotal);
+  assert.equal(t.rows[t.rows.length - 1].balanceAfter, t.buffer);
+  assert.equal(t.allOpenTotal, t.neededTotal + t.laterTotal);
 });
 
 test("undated commitments count as due now and sort right after overdue", () => {

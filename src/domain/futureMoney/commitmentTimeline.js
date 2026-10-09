@@ -6,8 +6,10 @@
 // balance agrees with the Buffer in the hero.
 //
 //   overdue  = dated before today. Overdue items are paid first in the running balance.
-//   shown    = overdue + due within `horizonDays` (undated items count as due now, same rule as horizon.js).
-//   later    = the rest of the open commitments, summed, so   available - shown - later = Buffer.
+//   period   = overdue + due within `horizonDays` (undated items count as due now, same rule as horizon.js).
+//              This is the forecast period: Needed = the period's total, Buffer = available - Needed, and the last
+//              balance in the list equals the Buffer. It is the same figure as Home's Money Required.
+//   later    = open commitments beyond the period. Not in Needed or Buffer; reported separately so nothing hides.
 
 import { getMoneyRequiredForPeriod } from "./moneyRequired.js";
 import { isWithinPaymentsHorizon } from "./horizon.js";
@@ -17,7 +19,7 @@ const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
 /**
  * @param {{futureMoney:Object, openingBalance:number, today:string, horizonDays?:number}} args
  * @returns {{rows:Array, laterCount:number, laterTotal:number, overdueTotal:number, upcomingTotal:number,
- *            neededTotal:number, buffer:number}}
+ *            neededTotal:number, buffer:number, allOpenTotal:number}}
  *   rows[] = { event, date, amount, overdue, balanceAfter }
  */
 export function buildCommitmentTimeline({ futureMoney, openingBalance, today, horizonDays = 30 }) {
@@ -36,14 +38,16 @@ export function buildCommitmentTimeline({ futureMoney, openingBalance, today, ho
     return { event, date: event.date || null, amount: r2(event.amount), overdue: isOverdue(event), balanceAfter: balance };
   });
   const overdueTotal = r2(overdue.reduce((s, e) => s + (Number(e.amount) || 0), 0));
+  const shownTotal = r2(rows.reduce((s, r) => s + r.amount, 0));
   const laterTotal = r2(later.reduce((s, e) => s + (Number(e.amount) || 0), 0));
   return {
     rows,
     laterCount: later.length,
     laterTotal,
     overdueTotal,
-    upcomingTotal: r2(open.total - overdueTotal),
-    neededTotal: open.total,
-    buffer: r2((Number(openingBalance) || 0) - open.total),
+    upcomingTotal: r2(shownTotal - overdueTotal),
+    neededTotal: shownTotal,
+    buffer: r2((Number(openingBalance) || 0) - shownTotal),
+    allOpenTotal: open.total,
   };
 }

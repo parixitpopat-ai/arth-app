@@ -57,3 +57,10 @@ test("Home's 30-day range: overdue and day 30 included, day 31 excluded, undated
   assert.equal(r.total, 100 + 200 + 800);
   assert.equal(getMoneyRequiredForPeriod({ futureMoney: f }).total, 100 + 200 + 400 + 800 + 1600); // broader (Outlook) period
 });
+
+test("a zero-amount entry (an empty card statement) is not a commitment and does not appear in the count", () => {
+  const f = { committedSpending: [ev("committedSpending", 0, "2026-10-05"), ev("committedSpending", 500, "2026-10-14")], committedSaving: [], debtService: [] };
+  const r = getMoneyRequiredForPeriod({ futureMoney: f });
+  assert.equal(r.count, 1);
+  assert.equal(r.total, 500);
+});
