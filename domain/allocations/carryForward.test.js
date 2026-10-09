@@ -95,3 +95,13 @@ test("every screen calling it with the same inputs gets the same budget", () => 
   const b = getEffectiveMonthlyBudget(oct({ carryForwardEnabled: true }));
   assert.deepEqual(a, b);
 });
+
+test("a budget override of zero is a valid zero (not 'unset')", () => {
+  const r = getEffectiveMonthlyBudget(oct({ monthOverrides: { "2026-10": 0 } }));
+  assert.equal(r.base, 0);
+  assert.equal(r.effective, 0);
+  // last month's zero override is a zero plan: 0 planned - 700 spent carries a negative, floored at this month's total
+  const c = getEffectiveMonthlyBudget(oct({ carryForwardEnabled: true, monthOverrides: { "2026-09": 0 } }));
+  assert.equal(c.prevPlanning, 0);
+  assert.equal(c.effective, 9300); // 10000 + (0 - 700)
+});

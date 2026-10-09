@@ -2926,7 +2926,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const realMonthTxns = txns.filter(t=>t.date&&t.date.startsWith(realMonth));
     const monthSpend = realMonthTxns.filter(t=>t.type==="expense").reduce((s,t)=>s+getMyExpenseAmount(t),0);
     const monthIncome = realMonthTxns.filter(t=>t.type==="income").reduce((s,t)=>s+Number(t.amount||0),0);
-    const monthBudget = monthOverrides[realMonth] || Math.round(Number(annualBudget||0)/12);
+    const monthBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, realMonth);
     setWealthSnapshots(prev=>{
       if(prev.some(s=>s.date===today)) return prev;
       const snapshot = {
@@ -15849,7 +15849,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:10 }}>Month by Month</div>
         {months.map(m=>{
           const mSpend = txns.filter(t=>t.type==="expense"&&t.date?.startsWith(m.key)).reduce((s,t)=>s+getNetExpenseAmount(t),0);
-          const mBudget = monthOverrides[m.key]||monthlySlice;
+          const mBudget = monthOverrides[m.key]??monthlySlice;
           const diff = mBudget - mSpend;
           const isOver = diff < 0;
           const pct = mBudget>0 ? Math.min(100,Math.round(mSpend/mBudget*100)) : (mSpend>0 ? 100 : 0);
@@ -17688,7 +17688,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             for(let i=5;i>=0;i--){
               const d = new Date(nowD.getFullYear(), nowD.getMonth()-i, 1);
               const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-              const mBudget = monthOverrides[key] || Math.round(Number(annualBudget||0)/12);
+              const mBudget = getHouseholdPlanningAllocation(annualBudget, monthOverrides, key);
               const mTxns = txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(key));
               const mSpend = mTxns.reduce((s,t)=>s+getMyExpenseAmount(t),0);
               const pct = mBudget>0 ? Math.min(100,Math.round(mSpend/mBudget*100)) : 0;
