@@ -108,7 +108,7 @@ import { getCommitments, isRechargeBiller } from "./domain/bills/commitments";
 import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
-import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope } from "../domain/allocations/adapter";
+import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, buildRefundTotalsByExpense, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope } from "../domain/allocations/adapter";
 // WP8 — the central Insights read model. Every Insights card on InsightsPage (and
 // BudgetInsights, which imports the spending/budgetPerformance pair directly) is required to
 // consume these, never compute independently — see domain/insights/*.js file headers.
@@ -1863,12 +1863,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const thisMonthTxns = useMemo(()=>txns.filter(t=>t.date&&t.date.startsWith(cm)),[txns,cm]);
   const expenses = useMemo(()=>thisMonthTxns.filter(t=>t.type==="expense"),[thisMonthTxns]);
   const refundTotalsByBill = useMemo(()=>computeRefundTotalsByBill(txns), [txns]);
-  const refundTotalsByExpense = useMemo(()=>txns.reduce((map,txn)=>{
-    if(txn.type!=="settlement_in" || !txn.againstTxnId) return map;
-    const key = String(txn.againstTxnId);
-    map[key] = (map[key]||0) + Number(txn.amount||0);
-    return map;
-  },{}),[txns]);
+  // One refund rule for spending: domain/allocations/adapter.js (refunds only; person/group repayments excluded).
+  const refundTotalsByExpense = useMemo(()=>buildRefundTotalsByExpense(txns),[txns]);
   const getNetExpenseAmount = useCallback(expense=>Math.max(0, Number(expense?.amount||0) - Number(refundTotalsByExpense[String(expense?.id)]||0)),[refundTotalsByExpense]);
   // Bug fix (Group A / Group B receivable mix-up): extracted to domain/group/receivable.js,
   // with a real regression test, so this is a thin wrapper now, not a second copy of the logic.
