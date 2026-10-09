@@ -63,6 +63,7 @@ import { allocateCcPaymentToEmiInstallments, mergeEmiSettlementInto } from "./do
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
 import { pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel, createRelationship, migrateBillerAccountAttributions, backfillBillerAccountAttributionFromRelationships, getRelationshipTarget } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
+import { getMoneyRequiredForPeriod, classifyCashBuffer } from "./domain/futureMoney/moneyRequired";
 import { isWithinPaymentsHorizon, PAYMENTS_HORIZON_DAYS } from "./domain/futureMoney/horizon";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { projectMembershipsToCommitments as getMembershipFutureMoneyEvents, hasLiveMembershipRelationship } from "./domain/membership/futureMoney";
@@ -9916,7 +9917,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Now reads the shared `futureMoney` projection computed once above, instead of calling
     // getCommitments() independently — fixes the exact duplication this comment used to flag.
     // School Fees now flows in automatically via composeFutureMoneyCommitments(); everything
-    // below (homeCashRequired, homeBuffer, homeStatus) is the unchanged, original formula.
+    // below (homeCashRequired, homeBuffer, homeStatus) now share Outlook's calculation (moneyRequired.js).
     const homeCommittedSpending = futureMoney.committedSpending;
     const homeCommittedSaving = futureMoney.committedSaving;
     const homeUnpaidSpending = homeCommittedSpending.filter(c=>c.status!=="paid");
@@ -9930,13 +9931,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // approved array-scope decision — this is the "Protected Money" concept, architecturally the
     // same shape as Outlook's "Next Month Cash Outflow" lens, just not month-scoped here (Home
     // shows the immediate/ongoing figure, not a next-month preview).
-    const homeCashRequired = homeUnpaidSpending.reduce((sum,c)=>sum+c.amount,0) + homeCommittedSaving.reduce((sum,c)=>sum+c.amount,0);
+    // One calculation shared with Outlook (domain/futureMoney/moneyRequired.js): unpaid spending + saving + loan EMIs.
+    const homeMoneyRequired = getMoneyRequiredForPeriod({ futureMoney });
+    const homeCashRequired = homeMoneyRequired.total;
     const homeBuffer = homeOpeningBalance - homeCashRequired;
-    const homeHasCommitmentData = (homeUnpaidSpending.length + homeCommittedSaving.length)>0 || (expectedIncome||[]).filter(e=>e.status!=="received").length>0;
+    const homeHasCommitmentData = homeMoneyRequired.count>0 || (expectedIncome||[]).filter(e=>e.status!=="received").length>0;
+    const homeBufferLevel = classifyCashBuffer({ available:homeOpeningBalance, required:homeCashRequired }).level;
     const homeStatus = !homeHasCommitmentData ? { icon:"⚪", label:"Needs Setup", color:T.sub }
-      : homeBuffer<0 ? { icon:"🔴", label:"At Risk", color:T.danger }
-      : homeBuffer<homeCashRequired*0.1 ? { icon:"🟠", label:"Tight", color:T.warn }
-      : homeBuffer<homeCashRequired*0.3 ? { icon:"🟡", label:"Watchful", color:T.gold||T.warn }
+      : homeBufferLevel==="risk" ? { icon:"🔴", label:"At Risk", color:T.danger }
+      : homeBufferLevel==="tight" ? { icon:"🟠", label:"Tight", color:T.warn }
+      : homeBufferLevel==="watchful" ? { icon:"🟡", label:"Watchful", color:T.gold||T.warn }
       : { icon:"🟢", label:"Comfortable", color:T.success };
 
     const ccList = accounts.filter(a=>a.type==="cc");
@@ -13009,8 +13013,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // didn't exist yet when this formula was first written (see the stale "Debt Service is
     // honestly empty" comment this WP also removes below) and was never revisited once the debt
     // adapter shipped.
-    const debtServiceTotal = futureMoney.debtService.reduce((sum,d)=>sum+Number(d.amount||0),0);
-    const cashRequired = unpaidSpending.reduce((sum,c)=>sum+c.amount,0) + committedSaving.reduce((sum,c)=>sum+c.amount,0) + debtServiceTotal;
+    const moneyRequired = getMoneyRequiredForPeriod({ futureMoney }); // same calculation as Home's Money Required
+    const debtServiceTotal = moneyRequired.debtServiceTotal;
+    const cashRequired = moneyRequired.total;
     const cashAvailable = openingBalance;
     const buffer = cashAvailable - cashRequired;
     const bufferPerDay = daysLeftInMonth>0 ? buffer/daysLeftInMonth : buffer;
@@ -13021,14 +13026,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // check), not the budget-based Safe to Spend — status answers "can I survive the month,"
     // not "am I within budget," which are the two different questions this whole redesign
     // exists to separate.
-    const unpaidBillCount = unpaidSpending.length + committedSaving.length + futureMoney.debtService.length;
+    const unpaidBillCount = moneyRequired.count;
+    const bufferLevel = classifyCashBuffer({ available:cashAvailable, required:cashRequired, forecastNegative:negativeCheck.negative }).level;
     const pendingIncomeCount = (expectedIncome||[]).filter(e=>e.status!=="received").length;
     const hasCommitmentData = unpaidBillCount>0 || pendingIncomeCount>0;
     const forecastStatus = !hasEnoughData ? null
       : !hasCommitmentData ? { level:"incomplete", icon:"⚪", label:"Needs Setup", detail:"No Bills or Scheduled Income recorded yet — add them to improve forecast accuracy." }
-      : negativeCheck.negative || buffer<0 ? { level:"risk", icon:"🔴", label:"At Risk", detail:"Forecast goes negative or a commitment can't be covered." }
-      : buffer<cashRequired*0.1 ? { level:"tight", icon:"🟠", label:"Tight", detail:"Buffer is small — one unexpected expense could create stress." }
-      : buffer<cashRequired*0.3 ? { level:"watchful", icon:"🟡", label:"Watchful", detail:"Commitments are covered, but margin is limited." }
+      : bufferLevel==="risk" ? { level:"risk", icon:"🔴", label:"At Risk", detail:"Forecast goes negative or a commitment can't be covered." }
+      : bufferLevel==="tight" ? { level:"tight", icon:"🟠", label:"Tight", detail:"Buffer is small — one unexpected expense could create stress." }
+      : bufferLevel==="watchful" ? { level:"watchful", icon:"🟡", label:"Watchful", detail:"Commitments are covered, but margin is limited." }
       : { level:"comfortable", icon:"🟢", label:"Comfortable", detail:"Your Bills, SIPs, EMIs and card statements are covered." };
     const statusColor = { incomplete:T.sub, risk:T.danger, tight:T.warn, watchful:T.gold||T.warn, comfortable:T.success }[forecastStatus?.level] || T.sub;
 
