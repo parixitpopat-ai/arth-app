@@ -64,6 +64,7 @@ import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
 import { pauseRelationship, resumeRelationship, endRelationship, isDateActiveMembershipCoverage, migrateMembershipRelationships, correctSelfSentinel, createRelationship, migrateBillerAccountAttributions, backfillBillerAccountAttributionFromRelationships, getRelationshipTarget } from "./domain/membership/relationship";
 import { composeFutureMoneyCommitments } from "./domain/futureMoney/compose";
 import { getMoneyRequiredForPeriod, classifyCashBuffer } from "./domain/futureMoney/moneyRequired";
+import { buildCommitmentTimeline } from "./domain/futureMoney/commitmentTimeline";
 import { isWithinPaymentsHorizon, PAYMENTS_HORIZON_DAYS } from "./domain/futureMoney/horizon";
 import { projectFeePeriodsToCommitments as getSchoolFeeCommitments } from "./domain/schoolFees/futureMoney";
 import { projectMembershipsToCommitments as getMembershipFutureMoneyEvents, hasLiveMembershipRelationship } from "./domain/membership/futureMoney";
@@ -13031,6 +13032,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const debtServiceTotal = moneyRequired.debtServiceTotal;
     const cashRequired = moneyRequired.total;
     const cashAvailable = openingBalance;
+    // One dated list of every open commitment (overdue first) with the balance after each; its last balance = Buffer.
+    const commitmentTimeline = buildCommitmentTimeline({ futureMoney, openingBalance:cashAvailable, today:todayStr() });
     const buffer = cashAvailable - cashRequired;
     const bufferPerDay = daysLeftInMonth>0 ? buffer/daysLeftInMonth : buffer;
     const negativeCheck = hasTransientNegativeBalance(timeline);
@@ -13161,12 +13164,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // "One row, seven source types" rule. `section` decides only the date badge and the
     // solid-vs-dashed amount (isEstimatedOccurrence); everything else about the row already
     // comes from the composed event itself.
-    const RhythmRow = ({ e, section, showDate }) => {
+    const RhythmRow = ({ e, section, showDate, balanceAfter=null, overdue=false }) => {
       const statusKey = getDisplayStatus(e.sourceType);
       const dashed = isEstimatedOccurrence(e.sourceType, section);
       return (
         <div onClick={()=>openCommitmentRow(e)} style={{ display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer" }}>
-          {showDate&&(
+          {showDate&&e.date&&(
             <div style={{ width:34,textAlign:"center",flexShrink:0 }}>
               <div style={{ color:T.sub,fontSize:8.5,fontWeight:800,letterSpacing:0.3 }}>{new Date(e.date).toLocaleString("en-IN",{month:"short"}).toUpperCase()}</div>
               <div style={{ color:T.text,fontSize:13,fontWeight:900 }}>{new Date(e.date).getDate()}</div>
@@ -13175,11 +13178,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <span style={{ color:T.sub,flexShrink:0 }}>{rowIcon(e.sourceType)}</span>
           <div style={{ flex:1,minWidth:0 }}>
             <div style={{ color:T.text,fontSize:12.5,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{e.name}</div>
-            <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>{getSourceTypeLabel(e.sourceType)}{e.recurs&&section!=="next30"?" · last amount":""}</div>
+            <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>{getSourceTypeLabel(e.sourceType)}{e.recurs?(section!=="next30"?" · last amount":" · every month"):""}</div>
           </div>
           <div style={{ textAlign:"right",flexShrink:0 }}>
             <div style={{ color:T.text,fontSize:12.5,fontWeight:800,fontFamily:FONT.mono }}>{dashed?"~":""}{sym}{fmt(e.amount)}</div>
-            <div style={{ marginTop:2 }}><span style={statusStyle(statusKey,T)}>{STATUS[statusKey]?.label||""}</span></div>
+            <div style={{ marginTop:2 }}>{overdue?<span style={{ color:T.danger,fontSize:11,fontWeight:800 }}>Overdue</span>:<span style={statusStyle(statusKey,T)}>{STATUS[statusKey]?.label||""}</span>}</div>
+            {balanceAfter!==null&&<div style={{ color:balanceAfter<0?T.danger:T.sub,fontSize:11,fontWeight:700,marginTop:3,fontVariantNumeric:"tabular-nums" }}>{balanceAfter<0?"−":""}{sym}{fmt(Math.abs(balanceAfter))} left</div>}
           </div>
         </div>
       );
@@ -13200,13 +13204,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           was (see cashRequired/cashAvailable/buffer above; only the label and layout changed). */}
       <div style={{ ...card,padding:20,marginBottom:12 }}>
         <div style={{ textAlign:"center" }}>
-          <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND · REST OF {todayDate.toLocaleString("en-IN",{month:"long"}).toUpperCase()}</div>
+          <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>BUFFER · CASH AFTER COMMITMENTS</div>
           {!hasEnoughData ? (
             <div style={{ color:T.sub,fontSize:13,padding:"14px 0" }}>Not enough data yet.</div>
+          ) : buffer<0 ? (
+            <>
+              <div style={{ color:T.danger,fontSize:14,fontWeight:800,marginTop:8 }}>Short by</div>
+              <div style={{ ...MONEY.hero,color:T.danger,margin:"2px 0 6px",fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(Math.abs(buffer))}</div>
+              <div style={{ color:T.sub,fontSize:12 }}>Open commitments are more than the cash available.</div>
+            </>
           ) : (
             <>
-              <div style={{ ...MONEY.hero,color:buffer>=0?T.text:T.danger,margin:"6px 0" }}>{sym}{fmt(buffer)}</div>
-              <div style={{ color:T.sub,fontSize:11 }}>About {sym}{fmt(Math.round(Math.abs(bufferPerDay)))} a day for {daysLeftInMonth} day{daysLeftInMonth===1?"":"s"}</div>
+              <div style={{ ...MONEY.hero,color:T.text,margin:"6px 0",fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(buffer)}</div>
+              <div style={{ color:T.sub,fontSize:12 }}>About {sym}{fmt(Math.round(bufferPerDay))} a day for {daysLeftInMonth} day{daysLeftInMonth===1?"":"s"}</div>
             </>
           )}
         </div>
@@ -13226,6 +13236,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ display:"flex",justifyContent:"space-between",marginTop:14,paddingTop:14,borderTop:`1px solid ${T.border}` }}>
               <span style={{ color:T.sub,fontSize:11 }}>Needed · all open commitments</span>
               <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(cashRequired)}</span>
+            </div>
+            {commitmentTimeline.overdueTotal>0&&(
+              <div style={{ display:"flex",justifyContent:"space-between",marginTop:4,paddingLeft:12 }}>
+                <span style={{ color:T.danger,fontSize:12,fontWeight:700 }}>● Overdue</span>
+                <span style={{ color:T.danger,fontSize:12,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(commitmentTimeline.overdueTotal)}</span>
+              </div>
+            )}
+            <div style={{ display:"flex",justifyContent:"space-between",marginTop:4,paddingLeft:12 }}>
+              <span style={{ color:T.sub,fontSize:12,fontWeight:700 }}>● Upcoming</span>
+              <span style={{ color:T.text,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(commitmentTimeline.upcomingTotal)}</span>
             </div>
             <div style={{ display:"flex",justifyContent:"space-between",marginTop:6 }}>
               <span style={{ color:T.sub,fontSize:11 }}>Available</span>
@@ -13259,44 +13279,27 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         )}
       </div>
 
-      {/* Next 30 days — WP10. The one composed future-money list's near-term slice, real dated
-          rows (date, name, type · biller, amount, status), each opening its real source. */}
+      {/* One dated list of every open commitment: overdue first, then by date, with the cash left after each.
+          Replaces "Next 30 days" + "Forecast timeline" (same items twice, and the timeline left out EMIs and
+          overdue items). Rows still open their real source. domain/futureMoney/commitmentTimeline.js. */}
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6 }}>
-        <span style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>NEXT 30 DAYS · TO {formatShortDate(toLocalDateStr(rhythm.next30CutoffDate))||""}</span>
-        <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>{rhythm.next30.length} item{rhythm.next30.length===1?"":"s"}</span>
+        <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>OVERDUE + NEXT 30 DAYS · CASH LEFT AFTER EACH</span>
+        <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{commitmentTimeline.rows.length} item{commitmentTimeline.rows.length===1?"":"s"}</span>
       </div>
-      {rhythm.next30.length===0 ? (
-        <div style={{ ...card,textAlign:"center",color:T.sub,fontSize:12,padding:20,marginBottom:12 }}>Nothing due in the next 30 days. Anything overdue or due sooner is in Payments.</div>
+      {commitmentTimeline.rows.length===0 ? (
+        <div style={{ ...card,textAlign:"center",color:T.sub,fontSize:12,padding:20,marginBottom:12 }}>Nothing overdue or due in the next 30 days.</div>
       ) : (
         <div style={{ ...card,marginBottom:12 }}>
-          {rhythm.next30.map(e=><RhythmRow key={`${e.sourceType}:${e.sourceId}`} e={e} section="next30" showDate/>)}
+          <div style={{ display:"flex",justifyContent:"space-between",padding:"2px 0 8px",borderBottom:`1px solid ${T.border}` }}>
+            <span style={{ color:T.sub,fontSize:12 }}>Available now</span>
+            <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(cashAvailable)}</span>
+          </div>
+          {commitmentTimeline.rows.map(r=><RhythmRow key={`${r.event.sourceType}:${r.event.sourceId}`} e={r.event} section="next30" showDate balanceAfter={r.balanceAfter} overdue={r.overdue}/>)}
+          {commitmentTimeline.laterCount>0&&(
+            <div style={{ color:T.sub,fontSize:12,paddingTop:10 }}>Plus {sym}{fmt(commitmentTimeline.laterTotal)} in {commitmentTimeline.laterCount} later item{commitmentTimeline.laterCount===1?"":"s"} (below) → {commitmentTimeline.buffer<0?"short by":"buffer"} <span style={{ color:commitmentTimeline.buffer<0?T.danger:T.text,fontWeight:800 }}>{sym}{fmt(Math.abs(commitmentTimeline.buffer))}</span></div>
+          )}
         </div>
       )}
-
-      {/* Forecast Status detail is folded into the hero card above now — Forecast Timeline
-          (day-by-day cash projection) stays a separate, deeper view. */}
-      <div style={{ ...card,marginBottom:12 }}>
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,marginBottom:10 }}>FORECAST TIMELINE — NEXT 30 DAYS</div>
-        {negativeCheck.negative&&(
-          <div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",marginBottom:10 }}>
-            <span style={{ color:T.danger,fontSize:11,fontWeight:700 }}>⚠ Balance dips to {sym}{fmt(negativeCheck.firstNegativeAmount)} on {formatShortDate(negativeCheck.firstNegativeDate)||negativeCheck.firstNegativeDate}, even though the month may end positive.</span>
-          </div>
-        )}
-        {timeline.length===0 ? (
-          <div style={{ color:T.sub,fontSize:11 }}>No upcoming Bills or Income tracked in this window yet.</div>
-        ) : timeline.slice(0,6).map((ev,i)=>(
-          <div key={i} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:i<Math.min(timeline.length,6)-1?`1px solid ${T.border}`:"none" }}>
-            <div>
-              <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{ev.label}</div>
-              <div style={{ color:T.sub,fontSize:9 }}>{formatShortDate(ev.date)||ev.date}</div>
-            </div>
-            <div style={{ textAlign:"right" }}>
-              <div style={{ color:ev.amount>=0?T.success:T.danger,fontSize:12,fontWeight:700 }}>{ev.amount>=0?"+":""}{sym}{fmt(ev.amount)}</div>
-              <div style={{ color:ev.runningBalance<0?T.danger:T.sub,fontSize:9 }}>{sym}{fmt(ev.runningBalance)}</div>
-            </div>
-          </div>
-        ))}
-      </div>
 
       {/* After 30 days — WP10. Rhythm first (Every month, shown once), then each future
           calendar month's total (baseline + that month's one-off events), matching the
@@ -13321,14 +13324,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ ...card,marginBottom:12 }}>
               <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6 }}>
                 <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>Every month</span>
-                <span style={{ color:T.sub,fontSize:10 }}>{filteredEveryMonthEvents.length} item{filteredEveryMonthEvents.length===1?"":"s"} · counted in each month below</span>
+                <span style={{ color:T.sub,fontSize:10 }}>{filteredEveryMonthEvents.length} item{filteredEveryMonthEvents.length===1?"":"s"} · repeats every month</span>
               </div>
               <div style={{ color:T.text,fontSize:15,fontWeight:900,fontFamily:FONT.mono,marginBottom:6 }}>{sym}{fmt(filteredEveryMonthTotal)}</div>
               {filteredEveryMonthEvents.map(e=><RhythmRow key={`${e.sourceType}:${e.sourceId}`} e={e} section="everyMonth" showDate={false}/>)}
             </div>
           )}
 
-          {filteredMonthBuckets.filter(b=>!b.hidden).map(b=>(
+          {filteredMonthBuckets.filter(b=>!b.hidden&&b.items.length>0).map(b=>(
             <div key={b.monthKey} style={{ ...card,marginBottom:12 }}>
               <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:b.items.length>0?6:0 }}>
                 <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{b.monthDate.toLocaleString("en-IN",{month:"long",year:b.monthDate.getFullYear()!==todayDate.getFullYear()?"numeric":undefined})}</span>
@@ -13339,12 +13342,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
           ))}
 
-          {filteredMonthBuckets.some(b=>b.hidden)&&!showAllMonths&&(
+          {filteredMonthBuckets.some(b=>b.hidden&&b.items.length>0)&&!showAllMonths&&(
             <button onClick={()=>setShowAllMonths(true)} style={{ ...card,width:"100%",textAlign:"center",cursor:"pointer",border:`1px solid ${T.border}`,marginBottom:12,color:T.accent,fontSize:12,fontWeight:700 }}>
-              Show {filteredMonthBuckets.find(b=>b.hidden)?.monthDate.toLocaleString("en-IN",{month:"long"})} – {filteredMonthBuckets[filteredMonthBuckets.length-1]?.monthDate.toLocaleString("en-IN",{month:"long",year:"numeric"})}
+              Show {filteredMonthBuckets.find(b=>b.hidden&&b.items.length>0)?.monthDate.toLocaleString("en-IN",{month:"long"})} – {filteredMonthBuckets[filteredMonthBuckets.length-1]?.monthDate.toLocaleString("en-IN",{month:"long",year:"numeric"})}
             </button>
           )}
-          {showAllMonths&&filteredMonthBuckets.filter(b=>b.hidden).map(b=>(
+          {showAllMonths&&filteredMonthBuckets.filter(b=>b.hidden&&b.items.length>0).map(b=>(
             <div key={b.monthKey} style={{ ...card,marginBottom:12 }}>
               <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:b.items.length>0?6:0 }}>
                 <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>{b.monthDate.toLocaleString("en-IN",{month:"long",year:"numeric"})}</span>
