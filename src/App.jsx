@@ -108,7 +108,7 @@ import { getCommitments, isRechargeBiller } from "./domain/bills/commitments";
 import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
-import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope } from "../domain/allocations/adapter";
+import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope } from "../domain/allocations/adapter";
 // WP8 — the central Insights read model. Every Insights card on InsightsPage (and
 // BudgetInsights, which imports the spending/budgetPerformance pair directly) is required to
 // consume these, never compute independently — see domain/insights/*.js file headers.
@@ -1873,39 +1873,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Bug fix (Group A / Group B receivable mix-up): extracted to domain/group/receivable.js,
   // with a real regression test, so this is a thin wrapper now, not a second copy of the logic.
   const getGroupCollectiveDue = useCallback(expense=>getGroupCollectiveDuePure(expense),[]);
-  const getMyExpenseAmount = useCallback(expense=>{
-    if(expense?.excludeFromSpend) return 0;
-    const netAmount = getNetExpenseAmount(expense);
-    if(!(netAmount>0)) return 0;
-
-    const trackingMode = expense?.trackingMode
-      || (Object.keys(expense?.people||{}).some(pid=>pid!=="__me__") ? "split" : (expense?.forPerson || expense?.groupId ? "tag" : "none"));
-    const meId = people.find(person=>person.isMe)?.id;
-    let attributedAway = 0;
-
-    Object.entries(expense?.people||{}).forEach(([pid,info])=>{
-      if(pid==="__me__") return;
-      const mode = info?.mode;
-      const part = Number(info?.amount||0);
-      if(!(part>0)) return;
-      if(mode==="owes") attributedAway += part;
-    });
-
-    const groupAllocations = Array.isArray(expense?.groupAllocations) ? expense.groupAllocations : [];
-    groupAllocations.forEach(groupPart=>{
-      const mode = groupPart?.mode;
-      const part = Number(groupPart?.amount||0);
-      if(!(part>0)) return;
-      if(mode==="owes") attributedAway += part;
-    });
-
-    if((trackingMode==="split" || trackingMode==="allocate") && groupAllocations.length===0){
-      const collectivePart = Number(expense?.groupCollectiveAmount||0);
-      if(collectivePart>0) attributedAway += collectivePart;
-    }
-
-    return Math.max(0, netAmount - attributedAway);
-  },[getNetExpenseAmount]);
+  // My share of one expense. The rule lives in domain/allocations/adapter.js (getMyExpenseShare), shared with
+  // getHouseholdAttributedTotal; this is the per-transaction entry point for the App's own spend figures.
+  const getMyExpenseAmount = useCallback(expense=>getMyExpenseShare(expense, refundTotalsByExpense),[refundTotalsByExpense]);
 
   // ── COMPUTED ───────────────────────────────────────────────────────────────
   const myActual = useMemo(()=>expenses.reduce((sum,expense)=>sum+getMyExpenseAmount(expense),0),[expenses,getMyExpenseAmount]);

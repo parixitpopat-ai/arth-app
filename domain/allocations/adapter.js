@@ -317,49 +317,64 @@ export function getHouseholdAttributedTotal({ periodTransactions, allTransaction
 
   return periodTransactions.reduce((sum, expense) => {
     if (expense.type !== "expense") return sum;
-    if (expense?.excludeFromSpend) return sum;
-
-    const netAmount = Math.max(
-      0,
-      Number(expense?.amount || 0) - Number(refundMap[String(expense?.id)] || 0)
-    );
-    if (!(netAmount > 0)) return sum;
-
-    // trackingMode inference - intentionally mirrors getMyExpenseAmount's
-    // (App.jsx ~L1245) specific fallback. See BUG-TRX-002 for the
-    // 3-way divergence this does NOT attempt to reconcile.
-    const trackingMode =
-      expense?.trackingMode ||
-      (Object.keys(expense?.people || {}).some((pid) => pid !== "__me__")
-        ? "split"
-        : expense?.forPerson || expense?.groupId
-        ? "tag"
-        : "none");
-
-    let attributedAway = 0;
-    Object.entries(expense?.people || {}).forEach(([pid, info]) => {
-      if (pid === "__me__") return;
-      const mode = info?.mode;
-      const part = Number(info?.amount || 0);
-      if (!(part > 0)) return;
-      if (mode === "owes") attributedAway += part;
-    });
-
-    const groupAllocations = Array.isArray(expense?.groupAllocations) ? expense.groupAllocations : [];
-    groupAllocations.forEach((groupPart) => {
-      const mode = groupPart?.mode;
-      const part = Number(groupPart?.amount || 0);
-      if (!(part > 0)) return;
-      if (mode === "owes") attributedAway += part;
-    });
-
-    if ((trackingMode === "split" || trackingMode === "allocate") && groupAllocations.length === 0) {
-      const collectivePart = Number(expense?.groupCollectiveAmount || 0);
-      if (collectivePart > 0) attributedAway += collectivePart;
-    }
-
-    return sum + Math.max(0, netAmount - attributedAway);
+    return sum + getMyExpenseShare(expense, refundMap);
   }, 0);
+}
+
+/**
+ * My share of ONE expense: amount less refunds, less what others owe me (people / group
+ * allocations / group collective), zero when excluded from spend. The single per-transaction rule
+ * behind both getHouseholdAttributedTotal and App.jsx's getMyExpenseAmount (which used to be a
+ * hand-copied duplicate; the two were proven equivalent before this was extracted).
+ * Does NOT check `type` - callers pass expenses.
+ *
+ * @param {Object} expense
+ * @param {Object} refundMap - from buildRefundTotalsByExpense
+ * @returns {number}
+ */
+export function getMyExpenseShare(expense, refundMap) {
+  if (expense?.excludeFromSpend) return 0;
+
+  const netAmount = Math.max(
+    0,
+    Number(expense?.amount || 0) - Number((refundMap || {})[String(expense?.id)] || 0)
+  );
+  if (!(netAmount > 0)) return 0;
+
+  // trackingMode inference - intentionally mirrors getMyExpenseAmount's
+  // (App.jsx ~L1245) specific fallback. See BUG-TRX-002 for the
+  // 3-way divergence this does NOT attempt to reconcile.
+  const trackingMode =
+    expense?.trackingMode ||
+    (Object.keys(expense?.people || {}).some((pid) => pid !== "__me__")
+      ? "split"
+      : expense?.forPerson || expense?.groupId
+      ? "tag"
+      : "none");
+
+  let attributedAway = 0;
+  Object.entries(expense?.people || {}).forEach(([pid, info]) => {
+    if (pid === "__me__") return;
+    const mode = info?.mode;
+    const part = Number(info?.amount || 0);
+    if (!(part > 0)) return;
+    if (mode === "owes") attributedAway += part;
+  });
+
+  const groupAllocations = Array.isArray(expense?.groupAllocations) ? expense.groupAllocations : [];
+  groupAllocations.forEach((groupPart) => {
+    const mode = groupPart?.mode;
+    const part = Number(groupPart?.amount || 0);
+    if (!(part > 0)) return;
+    if (mode === "owes") attributedAway += part;
+  });
+
+  if ((trackingMode === "split" || trackingMode === "allocate") && groupAllocations.length === 0) {
+    const collectivePart = Number(expense?.groupCollectiveAmount || 0);
+    if (collectivePart > 0) attributedAway += collectivePart;
+  }
+
+  return Math.max(0, netAmount - attributedAway);
 }
 /**
  * WP-4 Home — Budget carry-forward resolution.
