@@ -13202,7 +13202,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <span style={{ color:T.sub,flexShrink:0 }}>{rowIcon(e.sourceType)}</span>
           <div style={{ flex:1,minWidth:0 }}>
             <div style={{ color:T.text,fontSize:12.5,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{e.name}</div>
-            <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>{getSourceTypeLabel(e.sourceType)}{e.recurs?(section!=="next30"?" · last amount":" · every month"):""}</div>
+            <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>{getSourceTypeLabel(e.sourceType)}{e.recurs?(section!=="next30"?" · last amount":(Number(e.cycleMonths)>1?` · every ${e.cycleMonths} months`:" · every month")):""}</div>
           </div>
           <div style={{ textAlign:"right",flexShrink:0 }}>
             <div style={{ color:T.text,fontSize:12.5,fontWeight:800,fontFamily:FONT.mono }}>{dashed?"~":""}{sym}{fmt(e.amount)}</div>

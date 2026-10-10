@@ -22,6 +22,9 @@
 const MONTHLY_RHYTHM_SOURCE_TYPES = ["bill", "ccStatement", "recurringSchedule", "debt", "membership"];
 
 export function isMonthlyRhythm(event) {
+  // A membership paid every 3, 6 or 12 months (cycleMonths > 1) is not monthly: it is one dated event in the month
+  // it falls due, never counted in Every month. Unknown cycle (null) keeps the old monthly assumption.
+  if (event?.sourceType === "membership" && Number(event.cycleMonths) > 1) return false;
   return Boolean(event?.recurs) && MONTHLY_RHYTHM_SOURCE_TYPES.includes(event?.sourceType);
 }
 
