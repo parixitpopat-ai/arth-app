@@ -138,6 +138,7 @@ import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVer
 import { generateDueStatements, isEmptyStatementBill, getPendingStatementChecks } from "./domain/cards/statementBills";
 import { reconcileAutoEmiLoans } from "./domain/loans/autoEmiProgress";
 import { getPaybackTotalsByPerson, applyPaybacks, buildPaybackTxn } from "./domain/person/payback";
+import { getEmiInstalmentDates } from "./domain/loans/emiInstalments";
 import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
@@ -5123,17 +5124,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             if(emiSourceType==="cc" && tenureNum>0 && emiAmt>0){
               const ccAcc = getAcc(accId);
               const stmtDay = Number(ccAcc?.statementDate || dueDayNum || 15);
-              const purchaseDate = new Date((date || todayStr()) + "T00:00:00");
-              // dateAtDay clamps stmtDay into whichever month it lands in, instead of letting
-              // Date's day-overflow silently roll a 29th-31st statement day into a later month
-              // (e.g. a card statementDate of 31 landing in February would otherwise become
-              // March) — the same bug class found and fixed in domain/bills/periodCalculations.js
-              // and domain/obligations/expected.js during this session's date-logic audit.
-              let cursor = dateAtDay(purchaseDate.getFullYear(), purchaseDate.getMonth(), stmtDay);
-              // Compare by calendar day, not the raw Date objects — dateAtDay anchors at noon to
-              // dodge DST/midnight edge cases, so a same-day comparison against purchaseDate's
-              // midnight would wrongly read as "after" and skip the intended advance to next month.
-              if(toLocalDateStr(cursor) <= toLocalDateStr(purchaseDate)) cursor = dateAtDay(purchaseDate.getFullYear(), purchaseDate.getMonth()+1, stmtDay);
+              // One instalment on each statement day after the purchase (domain/loans/emiInstalments.js).
+              const instDates = getEmiInstalmentDates({ purchaseDate: date || todayStr(), statementDay: stmtDay, tenure: tenureNum });
               const instCatIds = catIds.length ? catIds : (catId ? [catId] : ["financial"]);
               for(let i=0; i<tenureNum; i++){
                 autoInstallments.push({
@@ -5141,7 +5133,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   type:"expense",
                   desc:`EMI ${i+1}/${tenureNum} – ${who.trim() || note.trim() || "EMI purchase"}`,
                   merchant:who.trim() || "EMI purchase",
-                  date:toLocalDateStr(cursor),
+                  date:instDates[i],
                   note:`CC EMI installment ${i+1} of ${tenureNum}`,
                   amount:emiAmt,
                   accId,
@@ -5155,7 +5147,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   trackingMode:"none",
                   people:{},
                 });
-                cursor = dateAtDay(cursor.getFullYear(), cursor.getMonth()+1, stmtDay);
               }
             }
 
