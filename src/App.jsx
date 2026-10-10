@@ -10066,7 +10066,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
                 <div role="img" aria-label={`Spent ${sym}${fmt(homeMonthSpend)} of ${sym}${fmt(homeMonthBudget)}${expected!=null?`. Expected by today ${sym}${fmt(expected)}.`:""}`} style={{ position:"relative",height:12,background:T.border,borderRadius:6,margin:"12px 0 4px" }}>
                   <div style={{ height:"100%",width:pct(homeMonthSpend),background:fill,borderRadius:6 }}/>
-                  {expected!=null&&<div style={{ position:"absolute",top:-3,bottom:-3,left:pct(expected),width:2,marginLeft:-1,background:T.text,borderRadius:1 }}/>}
+                  {expected!=null&&<div style={{ position:"absolute",top:-3,bottom:-3,left:pct(expected),width:2,marginLeft:-1,background:T.warn,borderRadius:1 }}/>}
                 </div>
                 <div style={{ display:"flex",justifyContent:"space-between",color:T.sub,fontSize:11,fontVariantNumeric:"tabular-nums" }}><span>{sym}0</span><span>{sym}{fmt(homeMonthBudget)}</span></div>
                 {expected!=null&&<div style={{ color:T.sub,fontSize:12,marginTop:6 }}>Expected by today <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmt(expected)}</span></div>}
@@ -15631,7 +15631,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       <div style={{ color:dashRemaining>=0?T.sub:T.danger,fontSize:14,fontWeight:600,marginBottom:10 }}>of {sym}{fmt(dashMonthly)} · {dashRemaining>=0?`${sym}${fmt(dashRemaining)} left`:`${sym}${fmt(Math.abs(dashRemaining))} over`} · {dashLeftDays} day{dashLeftDays===1?"":"s"}</div>
                       <div role="img" aria-label={`Spent ${sym}${fmt(dashSpend)} of ${sym}${fmt(dashMonthly)}${expected!=null?`. Expected by today ${sym}${fmt(expected)}.`:""}`} style={{ position:"relative",height:12,background:T.border,borderRadius:6 }}>
                         <div style={{ height:"100%",width:pct(dashSpend),background:fill,borderRadius:6 }}/>
-                        {expected!=null&&<div style={{ position:"absolute",top:-3,bottom:-3,left:pct(expected),width:2,marginLeft:-1,background:T.text,borderRadius:1 }}/>}
+                        {expected!=null&&<div style={{ position:"absolute",top:-3,bottom:-3,left:pct(expected),width:2,marginLeft:-1,background:T.warn,borderRadius:1 }}/>}
                       </div>
                       <div style={{ display:"flex",justifyContent:"space-between",color:T.sub,fontSize:11,marginTop:4,fontVariantNumeric:"tabular-nums" }}><span>{sym}0</span><span>{sym}{fmt(dashMonthly)}</span></div>
                       <div style={{ color:T.sub,fontSize:12,marginTop:8 }}>{expected!=null?<>Expected by today <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmt(expected)}</span> · </>:null}{dashSafePerDay===null?"—":`about ${sym}${fmt(dashSafePerDay)} a day`}</div>

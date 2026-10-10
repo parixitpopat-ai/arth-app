@@ -83,9 +83,9 @@ export default function TransactionsCalendar({
             <button key={e.id} type="button" onClick={() => onEditEntry && onEditEntry(e.id)} style={{ width: "100%", minHeight: 52, display: "flex", alignItems: "center", gap: 12, border: "none", borderBottom: `1px solid ${T.border}`, background: "none", textAlign: "left", cursor: "pointer", fontFamily: "inherit", padding: 0, color: T.text }}>
               <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                 <span style={{ fontSize: 15, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.title}</span>
-                <span style={{ fontSize: 12, color: T.sub }}>{e.kindText}{e.kind === "spend" && e.share !== null && e.share !== e.gross ? ` · your share ${money(sym, e.share)}` : ""}</span>
+                <span style={{ fontSize: 12, color: T.sub }}>{e.kindText}{e.kind === "spend" && e.share !== null && e.share !== e.gross ? ` · of ${money(sym, e.gross)}` : ""}</span>
               </span>
-              <span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: e.kind === "income" ? T.success : T.text }}>{e.kind === "income" ? "+" : ""}{money(sym, e.gross)}</span>
+              <span style={{ fontSize: 15, fontWeight: 700, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: e.kind === "income" ? T.success : T.text }}>{e.kind === "income" ? "+" : ""}{money(sym, e.kind === "spend" && e.share !== null ? e.share : e.gross)}</span>
             </button>
           ))}
           {countedEntries.length === 0 && otherEntries.length === 0 && dues.length === 0 && <div style={{ padding: "10px 0", fontSize: 13, color: T.sub }}>Nothing recorded on this date.</div>}

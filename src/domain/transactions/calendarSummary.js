@@ -66,7 +66,7 @@ export function buildMonthCalendar({ txns, monthKey, today, dueItems = [] }) {
 
 /**
  * The entries of one date for the day sheet, newest recorded first. `share` is what the entry cost me
- * (expenses only); the sheet shows the full amount and "your share" when they differ.
+ * (expenses only); the sheet leads with the share and shows "of <full amount>" when they differ.
  */
 export function getDayEntries({ txns, date }) {
   const all = txns || [];
