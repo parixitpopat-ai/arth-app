@@ -39,3 +39,17 @@ test("only the latest-ending period across several payments decides the status",
   assert.equal(status.kind, "renewing");
   assert.equal(status.m.id, "current");
 });
+
+test("boundary: on the last covered day the membership is renewing with 0 days left, not overdue; overdue starts the next day", () => {
+  const rows = [{ m: { id: "m1" }, period: { from: "2026-09-16", to: "2026-12-15", graceDays: 0 } }];
+  assert.deepEqual(getMembershipRenewalStatus(rows, "2026-12-15", 7), { kind: "renewing", m: rows[0].m, days: 0 });
+  assert.deepEqual(getMembershipRenewalStatus(rows, "2026-12-16", 7), { kind: "overdue", m: rows[0].m, days: 1 });
+  assert.equal(getMembershipRenewalStatus(rows, "2026-12-07", 7), null);   // 8 days out: not yet
+  assert.equal(getMembershipRenewalStatus(rows, "2026-12-08", 7).days, 7); // 7 days out
+});
+
+test("boundary: grace days move the last covered day, and the Outlook/reminder date together", () => {
+  const rows = [{ m: { id: "m1" }, period: { from: "2026-06-01", to: "2026-08-31", graceDays: 15 } }];
+  assert.equal(getMembershipRenewalStatus(rows, "2026-09-15", 7).kind, "renewing");
+  assert.equal(getMembershipRenewalStatus(rows, "2026-09-16", 7).kind, "overdue");
+});

@@ -164,3 +164,15 @@ test("the membership event carries the cycle of its current period", () => {
   const monthly = mapMembershipToCommitment(ba, [{ id: "m1", billerAccountId: "ba1", amount: 2999 }], getCurrentPeriod({ m1: { from: "2026-10-01", to: "2026-10-31", graceDays: 0 } }));
   assert.equal(monthly.cycleMonths, 1);
 });
+
+// Date semantics audit: a period's `to` (+ grace) is its LAST COVERED day. The Outlook event, the Payments renewal
+// reminder and the "Days Left" count all use that same effective end, so the three agree; the next period starts the
+// following day. Pinned here so a one-day shift cannot creep in.
+test("the Outlook renewal date is the last covered day (period end + grace); the next period begins the day after", () => {
+  const ba = { id: "ba1", name: "Genesis", type: "Gym / Fitness" };
+  const mk = period => mapMembershipToCommitment(ba, [{ id: "m1", billerAccountId: "ba1", amount: 8499 }], getCurrentPeriod({ m1: period }));
+  assert.equal(mk({ from: "2026-09-16", to: "2026-12-15", graceDays: 0 }).date, "2026-12-15");
+  assert.equal(mk({ from: "2026-06-01", to: "2026-08-31", graceDays: 15 }).date, "2026-09-15"); // 31 Aug + 15d grace; next period starts 16 Sep
+  assert.equal(mk({ from: "2026-12-20", to: "2027-01-31", graceDays: 0 }).date, "2027-01-31"); // month and year boundary
+  assert.equal(mk({ from: "2027-01-30", to: "2027-03-01", graceDays: 0 }).date, "2027-03-01");
+});
