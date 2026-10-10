@@ -1,6 +1,6 @@
 # FIN-TRUTH-001 — Arth financial truth model (audit and proposal)
 
-Status: **proposal for review. No code changed by this document.**
+Status: **audit and proposal (sections 1–7, written before the work), reconciled with the merged code in section 8.** This document itself changes no code.
 Scope: cash balance, spending, card liability, net worth, bill outstanding, group spending, collective due, budget used, cash needed, carry-forward.
 Method: read the calculation behind every screen, then reproduce disagreements in a real browser with seeded data. Anything not reproduced is labelled "by code only".
 Anchors (existing decisions, preserved): ADR-017 (frozen transaction types; refunds and repayments are flags/relationships, not types), ADR-024 (Budget measures consumption; Protected Money measures cash required; never mixed), ADR-035 (Safe to Spend has one owner, not Home), ADR-036 (allocation engine), ADR-038 (bill paid/remaining derive from Contributions), ADR-018 (cards stay Accounts), BUD-001/002 (carry-forward stays Budget-owned; Home reflects it).
@@ -86,3 +86,39 @@ Locked: (1) a loan given is a receivable, not an expense; repayments reduce the 
 Built, each on its own branch: D1 `wp-d1-refund-rule`, D2 `wp-d2-funding-account`, D3 `wp-d3-money-required`, D4 `wp-d4-effective-budget` (stacked on `wp-d-carry-forward-attributed`).
 
 Loan audit (existing architecture): loan disbursal is a transfer out of the lending account with no destination (never an expense; `domain/loans/disbursal.js`); a repayment is a `settlement_in` with `linkedLoanId` and no `againstTxnId`, so it never reaches the spending refund map. Loans carry the statuses `written_off` and `converted_to_expense` and the UI labels them, **but nothing in the app sets them** and there is no Bad Debts category or recognition. Person-split write-off exists (`writtenOff`, `settled:true`) but only hides the receivable; it recognises no loss. Explicit loan write-off with Bad Debts and post-write-off recovery is therefore **not supported today and is a separate work package (WP-F)**, not part of D1-D4.
+
+## 8. Status reconciled with the merged code (`main` @ `9c143cc`)
+
+Verified by `git merge-base --is-ancestor`, by reading the code, and by the browser/test runs recorded in the work packages.
+
+| Item | Status on `main` | Evidence |
+|---|---|---|
+| **D1** friend repayment made spending fall twice | **Fixed, merged.** One refund rule: only `isRefund` (or a legacy settlement with no person/group) reduces an expense | `wp-d1-refund-rule`; `domain/allocations/refundRule.test.js` |
+| **D2** linked UPI/debit counted twice | **Fixed, merged.** Linked UPI/debit are payment rails with no balance; the funding bank is debited once | `wp-d2-funding-account`; `src/domain/accounts/accountBalance.js` |
+| **D3** Home and Outlook "Money required" differed | **Fixed, merged.** One function, `getMoneyRequiredForPeriod`, shared; includes loan EMIs; explicit period = overdue + next 30 days | `wp-d3-money-required`, `wp-fin-truth-followups` |
+| **D4** Home ignored carry-forward | **Fixed, merged.** `getEffectiveMonthlyBudget` used by Home, Budget and Insights; carry-forward stays off by default; a zero override is valid | `wp-d4-effective-budget`, `wp-d-carry-forward-attributed` |
+| **D5** `StatsPage` unreachable duplicate | **Still open.** `StatsPage` is still defined in `App.jsx` and never rendered. Cleanup, not done | `grep` finds the definition and no `<StatsPage` |
+| **R1** unbilled card spend in net worth | **Unchanged.** Net worth uses billed only (`cardOutstanding`); "In use" = billed + unbilled | `App.jsx` `creditCardLiabilityTotal` |
+| **R2** group "Spent" includes unpaid bills | **Unchanged**, undecided | – |
+| **R3** collective due vs partial payments/refunds | **Frozen.** Not changed | – |
+| **R4** cash: raw vs checkpoint | **Resolved: checkpoint.** Available Cash = the valid balance checkpoint plus later movements, shared by Home and Outlook. In one browser scenario Outlook "Available" equalled net worth "Bank and cash" | `src/domain/accounts/availableCash.js` |
+| **R5** loan disbursal label | Not changed (wording) | – |
+| **R6** Home "Next 30 days" vs everything unpaid | **Resolved.** Home states the range explicitly ("Overdue + due by <date>", 30 days) and uses the same figure as Outlook | `wp-fin-truth-followups` |
+| Reconciliation suite (§5 step 5) | **Built**, including a card-EMI scenario reconciling billed, unbilled, cash, obligations and Money Required | `src/domain/cards/cardEmiReconciliation.test.js` |
+| Loan given is not an expense (§7 lock 1) | **Built.** Disbursal is a destination-less transfer; repayments never reduce past spending | `wp-loan-not-expense`; `domain/loans/disbursal.js` |
+| **WP-F** explicit loan write-off with Bad Debts | **Not started.** `written_off` / `converted_to_expense` statuses exist and nothing sets them | – |
+
+### Later work that touches these measures (all merged)
+* Outlook hierarchy (locked): Buffer is the hero, Financial Runway alongside, Available Cash separate. Financial Runway counts
+  card-EMI instalments once (as the loan EMI), not also as living cost.
+* Card statements: no transactions, no bill; ₹0 statements are removed; billing-day check on Home.
+* EMI-purchase loans advance as their instalments are billed (outstanding, due date, closure).
+* Quarterly/half-yearly/yearly memberships are one dated Outlook item in the month they fall due, not counted monthly.
+
+### Open and documented elsewhere
+* What "To pay" means per statement state, and the gap for a bank figure against an Arth ₹0 statement: `FIN-TRUTH-002`.
+* Proposed definition of calendar-month card spending, and the `cc_emi`-not-in-Spent inconsistency: `FIN-TRUTH-003`.
+* EMI-purchase audit: instalments are attributed to their own months, never the purchase month; regression tests in
+  `src/domain/loans/emiInstalments.test.js`.
+
+Nothing in sections 1–7 is contradicted by the merged code, except that the four defects they describe have since been fixed.
