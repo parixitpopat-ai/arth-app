@@ -17,7 +17,8 @@
 //      Taking the larger, not the sum, stops a commitment such as "Rent" being counted on top of the rent that
 //      already shows up in (a).
 //   + EMIs      = the monthly instalment of every active loan taken. Loan EMI payments recorded as expenses
-//                 (linkedLoanId) are removed from (a) so an EMI is counted once, here.
+//                 (linkedLoanId), card-EMI instalments created with a purchase (isAutoEmiInstallment) and logged card
+//                 EMI instalments (cc_emi) are removed from (a) so an EMI is counted once, here.
 // Not essential: investments/SIPs (cash outflows in the Buffer, but stoppable), transfers, loans given.
 
 import { getCategoryAttributedTotal, getMandatoryCommitmentsTotal } from "../allocations/adapter.js";
@@ -45,7 +46,7 @@ export function getEssentialMonthlyOutflow({ txns, cats, loans, mandatoryCommitm
   const all = txns || [];
   const essentialCats = (cats || []).filter(c => c.fixed === true);
   const keys = previousMonthKeys(monthKey, months).filter(k => all.some(t => String(t.date || "").startsWith(k + "-")));
-  const spendOnly = all.filter(t => !t.linkedLoanId && !t.isLoanDisbursal);
+  const spendOnly = all.filter(t => !t.linkedLoanId && !t.isLoanDisbursal && !t.isAutoEmiInstallment && t.type !== "cc_emi");
   let sum = 0;
   for (const k of keys) {
     const monthTxns = spendOnly.filter(t => String(t.date || "").startsWith(k + "-"));
