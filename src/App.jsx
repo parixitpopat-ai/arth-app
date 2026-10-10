@@ -136,6 +136,7 @@ import { getFrequentVendors, getFrequentItemsForVendor, getVendorAggregate } fro
 import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVersion, migrateLegacyBillingHistory } from "./domain/cards/billingConfig";
 import { generateDueStatements } from "./domain/cards/statementBills";
+import { reconcileAutoEmiLoans } from "./domain/loans/autoEmiProgress";
 import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
 import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconciliation";
@@ -1096,6 +1097,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [vehicles, setVehicles] = useState(()=>JSON.parse(localStorage.getItem("arth_vehicles")||"[]"));
   const [events, setEvents] = useState(()=>JSON.parse(localStorage.getItem("arth_events")||"[]"));
   const [loans, setLoans] = useState(()=>normalizeLoans(JSON.parse(localStorage.getItem("arth_loans")||"[]")));
+
+  // Card-EMI purchase loans: as each pre-created instalment falls due it is billed to the card, so the loan's
+  // outstanding drops, its due date moves to the next instalment, and it closes after the last one
+  // (domain/loans/autoEmiProgress.js). Idempotent: returns the same array when nothing changed.
+  useEffect(()=>{
+    const next = reconcileAutoEmiLoans(loans, txns, todayStr());
+    if(next!==loans) setLoans(next);
+  },[loans, txns]);
   const [ccEmiPlans, setCcEmiPlans] = useState(()=>JSON.parse(localStorage.getItem("arth_cc_emi_plans")||"[]"));
   const currentFYStartYear = new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1;
   const [annualBudget, setAnnualBudget] = useState(()=>Number(localStorage.getItem("arth_annual_budget")||600000));
@@ -5172,7 +5181,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               note:[
                 note.trim(),
                 upfrontPaid>0 ? `Down payment ${sym}${fmt(upfrontPaid)} paid upfront.` : "",
-                `Balance ${sym}${fmt(remainingBalance)} moved to ${emiSourceType.replace(/_/g," ")} EMI.`
+                `Balance ${sym}${fmt(remainingBalance)} moved to ${({ bank:"a bank loan", cc:"a credit card EMI", store:"a store EMI", person:"a loan from a person", other:"an EMI plan" })[emiSourceType]||"an EMI plan"}.`
               ].filter(Boolean).join(" · "),
               repayments:[],
               status:"active",
