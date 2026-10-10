@@ -6,7 +6,11 @@
 // gymCheckIns[] records. Purpose (the user's own words): "help us determine how much did I spend
 // vs how many days I utilised, to get per day cost."
 
+import { getRelationshipStatusAsOfDate } from "./lifecycle.js";
+
 const GYM_TYPE = "Gym / Fitness";
+/** How far back a catch-up reaches. Older unanswered days are left unasked: nobody remembers them. */
+export const GYM_CATCH_UP_DAYS = 31;
 
 /**
  * The one active Gym/Fitness relationship still needing today's check-in, or null. Never asks
@@ -60,4 +64,54 @@ export function getCostPerVisit(checkIns, relationshipId, lifetimeSpend) {
   const visits = (checkIns || []).filter(c => c.relationshipId === relationshipId && c.attended).length;
   if (!visits) return null;
   return lifetimeSpend / visits;
+}
+
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const addDays = (dateStr, n) => { const d = new Date(`${dateStr}T12:00:00`); d.setDate(d.getDate() + n); return ymd(d); };
+
+/** The day a relationship started being asked about: its first "active" history entry, else the day it was created. */
+function relationshipStartDate(rel, today) {
+  const firstActive = (rel.statusHistory || []).filter(h => h.status === "active" && h.effectiveDate).map(h => h.effectiveDate).sort()[0];
+  if (firstActive) return firstActive;
+  if (rel.createdAt) { const d = new Date(Number(rel.createdAt)); if (!Number.isNaN(d.getTime())) return ymd(d); }
+  return today;
+}
+
+/**
+ * Every day the one active Gym relationship still owes an answer for, oldest first, today included.
+ * Open the app after 10 days and this returns 10 days, not just today, so Arth can ask "were you on a break?".
+ * Skips: days the user marked as a public holiday, days already answered, days before the relationship began,
+ * days it was paused or ended (traveling), and anything older than GYM_CATCH_UP_DAYS.
+ *
+ * @returns {{relationshipId:string, billerAccountId:string, billerName:string, days:string[]}|null}
+ */
+export function getPendingGymCatchUp({ relationships, billerAccounts, billers, checkIns, holidays, today }) {
+  const gymAccountIds = new Set((billerAccounts || []).filter(ba => ba.type === GYM_TYPE).map(ba => ba.id));
+  if (!gymAccountIds.size) return null;
+  const holidaySet = new Set(holidays || []);
+  const answered = new Set((checkIns || []).map(c => `${c.relationshipId}|${c.date}`));
+
+  for (const rel of relationships || []) {
+    if (!gymAccountIds.has(rel.billerAccountId) || rel.status !== "active") continue;
+    const earliest = addDays(today, -(GYM_CATCH_UP_DAYS - 1));
+    const start = relationshipStartDate(rel, today);
+    const from = start > earliest ? start : earliest;
+    const hasHistory = Array.isArray(rel.statusHistory) && rel.statusHistory.length > 0;
+    const days = [];
+    for (let d = from; d <= today; d = addDays(d, 1)) {
+      if (holidaySet.has(d) || answered.has(`${rel.id}|${d}`)) continue;
+      if (hasHistory && getRelationshipStatusAsOfDate(rel.statusHistory, d) !== "active") continue;
+      days.push(d);
+    }
+    if (!days.length) continue;
+    const ba = (billerAccounts || []).find(x => x.id === rel.billerAccountId);
+    const shell = ba?.billerId ? (billers || []).find(x => x.id === ba.billerId) : null;
+    return { relationshipId: rel.id, billerAccountId: rel.billerAccountId, billerName: shell?.name || ba?.name || "Gym", days };
+  }
+  return null;
+}
+
+/** One check-in record per day for a break: not attended, flagged so it is never mistaken for a skipped day. */
+export function recordGymBreak({ relationshipId, billerAccountId, days, genId }) {
+  return (days || []).map(date => ({ ...recordGymCheckIn({ relationshipId, billerAccountId, date, attended: false, genId }), onBreak: true }));
 }
