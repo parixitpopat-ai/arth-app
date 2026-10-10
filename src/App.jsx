@@ -11784,14 +11784,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const displayPaidByMe = groupViewMode==="overall" ? overallPaidByMe : groupPaidByMe;
       const displayMySpend  = groupViewMode==="overall" ? overallMySpend  : groupMySpend;
       // owe/owes-me are all-time outstanding balances, not month-filtered
-      const groupIOweBeforePaybacks = gTxns.reduce((sum,t)=>{
+      const groupIOwe = gTxns.reduce((sum,t)=>{
         const me=t.people?.__me__;
         if(!me||me.mode!=="owes"||me.settled) return sum;
         return sum + remainingShare(me);
       },0);
-      // Paybacks made from this group lower it (domain/person/payback.js); never below zero.
-      const groupPaidBack = txns.filter(t=>t.isPersonPayback && t.paidToGroupId===g.id).reduce((sum,t)=>sum+Number(t.amount||0),0);
-      const groupIOwe = Math.max(0, groupIOweBeforePaybacks - groupPaidBack);
+      // What I owe each member in this group (getGroupMemberIOwe, already net of paybacks made from the group). The
+      // tile shows the legacy figure above plus this, so it agrees with each member's own group balance; archive
+      // keeps using the legacy figure alone, as before.
       const groupMembersOwed = (g.members||[]).reduce((sum,id)=>sum+getGroupMemberIOwe(g.id,id),0);
       const groupOwesMe = total;
 
@@ -12007,7 +12007,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   </div>
                   <div style={{ background:T.input,borderRadius:10,padding:8,textAlign:"center" }}>
                     <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>YOU OWE</div>
-                    <div style={{ color:T.danger,fontSize:16,fontWeight:800 }}>{sym}{fmt(groupIOwe)}</div>
+                    <div data-testid="group-you-owe" style={{ color:T.danger,fontSize:16,fontWeight:800 }}>{sym}{fmt(groupIOwe+groupMembersOwed)}</div>
                   </div>
                   <div onClick={groupOwesMe>0?()=>setShowGroupOwesBreakdown(true):undefined} style={{ background:T.input,borderRadius:10,padding:8,textAlign:"center",cursor:groupOwesMe>0?"pointer":"default",position:"relative" }}>
                     <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>GROUP OWES{groupOwesMe>0&&<span style={{ marginLeft:4 }}>›</span>}</div>
