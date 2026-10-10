@@ -22,7 +22,7 @@ import { groupFutureMoneyByRhythm } from "./domain/futureMoney/rhythm";
 import { getSourceTypeLabel, getDisplayStatus, isEstimatedOccurrence } from "./domain/futureMoney/sourceTypeMeta";
 import { todayStr, toLocalDateStr, addDaysToDateStr, addMonthsClamped, dateAtDay, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
 import { getMembershipRenewalStatus } from "./domain/membership/renewalStatus";
-import { getPendingGymCheckIn, recordGymCheckIn } from "./domain/membership/checkIn";
+import { getPendingGymCatchUp, recordGymCheckIn, recordGymBreak } from "./domain/membership/checkIn";
 import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
 import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
 import { normalizeVendorText } from "./helpers/textHelpers";
@@ -10324,17 +10324,25 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               never asks twice in one day. Purely additive — records into its own gymCheckIns[],
               never touches memberships[]/bills[]/membershipRelationships. */}
           {(()=>{
-            const pending = getPendingGymCheckIn({ relationships:membershipRelationships, billerAccounts, billers, checkIns:gymCheckIns, holidays:arthHolidays, today:todayStr() });
+            const pending = getPendingGymCatchUp({ relationships:membershipRelationships, billerAccounts, billers, checkIns:gymCheckIns, holidays:arthHolidays, today:todayStr() });
             if(!pending) return null;
-            const answer = attended=>setGymCheckIns(prev=>[...prev, recordGymCheckIn({ relationshipId:pending.relationshipId, billerAccountId:pending.billerAccountId, date:todayStr(), attended, genId })]);
+            // Several unanswered days (opened the app after a gap): ask about the oldest first, and offer "on a break"
+            // for all of them at once. Answering removes the day, so the next render asks about the next one.
+            const day = pending.days[0];
+            const many = pending.days.length>1;
+            const dayLabel = day===todayStr() ? "today" : `on ${formatShortDate(day)||day}`;
+            const answer = attended=>setGymCheckIns(prev=>[...prev, recordGymCheckIn({ relationshipId:pending.relationshipId, billerAccountId:pending.billerAccountId, date:day, attended, genId })]);
+            const onBreak = ()=>setGymCheckIns(prev=>[...prev, ...recordGymBreak({ relationshipId:pending.relationshipId, billerAccountId:pending.billerAccountId, days:pending.days, genId })]);
             return (
-              <div style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:16,padding:14,marginBottom:12 }}>
-                <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:10 }}>🏋️ Did you go to {pending.billerName} today?</div>
+              <div data-testid="gym-checkin" style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:16,padding:14,marginBottom:12 }}>
+                {many&&<div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:4 }}>{pending.days.length} days at {pending.billerName} to check in</div>}
+                <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:10 }}>🏋️ Did you go to {pending.billerName} {dayLabel}?</div>
                 <div style={{ display:"flex",gap:8 }}>
                   <button onClick={()=>answer(true)} style={{ flex:1,background:T.success,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>✅ Went</button>
                   <button onClick={()=>answer(false)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>❌ Didn't go</button>
-                  <button onClick={()=>setArthHolidays(prev=>prev.includes(todayStr())?prev:[...prev,todayStr()])} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏖 Holiday</button>
+                  <button onClick={()=>setArthHolidays(prev=>prev.includes(day)?prev:[...prev,day])} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>🏖 Holiday</button>
                 </div>
+                {many&&<button data-testid="gym-break" onClick={onBreak} style={{ width:"100%",marginTop:8,background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>🧳 I was on a break — skip all {pending.days.length} days</button>}
               </div>
             );
           })()}
