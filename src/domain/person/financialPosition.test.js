@@ -239,3 +239,49 @@ test("reconciliation: breakdown's enumerated owesMe/iOwe sums exactly equal an i
   assert.equal(enumeratedOwesMe, 1825);
   assert.equal(enumeratedIOwe, 750);
 });
+
+// ---- paybacks: someone paid on my behalf, now I pay them back ----
+import { buildPaybackTxn, getPaybackTotalsByPerson, applyPaybacks } from "./payback.js";
+import { getGroupMemberIOwe } from "../group/balances.js";
+
+const iOweExpense = { id: "e1", type: "expense", amount: 1000, date: "2026-10-01", groupId: "g1", people: { p1: { mode: "owes_by_me", amount: 1000 } } };
+const payback = (id, amount, groupId = null, date = "2026-10-05") => buildPaybackTxn({ personId: "p1", personName: "Ravi", groupId, fromAccId: "b1", amount, date, id, now: Number(String(id).replace(/\D/g, "")) || 1 });
+const position = txns => {
+  const owed = txns.filter(t => t.type === "expense").reduce((s, t) => s + Number(t.people?.p1?.amount || 0), 0);
+  return applyPaybacks({ owesMe: 0, iOwe: owed }, getPaybackTotalsByPerson(txns).p1 || 0);
+};
+const enumerated = txns => { const b = getFinancialPositionBreakdown("p1", txns, [], "me"); return { iOwe: b.filter(i => i.mode === "iOwe").reduce((s, i) => s + i.amount, 0), owesMe: b.filter(i => i.mode === "owesMe").reduce((s, i) => s + i.amount, 0) }; };
+
+test("someone paid 1,000 for me: I owe 1,000; after paying back 400 I owe 600; the breakdown adds up to the same", () => {
+  const txns = [iOweExpense, payback("pb1", 400)];
+  assert.deepEqual([position(txns).iOwe, position(txns).owesMe], [600, 0]);
+  assert.deepEqual(enumerated(txns), { iOwe: 600, owesMe: 0 });
+});
+
+test("paying it all back clears it (balanced)", () => {
+  const txns = [iOweExpense, payback("pb1", 400), payback("pb2", 600, null, "2026-10-08")];
+  assert.deepEqual([position(txns).iOwe, position(txns).owesMe], [0, 0]);
+  assert.deepEqual(enumerated(txns), { iOwe: 0, owesMe: 0 });
+  assert.equal(getFinancialPositionLabel(position(txns)).state, "balanced");
+});
+
+test("overpaying: 1,500 against 1,000 owed leaves 500 that they owe me, in the totals and in the breakdown", () => {
+  const txns = [iOweExpense, payback("pb1", 1500)];
+  assert.deepEqual([position(txns).iOwe, position(txns).owesMe], [0, 500]);
+  assert.deepEqual(enumerated(txns), { iOwe: 0, owesMe: 500 });
+  const label = getFinancialPositionLabel(position(txns));
+  assert.deepEqual([label.state, label.amount], ["owed_to_me", 500]);
+});
+
+test("a payback with nothing owed is all excess: they owe me the full amount", () => {
+  const txns = [payback("pb1", 300)];
+  assert.deepEqual([position(txns).iOwe, position(txns).owesMe], [0, 300]);
+  assert.deepEqual(enumerated(txns), { iOwe: 0, owesMe: 300 });
+});
+
+test("group: a payback made from the group lowers that group's 'I owe' for that person; one made outside the group does not", () => {
+  assert.equal(getGroupMemberIOwe([iOweExpense], "g1", "p1"), 1000);
+  assert.equal(getGroupMemberIOwe([iOweExpense, payback("pb1", 400, "g1")], "g1", "p1"), 600);
+  assert.equal(getGroupMemberIOwe([iOweExpense, payback("pb1", 400, null)], "g1", "p1"), 1000);
+  assert.equal(getGroupMemberIOwe([iOweExpense, payback("pb1", 1500, "g1")], "g1", "p1"), 0); // floored at 0 inside the group
+});

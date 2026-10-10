@@ -125,7 +125,7 @@ export function describeOtherKind(t, personName = null) {
     if (t.linkedLoanId) return "Loan repayment received";
     return "Reimbursement";
   }
-  if (t.type === "transfer") return t.isLoanDisbursal ? "Loan given" : "Transfer between your accounts";
+  if (t.type === "transfer") return t.isLoanDisbursal ? "Loan given" : t.isPersonPayback ? "Paid back" : "Transfer between your accounts";
   if (t.type === "investment") return "Investment";
   if (t.type === "cc_payment") return "Credit card payment";
   if (t.type === "cc_emi") return "Card EMI";
