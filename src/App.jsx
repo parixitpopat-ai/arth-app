@@ -137,6 +137,7 @@ import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVersion, migrateLegacyBillingHistory } from "./domain/cards/billingConfig";
 import { generateDueStatements, isEmptyStatementBill, getPendingStatementChecks } from "./domain/cards/statementBills";
 import { reconcileAutoEmiLoans } from "./domain/loans/autoEmiProgress";
+import { getPaybackTotalsByPerson, applyPaybacks, buildPaybackTxn } from "./domain/person/payback";
 import { getEmiInstalmentDates } from "./domain/loans/emiInstalments";
 import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
@@ -1085,6 +1086,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [activeBillerShell, setActiveBillerShell] = useState(null);
   const [editingBillerShell, setEditingBillerShell] = useState(null);
   const [showAddYouOwe, setShowAddYouOwe] = useState(null); // holds personId when open
+  const [paybackTarget, setPaybackTarget] = useState(null); // { personId|null, groupId|null } when the Pay back sheet is open
   const [viewingMembership, setViewingMembership] = useState(null); // holds the membership record for the detail view
   const [showAddEvent, setShowAddEvent] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
@@ -2236,13 +2238,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       });
     });
 
-    const ids = new Set([...Object.keys(receivables), ...Object.keys(payables)]);
+    // Paybacks (domain/person/payback.js): what I have paid back lowers "I owe"; anything beyond what I owed becomes
+    // what they owe me.
+    const paidBack = getPaybackTotalsByPerson(txns);
+    const ids = new Set([...Object.keys(receivables), ...Object.keys(payables), ...Object.keys(paidBack)]);
     const map = {};
     ids.forEach(pid=>{
-      map[pid] = {
-        owesMe: Number(receivables[pid]||0),
-        iOwe: Math.max(0, Number(payables[pid]||0)),
-      };
+      const settled = applyPaybacks({ owesMe:Number(receivables[pid]||0), iOwe:Math.max(0, Number(payables[pid]||0)) }, paidBack[pid]||0);
+      map[pid] = { owesMe:settled.owesMe, iOwe:settled.iOwe };
     });
 
     return map;
@@ -11442,6 +11445,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             recentActivityFeed={recentActivityFeed}
             onSettle={handleSettle}
             onRequest={handleRequest}
+            onPayBack={person=>setPaybackTarget({ personId:person.id, groupId:null })}
             onArchivePerson={handleArchive}
             getPersonAttributedAmount={getPersonAttributedAmount}
             meId={people.find(x=>x.isMe)?.id}
@@ -11785,6 +11789,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         if(!me||me.mode!=="owes"||me.settled) return sum;
         return sum + remainingShare(me);
       },0);
+      // What I owe each member in this group (getGroupMemberIOwe, already net of paybacks made from the group). The
+      // tile shows the legacy figure above plus this, so it agrees with each member's own group balance; archive
+      // keeps using the legacy figure alone, as before.
+      const groupMembersOwed = (g.members||[]).reduce((sum,id)=>sum+getGroupMemberIOwe(g.id,id),0);
       const groupOwesMe = total;
 
       // getGroupMemberOwed is now defined at component top-level scope
@@ -11999,7 +12007,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   </div>
                   <div style={{ background:T.input,borderRadius:10,padding:8,textAlign:"center" }}>
                     <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>YOU OWE</div>
-                    <div style={{ color:T.danger,fontSize:16,fontWeight:800 }}>{sym}{fmt(groupIOwe)}</div>
+                    <div data-testid="group-you-owe" style={{ color:T.danger,fontSize:16,fontWeight:800 }}>{sym}{fmt(groupIOwe+groupMembersOwed)}</div>
                   </div>
                   <div onClick={groupOwesMe>0?()=>setShowGroupOwesBreakdown(true):undefined} style={{ background:T.input,borderRadius:10,padding:8,textAlign:"center",cursor:groupOwesMe>0?"pointer":"default",position:"relative" }}>
                     <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>GROUP OWES{groupOwesMe>0&&<span style={{ marginLeft:4 }}>›</span>}</div>
@@ -12086,6 +12094,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     </div>
                   );
                 })()}
+                {(groupIOwe>0||groupMembersOwed>0)&&(
+                  <button data-testid="group-payback" onClick={()=>setPaybackTarget({ personId:null, groupId:g.id })} style={{ ...btnP,marginTop:8,background:T.danger+"18",border:`1px solid ${T.danger}44`,color:T.danger,width:"100%" }}>Pay back someone in this group</button>
+                )}
                 {groupOwesMe>0&&(()=>{
                   const buildMsg=(upiHandle)=>{
                     const msgBills=bills.filter(b=>b.groupId===g.id&&b.status==="unpaid"&&((b.dueDate||b.billDate||"").startsWith(shareMonth)));
@@ -18355,6 +18366,74 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     );
   };
 
+  // -- PAY BACK -----------------------------------------------------------------
+  // Someone paid on my behalf and I now pay them back (domain/person/payback.js). Takes money out of the account I pick,
+  // lowers what I owe them, and is not spending. Paying more than I owe is allowed: the extra shows as what they owe me.
+  const PaybackModal = ({ personId:initialPersonId, groupId, onClose }) => {
+    const grp = groupId ? groups.find(g=>g.id===groupId) : null;
+    const candidates = grp ? (grp.members||[]).filter(id=>{ const pp=people.find(x=>x.id===id); return pp&&!pp.isMe; }) : [];
+    const [personId,setPersonId] = useState(initialPersonId || candidates.find(id=>getGroupMemberIOwe(groupId,id)>0) || candidates[0] || null);
+    const p = personId ? getPerson(personId) : null;
+    const fromAccounts = paidViaAccounts.filter(a=>a.type!=="cc" && !isInvestmentAccount(a));
+    const [accId,setAccId] = useState(fromAccounts[0]?.id || "");
+    const [date,setDate] = useState(todayStr());
+    const [note,setNote] = useState("");
+    const owed = !personId ? 0 : (groupId ? getGroupMemberIOwe(groupId,personId) : Number(settlements[personId]?.iOwe||0));
+    const [amount,setAmount] = useState(owed>0 ? String(owed) : "");
+    useEffect(()=>{ setAmount(owed>0 ? String(owed) : ""); },[personId]);
+    const amt = parseFloat(amount)||0;
+    const excess = amt>owed ? Math.round((amt-owed)*100)/100 : 0;
+    const canSave = !!personId && !!accId && amt>0;
+    const save = () => {
+      if(!canSave) return;
+      setTxns(prev=>[buildPaybackTxn({ personId, personName:p?.name, groupId:groupId||null, fromAccId:accId, amount:amt, date:date||todayStr(), note, id:genId() }), ...prev]);
+      setToast({ message:`${sym}${fmt(amt)} paid back to ${p?.name||"them"}`, icon:"✓" });
+      onClose();
+    };
+    return (
+      <div data-testid="payback-modal" onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:320,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
+        <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+            <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Pay back {p?.name||""}{grp?` · ${grp.name}`:""}</div>
+            <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          </div>
+          <div style={{ color:T.sub,fontSize:11,marginBottom:14 }}>They paid for you and you are paying it back. This takes money out of the account you pick and lowers what you owe. It is not counted as spending again.</div>
+          <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            {grp&&candidates.length>0&&(
+              <div>
+                <span style={lbl}>Pay back to</span>
+                <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                  {candidates.map(id=>{ const pp=getPerson(id); return <Chip key={id} color={T.accent} active={personId===id} onClick={()=>setPersonId(id)}>{pp.name}</Chip>; })}
+                </div>
+              </div>
+            )}
+            <div style={{ color:T.sub,fontSize:12 }}>You owe {p?.name||"them"}{grp?" in this group":""}: <b style={{ color:T.danger }}>{sym}{fmt(owed)}</b></div>
+            <div>
+              <span style={lbl}>Amount *</span>
+              <input data-testid="payback-amount" style={{ ...inp,fontSize:16,fontWeight:700 }} type="number" min="0" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)} autoFocus/>
+              {excess>0&&<div data-testid="payback-excess" style={{ color:T.warn,fontSize:11,marginTop:4 }}>{sym}{fmt(excess)} is more than you owe. The extra will show as {p?.name||"they"} owing you {sym}{fmt(excess)}.</div>}
+            </div>
+            <div>
+              <span style={lbl}>Paid from</span>
+              <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                {fromAccounts.map(a=><Chip key={a.id} color={a.color||T.accent} active={accId===a.id} onClick={()=>setAccId(a.id)}>{a.name}</Chip>)}
+              </div>
+            </div>
+            <div>
+              <span style={lbl}>Date</span>
+              <input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/>
+            </div>
+            <div>
+              <span style={lbl}>Note (optional)</span>
+              <input style={inp} placeholder="e.g. Dinner on 5 Oct" value={note} onChange={e=>setNote(e.target.value)}/>
+            </div>
+            <button data-testid="payback-save" onClick={save} disabled={!canSave} style={{ background:canSave?T.danger:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Pay back {amt>0?`${sym}${fmt(amt)}`:""}</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // -- ATTACH PAST EXPENSES MODAL ---------------------------------------------
   const AttachExpensesModal = ({ ba, onClose }) => {
     const [search, setSearch] = useState("");
@@ -20104,6 +20183,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {editingBillerAccount&&<BillerAccountModal existing={editingBillerAccount} onClose={()=>setEditingBillerAccount(null)}/>}
         {attachExpensesFor&&<AttachExpensesModal ba={attachExpensesFor} onClose={()=>setAttachExpensesFor(null)}/>}
         {showAddYouOwe&&<AddYouOweModal personId={showAddYouOwe} onClose={()=>setShowAddYouOwe(null)}/>}
+        {paybackTarget&&<PaybackModal personId={paybackTarget.personId} groupId={paybackTarget.groupId} onClose={()=>setPaybackTarget(null)}/>}
         {viewingMembership&&<MembershipDetailModal membership={viewingMembership} onClose={()=>setViewingMembership(null)} onViewTransaction={(txnId)=>{ setViewingMembership(null); setTxnDetailId(txnId); }}/>}
         {showAddEvent&&<AddEventModal existing={editingEvent} onClose={()=>{ setShowAddEvent(false); setEditingEvent(null); }} T={T} inp={inp} lbl={lbl} people={people} setEvents={setEvents} EVENT_TYPES={EVENT_TYPES}/>}
         {showEventsList&&<EventsListModal onClose={()=>setShowEventsList(false)} T={T} sym={sym} fmt={fmt} events={events} txns={txns} formatShortDate={formatShortDate} setViewingEvent={setViewingEvent} setEditingEvent={setEditingEvent} setShowAddEvent={setShowAddEvent} EVENT_TYPES={EVENT_TYPES}/>}

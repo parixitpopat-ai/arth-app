@@ -125,3 +125,9 @@ test("describing entries that are not spending or income", () => {
   assert.equal(describeOtherKind({ type: "investment" }), "Investment");
   assert.equal(describeOtherKind({ type: "cc_payment" }), "Credit card payment");
 });
+
+test("a payback to a person is listed as 'Paid back', not as a transfer between your accounts, and is not counted as spending", () => {
+  const t = { id: "pb", type: "transfer", amount: 400, date: "2026-10-05", fromAccId: "b1", toAccId: null, isPersonPayback: true, paidToPersonId: "p1" };
+  assert.equal(describeOtherKind(t), "Paid back");
+  assert.equal(describeOtherKind({ id: "t", type: "transfer", amount: 1, date: "2026-10-05", fromAccId: "b1", toAccId: "b2" }), "Transfer between your accounts");
+});

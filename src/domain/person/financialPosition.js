@@ -21,6 +21,7 @@
 
 import { getBillSplitSource } from "../bills/splitSource.js";
 import { remainingShare } from "../shared/remainingShare.js";
+import { getPaybacks } from "./payback.js";
 
 /**
  * @param {{owesMe:number, iOwe:number}} settlement - settlements[p.id],
@@ -136,6 +137,21 @@ export function getFinancialPositionBreakdown(personId, txns, bills, meId) {
       date: b.dueDate || null,
       transactionRef: null,
     });
+  }
+
+  // Paybacks (payback.js): each one lowers "I owe" by the part of it that was owed, oldest first; whatever is left over is
+  // an overpayment and is listed as owed to me, so the totals above still equal what the screen shows.
+  const paybacks = getPaybacks(txns, personId);
+  if (paybacks.length) {
+    let room = items.filter(i => i.mode === "iOwe").reduce((sum, i) => sum + i.amount, 0);
+    let excess = 0;
+    for (const pb of paybacks) {
+      const amount = Number(pb.amount || 0);
+      const applied = Math.min(room, amount);
+      room -= applied; excess += amount - applied;
+      if (applied > 0) items.push({ id: pb.id, kind: "txn", desc: pb.desc || "Paid back", amount: -applied, mode: "iOwe", date: pb.date || null, transactionRef: null });
+    }
+    if (excess > 0) items.push({ id: `payback_excess_${personId}`, kind: "txn", desc: "Paid back more than owed", amount: Math.round(excess * 100) / 100, mode: "owesMe", date: null, transactionRef: null });
   }
 
   return items.sort((a, b) => (b.date || "").localeCompare(a.date || ""));

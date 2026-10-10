@@ -39,6 +39,7 @@ export const txnLabel = txnOrType => {
   const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
   if(isRefund) return "Refund";
   if(typeof txnOrType === "object" && txnOrType?.isLoanDisbursal) return "Loan given";
+  if(typeof txnOrType === "object" && txnOrType?.isPersonPayback) return "Paid back";
   const hasSettlementLinks = typeof txnOrType === "object" && (txnOrType?.settlementLinks?.length||0)>0;
   if(type==="settlement_in") return hasSettlementLinks ? "Repayment" : "Reimbursement";
   return type==="income"?"Income":type==="transfer"?"Transfer":type==="cc_payment"?"CC Payment":type==="cc_emi"?"CC EMI":type==="settlement_out"?"Settlement Out":type==="investment"?"Investment":"Expense";
@@ -49,6 +50,7 @@ export const txnEmoji = txnOrType => {
   const isRefund = typeof txnOrType === "object" && txnOrType?.type === "settlement_in" && txnOrType?.isRefund;
   if(isRefund) return "↩️";
   if(typeof txnOrType === "object" && txnOrType?.isLoanDisbursal) return "🤝";
+  if(typeof txnOrType === "object" && txnOrType?.isPersonPayback) return "🤝";
   return type==="income"?"💚":type==="transfer"?"🔄":type==="cc_payment"?"💳":type==="cc_emi"?"💳":type==="settlement_in"?"💼":type==="settlement_out"?"📤":type==="investment"?"💹":"💸";
 };
 

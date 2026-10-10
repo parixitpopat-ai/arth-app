@@ -32,6 +32,7 @@
 // the unscoped total — never part of any single group's scoped figure.
 
 import { remainingShare } from "../shared/remainingShare.js";
+import { getPaybackTotal } from "../person/payback.js";
 
 /**
  * How much the Master User owes a specific person, within a specific
@@ -57,9 +58,12 @@ import { remainingShare } from "../shared/remainingShare.js";
  */
 export function getGroupMemberIOwe(txns, groupId, pid) {
   if (pid === "__me__") return 0;
-  return (txns || [])
+  const owed = (txns || [])
     .filter(t => t.groupId === groupId && t.type === "expense" && t.people && t.people[pid] && t.people[pid].mode === "owes_by_me")
     .reduce((sum, t) => sum + Number(t.people[pid].amount || 0), 0);
+  // Paybacks made from this group (domain/person/payback.js) lower it; never below zero here (an overpayment shows on
+  // the person's own balance as what they owe me).
+  return Math.max(0, owed - getPaybackTotal(txns, pid, { groupId }));
 }
 
 /**
