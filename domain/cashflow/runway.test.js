@@ -86,3 +86,16 @@ test("expected income converts to a monthly figure; one-offs are not recurring",
   assert.equal(toMonthlyAmount(1000, "weekly"), 4333.33);
   assert.equal(toMonthlyAmount(5000, "once"), 0);
 });
+
+test("card-EMI instalments (auto-created or logged) are counted once, as the loan EMI, not again as living cost", () => {
+  const loans = [{ direction: "taken", status: "active", outstanding: 60000, emiAmount: 10000 }];
+  const instalments = [
+    exp(30, 10000, "2026-08-15", "financial", { isAutoEmiInstallment: true }),
+    exp(31, 10000, "2026-09-15", "financial", { isAutoEmiInstallment: true }),
+    { id: 32, type: "cc_emi", amount: 10000, date: "2026-09-16", catId: "financial", catIds: ["financial"] },
+  ];
+  const e = getEssentialMonthlyOutflow({ txns: [...history, ...instalments], cats, loans, mandatoryCommitments: [], monthKey: "2026-10" });
+  assert.equal(e.essentialAverage, 22000); // unchanged by the instalments
+  assert.equal(e.emi, 10000);
+  assert.equal(e.total, 32000);
+});
