@@ -97,3 +97,20 @@ test("an event exactly at the 30-day cutoff month boundary is not silently dropp
   assert.equal(inNext30 || inAnyBucket, true, "must appear exactly once, somewhere");
   assert.equal(inNext30 && inAnyBucket, false, "must not appear in both");
 });
+
+test("a quarterly membership is not monthly: it is counted once in the month it falls due, never in Every month", () => {
+  const gym = { sourceType: "membership", sourceId: "g", name: "Parixit", amount: 8499, date: "2026-12-15", recurs: true, cycleMonths: 3 };
+  const other = { sourceType: "membership", sourceId: "n", name: "Nidhi Genesis", amount: 2999, date: "2026-10-30", recurs: true, cycleMonths: 1 };
+  const unknown = { sourceType: "membership", sourceId: "u", name: "Old", amount: 500, date: "2026-10-29", recurs: true, cycleMonths: null };
+  assert.equal(isMonthlyRhythm(gym), false);
+  assert.equal(isMonthlyRhythm(other), true);
+  assert.equal(isMonthlyRhythm(unknown), true); // cycle unknown: the previous monthly assumption stands
+  const g = groupFutureMoneyByRhythm({ committedSpending: [gym, other, unknown] }, "2026-10-10");
+  assert.equal(g.everyMonthTotal, 2999 + 500); // 8,499 is not in the monthly baseline
+  const dec = g.monthBuckets.find(b => b.monthKey === "2026-12");
+  assert.equal(dec.items.some(e => e.sourceId === "g"), true);
+  const jan = g.monthBuckets.find(b => b.monthKey === "2027-01"); // November is inside the next-30-days window
+  assert.equal(jan.items.some(e => e.sourceId === "g"), false);
+  assert.equal(dec.total, g.everyMonthTotal + 8499);
+  assert.equal(jan.total, g.everyMonthTotal);
+});

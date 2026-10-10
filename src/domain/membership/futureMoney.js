@@ -17,6 +17,18 @@
 
 import { getPeriodEffectiveEnd } from "../../helpers/dateHelpers.js";
 
+/**
+ * How many months one payment of this period covers, from the period's own dates (not its label: labels
+ * like "Period 2" say nothing). 1 = monthly, 3 = quarterly, 6, 12. null when the dates can't say.
+ * A period 16 Sep to 15 Dec is 91 days: 91 / 30.4 = 3.
+ */
+export function getPeriodCycleMonths(period) {
+  const from = Date.parse(`${period?.from}T12:00:00`), to = Date.parse(`${period?.to}T12:00:00`);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return null;
+  const days = Math.round((to - from) / 86400000) + 1;
+  return Math.max(1, Math.round(days / 30.4375));
+}
+
 const NON_SCHOOL_MEMBERSHIP_TYPES = ["Gym / Fitness", "Club Membership", "Other Subscription", "Society Maintenance", "Rental"];
 
 // Lifecycle gate (confirmed product decision): a Paused or Ended Financial Relationship
@@ -55,7 +67,7 @@ export function mapMembershipToCommitment(billerAccount, memberships, getCurrent
   if (!hasLiveMembershipRelationship(billerAccount.id, relationships)) return null;
   const withEff = (memberships || [])
     .filter(m => m && String(m.billerAccountId) === String(billerAccount.id))
-    .map(m => ({ m, eff: getPeriodEffectiveEnd(getCurrentPeriod(m)) }))
+    .map(m => { const period = getCurrentPeriod(m); return { m, period, eff: getPeriodEffectiveEnd(period) }; })
     .filter(x => x.eff);
   if (!withEff.length) return null;
 
@@ -73,6 +85,9 @@ export function mapMembershipToCommitment(billerAccount, memberships, getCurrent
     date: latest.eff,
     status: "unpaid",
     recurs: true,
+    // Months one payment covers (1 monthly, 3 quarterly...). Lets Outlook show a quarterly fee once, in the
+    // month it falls due, instead of counting it every month (futureMoney/rhythm.js).
+    cycleMonths: getPeriodCycleMonths(latest.period),
   };
 }
 

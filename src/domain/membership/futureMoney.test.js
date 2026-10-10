@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mapMembershipToCommitment, projectMembershipsToCommitments, hasLiveMembershipRelationship } from "./futureMoney.js";
+import { mapMembershipToCommitment, projectMembershipsToCommitments, hasLiveMembershipRelationship, getPeriodCycleMonths } from "./futureMoney.js";
 
 const getCurrentPeriod = periodsByMembershipId => m => periodsByMembershipId[m.id] || null;
 
@@ -146,4 +146,21 @@ test("hasLiveMembershipRelationship: direct checks (exported for reuse by renewa
   assert.equal(hasLiveMembershipRelationship("ba1", [{ billerAccountId: "ba1", status: "active" }]), true);
   assert.equal(hasLiveMembershipRelationship("ba1", [{ billerAccountId: "ba1", status: "paused" }]), false);
   assert.equal(hasLiveMembershipRelationship("ba1", [{ billerAccountId: "ba1", status: "ended" }]), false);
+});
+
+test("getPeriodCycleMonths reads the cycle from the period's own dates, not its label", () => {
+  assert.equal(getPeriodCycleMonths({ from: "2026-04-14", to: "2026-05-13" }), 1);
+  assert.equal(getPeriodCycleMonths({ from: "2026-09-16", to: "2026-12-15" }), 3);
+  assert.equal(getPeriodCycleMonths({ from: "2026-06-01", to: "2026-08-31", label: "Period 2" }), 3);
+  assert.equal(getPeriodCycleMonths({ from: "2026-01-01", to: "2026-06-30" }), 6);
+  assert.equal(getPeriodCycleMonths({ from: "2026-01-01", to: "2026-12-31" }), 12);
+  assert.equal(getPeriodCycleMonths({ from: "", to: "2026-12-31" }), null);
+});
+
+test("the membership event carries the cycle of its current period", () => {
+  const ba = { id: "ba1", name: "Genesis", type: "Gym / Fitness" };
+  const quarterly = mapMembershipToCommitment(ba, [{ id: "m1", billerAccountId: "ba1", amount: 8499 }], getCurrentPeriod({ m1: { from: "2026-09-16", to: "2026-12-15", graceDays: 0 } }));
+  assert.equal(quarterly.cycleMonths, 3);
+  const monthly = mapMembershipToCommitment(ba, [{ id: "m1", billerAccountId: "ba1", amount: 2999 }], getCurrentPeriod({ m1: { from: "2026-10-01", to: "2026-10-31", graceDays: 0 } }));
+  assert.equal(monthly.cycleMonths, 1);
 });
