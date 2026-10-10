@@ -135,7 +135,7 @@ import { computeAccountBalance, isLinkedPaymentMethod, getParentAccountId } from
 import { getFrequentVendors, getFrequentItemsForVendor, getVendorAggregate } from "./domain/transactions/vendorInsights";
 import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVersion, migrateLegacyBillingHistory } from "./domain/cards/billingConfig";
-import { generateDueStatements } from "./domain/cards/statementBills";
+import { generateDueStatements, isEmptyStatementBill, getPendingStatementChecks } from "./domain/cards/statementBills";
 import { reconcileAutoEmiLoans } from "./domain/loans/autoEmiProgress";
 import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
@@ -948,6 +948,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setAccounts(prev=>prev.map(a=>a.type==="cc" ? migrateLegacyBillingHistory(a) : a));
       return;
     }
+    // No transactions, no bill: statements generated earlier for an empty cycle (unpaid, ₹0, nothing from the bank)
+    // are removed, so they cannot show as overdue. One carrying a bank amount is real and stays.
+    if(bills.some(isEmptyStatementBill)){ setBills(prev=>prev.filter(b=>!isEmptyStatementBill(b))); return; }
     const newBills = ccAccounts.flatMap(card=>generateDueStatements({ card, accounts, txns:expandPaymentLines(txns), bills, toDateOnly }));
     if(newBills.length>0){ setBills(prev=>[...prev, ...newBills]); return; }
     // Rule 10/test I: a cc_payment transaction pays a card regardless of a statement's
@@ -10295,6 +10298,27 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {/* Investment reminders (due today + not recorded this month) and Membership expiry
               alerts all folded into Today's Focus (the "bills" card below) - one system, one
               source, not three separate always-visible legacy blocks. */}
+          {/* Billing-day check: a closed card cycle with no transactions makes no bill (domain/cards/statementBills.js).
+              Ask once whether the card was really unused; "No transactions" ends it for that cycle. */}
+          {(()=>{
+            const checks = getPendingStatementChecks({ accounts, txns:expandPaymentLines(txns), bills, toDateOnly, today:todayStr() });
+            if(!checks.length) return null;
+            const c = checks[0];
+            const mark = value=>setAccounts(prev=>prev.map(a=>a.id===c.cardId?{ ...a, statementChecks:{ ...(a.statementChecks||{}), [c.periodTo]:value } }:a));
+            const tomorrow = (()=>{ const d=new Date(); d.setDate(d.getDate()+1); return toLocalDateStr(d); })();
+            return (
+              <div data-testid="statement-check" style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:16,padding:14,marginBottom:12 }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>💳 {c.cardName} statement closed on {formatShortDate(c.to)||c.to}</div>
+                <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>Arth has no transactions on this card between {formatShortDate(c.from)||c.from} and {formatShortDate(c.to)||c.to}. Please check your statement. Did you use it?</div>
+                <div style={{ display:"flex",gap:8 }}>
+                  <button data-testid="statement-none" onClick={()=>mark("none")} style={{ flex:1,background:T.success,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>No transactions</button>
+                  <button onClick={()=>{ setAddPrefill({ accId:c.cardId }); setDefaultAddType("expense"); setShowAdd(true); }} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.text,fontFamily:"Nunito,sans-serif" }}>Yes, add them</button>
+                  <button onClick={()=>mark(`snooze:${tomorrow}`)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Tomorrow</button>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Daily Gym check-in — "did you go today?" (domain/membership/checkIn.js). Skips
               itself on a paused (traveling) relationship or a day already marked a holiday;
               never asks twice in one day. Purely additive — records into its own gymCheckIns[],
