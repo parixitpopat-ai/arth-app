@@ -7,7 +7,7 @@ import { RADIUS, TOUCH, FONT } from "../constants/theme";
 // off `bills`/`getCardSummary`, the same canonical data Money and the reconciliation sheet use.
 export default function CreditCardsListScreen({
   accounts, bills, txns, T, sym, fmt, formatShortDate, toDateOnly, getCardSummary,
-  onClose, onViewStatement, onPay,
+  onClose, onViewStatement, onPay, onOpenCard,
 }) {
   const cards = (accounts || []).filter(a => a.type === "cc");
 
@@ -40,6 +40,7 @@ export default function CreditCardsListScreen({
                   <div>
                     <div style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>{card.name}</div>
                     {card.last4 && <div style={{ color: T.sub, fontSize: 11, marginTop: 1 }}>••{card.last4}</div>}
+                    {onOpenCard && <button data-testid={`open-card-${card.id}`} onClick={() => onOpenCard(card)} style={{ background: "none", border: "none", padding: 0, marginTop: 4, color: T.accent, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: FONT.sans }}>Card details and transactions ›</button>}
                   </div>
                   {pill && <span style={{ background: pill.c + "18", color: pill.c, borderRadius: 20, padding: "3px 10px", fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{pill.l}</span>}
                 </div>
