@@ -32,8 +32,8 @@
 // the unscoped total — never part of any single group's scoped figure.
 
 import { remainingShare } from "../shared/remainingShare.js";
-import { getPaybackTotal } from "../person/payback.js";
-import { getPaidByPayableTotal } from "../person/paidBy.js";
+import { getPaybacks } from "../person/payback.js";
+import { getPaidByPayable } from "../person/paidBy.js";
 import { buildRefundTotalsByExpense } from "../../../domain/allocations/adapter.js";
 
 /**
@@ -60,14 +60,33 @@ import { buildRefundTotalsByExpense } from "../../../domain/allocations/adapter.
  */
 export function getGroupMemberIOwe(txns, groupId, pid) {
   if (pid === "__me__") return 0;
-  const owedByMode = (txns || [])
-    .filter(t => t.groupId === groupId && t.type === "expense" && t.people && t.people[pid] && t.people[pid].mode === "owes_by_me")
-    .reduce((sum, t) => sum + Number(t.people[pid].amount || 0), 0);
-  // Expenses this person paid on my behalf, recorded against this group (paidBy.js), net of refunds.
-  const owed = owedByMode + getPaidByPayableTotal(txns, pid, buildRefundTotalsByExpense(txns || []), { groupId });
-  // Paybacks made from this group (domain/person/payback.js) lower it; never below zero here (an overpayment shows on
-  // the person's own balance as what they owe me).
-  return Math.max(0, owed - getPaybackTotal(txns, pid, { groupId }));
+  const all = txns || [];
+  const refunds = buildRefundTotalsByExpense(all);
+
+  // Everything I owe this person that comes from a transaction, oldest first: the older owes_by_me share (raw amount,
+  // as before) and expenses they paid on my behalf (paidBy.js, net of refunds). Each keeps its group, if it has one.
+  const items = [];
+  for (const t of all) {
+    if (!t || t.type !== "expense") continue;
+    const mode = t.people && t.people[pid] && t.people[pid].mode === "owes_by_me" ? Number(t.people[pid].amount || 0) : 0;
+    const paidBy = getPaidByPayable(t, refunds) && String(t.paidByPersonId) === String(pid) ? getPaidByPayable(t, refunds) : 0;
+    const amount = mode + paidBy;
+    if (amount > 0) items.push({ date: String(t.date || ""), at: Number(t.createdAt || 0), groupId: t.groupId || null, left: amount });
+  }
+  items.sort((x, y) => x.date.localeCompare(y.date) || x.at - y.at);
+
+  // Paybacks (payback.js) are applied to those items: a payback made from a group first lowers that group's items;
+  // a payback made from the person's profile has no group and lowers the oldest items, whichever group they belong to.
+  // So paying from either place leaves the group balance consistent with the person's overall balance.
+  const consume = (amount, matches) => {
+    let rest = amount;
+    for (const it of items) { if (rest <= 0) break; if (!matches(it) || it.left <= 0) continue; const used = Math.min(it.left, rest); it.left -= used; rest -= used; }
+  };
+  const paybacks = getPaybacks(all, pid);
+  for (const pb of paybacks.filter(x => x.paidToGroupId)) consume(Number(pb.amount || 0), it => it.groupId === pb.paidToGroupId);
+  for (const pb of paybacks.filter(x => !x.paidToGroupId)) consume(Number(pb.amount || 0), () => true);
+
+  return Math.round(items.filter(it => it.groupId === groupId).reduce((sum, it) => sum + it.left, 0) * 100) / 100;
 }
 
 /**
