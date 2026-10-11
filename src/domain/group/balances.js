@@ -33,6 +33,8 @@
 
 import { remainingShare } from "../shared/remainingShare.js";
 import { getPaybackTotal } from "../person/payback.js";
+import { getPaidByPayableTotal } from "../person/paidBy.js";
+import { buildRefundTotalsByExpense } from "../../../domain/allocations/adapter.js";
 
 /**
  * How much the Master User owes a specific person, within a specific
@@ -58,9 +60,11 @@ import { getPaybackTotal } from "../person/payback.js";
  */
 export function getGroupMemberIOwe(txns, groupId, pid) {
   if (pid === "__me__") return 0;
-  const owed = (txns || [])
+  const owedByMode = (txns || [])
     .filter(t => t.groupId === groupId && t.type === "expense" && t.people && t.people[pid] && t.people[pid].mode === "owes_by_me")
     .reduce((sum, t) => sum + Number(t.people[pid].amount || 0), 0);
+  // Expenses this person paid on my behalf, recorded against this group (paidBy.js), net of refunds.
+  const owed = owedByMode + getPaidByPayableTotal(txns, pid, buildRefundTotalsByExpense(txns || []), { groupId });
   // Paybacks made from this group (domain/person/payback.js) lower it; never below zero here (an overpayment shows on
   // the person's own balance as what they owe me).
   return Math.max(0, owed - getPaybackTotal(txns, pid, { groupId }));
