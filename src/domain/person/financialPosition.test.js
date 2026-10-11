@@ -279,9 +279,15 @@ test("a payback with nothing owed is all excess: they owe me the full amount", (
   assert.deepEqual(enumerated(txns), { iOwe: 0, owesMe: 300 });
 });
 
-test("group: a payback made from the group lowers that group's 'I owe' for that person; one made outside the group does not", () => {
+test("group: a payback made from the group lowers that group's 'I owe' for that person", () => {
   assert.equal(getGroupMemberIOwe([iOweExpense], "g1", "p1"), 1000);
+  assert.equal(getGroupMemberIOwe([iOweExpense], "g2", "p1"), 0);
   assert.equal(getGroupMemberIOwe([iOweExpense, payback("pb1", 400, "g1")], "g1", "p1"), 600);
-  assert.equal(getGroupMemberIOwe([iOweExpense, payback("pb1", 400, null)], "g1", "p1"), 1000);
   assert.equal(getGroupMemberIOwe([iOweExpense, payback("pb1", 1500, "g1")], "g1", "p1"), 0); // floored at 0 inside the group
+});
+
+test("group: a payback made from the person's profile (no group) also lowers the group balance, so the two screens agree", () => {
+  assert.equal(getGroupMemberIOwe([iOweExpense, payback("pb1", 400, null)], "g1", "p1"), 600);
+  assert.equal(getGroupMemberIOwe([iOweExpense, payback("pb1", 1000, null)], "g1", "p1"), 0);
+  assert.equal(getGroupMemberIOwe([iOweExpense, payback("pb1", 1500, null)], "g1", "p1"), 0);
 });

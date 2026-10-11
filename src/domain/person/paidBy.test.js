@@ -95,3 +95,43 @@ test("person and group attribution: a group-tagged purchase shows in that group'
   assert.equal(getGroupMemberIOwe([g, pay("p1x", 400, { groupId: "g1" })], "g1", "p1"), 600);
   assert.deepEqual(getPaidByPayablesByPerson([g, paidBy("c", 50, "2026-10-04", { paidByPersonId: "p2" })]), { p1: 1000, p2: 50 });
 });
+
+// ---- group balance after paybacks: one rule, whichever screen the payment was made from ----
+test("an untagged payback is applied to the oldest purchases first, across groups and ungrouped", () => {
+  const older = paidBy("a", 1000, "2026-10-01", { groupId: "g1" });
+  const newer = paidBy("b", 600, "2026-10-05", { groupId: "g2" });
+  const loose = paidBy("c", 200, "2026-10-07");
+  const at = (txns, g) => getGroupMemberIOwe(txns, g, "p1");
+  const all = [older, newer, loose];
+  assert.deepEqual([at(all, "g1"), at(all, "g2")], [1000, 600]);
+  const afterOne = [...all, pay("p1x", 1300)]; // clears g1's 1,000 and 300 of g2's 600
+  assert.deepEqual([at(afterOne, "g1"), at(afterOne, "g2")], [0, 300]);
+  const afterAll = [...all, pay("p1x", 1800)];
+  assert.deepEqual([at(afterAll, "g1"), at(afterAll, "g2")], [0, 0]);
+});
+
+test("a group-tagged payback lowers that group first; the person's overall balance equals the sum of the pieces", () => {
+  const a = paidBy("a", 1000, "2026-10-01", { groupId: "g1" });
+  const b = paidBy("b", 600, "2026-10-05", { groupId: "g2" });
+  const txns = [a, b, pay("p1x", 400, { groupId: "g2" }), pay("p2x", 300)];
+  // g2 payback takes 400 off g2 (200 left); the untagged 300 takes the oldest: g1 1000 -> 700
+  assert.equal(getGroupMemberIOwe(txns, "g1", "p1"), 700);
+  assert.equal(getGroupMemberIOwe(txns, "g2", "p1"), 200);
+  const overall = position(txns).iOwe;
+  assert.equal(overall, 900);
+  assert.equal(getGroupMemberIOwe(txns, "g1", "p1") + getGroupMemberIOwe(txns, "g2", "p1"), overall);
+});
+
+test("group balance never exceeds the person's overall balance; an overpayment leaves it at zero", () => {
+  const a = paidBy("a", 500, "2026-10-01", { groupId: "g1" });
+  const txns = [a, pay("p1x", 800)];
+  assert.equal(getGroupMemberIOwe(txns, "g1", "p1"), 0);
+  assert.equal(position(txns).owesMe, 300);
+});
+
+test("older owes_by_me shares and paid-by purchases are allocated together", () => {
+  const mode = { id: "m", type: "expense", amount: 400, date: "2026-10-02", accId: "b1", groupId: "g1", people: { p1: { mode: "owes_by_me", amount: 400 } } };
+  const pb1 = paidBy("a", 600, "2026-10-04", { groupId: "g1" });
+  assert.equal(getGroupMemberIOwe([mode, pb1], "g1", "p1"), 1000);
+  assert.equal(getGroupMemberIOwe([mode, pb1, pay("p1x", 500)], "g1", "p1"), 500);
+});
