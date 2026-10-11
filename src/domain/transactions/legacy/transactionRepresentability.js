@@ -83,6 +83,12 @@ export function checkRepresentability({ operation, draft, priorStoredRecord = nu
     return notRepresentable(`type "${draft.type}" is outside WP-TXN-01 scope (expense/income only)`);
   }
 
+  // "Paid by <person>" (domain/person/paidBy.js): another person paid, so the expense has no account of mine, which the
+  // aggregate requires. It stays on the legacy path, which stores it unchanged.
+  if (draft.paidByPersonId || priorStoredRecord?.paidByPersonId) {
+    return notRepresentable("paid by another person: no account of mine is used, the aggregate requires one");
+  }
+
   if (hasCategorySplit(draft)) {
     return notRepresentable("category split (catIds.length > 1 or catAllocations) has no Transaction.categoryId equivalent");
   }

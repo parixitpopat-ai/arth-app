@@ -138,6 +138,7 @@ import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVer
 import { generateDueStatements, isEmptyStatementBill, getPendingStatementChecks } from "./domain/cards/statementBills";
 import { reconcileAutoEmiLoans } from "./domain/loans/autoEmiProgress";
 import { getPaybackTotalsByPerson, applyPaybacks, buildPaybackTxn } from "./domain/person/payback";
+import { isPaidByOther, getPaidByPayable } from "./domain/person/paidBy";
 import { getEmiInstalmentDates } from "./domain/loans/emiInstalments";
 import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./domain/cards/reconciliation";
 import { allocateCcPaymentsToStatements } from "./domain/cards/paymentAllocation";
@@ -2216,6 +2217,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(t.type==="settlement_out"&&t.toPersonId){
         payables[t.toPersonId] = (payables[t.toPersonId]||0) + Number(t.amount||0);
       }
+      // Paid by another person (domain/person/paidBy.js): what I owe the payer for an expense they paid on my behalf.
+      if(isPaidByOther(t)){
+        payables[t.paidByPersonId] = (payables[t.paidByPersonId]||0) + getPaidByPayable(t, refundTotalsByExpense);
+      }
       // Txn breakup O mode (owes_by_me) — I owe this person
       if(t.type==="expense"&&t.people){
         Object.entries(t.people).forEach(([pid,info])=>{
@@ -2249,7 +2254,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     });
 
     return map;
-  },[txns,bills,people]);
+  },[txns,bills,people,refundTotalsByExpense]);
 
   // Normalizes a membership/payment record to its periods array — new records store `periods`
   // directly; old records (pre-redesign) only had validFrom/validUntil/cycle, so synthesize an
@@ -3197,6 +3202,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               {investmentMetricText&&<span style={{ color:T.sub,fontSize:10 }}>{investmentMetricText}</span>}
               {t.catAllocations&&Object.keys(t.catAllocations).length>0&&<span style={{ color:T.sub,fontSize:10 }}>{Object.entries(t.catAllocations).map(([cid,val])=>`${getCat(cid).name.split(" ")[0]} ${sym}${fmt(val)}`).join(" · ")}</span>}
               {acc&&<span style={{ color:T.sub,fontSize:10 }}>{accIcon(acc.type)} {acc.name}</span>}
+              {t.paidByPersonId&&<span data-testid="txn-paid-by" style={{ color:T.warn,fontSize:10,fontWeight:700 }}>👤 Paid by {getPerson(t.paidByPersonId)?.name||"someone"}</span>}
               {t.transactionRef&&<span style={{ color:T.sub,fontSize:10 }}># {t.transactionRef}</span>}
               {totalOwed>0&&!allSettled&&<span style={{ color:T.accent,fontSize:10,fontWeight:700 }}>↗ {sym}{fmt(totalOwed)}</span>}
               {t.type==="settlement_in"&&t.isRefund&&<span style={{ background:refundTone+"18",color:refundTone,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>↩ Refund</span>}
@@ -3240,6 +3246,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               })}
               {t.merchant&&t.type!=="cc_payment"&&t.type!=="transfer"&&<span style={{ background:T.pill,color:T.sub,borderRadius:20,padding:"2px 9px",fontSize:10 }}>@ {t.merchant}</span>}
               {acc&&<span style={{ background:acc.color+"20",color:acc.color,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>{accIcon(acc.type)} {acc.name}</span>}
+              {t.paidByPersonId&&<span style={{ background:T.warn+"20",color:T.warn,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>👤 Paid by {getPerson(t.paidByPersonId)?.name||"someone"}</span>}
               {t.groupId&&getGroup(t.groupId)&&<span style={{ background:T.pill,color:T.sub,borderRadius:20,padding:"2px 9px",fontSize:10 }}>👥 {getGroup(t.groupId).name}</span>}
               {allSettled&&<span style={{ background:T.success+"20",color:T.success,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>✅ Settled</span>}
               {t.type==="settlement_in"&&t.isRefund&&<span style={{ background:refundTone+"18",color:refundTone,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:700 }}>↩ Refund</span>}
@@ -3927,6 +3934,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [catIds, setCatIds] = useState(initialCatIds);  // multiple categories
     const [subIds, setSubIds] = useState(initialSubIds);  // multiple subcats
     const [accId, setAccId] = useState(isEditing ? (sourceTxn.accId || sourceTxn.fromAccId || defaultAccId) : (refundPrefill?.accId || safePrefill.accId || defaultAccId));
+    // Paid by another person (domain/person/paidBy.js): "" = me, as before. Only for an expense.
+    const [paidByPersonId, setPaidByPersonId] = useState(isEditing && sourceTxn?.type==="expense" && sourceTxn?.paidByPersonId ? sourceTxn.paidByPersonId : "");
     const [paymentMethod, setPaymentMethod] = useState(isEditing ? (sourceTxn.paymentMethod||"") : "");
     const [fromAccId, setFromAccId] = useState(isEditing ? (sourceTxn.fromAccId || defaultFromAccId) : (safePrefill.fromAccId || defaultFromAccId));
     const [toAccId, setToAccId] = useState(isEditing ? (sourceTxn.toAccId || defaultToCardId) : (safePrefill.toAccId || defaultToCardId));
@@ -5070,7 +5079,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       // cancel the save). Warn inline instead, and let the save proceed.
       if(!isEditing && txnType==="expense" && amt>0){
         const dupWindow = 5*60*1000; // 5 minutes
-        const dup = txns.find(t=>t.type==="expense" && Math.abs(t.amount-amt)<0.01 && String(t.accId)===String(accId) && Math.abs(Date.now()-(t.createdAt||0))<dupWindow);
+        const dup = txns.find(t=>t.type==="expense" && Math.abs(t.amount-amt)<0.01 && (paidByPersonId ? String(t.paidByPersonId||"")===String(paidByPersonId) : String(t.accId)===String(accId)) && Math.abs(Date.now()-(t.createdAt||0))<dupWindow);
         if(dup) setRefDupWarning(`Note: a matching ${sym}${fmt(amt)} expense from this account was recorded ${Math.round((Date.now()-(dup.createdAt||0))/60000)} minute(s) ago — saved anyway.`);
       }
       // Create membership record if linked biller is membership type
@@ -5094,7 +5103,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         setMemberships(prev=>[memRecord,...prev]);
       }
       if(txnType==="expense"){
-        if(expensePaymentMode==="emi"){
+        if(expensePaymentMode==="emi" && !paidByPersonId){
           const dueDayNum = Math.max(1, Math.min(31, parseInt(emiDueDay || (toDateOnly(date)?.getDate() || new Date().getDate()), 10) || new Date().getDate()));
           const upfrontPaid = emiDownPaymentValue;
           const remainingBalance = financedAmount;
@@ -5382,8 +5391,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           catIds:effectiveCatIds,
           subIds:validSubIds,
           subId:validSubIds[0]||null,
-          accId,
-          paymentMethod: (txnType==="expense" && getAcc(accId)?.type==="bank") ? (paymentMethod||null) : null,
+          // Paid by another person: none of my accounts was used, so no account is recorded and none is debited.
+          accId: (txnType==="expense" && paidByPersonId) ? null : accId,
+          paidByPersonId: (txnType==="expense" && paidByPersonId) ? paidByPersonId : null,
+          paymentMethod: (txnType==="expense" && !paidByPersonId && getAcc(accId)?.type==="bank") ? (paymentMethod||null) : null,
           isBillPayment,
           billInvoiceNo:billInvoiceNo.trim()||null,
           paidBillId:linkedBillId,
@@ -5468,7 +5479,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         if(eduMode && newTxn.linkedFeePeriods?.length){
           setFeePeriods(prev=>applyEducationSettlement(prev, newTxn.linkedFeePeriods, resolvedTxnId, schoolFeesService.settlePeriods));
         }
-        if(!isEditing && getAcc(accId).type==="cc") setAccounts(prev=>prev.map(a=>a.id===accId?{...a,outstanding:(a.outstanding||0)+amt}:a));
+        if(!isEditing && !(txnType==="expense" && paidByPersonId) && getAcc(accId)?.type==="cc") setAccounts(prev=>prev.map(a=>a.id===accId?{...a,outstanding:(a.outstanding||0)+amt}:a));
 
         if(isBillPayment){
           const billRecord = {
@@ -5940,7 +5951,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <button onClick={()=>setShowDetailsCard(true)} style={{ ...inp,flex:1,display:"flex",flexDirection:"column",alignItems:"flex-start",justifyContent:"center",cursor:"pointer",textAlign:"left",gap:2 }}>
                   <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Details ▾</span>
                   <span style={{ color:T.text,fontSize:12,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap" }}>
-                    {(() => { const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
+                    {(() => { if(paidByPersonId) return `👤 Paid by ${getPerson(paidByPersonId)?.name||""}`; const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
                     <span style={{ color:T.sub }}>·</span>
                     {formatShortDate(date)||date}
                   </span>
@@ -5950,6 +5961,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {/* Full/EMI, moved here (after the combined Amount+Details row) -- still a MODE
                 toggle, same pattern as Itemise Purchase, not bundled with Reference. */}
             {txnType==="expense"&&(
+              <div data-testid="paid-by" style={{ display:"flex",gap:6,alignItems:"center",flexWrap:"wrap" }}>
+                <span style={{ ...lbl,marginBottom:0 }}>Paid by</span>
+                <Chip color={T.accent} active={!paidByPersonId} onClick={()=>setPaidByPersonId("")}>Me</Chip>
+                {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=>(
+                  <Chip key={p.id} color={T.warn} active={paidByPersonId===p.id} onClick={()=>{ setPaidByPersonId(p.id); setExpensePaymentMode("full"); }}>{p.emoji||"👤"} {p.name}</Chip>
+                ))}
+              </div>
+            )}
+            {txnType==="expense"&&paidByPersonId&&(
+              <div data-testid="paid-by-note" style={{ color:T.sub,fontSize:11 }}>{getPerson(paidByPersonId)?.name||"They"} paid for this from their own pocket. None of your accounts is used. You will owe {getPerson(paidByPersonId)?.name||"them"} {sym}{fmt(parseFloat(amount)||0)} until you pay back from their profile.</div>
+            )}
+            {txnType==="expense"&&!paidByPersonId&&(
               <div style={{ display:"flex",gap:4,justifyContent:"flex-end" }}>
                 <Chip color={T.success} active={expensePaymentMode==="full"} onClick={()=>setExpensePaymentMode("full")}>✅ Full</Chip>
                 <Chip color={T.warn} active={expensePaymentMode==="emi"} onClick={()=>setExpensePaymentMode("emi")}>🧾 EMI</Chip>
@@ -5960,7 +5983,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                   <button onClick={()=>setShowDetailsCard(false)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"Nunito,sans-serif",padding:0 }}>← Details</button>
                 </div>
-                <div>
+                {!paidByPersonId&&<div>
                   <span style={lbl}>Paid via</span>
                   <button onClick={()=>setShowAccountSheet(true)} style={{ ...inp,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left" }}>
                     <span style={{ color:T.text }}>
@@ -5977,7 +6000,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       onClose={()=>setShowAccountSheet(false)}
                     />
                   )}
-                </div>
+                </div>}
                 <div>
                   <span style={lbl}>Date</span>
                   <input style={inp} type="date" value={date} min={safePrefill.dateMin||undefined} max={safePrefill.dateMax||undefined} onChange={e=>setDate(e.target.value)}/>
@@ -5998,7 +6021,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {/* T3-3/T3-4 resolution: price-breakdown moved here from the retired "Advanced
                     (optional)" wrapper -- it's fundamentally about HOW you're paying, so it
                     belongs beside Paid Via, shown only when that account is a CC. */}
-                {getAcc(accId)?.type==="cc"&&(
+                {!paidByPersonId&&getAcc(accId)?.type==="cc"&&(
                   <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
                     <button onClick={()=>setShowPriceBreakdown(v=>!v)} style={{ background:"none",border:`1px dashed ${showPriceBreakdown?T.accent:T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,color:showPriceBreakdown?T.accent:T.sub,fontFamily:"Nunito,sans-serif",fontWeight:700,textAlign:"left" }}>
                       {showPriceBreakdown?"▲ Hide price breakdown":"▼ Price breakdown (MRP · discount · fees · interest · GST)"}
@@ -6158,7 +6181,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 )}
                 {(()=>{
                   const linkedMethods = accounts.filter(a=>(a.type==="debit"&&a.linkedBank===accId)||(a.type==="upi"&&a.linkedAccount===accId));
-                  if(getAcc(accId)?.type!=="bank"||!linkedMethods.length) return null;
+                  if(paidByPersonId||getAcc(accId)?.type!=="bank"||!linkedMethods.length) return null;
                   return (
                     <div>
                       <span style={lbl}>Payment Method (optional)</span>
@@ -21454,7 +21477,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div>
                     {/* Surfaces getVendorAggregate -- tappable only when there's a real merchant to look up. */}
                     <div onClick={t.merchant?(e)=>{ e.stopPropagation(); setViewingVendor(t.merchant); }:undefined} style={{ color:T.text,fontSize:18,fontWeight:900,cursor:t.merchant?"pointer":"default",textDecoration:t.merchant?"underline":"none",textDecorationColor:t.merchant?T.border:"transparent",textUnderlineOffset:3 }}>{t.merchant||t.who||t.desc||"Transaction"}</div>
-                    <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>{formatShortDate(t.date)||t.date} · {acc?.name||"Account"}</div>
+                    <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>{formatShortDate(t.date)||t.date} · {acc?.name||(t.paidByPersonId?`Paid by ${getPerson(t.paidByPersonId)?.name||"someone"}`:"Account")}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
                     <div style={{ color,fontSize:22,fontWeight:900 }}>{t.type==="income"?"+":t.type==="expense"?"-":""}{sym}{fmt(t.amount)}</div>

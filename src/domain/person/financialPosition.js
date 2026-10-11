@@ -22,6 +22,8 @@
 import { getBillSplitSource } from "../bills/splitSource.js";
 import { remainingShare } from "../shared/remainingShare.js";
 import { getPaybacks } from "./payback.js";
+import { isPaidByOther, getPaidByPayable } from "./paidBy.js";
+import { buildRefundTotalsByExpense } from "../../../domain/allocations/adapter.js";
 
 /**
  * @param {{owesMe:number, iOwe:number}} settlement - settlements[p.id],
@@ -69,6 +71,7 @@ export function getFinancialPositionLabel(settlement) {
  */
 export function getFinancialPositionBreakdown(personId, txns, bills, meId) {
   const items = [];
+  const paidByRefunds = buildRefundTotalsByExpense(txns || []);
 
   for (const t of (txns || [])) {
     if (!t) continue;
@@ -106,6 +109,10 @@ export function getFinancialPositionBreakdown(personId, txns, bills, meId) {
       }
     }
 
+    if (isPaidByOther(t) && String(t.paidByPersonId) === String(personId)) {
+      const amount = getPaidByPayable(t, paidByRefunds);
+      if (amount > 0) items.push({ id: `${t.id}_paidby`, kind: "txn", desc: t.desc || t.merchant || "Paid on my behalf", amount, mode: "iOwe", date: t.date || null, transactionRef: t.transactionRef || null });
+    }
     if (t.type === "settlement_in" && t.fromPersonId === personId && Number(t.extraAmount || 0) > 0 && (t.settlementLinks || []).length > 0) {
       items.push({ id: t.id, kind: "txn", desc: t.desc || "Settlement", amount: Number(t.extraAmount), mode: "iOwe", date: t.date || null, transactionRef: t.transactionRef || null });
     }
