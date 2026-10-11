@@ -137,6 +137,7 @@ import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVersion, migrateLegacyBillingHistory } from "./domain/cards/billingConfig";
 import { generateDueStatements, isEmptyStatementBill, getPendingStatementChecks } from "./domain/cards/statementBills";
 import { reconcileAutoEmiLoans } from "./domain/loans/autoEmiProgress";
+import { getCardAlerts } from "./domain/cards/alerts";
 import { getPaybackTotalsByPerson, applyPaybacks, buildPaybackTxn } from "./domain/person/payback";
 import { isPaidByOther, getPaidByPayable } from "./domain/person/paidBy";
 import { getEmiInstalmentDates } from "./domain/loans/emiInstalments";
@@ -2428,6 +2429,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     }).filter(Boolean).sort((a,b)=>b.pct-a.pct);
   },[people, viewMonth, thisMonthTxns, getPersonAttributedAmount]);
   const activeBudgetAlerts = useMemo(()=>budgetAlerts.filter(a=>!dismissedAlerts.includes(a.id)),[budgetAlerts,dismissedAlerts]);
+  // Card spend alerts (domain/cards/alerts.js): a card over its alert % of limit this billing cycle. Dismissed per cycle.
+  const activeCardAlerts = useMemo(()=>{
+    const ex = expandPaymentLines(txns);
+    return getCardAlerts(accounts.filter(a=>a.type==="cc"), card=>getCardSummary(card, accounts, ex, toDateOnly), dismissedAlerts);
+  },[accounts,txns,dismissedAlerts]);
 
   const directOwedToMe = useMemo(()=>Object.values(settlements).reduce((s,p)=>s+(p.owesMe||0),0),[settlements]);
   const receivablePeopleList = useMemo(()=>Object.entries(settlements)
@@ -8735,9 +8741,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 : `Cycle ${formatShortDate(cardSummary?.prevStatementDate)} – ${formatShortDate(cardSummary?.lastStatementDate)} · Due ${formatShortDate(cardSummary?.dueOn)} · Alert above ${utilLimit}% of limit`}
             </div>
             <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:10 }}>
-              <div style={{ height:"100%",width:`${Math.min(100,util)}%`,background:util>utilLimit?T.danger:T.success,borderRadius:3 }}/>
+              <div style={{ height:"100%",width:`${Math.min(100,util)}%`,background:cardSummary?.isOverAlert?T.danger:T.success,borderRadius:3 }}/>
             </div>
-            {util>utilLimit&&<div style={{ background:T.danger+"22",border:`1px solid ${T.danger}44`,borderRadius:10,padding:10,marginBottom:14 }}>⚠️ <span style={{ color:T.danger,fontSize:12,fontWeight:700 }}>Current-cycle spend is above your {utilLimit}% alert limit</span></div>}
+            {cardSummary?.isOverAlert&&<div data-testid="card-over-alert" style={{ color:T.danger,fontSize:11,fontWeight:700,marginBottom:14 }}>Over your {utilLimit}% alert · shown in Notifications</div>}
           </>}
 
           {isInvestmentAccount(a) && a.type!=="cc" && (
@@ -18015,7 +18021,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ padding:"10px 8px",display:"flex",flexDirection:"column",gap:2 }}>
             {[
               { icon:"👤", label:"User Profile", onClick:()=>{ setShowSettings(true); setSettingsSection("myprofile"); onClose(); } },
-              { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
+              { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length+activeCardAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"🧾", label:"Payments", onClick:()=>goToTab("bills") },
               { icon:"👥", label:"People & Groups", onClick:()=>goToTab("people") },
               { icon:"🚗", label:"Vehicles", onClick:()=>{ setShowSettings(true); setSettingsSection("vehicles"); onClose(); } },
@@ -18045,9 +18051,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🔔 Notifications</div>
             <button onClick={onClose} style={{ background:"none",border:"none",color:T.sub,fontSize:18,cursor:"pointer" }}>✕</button>
           </div>
-          {activeBudgetAlerts.length===0&&(
+          {activeBudgetAlerts.length===0&&activeCardAlerts.length===0&&(
             <div style={{ textAlign:"center",padding:"40px 20px",color:T.sub,fontSize:13 }}>You're all caught up.</div>
           )}
+          {activeCardAlerts.map(a=>(
+            <div key={a.id} data-testid="card-alert" style={{ background:T.danger+"16",border:`1px solid ${T.danger}33`,borderRadius:14,padding:"12px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10 }}>
+              <div onClick={()=>{ const c=accounts.find(x=>x.id===a.cardId); onClose(); if(c) setShowAccDetail(c); }} style={{ flex:1,cursor:"pointer" }}>
+                <div style={{ color:T.danger,fontSize:12,fontWeight:800 }}>💳 {a.name} is at {a.pct}% of its limit</div>
+                <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{sym}{fmt(a.spend)} this billing cycle of a {sym}{fmt(a.limit)} limit · alert at {a.alertPct}%</div>
+              </div>
+              <button onClick={()=>archive(a.id)} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>✓ Archive</button>
+            </div>
+          ))}
           {activeBudgetAlerts.map(a=>(
             <div key={a.id} style={{ background:(a.over?T.danger:T.warn)+"16",border:`1px solid ${(a.over?T.danger:T.warn)}33`,borderRadius:14,padding:"12px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10 }}>
               <div onClick={()=>{ setBudgetFocusPersonId(a.p.id); setTab("budget"); setShowSettings(false); onClose(); }} style={{ flex:1,cursor:"pointer" }}>
