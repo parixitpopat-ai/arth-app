@@ -10185,7 +10185,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       cc: ccList.length>0 ? (
         <div key="cc" onClick={()=>{
           if(ccList.length===1) setShowAccDetail(ccList[0]);
-          else { setShowSettings(true); setSettingsSection("accounts"); }
+          else setShowCreditCardsList(true); // the cards list (statements, due, payments), not Settings
         }} style={{ ...card,cursor:"pointer",display:"flex",alignItems:"center",gap:12 }}>
           <div style={{ width:36,height:36,borderRadius:10,background:T.danger+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>💳</div>
           <div style={{ flex:1 }}>
@@ -14840,7 +14840,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   const linkedB=a.type==="debit"?accounts.find(b=>b.id===a.linkedBank):null;
                   const ccSummary = a.type==="cc" ? getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly) : null;
                   return (
-                    <div key={a.id} style={{ ...card,cursor:"pointer" }} onClick={()=>setShowAccDetail(a)}>
+                    <div key={a.id} data-testid={`settings-account-${a.id}`} style={{ ...card,cursor:"pointer" }} onClick={()=>setEditingAccount(a)}> {/* Settings configures an account; its transactions are viewed in Money (account detail) or Billers */}
                       <div style={{ display:"flex",alignItems:"center",gap:12 }}>
                         <div style={{ width:38,height:38,borderRadius:11,background:a.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{accIcon(a.type)}</div>
                         <div style={{ flex:1 }}>
@@ -19999,6 +19999,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             onClose={()=>setShowCreditCardsList(false)}
             onViewStatement={bill=>{ setShowCreditCardsList(false); setViewingCcStatementId(bill.id); }}
             onPay={card=>{ setShowCreditCardsList(false); setAddPrefill({ toAccId:card.id }); setDefaultAddType("cc_payment"); setShowAdd(true); }}
+            onOpenCard={card=>{ setShowCreditCardsList(false); setShowAccDetail(card); }}
           />
         )}
         {showAddPolicy&&<AddInsurancePolicyModal existing={editingPolicy} prefill={addPolicyPrefill} onClose={()=>{ setShowAddPolicy(false); setEditingPolicy(null); setAddPolicyPrefill(null); }} T={T} inp={inp} lbl={lbl} setInsurancePolicies={setInsurancePolicies} setBills={setBills} billers={billers}/>}
