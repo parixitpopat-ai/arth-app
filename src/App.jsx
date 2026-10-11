@@ -14835,12 +14835,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <button onClick={()=>setShowAddAccount(true)} style={{ background:T.accent,border:"none",color:"#000",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>+ Add</button>
         </div>
         <div style={{ padding:"0 16px" }}>
+          {/* Debit cards and UPI handles are a way of paying from a bank or card, not a source of money: they are listed
+              under the account they are linked to. Only one that is not linked to anything stays on its own. */}
           {["bank","cc","debit","upi","cash"].map(type=>{
-            const accs=accounts.filter(a=>a.type===type);
+            const isMethod = type==="debit"||type==="upi";
+            const accs=accounts.filter(a=>a.type===type && (!isMethod || !isLinkedPaymentMethod(a,accounts)));
             if(!accs.length) return null;
             return (
               <div key={type} style={{ marginBottom:16 }}>
-                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,marginBottom:8 }}>{accLabel(type)}s</div>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,marginBottom:8 }}>{type==="debit"?"Debit cards not linked to a bank":type==="upi"?"UPI IDs not linked to a bank or card":`${accLabel(type)}s`}</div>
                 {accs.map(a=>{
                   const bal=a.type==="cc"?null:(a.type==="bank" ? effectiveAccountBalance(a.id) : accountBalance(a.id));
                   const linkedB=a.type==="debit"?accounts.find(b=>b.id===a.linkedBank):null;
@@ -14885,6 +14888,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           <button onClick={e=>{e.stopPropagation();setConfirmDeleteAccount(a.id);}} style={{ background:"none",border:"none",color:T.danger,fontSize:14,cursor:"pointer" }}>🗑</button>
                         </div>
                       </div>
+                      {(()=>{
+                        const methods = accounts.filter(m=>getParentAccountId(m,accounts)===a.id);
+                        if(!methods.length) return null;
+                        return (
+                          <div data-testid={`settings-methods-${a.id}`} style={{ marginTop:10,paddingTop:8,borderTop:`1px dashed ${T.border}`,display:"flex",flexDirection:"column",gap:6 }}>
+                            <div style={{ color:T.sub,fontSize:9,fontWeight:700,letterSpacing:1,textTransform:"uppercase" }}>Pay with</div>
+                            {methods.map(m=>(
+                              <div key={m.id} data-testid={`settings-method-${m.id}`} onClick={e=>{ e.stopPropagation(); setEditingAccount(m); }} style={{ display:"flex",alignItems:"center",gap:8,cursor:"pointer" }}>
+                                <span style={{ fontSize:14 }}>{m.type==="upi"?"📱":"🏧"}</span>
+                                <span style={{ flex:1,color:T.text,fontSize:12,fontWeight:700 }}>{m.name}{m.type==="upi"&&m.handle?` · ${m.handle}`:""}{m.type==="debit"&&m.last4?` ···${m.last4}`:""} <span style={{ color:T.sub,fontWeight:400 }}>· {m.type==="upi"?"UPI":"Debit card"}</span></span>
+                                <button onClick={e=>{ e.stopPropagation(); setEditingAccount(m); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+                                <button onClick={e=>{ e.stopPropagation(); setConfirmDeleteAccount(m.id); }} style={{ background:"none",border:"none",color:T.danger,fontSize:13,cursor:"pointer" }}>🗑</button>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}
