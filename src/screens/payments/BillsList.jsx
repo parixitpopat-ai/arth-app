@@ -7,7 +7,7 @@ import { getBillPeriodLabel, getSplitProgressText, getCardVerificationText, form
 // UI-2C M2 PY-18 Bills and PY-27 "All bills paid". Read-only: the caller passes the view model
 // from buildPaymentsView() and handlers; this file computes no money.
 
-const BADGE_STATUS = { overdue: "overdue", partial: "partial", due: "due", unpaid: "upcoming", paid: "paid", cancelled: "writtenOff" };
+const BADGE_STATUS = { overdue: "overdue", partial: "partial", due: "due", unpaid: "upcoming", paid: "paid", cancelled: "writtenOff", check: "partial" };
 
 function Badge({ T, row }) {
   return <span data-testid={`badge-${row.bill.id}`} style={statusStyle(BADGE_STATUS[row.badge.kind], T)}>{row.badgeText.text}</span>;
@@ -35,7 +35,7 @@ function BillRow({ T, row, sym, fmt, onOpen, txns, pendingSync }) {
         </span>
       </span>
       <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-        <span style={{ color: T.text, fontSize: 15, fontWeight: 600, fontFamily: FONT.mono }}>{sym}{fmt(bal.amount)}</span>
+        <span style={{ color: T.text, fontSize: 15, fontWeight: 600, fontFamily: FONT.mono }}>{row.badge.kind === "check" ? "—" : `${sym}${fmt(bal.amount)}`}</span>
         {bal.status === "partial" ? <span style={{ color: T.sub, fontSize: 11, fontFamily: FONT.mono }}>{sym}{fmt(bal.paid)} of {sym}{fmt(bal.amount)}</span> : null}
         <Badge T={T} row={row} />
       </span>
@@ -130,6 +130,7 @@ export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, o
       <Group T={T} title="Overdue" rows={groups.overdue} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />
       <Group T={T} title="Due" rows={dueRows} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />
       <Group T={T} title="Later" rows={laterRows} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />
+      <Group T={T} title="Check statement" rows={groups.check || []} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />
       {groups.expected?.length ? (
         <div data-testid="group-Expected">
           <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", margin: "16px 0 8px" }}>Coming up · not bills yet</div>

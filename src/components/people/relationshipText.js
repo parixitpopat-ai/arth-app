@@ -1,5 +1,7 @@
 // Display text for UI-2C relationship rows (P-4 / G-12).
 
+import { getStatementCheckText } from "../../domain/obligations/billBalance.js";
+
 export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 export const dayMonth = ymd => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || ""));
@@ -18,6 +20,7 @@ export function relationshipStatusText(state, sym, fmt) {
     case "overdue": return { text: `${amt} · ${state.days} day${state.days === 1 ? "" : "s"} overdue`, tone: "negative" };
     case "due": return { text: `${amt} · ${state.days === 0 ? "today" : dayMonth(b.dueDate)}`, tone: "attention" };
     case "unpaid": return { text: b?.dueDate ? `${amt} · ${dayMonth(b.dueDate)}` : `${amt} unpaid`, tone: "muted" };
+    case "check": return { text: getStatementCheckText(b, sym), tone: "attention" };
     case "paid": return { text: `${monthOf(b.dueDate || b.paidDate) || "Last"} paid`, tone: "positive" };
     default: return { text: "Nothing due", tone: "muted" };
   }
@@ -29,7 +32,8 @@ export function relationshipSummaryText(summary, sym, fmt) {
   if (!summary || !summary.count) return "";
   const parts = [`${summary.count} relationship${summary.count === 1 ? "" : "s"}`];
   const a = summary.attention;
-  if (a && a.bill) {
+  if (a && a.kind === "check") parts.push(getStatementCheckText(a.bill, sym));
+  else if (a && a.bill) {
     const amt = `${sym}${fmt(Number(a.bill.amount || 0))}`;
     if (a.kind === "overdue") parts.push(`${amt} overdue`);
     else if (a.bill.dueDate) parts.push(`${amt} due ${a.kind === "due" && a.days === 0 ? "today" : dayMonth(a.bill.dueDate)}`);

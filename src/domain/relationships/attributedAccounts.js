@@ -25,6 +25,7 @@
 
 import { getRelationshipTarget } from "../membership/relationship.js";
 import { DUE_SOON_DAYS } from "../obligations/dueSoonWindow.js";
+import { isZeroAmountStatement, needsStatementCheck } from "../obligations/billBalance.js";
 
 // Payments v2 (WP18) Decision #5 — "Keep 14 as a single constant." This used
 // to be its own local DUE_WINDOW_DAYS = 14, duplicating billBalance.js's
@@ -39,11 +40,14 @@ const ymdToNoon = ymd => {
 };
 const daysBetween = (fromYMD, toYMD) => Math.round((ymdToNoon(toYMD) - ymdToNoon(fromYMD)) / DAY_MS);
 
-const isOpen = b => b && b.status !== "paid" && b.status !== "cancelled";
+// A zero-amount statement is open only when the bank reports money on it (then it is a check); otherwise it is an empty cycle.
+const isOpen = b => b && b.status !== "paid" && b.status !== "cancelled" && (!isZeroAmountStatement(b) || needsStatementCheck(b));
 const isValidYMD = v => /^\d{4}-\d{2}-\d{2}/.test(String(v || ""));
 
 /** D-16 badge for one open Bill: { kind, days } with kind overdue | due | unpaid. */
 export function getOpenBillBadge(bill, refDate = new Date()) {
+  // A zero-amount card statement is an item to check, not a payable and never overdue (same rule as billBalance.js).
+  if (isZeroAmountStatement(bill)) return { kind: "check", days: null };
   if (!isValidYMD(bill?.dueDate)) return { kind: "unpaid", days: null };
   const days = daysBetween(localYMD(refDate), bill.dueDate);
   if (days < 0) return { kind: "overdue", days: -days };
@@ -51,7 +55,7 @@ export function getOpenBillBadge(bill, refDate = new Date()) {
   return { kind: "unpaid", days };
 }
 
-const URGENCY = { overdue: 0, due: 1, unpaid: 2 };
+const URGENCY = { overdue: 0, due: 1, unpaid: 2, check: 3 };
 
 /**
  * The one Bill to show for a relationship: the most urgent open Bill
@@ -94,7 +98,7 @@ export function getAttributedRelationships({ targetType, targetId, billerAccount
   const rows = billerAccounts
     .filter(ba => ba && activeBillerIds.has(String(ba.id)))
     .map(ba => ({ billerAccount: ba, state: getRelationshipBillState(ba.id, bills, refDate) }));
-  const rank = { overdue: 0, due: 1, unpaid: 2, paid: 3, none: 4 };
+  const rank = { overdue: 0, due: 1, unpaid: 2, check: 3, paid: 4, none: 5 };
   return rows.sort((a, b) =>
     rank[a.state.kind] - rank[b.state.kind]
     || String(a.billerAccount.name || "").localeCompare(String(b.billerAccount.name || ""), "en", { sensitivity: "base" }));
@@ -108,6 +112,6 @@ export function getAttributedRelationships({ targetType, targetId, billerAccount
 export function summarizeRelationships(rows) {
   const list = rows || [];
   const first = list[0]?.state;
-  const attention = first && (first.kind === "overdue" || first.kind === "due" || first.kind === "unpaid") ? first : null;
+  const attention = first && (first.kind === "overdue" || first.kind === "due" || first.kind === "unpaid" || first.kind === "check") ? first : null;
   return { count: list.length, attention };
 }

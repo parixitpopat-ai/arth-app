@@ -32,6 +32,27 @@ const EPS = 0.005;
 const sameId = (a, b) => a != null && b != null && String(a) === String(b);
 const money = n => Math.round(Number(n || 0) * 100) / 100;
 
+/**
+ * A card statement with nothing for Arth to pay (amount 0) that is still open. If the bank's own figure was entered it
+ * is a mismatch to check — never an amount payable, and never "overdue": there is nothing to be late with. Ordinary
+ * (non-statement) bills are not covered by this rule.
+ */
+export const isZeroAmountStatement = bill =>
+  Boolean(bill && bill.isCcStatement && bill.status !== "paid" && bill.status !== "cancelled" && money(bill.amount) <= EPS);
+
+/** "Check statement: bank says ₹1,500" for a zero-amount statement the bank reports money on; "Check statement" otherwise. */
+export function getStatementCheckText(bill, sym = "₹") {
+  const bank = Number(bill?.bankAmount);
+  if (Number.isFinite(bank) && bank > EPS) return `Check statement: bank says ${sym}${bank.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  return "Check statement";
+}
+
+/** A zero-amount statement the bank reports money on: the one case that is worth showing to the user as "check". */
+export const needsStatementCheck = bill => isZeroAmountStatement(bill) && Number(bill.bankAmount) > EPS;
+
+/** Still owed and shown as something to pay: an unpaid Bill that is not a zero-amount statement. */
+export const isOpenPayableBill = bill => Boolean(bill && bill.status === "unpaid") && !isZeroAmountStatement(bill);
+
 export function getBillContributions(bill, contributions) {
   if (!bill) return [];
   // One payment counts once per Bill. Older builds could store the same transaction's
@@ -89,14 +110,16 @@ const isYMD = v => /^\d{4}-\d{2}-\d{2}/.test(String(v || ""));
 
 /**
  * The single D-16 badge for a Bill, in the approved order:
- * Cancelled → Paid → Overdue → Partially paid → Due (within 14 days,
- * including today) → Unpaid.
- * Returns { kind, days, balance } — kind: cancelled | paid | overdue | partial | due | unpaid.
+ * Cancelled → Paid → Check (a zero-amount card statement: attention, not a
+ * payable and never overdue) → Overdue → Partially paid → Due (within 14
+ * days, including today) → Unpaid.
+ * Returns { kind, days, balance } — kind: cancelled | paid | check | overdue | partial | due | unpaid.
  */
 export function getBillBadge(bill, contributions, refDate = new Date()) {
   const balance = getBillBalance(bill, contributions);
   if (balance.status === "cancelled") return { kind: "cancelled", days: null, balance };
   if (balance.status === "paid") return { kind: "paid", days: null, balance };
+  if (isZeroAmountStatement(bill)) return { kind: "check", days: null, balance };
   if (isYMD(bill?.dueDate)) {
     const days = Math.round((noon(bill.dueDate) - noon(localYMD(refDate))) / 86400000);
     if (days < 0) return { kind: "overdue", days: -days, balance };

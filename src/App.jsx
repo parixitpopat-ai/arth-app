@@ -147,7 +147,7 @@ import { reconcileCreditCardBillers } from "./domain/billers/creditCardReconcili
 import { withBillForSnapshots, repairUnassignedBills } from "./domain/bills/billFor";
 import { getMembershipRenewalReminders, getSchoolFeeReminders } from "./domain/bills/renewalReminders";
 import { getInsuranceRenewalReminders } from "./domain/insurance/renewalReminders";
-import { getBillBalance, planBillPayment, withProjectedBillStatuses, getPartialRemainingByBill, getBillBadge, getBillLedger } from "./domain/obligations/billBalance";
+import { getBillBalance, planBillPayment, withProjectedBillStatuses, getPartialRemainingByBill, getBillBadge, getBillLedger, isOpenPayableBill, getStatementCheckText, needsStatementCheck } from "./domain/obligations/billBalance";
 import { hasCompleteSchedule, setRelationshipSchedule, getExpectedForRelationship, getExpectedItems, buildBillFieldsFromExpected } from "./domain/obligations/expected";
 import { buildPaymentsView, getBillPeriodLabel, getBadgeText, getCardVerificationText } from "./domain/bills/paymentsView";
 import { DUE_SOON_DAYS } from "./domain/obligations/dueSoonWindow";
@@ -10214,7 +10214,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
       bills: (()=>{
         const today = new Date();
-        const upcoming = bills.filter(b=>b.status==="unpaid").sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).slice(0,4);
+        const upcoming = bills.filter(isOpenPayableBill).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)).slice(0,4);
         const overdue = upcoming.filter(b=>new Date(b.dueDate)<today);
         const todayStrFocus = toLocalDateStr(today);
         const in7Focus = toLocalDateStr(new Date(Date.now()+7*24*60*60*1000));
@@ -16849,7 +16849,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       bills.forEach(b => {
         if (b.status === "cancelled") return;
         const badge = getBillBadge(b, contributions);
-        if (badge.kind !== "overdue" && badge.kind !== "due") return;
+        if (badge.kind === "check" ? !needsStatementCheck(b) : (badge.kind !== "overdue" && badge.kind !== "due")) return;
         const ba = billerAccounts.find(x => String(x.id) === String(b.billerAccountId));
         const shell = ba?.billerId ? billers.find(x => x.id === ba.billerId) : null;
         // F5 — an Insurance renewal Bill (created via F4) has no billerAccountId at all (Insurance
@@ -16858,7 +16858,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const linkedPolicy = b.insurancePolicyId ? insurancePolicies.find(p => String(p.id) === String(b.insurancePolicyId)) : null;
         const connName = b.isCcStatement ? (shell?.name || ba?.name || b.name) : (ba?.name || linkedPolicy?.name || b.name);
         const categoryText = b.isCcStatement
-          ? `Credit card · ${getCardVerificationText(b)}`
+          ? `Credit card · ${badge.kind === "check" ? getStatementCheckText(b, sym) : getCardVerificationText(b)}`
           : linkedPolicy ? `Insurance · ${linkedPolicy.insuredPerson || ""}`
           : `${ba?.type || ""}${ba ? ` · ${getBillerOwnerLabel(ba)}` : ""}`;
         rows.push({
@@ -16869,7 +16869,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           period: getBillPeriodLabel(b),
           categoryText,
           amount: badge.balance.remaining,
-          badgeText: getBadgeText(badge, b).text,
+          badgeText: badge.kind === "check" ? "Needs check" : getBadgeText(badge, b).text,
           onClick: () => { if (b.isCcStatement) setViewingCcStatementId(b.id); else setViewingBillId(b.id); },
         });
       });
@@ -16912,7 +16912,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const overdueCount = toPayRows.filter(r => r.kind === "overdue").length;
     // "All bills · N" — every still-open obligation, not just the next-14-days ones above (the
     // existing "bills" tab/BillsList this links to already shows the full horizon).
-    const allOpenBillsCount = bills.filter(b => { const k = getBillBadge(b, contributions).kind; return k !== "paid" && k !== "cancelled"; }).length;
+    const allOpenBillsCount = bills.filter(b => { const k = getBillBadge(b, contributions).kind; return k !== "paid" && k !== "cancelled" && k !== "check"; }).length;
     const allOpenSchoolCount = feePeriods.filter(p => p.startingStateDeclared && calculateOutstanding(p) > 0).length;
     const allOpenCount = allOpenBillsCount + allOpenSchoolCount;
 
@@ -16935,7 +16935,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               ? (coverage.status === "expired" ? `Expired ${formatShortDate(coverage.validUntil) || coverage.validUntil}` : `Ends ${formatShortDate(coverage.validUntil) || coverage.validUntil}`)
               : "No recharge yet";
           } else if (MEMBERSHIP_TYPES.includes(ba.type)) {
-            const nextUnpaid = baBills.filter(b => b.status === "unpaid" && b.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
+            const nextUnpaid = baBills.filter(b => isOpenPayableBill(b) && b.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
             if (nextUnpaid) {
               const badge = getBillBadge(nextUnpaid, contributions);
               statusLine = badge.kind === "overdue" ? `Overdue · ${sym}${fmt(badge.balance.remaining)} left` : `Due ${formatShortDate(nextUnpaid.dueDate) || nextUnpaid.dueDate} · ${sym}${fmt(badge.balance.remaining)}`;
@@ -16945,7 +16945,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               statusLine = status ? (status.kind === "overdue" ? `Overdue renewal · ${status.days}d` : `Renews ${formatShortDate(addDaysToDateStr(today, status.days)) || ""}`) : "Active";
             }
           } else {
-            const nextUnpaid = baBills.filter(b => b.status === "unpaid" && b.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
+            const nextUnpaid = baBills.filter(b => isOpenPayableBill(b) && b.dueDate).sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
             if (nextUnpaid) {
               const badge = getBillBadge(nextUnpaid, contributions);
               statusLine = badge.kind === "overdue" ? `Overdue · ${sym}${fmt(badge.balance.remaining)} left` : `Due ${formatShortDate(nextUnpaid.dueDate) || nextUnpaid.dueDate} · ${sym}${fmt(badge.balance.remaining)}`;
@@ -17069,7 +17069,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div style={{ color: T.sub,fontSize: 10.5,marginTop: 2,overflow: "hidden",textOverflow: "ellipsis",whiteSpace: "nowrap" }}>{row.categoryText}</div>
                 </div>
                 <div style={{ textAlign: "right",flexShrink: 0 }}>
-                  <div style={{ color: T.text,fontSize: 13,fontWeight: 800 }}>{sym}{fmt(row.amount)}</div>
+                  <div style={{ color: T.text,fontSize: 13,fontWeight: 800 }}>{row.kind === "check" ? "—" : `${sym}${fmt(row.amount)}`}</div>
                   <div style={{ color: row.kind === "overdue" ? T.danger : T.warn,fontSize: 10,fontWeight: 700,marginTop: 2 }}>{row.badgeText}</div>
                 </div>
                 <span style={{ color: T.sub,fontSize: 14,flexShrink: 0 }}>›</span>
@@ -17138,7 +17138,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const forLabel = getBillerOwnerLabel(ba);
     const statusLabel = rel ? (rel.status === "active" ? "Active" : rel.status === "paused" ? "Paused" : "Ended") : "Active";
 
-    const openBill = useMemo(() => [...baBills].filter(b => b.status === "unpaid" && b.status !== "cancelled").sort((a, b) => String(a.dueDate || "9999").localeCompare(String(b.dueDate || "9999")))[0] || null, [baBills]);
+    const openBill = useMemo(() => [...baBills].filter(isOpenPayableBill).sort((a, b) => String(a.dueDate || "9999").localeCompare(String(b.dueDate || "9999")))[0] || null, [baBills]);
     const recentPaid = useMemo(() => [...baBills].filter(b => b.status === "paid").sort((a, b) => String(b.paidDate || "").localeCompare(String(a.paidDate || ""))).slice(0, 2), [baBills]);
     const allOpenOrPaidCount = baBills.filter(b => b.status !== "cancelled").length;
 
@@ -17199,7 +17199,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if (subView === "allBills") {
       const yearOf = b => { const d = b.dueDate || b.billDate || b.paidDate; const y = d ? Number(String(d).slice(0, 4)) : new Date().getFullYear(); return y; };
       const live = baBills.filter(b => b.status !== "cancelled");
-      const topay = live.filter(b => b.status === "unpaid").sort((a, b) => String(a.dueDate || "9999").localeCompare(String(b.dueDate || "9999")));
+      const topay = live.filter(isOpenPayableBill).sort((a, b) => String(a.dueDate || "9999").localeCompare(String(b.dueDate || "9999")));
       const paid = live.filter(b => b.status === "paid").sort((a, b) => String(b.paidDate || "").localeCompare(String(a.paidDate || "")));
       const all = [...topay, ...paid];
       const shown = billsSubTab === "topay" ? topay : billsSubTab === "paid" ? paid : all;
@@ -17515,7 +17515,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     {cat.types.map(type=>{
                       const billersOfType = billers.filter(b=>b.type===type);
                       const accsOfType = billerAccounts.filter(ba=>ba.type===type);
-                      const unpaid = accsOfType.reduce((sum,ba)=>sum+bills.filter(b=>String(b.billerAccountId)===String(ba.id)&&b.status==="unpaid").length,0);
+                      const unpaid = accsOfType.reduce((sum,ba)=>sum+bills.filter(b=>String(b.billerAccountId)===String(ba.id)&&isOpenPayableBill(b)).length,0);
                       return (
                         <div key={type} onClick={()=>{
                           setShowAddActivateSheet(false);
@@ -20359,7 +20359,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
                   {billersOfType.map(b=>{
                     const accs = billerAccounts.filter(ba=>ba.billerId===b.id);
-                    const unpaidCount = accs.reduce((sum,ba)=>sum+bills.filter(bl=>String(bl.billerAccountId)===String(ba.id)&&bl.status==="unpaid").length,0);
+                    const unpaidCount = accs.reduce((sum,ba)=>sum+bills.filter(bl=>String(bl.billerAccountId)===String(ba.id)&&isOpenPayableBill(bl)).length,0);
                     return (
                       <div key={b.id} onClick={()=>{ setActiveBillerShell(b); setCategoryAccountsView(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}` }}>
                         <div>
@@ -20452,7 +20452,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         {accs.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No one added yet. Tap below to add Self, family, or anyone else.</div>}
                         {accs.map(ba=>{
                           const baBills = bills.filter(b=>String(b.billerAccountId)===String(ba.id));
-                          const unpaidCount = baBills.filter(b=>b.status==="unpaid").length;
+                          const unpaidCount = baBills.filter(isOpenPayableBill).length;
                           const lastBill = [...baBills].sort((a,b2)=>(b2.createdAt||0)-(a.createdAt||0))[0];
                           return (
                             <div key={ba.id} onClick={()=>{ setActiveBillerForAction(ba); setActiveBillerShell(null); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:14,padding:"12px 14px",cursor:"pointer",border:`1px solid ${unpaidCount>0?T.danger+"44":T.border}` }}>
@@ -20691,7 +20691,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   );
                 })()}
                 {!ba.accId&&actionType!=="membership"&&(()=>{
-                  const nextUnpaid = baBills.filter(b=>b.status==="unpaid"&&b.dueDate).sort((a,b2)=>a.dueDate.localeCompare(b2.dueDate))[0];
+                  const nextUnpaid = baBills.filter(b=>isOpenPayableBill(b)&&b.dueDate).sort((a,b2)=>a.dueDate.localeCompare(b2.dueDate))[0];
                   const paidSorted = baBills.filter(b=>b.status==="paid").sort((a,b2)=>(b2.paidDate||b2.billDate||"").localeCompare(a.paidDate||a.billDate||""));
                   const lastPaid = paidSorted[0];
                   const avgAmt = paidSorted.length ? Math.round(paidSorted.reduce((s,b)=>s+Number(b.amount||0),0)/paidSorted.length) : 0;
@@ -20724,7 +20724,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     (different amount/period), so only the person opening this account can say
                     they match. */}
                 {actionType==="membership"&&(()=>{
-                  const openBills = baBills.filter(b=>b.status==="unpaid");
+                  const openBills = baBills.filter(isOpenPayableBill);
                   if(!openBills.length) return null;
                   return (
                     <div style={{ background:T.danger+"14",border:`1px solid ${T.danger}33`,borderRadius:14,padding:"13px",marginBottom:12 }}>

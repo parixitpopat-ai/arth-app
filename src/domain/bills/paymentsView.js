@@ -8,7 +8,7 @@
 // Upcoming, Paid, plus Cancelled (left out of totals). Each row carries its
 // single D-16 badge. Expected items (M5) are not Bills and never appear here.
 
-import { getBillBadge } from "../obligations/billBalance.js";
+import { getBillBadge, getStatementCheckText, needsStatementCheck } from "../obligations/billBalance.js";
 import { getBillSplitSource } from "./splitSource.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -44,6 +44,7 @@ export function getBadgeText(badge, bill) {
   switch (badge.kind) {
     case "cancelled": return { text: "Cancelled", tone: "muted" };
     case "paid": return { text: `✓ Paid${bill?.paidDate ? ` ${formatDayMonth(bill.paidDate)}` : ""}`, tone: "positive" };
+    case "check": return { text: getStatementCheckText(bill), tone: "attention" };
     case "overdue": return { text: `${badge.days} day${badge.days === 1 ? "" : "s"} overdue`, tone: "negative" };
     case "partial": return { text: "Partially paid", tone: "attention" };
     case "due": return { text: `Due ${formatDayMonth(bill?.dueDate)}`, tone: "attention" };
@@ -122,6 +123,9 @@ export function buildPaymentsView({ bills, contributions, refDate = new Date(), 
     upcoming: open.filter(r => r.badge.kind !== "overdue" && r.badge.days !== 0 && r.badge.days !== 1).sort(byDue),
     paid: rows.filter(r => r.badge.kind === "paid").sort((a, b) => String(b.bill.paidDate || "").localeCompare(String(a.bill.paidDate || ""))),
     cancelled: rows.filter(r => r.badge.kind === "cancelled"),
+    // A zero-amount card statement the bank disagrees with: something to check, not to pay. Not in any total. (One with no
+    // bank figure either is an empty cycle and is not shown at all.)
+    check: rows.filter(r => needsStatementCheck(r.bill)).sort(byDue),
   };
   const totalUnpaid = Math.round(open.reduce((s, r) => s + r.badge.balance.remaining, 0) * 100) / 100;
   const lastPaid = groups.paid[0] || null;
