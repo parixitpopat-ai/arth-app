@@ -14,6 +14,11 @@ import assert from "node:assert/strict";
 import { getCommitments, isRechargeBiller } from "./commitments.js";
 import { getCardSummary } from "../cards/summaries.js";
 
+// getCommitments takes the card-summary function as an injected argument (it stays a pure function of its inputs). The
+// CC-account fixtures below carry their summary as `_testSummary`; this stub is the injected function that reads it.
+// (The real getCardSummary never read `_testSummary`, so passing it made these cases see no card due at all.)
+const stubCardSummary = account => account._testSummary || {};
+
 // ============================================================
 // Phase A — Characterization of CURRENT Home/Outlook behavior
 // ============================================================
@@ -100,7 +105,7 @@ test("commitment: a recharge-type Bill (billerCategory in the recharge list) is 
 
 test("commitment: CC-statement obligation is included in Committed Spending, synthetic sourceType, unpaid by construction", () => {
   const accounts = [{ id: "cc1", name: "HDFC Card", type: "cc", _testSummary: { currentDue: 15000, dueOn: new Date("2026-09-05") } }];
-  const { committedSpending } = getCommitments([], [], accounts, [], [], null, getCardSummary, {});
+  const { committedSpending } = getCommitments([], [], accounts, [], [], null, stubCardSummary, {});
   const ccEntry = committedSpending.find(x => x.sourceType === "ccStatement");
   assert.equal(ccEntry.amount, 15000);
   assert.equal(ccEntry.status, "unpaid");
@@ -109,8 +114,21 @@ test("commitment: CC-statement obligation is included in Committed Spending, syn
 
 test("commitment: a CC account with currentDue <= 0 produces NO entry (no phantom commitment for a paid-off card)", () => {
   const accounts = [{ id: "cc1", name: "HDFC Card", type: "cc", _testSummary: { currentDue: 0, dueOn: new Date("2026-09-05") } }];
-  const { committedSpending } = getCommitments([], [], accounts, [], [], null, getCardSummary, {});
+  const { committedSpending } = getCommitments([], [], accounts, [], [], null, stubCardSummary, {});
   assert.equal(committedSpending.find(x => x.sourceType === "ccStatement"), undefined);
+});
+
+// Statement-as-bill architecture (Credit Card WP, rule 17): once a real statement Bill exists for a card, that Bill is the
+// obligation. The synthetic card entry only covers a card that has no generated statement yet, so the same due is never
+// counted twice.
+test("commitment: a card with a generated statement Bill gets NO synthetic entry — the Bill is the one source", () => {
+  const accounts = [{ id: "cc1", name: "HDFC Card", type: "cc", _testSummary: { currentDue: 15000, dueOn: new Date("2026-09-05") } }];
+  const bills = [{ id: "s1", isCcStatement: true, accId: "cc1", name: "HDFC Card Statement", amount: 15000, status: "unpaid", dueDate: "2026-09-05" }];
+  const { committedSpending } = getCommitments(bills, [], accounts, [], [], null, stubCardSummary, {});
+  assert.equal(committedSpending.length, 1);
+  assert.equal(committedSpending[0].sourceType, "bill");
+  assert.equal(committedSpending[0].subCategory, "ccStatement");
+  assert.equal(committedSpending.some(x => x.sourceType === "ccStatement"), false);
 });
 
 test("commitment: active SIP/recurringSchedule appears in Committed Saving, NOT Committed Spending", () => {
@@ -177,7 +195,7 @@ test("commitment: no accidental double-counting — a household with one Bill, o
   const bills = [{ id: "b1", name: "Electricity", amount: 2000, status: "unpaid" }];
   const schedules = [{ id: "r1", name: "SIP", amount: 5000, day: 5, active: true }];
   const accounts = [{ id: "cc1", name: "Card", type: "cc", _testSummary: { currentDue: 8000, dueOn: new Date("2026-09-05") } }];
-  const { committedSpending, committedSaving } = getCommitments(bills, schedules, accounts, [], [], null, getCardSummary, {});
+  const { committedSpending, committedSaving } = getCommitments(bills, schedules, accounts, [], [], null, stubCardSummary, {});
   assert.equal(committedSpending.length, 2, "1 bill + 1 CC statement");
   assert.equal(committedSaving.length, 1, "1 SIP");
 });
