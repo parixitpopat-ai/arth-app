@@ -19296,24 +19296,30 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setBillSplitPeople({});
     };
 
+    // A prepaid recharge is paid FIRST and used after (recharge, then valid until); a postpaid/other bill is used first and paid by a due date.
+    // So a recharge has no "pay by" date, bill number, bill period or recurring flag: its date is the recharge date and it needs a validity.
+    const effDueDate = isRecharge ? validFrom2 : dueDate;
+    const formReady = Boolean(name.trim() && parseFloat(amount) && effDueDate && (!isRecharge || Number(validityDays)>0));
     const submit=()=>{
-      if(!name.trim()||!parseFloat(amount)||!dueDate||duplicateInvoiceBill) return;
+      if(!formReady||duplicateInvoiceBill) return;
       const shares=calcShares();
       const peopleSplit={};
       Object.entries(shares).forEach(([pid,sh])=>{ peopleSplit[pid]={amount:sh,mode:getSplitShareMode(getPerson(pid))}; });
       const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
       const myShare = billIncludeMe ? Math.max(0, amt-owedByOthers) : 0;
       const groupCollectiveAmount = billGroup ? Math.max(0, amt-owedByOthers-myShare) : 0;
-      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),amount:amt,dueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring,frequency,status:"unpaid",paidDate:null,billDate:billDate||todayStr(),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto,billerAccountId:billerAccountId||null,billerCategory:billerCategory||null,consumerNumber:consumerNumber.trim()||null,lastPaidAmount:lastPaidAmount?parseFloat(lastPaidAmount):null,autoGenerate,isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0,validityDays:validityDays?Number(validityDays):null,planType:planType||null,planDesc:planDesc.trim()||null,validFrom:validFrom2||null,validUntil:validUntilCalc||null,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null,forType:billForType==="unassigned"?"unassigned":billForType,forId:billForType==="unassigned"||billForType==="house"?null:billForId};
+      const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:isRecharge?"":invoiceNo.trim(),amount:amt,dueDate:effDueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring:isRecharge?false:recurring,frequency,status:"unpaid",paidDate:null,billDate:isRecharge?validFrom2:(billDate||todayStr()),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto,billerAccountId:billerAccountId||null,billerCategory:billerCategory||null,consumerNumber:consumerNumber.trim()||null,lastPaidAmount:lastPaidAmount?parseFloat(lastPaidAmount):null,autoGenerate,isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0,validityDays:validityDays?Number(validityDays):null,planType:planType||null,planDesc:planDesc.trim()||null,validFrom:validFrom2||null,validUntil:validUntilCalc||null,billPeriodFrom:isRecharge?null:(billPeriodFrom||null),billPeriodTo:isRecharge?null:(billPeriodTo||null),unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null,forType:billForType==="unassigned"?"unassigned":billForType,forId:billForType==="unassigned"||billForType==="house"?null:billForId};
       setBills(p=>[newBill,...p]);
 
-      const matchingTxn = txns.find(t=>t.type==="expense" && !t.isBillPayment && !t.paidBillId && Number(t.amount)===amt && (billCatIds[0]? t.catId===billCatIds[0] : true));
+      const matchingTxn = isRecharge ? null : txns.find(t=>t.type==="expense" && !t.isBillPayment && !t.paidBillId && Number(t.amount)===amt && (billCatIds[0]? t.catId===billCatIds[0] : true));
       if(matchingTxn){
         setBillMatchSuggestion({bill:newBill,txn:matchingTxn});
       }
 
       setShowAddBill(false);
       setDefaultBillerAccountId("");
+      // Recharge first, pay at the time: go straight to recording how it was paid. (Closing that sheet leaves the recharge open to record later.)
+      if(isRecharge) setMarkingBillPaid(newBill);
     };
 
     return (
@@ -19322,7 +19328,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:hasConnectionPrefill?4:16 }}>
             {/* D2 — the known title/button-text gap, fixed here: a bill added from a connection
                 says so, instead of the same generic "Add Bill" every context used to show. */}
-            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>📅 Add bill{hasConnectionPrefill?"":""}</div>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{isRecharge?"🔁 Recharge":"📅 Add bill"}</div>
             <button onClick={()=>setShowAddBill(false)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
           </div>
           {hasConnectionPrefill && _preBA && (
@@ -19469,13 +19475,27 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             )}
 
             <div>
-              <span style={lbl}>Amount ({sym}) *</span>
+              <span style={lbl}>{isRecharge?"Recharge amount":"Amount"} ({sym}) *</span>
               <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center",border:`1px solid ${amount&&parseFloat(amount)>0?T.border:T.danger+"66"}` }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
             </div>
+            {isRecharge ? (
+              <div data-testid="recharge-details" style={{ background:T.input,borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:8 }}>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>RECHARGE DETAILS</div>
+                <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.5 }}>A prepaid plan is paid first and used after. Add the date you recharged and how long it lasts; there is no due date.</div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                  <div><span style={lbl}>Recharge Date *</span><input data-testid="recharge-date" style={inp} type="date" value={validFrom2} onChange={e=>setValidFrom2(e.target.value)}/></div>
+                  <div><span style={lbl}>Validity (days) *</span><input data-testid="recharge-validity" style={{ ...inp,border:`1px solid ${Number(validityDays)>0?T.border:T.danger+"66"}` }} type="number" placeholder="28, 84, 365" value={validityDays} onChange={e=>setValidityDays(e.target.value)}/></div>
+                </div>
+                {validUntilCalc&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span data-testid="recharge-valid-until" style={{ color:T.success,fontSize:13,fontWeight:800 }}>{formatShortDate(validUntilCalc)||validUntilCalc}</span></div>}
+                <div><span style={lbl}>Plan Type</span><div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>{["Voice+Data","Data Only","Unlimited Calls","SMS+Voice"].map(pt=>(<button key={pt} onClick={()=>setPlanType(p=>p===pt?"":pt)} style={{ background:planType===pt?T.accent+"22":"none",border:`1px solid ${planType===pt?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:planType===pt?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pt}</button>))}</div></div>
+                <div><span style={lbl}>Plan Details</span><input style={inp} placeholder="e.g. 1.5GB/day + unlimited calls" value={planDesc} onChange={e=>setPlanDesc(e.target.value)}/></div>
+              </div>
+            ) : (
             <div>
               <span style={lbl}>Due Date (pay by) *</span>
               <input style={{ ...inp,border:`1px solid ${!dueDate?T.danger+"66":T.border}` }} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/>
             </div>
+            )}
 
             {/* D5 — Split stays a single row reading "Just me" until it's tapped; this is the
                 existing Person/Group allocation (equal/amount/percent/share) already built for
@@ -19564,28 +19584,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   </div>
                 )}
                 <input style={inp} placeholder="Provider / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
-                <input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>
+                {!isRecharge&&<input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>}
                 {duplicateInvoiceBill && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:-4 }}>This invoice number already exists for {duplicateInvoiceBill.name}.</div>}
-                {isRecharge&&(
-                  <div style={{ background:T.input,borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:8 }}>
-                    <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>RECHARGE DETAILS</div>
-                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-                      <div><span style={lbl}>Recharge Date</span><input style={inp} type="date" value={validFrom2} onChange={e=>setValidFrom2(e.target.value)}/></div>
-                      <div><span style={lbl}>Validity (days)</span><input style={inp} type="number" placeholder="28, 84, 365" value={validityDays} onChange={e=>setValidityDays(e.target.value)}/></div>
-                    </div>
-                    {validUntilCalc&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span style={{ color:T.success,fontSize:12,fontWeight:800 }}>{formatShortDate(validUntilCalc)||validUntilCalc}</span></div>}
-                    <div><span style={lbl}>Plan Type</span><div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>{["Voice+Data","Data Only","Unlimited Calls","SMS+Voice"].map(pt=>(<button key={pt} onClick={()=>setPlanType(p=>p===pt?"":pt)} style={{ background:planType===pt?T.accent+"22":"none",border:`1px solid ${planType===pt?T.accent:T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:planType===pt?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pt}</button>))}</div></div>
-                    <div><span style={lbl}>Plan Details</span><input style={inp} placeholder="e.g. 1.5GB/day + unlimited calls" value={planDesc} onChange={e=>setPlanDesc(e.target.value)}/></div>
-                  </div>
-                )}
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                {!isRecharge&&<div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
                   <div><span style={lbl}>Bill Date (generated on)</span><input style={inp} type="date" value={billDate} onChange={e=>setBillDate(e.target.value)}/></div>
                   <div><span style={lbl}>Bill period from</span><input style={inp} type="date" value={billPeriodFrom} onChange={e=>setBillPeriodFrom(e.target.value)}/></div>
                   <div><span style={lbl}>Bill period to</span><input style={inp} type="date" value={billPeriodTo} onChange={e=>setBillPeriodTo(e.target.value)}/></div>
                   {showsMeterFields && <div><span style={lbl}>Units Consumed</span><input style={inp} type="number" placeholder="e.g. 412" value={unitsConsumed} onChange={e=>setUnitsConsumed(e.target.value)}/></div>}
                   {showsMeterFields && <div><span style={lbl}>Meter Reading</span><input style={inp} type="number" placeholder="e.g. 25890" value={meterReading} onChange={e=>setMeterReading(e.target.value)}/></div>}
-                </div>
-                <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+                </div>}
+                {!isRecharge&&<div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
                   <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:recurring?12:0 }}>
                     <input type="checkbox" id="recurring" checked={recurring} onChange={e=>setRecurring(e.target.checked)} style={{ width:18,height:18,accentColor:T.accent,cursor:"pointer" }}/>
                     <label htmlFor="recurring" style={{ color:T.text,fontSize:14,fontWeight:700,cursor:"pointer" }}>🔁 Recurring bill</label>
@@ -19595,10 +19603,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       <button key={v} onClick={()=>setFrequency(v)} style={{ background:frequency===v?T.accent+"22":"none",border:`1px solid ${frequency===v?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:frequency===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
                     ))}
                   </div>}
-                </div>
+                </div>}
                 <div style={{ background:T.input,borderRadius:12,padding:"11px 14px",display:"flex",alignItems:"center",gap:10 }}>
                   <span>📷</span>
-                  <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1 }}>Attach Bill Photo (optional)</span>
+                  <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1 }}>{isRecharge?"Attach Receipt (optional)":"Attach Bill Photo (optional)"}</span>
                   <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>
                     {billPhoto?"Change":"Upload"}
                     <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setBillPhoto(ev.target.result); r.readAsDataURL(f); }}/>
@@ -19611,7 +19619,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={()=>setShowAddBill(false)} style={btnG}>Cancel</button>
-              <button onClick={submit} disabled={!name.trim()||!parseFloat(amount)||!dueDate} style={{ ...btnP,opacity:(name.trim()&&parseFloat(amount)&&dueDate)?1:0.5 }}>{!dueDate&&name.trim()&&parseFloat(amount)?"Enter a due date":"Add bill"}</button>
+              <button data-testid="addbill-submit" onClick={submit} disabled={!formReady} style={{ ...btnP,opacity:formReady?1:0.5 }}>{formReady?(isRecharge?"Record recharge":"Add bill"):(isRecharge?(name.trim()&&parseFloat(amount)&&!(Number(validityDays)>0)?"Enter the validity":"Record recharge"):(!dueDate&&name.trim()&&parseFloat(amount)?"Enter a due date":"Add bill"))}</button>
             </div>
             </>)}
           </div>
