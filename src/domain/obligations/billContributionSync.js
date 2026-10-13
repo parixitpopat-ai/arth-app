@@ -28,9 +28,10 @@ const isBillContributionOfTxn = (c, txnId) => c?.obligationType === BILL && same
  * Contribution for the same pair is replaced, never duplicated. A non-positive
  * amount writes nothing (and removes a stale one) instead of throwing.
  */
-export function withBillContributionForTxn(prevContributions, { billId, txnId, amount, txnAmount }, genId) {
+export function withBillContributionForTxn(prevContributions, { billId, txnId, amount, txnAmount, lineItemId, lineItemAmount }, genId) {
+  // With a lineItemId only that item's contribution to this Bill is replaced (WP-5); without one, the pair's as before.
   const without = (prevContributions || []).filter(
-    c => !(isBillContributionOfTxn(c, txnId) && sameId(c.obligationId, billId))
+    c => !(isBillContributionOfTxn(c, txnId) && sameId(c.obligationId, billId) && (lineItemId == null || sameId(c.lineItemId, lineItemId)))
   );
   const amt = Number(amount);
   const txnAmt = Number(txnAmount);
@@ -41,6 +42,7 @@ export function withBillContributionForTxn(prevContributions, { billId, txnId, a
     txnId: String(txnId),
     amount: amt,
     txnAmount: txnAmt,
+    ...(lineItemId != null ? { lineItemId: String(lineItemId), lineItemAmount: Number(lineItemAmount) } : {}),
   }, genId);
 }
 

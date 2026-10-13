@@ -85,7 +85,7 @@ export class ContributionValidationError extends Error {
  *   obligationId, txnId, amount, createdAt }
  * @throws {ContributionValidationError}
  */
-export function createContribution({ obligationType, obligationId, txnId, amount, txnAmount } = {}, genId) {
+export function createContribution({ obligationType, obligationId, txnId, amount, txnAmount, lineItemId, lineItemAmount } = {}, genId) {
   if (!obligationType || typeof obligationType !== "string" || !obligationType.trim()) {
     throw new ContributionValidationError("createContribution: obligationType is required");
   }
@@ -109,6 +109,21 @@ export function createContribution({ obligationType, obligationId, txnId, amount
   if (typeof genId !== "function") {
     throw new ContributionValidationError("createContribution: genId function is required");
   }
+  // UI-2C WP-5 (T-34): an itemised transaction can pay a Bill from ONE item. The link then lives on the item, and the
+  // per-item check is alongside (not instead of) amount <= txnAmount: a contribution cannot be worth more than its item.
+  // No lineItemId = the whole transaction counts as one item (the record is exactly as before, with no new key).
+  const hasItem = lineItemId != null;
+  if (hasItem) {
+    if (typeof lineItemId !== "string" || !lineItemId.trim()) {
+      throw new ContributionValidationError("createContribution: lineItemId must be a non-empty string when given");
+    }
+    if (!Number.isFinite(lineItemAmount) || lineItemAmount <= 0) {
+      throw new ContributionValidationError("createContribution: lineItemAmount must be a positive number when lineItemId is given");
+    }
+    if (amount > lineItemAmount + 0.005) {
+      throw new ContributionValidationError("createContribution: amount cannot exceed the line item's own amount (lineItemAmount)");
+    }
+  }
 
   return {
     id: genId(),
@@ -116,8 +131,32 @@ export function createContribution({ obligationType, obligationId, txnId, amount
     obligationId,
     txnId,
     amount,
+    ...(hasItem ? { lineItemId } : {}),
     createdAt: Date.now(),
   };
+}
+
+const round2 = n => Math.round((Number(n) || 0) * 100) / 100;
+
+/** A line item's own amount: qty x unitPrice (what every reader of lineItems already computes; see itemLineMath.js). */
+export function getLineItemAmount(line) {
+  if (!line) return 0;
+  const qty = line.qty === undefined || line.qty === null || line.qty === "" ? 1 : Number(line.qty);
+  return round2(qty * Number(line.unitPrice || 0));
+}
+
+/** Everything this transaction's ONE item has contributed (across obligations). */
+export function getLineItemContributed(contributions, txnId, lineItemId) {
+  return round2((contributions || [])
+    .filter(c => c.txnId === txnId && c.lineItemId === lineItemId)
+    .reduce((sum, c) => sum + Number(c.amount || 0), 0));
+}
+
+/** What is left of one item after its contributions; never negative. */
+export function getLineItemUnallocated(txn, lineItemId, contributions) {
+  const line = (txn?.lineItems || []).find(l => String(l.id) === String(lineItemId));
+  if (!line) return 0;
+  return round2(Math.max(0, getLineItemAmount(line) - getLineItemContributed(contributions, txn.id, lineItemId)));
 }
 
 /**
@@ -141,6 +180,13 @@ export function createContribution({ obligationType, obligationId, txnId, amount
  */
 export function withNewContribution(prevContributions, input, genId) {
   const contribution = createContribution(input, genId);
+  if (contribution.lineItemId !== undefined) {
+    // Several contributions can come from one item over time (e.g. to two Bills): together they cannot exceed the item.
+    const already = getLineItemContributed(prevContributions, contribution.txnId, contribution.lineItemId);
+    if (already + contribution.amount > input.lineItemAmount + 0.005) {
+      throw new ContributionValidationError("withNewContribution: this item's contributions would exceed the line item's amount");
+    }
+  }
   return [...(prevContributions || []), contribution];
 }
 
