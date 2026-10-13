@@ -109,6 +109,7 @@ import { PersonProfileScreen } from "./screens/PersonProfileScreen";
 import { isSchoolRelationshipCurrent, getSchoolRelationships, getCurrentSchoolBillerAccountIds, migrateSchoolRelationshipsIntoCanonicalStore } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { getCommitments, isRechargeBiller } from "./domain/bills/commitments";
+import { getRechargeWords } from "./domain/bills/rechargeWords";
 import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
@@ -19228,7 +19229,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [unitsConsumed,setUnitsConsumed]=useState("");
     const [meterReading,setMeterReading]=useState("");
     // Prepaid recharge fields
-    const isRecharge = ["Mobile Prepaid","Fastag","Metro Recharge","NCMC Recharge","EV Recharge","Prepaid Meter","DTH"].includes(billerCategory);
+    const isRecharge = isRechargeBiller(billerCategory);
+    const rw = getRechargeWords(billerCategory);
     const [validityDays,setValidityDays]=useState("");
     const [planType,setPlanType]=useState("");
     const [planDesc,setPlanDesc]=useState("");
@@ -19328,7 +19330,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:hasConnectionPrefill?4:16 }}>
             {/* D2 — the known title/button-text gap, fixed here: a bill added from a connection
                 says so, instead of the same generic "Add Bill" every context used to show. */}
-            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{isRecharge?"🔁 Recharge":"📅 Add bill"}</div>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{isRecharge?`🔁 ${rw.title}`:"📅 Add bill"}</div>
             <button onClick={()=>setShowAddBill(false)} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
           </div>
           {hasConnectionPrefill && _preBA && (
@@ -19475,19 +19477,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             )}
 
             <div>
-              <span style={lbl}>{isRecharge?"Recharge amount":"Amount"} ({sym}) *</span>
+              <span style={lbl}>{isRecharge?rw.amount:"Amount"} ({sym}) *</span>
               <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center",border:`1px solid ${amount&&parseFloat(amount)>0?T.border:T.danger+"66"}` }} type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)}/>
             </div>
             {isRecharge ? (
               <div data-testid="recharge-details" style={{ background:T.input,borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:8 }}>
-                <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>RECHARGE DETAILS</div>
-                <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.5 }}>A prepaid plan is paid first and used after. Add the date you recharged and how long it lasts; there is no due date.</div>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>{rw.details}</div>
+                <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.5 }}>{rw.intro}</div>
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-                  <div><span style={lbl}>Recharge Date *</span><input data-testid="recharge-date" style={inp} type="date" value={validFrom2} onChange={e=>setValidFrom2(e.target.value)}/></div>
+                  <div><span style={lbl}>{rw.date} *</span><input data-testid="recharge-date" style={inp} type="date" value={validFrom2} onChange={e=>setValidFrom2(e.target.value)}/></div>
                   <div><span style={lbl}>Validity (days) *</span><input data-testid="recharge-validity" style={{ ...inp,border:`1px solid ${Number(validityDays)>0?T.border:T.danger+"66"}` }} type="number" placeholder="28, 84, 365" value={validityDays} onChange={e=>setValidityDays(e.target.value)}/></div>
                 </div>
                 {validUntilCalc&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span data-testid="recharge-valid-until" style={{ color:T.success,fontSize:13,fontWeight:800 }}>{formatShortDate(validUntilCalc)||validUntilCalc}</span></div>}
-                <div><span style={lbl}>Plan Type</span><div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>{["Voice+Data","Data Only","Unlimited Calls","SMS+Voice"].map(pt=>(<button key={pt} onClick={()=>setPlanType(p=>p===pt?"":pt)} style={{ background:planType===pt?T.accent+"22":"none",border:`1px solid ${planType===pt?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:planType===pt?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pt}</button>))}</div></div>
+                {rw.presets.length>0&&<div data-testid="period-presets" style={{ display:"flex",gap:6,flexWrap:"wrap" }}>{rw.presets.map(pr=>(<button key={pr.label} onClick={()=>setValidityDays(String(pr.days))} style={{ background:Number(validityDays)===pr.days?T.accent+"22":"none",border:`1px solid ${Number(validityDays)===pr.days?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:Number(validityDays)===pr.days?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pr.label}</button>))}</div>}
+                {rw.kind==="recharge"&&<div><span style={lbl}>Plan Type</span><div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>{["Voice+Data","Data Only","Unlimited Calls","SMS+Voice"].map(pt=>(<button key={pt} onClick={()=>setPlanType(p=>p===pt?"":pt)} style={{ background:planType===pt?T.accent+"22":"none",border:`1px solid ${planType===pt?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:planType===pt?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pt}</button>))}</div></div>}
                 <div><span style={lbl}>Plan Details</span><input style={inp} placeholder="e.g. 1.5GB/day + unlimited calls" value={planDesc} onChange={e=>setPlanDesc(e.target.value)}/></div>
               </div>
             ) : (
@@ -19619,7 +19622,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={()=>setShowAddBill(false)} style={btnG}>Cancel</button>
-              <button data-testid="addbill-submit" onClick={submit} disabled={!formReady} style={{ ...btnP,opacity:formReady?1:0.5 }}>{formReady?(isRecharge?"Record recharge":"Add bill"):(isRecharge?(name.trim()&&parseFloat(amount)&&!(Number(validityDays)>0)?"Enter the validity":"Record recharge"):(!dueDate&&name.trim()&&parseFloat(amount)?"Enter a due date":"Add bill"))}</button>
+              <button data-testid="addbill-submit" onClick={submit} disabled={!formReady} style={{ ...btnP,opacity:formReady?1:0.5 }}>{formReady?(isRecharge?rw.button:"Add bill"):(isRecharge?(name.trim()&&parseFloat(amount)&&!(Number(validityDays)>0)?"Enter the validity":rw.button):(!dueDate&&name.trim()&&parseFloat(amount)?"Enter a due date":"Add bill"))}</button>
             </div>
             </>)}
           </div>
@@ -20684,18 +20687,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {isRechargeBiller(ba.type)&&(()=>{
                   const coverage = getPrepaidCoverage(baBills);
                   const history = getPrepaidHistory(baBills);
+                  const rw = getRechargeWords(ba.type);
                   const doRecharge = ()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); setActiveBillerForAction(null); };
                   const kicker = { color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1 };
                   const rechargeBtn = (
-                    <button data-testid="prepaid-recharge-btn" onClick={doRecharge} style={{ width:"100%",minHeight:48,marginTop:12,background:T.accent,border:"none",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"inherit" }}>Recharge</button>
+                    <button data-testid="prepaid-recharge-btn" onClick={doRecharge} style={{ width:"100%",minHeight:48,marginTop:12,background:T.accent,border:"none",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"inherit" }}>{rw.action}</button>
                   );
                   // W1/W2 — same card frame in both states; zero recharges is a valid state, never "0 days left".
                   const accName = b=>{ const tx = txns.find(t=>String(t.id)===String(b.paidByTxnId)); return tx ? (accounts.find(a=>String(a.id)===String(tx.accId))?.name||"") : ""; };
                   const rechargesList = (
                     <div data-testid="prepaid-recharges" style={{ marginBottom:12 }}>
-                      <div style={{ ...kicker,margin:"4px 2px 8px" }}>Recharges</div>
+                      <div style={{ ...kicker,margin:"4px 2px 8px" }}>{rw.list}</div>
                       {history.length===0 ? (
-                        <div style={{ color:T.sub,fontSize:13,padding:"4px 2px" }}>Recharges you record appear here.</div>
+                        <div style={{ color:T.sub,fontSize:13,padding:"4px 2px" }}>{rw.emptyList}</div>
                       ) : (
                         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"0 12px" }}>
                           {history.slice(0,6).map((b,i)=>(
@@ -20716,9 +20720,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     return (
                       <>
                         <div data-testid="prepaid-coverage-empty" style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:16,marginBottom:12 }}>
-                          <div style={kicker}>Prepaid coverage</div>
-                          <div style={{ color:T.text,fontSize:16,fontWeight:800,margin:"8px 0 4px" }}>No recharge recorded yet</div>
-                          <div style={{ color:T.sub,fontSize:13,lineHeight:1.5 }}>Coverage starts from your first recharge. Record one and Arth shows the plan, its validity and what's left.</div>
+                          <div style={kicker}>{rw.coverage}</div>
+                          <div style={{ color:T.text,fontSize:16,fontWeight:800,margin:"8px 0 4px" }}>{rw.none}</div>
+                          <div style={{ color:T.sub,fontSize:13,lineHeight:1.5 }}>{rw.noneBody}</div>
                           {rechargeBtn}
                         </div>
                         {rechargesList}
@@ -20736,7 +20740,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <>
                       <div data-testid="prepaid-coverage-card" data-status={coverage.status} style={{ background:T.card,border:`1px solid ${coverage.status==="expiring_soon"?T.warn:T.border}`,borderRadius:16,padding:16,marginBottom:12 }}>
                         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
-                          <div style={kicker}>Prepaid coverage</div>
+                          <div style={kicker}>{rw.coverage}</div>
                           {coverage.status==="expiring_soon"&&<span data-testid="prepaid-expiring-badge" style={{ border:`1px solid ${T.warn}`,color:T.warn,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap" }}>Expiring soon</span>}
                         </div>
                         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,margin:"8px 0 6px",minWidth:0 }}>
@@ -20824,7 +20828,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     // F3 — recharge-type connections (Mobile Prepaid, Fastag, DTH, ...) frame this
                     // as "Recharge" instead of the generic "Add Bill" label; it's the exact same
                     // flow underneath (AddBillModal's isRecharge fields), reused, not redrawn.
-                    <button onClick={()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); setActiveBillerForAction(null); }} style={{ background:T.info+"22",border:`1px solid ${T.info}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>{isRechargeBiller(ba.type)?"🔁 Recharge":"📄 Add Bill"}</button>
+                    <button onClick={()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); setActiveBillerForAction(null); }} style={{ background:T.info+"22",border:`1px solid ${T.info}33`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.info,fontFamily:"Nunito,sans-serif" }}>{isRechargeBiller(ba.type)?`🔁 ${getRechargeWords(ba.type).action}`:"📄 Add Bill"}</button>
                   )}
                   {/* Attach Past Expenses is for reconciling bill-style payments already recorded elsewhere —
                       doesn't apply to pure memberships, which are self-contained payment+allocation records. */}

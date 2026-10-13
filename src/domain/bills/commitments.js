@@ -22,9 +22,12 @@
 import { getNetBillAmount } from "./refunds.js";
 import { dateAtDay, toLocalDateStr } from "../../helpers/dateHelpers.js";
 
-const RECHARGE_CATEGORIES = ["Mobile Prepaid", "Fastag", "Metro Recharge", "NCMC Recharge", "EV Recharge", "Prepaid Meter", "DTH"];
+// Paid FIRST, used after, for a period (valid until): prepaid recharges and streaming subscriptions. Everything else (postpaid, utilities...) is used first and paid by a due date.
+const SUBSCRIPTION_CATEGORIES = ["OTT / Streaming"];
+const RECHARGE_CATEGORIES = ["Mobile Prepaid", "Fastag", "Metro Recharge", "NCMC Recharge", "EV Recharge", "Prepaid Meter", "DTH", ...SUBSCRIPTION_CATEGORIES];
 
 export const isRechargeBiller = (billerCategory) => RECHARGE_CATEGORIES.includes(billerCategory);
+export const isSubscriptionBiller = (billerCategory) => SUBSCRIPTION_CATEGORIES.includes(billerCategory);
 
 /**
  * Household's own share of a Bill's amount — faithful reproduction of the

@@ -230,5 +230,5 @@ test("ADR-038: a partially paid Bill commits no more than its remaining balance"
 // Prepaid is paid first and used after (recharge, valid until); postpaid is used first and paid by a due date. Only the former is a recharge.
 test("recharge types are the prepaid ones; Mobile Postpaid, Broadband and the like are ordinary bills", () => {
   for (const c of ["Mobile Prepaid", "DTH", "Fastag", "Metro Recharge", "NCMC Recharge", "EV Recharge", "Prepaid Meter"]) assert.equal(isRechargeBiller(c), true, c);
-  for (const c of ["Mobile Postpaid", "Broadband", "Landline", "Electricity", "Cable TV", "OTT / Streaming", "Credit Card"]) assert.equal(isRechargeBiller(c), false, c);
+  for (const c of ["Mobile Postpaid", "Broadband", "Landline", "Electricity", "Cable TV", "Credit Card"]) assert.equal(isRechargeBiller(c), false, c);
 });
