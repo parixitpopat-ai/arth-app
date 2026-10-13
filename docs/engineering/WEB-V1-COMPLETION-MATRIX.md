@@ -56,7 +56,7 @@ A "required" item means a source above names it for Web v1. Where the sources di
 | 34 | Prepaid coverage on biller detail (WP9) | `domain/bills/prepaidUtilisation.js` | `prepaidUtilisation.test.js` | at-merge | IU | Low |
 | 35 | Quarterly/yearly membership is one dated Outlook item (DEC) | `membership/futureMoney.js`, `futureMoney/rhythm.js` | their tests | at-merge | IU | Low |
 | 36 | Gym check-in catch-up with a break option (DEC) | `membership/checkIn.js` | `checkIn.test.js` | at-merge | IU | Low |
-| 37 | Plan Ahead readiness card and nudge state, synced (WP-A) | `domain/budget/readiness.js`, `nudge.js` | their tests | main-13Oct (card opens in budget flow only partly: script tail failed) | IU | Device + two-device (checklist 6; §4 step 5). **High** (named by you) |
+| 37 | Plan Ahead readiness card and nudge state, synced (WP-A) | `domain/budget/readiness.js`, `nudge.js` | their tests | none today (the one script that opens it failed on a selector after its school-fee step); at-merge only | IU | Device + two-device (checklist 6; §4 step 5). **High** (named by you) |
 
 ## D. Reports (ARTH_SCOPE screen 12; roadmap Phase 5)
 The frozen list names a Reports screen; `SCREEN_ARCHITECTURE.md` marks it not started; `V1_DEFINITION.md` leaves v1-or-later undecided. The audit below is of what exists.
