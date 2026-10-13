@@ -50,7 +50,8 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
   const addLine = () => setLines(prev => [...prev, { id: lineId(), method: PAYMENT_METHODS[0], accId: "", amount: String(Math.max(0, paidWithDifference(prev.map(l => ({ ...l, amount: parseFloat(l.amount) || 0 })), amount))) }]);
   const removeLine = id => setLines(prev => prev.length > 2 ? prev.filter(l => l.id !== id) : prev);
 
-  const eligibleAccounts = (accounts || []).filter(a => a.type !== "cc");
+  // `accounts` is already the list of valid sources (bank, cash, credit card; no debit/UPI/investment; no card for a card statement).
+  const eligibleAccounts = accounts || [];
   const lbl = { color: T.sub, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", display: "block", marginBottom: 6 };
   const inp = { width: "100%", boxSizing: "border-box", minHeight: TOUCH.min, background: T.input, border: `1px solid ${T.borderStrong}`, borderRadius: RADIUS.md, padding: "0 12px", color: T.text, fontSize: 15, fontFamily: FONT.sans, outline: "none" };
   const subtitle = [bill.name, forLabel ? `for ${forLabel}` : null, `balance ${sym}${fmt(remaining)}`].filter(Boolean).join(" · ");

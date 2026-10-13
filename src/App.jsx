@@ -110,6 +110,7 @@ import { isSchoolRelationshipCurrent, getSchoolRelationships, getCurrentSchoolBi
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { getCommitments, isRechargeBiller } from "./domain/bills/commitments";
 import { getRechargeWords } from "./domain/bills/rechargeWords";
+import { getPaidFromAccounts } from "./domain/accounts/paymentSources";
 import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
@@ -1722,6 +1723,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setTxns(prev=>mergeEmiSettlementInto(prev, updatedTxns, txns));
     } else
     setTxns(p=>[{id:paymentTxnId,type:"expense",desc:bill.name,merchant:bill.merchant||"",date:paymentDate,note:"Bill payment",catId:bill.catId,catIds:bill.catIds||[bill.catId],subId:bill.subId||null,accId,...(payment.paymentLines&&payment.paymentLines.length>1?{paymentLines:payment.paymentLines}:{}),people:isFirstPayment?(bill.splitPeople||{}):{},forPerson:attributedPersonId,groupId:bill.groupId||null,groupCollectiveAmount:isFirstPayment?Number(bill.groupCollectiveAmount||0):0,amount:paidAmount,isBillPayment:true,billInvoiceNo:bill.invoiceNo||null,paidBillId:bill.id,paidBillName:bill.name,transactionRef:transactionRef||null,imageBase64:bill.imageBase64||null,paymentImageBase64:bill.paymentImageBase64||null},...p]);
+    // Paid on a credit card (an ordinary bill, never a statement): the card's outstanding rises by what went on it, as Add expense does.
+    {
+      const cardPaid = {};
+      const lines = payment.paymentLines && payment.paymentLines.length>1 ? payment.paymentLines : [{ accId, amount:paidAmount }];
+      lines.forEach(l=>{ if(accounts.find(a=>String(a.id)===String(l.accId))?.type==="cc") cardPaid[l.accId]=(cardPaid[l.accId]||0)+Number(l.amount||0); });
+      if(Object.keys(cardPaid).length) setAccounts(prev=>prev.map(a=>cardPaid[a.id]?{...a,outstanding:(a.outstanding||0)+cardPaid[a.id]}:a));
+    }
     setBills(p=>p.map(x=>x.id===bill.id?{...x,
       ...(becomesPaid?{status:"paid",paidDate:paymentDate}:{}),
       ...(isFirstPayment?{paidByTxnId:paymentTxnId}:{}),
@@ -1739,7 +1747,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     }
     if(typeof navigator!=="undefined" && navigator.onLine===false) setToast({ message:offlineSavedText(bill.name, cloudActiveRef.current), icon:"📴" });
     setMarkingBillPaid(null);
-  }, [billerAccounts, contributions, membershipRelationships, loans, txns]);
+  }, [billerAccounts, contributions, membershipRelationships, loans, txns, accounts]);
 
   // ADR-039 §6 — "Confirm amount": `bill.fromSchedule`. Creates one real, normal Bill from an
   // Expected item, through the same path every other Bill uses — this is the only writer;
@@ -1826,7 +1834,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // account's id are untouched — their balances still compute correctly, they're just no longer
   // offered as a NEW selection. One shared list, used everywhere an account gets picked for
   // paying, so this can't drift into 6 separate copies of the same filter.
-  const paidViaAccounts = useMemo(()=>accounts.filter(a=>a.type!=="debit"&&a.type!=="upi"),[accounts]);
+  // "Paid from" sources: bank, cash, credit card only — never a debit card, UPI handle or investment account (domain/accounts/paymentSources.js).
+  const paidViaAccounts = useMemo(()=>getPaidFromAccounts(accounts,{ isInvestmentAccount }),[accounts]);
   const getPerson = useCallback(id=>people.find(p=>p.id===id)||{name:"?",emoji:"👤",color:"#888",relation:"",personType:"contact"},[people]);
   // UI-2C D-3 — a Bill's own For as display text: the person or group it was created for, or
   // "Unassigned". Never derived from bill.groupId (that is the split context).
@@ -4444,6 +4453,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const validSubIds = subIds.filter(sid=>validCatIds.some(cid=>getCat(cid)?.subs?.some(sub=>sub.id===sid)));
     const catId = validCatIds[0]||null;  // primary cat for backward compat
     const nonCCAccs = paidViaAccounts.filter(a=>a.type!=="cc");
+    // Transfer between accounts: never a debit card or UPI handle at either end (they are payment methods, not accounts); a PPF/FD/NPS account may be either end (deposit / withdrawal). An old transfer keeps the account it already used.
+    const transferAccs = (keepIds)=>accounts.filter(a=>(a.type!=="debit"&&a.type!=="upi") || keepIds.some(id=>String(id)===String(a.id)));
     const ccAccs = accounts.filter(a=>a.type==="cc");
     const investmentMetricConfig = getInvestmentMetricConfig(investType);
     const selectedPids = Object.entries(splitPeople).filter(([,v])=>v).map(([k])=>k).filter(p=>p!=="__me__");
@@ -6421,8 +6432,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {(txnType==="transfer"||txnType==="cc_payment")&&(
               <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-                  <div><span style={lbl}>From</span><select style={inp} value={fromAccId} onChange={e=>setFromAccId(e.target.value)}>{(txnType==="cc_payment"?nonCCAccs:accounts).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
-                  <div><span style={lbl}>To</span><select style={inp} value={toAccId} onChange={e=>setToAccId(e.target.value)}>{(txnType==="cc_payment"?ccAccs:accounts).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
+                  <div><span style={lbl}>From</span><select style={inp} value={fromAccId} onChange={e=>setFromAccId(e.target.value)}>{(txnType==="cc_payment"?nonCCAccs:transferAccs([fromAccId,toAccId])).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
+                  <div><span style={lbl}>To</span><select style={inp} value={toAccId} onChange={e=>setToAccId(e.target.value)}>{(txnType==="cc_payment"?ccAccs:transferAccs([fromAccId,toAccId])).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
                 </div>
                 {txnType==="transfer"&&<div style={{ color:T.sub,fontSize:10 }}>Use `Transfer` for moving money into PPF / FD / NPS accounts. It will not count as an expense, and investment-bucket accounts still show under `Wealth → Investments`.</div>}
               </div>
@@ -21233,8 +21244,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             balance={getBillBalance(markingBillPaid, contributions).remaining}
             forLabel={getBillForLabel(markingBillPaid)}
             today={todayStr()}
-            accounts={accounts}
-            defaultAccId={accounts.find(a=>a.type!=="cc")?.id||""}
+            accounts={getPaidFromAccounts(accounts,{ isInvestmentAccount, allowCard:!markingBillPaid.isCcStatement })}
+            defaultAccId={getPaidFromAccounts(accounts,{ isInvestmentAccount, allowCard:false })[0]?.id||""}
             T={T}
             sym={sym}
             fmt={fmt}
