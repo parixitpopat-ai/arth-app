@@ -158,6 +158,7 @@ import BillsList from "./screens/payments/BillsList";
 import BillDetailSheet from "./screens/payments/BillDetailSheet";
 import { getBillerAccountDeleteBlockers, describeBillerAccountDeleteBlockers } from "./domain/billers/deleteGuard";
 import { getGroupDefaultIntent } from "./domain/group/defaultIntent";
+import { planItemBillLinks, withItemBillContributions, getDroppedItemBills } from "./domain/obligations/itemBillLinks";
 import { withBillContributionForTxn, withoutBillContributionsForTxn, withoutBillContributionsForTxns, reopenBillsPaidByDeletedTxns } from "./domain/obligations/billContributionSync";
 import { nextBillMatchChoice, getBillChoicesToShow, getBillLinkAmountMismatch, mergePaymentIntoExistingBill } from "./domain/bills/billPaymentLink";
 import StatCard from "./components/StatCard";
@@ -4474,6 +4475,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     },[isBillPayment, catId, amt, date, bills]);
     // "" = no confirmed match, "__new__" = explicitly dismissed ("not any of these"), else a bill id.
     const [billMatchChoice, setBillMatchChoice] = useState(isEditing ? (sourceTxn?.paidBillId||"") : "");
+    // T-34 (WP-5) — per-item bill links for an itemised expense: { [itemId]: billId }. The link lives on the item (a Contribution
+    // with lineItemId), not on the transaction. Editing starts from this transaction's own item-level Contributions.
+    const [itemBillLinks, setItemBillLinks] = useState(()=>{
+      if(!isEditing || !sourceTxn?.id) return {};
+      const out = {};
+      (contributions||[]).filter(c=>c?.obligationType==="bill" && c.lineItemId!=null && String(c.txnId)===String(sourceTxn.id)).forEach(c=>{ out[String(c.lineItemId)] = String(c.obligationId); });
+      return out;
+    });
+    const [linkPickerItemId, setLinkPickerItemId] = useState(null);
+    const hasItemBillLinks = Object.keys(itemBillLinks).length>0;
+    // Contributions of other payments only (this transaction's own are re-applied on save), so each item sees what is really still owed.
+    const contributionsWithoutThisTxn = useMemo(()=>(contributions||[]).filter(c=>!(isEditing && String(c.txnId)===String(sourceTxn?.id))),[contributions,isEditing,sourceTxn?.id]);
+    // What each linked item would apply, in item order: an item cannot apply more than its own amount, and a bill cannot take more than it still owes,
+    // counting the items of this same payment that came before it (several items may pay the same bill).
+    const itemBillPlan = useMemo(()=>planItemBillLinks({ items:lineItems.map(it=>({ id:it.id, amount:(parseFloat(it.qty)||0)*(parseFloat(it.unitPrice)||0) })), links:itemBillLinks, bills, contributions:contributionsWithoutThisTxn }),[lineItems,itemBillLinks,bills,contributionsWithoutThisTxn]);
+    const itemBillChoices = useMemo(()=>bills.filter(b=>isOpenPayableBill(b) && getBillBalance(b, contributionsWithoutThisTxn).remaining>0.005)
+      .sort((x,y)=>String(x.dueDate||"9999").localeCompare(String(y.dueDate||"9999"))).slice(0,8),[bills,contributionsWithoutThisTxn]);
     const billMatchCandidateIdsKey = billMatchCandidates.map(b=>b.id).join(",");
     const lastBillMatchKeyRef = useRef(null);
     useEffect(()=>{
@@ -5487,6 +5505,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         }
         if(!isEditing && !(txnType==="expense" && paidByPersonId) && getAcc(accId)?.type==="cc") setAccounts(prev=>prev.map(a=>a.id===accId?{...a,outstanding:(a.outstanding||0)+amt}:a));
 
+        // T-34 (WP-5): item-level bill links (domain/obligations/itemBillLinks.js). This transaction's earlier item-level Contributions are
+        // replaced by what the items say now, so unlinking, deleting an item, or switching off Itemised removes them; a whole-transaction
+        // bill payment below is unaffected. A Bill that only an unlinked item paid reopens (same guard as delete: it must point back at this transaction).
+        {
+          const linkItems = (!isBillPayment && useItemizedLines && normalizedLineItems?.length)
+            ? normalizedLineItems.map(it=>({ id:it.id, amount:(Number(it.qty)||0)*(Number(it.unitPrice)||0) })) : [];
+          const dropped = getDroppedItemBills({ prev:contributions, txnId:resolvedTxnId, links:itemBillLinks, items:linkItems });
+          if(dropped.length) setBills(prev=>prev.map(bl=>dropped.includes(String(bl.id)) && String(bl.paidByTxnId)===String(resolvedTxnId) ? {...bl, status:"unpaid", paidDate:null, paidByTxnId:null} : bl));
+          setContributions(prev=>withItemBillContributions(prev, { txnId:resolvedTxnId, txnAmount:amt, items:linkItems, links:itemBillLinks, bills }, genId));
+        }
         if(isBillPayment){
           const billRecord = {
             id:linkedBillId,
@@ -6158,6 +6186,33 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                                   : describeLine({ basis:"total", qty:item.qty||1, unit:item.unit||"nos", price:itemTotal }, sym, fmt)}</div>
                                 {/* T3-9b: identifies which item(s) block Save. */}
                                 {!item.catId&&<div style={{ color:T.warn,fontSize:10,marginTop:2,fontWeight:700 }}>⚠️ Needs a category</div>}
+                                {txnType==="expense"&&!isBillPayment&&(()=>{
+                                  const linkedPlan = itemBillPlan[String(item.id)];
+                                  const pickerOpen = linkPickerItemId===item.id;
+                                  return (
+                                    <div data-testid={`item-bill-${item.id}`} style={{ marginTop:6 }}>
+                                      {linkedPlan?.bill ? (
+                                        <div style={{ display:"flex",alignItems:"center",gap:6,flexWrap:"wrap" }}>
+                                          <span data-testid={`item-bill-pays-${item.id}`} style={{ color:T.accent,fontSize:11,fontWeight:700 }}>Pays · {linkedPlan.bill.name||"Bill"} · {sym}{fmt(linkedPlan.applied)}</span>
+                                          <button type="button" data-testid={`item-bill-unlink-${item.id}`} onClick={()=>setItemBillLinks(prev=>{ const n={...prev}; delete n[String(item.id)]; return n; })} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"2px 8px",cursor:"pointer",fontSize:10,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Unlink</button>
+                                          {linkedPlan.unallocated>0.005&&<span data-testid={`item-bill-unallocated-${item.id}`} style={{ color:T.warn,fontSize:10,fontWeight:700 }}>{sym}{fmt(linkedPlan.unallocated)} of this item is more than the bill still owes · unallocated</span>}
+                                        </div>
+                                      ) : (
+                                        <button type="button" data-testid={`item-bill-link-${item.id}`} onClick={()=>setLinkPickerItemId(pickerOpen?null:item.id)} style={{ background:"none",border:`1px dashed ${T.borderStrong||T.border}`,borderRadius:8,padding:"3px 10px",cursor:"pointer",fontSize:10.5,color:T.accent,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>No bill · Link a bill</button>
+                                      )}
+                                      {pickerOpen&&!linkedPlan?.bill&&(
+                                        <div data-testid={`item-bill-picker-${item.id}`} style={{ marginTop:6,display:"flex",flexDirection:"column",gap:4 }}>
+                                          {itemBillChoices.length===0&&<div style={{ color:T.sub,fontSize:10.5 }}>No open bills to link.</div>}
+                                          {itemBillChoices.map(b=>(
+                                            <button key={b.id} type="button" data-testid={`item-bill-choice-${item.id}-${b.id}`} onClick={()=>{ setItemBillLinks(prev=>({ ...prev, [String(item.id)]:String(b.id) })); setLinkPickerItemId(null); }} style={{ textAlign:"left",background:T.input,border:`1px solid ${T.border}`,borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:11,color:T.text,fontFamily:"Nunito,sans-serif" }}>
+                                              {b.name||"Bill"} · {sym}{fmt(getBillBalance(b, contributionsWithoutThisTxn).remaining)} left{b.dueDate?` · due ${formatShortDate(b.dueDate)||b.dueDate}`:""}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                               <div style={{ color:T.accent,fontSize:13,fontWeight:800 }}>{sym}{fmt(itemTotal)}</div>
                               <button onClick={()=>{setEditingItemId(item.id);setShowItemSheet(true);}} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:11,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Edit</button>
@@ -7364,7 +7419,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <span>💼</span>
                     <span>{reimbursable?"Reimbursable ✓":"Work expense"}</span>
                   </button>
-                  <button onClick={()=>setIsBillPayment(v=>!v)} style={{ background:isBillPayment?T.accent+"20":"none",border:`1px solid ${isBillPayment?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:isBillPayment?T.accent:T.sub,fontFamily:"Nunito,sans-serif",display:"inline-flex",alignItems:"center",gap:6 }}>
+                  <button data-testid="bill-payment-chip" disabled={hasItemBillLinks} title={hasItemBillLinks?"Items are linked to bills. Unlink them to mark the whole expense as a bill payment.":undefined} onClick={()=>setIsBillPayment(v=>!v)} style={{ background:isBillPayment?T.accent+"20":"none",border:`1px solid ${isBillPayment?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:800,color:isBillPayment?T.accent:T.sub,fontFamily:"Nunito,sans-serif",display:"inline-flex",alignItems:"center",gap:6 }}>
                     <span>🧾</span>
                     <span>Bill payment</span>
                     {isBillPayment&&<span style={{ fontSize:10 }}>✓</span>}
