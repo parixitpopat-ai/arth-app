@@ -59,7 +59,8 @@ export function getBillContributions(bill, contributions) {
   // Contribution more than once for a Bill (e.g. before edits upserted); keep the latest.
   const own = (contributions || []).filter(c => c?.obligationType === BILL && sameId(c.obligationId, bill.id));
   const byTxn = new Map();
-  own.forEach(c => byTxn.set(c.txnId == null ? `c:${c.id}` : `t:${c.txnId}`, c));
+  // One payment counts once per Bill — but two different ITEMS of one itemised payment can each pay the same Bill.
+  own.forEach(c => byTxn.set(c.txnId == null ? `c:${c.id}` : `t:${c.txnId}:${c.lineItemId ?? ""}`, c));
   return [...byTxn.values()];
 }
 
