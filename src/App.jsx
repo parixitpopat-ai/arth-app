@@ -184,6 +184,7 @@ import { expandPaymentLines } from "./domain/payments/paymentLineSlices";
 import { tagRenewalsWithFor } from "./domain/bills/renewalFor";
 import { RangeFieldGrid, RangeField, MonthRangeSheet } from "./components/RangeFields";
 import CashFlowScreen, { CashFlowCard } from "./screens/CashFlowScreen";
+import ReportsScreen, { ReportsCard } from "./screens/ReportsScreen";
 import { computeLine, describeLine, reconcileLines, rateUnitsFor, defaultRateUnit } from "./domain/transactions/itemLineMath";
 import {
   EDUCATION_CAT_ID, EDUCATION_SUB_DESC, EDU_SUB, findEducationCategory, roleOfEducationSub, ensureEducationCategory, feeKindForEducationSub, educationSubNeedsPeriod,
@@ -1420,6 +1421,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [txnViewMode, setTxnViewMode] = useState("list"); // Transactions: "list" | "calendar"
   const [txnCalMonth, setTxnCalMonth] = useState(()=>todayStr().slice(0,7));
   const [txnCalDate, setTxnCalDate] = useState(null);
+  const [reportsOpen, setReportsOpen] = useState(false); // Money → Reports screen
   const [cashFlowMonth, setCashFlowMonth] = useState(null); // Money → Cash flow screen: the month it opened on (null = closed)
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [toast, setToast] = useState(null); // { message, icon } | null
@@ -14008,6 +14010,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           todayLabel={`${Number(todayStr().slice(8,10))} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][Number(todayStr().slice(5,7))-1]}`}
           onOpen={mk=>setCashFlowMonth(mk)}/>
 
+        <ReportsCard T={T} fy={new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1} onOpen={()=>setReportsOpen(true)}/>
+
         <Section title="Cash">
           <div style={{ ...card }}>
             {bankAccts.map(a=><Line key={a.id} label={a.name} value={`${sym}${fmt(accountBalance(a.id))}`} sub="Bank" onClick={()=>setShowAccDetail(a)}/>)}
@@ -19913,7 +19917,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               onBack={()=>setReadinessMonth(null)} onMonth={setReadinessMonth} onAddUpcoming={()=>{ setReadinessMonth(null); setShowAddBill(true); }}/>
           : <BudgetPage/>)}
         {!showSettings&&tab==="bills"&&<BillsPage/>}
-        {!showSettings&&tab==="wealth"&&wealthUnlocked&&(cashFlowMonth
+        {!showSettings&&tab==="wealth"&&wealthUnlocked&&(reportsOpen&&!cashFlowMonth
+          ? <ReportsScreen T={T} sym={sym} fmt={fmt} txns={txns} cats={cats} people={people} todayMonthKey={todayStr().slice(0,7)}
+              getIncomeLabel={formatIncomeTypeLabel} getPersonAttributedAmount={getPersonAttributedAmount} getPersonPlanningAllocation={getPersonPlanningAllocation}
+              onBack={()=>setReportsOpen(false)} onOpenMonth={mk=>setCashFlowMonth(mk)}/>
+          : cashFlowMonth
           ? <CashFlowScreen T={T} sym={sym} fmt={fmt} txns={txns} cats={cats} todayMonthKey={todayStr().slice(0,7)}
               todayLabel={`${Number(todayStr().slice(8,10))} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][Number(todayStr().slice(5,7))-1]}`}
               initialMonthKey={cashFlowMonth} getIncomeLabel={formatIncomeTypeLabel} getAccountName={id=>getAcc(id)?.name||""}
