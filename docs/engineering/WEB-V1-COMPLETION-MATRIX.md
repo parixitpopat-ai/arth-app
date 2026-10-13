@@ -1,6 +1,6 @@
 # WEB-V1-COMPLETION-MATRIX — authoritative status of Arth Web v1
 
-Date: 13 Oct 2026. **Pinned to `origin/main` = `8e722e8`** (fast-forwarded from 963c75c; it contains `wp-zero-statement-attention`, `wp-test-inventory`, `wp-5-line-item-link` and `wp-docs-web-v1-closure`). On that commit: `npm test` 1,661 / 1,661, 0 skipped; production build passes; lint shows only the 4 baseline problems. Rows marked *main-8e722e8-13Oct* were browser-verified on the integration whose code tree is identical to `8e722e8` (the commit differs from the tested `825292e` only by this file). This file's own correction commit is the next commit on main.
+Date: 13 Oct 2026. **Pinned to code tree `0e81823`** (= `origin/main` 8e722e8 + `wp-reports-fy` 8a71c13 + `wp-t34-item-bill-link` 769a60a). `origin/main` is still 8e722e8-lineage until this is merged; the pin below is replaced with the pushed SHA at merge. On the pinned tree: `npm test` 1,679 / 1,679, 0 skipped; build passes; lint shows only the 4 baseline problems. Rows marked *main-t34-reports-13Oct* were browser-verified on that tree.
 This replaces the June roadmap/pending-scope files as the operational source; those are history (30 Jun 2026 and earlier).
 
 ## How to read it
@@ -23,22 +23,22 @@ A "required" item means a source above names it for Web v1. Where the sources di
 | 9 | Statement states; "To pay" meaning (FIN-TRUTH-002) | `cards/reconciliation.js`, `statementBills.js` | `reconciliation.test.js`, `statementBills.test.js` | main-13Oct | IV | None |
 | 10 | No transactions, no statement bill; billing-day check (DEC) | `statementBills.js` | `statementBills.test.js` | main-13Oct (prompt shown) | IV | None |
 | 11 | ₹0 statement with a bank figure: kept, never payable, never overdue, shown as a check item everywhere (DEC) | `obligations/billBalance.js` + 6 consumers | `zeroStatement.test.js` (10) | main-8e722e8-13Oct: Home, Bills, Billers, relationship row, Outlook | IV (on origin/main 8e722e8) | None. High-priority item closed |
-| 12 | Calendar-month card spending (FIN-TRUTH-003; DEC "where is this month's card spend") | none (definition only) | none | none | RM, scope to confirm | Scope after your decision; owner: you. Medium |
+| 12 | Calendar-month card spending (FIN-TRUTH-003; DEC) | none (definition only) | none | none | DF — explicitly deferred (scope lock, 13 Oct) | Not part of this closeout. Medium |
 | 13 | Loan write-off / Bad Debts (WP-F; FIN-TRUTH lock 1) | none; statuses exist, nothing sets them | none | none | DF | Separate WP. Low for v1 |
 | 14 | Open decisions: R1 net worth uses billed only; R2 group Spent includes unpaid bills; R3 collective due (frozen) | `App.jsx` | — | — | DF | Decide R1, R2. Low |
 
 ## B. People, Payments, Relationships (UI-2C)
 | # | Requirement | Code | Tests | Browser | Status | Remaining action / priority |
 |---|---|---|---|---|---|---|
-| 15 | M1 People and Groups: one-screen add, split default, detail/edit (QW-3, QW-4, QW-6, WP-1) | `components/people/*`, `domain/person/*`, `domain/relationships/attributedAccounts.js` | `splitDefault`, `newPerson`, `attributedAccounts` tests | main-13Oct (screens render); flows at-merge | IU | Smoke the add/edit flows on main. Medium |
+| 15 | M1 People and Groups: one-screen add, split default, detail/edit (QW-3, QW-4, QW-6, WP-1) | `components/people/*`, `domain/person/*`, `domain/relationships/attributedAccounts.js` | `splitDefault`, `newPerson`, `attributedAccounts` tests | main-t34-reports-13Oct (add person with setup sheet, edit/rename persisted, add group persisted) | IV | Device pass. Low |
 | 16 | M2 Payments and bills: list, detail, record payment, partial/overpay, Unallocated (QW-7, WP-2, WP-4, ADR-038) | `domain/obligations/billBalance.js`, `screens/payments/*` | `billBalance`, `billContributionSync`, `paymentsView` tests | main-13Oct | IV | Device pass (checklist 2). Medium |
 | 17 | Expected obligations: computed, never a bill; Confirm amount creates the bill (WP-3, ADR-039) | `domain/obligations/expected.js`, `ExpectedSchedulePanel.jsx` | `expected.test.js` | main-13Oct (schedule → Expected → Confirm → bill) | IV | Observation: no "Set schedule" on a bill-less connection. ADR-039 has no file in arth-app (only references). Low |
-| 18 | Relationship lifecycle: active / pause / end, usually-paid-from (WP-6) | `RelationshipStatusPanel`, `domain/membership/lifecycle.js` | `lifecycle.test.js` | panel rendered main-13Oct; transitions at-merge | IU | Smoke pause/end. Medium |
+| 18 | Relationship lifecycle: active / pause / end, usually-paid-from (WP-6) | `RelationshipStatusPanel`, `domain/membership/lifecycle.js` | `lifecycle.test.js` | main-t34-reports-13Oct (pause with reason, resume, end: status and history stored: active→paused→active→ended) | IV | Device pass. Low |
 | 19 | Cloud sync of billers and membership relationships (WP-8) | `App.jsx` snapshot + restore; `src/cloudSync.js` | none for the sync path | none | IU | **Two-device test** (`WEB-V1-VERIFICATION-001.md` §4). **High** |
 | 20 | Item-level bill link, domain: optional `lineItemId`, per-item check (WP-5) | `domain/obligations/contribution.js`, `billBalance.js`, `billContributionSync.js` | `contributionLineItem.test.js` (8) | main-8e722e8-13Oct (app loads item-linked and plain contributions; item 1 and item 2 of one payment each pay a different bill; a plain record is unchanged). No UI exists to exercise item linking or the limits; limits are test-only | IV for the domain (on origin/main 8e722e8) | T-34 UI is row 21. Medium |
-| 21 | Item-level bill link, UI (T-34 per-item "Link a bill"; D-7: "Relationship" vs "Pays a bill?" is already chosen in the handoff) | none | none | none | RM | Needs Add Expense itemised wiring; itemised drafts take the legacy save path. Approve scope first. Low–medium, not a blocker |
+| 21 | Item-level bill link, UI (T-34 per-item "Link a bill"; D-7: "Relationship" vs "Pays a bill?" is chosen in the handoff) | `App.jsx` Add Expense (itemised items), `domain/obligations/itemBillLinks.js` | `itemBillLinks.test.js` (8), `contributionLineItem.test.js` (8) | main-t34-reports-13Oct: link two items to two bills (both paid); two items on one bill (700 + 300 of 1,000, never over); item above its bill's balance applies the balance and shows the rest unallocated; edit shows existing links; unlink reduces and reopens a bill nothing else pays; whole-expense Bill payment unchanged (no `lineItemId`); 320 px no overflow | IV | Device pass. None otherwise |
 | 22 | Navigation Home / Money / Payments / People with Add (N-1) | `App.jsx` `TABS` | — | main-13Oct | IV | None |
-| 23 | Desktop two-pane layout (WP-7, D-1/D-2) | none; no responsive layer | none | none | DF, scope to confirm | Decide whether Web v1 includes desktop. Low |
+| 23 | Desktop two-pane layout (WP-7, D-1/D-2) | none; no responsive layer | none | none | DF — explicitly deferred (scope lock, 13 Oct) | Not part of this closeout. Low |
 | 24 | Other obligations writing Contributions (WP-9 decision) | no decision record found | — | — | DF | Decision record only. Low |
 | 25 | Paid by a person; Pay back person/group; group balance reconciliation (DEC) | `domain/person/paidBy.js`, `payback.js`, `domain/group/balances.js` | `paidBy`, `payback`, `balances` tests | main-13Oct | IV | Device pass (checklist 7). Medium |
 | 26 | Debit/UPI listed under their bank or card (DEC) | `Settings` rows, `isLinkedPaymentMethod` | `accountBalance.test.js` | main-13Oct | IV | None |
@@ -51,8 +51,8 @@ A "required" item means a source above names it for Web v1. Where the sources di
 | 29 | Outlook: Buffer hero, Financial Runway beside it, Available Cash separate (UI-B) | `OutlookPage`, `cashflow/runway.js`, `commitmentTimeline.js` | `runway.test.js`, `commitmentTimeline.test.js` | main-13Oct | IV | Device pass. Low |
 | 30 | Home Spent headline, pace tick, Budget headline, amber expected-by-today tick (UI-A, UI-D) | `budget/pace.js`, Home | `pace.test.js` | main-13Oct | IV | None |
 | 31 | Transactions calendar: future days, one month ahead, day sheet, tap a day to add (UI-C, UI-D) | `screens/TransactionsCalendar.jsx` | `calendarSummary.test.js` | main-13Oct incl. 320 and 390 px | IV | None |
-| 32 | Budget: mandatory commitments, unplanned actual, pool limit (WP7) | `domain/budget/*`, Budget page | `commitmentSplit`, `spread`, `readiness` tests | main-13Oct (page renders) | IU | Device pass (checklist 5). Medium |
-| 33 | Insights, 11 sections (WP8) | `domain/insights/*`, `InsightsPage` | `domain/insights/*.test.js` | main-13Oct (renders; insurance renewal states) | IU | Smoke each section. Low |
+| 32 | Budget: mandatory commitments, unplanned actual, pool limit (WP7) | `domain/budget/*`, Budget page | `commitmentSplit`, `spread`, `readiness` tests | main-t34-reports-13Oct (page renders with unplanned category; adding a commitment of ₹20,000 moves the pool ₹50,000 → ₹30,000 and is stored); pool over-allocation block verified at merge only | IV (pool-limit block at-merge) | Device pass (checklist 5). Medium |
+| 33 | Insights, 11 sections (WP8) | `domain/insights/*`, `InsightsPage` | `domain/insights/*.test.js` | main-t34-reports-13Oct (all 11 sections render with data; spending, categories, people checked; section links open Budget) | IV | Note: Insights §5 monthly per-person uses the people-map only; Reports uses the fuller Budget definition (see row 39). Low |
 | 34 | Prepaid coverage on biller detail (WP9) | `domain/bills/prepaidUtilisation.js` | `prepaidUtilisation.test.js` | main-8e722e8-13Oct (coverage card: plan, 13 of 28 days used, 15 left) | IV | Low |
 | 35 | Quarterly/yearly membership is one dated Outlook item (DEC) | `membership/futureMoney.js`, `futureMoney/rhythm.js` | their tests | main-8e722e8-13Oct (quarterly is one later item; monthly one in the list) | IV | Low |
 | 36 | Gym check-in catch-up with a break option (DEC) | `membership/checkIn.js` | `checkIn.test.js` | main-8e722e8-13Oct (13 days offered oldest first; break skips all) | IV | Low |
@@ -62,10 +62,10 @@ A "required" item means a source above names it for Web v1. Where the sources di
 The frozen list names a Reports screen; `SCREEN_ARCHITECTURE.md` marks it not started; `V1_DEFINITION.md` leaves v1-or-later undecided. The audit below is of what exists.
 | # | Requirement | What exists | Status | Gap / action |
 |---|---|---|---|---|
-| 38 | Monthly spend report: by category and by person | Insights §1 Spending, §5 People/Groups, §6 Categories (month picker); Money > Monthly cash flow with category breakdown | IU | Meets the monthly need in pieces. No single "Reports" screen. Scope to confirm |
-| 39 | Per-person spend report | Insights §5 (monthly, per person/group); Budget Annual Person View (FY budget vs year-to-date spend per person) | IU, partial | Gap: per-person spend **by category** and **a per-person FY report**. Scope to confirm |
-| 40 | FY annual summary (household income, spend, saving rate, by category, April–March) | Group page has an FY view; Budget has an FY selector; nothing at household level | RM | Concrete gap. Building blocks exist (monthly cash flow per month, saving rate, attributed totals); a 12-month roll-up is the missing piece. Scope to confirm |
-| 41 | Net worth trend over time | Daily snapshots are recorded (`wealthSnapshots`); Insights §11 shows change since last month only | RM | Concrete gap: no history view. Scope to confirm |
+| 38 | Monthly spend report: by category and by person | Insights §1, §5, §6 (month picker); Money > Monthly cash flow; Reports > Year summary month rows open the month | `monthlyCashFlow.test.js`, `fiscalYear.test.js` | main-t34-reports-13Oct | IV | None |
+| 39 | Per-person spend report incl. FY coverage | Money > Reports > By person: every person for a chosen FY, spent vs planned, remaining, % used, categories, month by month. Uses the Budget definition (people map, tagItems, allocations, forPerson) | IV | Known difference: Insights §5 (monthly) counts only the people map, so its figure can be lower for the same person; not changed (no scope). Test: `fiscalYear.test.js` covers the attribution fields; browser: 3,900 = 3,000 + 900 (tagItems), 400 via forPerson |
+| 40 | FY annual summary (household income, spend, % left over, by category, April–March) | Money > Reports > Year summary: sums the 12 monthly cash-flow results (`domain/reports/fiscalYear.js`); FY picker; month rows; categories; income sources; not-counted | IV | `fiscalYear.test.js` (10) reconciles with the months; browser: ₹1,80,000 in, ₹24,300 out, +₹1,55,700, 87%, prior FY, 320 px no overflow |
+| 41 | Net worth trend over time | Daily snapshots are recorded (`wealthSnapshots`); Insights §11 shows change since last month only | DF — explicitly deferred (scope lock, 13 Oct) | Not part of this closeout |
 | 42 | Cash-flow visual | `screens/CashFlowScreen.jsx` monthly bars (`cf-chart`) | IU | Rendered on Money; chart not browser-checked today. Low |
 | 43 | Daily spend calendar | Row 31 | IV | None |
 
@@ -86,18 +86,19 @@ The frozen list names a Reports screen; `SCREEN_ARCHITECTURE.md` marks it not st
 | 55 | Documentation drift | June roadmap/pending scope, `SCREEN_ARCHITECTURE.md` | — | Stale | Retire or mark as history. Medium |
 
 ## Web v1 status
-**Web v1 is NOT complete.** Reports (rows 38–41: household FY summary, net-worth history, per-person gaps) and T-34 (row 21) remain Web v1 requirements until implemented and verified. Real-device (checklist) and two-device Supabase (§4) checks are **pending**: no device evidence exists for any row.
+**Web v1 is NOT complete.** The locked Web v1 requirements — household FY summary (row 40), per-person reporting with FY coverage (row 39) and T-34 (row 21) — are now implemented and browser-verified on the pinned tree, but only on the integration branch until it is merged. Explicitly deferred by scope lock: calendar-month card spending (12), net-worth history UI (41), desktop two-pane (23). **Real-device (checklist) and two-device Supabase (§4) checks are PENDING: no device evidence exists for any row.** Web v1 cannot be declared complete until they are done.
 
 ## Web v1 blockers (my assessment, on this evidence)
-1. **A signed-off Web v1 scope.** `V1_DEFINITION.md` poses the question and nothing answers it. Rows 12, 21, 23, 38–41 are "scope to confirm" because of it.
+1. ~~A signed-off Web v1 scope~~ — locked 13 Oct: in = rows 39, 40, 21; deferred = rows 12, 23, 41.
 2. ~~Merge the branches~~ — done: rows 11, 20, 53 are on `origin/main` 8e722e8. No known data-truth defect remains open.
-3. **Two-device Supabase restore** (row 19) and the **real-device pass** (checklist) — not performed. Until they are, rows marked IU stay IU.
-4. Not blockers on this evidence: `StatsPage`, calendar-month card spending, WP-F, skeletons, biometrics, statement import, item-level UI (row 21).
+3. **Two-device Supabase restore** (row 19) and the **real-device pass** (checklist) — not performed. Until they are, no row is device-verified and rows 19 and 37 (sync) stay IU.
+3a. Merge of the Reports and T-34 branches into `origin/main`.
+4. Not blockers on this evidence: `StatsPage`, WP-F, skeletons, biometrics, statement import, and the three scope-locked deferrals.
 
 ## Proposed closure sequence
 1. ~~Merge the four branches~~ — done (8e722e8).
-2. You decide scope for rows 12, 21, 23, 38–41 (in or out of Web v1).
+2. ~~Scope decisions~~ — locked (see Web v1 status).
 3. You run the real-device checklist and the two-device test; I fix what fails.
-4. I smoke the remaining IU rows on main (rows 15, 18, 32, 33; rows 27, 34–37 are now verified).
-5. Then, only if in scope: calendar-month card spending (FIN-TRUTH-003), the household FY summary and net-worth history, the T-34 per-item link UI.
+4. ~~Smoke the remaining IU rows~~ — done for rows 15, 18, 32, 33 on the pinned tree.
+5. ~~Household FY summary, per-person FY, T-34 UI~~ — built and verified on the pinned tree; merge pending.
 6. Last: `StatsPage` removal branch; retire the stale scope documents.
