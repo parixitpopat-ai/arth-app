@@ -1,11 +1,11 @@
 # WEB-V1-COMPLETION-MATRIX — authoritative status of Arth Web v1
 
-Date: 13 Oct 2026. **Integration state:** `origin/main` is still 963c75c. The four branches (`wp-zero-statement-attention` 6ed6e0a, `wp-test-inventory` 85df2e6, `wp-5-line-item-link` 02fad93, `wp-docs-web-v1-closure` 765863d) exist on origin and are **not yet merged into `origin/main`**. Rows marked *main-candidate-13Oct* were verified on a local integration of main plus those four branches, commit **825292e** (`main-candidate`). If that merge is pushed as a fast-forward, 825292e becomes the main SHA; this matrix will then be re-pinned to the pushed SHA.
+Date: 13 Oct 2026. **Pinned to `origin/main` = `8e722e8`** (fast-forwarded from 963c75c; it contains `wp-zero-statement-attention`, `wp-test-inventory`, `wp-5-line-item-link` and `wp-docs-web-v1-closure`). On that commit: `npm test` 1,661 / 1,661, 0 skipped; production build passes; lint shows only the 4 baseline problems. Rows marked *main-8e722e8-13Oct* were browser-verified on the integration whose code tree is identical to `8e722e8` (the commit differs from the tested `825292e` only by this file). This file's own correction commit is the next commit on main.
 This replaces the June roadmap/pending-scope files as the operational source; those are history (30 Jun 2026 and earlier).
 
 ## How to read it
 **Sources:** `ARTH_SCOPE` = `src/ARTH_SCOPE.md` (frozen 18-screen V1 list; its navigation is superseded by UI-2C N-1) · `UI-2C` = UI-2C plan and handoff v4 (design-docs repo) · `FIN-TRUTH` = `docs/engineering/FIN-TRUTH-001/002/003` · `UI-FIX` = the Oct 2026 UI fixes handoff (UI-A to UI-D) as worked in this session · `DEC` = a decision you gave in this session · `ADR` = `docs/engineering` ADR-017/024/035/036/038.
-**Evidence, three separate columns.** *Tests* = named test files (all in `npm test`). *Browser* = Playwright: **main-candidate-13Oct** (run on the integration above) or **main-13Oct** (run earlier today on main plus some of the branches, see `WEB-V1-VERIFICATION-001.md`) or **at-merge** (run when that work merged, by me in an earlier session, not re-run today) or none. *Device* = real phone: **none for every row** — no real-device test has been performed.
+**Evidence, three separate columns.** *Tests* = named test files (all in `npm test`). *Browser* = Playwright: **main-8e722e8-13Oct** (run on the integration above) or **main-13Oct** (run earlier today on main plus some of the branches, see `WEB-V1-VERIFICATION-001.md`) or **at-merge** (run when that work merged, by me in an earlier session, not re-run today) or none. *Device* = real phone: **none for every row** — no real-device test has been performed.
 **Status:** **IV** implemented and verified (tests + browser on today's code) · **IU** implemented but unverified (tests, and/or browser only at merge, no device) · **RM** required but missing · **DF** deferred / out of scope.
 A "required" item means a source above names it for Web v1. Where the sources disagree or are silent, the row says **scope to confirm** and is not counted as a blocker.
 
@@ -17,12 +17,12 @@ A "required" item means a source above names it for Web v1. Where the sources di
 | 3 | Home and Outlook share one Money Required (D3) | `futureMoney/moneyRequired.js` | `moneyRequired.test.js`, `commitmentTimeline.test.js` | main-13Oct (Home ₹9,200 = Outlook Needed ₹9,200) | IV | None |
 | 4 | One effective monthly budget; ₹0 override valid; carry-forward off by default (D4) | `getEffectiveMonthlyBudget` | `carryForward.test.js` | main-13Oct (Budget/Home) | IV | Device pass. Low |
 | 5 | Available Cash = balance checkpoint + later movements (R4) | `domain/accounts/availableCash.js` | `availableCash.test.js` | main-13Oct (Outlook) | IV | Device pass (checklist 1). Medium |
-| 6 | Loan given is a receivable, not an expense (lock 1) | `domain/loans/disbursal.js` | `disbursal.test.js` | main-candidate-13Oct (Loan given chip on Add) | IV | Device pass. Low |
+| 6 | Loan given is a receivable, not an expense (lock 1) | `domain/loans/disbursal.js` | `disbursal.test.js` | main-8e722e8-13Oct (Loan given chip on Add) | IV | Device pass. Low |
 | 7 | Card billed / unbilled / in use reconcile; EMIs counted once (R1, FIN-TRUTH) | `cards/summaries.js`, `cardEmiReconciliation` | `cardEmiReconciliation.test.js`, `usage.test.js`, `runway.test.js` | main-13Oct (Runway counts EMI once) | IV | Device pass (checklist 4). Medium |
-| 8 | EMI purchase loans track billed instalments; back-dated EMI audited (DEC) | `loans/autoEmiProgress.js`, `emiInstalments.js` | their tests | main-candidate-13Oct (legacy EMI loan: billed instalment recorded, outstanding 0, closed) | IV | Device pass (checklist 4). Low |
+| 8 | EMI purchase loans track billed instalments; back-dated EMI audited (DEC) | `loans/autoEmiProgress.js`, `emiInstalments.js` | their tests | main-8e722e8-13Oct (legacy EMI loan: billed instalment recorded, outstanding 0, closed) | IV | Device pass (checklist 4). Low |
 | 9 | Statement states; "To pay" meaning (FIN-TRUTH-002) | `cards/reconciliation.js`, `statementBills.js` | `reconciliation.test.js`, `statementBills.test.js` | main-13Oct | IV | None |
 | 10 | No transactions, no statement bill; billing-day check (DEC) | `statementBills.js` | `statementBills.test.js` | main-13Oct (prompt shown) | IV | None |
-| 11 | ₹0 statement with a bank figure: kept, never payable, never overdue, shown as a check item everywhere (DEC) | `obligations/billBalance.js` + 6 consumers | `zeroStatement.test.js` (10) | main-candidate-13Oct: Home, Bills, Billers, relationship row, Outlook | IV (integrated candidate; not yet on origin/main) | Push the merge to origin/main. High |
+| 11 | ₹0 statement with a bank figure: kept, never payable, never overdue, shown as a check item everywhere (DEC) | `obligations/billBalance.js` + 6 consumers | `zeroStatement.test.js` (10) | main-8e722e8-13Oct: Home, Bills, Billers, relationship row, Outlook | IV (on origin/main 8e722e8) | None. High-priority item closed |
 | 12 | Calendar-month card spending (FIN-TRUTH-003; DEC "where is this month's card spend") | none (definition only) | none | none | RM, scope to confirm | Scope after your decision; owner: you. Medium |
 | 13 | Loan write-off / Bad Debts (WP-F; FIN-TRUTH lock 1) | none; statuses exist, nothing sets them | none | none | DF | Separate WP. Low for v1 |
 | 14 | Open decisions: R1 net worth uses billed only; R2 group Spent includes unpaid bills; R3 collective due (frozen) | `App.jsx` | — | — | DF | Decide R1, R2. Low |
@@ -35,14 +35,14 @@ A "required" item means a source above names it for Web v1. Where the sources di
 | 17 | Expected obligations: computed, never a bill; Confirm amount creates the bill (WP-3, ADR-039) | `domain/obligations/expected.js`, `ExpectedSchedulePanel.jsx` | `expected.test.js` | main-13Oct (schedule → Expected → Confirm → bill) | IV | Observation: no "Set schedule" on a bill-less connection. ADR-039 has no file in arth-app (only references). Low |
 | 18 | Relationship lifecycle: active / pause / end, usually-paid-from (WP-6) | `RelationshipStatusPanel`, `domain/membership/lifecycle.js` | `lifecycle.test.js` | panel rendered main-13Oct; transitions at-merge | IU | Smoke pause/end. Medium |
 | 19 | Cloud sync of billers and membership relationships (WP-8) | `App.jsx` snapshot + restore; `src/cloudSync.js` | none for the sync path | none | IU | **Two-device test** (`WEB-V1-VERIFICATION-001.md` §4). **High** |
-| 20 | Item-level bill link, domain: optional `lineItemId`, per-item check (WP-5) | `domain/obligations/contribution.js`, `billBalance.js`, `billContributionSync.js` | `contributionLineItem.test.js` (8) | main-candidate-13Oct (app loads item-linked and plain contributions; item 1 and item 2 of one payment each pay a different bill; a plain record is unchanged). No UI exists to exercise item linking or the limits; limits are test-only | IV for the domain (integrated candidate; not yet on origin/main) | T-34 UI is row 21. Medium |
+| 20 | Item-level bill link, domain: optional `lineItemId`, per-item check (WP-5) | `domain/obligations/contribution.js`, `billBalance.js`, `billContributionSync.js` | `contributionLineItem.test.js` (8) | main-8e722e8-13Oct (app loads item-linked and plain contributions; item 1 and item 2 of one payment each pay a different bill; a plain record is unchanged). No UI exists to exercise item linking or the limits; limits are test-only | IV for the domain (on origin/main 8e722e8) | T-34 UI is row 21. Medium |
 | 21 | Item-level bill link, UI (T-34 per-item "Link a bill"; D-7: "Relationship" vs "Pays a bill?" is already chosen in the handoff) | none | none | none | RM | Needs Add Expense itemised wiring; itemised drafts take the legacy save path. Approve scope first. Low–medium, not a blocker |
 | 22 | Navigation Home / Money / Payments / People with Add (N-1) | `App.jsx` `TABS` | — | main-13Oct | IV | None |
 | 23 | Desktop two-pane layout (WP-7, D-1/D-2) | none; no responsive layer | none | none | DF, scope to confirm | Decide whether Web v1 includes desktop. Low |
 | 24 | Other obligations writing Contributions (WP-9 decision) | no decision record found | — | — | DF | Decision record only. Low |
 | 25 | Paid by a person; Pay back person/group; group balance reconciliation (DEC) | `domain/person/paidBy.js`, `payback.js`, `domain/group/balances.js` | `paidBy`, `payback`, `balances` tests | main-13Oct | IV | Device pass (checklist 7). Medium |
 | 26 | Debit/UPI listed under their bank or card (DEC) | `Settings` rows, `isLinkedPaymentMethod` | `accountBalance.test.js` | main-13Oct | IV | None |
-| 27 | Card spend alert in Notifications, per cycle, dismissible (DEC) | `domain/cards/alerts.js` | `alerts.test.js` | main-candidate-13Oct (notification shown, archive persists after reload) | IV | Device pass. Low |
+| 27 | Card spend alert in Notifications, per cycle, dismissible (DEC) | `domain/cards/alerts.js` | `alerts.test.js` | main-8e722e8-13Oct (notification shown, archive persists after reload) | IV | Device pass. Low |
 | 28 | Settings > Accounts row opens edit, not transactions (DEC) | `App.jsx` Settings | — | main-13Oct (edit buttons) | IV | None |
 
 ## C. Outlook, Budget, Insights, Home, Calendar (UI-FIX, ARTH_SCOPE)
@@ -53,10 +53,10 @@ A "required" item means a source above names it for Web v1. Where the sources di
 | 31 | Transactions calendar: future days, one month ahead, day sheet, tap a day to add (UI-C, UI-D) | `screens/TransactionsCalendar.jsx` | `calendarSummary.test.js` | main-13Oct incl. 320 and 390 px | IV | None |
 | 32 | Budget: mandatory commitments, unplanned actual, pool limit (WP7) | `domain/budget/*`, Budget page | `commitmentSplit`, `spread`, `readiness` tests | main-13Oct (page renders) | IU | Device pass (checklist 5). Medium |
 | 33 | Insights, 11 sections (WP8) | `domain/insights/*`, `InsightsPage` | `domain/insights/*.test.js` | main-13Oct (renders; insurance renewal states) | IU | Smoke each section. Low |
-| 34 | Prepaid coverage on biller detail (WP9) | `domain/bills/prepaidUtilisation.js` | `prepaidUtilisation.test.js` | main-candidate-13Oct (coverage card: plan, 13 of 28 days used, 15 left) | IV | Low |
-| 35 | Quarterly/yearly membership is one dated Outlook item (DEC) | `membership/futureMoney.js`, `futureMoney/rhythm.js` | their tests | main-candidate-13Oct (quarterly is one later item; monthly one in the list) | IV | Low |
-| 36 | Gym check-in catch-up with a break option (DEC) | `membership/checkIn.js` | `checkIn.test.js` | main-candidate-13Oct (13 days offered oldest first; break skips all) | IV | Low |
-| 37 | Plan Ahead readiness card and nudge state, synced (WP-A) | `domain/budget/readiness.js`, `nudge.js` | their tests | main-candidate-13Oct (Plan Ahead card opens, November figures right, over-budget nudge shows, "Not now" stored and kept after reload). Cloud sync of the nudge not verified | IV locally; sync IU | Two-device (§4 step 5) and device (checklist 6). High |
+| 34 | Prepaid coverage on biller detail (WP9) | `domain/bills/prepaidUtilisation.js` | `prepaidUtilisation.test.js` | main-8e722e8-13Oct (coverage card: plan, 13 of 28 days used, 15 left) | IV | Low |
+| 35 | Quarterly/yearly membership is one dated Outlook item (DEC) | `membership/futureMoney.js`, `futureMoney/rhythm.js` | their tests | main-8e722e8-13Oct (quarterly is one later item; monthly one in the list) | IV | Low |
+| 36 | Gym check-in catch-up with a break option (DEC) | `membership/checkIn.js` | `checkIn.test.js` | main-8e722e8-13Oct (13 days offered oldest first; break skips all) | IV | Low |
+| 37 | Plan Ahead readiness card and nudge state, synced (WP-A) | `domain/budget/readiness.js`, `nudge.js` | their tests | main-8e722e8-13Oct (Plan Ahead card opens, November figures right, over-budget nudge shows, "Not now" stored and kept after reload). Cloud sync of the nudge not verified | IV locally; sync IU | Two-device (§4 step 5) and device (checklist 6). High |
 
 ## D. Reports (ARTH_SCOPE screen 12; roadmap Phase 5)
 The frozen list names a Reports screen; `SCREEN_ARCHITECTURE.md` marks it not started; `V1_DEFINITION.md` leaves v1-or-later undecided. The audit below is of what exists.
@@ -81,7 +81,7 @@ The frozen list names a Reports screen; `SCREEN_ARCHITECTURE.md` marks it not st
 | 50 | AI + Search; AI categorisation | none | — | DF (separate track) | — |
 | 51 | Bank statement import (CSV/Excel; IDFC FIRST, ICICI) | none (only CSV export, JSON restore) | — | DF (roadmap Phase 6–7; not in the frozen V1 list) | Separate |
 | 52 | Android/APK, SMS, offline queue, open banking, per-purchase reimbursement | — | — | DF (separate) | — |
-| 53 | Test suite integrity | `src/testInventory.test.js`, `TEST-INVENTORY-001.md` | `testInventory.test.js`; 1,661 / 1,661, 0 skipped, all registered | IV on the integrated candidate | Push the merge. High |
+| 53 | Test suite integrity | `src/testInventory.test.js`, `TEST-INVENTORY-001.md` | `testInventory.test.js`; 1,661 / 1,661, 0 skipped, all registered | IV on main 8e722e8 | None |
 | 54 | `StatsPage` unreachable duplicate (FIN-TRUTH D5) | `App.jsx` ~L17687 | `grep`: no `<StatsPage` | Cleanup, not a feature | Keep for now; remove on its own branch later (your decision) |
 | 55 | Documentation drift | June roadmap/pending scope, `SCREEN_ARCHITECTURE.md` | — | Stale | Retire or mark as history. Medium |
 
@@ -90,14 +90,14 @@ The frozen list names a Reports screen; `SCREEN_ARCHITECTURE.md` marks it not st
 
 ## Web v1 blockers (my assessment, on this evidence)
 1. **A signed-off Web v1 scope.** `V1_DEFINITION.md` poses the question and nothing answers it. Rows 12, 21, 23, 38–41 are "scope to confirm" because of it.
-2. **Merge the three branches** (rows 11, 20, 53) after you review them: the ₹0 statement fix is the only known data-truth defect.
+2. ~~Merge the branches~~ — done: rows 11, 20, 53 are on `origin/main` 8e722e8. No known data-truth defect remains open.
 3. **Two-device Supabase restore** (row 19) and the **real-device pass** (checklist) — not performed. Until they are, rows marked IU stay IU.
 4. Not blockers on this evidence: `StatsPage`, calendar-month card spending, WP-F, skeletons, biometrics, statement import, item-level UI (row 21).
 
 ## Proposed closure sequence
-1. You review and say Merge for `wp-zero-statement-attention`, `wp-test-inventory`, `wp-5-line-item-link`, and this docs branch.
+1. ~~Merge the four branches~~ — done (8e722e8).
 2. You decide scope for rows 12, 21, 23, 38–41 (in or out of Web v1).
 3. You run the real-device checklist and the two-device test; I fix what fails.
-4. I smoke the remaining IU rows on merged main (rows 15, 18, 27, 32–37).
+4. I smoke the remaining IU rows on main (rows 15, 18, 32, 33; rows 27, 34–37 are now verified).
 5. Then, only if in scope: calendar-month card spending (FIN-TRUTH-003), the household FY summary and net-worth history, the T-34 per-item link UI.
 6. Last: `StatsPage` removal branch; retire the stale scope documents.
