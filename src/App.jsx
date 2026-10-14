@@ -164,6 +164,7 @@ import { getGroupDefaultIntent } from "./domain/group/defaultIntent";
 import { planItemBillLinks, withItemBillContributions, getDroppedItemBills } from "./domain/obligations/itemBillLinks";
 import { withBillContributionForTxn, withoutBillContributionsForTxn, withoutBillContributionsForTxns, reopenBillsPaidByDeletedTxns } from "./domain/obligations/billContributionSync";
 import { nextBillMatchChoice, getBillChoicesToShow, getBillLinkAmountMismatch, mergePaymentIntoExistingBill } from "./domain/bills/billPaymentLink";
+import { getLinkablePayments, planLinkExistingPayment } from "./domain/bills/linkExistingPayment";
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
@@ -1749,6 +1750,21 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(typeof navigator!=="undefined" && navigator.onLine===false) setToast({ message:offlineSavedText(bill.name, cloudActiveRef.current), icon:"📴" });
     setMarkingBillPaid(null);
   }, [billerAccounts, contributions, membershipRelationships, loans, txns, accounts]);
+
+  // "I already paid this": links an EARLIER expense to a recharge/renewal instead of recording a second payment.
+  // Same writes the "Bill matched" suggestion makes (Contribution, bill paid, the expense points back at the bill), and it
+  // changes no account: the expense already moved the money. At most what is still owed is applied (ADR-038).
+  const linkExistingPaymentToBill = useCallback((bill, txn)=>{
+    const plan = planLinkExistingPayment(bill, txn, contributions);
+    if(!(plan.applied>0)) return;
+    setBills(p=>p.map(x=>x.id===bill.id?{...x,
+      ...(plan.becomesPaid?{status:"paid",paidDate:txn.date||todayStr()}:{}),
+      ...(plan.isFirst?{paidByTxnId:txn.id}:{}),
+      lastPaidAmount:Number(txn.amount||0),lastPaidDate:txn.date||todayStr(),lastPaidAt:txn.id}:x));
+    setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:txn.id, amount:plan.applied, txnAmount:Number(txn.amount||0) }, genId));
+    setTxns(p=>p.map(x=>String(x.id)===String(txn.id)?{...x,isBillPayment:true,billInvoiceNo:bill.invoiceNo||"",paidBillId:bill.id,paidBillName:bill.name}:x));
+    setMarkingBillPaid(null);
+  }, [contributions]);
 
   // ADR-039 §6 — "Confirm amount": `bill.fromSchedule`. Creates one real, normal Bill from an
   // Expected item, through the same path every other Bill uses — this is the only writer;
@@ -21278,6 +21294,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             formatShortDate={formatShortDate}
             onClose={()=>setMarkingBillPaid(null)}
             onConfirm={(accId,transactionRef,payment)=>confirmMarkBillPaid(markingBillPaid,accId,transactionRef,payment)}
+            linkablePayments={isRechargeBiller(markingBillPaid.billerCategory) ? getLinkablePayments(txns, markingBillPaid) : []}
+            getAccountName={id=>getAcc(id).name}
+            onLinkPayment={txn=>linkExistingPaymentToBill(markingBillPaid, txn)}
           />
         )}
         {billMatchSuggestion&&(

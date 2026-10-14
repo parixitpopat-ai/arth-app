@@ -11,7 +11,7 @@ import { PAYMENT_METHODS, paidWithDifference, isPaidWithBalanced } from "../doma
 // Credit-card statements keep their own payment rules, so their amount stays the statement amount.
 //
 // `balance` is the Bill's remaining balance (billBalance.js); `forLabel` is the Bill's own For.
-export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, defaultAccId, today, T, sym, fmt, formatShortDate, onClose, onConfirm }) {
+export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, defaultAccId, today, T, sym, fmt, formatShortDate, onClose, onConfirm, linkablePayments = [], getAccountName, onLinkPayment }) {
   const remaining = Number(balance ?? bill.amount ?? 0);
   const isCard = Boolean(bill.isCcStatement);
   const [accId, setAccId] = useState(defaultAccId || "");
@@ -21,6 +21,8 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
   // Payments v2 H2 — if recording throws, nothing was saved (the caller writes only after its checks pass),
   // the entries stay as typed, and the primary button stays off until "Try again" or an edit.
   const [failed, setFailed] = useState(false);
+  // "Already paid? Link an earlier payment" — only offered when the caller passes candidates (recharges and renewals).
+  const [showLink, setShowLink] = useState(false);
   const edit = setter => v => { setFailed(false); setter(v); };
   // Payments v2 C3 — pay one Bill with several methods/accounts ("Split across methods"). The lines must add up to
   // the amount exactly (same rule as Pay Fees' "Paid with"); a card statement keeps its single account.
@@ -132,6 +134,30 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
           <input value={transactionRef} onChange={e => setTransactionRef(e.target.value.toUpperCase())} placeholder="UTR or note" style={inp} />
         </label>
       </div>
+
+      {linkablePayments.length > 0 && onLinkPayment && (
+        <div style={{ marginTop: 14, borderTop: `1px solid ${T.border}`, paddingTop: 6 }}>
+          <button type="button" data-testid="record-payment-link-toggle" onClick={() => setShowLink(v => !v)} style={{ minHeight: 44, padding: "0 4px", background: "none", border: "none", color: T.accent, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+            {showLink ? "Hide earlier payments" : "Already paid? Link an earlier payment"}
+          </button>
+          {showLink && (
+            <div data-testid="record-payment-link-list" style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+              <div style={{ color: T.sub, fontSize: 12 }}>Uses a payment you already recorded, so nothing is counted twice. Your accounts do not change.</div>
+              {linkablePayments.map(t => (
+                <button key={t.id} type="button" data-testid="record-payment-link-item" onClick={() => onLinkPayment(t)} style={{ textAlign: "left", minHeight: 44, padding: "8px 12px", background: T.pill, border: `1px solid ${T.border}`, borderRadius: RADIUS.md, color: T.text, cursor: "pointer", fontFamily: "inherit" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 14, fontWeight: 700 }}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.desc || t.merchant || "Expense"}</span>
+                    <span style={{ fontFamily: FONT.mono }}>{sym}{fmt(t.amount)}</span>
+                  </div>
+                  <div style={{ color: T.sub, fontSize: 12, marginTop: 2 }}>
+                    {formatShortDate(t.date) || t.date}{getAccountName && t.accId ? ` · ${getAccountName(t.accId)}` : ""}{Math.abs(Number(t.amount) - remaining) > 0.005 ? ` · recharge is ${sym}${fmt(remaining)}` : ""}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {failed && (
         <div data-testid="record-payment-error" role="alert" style={{ marginTop: 14, background: T.card, border: `1px solid ${T.danger || T.border}`, borderRadius: RADIUS.md, padding: "12px 14px" }}>
