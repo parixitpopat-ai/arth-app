@@ -111,6 +111,7 @@ import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refu
 import { getCommitments, isRechargeBiller } from "./domain/bills/commitments";
 import { getRechargeWords } from "./domain/bills/rechargeWords";
 import { getPaidFromAccounts } from "./domain/accounts/paymentSources";
+import { withMembershipPaymentSynced } from "./domain/membership/paymentSync";
 import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
@@ -2158,7 +2159,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const linkedTxn = getInvestmentTxn(inv);
     const sourceItem = linkedTxn ? {
       ...inv,
-      paymentAccId: linkedTxn.accId || inv?.paymentAccId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "",
+      paymentAccId: linkedTxn.accId || inv?.paymentAccId || paidViaAccounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "",
       startDate: inv?.startDate || linkedTxn?.date || todayStr(),
       lastNavDate: todayStr(),
     } : inv;
@@ -2170,7 +2171,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       folioNo:String(sourceItem?.folioNo || "").trim(),
       amount:Number(sourceItem?.amount || 0),
       freq:sourceItem?.freq || "",
-      paymentAccId:sourceItem?.paymentAccId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "",
+      paymentAccId:sourceItem?.paymentAccId || paidViaAccounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "",
       lastNav:Number(sourceItem?.lastNav || linkedTxn?.investNav || 0),
       startDate:sourceItem?.startDate || todayStr(),
       lastNavDate:sourceItem?.lastNavDate || todayStr(),
@@ -7952,7 +7953,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const owedPeople = Object.entries(t?.people||{}).filter(([pid,info])=>info.mode==="owes"&&!info.settled&&pid!=="__me__"&&remainingShare(info)>0);
     const [partials, setPartials] = useState(Object.fromEntries(owedPeople.map(([pid,info])=>[pid,String(remainingShare(info))])));
     const [receiptImg, setReceiptImg] = useState(null);
-    const [accId, setAccId] = useState(accounts.find(a=>a.type!=="cc")?.id||"");
+    const [accId, setAccId] = useState(paidViaAccounts.find(a=>a.type!=="cc")?.id||"");
     const [settleRef, setSettleRef] = useState("");
     const [settleSms, setSettleSms] = useState("");
     const [showSettleSms, setShowSettleSms] = useState(false);
@@ -8387,7 +8388,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const linkedTxn = item?.linkedTxnId
       ? txns.find(txn=>String(txn.id)===String(item.linkedTxnId)) || txns.find(txn=>String(txn.linkedInvestmentId||"")===String(item.id||"")) || null
       : txns.find(txn=>String(txn.linkedInvestmentId||"")===String(item?.id||"")) || null;
-    const [paymentAccId,setPaymentAccId]=useState(item?.paymentAccId || linkedTxn?.accId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "");
+    const [paymentAccId,setPaymentAccId]=useState(item?.paymentAccId || linkedTxn?.accId || paidViaAccounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "");
     const [lastNav,setLastNav]=useState(String(item?.lastNav||linkedTxn?.investNav||""));
     const [showFolioSuggestions,setShowFolioSuggestions]=useState(false);
     const [startDate,setStartDate]=useState(item?.startDate||todayStr());
@@ -12689,7 +12690,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [startDate,setStartDate]=useState(item?.startDate||todayStr());
     const [dueDate,setDueDate]=useState(item?.dueDate||"");
     const [dueDay,setDueDay]=useState(String(item?.dueDay||""));
-    const [paymentAccId,setPaymentAccId]=useState(item?.paymentAccId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "");
+    const [paymentAccId,setPaymentAccId]=useState(item?.paymentAccId || paidViaAccounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "");
     const [hasInterest,setHasInterest]=useState(item?.hasInterest ?? (Number(item?.interestRate||0)>0));
     const [interestRate,setInterestRate]=useState(String(item?.interestRate||""));
     const [note,setNote]=useState(item?.note||"");
@@ -12881,7 +12882,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const isEmiFlow = item?.direction==="taken" && (Number(item?.emiAmount||0)>0 || item?.paymentMode==="emi" || item?.isEmiPlan);
     const [amount,setAmount]=useState(String(item?.direction==="taken" ? (item?.emiAmount || item?.outstanding || "") : (item?.outstanding || "")));
     const [date,setDate]=useState(todayStr());
-    const [accId,setAccId]=useState(item?.paymentAccId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "");
+    const [accId,setAccId]=useState(item?.paymentAccId || paidViaAccounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "");
     const [note,setNote]=useState("");
     const label = item?.direction==="given" ? "Record money received" : (isEmiFlow ? "Pay EMI" : "Record repayment made");
 
@@ -12989,7 +12990,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [emiAmount,setEmiAmount]=useState(String(item?.emiAmount||""));
     const [interestRate,setInterestRate]=useState(String(item?.interestRate||""));
     const [nextDue,setNextDue]=useState(item?.nextDue||todayStr());
-    const [paymentAccId,setPaymentAccId]=useState(item?.paymentAccId || accounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "");
+    const [paymentAccId,setPaymentAccId]=useState(item?.paymentAccId || paidViaAccounts.find(a=>a.type!=="cc")?.id || accounts[0]?.id || "");
     const [note,setNote]=useState(item?.note||"");
     const save=()=>{
       if(!name.trim()) return;
@@ -16494,6 +16495,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [billPeriodTo,setBillPeriodTo]=useState(b.billPeriodTo||"");
     const [unitsConsumed,setUnitsConsumed]=useState(b.unitsConsumed!=null?String(b.unitsConsumed):"");
     const [meterReading,setMeterReading]=useState(b.meterReading!=null?String(b.meterReading):"");
+    // A paid-first connection (prepaid recharge, streaming subscription): its edit screen is the recharge form, not a bill with a due date.
+    const isRecharge = isRechargeBiller(b.billerCategory);
+    const rw = getRechargeWords(b.billerCategory);
+    const [validFrom2,setValidFrom2]=useState(b.validFrom||b.billDate||b.dueDate||todayStr());
+    const [validityDays,setValidityDays]=useState(b.validityDays!=null?String(b.validityDays):((b.validFrom&&b.validUntil)?String(Math.round((new Date(b.validUntil)-new Date(b.validFrom))/86400000)):""));
+    const [planType,setPlanType]=useState(b.planType||"");
+    const [planDesc,setPlanDesc]=useState(b.planDesc||"");
+    const validUntilCalc = validityDays && validFrom2 ? (()=>{ const d=new Date(validFrom2); d.setDate(d.getDate()+Number(validityDays)); return d.toISOString().split("T")[0]; })() : "";
     const [editPhoto,setEditPhoto]=useState(b.imageBase64||null);
     const [editSplitPeople,setEditSplitPeople]=useState(()=>{ const m={}; Object.entries(b.splitPeople||{}).forEach(([pid])=>m[pid]=true); return m; });
     // Restore the ACTUAL saved per-person amounts, not a fresh equal split — this was the bug:
@@ -16536,6 +16545,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
     const save=()=>{
       if(duplicateInvoiceBill) return;
+      if(isRecharge && !(Number(validityDays)>0 && validFrom2)) return;
       const shares=calcEditShares();
       // WP-BILLS-2A: peopleSplit is built inside the functional updater, against the LIVE
       // previous bill (x.splitPeople) rather than the possibly-stale `b` prop, and merged via
@@ -16547,7 +16557,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const owedByOthers = Object.entries(peopleSplit).reduce((sum,[,info])=>sum+(info.mode==="owes"?Number(info.amount||0):0),0);
         const myShare=editIncludeMe ? Math.max(0, editAmt-owedByOthers) : 0;
         const groupCollectiveAmount = editGroup ? Math.max(0, editAmt-owedByOthers-myShare) : 0;
-        return {...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:billDate||x.billDate||todayStr(),dueDate,catId,subId:subId||null,recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:billPeriodFrom||null,billPeriodTo:billPeriodTo||null,unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null,forType:editForType==="unassigned"?"unassigned":editForType,forId:editForType==="unassigned"||editForType==="house"?null:editForId};
+        return {...x,name:name.trim(),amount:parseFloat(amount)||0,billDate:isRecharge?validFrom2:(billDate||x.billDate||todayStr()),dueDate:isRecharge?validFrom2:dueDate,catId,subId:subId||null,recurring:isRecharge?false:recurring,frequency,merchant:merchant.trim()||name.trim(),invoiceNo:isRecharge?(x.invoiceNo||""):invoiceNo.trim(),imageBase64:editPhoto,splitPeople:peopleSplit,groupId:editGroup||null,groupCollectiveAmount,myShare,billerAccountId:billerAccountId||null,autoGenerate,billPeriodFrom:isRecharge?(x.billPeriodFrom||null):(billPeriodFrom||null),billPeriodTo:isRecharge?(x.billPeriodTo||null):(billPeriodTo||null),unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null,...(isRecharge?{validFrom:validFrom2,validityDays:Number(validityDays),validUntil:validUntilCalc,planType:planType||null,planDesc:planDesc.trim()||null}:{}),forType:editForType==="unassigned"?"unassigned":editForType,forId:editForType==="unassigned"||editForType==="house"?null:editForId};
       }));
       onClose();
     };
@@ -16556,7 +16566,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.8)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200 }}>
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 18px 40px",width:"100%",maxWidth:430,maxHeight:"90vh",overflowY:"auto" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>✏️ Edit Bill</div>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{isRecharge?`✏️ Edit ${rw.kind==="subscription"?"renewal":"recharge"}`:"✏️ Edit Bill"}</div>
             <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>✕</button>
           </div>
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
@@ -16592,21 +16602,34 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
             <input style={inp} placeholder="Bill name * e.g. April Electricity Bill" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
             <input style={inp} placeholder="Provider / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>
-            <input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>
+            {!isRecharge&&<input style={{ ...inp,border:`1px solid ${duplicateInvoiceBill?T.danger+"66":T.border}` }} placeholder="Bill number / invoice no. (unique) e.g. MSojo123" value={invoiceNo} onChange={e=>setInvoiceNo(e.target.value)}/>}
             {duplicateInvoiceBill && <div style={{ color:T.danger,fontSize:10,fontWeight:700,marginTop:-4 }}>This invoice number already exists for {duplicateInvoiceBill.name}.</div>}
             <div>
-              <span style={lbl}>Amount ({sym})</span>
+              <span style={lbl}>{isRecharge?rw.amount:"Amount"} ({sym})</span>
               <input style={{ ...inp,fontSize:20,fontWeight:800,textAlign:"center" }} type="number" value={amount} onChange={e=>setAmount(e.target.value)}/>
             </div>
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+            {isRecharge&&(
+              <div data-testid="edit-recharge-details" style={{ background:T.input,borderRadius:12,padding:"12px",display:"flex",flexDirection:"column",gap:8 }}>
+                <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>{rw.details}</div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                  <div><span style={lbl}>{rw.date} *</span><input data-testid="edit-recharge-date" style={inp} type="date" value={validFrom2} onChange={e=>setValidFrom2(e.target.value)}/></div>
+                  <div><span style={lbl}>Validity (days) *</span><input data-testid="edit-recharge-validity" style={{ ...inp,border:`1px solid ${Number(validityDays)>0?T.border:T.danger+"66"}` }} type="number" value={validityDays} onChange={e=>setValidityDays(e.target.value)}/></div>
+                </div>
+                {validUntilCalc&&<div style={{ background:T.success+"16",borderRadius:10,padding:"8px 12px",display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:11 }}>Valid Until</span><span data-testid="edit-recharge-valid-until" style={{ color:T.success,fontSize:13,fontWeight:800 }}>{formatShortDate(validUntilCalc)||validUntilCalc}</span></div>}
+                {rw.presets.length>0&&<div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>{rw.presets.map(pr=>(<button key={pr.label} onClick={()=>setValidityDays(String(pr.days))} style={{ background:Number(validityDays)===pr.days?T.accent+"22":"none",border:`1px solid ${Number(validityDays)===pr.days?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:Number(validityDays)===pr.days?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pr.label}</button>))}</div>}
+                {rw.kind==="recharge"&&<div><span style={lbl}>Plan Type</span><div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>{["Voice+Data","Data Only","Unlimited Calls","SMS+Voice"].map(pt=>(<button key={pt} onClick={()=>setPlanType(q=>q===pt?"":pt)} style={{ background:planType===pt?T.accent+"22":"none",border:`1px solid ${planType===pt?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:planType===pt?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{pt}</button>))}</div></div>}
+                <div><span style={lbl}>Plan Details</span><input style={inp} placeholder="e.g. 1.5GB/day + unlimited calls" value={planDesc} onChange={e=>setPlanDesc(e.target.value)}/></div>
+              </div>
+            )}
+            {!isRecharge&&<div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
               <div><span style={lbl}>Bill Date (generated on)</span><input style={inp} type="date" value={billDate} onChange={e=>setBillDate(e.target.value)}/></div>
               <div><span style={lbl}>Due Date (pay by)</span><input style={inp} type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}/></div>
               <div><span style={lbl}>Period From (optional)</span><input style={inp} type="date" value={billPeriodFrom} onChange={e=>setBillPeriodFrom(e.target.value)}/></div>
               <div><span style={lbl}>Period To (optional)</span><input style={inp} type="date" value={billPeriodTo} onChange={e=>setBillPeriodTo(e.target.value)}/></div>
               <div><span style={lbl}>Units Consumed (optional)</span><input style={inp} type="number" placeholder="e.g. 412" value={unitsConsumed} onChange={e=>setUnitsConsumed(e.target.value)}/></div>
               <div><span style={lbl}>Meter Reading (optional)</span><input style={inp} type="number" placeholder="e.g. 25890" value={meterReading} onChange={e=>setMeterReading(e.target.value)}/></div>
-            </div>
-            <div style={{ background:T.input,borderRadius:10,padding:"10px 12px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
+            </div>}
+            {!isRecharge&&<div style={{ background:T.input,borderRadius:10,padding:"10px 12px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8 }}>
               <div>
                 <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Bill date</div>
                 <div style={{ color:T.text,fontSize:11,fontWeight:700,marginTop:3 }}>{formatShortDate(billDateText) || billDateText || "—"}</div>
@@ -16619,7 +16642,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Payment date</div>
                 <div style={{ color:T.text,fontSize:11,fontWeight:700,marginTop:3 }}>{paymentDateText ? (formatShortDate(paymentDateText) || paymentDateText) : "—"}</div>
               </div>
-            </div>
+            </div>}
             <div>
               <span style={lbl}>Category</span>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -16659,7 +16682,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </>}
             </div>
 
-            <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
+            {!isRecharge&&<div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
               <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:recurring?12:0 }}>
                 <input type="checkbox" id="edit_recurring" checked={recurring} onChange={e=>setRecurring(e.target.checked)} style={{ width:18,height:18,accentColor:T.accent,cursor:"pointer" }}/>
                 <label htmlFor="edit_recurring" style={{ color:T.text,fontSize:14,fontWeight:700,cursor:"pointer" }}>🔁 Recurring bill</label>
@@ -16669,11 +16692,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <button key={v} onClick={()=>setFrequency(v)} style={{ background:frequency===v?T.accent+"22":"none",border:`1px solid ${frequency===v?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:frequency===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
                 ))}
               </div>}
-            </div>
+            </div>}
             {/* Bill photo */}
             <div style={{ background:T.input,borderRadius:12,padding:"11px 14px",display:"flex",alignItems:"center",gap:10 }}>
               <span>📷</span>
-              <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1 }}>Bill Photo (optional)</span>
+              <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1 }}>{isRecharge?"Receipt (optional)":"Bill Photo (optional)"}</span>
               <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>
                 {editPhoto?"Change":"Upload"}
                 <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setEditPhoto(ev.target.result); r.readAsDataURL(f); }}/>
@@ -16684,7 +16707,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={onClose} style={btnG}>Cancel</button>
-              <button onClick={save} style={btnP}>Save Changes ✓</button>
+              <button data-testid="edit-bill-save" onClick={save} disabled={isRecharge&&!(Number(validityDays)>0&&validFrom2)} style={{ ...btnP,opacity:(isRecharge&&!(Number(validityDays)>0&&validFrom2))?0.5:1 }}>Save Changes ✓</button>
             </div>
           </div>
         </div>
@@ -18881,7 +18904,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [startsOn, setStartsOn] = useState(existingPeriods?.[0]?.from||todayStr());
     const [endsOn, setEndsOn] = useState(existingPeriods?.[0]?.to||"");
     const [amount, setAmount] = useState(existing?.amount?String(existing.amount):"");
-    const [accId, setAccId] = useState(existing?.accId||accounts.find(a=>a.type!=="cc")?.id||"");
+    const [accId, setAccId] = useState(existing?.accId||paidViaAccounts.find(a=>a.type!=="cc")?.id||"");
     const [coverageMode, setCoverageMode] = useState((existingPeriods?.length||0)>1 ? "multiple" : "one");
     const [periods, setPeriods] = useState(existingPeriods?.length>1 ? existingPeriods : []);
     // Grace period for the "one period" mode — a separate property on the period, not baked into
@@ -19007,6 +19030,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         // on the relationship (membershipRelationshipId above), not on this payment record.
       };
       setMemberships(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[...prev,record]);
+      // Editing keeps the real payment in step: the expense this membership created (and only that one, never a transaction the user linked by hand)
+      // follows the edited amount, account and category, so spending and the account balance agree with the membership record.
+      if(isEdit && finalTxnId) setTxns(prev=>withMembershipPaymentSynced(prev,{ txnId:finalTxnId, membershipId:recordId, amount:totalAmount, accId, catId }));
       onClose();
     };
 
@@ -21031,7 +21057,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           return (
                             <div key={m.id} onClick={()=>setViewingMembership(m)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"10px 12px",cursor:"pointer" }}>
                               <div>
-                                <div style={{ color:isCurrentRow?T.success:T.text,fontSize:11,fontWeight:800 }}>{isCurrentRow?"Current":"Completed"} · {period?.label||"Payment"}{period?.graceDays>0?` (+${period.graceDays}d grace)`:""}</div>
+                                <div style={{ color:isCurrentRow?T.success:T.text,fontSize:11,fontWeight:800 }}>{isCurrentRow?"Current":(period?.from && period.from>todayStr()?"Upcoming":"Completed")} · {period?.label||"Payment"}{period?.graceDays>0?` (+${period.graceDays}d grace)`:""}</div>
                                 <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(period?.from)||period?.from} → {formatShortDate(period?.to)||period?.to}</div>
                               </div>
                               <div style={{ color:T.text,fontSize:12,fontWeight:800 }}>{sym}{fmt(m.amount)}</div>
