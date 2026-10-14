@@ -1,6 +1,6 @@
 # WEB-V1-COMPLETION-MATRIX — authoritative status of Arth Web v1
 
-Date: 14 Oct 2026. **`origin/main` = `26dc3107ffd5cef8036fd3cf78708b867709da3d`** (code merged and deployed to production, see the release-evidence table). **Not yet merged:** branch `wp-membership-verify` = `98e3c82` (edit screens, membership payment sync, defaults; 1,693 tests). Rows in sections A–E below were last verified at `8a96e5f`; the table "Release evidence since 8a96e5f" is the current record for everything merged after it. Rows marked *main-t34-reports-13Oct* were browser-verified on that code.
+Date: 14 Oct 2026. **Code is at `origin/main` = `4b93113b1a710be652937ccba3449a03df4e9cf0`** (merged, deployed to production, `wp-membership-verify` included). The commit that carries this re-pin is a docs-only change on top; its SHA is the final `origin/main` and is reported with the deployment check, since a file cannot cite the commit that contains it. Rows in sections A–E were last verified at `8a96e5f`; the table "Release evidence since 8a96e5f" is the current record for everything merged after it.
 This replaces the June roadmap/pending-scope files as the operational source; those are history (30 Jun 2026 and earlier).
 
 ## How to read it
@@ -94,19 +94,19 @@ Five separate questions per change. **Code merged** = the commit is on `origin/m
 | Subscription renewal form for OTT / Streaming (`f75b3f0`) | Yes | 1,684 → 1,689 pass | Yes: Netflix ₹649 yearly, valid until 14-Oct-2027, paid, debited | Yes (same deployment) | **Pending** |
 | "Paid from" rule: bank, cash and credit card only; no debit, UPI or PPF/FD/NPS; Transfer ends exclude debit/UPI (`26dc310`) | Yes | 1,689 pass (`paymentSources.test.js`, 5) | Yes: Record payment, split lines, statement payment, Transfer | Yes (same deployment) | **Pending** |
 | Record payment on the deployed site | – | – | Not run on the deployed site; same code verified locally | Deployment verified, UI not opened | **Pending** |
-| Edit screen for a recharge or renewal is the recharge form (date, validity, valid until, plan); ordinary bill edit unchanged (`98e3c82`) | **No** (branch `wp-membership-verify`) | 1,693 pass | Yes: prepaid, OTT, and an ordinary bill | No | **Pending** |
+| Edit screen for a recharge or renewal is the recharge form (date, validity, valid until, plan); ordinary bill edit unchanged (`98e3c82`) | Yes, `4b93113` | 1,693 pass | Yes, on merged main: prepaid, OTT, and an ordinary bill | Yes: `dpl_A2rQ7aow…` READY, commit `4b93113`, alias `arth-app.vercel.app` (UI not opened) | **Pending** |
 | Gym, Club Membership, Other Subscription: create and renew (already paid-first: plan, start, amount paid, paid from) | Yes (existing flow) | existing membership tests | Yes: create and renew for Gym; create for Club (annual) and Other Subscription; paid-from lists only bank, cash, card | Existing flow, deployed | **Pending** |
-| Editing a membership payment updates its expense (amount, account, category); hand-linked transactions untouched (`98e3c82`) | **No** | `paymentSync.test.js` (4) | Yes: 3,000 → 3,500 updates the expense | No | **Pending** |
-| Membership timeline says "Upcoming" for a future period (`98e3c82`) | **No** | – | Yes | No | **Pending** |
-| Default "paid from" in membership/loan/investment forms is never a debit, UPI or PPF account (`98e3c82`) | **No** | covered by `paymentSources.test.js` | Yes: membership default = HDFC Savings with a PPF account listed first | No | **Pending** |
+| Editing a membership payment updates its expense (amount, account, category); hand-linked transactions untouched (`98e3c82`) | Yes, `4b93113` | `paymentSync.test.js` (4); 1,693 pass | Yes, on merged main: a membership created in the form, 3,000 → 3,500, updates its expense (account balance ₹45,000 → ₹44,500); a membership linked by hand to an existing ₹2,000 expense, edited to ₹2,500, leaves that expense and the balance unchanged | Yes (same deployment, UI not opened) | **Pending** |
+| Membership timeline says "Upcoming" for a future period (`98e3c82`) | Yes, `4b93113` | 1,693 pass | Yes, on merged main: next period shows "Upcoming", the running one "Current" | Yes (same deployment, UI not opened) | **Pending** |
+| Default "paid from" in membership/loan/investment forms is never a debit, UPI or PPF account (`98e3c82`) | Yes, `4b93113` | `paymentSources.test.js`; 1,693 pass | Yes, on merged main: membership default = HDFC Savings with a PPF account and a UPI handle listed first; the list holds only HDFC Savings | Yes (same deployment, UI not opened) | **Pending** |
 
-Defects found during this pass, both fixed only on `wp-membership-verify`: (1) editing a membership left its payment at the old amount, so spending and the account did not agree with the membership; (2) the edit screen for a recharge still used the bill layout.
+Defects found during this pass, both fixed and merged in `4b93113`: (1) editing a membership left its payment at the old amount, so spending and the account did not agree with the membership; (2) the edit screen for a recharge still used the bill layout.
 
 ## Release gates still pending (no evidence yet)
 1. **Real-device checklist** (`WEB-V1-VERIFICATION-001.md` §3): not performed.
 2. **Two-device Supabase restore** for billers and membership relationships (§4): not performed.
 3. **Plan Ahead nudge-state cloud sync**: works locally including after a reload; cloud sync not verified.
-4. **Deployed-UI check** of Record payment and the new forms on `arth-app.vercel.app`: not performed from this environment.
+4. **Live-site UI check** of Record payment, the new forms, the edit screens and membership edit on `arth-app.vercel.app`: not performed. The deployment is verified (right commit, READY, aliased); nobody has opened the live UI to test it.
 
 ## Web v1 status
 **Web v1 is NOT complete.** The locked Web v1 requirements — household FY summary (row 40), per-person reporting with FY coverage (row 39) and T-34 (row 21) — are now implemented, merged and browser-verified on main `8a96e5f`. Explicitly deferred by scope lock: calendar-month card spending (12), net-worth history UI (41), desktop two-pane (23). **Real-device (checklist) and two-device Supabase (§4) checks are PENDING: no device evidence exists for any row.** Web v1 cannot be declared complete until they are done.
