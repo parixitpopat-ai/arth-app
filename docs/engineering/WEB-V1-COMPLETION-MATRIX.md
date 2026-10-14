@@ -1,6 +1,6 @@
 # WEB-V1-COMPLETION-MATRIX — authoritative status of Arth Web v1
 
-Date: 13 Oct 2026. **Pinned to `origin/main` = `8a96e5f`** (fast-forwarded from fe43628; it contains Reports `8a71c13` and T-34 `769a60a`). All code in this matrix is exactly the tree at `8a96e5f`; this file's own re-pin is a docs-only commit on top. On `8a96e5f`: `npm test` 1,679 / 1,679, 0 skipped; production build passes; lint shows only the 4 baseline problems. Rows marked *main-t34-reports-13Oct* were browser-verified on the same code (integration tree 0e81823, then re-run on actual main for Reports, T-34, the ₹0 statement and the pool block).
+Date: 14 Oct 2026. **`origin/main` = `26dc3107ffd5cef8036fd3cf78708b867709da3d`** (code merged and deployed to production, see the release-evidence table). **Not yet merged:** branch `wp-membership-verify` = `98e3c82` (edit screens, membership payment sync, defaults; 1,693 tests). Rows in sections A–E below were last verified at `8a96e5f`; the table "Release evidence since 8a96e5f" is the current record for everything merged after it. Rows marked *main-t34-reports-13Oct* were browser-verified on that code.
 This replaces the June roadmap/pending-scope files as the operational source; those are history (30 Jun 2026 and earlier).
 
 ## How to read it
@@ -84,6 +84,29 @@ The frozen list names a Reports screen; `SCREEN_ARCHITECTURE.md` marks it not st
 | 53 | Test suite integrity | `src/testInventory.test.js`, `TEST-INVENTORY-001.md` | `testInventory.test.js`; 1,661 / 1,661, 0 skipped, all registered | IV on main 8e722e8 | None |
 | 54 | `StatsPage` unreachable duplicate (FIN-TRUTH D5) | `App.jsx` ~L17687 | `grep`: no `<StatsPage` | Cleanup, not a feature | Keep for now; remove on its own branch later (your decision) |
 | 55 | Documentation drift | June roadmap/pending scope, `SCREEN_ARCHITECTURE.md` | — | Stale | Retire or mark as history. Medium |
+
+## Release evidence since 8a96e5f (what each change has actually been through)
+Five separate questions per change. **Code merged** = the commit is on `origin/main`. **Tests** = `npm test` count passing on that code. **Browser** = Playwright on a local dev server, desktop Chromium at 320–420 px. **Deployed** = Vercel production deployment of that commit is READY and aliased to `arth-app.vercel.app` (checked through the Vercel API). **Device** = a real phone. A deployed commit is *not* a verified deployed UI: the sandbox cannot open `arth-app.vercel.app` in a browser (outbound 403; the Vercel fetch tool returned only the HTML shell), so no test below was run against the live site.
+
+| Change | Code merged | Tests | Browser (local) | Deployed | Real device |
+|---|---|---|---|---|---|
+| Prepaid recharge form: recharge-first, no due date/bill number/period/recurring; Record payment opens after save (`c11889b`) | Yes, on main (via `f75b3f0`, `26dc310`) | 1,680 → 1,689 pass | Yes: form fields, required validity, valid-until, paid via Record payment, HDFC debited | Yes: `dpl_9dm3HjL6…` READY, commit `26dc310`, alias `arth-app.vercel.app`, no alias error | **Pending** |
+| Subscription renewal form for OTT / Streaming (`f75b3f0`) | Yes | 1,684 → 1,689 pass | Yes: Netflix ₹649 yearly, valid until 14-Oct-2027, paid, debited | Yes (same deployment) | **Pending** |
+| "Paid from" rule: bank, cash and credit card only; no debit, UPI or PPF/FD/NPS; Transfer ends exclude debit/UPI (`26dc310`) | Yes | 1,689 pass (`paymentSources.test.js`, 5) | Yes: Record payment, split lines, statement payment, Transfer | Yes (same deployment) | **Pending** |
+| Record payment on the deployed site | – | – | Not run on the deployed site; same code verified locally | Deployment verified, UI not opened | **Pending** |
+| Edit screen for a recharge or renewal is the recharge form (date, validity, valid until, plan); ordinary bill edit unchanged (`98e3c82`) | **No** (branch `wp-membership-verify`) | 1,693 pass | Yes: prepaid, OTT, and an ordinary bill | No | **Pending** |
+| Gym, Club Membership, Other Subscription: create and renew (already paid-first: plan, start, amount paid, paid from) | Yes (existing flow) | existing membership tests | Yes: create and renew for Gym; create for Club (annual) and Other Subscription; paid-from lists only bank, cash, card | Existing flow, deployed | **Pending** |
+| Editing a membership payment updates its expense (amount, account, category); hand-linked transactions untouched (`98e3c82`) | **No** | `paymentSync.test.js` (4) | Yes: 3,000 → 3,500 updates the expense | No | **Pending** |
+| Membership timeline says "Upcoming" for a future period (`98e3c82`) | **No** | – | Yes | No | **Pending** |
+| Default "paid from" in membership/loan/investment forms is never a debit, UPI or PPF account (`98e3c82`) | **No** | covered by `paymentSources.test.js` | Yes: membership default = HDFC Savings with a PPF account listed first | No | **Pending** |
+
+Defects found during this pass, both fixed only on `wp-membership-verify`: (1) editing a membership left its payment at the old amount, so spending and the account did not agree with the membership; (2) the edit screen for a recharge still used the bill layout.
+
+## Release gates still pending (no evidence yet)
+1. **Real-device checklist** (`WEB-V1-VERIFICATION-001.md` §3): not performed.
+2. **Two-device Supabase restore** for billers and membership relationships (§4): not performed.
+3. **Plan Ahead nudge-state cloud sync**: works locally including after a reload; cloud sync not verified.
+4. **Deployed-UI check** of Record payment and the new forms on `arth-app.vercel.app`: not performed from this environment.
 
 ## Web v1 status
 **Web v1 is NOT complete.** The locked Web v1 requirements — household FY summary (row 40), per-person reporting with FY coverage (row 39) and T-34 (row 21) — are now implemented, merged and browser-verified on main `8a96e5f`. Explicitly deferred by scope lock: calendar-month card spending (12), net-worth history UI (41), desktop two-pane (23). **Real-device (checklist) and two-device Supabase (§4) checks are PENDING: no device evidence exists for any row.** Web v1 cannot be declared complete until they are done.
