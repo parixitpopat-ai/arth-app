@@ -1,5 +1,7 @@
 # SYNC-SAFETY-001 — isolated cloud-sync safety test (synthetic data only)
 
+> **Baseline record.** This describes the sync behaviour before the fix. Current status and results: `SYNC-SAFETY-003-results.md`.
+
 Date: 15 Oct 2026. Status: **evidence gathered; four of the five required properties are NOT met.** Cloud-sync verification for Web v1 is **not complete**.
 
 ## Why this exists

@@ -1,5 +1,5 @@
 {
-  "at": "2026-10-15T10:32:02.456Z",
+  "at": "2026-10-15T10:40:55.903Z",
   "outcomeVector": [
     {
       "id": "P1",
@@ -47,7 +47,7 @@
     },
     {
       "id": "R1",
-      "pass": false
+      "pass": true
     },
     {
       "id": "T1",
@@ -196,12 +196,12 @@
     {
       "id": "R1",
       "property": "4 reconciliation mismatch is detected and sync pauses",
-      "pass": false,
+      "pass": true,
       "evidence": {
         "paused": true,
         "localIntact": true,
         "bannerShown": true,
-        "cloudMissingTheTxn": false
+        "cloudHasOneFewerThanDevice": true
       }
     },
     {

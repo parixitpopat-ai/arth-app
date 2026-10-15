@@ -1,6 +1,6 @@
 # SYNC-SAFETY-002 — design and test plan for the sync-safety work package
 
-Status: **PROPOSAL, awaiting owner review. No sync code has been changed.** Branch `wp-sync-safety`, based on `wp-sync-evidence` `7bf8ffa`. `origin/main` = `5fc65e7` and is not touched. Evidence this answers: `SYNC-SAFETY-001.md` (3 of 5 safety properties fail; silent loss reproduced in 3 cases).
+Status: **IMPLEMENTED on branch `wp-sync-safety` (not merged). Results: `SYNC-SAFETY-003-results.md`.** Changes from this proposal: the unsynced indicator says "not synced yet" with the next retry time rather than a count; every write is read back by default (§3.8); the first sign-in path uses the same engine. Branch `wp-sync-safety`, based on `wp-sync-evidence` `7bf8ffa`. `origin/main` = `5fc65e7` and is not touched. Evidence this answers: `SYNC-SAFETY-001.md` (3 of 5 safety properties fail; silent loss reproduced in 3 cases).
 
 ## 1. Invariants the design must guarantee
 - **I1 No silent loss.** At every moment, every transaction ID ever saved on any device is present in at least one of: that device's live data, the cloud row, or a verified safety backup on a device. Replacing data never happens without a verified backup that contains what is being replaced.
