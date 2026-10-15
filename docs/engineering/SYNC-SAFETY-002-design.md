@@ -36,8 +36,25 @@ Inputs: `{ hasBase, dirty, cloud: none | { token, digest, writeId } , networkOk 
 | No base yet, local empty | Pull (with backup of the empty state skipped as nothing to lose). |
 `pendingWrite` is resolved before the table is applied (§3.4).
 
-### 3.3 Compare-and-swap push, no schema change
-The push becomes a conditional update of the one row: *update where `user_id = me` and `updated_at = baseToken`*, returning the new `updated_at`; zero rows updated means someone else wrote first → treat as conflict by re-running the decision table. First-ever write is a plain insert (a duplicate-key failure means a row appeared → re-decide). This uses only the two existing columns (`snapshot`, `updated_at`); the token is always the **server-returned** value, never a client clock. **To verify before relying on it (I have not):** that PostgREST/supabase-js `update().eq().eq().select()` returns the affected rows as I expect in the current docs, that `updated_at` is not overwritten by a trigger in a way that breaks equality, that row-level-security permits UPDATE with these filters, and timestamp-precision round-tripping (microseconds vs milliseconds). The local fake backend models this; real Supabase behaviour stays **unverified** until tested on an isolated project (decision D2).
+### 3.3 Compare-and-swap push (D1 decided by the owner: `updated_at` provisionally, verified first; version column in an approved migration if it cannot be made reliable)
+The push is one conditional `UPDATE ... WHERE user_id = me AND updated_at = baseToken ... RETURNING updated_at`; zero rows means someone else wrote first and the decision table is re-run. First-ever write is a plain `INSERT`; a duplicate-key failure means a row appeared, so re-decide. **No read-then-write sequence is ever used as the check** (shown below to lose updates). The token is always the **server-returned** value.
+
+Verification status (script `tools/sync-sim/pg-verify/cas-semantics.sh`, run 15 Oct 2026 on a throwaway local PostgreSQL 16.13 over a unix socket; no Supabase, no network):
+| Question | Result | Basis |
+|---|---|---|
+| Does a conditional UPDATE reliably stop a concurrent overwrite? | **Yes** under overlapping transactions at the default READ COMMITTED level: the second writer blocked on the row lock, re-checked its WHERE after the first committed, and updated 0 rows. | Run on real PostgreSQL |
+| Does check-then-write stop it? | **No**: both writers read the same token, the second silently overwrote the first. | Run on real PostgreSQL |
+| Does the app's current `upsert` (`ON CONFLICT DO UPDATE`) check anything? | **No**: unconditional overwrite. | Run on real PostgreSQL |
+| Precision | `timestamptz` and `timestamp(6)` round-trip millisecond client values exactly and match an equality filter. **`timestamp(0)` rounds to whole seconds, so distinct writes in the same second can share a token and the check fails.** | Run on real PostgreSQL |
+| Trigger behaviour | A `BEFORE UPDATE` trigger that sets `now()` overrides a client-supplied `updated_at`. That is harmless **only because** the token is always read back from the server; it is not usable as a client clock. | Run on real PostgreSQL |
+| supabase-js builds the call as expected | `update(...).eq(...).eq(...).select()` sends a filtered PATCH asking for the representation; the Supabase reference documents `.select()` after filters to return updated rows. | Installed `postgrest-js` 2.102 source and the Supabase docs |
+| Zero matched rows gives an empty result, not an error | Expected from PostgREST behaviour but **not confirmed** by anything I could read or run here. | **Unverified** |
+| The production table's actual column type and precision, any trigger on it, and whether its row-level-security policy allows UPDATE with these filters | **Unverified.** Needs a read-only look at the table definition (owner decision D6, not yet granted) or an isolated real test (D2, explicitly deferred). | **Unverified** |
+
+Consequences for the design:
+1. The compare-and-swap is correct only if the production `updated_at` is `timestamptz` (or `timestamp(6)`), or if a trigger makes it advance on every write. **If it turned out to be `timestamp(0)`, it would not be reliable and the version-column migration would be required.** This is a release gate: no production use until that is confirmed.
+2. Runtime self-protection: the client writes `updated_at = max(now, baseToken + 1 ms)`, so tokens never repeat; after every successful write it checks that the returned token differs from the base token. If not (rounding or a trigger collapsing the value), the engine enters a **paused, safe** state ("concurrency check unreliable: needs the version column") and makes no further overwriting writes. This detects the problem on the device that causes the collision; it cannot undo a collision that already let another device overwrite, which is why the production definition must be confirmed first.
+3. The token is hidden behind a small `CasClient` interface (`read()`, `insert()`, `swap(baseToken, snapshot)`), so moving to a `version` column changes one module, not the engine.
 
 ### 3.4 Lost replies and interruptions
 Each snapshot carries `syncMeta = { deviceId, writeId, digest, txnCount }`. If a push's reply is lost, the stored `pendingWrite.writeId` is compared with the cloud row's `syncMeta.writeId` on the next contact: equal → our write did land, adopt its token and mark synced; different/absent → the write did not land, still dirty, retry. Rejected writes (HTTP errors) leave `dirty` true, so they are retried, and reloading cannot discard them because nothing replaces local data unless it is clean (or backed up and chosen).
@@ -79,8 +96,8 @@ Existing devices have no `baseToken`. First run after the update: if the local a
 **Gate before any proposal to merge:** full `npm test`, production build, lint (`src` = 4 baseline), both harness runs identical with all five properties passing, evidence and matrix updated with exact SHAs.
 
 ## 6. Decisions needed from the owner
-- **D1 — Concurrency check:** use `updated_at` as the compare-and-swap token with no schema change (this design), or add a `version` column with a server-side check (stronger, needs a migration on production, which I will not run).
-- **D2 — Real-backend verification:** the fake server cannot show Supabase-specific failures. Options: a separate Supabase test project with synthetic data (may have a cost; I will not create one without approval), or leave real-backend behaviour **unverified** and say so in the matrix.
+- **D1 — DECIDED:** `updated_at` provisionally, verified first (see §3.3); a `version` column in an approved migration if it cannot be made reliable.
+- **D2 — DECIDED:** no project is created and no cost incurred. Finish the deterministic local harness first. Real-service behaviour stays explicitly **unverified** until separately authorised isolated testing.
 - **D3 — Conflict policy:** explicit choice with backups, no automatic merge (this design). Confirm.
 - **D4 — Backup storage:** localStorage with a forced file download if full (this design), or add IndexedDB for larger backups (more code).
 - **D5 — One-time conflict screen** for existing installs whose local and cloud copies differ (§4). Confirm.
