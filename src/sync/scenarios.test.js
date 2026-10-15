@@ -196,13 +196,25 @@ test("reconciliation: a cloud copy that differs from what was sent is detected a
   assert.ok(A.ids().length === 4, "local data intact");
 });
 
-test("without an echoed write record the status says 'sent', and a full read-back runs at most every 10 minutes", async () => {
+test("by default every write is read back and reconciled, so a damaged cloud copy is caught at once", async () => {
   const kit = S.makeKit("new", { echoMeta: false });
   const A = kit.mk("A"); kit.seed(0); await A.start(); await A.settle(100);
   A.addTxn("x"); await A.settle(1500);
-  assert.equal(A.status().kind, "synced", "first push is read back");
+  assert.equal(A.status().kind, "synced");
   A.addTxn("y"); await A.settle(1500);
-  assert.equal(A.status().kind, "sent", "within 10 minutes: accepted but not read back");
+  assert.equal(A.status().kind, "synced", "second write is also read back");
+  kit.cloud.faults.corruptNext = true;
+  A.addTxn("z"); await A.settle(1500);
+  assert.equal(A.status().kind, "paused-reconcile");
+});
+
+test("when read-back is throttled (fullVerifyEveryMs), the status says 'sent' (not verified) until a manual sync verifies", async () => {
+  const kit = S.makeKit("new", { echoMeta: false }, { fullVerifyEveryMs: 600000 });
+  const A = kit.mk("A"); kit.seed(0); await A.start(); await A.settle(100);
+  A.addTxn("x"); await A.settle(1500);
+  assert.equal(A.status().kind, "synced", "first write is read back");
+  A.addTxn("y"); await A.settle(1500);
+  assert.equal(A.status().kind, "sent", "within the interval: accepted but not read back, and not called verified");
   await A.engine.syncNow(); await A.settle(100);
   assert.equal(A.status().kind, "synced", "a manual sync verifies");
 });

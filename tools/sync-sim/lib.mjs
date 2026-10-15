@@ -87,3 +87,26 @@ export async function openCloudSettings(page) {
 }
 export async function cloudPanelText(page) { await openCloudSettings(page); const t = await bodyText(page); return t.slice(t.indexOf("Cloud Sync & Account"), t.indexOf("HOME")).replace(/\n/g, " | "); }
 export async function pressSyncNow(page) { await page.getByText("Sync Now").first().click(); await page.waitForTimeout(2000); }
+
+
+export async function waitFor(fn, { timeout = 20000, step = 150, what = "condition" } = {}) {
+  const t0 = Date.now();
+  for (;;) {
+    try { const v = await fn(); if (v) return v; } catch { /* retry */ }
+    if (Date.now() - t0 > timeout) return false;
+    await new Promise(r => setTimeout(r, step));
+  }
+}
+export const syncState = page => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("arth_sync_state") || "null"); } catch { return null; } });
+export const safetyBackupIds = page => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("arth_sync_safety_backups") || "[]").flatMap(b => (b.snapshot?.txns || []).map(t => String(t.id))); } catch { return []; } });
+export const safetyBackups = page => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("arth_sync_safety_backups") || "[]").map(b => ({ reason: b.reason, txnCount: b.txnCount })); } catch { return []; } });
+export async function goHome(page) {
+  for (let i = 0; i < 3; i++) { if (await page.getByText("+", { exact: true }).first().isVisible().catch(() => false) && !(await page.getByTestId("sync-status-headline").count())) return; await page.getByText("←", { exact: true }).first().dispatchEvent("click").catch(() => {}); await page.waitForTimeout(300); }
+}
+export async function cloudHeadline(page) {
+  if (!(await page.getByTestId("sync-status-headline").count())) await openCloudSettings(page);
+  const h = await page.getByTestId("sync-status-headline").innerText().catch(() => "");
+  const d = await page.getByTestId("sync-status-detail").innerText().catch(() => "");
+  const b = await page.getByTestId("sync-backup-line").innerText().catch(() => "");
+  return { headline: h, detail: d, backup: b };
+}

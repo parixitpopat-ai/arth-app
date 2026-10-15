@@ -19,7 +19,9 @@ import { statusText } from "./statusText.js";
 import { hasMeaningfulData } from "../domain/identity/masterUserSetup.js";
 
 export const DEFAULT_BACKOFF_MS = [2000, 5000, 15000, 60000, 300000];
-export const FULL_VERIFY_EVERY_MS = 10 * 60 * 1000;
+// Default: read the saved copy back after EVERY write (reconciliation is never skipped). Costs one extra download per write;
+// a larger value trades that bandwidth for a longer window in which a bad cloud copy would go unnoticed.
+export const FULL_VERIFY_EVERY_MS = 0;
 
 /** A token strictly later than the one it replaces, so tokens never repeat in a row's history. */
 export function advanceToken(baseToken, nowMs) {
@@ -69,6 +71,8 @@ export function createSyncEngine({
       : { ...st, pendingWrite: null });
   }
 
+  const withBackup = (st, bk, reason) => ({ ...st, lastBackup: { id: bk.id, at: bk.at, txnCount: bk.txnCount, reason } });
+
   async function backupOrBlock(snapshot, reason) {
     const bk = await createSafetyBackup(storage, { reason, snapshot, now, genId });
     if (!bk.ok) setStatus({ kind: "blocked-backup", error: bk.error });
@@ -95,7 +99,7 @@ export function createSyncEngine({
       return { st, result: { outcome: "paused" } };
     }
     st = save({ ...st, baseToken: res.token, baseDigest: localDigest, pendingWrite: null });
-    // Reconcile: the echoed write metadata when the backend gives it; otherwise a full read-back at most every fullVerifyEveryMs or on a manual sync.
+    // Reconcile: the echoed write metadata when the backend gives it; otherwise a full read-back (every write by default, or at most every fullVerifyEveryMs).
     let verified = null, detail = "";
     if (res.meta !== undefined) { verified = sameMeta(res.meta, meta); if (!verified) detail = "write metadata differs"; }
     else if (trigger === "manual" || trigger === "resolve" || now() - lastFullVerifyAt >= fullVerifyEveryMs) {
@@ -125,12 +129,16 @@ export function createSyncEngine({
   async function takeCloud(st, local, rec, cloudDigest, reason) {
     const bk = await backupOrBlock(local, reason);
     if (!bk.ok) return { st, result: { outcome: "blocked-backup", error: bk.error } };
+    st = withBackup(st, bk, reason);
     await applySnapshot(rec.snapshot);
     const after = await readLocalAfterApply();
     const want = txnIdsOf(rec.snapshot), got = txnIdsOf(after);
     const ok = want.length === got.length && want.every((id, i) => id === got[i]);
     const reconcile = { at: iso(now()), ok, localCount: got.length, cloudCount: want.length, detail: ok ? "" : `applied ${got.length} of ${want.length} transactions` };
-    st = save({ ...st, baseToken: rec.token, baseDigest: cloudDigest, pendingWrite: null, conflict: null, lastReconcile: reconcile, ...(ok ? { lastVerifiedAt: iso(now()) } : { paused: "reconcile-mismatch" }) });
+    // The device's own (possibly re-normalised) content after adoption is what counts as "in sync", so normalisation never makes a
+    // freshly adopted copy look changed (which would bounce a needless write between devices).
+    const afterDigest = ok ? await digestSnapshot(after) : cloudDigest;
+    st = save({ ...st, baseToken: rec.token, baseDigest: afterDigest, pendingWrite: null, conflict: null, lastReconcile: reconcile, ...(ok ? { lastVerifiedAt: iso(now()) } : { paused: "reconcile-mismatch" }) });
     if (!ok) { setStatus(pausedStatus(st)); return { st, result: { outcome: "paused" } }; }
     clearRetry();
     setStatus({ kind: "synced", verifiedAt: st.lastVerifiedAt });
@@ -224,8 +232,9 @@ export function createSyncEngine({
     let localDigest, rec;
     try { localDigest = await digestSnapshot(local); rec = await cloud.read(userId); } catch (e) { return failed(e, true); }
     if (choice === "keep-local") {
-      if (rec) { const bk = await backupOrBlock(rec.snapshot, "before-keep-local"); if (!bk.ok) return { outcome: "blocked-backup", error: bk.error }; }
-      const r = await pushLocal({ ...st, conflict: null }, local, localDigest, rec ? rec.token : null, "resolve");
+      let base = { ...st, conflict: null };
+      if (rec) { const bk = await backupOrBlock(rec.snapshot, "before-keep-local"); if (!bk.ok) return { outcome: "blocked-backup", error: bk.error }; base = withBackup(base, bk, "before-keep-local"); }
+      const r = await pushLocal(base, local, localDigest, rec ? rec.token : null, "resolve");
       if (r.result.outcome === "pushed") { save({ ...r.st, conflict: null }); return { outcome: "resolved-keep-local" }; }
       if (r.result.outcome === "conflict-retry") {         // the cloud moved again while deciding: record the new situation, ask again
         let fresh = rec; try { fresh = await cloud.read(userId); } catch { /* keep the earlier copy for the report */ }

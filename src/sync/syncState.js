@@ -15,6 +15,7 @@ export const EMPTY_STATE = Object.freeze({
   paused: null,         // null | "token-unreliable" | "reconcile-mismatch"
   lastVerifiedAt: null, // ISO time of the last sync whose result was verified
   lastReconcile: null,  // { at, ok, localCount, cloudCount, detail }
+  lastBackup: null,     // { id, at, txnCount, reason }: the most recent VERIFIED safety backup (what the UI may mention)
 });
 
 export function loadSyncState(storage, userId) {
