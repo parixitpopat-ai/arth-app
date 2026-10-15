@@ -206,7 +206,8 @@ async function diverge() {
   const id = String(await findId(A.page, "R1-CORRUPTED"));
   const paused = await L.waitFor(async () => (await L.syncState(A.page))?.paused === "reconcile-mismatch", { timeout: 15000 });
   const banner = await bannerText(A.page);
-  record("R1", "4 reconciliation mismatch is detected and sync pauses", paused && !cloud().includes(id) && (await ids(A.page)).includes(id) && /don't match|copies/i.test(banner), { paused: Boolean(paused), localIntact: (await ids(A.page)).includes(id), bannerShown: /copies/i.test(banner), cloudMissingTheTxn: !cloud().includes(id) });
+  const localAfter = await ids(A.page);
+  record("R1", "4 reconciliation mismatch is detected and sync pauses", paused && localAfter.includes(id) && cloud().length === localAfter.length - 1 && /don't match|copies/i.test(banner), { paused: Boolean(paused), localIntact: localAfter.includes(id), bannerShown: /copies/i.test(banner), cloudHasOneFewerThanDevice: cloud().length === localAfter.length - 1 });
 }
 
 // T1 ── an unreliable (coarse) concurrency token pauses sync ─────────────────────────────────

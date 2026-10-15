@@ -1,10 +1,10 @@
 {
   "app": "Arth",
   "backupType": "manual",
-  "exportedAt": "2026-10-15T10:21:36.392Z",
+  "exportedAt": "2026-10-15T10:33:30.902Z",
   "snapshot": {
     "version": 1,
-    "savedAt": "2026-10-15T10:20:29.511Z",
+    "savedAt": "2026-10-15T10:32:23.914Z",
     "dark": true,
     "masterUserSetupComplete": true,
     "autoDetectExpenseCategory": true,
