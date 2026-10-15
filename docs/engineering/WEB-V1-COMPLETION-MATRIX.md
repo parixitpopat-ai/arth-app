@@ -34,7 +34,7 @@ A "required" item means a source above names it for Web v1. Where the sources di
 | 16 | M2 Payments and bills: list, detail, record payment, partial/overpay, Unallocated (QW-7, WP-2, WP-4, ADR-038) | `domain/obligations/billBalance.js`, `screens/payments/*` | `billBalance`, `billContributionSync`, `paymentsView` tests | main-13Oct | IV | Device pass (checklist 2). Medium |
 | 17 | Expected obligations: computed, never a bill; Confirm amount creates the bill (WP-3, ADR-039) | `domain/obligations/expected.js`, `ExpectedSchedulePanel.jsx` | `expected.test.js` | main-13Oct (schedule → Expected → Confirm → bill) | IV | Observation: no "Set schedule" on a bill-less connection. ADR-039 has no file in arth-app (only references). Low |
 | 18 | Relationship lifecycle: active / pause / end, usually-paid-from (WP-6) | `RelationshipStatusPanel`, `domain/membership/lifecycle.js` | `lifecycle.test.js` | main-t34-reports-13Oct (pause with reason, resume, end: status and history stored: active→paused→active→ended) | IV | Device pass. Low |
-| 19 | Cloud sync of billers and membership relationships (WP-8) | `App.jsx` snapshot + restore; `src/cloudSync.js` | none for the sync path | none | IU | **Two-device test** (`WEB-V1-VERIFICATION-001.md` §4). **High** |
+| 19 | Cloud sync of billers and membership relationships (WP-8) | `App.jsx` snapshot + restore; `src/cloudSync.js` | none for the sync path | none | IU | **Two-device restore: Blocked** — the owner will not test against real financial data (a previous sync lost transactions). Replaced by a developer-run isolated test on synthetic data (`SYNC-SAFETY-001.md`). **High** |
 | 20 | Item-level bill link, domain: optional `lineItemId`, per-item check (WP-5) | `domain/obligations/contribution.js`, `billBalance.js`, `billContributionSync.js` | `contributionLineItem.test.js` (8) | main-8e722e8-13Oct (app loads item-linked and plain contributions; item 1 and item 2 of one payment each pay a different bill; a plain record is unchanged). No UI exists to exercise item linking or the limits; limits are test-only | IV for the domain (on origin/main 8e722e8) | T-34 UI is row 21. Medium |
 | 21 | Item-level bill link, UI (T-34 per-item "Link a bill"; D-7: "Relationship" vs "Pays a bill?" is chosen in the handoff) | `App.jsx` Add Expense (itemised items), `domain/obligations/itemBillLinks.js` | `itemBillLinks.test.js` (8), `contributionLineItem.test.js` (8) | main-t34-reports-13Oct: link two items to two bills (both paid); two items on one bill (700 + 300 of 1,000, never over); item above its bill's balance applies the balance and shows the rest unallocated; edit shows existing links; unlink reduces and reopens a bill nothing else pays; whole-expense Bill payment unchanged (no `lineItemId`); 320 px no overflow | IV | Device pass. None otherwise |
 | 22 | Navigation Home / Money / Payments / People with Add (N-1) | `App.jsx` `TABS` | — | main-13Oct | IV | None |
@@ -56,7 +56,7 @@ A "required" item means a source above names it for Web v1. Where the sources di
 | 34 | Prepaid coverage on biller detail (WP9) | `domain/bills/prepaidUtilisation.js` | `prepaidUtilisation.test.js` | main-8e722e8-13Oct (coverage card: plan, 13 of 28 days used, 15 left) | IV | Low |
 | 35 | Quarterly/yearly membership is one dated Outlook item (DEC) | `membership/futureMoney.js`, `futureMoney/rhythm.js` | their tests | main-8e722e8-13Oct (quarterly is one later item; monthly one in the list) | IV | Low |
 | 36 | Gym check-in catch-up with a break option (DEC) | `membership/checkIn.js` | `checkIn.test.js` | main-8e722e8-13Oct (13 days offered oldest first; break skips all) | IV | Low |
-| 37 | Plan Ahead readiness card and nudge state, synced (WP-A) | `domain/budget/readiness.js`, `nudge.js` | their tests | main-8e722e8-13Oct (Plan Ahead card opens, November figures right, over-budget nudge shows, "Not now" stored and kept after reload). Cloud sync of the nudge not verified | IV locally; sync IU | Two-device (§4 step 5) and device (checklist 6). High |
+| 37 | Plan Ahead readiness card and nudge state, synced (WP-A) | `domain/budget/readiness.js`, `nudge.js` | their tests | main-8e722e8-13Oct (Plan Ahead card opens, November figures right, over-budget nudge shows, "Not now" stored and kept after reload). Cloud sync of the nudge: **Unverified** (local persistence is not evidence of cloud sync) | IV locally; sync IU | Isolated synthetic sync test (`SYNC-SAFETY-001.md`) and device (checklist 6). High |
 
 ## D. Reports (ARTH_SCOPE screen 12; roadmap Phase 5)
 The frozen list names a Reports screen; `SCREEN_ARCHITECTURE.md` marks it not started; `V1_DEFINITION.md` leaves v1-or-later undecided. The audit below is of what exists.
@@ -105,8 +105,8 @@ Defects found during this pass, both fixed and merged in `4b93113`: (1) editing 
 
 ## Release gates still pending (no evidence yet)
 1. **Real-device checklist** (`WEB-V1-VERIFICATION-001.md` §3): not performed.
-2. **Two-device Supabase restore** for billers and membership relationships (§4): not performed.
-3. **Plan Ahead nudge-state cloud sync**: works locally including after a reload; cloud sync not verified.
+2. **Two-device Supabase restore** for billers and membership relationships: **Blocked — the owner will not test against real financial data because of a previous data-loss incident.** Not to be requested on live data (no clearing local data, reinstalling, signing out or switching devices to force a sync). Replaced by a developer-controlled isolated test with synthetic data and separate test accounts; evidence in `SYNC-SAFETY-001.md`. Cloud-sync verification is not complete until that evidence exists.
+3. **Plan Ahead nudge-state cloud sync**: **Unverified.** It persists locally, including after a reload; that is not evidence of cloud sync and is not treated as such.
 4. **Live-site UI check** of Record payment, the new forms, the edit screens and membership edit on `arth-app.vercel.app`: not performed. The deployment is verified (right commit, READY, aliased); nobody has opened the live UI to test it.
 
 ## Web v1 status
@@ -115,14 +115,14 @@ Defects found during this pass, both fixed and merged in `4b93113`: (1) editing 
 ## Web v1 blockers (my assessment, on this evidence)
 1. ~~A signed-off Web v1 scope~~ — locked 13 Oct: in = rows 39, 40, 21; deferred = rows 12, 23, 41.
 2. ~~Merge the branches~~ — done: rows 11, 20, 53 are on `origin/main` 8e722e8. No known data-truth defect remains open.
-3. **Two-device Supabase restore** (row 19) and the **real-device pass** (checklist) — not performed. Until they are, no row is device-verified and rows 19 and 37 (sync) stay IU.
+3. **Two-device Supabase restore** (row 19): **Blocked** on live data by the owner's decision; to be replaced by the isolated synthetic test. **Real-device pass** (checklist) — not performed. Until then no row is device-verified and rows 19 and 37 (sync) stay IU.
 3a. ~~Merge of the Reports and T-34 branches~~ — done (8a96e5f).
 4. Not blockers on this evidence: `StatsPage`, WP-F, skeletons, biometrics, statement import, and the three scope-locked deferrals.
 
 ## Proposed closure sequence
 1. ~~Merge the four branches~~ — done (8e722e8).
 2. ~~Scope decisions~~ — locked (see Web v1 status).
-3. You run the real-device checklist and the two-device test; I fix what fails.
+3. You run the real-device checklist (not the sync test: that is developer-run on synthetic data); I fix what fails.
 4. ~~Smoke the remaining IU rows~~ — done for rows 15, 18, 32, 33 on the pinned tree.
 5. ~~Household FY summary, per-person FY, T-34 UI~~ — built, merged and verified on main 8a96e5f.
 6. Last: `StatsPage` removal branch; retire the stale scope documents.
