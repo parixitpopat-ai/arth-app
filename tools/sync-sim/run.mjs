@@ -25,8 +25,8 @@ const exportBefore = L.writeImmutableExport(OUT + "immutable", "synthetic-baseli
 const ctxs = [];
 
 async function resetWorld() { fake.rows.clear(); fake.writeLog.length = 0; fake.stats.unconditionalWrites = 0; await L.setFaults({ latencyMs: 0, rejectWrites: 0, dropResponseWrites: 0, offline: false, corruptNext: false, precisionMs: 0 }); }
-async function boot(name, localTxns) {
-  const d = await device(name, { seedLocal: { arth_txns: localTxns, arth_accounts: accounts, arth_master_user_setup_complete: true } });
+async function boot(name, localTxns, extra = {}) {
+  const d = await device(name, { seedLocal: { arth_txns: localTxns, arth_accounts: accounts, arth_master_user_setup_complete: true, ...extra } });
   ctxs.push(d.ctx);
   await d.page.goto(L.APP, { waitUntil: "networkidle" }); await L.pin(d.page, true);
   return d;
@@ -36,9 +36,9 @@ const findId = async (page, desc) => (await L.localTxns(page)).find(t => t.desc 
 const cloud = () => fake.cloudIds(uid);
 const synced = page => async () => { const s = await L.syncState(page); const l = await ids(page); return s && s.baseToken && !s.pendingWrite && JSON.stringify(l) === JSON.stringify(cloud()); };
 /** Two devices that have genuinely synced through the app: A uploads its data, B starts empty and adopts it. */
-async function establish() {
+async function establish(extraA = {}) {
   await resetWorld();
-  const A = await boot("A", BASE);
+  const A = await boot("A", BASE, extraA);
   await L.waitFor(() => cloud().length === BASE.length, { what: "A inserted" });
   const B = await boot("B", []);
   await L.waitFor(async () => (await ids(B.page)).length === BASE.length, { what: "B adopted" });
@@ -185,17 +185,18 @@ async function diverge() {
     { resolved: Boolean(resolved), bNowHasAs: (await ids(B.page)).includes(aId), deviceBackedUpFirst: bk.some(b => b.reason === "before-use-cloud"), bsTxnRecoverableFromBackup: bkIds.includes(bId), lost: (await lostAcross([A, B], [aId, bId])).length });
 }
 
-// Q1 ── a backup that cannot be written blocks the replacement ────────────────────────────────
+// Q1 ── a backup that cannot be written blocks the replacement (the file sheet is offered; cancelling replaces nothing) ──
 {
   const { A, B, aId, bId } = await diverge();
-  await B.page.evaluate(() => { const chunk = "x".repeat(400); let n = 0; try { for (;;) { localStorage.setItem("pad" + n, chunk); n++; } } catch { /* full */ } for (let i = 0; i < 6; i++) localStorage.removeItem("pad" + (n - 1 - i)); });
+  await L.failBackupWrites(B.page, true);
   const before = await ids(B.page);
-  await B.page.getByTestId("sync-use-cloud").dispatchEvent("click"); await B.page.waitForTimeout(3000);
+  await B.page.getByTestId("sync-use-cloud").dispatchEvent("click");
+  const sheet = await L.waitFor(() => B.page.getByTestId("sync-backup-file-sheet").count(), { timeout: 8000 });
+  await B.page.getByTestId("sync-backup-file-cancel").dispatchEvent("click"); await B.page.waitForTimeout(1500);
   const after = await ids(B.page);
-  const err = await B.page.locator("[role=alert]").first().innerText().catch(() => "");
   const st = await L.syncState(B.page);
-  await B.page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith("pad")) localStorage.removeItem(k); });
-  record("Q1", "backup-before-replacement: a failed backup blocks the replacement", JSON.stringify(before) === JSON.stringify(after) && after.includes(bId) && Boolean(st?.conflict), { deviceUntouched: JSON.stringify(before) === JSON.stringify(after), conflictStillOpen: Boolean(st?.conflict), userToldNothingReplaced: /nothing was replaced|could not be completed/i.test(err) });
+  await L.failBackupWrites(B.page, false);
+  record("Q1", "backup-before-replacement: a failed backup blocks the replacement", JSON.stringify(before) === JSON.stringify(after) && after.includes(bId) && Boolean(st?.conflict) && Boolean(sheet), { fileSheetOffered: Boolean(sheet), deviceUntouched: JSON.stringify(before) === JSON.stringify(after), conflictStillOpen: Boolean(st?.conflict) });
 }
 
 // R1 ── a cloud copy that differs from what was sent pauses sync ─────────────────────────────
@@ -221,6 +222,224 @@ async function diverge() {
   const w = fake.writeLog.filter(x => x.outcome === "applied").length;
   await L.addExpense(A.page, "T1-AFTER", 661); await A.page.waitForTimeout(3000);
   record("T1", "concurrency token unreliable: sync pauses instead of overwriting", paused && fake.writeLog.filter(x => x.outcome === "applied").length === w, { paused: Boolean(paused), noFurtherWrites: fake.writeLog.filter(x => x.outcome === "applied").length === w });
+}
+
+
+// ══ SYNC-SAFETY-004 scenarios ═══════════════════════════════════════════════════════════════════════════════════════
+const monthKeyAhead = (n) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+const NEXT = monthKeyAhead(1);
+const bigBill = () => ({ id: "nb1", name: "Big annual fee", merchant: "SYN", amount: 90000, dueDate: `${NEXT}-10`, billDate: `${NEXT}-10`, catId: "utilities", catIds: ["utilities"], status: "unpaid", paidDate: null, createdDate: "2026-10-01", createdAt: 1, splitPeople: {}, recurring: false });
+const cloudSnap = () => fake.rows.get(uid)?.snapshot;
+const fireVisible = page => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+
+// TAB ── two tabs of one device: only one owns the app; a takeover is explicit; a foreign write makes a tab stale ─────────
+{
+  const { A } = await establish();
+  const tab1 = A.page, tab2 = await A.ctx.newPage();
+  await tab2.goto(L.APP, { waitUntil: "networkidle" }); await tab2.waitForTimeout(1500);
+  const pausedShown = await tab2.getByTestId("tab-paused").count(), appMounted = await tab2.getByText("+", { exact: true }).count();
+  const title = await tab2.getByTestId("tab-paused-title").innerText().catch(() => "");
+  const w0 = fake.writeLog.length;
+  await L.addExpense(tab1, "TAB-FROM-1", 811); const t1 = String(await findId(tab1, "TAB-FROM-1"));
+  const delivered = await L.waitFor(() => cloud().includes(t1), { timeout: 15000 });
+  record("TAB1", "two-tab: only one tab runs Arth; the second mounts nothing and cannot sync", pausedShown === 1 && appMounted === 0 && /open in another tab/i.test(title) && delivered,
+    { secondTabPaused: pausedShown === 1, secondTabMountedNoApp: appMounted === 0, secondTabTitleOk: /open in another tab/i.test(title), ownerStillSyncs: delivered, ownerWritesOnly: fake.writeLog.length - w0 >= 1 });
+  // explicit takeover: tab 2 loads the latest data; tab 1 pauses
+  await tab2.getByTestId("tab-take-over").click(); await tab2.waitForTimeout(1500); await L.pin(tab2, false); await tab2.waitForTimeout(1500);
+  const t2sees = (await ids(tab2)).includes(t1);
+  const tab1Paused = await L.waitFor(() => tab1.getByTestId("tab-paused").count(), { timeout: 8000 });
+  await L.addExpense(tab2, "TAB-FROM-2", 822); const t2 = String(await findId(tab2, "TAB-FROM-2"));
+  const delivered2 = await L.waitFor(() => cloud().includes(t2), { timeout: 15000 });
+  await tab1.getByTestId("tab-take-over").click(); await tab1.waitForTimeout(1500); await L.pin(tab1, false); await tab1.waitForTimeout(1500);
+  const t1sees = (await ids(tab1)).includes(t2);
+  const lost = await lostAcross([{ page: tab1 }], [t1, t2]);
+  record("TAB2", "two-tab: 'Use this tab' hands over with the latest data; nothing is lost", t2sees && Boolean(tab1Paused) && delivered2 && t1sees && lost.length === 0,
+    { newOwnerSawOldOwnersChange: t2sees, oldOwnerPaused: Boolean(tab1Paused), newOwnerSynced: delivered2, handedBackWithLatest: t1sees, lost: lost.length });
+  // a write by another tab to the synced data makes the owner stale (defence in depth)
+  await A.ctx.route("**/__tab-writer.html", r => r.fulfill({ contentType: "text/html", body: "<script>const t=JSON.parse(localStorage.getItem('arth_txns')||'[]'); if(t[0]) t[0].note='edited elsewhere'; localStorage.setItem('arth_txns', JSON.stringify(t));</script>ok" }));
+  const writer = await A.ctx.newPage(); await writer.goto(L.APP + "__tab-writer.html"); await writer.waitForTimeout(500); await writer.close();
+  const staleShown = await L.waitFor(async () => /changed in another tab/i.test(await tab1.getByTestId("tab-paused-title").innerText().catch(() => "")), { timeout: 8000 });
+  await tab1.getByTestId("tab-reload").click(); await tab1.waitForTimeout(1500); await L.pin(tab1, false); await tab1.waitForTimeout(1500);
+  record("TAB3", "two-tab: a foreign write marks the tab stale; it stops, then reloads cleanly", Boolean(staleShown) && (await ids(tab1)).includes(t2), { staleOverlayShown: Boolean(staleShown), reloadedWithLatestData: (await ids(tab1)).includes(t2) });
+}
+
+// BN ── Plan Ahead nudge through the real UI, across two devices ────────────────────────────────────────────────────────
+{
+  const { A, B } = await establish({ arth_bills: [bigBill()] });
+  await L.waitFor(async () => (await L.localTxnIds(B.page)).length === BASE.length);
+  await L.openPlanAhead(B.page); const beforeCard = await L.nudgeNotNow(B.page).count();           // B sees the card
+  await L.goHome(B.page).catch(() => {});
+  await B.page.reload({ waitUntil: "networkidle" }); await L.pin(B.page, false);
+  await L.openPlanAhead(A.page); await L.nudgeNotNow(A.page).click(); await A.page.waitForTimeout(500);
+  const inCloud = await L.waitFor(() => Boolean(cloudSnap()?.planNudges?.[NEXT]?.dismissedAtUsed), { timeout: 15000 });
+  await fireVisible(B.page);
+  const bGot = await L.waitFor(async () => Boolean((await L.localNudges(B.page))[NEXT]?.dismissedAtUsed), { timeout: 15000 });
+  await B.page.reload({ waitUntil: "networkidle" }); await L.pin(B.page, false);
+  await L.openPlanAhead(B.page); const afterCard = await L.nudgeNotNow(B.page).count();
+  record("BN1", "Plan Ahead: 'Not now' reaches the cloud and the other device stops offering the card", beforeCard === 1 && inCloud && bGot && afterCard === 0, { otherDeviceSawCardBefore: beforeCard === 1, dismissalInCloud: inCloud, otherDeviceReceivedIt: bGot, otherDeviceCardGone: afterCard === 0 });
+}
+{
+  const { A, B } = await establish({ arth_bills: [bigBill()] });
+  await L.openPlanAhead(A.page); await L.nudgeRaise(A.page).click(); await A.page.waitForTimeout(500);
+  const inCloud = await L.waitFor(() => cloudSnap()?.monthOverrides?.[NEXT] === 90000 && cloudSnap()?.planNudges?.[NEXT]?.raisedTo === 90000, { timeout: 15000 });
+  await fireVisible(B.page);
+  const bGot = await L.waitFor(async () => (await L.localOverrides(B.page))[NEXT] === 90000 && (await L.localNudges(B.page))[NEXT]?.raisedTo === 90000, { timeout: 15000 });
+  record("BN2", "Plan Ahead: accepting a raise syncs the nudge record and the budget override together", inCloud && bGot, { raiseAndOverrideInCloud: inCloud, otherDeviceGotBoth: bGot, reconcile: (await L.syncState(B.page))?.lastReconcile?.ok === true });
+}
+{
+  const { A, B } = await establish({ arth_bills: [bigBill()] });
+  await B.ctx.setOffline(true);
+  await L.openPlanAhead(B.page); await L.nudgeRaise(B.page).click(); await B.page.waitForTimeout(500);
+  await L.openPlanAhead(A.page); await L.nudgeNotNow(A.page).click(); await A.page.waitForTimeout(500);
+  await L.waitFor(() => Boolean(cloudSnap()?.planNudges?.[NEXT]?.dismissedAtUsed), { timeout: 15000 });
+  await B.ctx.setOffline(false);
+  await B.page.reload({ waitUntil: "networkidle" }); await L.pin(B.page, false);
+  const conflict = await L.waitFor(async () => (await L.syncState(B.page))?.conflict, { timeout: 20000 });
+  const other = await B.page.getByTestId("sync-conflict-other").innerText().catch(() => "");
+  const pins = (await B.page.evaluate(() => JSON.parse(localStorage.getItem("arth_sync_safety_backups") || "[]").filter(b => b.pinned).map(b => b.reason).sort()));
+  record("BN3", "Plan Ahead: a nudge-only conflict is described and both copies are held", Boolean(conflict) && /Plan Ahead choices/.test(other) && pins.length === 2 && cloudSnap()?.planNudges?.[NEXT]?.dismissedAtUsed != null,
+    { conflictRecorded: Boolean(conflict), sheetNamesPlanAhead: /Plan Ahead choices/.test(other), sheetNamesBudgetChange: /monthly budget changes/.test(other), bothCopiesHeld: pins.join("|") === "conflict-cloud-copy|conflict-device-copy", cloudKeptDismissal: cloudSnap()?.planNudges?.[NEXT]?.dismissedAtUsed != null });
+}
+
+// FB ── backup file fallback, through the real UI ───────────────────────────────────────────────────────────────────────
+async function fileFallbackSetup() {
+  const { A, B, aId, bId } = await diverge();
+  await L.failBackupWrites(B.page, true);
+  await B.page.getByTestId("sync-use-cloud").dispatchEvent("click");
+  await L.waitFor(() => B.page.getByTestId("sync-backup-file-sheet").count(), { timeout: 8000 });
+  return { A, B, aId, bId };
+}
+{
+  const { A, B, aId, bId } = await fileFallbackSetup();
+  const [dl] = await Promise.all([B.page.waitForEvent("download", { timeout: 10000 }), B.page.getByTestId("sync-backup-file-download").dispatchEvent("click")]);
+  const file = await dl.path(); const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+  const saved = L.writeImmutableExport(OUT + "immutable", "sync-fallback-backup.json", parsed);
+  await B.page.getByTestId("sync-backup-file-input").setInputFiles(file); await B.page.waitForTimeout(2500);
+  const replaced = await L.waitFor(async () => (await ids(B.page)).includes(aId) && !(await ids(B.page)).includes(bId), { timeout: 15000 });
+  const st = await L.syncState(B.page);
+  const fileHasBs = (parsed.snapshot?.txns || []).some(t => String(t.id) === bId);
+  await L.failBackupWrites(B.page, false);
+  record("FB1", "backup-file fallback: a downloaded, re-selected, verified file secures the replacement", Boolean(replaced) && fileHasBs && st?.lastBackup?.external === true && L.verifyExport(saved), { fileContainsTheReplacedData: fileHasBs, replacementProceededAfterVerification: Boolean(replaced), recordedAsFileBackup: st?.lastBackup?.external === true, fileHasChecksum: typeof parsed.digest === "string" && parsed.digest.length === 64 });
+}
+{
+  const { B, bId } = await fileFallbackSetup();
+  const [dl] = await Promise.all([B.page.waitForEvent("download", { timeout: 10000 }), B.page.getByTestId("sync-backup-file-download").dispatchEvent("click")]);
+  const good = JSON.parse(fs.readFileSync(await dl.path(), "utf8"));
+  const before = await ids(B.page);
+  const bad1 = OUT + "immutable/synthetic-baseline.export.json";                            // a different, non-Arth-sync file
+  await B.page.getByTestId("sync-backup-file-input").setInputFiles(bad1); await B.page.waitForTimeout(1500);
+  const err1 = await B.page.getByTestId("sync-backup-file-error").innerText().catch(() => "");
+  const damaged = JSON.parse(JSON.stringify(good)); damaged.snapshot.txns.pop();
+  fs.mkdirSync(OUT + "tmp", { recursive: true }); const dpath = OUT + "tmp/damaged-backup.json"; fs.writeFileSync(dpath, JSON.stringify(damaged));
+  await B.page.getByTestId("sync-backup-file-input").setInputFiles(dpath); await B.page.waitForTimeout(1500);
+  const err2 = await B.page.getByTestId("sync-backup-file-error").innerText().catch(() => "");
+  const unchanged = JSON.stringify(await ids(B.page)) === JSON.stringify(before) && before.includes(bId);
+  await B.page.getByTestId("sync-backup-file-cancel").dispatchEvent("click"); await B.page.waitForTimeout(1000);
+  await L.failBackupWrites(B.page, false); fs.rmSync(OUT + "tmp", { recursive: true, force: true });
+  record("FB2", "backup-file fallback: wrong or damaged files are refused and nothing is replaced", /not an Arth sync backup/i.test(err1) && /damaged/i.test(err2) && unchanged && Boolean((await L.syncState(B.page))?.conflict),
+    { wrongFileRefused: /not an Arth sync backup/i.test(err1), damagedFileRefused: /damaged/i.test(err2), deviceUntouched: unchanged, conflictStillOpen: Boolean((await L.syncState(B.page))?.conflict) });
+}
+
+// RB ── recover from a sync safety backup through Backup & Restore (both sides are backed up first) ───────────────────────
+{
+  const { A, B, aId, bId } = await diverge();
+  await B.page.getByTestId("sync-use-cloud").dispatchEvent("click");                       // B adopts A's data; B's own is saved as 'before-use-cloud'
+  await L.waitFor(async () => (await ids(B.page)).includes(aId) && !(await ids(B.page)).includes(bId), { timeout: 20000 });
+  await L.waitFor(synced(B.page), { timeout: 20000 });
+  await B.page.getByText("☰", { exact: true }).first().dispatchEvent("click"); await B.page.waitForTimeout(400);
+  await B.page.getByText("⚙️", { exact: true }).first().dispatchEvent("click"); await B.page.waitForTimeout(400);
+  await B.page.getByText("Backup & Restore", { exact: true }).dispatchEvent("click"); await B.page.waitForTimeout(600);
+  const rows = await B.page.getByTestId("sync-safety-backup-row").count();
+  B.page.on("dialog", d => d.accept());
+  await B.page.getByTestId("sync-safety-backup-row").filter({ hasText: "before replacing this device" }).getByRole("button", { name: "Restore" }).click();
+  const restored = await L.waitFor(async () => (await ids(B.page)).includes(bId) && !(await ids(B.page)).includes(aId), { timeout: 20000 });
+  const reasons = (await L.safetyBackups(B.page)).map(b => b.reason);
+  const delivered = await L.waitFor(() => cloud().includes(bId) && !cloud().includes(aId), { timeout: 20000 });
+  const bkIds = await L.safetyBackupIds(B.page);
+  record("RB1", "recovery: restoring a sync safety backup backs up the device AND the cloud copy first, and loses nothing", rows >= 1 && Boolean(restored) && reasons.includes("before-restore") && reasons.includes("cloud-before-restore") && bkIds.includes(aId) && bkIds.includes(bId) && (await lostAcross([A, B], [aId, bId])).length === 0,
+    { safetyBackupsListedInUi: rows >= 1, restoredOldDeviceData: Boolean(restored), deviceBackedUpFirst: reasons.includes("before-restore"), cloudCopyBackedUpFirst: reasons.includes("cloud-before-restore"), restoredDataSyncedToCloud: Boolean(delivered), bothVersionsStillRecoverable: bkIds.includes(aId) && bkIds.includes(bId), lost: (await lostAcross([A, B], [aId, bId])).length });
+}
+
+// SI ── sign-in and recovery through the real screens (fake auth, code 123456) ─────────────────────────────────────────────
+async function finishSignIn(page, { name = "Synthetic Tester", newPin = true } = {}) {
+  await page.waitForTimeout(1500);
+  await L.completeProfile(page, name);
+  await L.pin(page, newPin); await page.waitForTimeout(2000);
+}
+const EMAIL = "sync-test-a@example.invalid";
+const NTX = L.syntheticTxns("N", 5);
+{
+  await resetWorld(); fake.resetAccounts();
+  const N = await device("N", { signedIn: false }); ctxs.push(N.ctx);
+  const r = await L.signIn(N.page, EMAIL, { mode: "signup" }); await finishSignIn(N.page);
+  const rowMade = await L.waitFor(() => fake.rows.size === 1, { timeout: 15000 });
+  await L.addExpense(N.page, "SI1-FIRST", 901); const id = String(await findId(N.page, "SI1-FIRST"));
+  const delivered = await L.waitFor(() => cloud().includes(id), { timeout: 15000 });
+  const st = await L.syncState(N.page);
+  const profileInCloud = JSON.stringify(cloudSnap()?.people || []).includes("Synthetic Tester");
+  record("SI1", "sign-in: a brand-new account reaches the app, creates its cloud copy, and syncs the first transaction", r.stage === "verified" && rowMade && delivered && Boolean(st?.baseToken) && !st?.conflict && profileInCloud, { signedIn: r.stage === "verified", cloudCopyCreated: rowMade, firstTransactionSynced: delivered, profileInCloud, noConflict: !st?.conflict });
+}
+{
+  await resetWorld(); fake.resetAccounts(); fake.addAccount(EMAIL);
+  const N = await device("N", { signedIn: false, seedLocal: { arth_txns: BASE, arth_accounts: accounts } }); ctxs.push(N.ctx);
+  await L.signIn(N.page, EMAIL, { mode: "signin" }); await finishSignIn(N.page);
+  const ok = await L.waitFor(() => JSON.stringify(cloud()) === JSON.stringify(baseIds), { timeout: 20000 });
+  const sawConflict = await N.page.getByText("Two versions of your data found").count();
+  record("SI2", "sign-in: an existing install with no sync history uploads its data when the account is empty", Boolean(ok) && sawConflict === 0 && JSON.stringify(await ids(N.page)) === JSON.stringify(baseIds), { cloudHoldsAllLocalTransactions: Boolean(ok), noConflictScreen: sawConflict === 0, localUnchanged: JSON.stringify(await ids(N.page)) === JSON.stringify(baseIds) });
+}
+for (const choice of ["keep-cloud", "keep-local"]) {
+  await resetWorld(); fake.resetAccounts(); fake.addAccount(EMAIL);
+  const X = await device("X", { signedIn: false, seedLocal: { arth_txns: BASE, arth_accounts: accounts } }); ctxs.push(X.ctx);
+  await L.signIn(X.page, EMAIL, { mode: "signin" }); await finishSignIn(X.page);
+  await L.waitFor(() => JSON.stringify(cloud()) === JSON.stringify(baseIds), { timeout: 20000 });
+  const N = await device("N", { signedIn: false, seedLocal: { arth_txns: NTX, arth_accounts: accounts } }); ctxs.push(N.ctx);
+  await L.signIn(N.page, EMAIL, { mode: "signin" });
+  const screen = await L.waitFor(() => N.page.getByText("Two versions of your data found").count(), { timeout: 15000 });
+  const nIds = NTX.map(t => t.id).sort();
+  await N.page.getByRole("button", { name: choice === "keep-cloud" ? /Use the cloud version/ : /Keep this device's data/ }).click();
+  await N.page.waitForTimeout(2500); await finishSignIn(N.page);
+  const bkIds = await L.safetyBackupIds(N.page);
+  const reasons = (await L.safetyBackups(N.page)).map(b => b.reason);
+  let ok;
+  if (choice === "keep-cloud") ok = JSON.stringify(await ids(N.page)) === JSON.stringify(baseIds) && nIds.every(i => bkIds.includes(i)) && JSON.stringify(cloud()) === JSON.stringify(baseIds);
+  else ok = JSON.stringify(cloud()) === JSON.stringify(nIds) && baseIds.every(i => bkIds.includes(i));
+  record(`SI3-${choice}`, "sign-in: existing install and a different cloud copy -> explicit choice, the replaced side is backed up first", Boolean(screen) && ok,
+    { conflictScreenShown: Boolean(screen), chosenSideWon: ok, replacedSideRecoverableFromBackup: choice === "keep-cloud" ? nIds.every(i => bkIds.includes(i)) : baseIds.every(i => bkIds.includes(i)), backupReasons: reasons.sort() });
+}
+{
+  await resetWorld(); fake.resetAccounts(); fake.addAccount(EMAIL);
+  const N = await device("N", { signedIn: false, seedLocal: { arth_txns: BASE, arth_accounts: accounts } }); ctxs.push(N.ctx);
+  await L.signIn(N.page, EMAIL, { mode: "signin" }); await finishSignIn(N.page);
+  await L.waitFor(synced(N.page), { timeout: 20000 });
+  const before = await L.syncState(N.page);
+  await L.openCloudSettings(N.page); await N.page.getByText("Sign Out", { exact: true }).click(); await N.page.waitForTimeout(1500);
+  const welcome = await N.page.getByText("Welcome to Arth").count();
+  await L.signIn(N.page, EMAIL, { mode: "signin" }); await N.page.waitForTimeout(3000);
+  const after = await L.syncState(N.page);
+  const conflict = await N.page.getByText("Two versions of your data found").count();
+  record("SI4", "sign-in: signing out and back in keeps the sync history; no conflict, nothing re-uploaded or lost", welcome === 1 && conflict === 0 && after?.baseToken === before?.baseToken && !after?.conflict && JSON.stringify(await ids(N.page)) === JSON.stringify(baseIds),
+    { signedOutToWelcome: welcome === 1, noConflictScreen: conflict === 0, historyKept: after?.baseToken === before?.baseToken, dataUnchanged: JSON.stringify(await ids(N.page)) === JSON.stringify(baseIds) });
+}
+{
+  await resetWorld(); fake.resetAccounts();
+  const u = fake.addAccount("recovery@example.invalid");                                     // an account whose data lives only in the cloud
+  fake.rows.set(u.id, { snapshot: JSON.parse(JSON.stringify({ ...L.syntheticSnapshot(BASE, new Date().toISOString()), masterUserSetupComplete: true })), micros: BigInt(Date.now()) * 1000n });
+  const R = await device("R", { signedIn: false }); ctxs.push(R.ctx);                       // a reinstalled app: empty storage
+  await L.signIn(R.page, "recovery@example.invalid", { mode: "signin" }); await R.page.waitForTimeout(2500); await L.pin(R.page, true); await R.page.waitForTimeout(2500);
+  const got = await L.waitFor(async () => JSON.stringify(await ids(R.page)) === JSON.stringify(baseIds), { timeout: 20000 });
+  const st = await L.syncState(R.page);
+  record("SI5", "recovery: a reinstalled app signs in and gets every record back, reconciled", Boolean(got) && st?.lastReconcile?.ok === true && !st?.conflict, { allTransactionsRestored: Boolean(got), reconciled: st?.lastReconcile?.ok === true, recordsChecked: st?.lastReconcile?.records > 0, noConflict: !st?.conflict });
+}
+{
+  await resetWorld(); fake.resetAccounts(); fake.addAccount(EMAIL);
+  const N = await device("N", { signedIn: false }); ctxs.push(N.ctx);
+  const bad = await L.signIn(N.page, EMAIL, { mode: "signin", code: "000000" });
+  const err = await N.page.getByText(/expired or is invalid|didn't work|invalid/i).first().innerText().catch(() => "");
+  const session = await N.page.evaluate(() => Boolean(localStorage.getItem("sb-localhost-auth-token")));
+  const M = await device("M", { signedIn: false }); ctxs.push(M.ctx);
+  const unknown = await L.signIn(M.page, "nobody@example.invalid", { mode: "signin" });
+  const hint = await M.page.getByText(/couldn't find an Arth account/i).count();
+  record("SI6", "sign-in: a wrong code and an unknown email are refused cleanly", bad.stage === "verified" && err.length > 0 && !session && unknown.stage === "email" && hint > 0, { wrongCodeRefused: err.length > 0 && !session, unknownEmailHint: hint > 0 });
 }
 
 // ── harness self-checks ─────────────────────────────────────────────────────────────────────

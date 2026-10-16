@@ -23,16 +23,16 @@ test("timestamps and ages are not inputs: the decision depends only on tokens an
   assert.ok(!/savedAt|Date|now\(/.test(decideSync.toString()));
 });
 
-test("no cloud row: insert when there is data, otherwise nothing", () => {
+test("no cloud row: always create it from this device, so even a profile-only device is tracked and later edits sync", () => {
   assert.equal(d({ cloud: null }).action, A.INSERT);
-  assert.equal(d({ cloud: null, hasBase: false, baseToken: undefined, baseDigest: undefined, localMeaningful: false, localDigest: "E" }).action, A.NOOP);
+  assert.equal(d({ cloud: null, hasBase: false, baseToken: undefined, baseDigest: undefined, localMeaningful: false, localDigest: "E" }).action, A.INSERT);
 });
 
 test("no history (existing install, new device, account switch)", () => {
   const nh = { hasBase: false, baseToken: undefined, baseDigest: undefined };
   assert.equal(d({ ...nh, localDigest: "D2", cloud: { token: "T9", digest: "D2", meaningful: true } }).action, A.ADOPT_BASE, "identical: nothing differs");
   assert.equal(d({ ...nh, localMeaningful: false, localDigest: "E", cloud: { token: "T9", digest: "D2", meaningful: true } }).action, A.FAST_FORWARD, "empty device takes the cloud");
-  assert.equal(d({ ...nh, localMeaningful: false, localDigest: "E", cloud: { token: "T9", digest: "E2", meaningful: false } }).action, A.ADOPT_BASE, "both empty");
+  assert.equal(d({ ...nh, localMeaningful: false, localDigest: "E", cloud: { token: "T9", digest: "E2", meaningful: false } }).action, A.FAST_FORWARD, "neither has user data but they differ: take the cloud copy (the device is backed up first) so nothing stays unsynced by accident");
   const p = d({ ...nh, localDigest: "L", cloud: { token: "T9", digest: "E2", meaningful: false } });
   assert.deepEqual([p.action, p.expectedToken], [A.PUSH, "T9"], "an empty cloud row is safely filled");
   assert.equal(d({ ...nh, localDigest: "L", cloud: { token: "T9", digest: "D2", meaningful: true } }).action, A.CONFLICT, "both have different data and no history: ask");

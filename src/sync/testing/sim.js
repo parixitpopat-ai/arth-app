@@ -85,7 +85,7 @@ export function createDevice({ name, userId = "synthetic-user-0001", clock, clou
   const setTimer = (fn, ms) => { const id = clock.setTimer(() => { mine.delete(id); fn(); }, ms); mine.add(id); return id; };
   const clearTimer = id => { mine.delete(id); clock.clearTimer(id); };
   const persist = () => storage.setItem(KEY, JSON.stringify(data));
-  const loadData = () => { const raw = storage.getItem(KEY); data = raw ? JSON.parse(raw) : { txns: [], accounts: BASE_ACCOUNTS.map(a => ({ ...a })), bills: [], people: [], planNudges: {} }; };
+  const loadData = () => { const raw = storage.getItem(KEY); data = raw ? JSON.parse(raw) : { txns: [], accounts: BASE_ACCOUNTS.map(a => ({ ...a })), bills: [], people: [], planNudges: {}, monthOverrides: {} }; };
   const snapshot = () => ({ version: 1, savedAt: new Date(lastRebuild).toISOString(), ...JSON.parse(JSON.stringify(data)) });
   function boot() {
     loadData(); lastRebuild = clock.now();
@@ -104,6 +104,17 @@ export function createDevice({ name, userId = "synthetic-user-0001", clock, clou
   dev.reload = async () => { if (engine) engine.stop(); [...mine].forEach(id => clock.clearTimer(id)); mine.clear(); boot(); await engine.boot(); };   // a reload kills the old page's engine, like a real tab
   dev.addTxn = (desc, amount = 100) => { const id = `${name}-t${++seq}`; data.txns.push({ id, type: "expense", desc, amount, date: "2026-10-15", catId: "food", catIds: ["food"], accId: "syn_bank", people: {} }); persist(); lastRebuild = clock.now(); created.push(id); engine.notifyChange(); return id; };
   dev.settle = async (ms = 1000) => { await clock.advance(ms, async () => { await engine.whenIdle(); }); await engine.whenIdle(); };
+  // Plan Ahead nudge state, mirroring App.jsx: dismissNudge / raiseMonthBudget / undoRaiseMonthBudget (planNudges + monthOverrides).
+  const touch = () => { persist(); lastRebuild = clock.now(); engine.notifyChange(); };
+  dev.dismissNudge = (monthKey, used) => { data.planNudges = { ...(data.planNudges || {}), [monthKey]: { dismissedAtUsed: used } }; touch(); };
+  dev.acceptNudge = (monthKey, from, to) => { data.monthOverrides = { ...(data.monthOverrides || {}), [monthKey]: to }; data.planNudges = { ...(data.planNudges || {}), [monthKey]: { raisedFrom: from, raisedTo: to, hadOverride: false, prevOverride: null } }; touch(); };
+  dev.undoNudge = monthKey => { const n = { ...(data.planNudges || {}) }; delete n[monthKey]; data.planNudges = n; const o = { ...(data.monthOverrides || {}) }; delete o[monthKey]; data.monthOverrides = o; touch(); };
+  /** Manual "Restore backup": both sides are backed up first (engine.prepareRestore); only then is the device's data replaced. */
+  dev.restoreFrom = async snap => {
+    const prep = await engine.prepareRestore(); if (!prep.ok) return prep;
+    const { savedAt, syncMeta, version, ...rest } = JSON.parse(JSON.stringify(snap)); data = rest; persist(); lastRebuild = clock.now(); engine.notifyChange(); return prep;
+  };
+  dev.nudgeRecord = monthKey => (data.planNudges || {})[monthKey];
   dev.ids = () => txnIdsOf(snapshot());
   dev.status = () => engine.getStatus();
   dev.state = () => engine.getState();

@@ -78,3 +78,16 @@ export function releasePinned(storage, conflictId) {
 export function listPinned(storage) {
   return readList(storage).filter(b => b.pinned).map(({ id, reason, at, digest, txnCount, conflictId }) => ({ id, reason, at, digest, txnCount, conflictId }));
 }
+
+/** Full entries (with snapshots) for the Backup & Restore screen, oldest first. */
+export function readSafetyBackups(storage) { return readList(storage); }
+
+export const REASON_LABELS = {
+  "before-fast-forward": "Before adopting the cloud copy",
+  "before-use-cloud": "Before replacing this device with the cloud copy",
+  "before-keep-local": "Cloud copy, before replacing it with this device's data",
+  "conflict-cloud-copy": "Cloud copy held while you decide",
+  "conflict-device-copy": "This device's copy held while you decide",
+  "before-restore": "This device, before restoring a backup",
+  "cloud-before-restore": "Cloud copy, before a restore replaces it",
+};

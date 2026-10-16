@@ -132,3 +132,36 @@ test("a backup records what Arth's own restore would drop, so the status never o
   assert.match(backupText({ at: "2026-10-15T06:00:00Z", txnCount: 3, restoreDrops: r.restoreDrops }), /would drop 1 record/);
   assert.doesNotMatch(backupText({ at: "2026-10-15T06:00:00Z", txnCount: 3 }), /would drop/);
 });
+
+test("a manual restore backs up BOTH this device and the cloud copy first, then the restored data replaces the cloud; nothing is lost", async () => {
+  const kit = S.makeKit("new"); kit.seed(0);
+  const A = kit.mk("A"), B = kit.mk("B"); await A.start(); await B.start(); await A.settle(100); await B.settle(100);
+  const oldSnapshot = { ...JSON.parse(JSON.stringify(A.data())) };                 // the "backup" being restored: base data only
+  const x = A.addTxn("x"); await A.settle(1500);                                    // x exists on A and in the cloud
+  assert.ok(cloudIds(kit).includes(x));
+  await B.engine.onVisible(); await B.settle(500); assert.ok(B.ids().includes(x), "B has x too");
+  const r = await A.restoreFrom(oldSnapshot); assert.equal(r.ok, true);
+  await A.settle(2000);
+  const reasons = listSafetyBackups(A.storage).map(b => b.reason).sort();
+  assert.deepEqual(reasons, ["before-restore", "cloud-before-restore"]);
+  assert.ok(stored(A).every(b => b.snapshot.txns.some(t => t.id === x)), "both backups hold the transaction that the restore removes");
+  assert.ok(!cloudIds(kit).includes(x), "the restored (older) data replaced the cloud copy, deliberately");
+  await B.engine.onVisible(); await B.settle(500);                                  // B adopts it, with its own backup first
+  assert.ok(B.status().kind === "synced" && !B.ids().includes(x));
+  assert.ok(stored(B).some(b => b.reason === "before-fast-forward" && b.snapshot.txns.some(t => t.id === x)), "B's copy with x is backed up before it is replaced");
+  assert.deepEqual(lostIds([A, B], kit.cloud), []);
+});
+
+test("a restore is refused, with nothing replaced, when the cloud copy cannot be backed up or no backup can be stored", async () => {
+  const kit = S.makeKit("new"); kit.seed(0);
+  const A = kit.mk("A"); await A.start(); await A.settle(100);
+  const old = JSON.parse(JSON.stringify(A.data())); A.addTxn("x"); await A.settle(1500);
+  const before = A.ids();
+  kit.cloud.faults.offlineDevices.add("A");                                         // cannot read the cloud copy to back it up
+  const r1 = await A.restoreFrom(old);
+  assert.equal(r1.ok, false); assert.match(r1.error, /cloud copy could not be read/); assert.deepEqual(A.ids(), before);
+  kit.cloud.faults.offlineDevices.delete("A");
+  A.storage.failKeys.add(SAFETY_BACKUPS_KEY);                                       // storage cannot hold a backup, no file option
+  const r2 = await A.restoreFrom(old);
+  assert.equal(r2.ok, false); assert.deepEqual(A.ids(), before);
+});

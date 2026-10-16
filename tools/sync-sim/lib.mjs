@@ -39,17 +39,18 @@ export function verifyExport(e) { return sha256(fs.readFileSync(e.file, "utf8"))
 export async function launch() {
   const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const blocked = [];     // any request that is not localhost = production leak attempt
-  async function device(name, { seedLocal } = {}) {
+  async function device(name, { seedLocal, signedIn = true } = {}) {
     const ctx = await browser.newContext({ timezoneId: "Asia/Kolkata", viewport: { width: 420, height: 900 } });
     await ctx.route(url => { try { const h = new URL(url).hostname; return !["localhost", "127.0.0.1"].includes(h); } catch { return false; } },
       route => { blocked.push(route.request().url()); route.abort(); });
-    await ctx.addInitScript(({ user, token, seed }) => {
+    await ctx.addInitScript(({ user, token, seed, signedIn }) => {
       if (!localStorage.getItem("__init_done")) {
-        localStorage.setItem("sb-localhost-auth-token", JSON.stringify({ access_token: token, refresh_token: "synthetic-refresh", token_type: "bearer", expires_in: 36000, expires_at: Math.floor(Date.now() / 1000) + 36000, user }));
+        if (signedIn) localStorage.setItem("sb-localhost-auth-token", JSON.stringify({ access_token: token, refresh_token: "synthetic-refresh", token_type: "bearer", expires_in: 36000, expires_at: Math.floor(Date.now() / 1000) + 36000, user }));
         localStorage.setItem("__init_done", "1");
         if (seed) for (const [k, v] of Object.entries(seed)) localStorage.setItem(k, JSON.stringify(v));
       }
-    }, { user: USER, token: TOKEN, seed: seedLocal });
+    }, { user: USER, token: TOKEN, seed: seedLocal, signedIn });
+    await ctx.addInitScript(() => { const orig = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (window.__failKeys && window.__failKeys.includes(k)) { const e = new Error("QuotaExceededError"); e.name = "QuotaExceededError"; throw e; } return orig.call(this, k, v); }; });
     const page = await ctx.newPage(); const errors = [];
     page.on("pageerror", e => errors.push(String(e)));
     return { name, ctx, page, errors };
@@ -110,3 +111,32 @@ export async function cloudHeadline(page) {
   const b = await page.getByTestId("sync-backup-line").innerText().catch(() => "");
   return { headline: h, detail: d, backup: b };
 }
+
+
+// ── sign-in flow (real Welcome -> email -> code -> profile -> PIN screens against the fake auth) ──
+export async function signIn(page, email, { mode = "signin", code = "123456" } = {}) {
+  await page.goto(APP, { waitUntil: "networkidle" }); await page.waitForTimeout(600);
+  await page.getByText(mode === "signup" ? "Sign Up" : "Sign In", { exact: true }).click(); await page.waitForTimeout(400);
+  await page.getByPlaceholder("Email address").fill(email);
+  await page.getByRole("button", { name: "Send OTP" }).click(); await page.waitForTimeout(700);
+  if (!(await page.getByPlaceholder("······").count())) return { stage: "email", error: await page.locator("div").filter({ hasText: /couldn't find|Couldn't|Signups/ }).first().innerText().catch(() => "") };
+  await page.getByPlaceholder("······").fill(code);
+  await page.getByRole("button", { name: /Verify/ }).click(); await page.waitForTimeout(2000);
+  return { stage: "verified" };
+}
+export async function completeProfile(page, name = "Synthetic Tester") {
+  if (await page.getByPlaceholder("e.g. Priya Sharma").count()) { await page.getByPlaceholder("e.g. Priya Sharma").fill(name); await page.getByRole("button", { name: /Continue into Arth/ }).click(); await page.waitForTimeout(1500); }
+}
+export const bodyHas = async (page, re) => re.test(await bodyText(page));
+
+// ── Plan Ahead nudge, through the real UI ──
+export async function openPlanAhead(page) {
+  await page.getByText("BUDGET", { exact: true }).first().click(); await page.waitForTimeout(600);
+  await page.getByText(/^[A-Z][a-z]+ budget$/).first().click(); await page.waitForTimeout(600);
+  await page.getByTestId("plan-ahead-card").click(); await page.waitForTimeout(600);
+}
+export const nudgeNotNow = page => page.getByRole("button", { name: "Not now" });
+export const nudgeRaise = page => page.getByRole("button", { name: /^Raise to/ });
+export const localNudges = page => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("arth_plan_nudges") || "{}"); } catch { return {}; } });
+export const localOverrides = page => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("arth_month_overrides") || "{}"); } catch { return {}; } });
+export const failBackupWrites = (page, on) => page.evaluate(v => { window.__failKeys = v ? ["arth_sync_safety_backups"] : []; }, on);

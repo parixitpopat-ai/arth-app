@@ -1,6 +1,7 @@
 import React from "react";
 import BottomSheet from "./BottomSheet";
 import { RADIUS, TOUCH, FONT } from "../constants/theme";
+import { describeDifferenceLines } from "../sync/differences";
 
 // SYNC-SAFETY-002 §3.7 — shown when this device and the cloud copy BOTH changed since they last agreed.
 // Nothing has been replaced when this opens. Each choice backs up the side it replaces (verified) before acting;
@@ -19,6 +20,11 @@ export default function SyncConflictSheet({ T, diff, busy, error, onKeepLocal, o
           <div data-testid="sync-conflict-local" style={{ color: T.text, fontSize: 13 }}>{c.txns?.local ?? 0} transactions · {only(diff?.onlyLocal?.length ?? 0, "here")}</div>
           <div style={{ color: T.text, fontSize: 13, fontWeight: 800, margin: "10px 0 6px" }}>☁️ Your cloud copy</div>
           <div data-testid="sync-conflict-cloud" style={{ color: T.text, fontSize: 13 }}>{c.txns?.cloud ?? 0} transactions · {only(diff?.onlyCloud?.length ?? 0, "in the cloud")}</div>
+          {describeDifferenceLines(diff?.lists).length > 0 && (
+            <div data-testid="sync-conflict-other" style={{ color: T.sub, fontSize: 12, marginTop: 10 }}>
+              Also different:{describeDifferenceLines(diff?.lists).map(l => <div key={l}>• {l}</div>)}
+            </div>
+          )}
         </div>
         {error && <div role="alert" style={{ background: T.danger + "18", border: `1px solid ${T.danger}33`, borderRadius: 10, padding: "10px 12px", marginBottom: 12, color: T.danger, fontSize: 12, fontWeight: 700 }}>{error}</div>}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

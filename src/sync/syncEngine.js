@@ -15,9 +15,10 @@ import { decideSync, SYNC_ACTIONS } from "./decideSync.js";
 import { digestSnapshot, summarizeDiff, txnIdsOf } from "./digest.js";
 import { createSafetyBackup, releasePinned } from "./safetyBackup.js";
 import { missingFrom, introducedDangling, describeMissing, listSummary } from "./snapshotIntegrity.js";
+import { differences } from "./differences.js";
 import { loadSyncState, saveSyncState } from "./syncState.js";
 import { statusText } from "./statusText.js";
-import { hasMeaningfulData } from "../domain/identity/masterUserSetup.js";
+import { hasUserData } from "./userData.js";
 
 export const DEFAULT_BACKOFF_MS = [2000, 5000, 15000, 60000, 300000];
 // Default: read the saved copy back after EVERY write (reconciliation is never skipped). Costs one extra download per write;
@@ -214,8 +215,8 @@ export function createSyncEngine({
     const cloudDigest = rec ? await digestSnapshot(rec.snapshot) : null;
     const d = decideSync({
       networkOk: true, hasBase: Boolean(st.baseToken), baseToken: st.baseToken, baseDigest: st.baseDigest,
-      localDigest, localMeaningful: hasMeaningfulData(local),
-      cloud: rec ? { token: rec.token, digest: cloudDigest, meaningful: hasMeaningfulData(rec.snapshot) } : null,
+      localDigest, localMeaningful: hasUserData(local),
+      cloud: rec ? { token: rec.token, digest: cloudDigest, meaningful: hasUserData(rec.snapshot) } : null,
     });
 
     switch (d.action) {
@@ -249,7 +250,7 @@ export function createSyncEngine({
         const conflictId = `cf_${now()}`;
         const cloudHold = await createSafetyBackup(storage, { reason: "conflict-cloud-copy", snapshot: rec.snapshot, now, genId, normalizers, pinned: true, conflictId });
         const localHold = await createSafetyBackup(storage, { reason: "conflict-device-copy", snapshot: local, now, genId, normalizers, pinned: true, conflictId });
-        st = save({ ...st, conflict: { type: "diverged", conflictId, detectedAt: iso(now()), cloudToken: rec.token, reason: d.reason, diff: summarizeDiff(local, rec.snapshot), held: { cloud: cloudHold.ok, device: localHold.ok, error: cloudHold.ok && localHold.ok ? null : (cloudHold.error || localHold.error) } } });
+        st = save({ ...st, conflict: { type: "diverged", conflictId, detectedAt: iso(now()), cloudToken: rec.token, reason: d.reason, diff: { ...summarizeDiff(local, rec.snapshot), lists: differences(local, rec.snapshot) }, held: { cloud: cloudHold.ok, device: localHold.ok, error: cloudHold.ok && localHold.ok ? null : (cloudHold.error || localHold.error) } } });
         setStatus(conflictStatus(st));
         return { outcome: "conflict" };
       }
@@ -288,7 +289,7 @@ export function createSyncEngine({
       if (r.result.outcome === "pushed") { save({ ...r.st, conflict: null }); releasePinned(storage, st.conflict.conflictId); return { outcome: "resolved-keep-local" }; }
       if (r.result.outcome === "conflict-retry") {         // the cloud moved again while deciding: record the new situation, ask again
         let fresh = rec; try { fresh = await cloud.read(userId); } catch { /* keep the earlier copy for the report */ }
-        const again = save({ ...load(), conflict: { ...st.conflict, detectedAt: iso(now()), cloudToken: fresh ? fresh.token : null, diff: fresh ? summarizeDiff(local, fresh.snapshot) : st.conflict.diff } });
+        const again = save({ ...load(), conflict: { ...st.conflict, detectedAt: iso(now()), cloudToken: fresh ? fresh.token : null, diff: fresh ? { ...summarizeDiff(local, fresh.snapshot), lists: differences(local, fresh.snapshot) } : st.conflict.diff } });
         setStatus(conflictStatus(again));
         return { outcome: "conflict" };
       }
@@ -304,7 +305,31 @@ export function createSyncEngine({
     return { outcome: "none" };
   }
 
+  /**
+   * Called BEFORE a manual "Restore backup" replaces this device's data. Restoring an older copy makes this device differ from the cloud,
+   * and the next sync would then replace the cloud copy too, so both sides are backed up first (verified): this device's current data and
+   * the cloud copy as it is right now. If either cannot be secured the restore must not proceed.
+   * @returns {Promise<{ok:true}|{ok:false,error:string}>}
+   */
+  async function prepareRestore() {
+    if (running) await running;
+    const local = getSnapshot();
+    const mine = await backupOrBlock(local, "before-restore");
+    if (!mine.ok) return { ok: false, error: mine.error };
+    let st = withBackup(load(), mine, "before-restore");
+    let rec;
+    try { rec = await cloud.read(userId); } catch (e) { return { ok: false, error: `the cloud copy could not be read to back it up first (${(e && e.message) || e}); connect and try again` }; }
+    if (rec) {
+      const theirs = await backupOrBlock(rec.snapshot, "cloud-before-restore");
+      if (!theirs.ok) return { ok: false, error: theirs.error };
+      st = withBackup(st, theirs, "cloud-before-restore");
+    }
+    save(st);
+    return { ok: true };
+  }
+
   return {
+    prepareRestore,
     boot: () => syncOnce("boot"),
     syncNow: () => syncOnce("manual"),
     notifyChange() { if (debounceTimer != null) clearTimer(debounceTimer); debounceTimer = setTimer(() => { debounceTimer = null; syncOnce("change"); }, debounceMs); },

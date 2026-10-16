@@ -7,7 +7,7 @@ import { createLegacyDevice } from "./testing/legacy.js";
 
 export const USER = "synthetic-user-0001";
 const BASE_TXNS = [1, 2, 3].map(n => ({ id: `base-${n}`, type: "expense", desc: `Base ${n}`, amount: 100 * n, date: "2026-10-01", catId: "food", catIds: ["food"], accId: "syn_bank", people: {} }));
-export const baseData = () => ({ txns: BASE_TXNS.map(t => ({ ...t })), accounts: [{ id: "syn_bank", name: "SYN Bank", type: "bank", balance: 100000 }], bills: [], people: [], planNudges: {} });
+export const baseData = () => ({ txns: BASE_TXNS.map(t => ({ ...t })), accounts: [{ id: "syn_bank", name: "SYN Bank", type: "bank", balance: 100000 }], bills: [], people: [], planNudges: {}, monthOverrides: {} });
 const baseSnapshot = () => ({ version: 1, ...baseData() });
 export const richData = () => ({ ...baseData(), bills: [{ id: "bill1", paidByTxnId: "base-1" }], contributions: [{ id: "c1", obligationType: "bill", obligationId: "bill1", txnId: "base-1" }], membershipRelationships: [{ id: "r1", billerAccountId: "ba1" }], billerAccounts: [{ id: "ba1" }], feeSchedules: [{ id: "s1" }], feePeriods: [{ id: "p1", scheduleId: "s1" }], planNudges: { "2026-11": { status: "dismissed" } } });
 

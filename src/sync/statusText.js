@@ -3,6 +3,8 @@
 // Every sync/backup message the person sees is produced here, from verified state only (SYNC-SAFETY-002 §3.9).
 // "Saved"/"synced" wording appears only for the kinds that carry a verified outcome.
 
+import { describeDifferenceLines } from "./differences.js";
+
 const when = iso => { try { return new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }); } catch { return String(iso); } };
 
 export const STATUS_KINDS = Object.freeze(["idle", "syncing", "synced", "sent", "pending", "failed", "conflict", "blocked-backup", "paused-token", "paused-reconcile", "stale-tab", "local-only"]);
@@ -25,10 +27,11 @@ export function statusText(s) {
       return { headline: "Couldn't sync", detail: `${s.error || "The cloud could not be reached"}. Your data is safe on this device and sync will retry${s.nextRetryAt ? ` (next try ${when(s.nextRetryAt)})` : ""}.`, tone: "error" };
     case "conflict": {
       const a = s.diff?.onlyLocal?.length ?? 0, b = s.diff?.onlyCloud?.length ?? 0;
+      const otherLines = describeDifferenceLines(s.diff?.lists);
       const held = s.held && s.held.cloud && s.held.device
         ? " Both copies are saved on this device while you decide."
         : " A verified local copy of both versions could not be saved: use Download before deciding.";
-      return { headline: "This device and your cloud copy both changed", detail: `${a} transaction${a === 1 ? "" : "s"} only on this device, ${b} only in the cloud. Nothing has been replaced.${s.held ? held : ""} Choose which copy to keep; the other is backed up first.`, tone: "warn" };
+      return { headline: "This device and your cloud copy both changed", detail: `${a} transaction${a === 1 ? "" : "s"} only on this device, ${b} only in the cloud. Nothing has been replaced.${s.held ? held : ""}${otherLines.length ? ` Also different: ${otherLines.join("; ")}.` : ""} Choose which copy to keep; the other is backed up first.`, tone: "warn" };
     }
     case "blocked-backup":
       return { headline: "Sync stopped to protect your data", detail: `A backup could not be verified${s.error ? ` (${s.error})` : ""}, so nothing was replaced. Save a backup file when asked, then try again.`, tone: "error" };

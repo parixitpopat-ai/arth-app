@@ -33,7 +33,9 @@ export function decideSync(input) {
   if (!networkOk) return out(SYNC_ACTIONS.RETRY_LATER, "cloud-unreachable");
 
   if (!cloud) {
-    return localMeaningful ? out(SYNC_ACTIONS.INSERT, "no-cloud-row") : out(SYNC_ACTIONS.NOOP, "nothing-anywhere");
+    // No cloud row yet (new account, or the row was removed): create it from this device, even when it only holds a profile and
+    // settings, so every later edit is tracked against a known version and reaches the cloud.
+    return out(SYNC_ACTIONS.INSERT, "no-cloud-row");
   }
 
   if (hasBase) {
@@ -46,7 +48,7 @@ export function decideSync(input) {
 
   // No history on this device (existing install, new device, or account switch).
   if (localDigest === cloud.digest) return out(SYNC_ACTIONS.ADOPT_BASE, "identical-no-history");
-  if (!localMeaningful) return cloud.meaningful ? out(SYNC_ACTIONS.FAST_FORWARD, "empty-device-takes-cloud") : out(SYNC_ACTIONS.ADOPT_BASE, "both-empty");
-  if (!cloud.meaningful) return out(SYNC_ACTIONS.PUSH, "cloud-row-empty", cloud.token);
+  if (!localMeaningful) return out(SYNC_ACTIONS.FAST_FORWARD, "device-without-data-takes-cloud");      // a verified backup of the device is taken first
+  if (!cloud.meaningful) return out(SYNC_ACTIONS.PUSH, "cloud-row-has-no-user-data", cloud.token);
   return out(SYNC_ACTIONS.CONFLICT, "both-have-data-no-history");
 }

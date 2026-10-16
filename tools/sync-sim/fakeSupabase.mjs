@@ -22,7 +22,7 @@ const fmt = micros => { const ms = Number(micros / 1000n), us = String(micros % 
 export function startFakeSupabase({ port = 54399, users = {} } = {}) {
   const rows = new Map();       // user_id -> { snapshot, micros }
   const writeLog = [];          // append-only
-  const requestLog = [];
+  const requestLog = []; const authLog = [];
   const faults = { latencyMs: 0, rejectWrites: 0, dropResponseWrites: 0, offline: false, corruptNext: false, precisionMs: 0 };
   const stats = { unconditionalWrites: 0 };
   let seq = 0;
@@ -31,7 +31,16 @@ export function startFakeSupabase({ port = 54399, users = {} } = {}) {
     res.writeHead(code, { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS", "access-control-expose-headers": "*", ...extra });
     res.end(body == null ? "" : JSON.stringify(body));
   };
-  const userForToken = auth => users[String(auth || "").replace(/^Bearer\s+/i, "")] || null;
+  // Synthetic accounts for the sign-in flow (email -> user); the one-time code is always 123456. Tokens map to users.
+  const accounts = new Map(); const refreshTokens = new Map(); let userSeq = 0;
+  const tokenUser = {};
+  const userForToken = auth => { const t = String(auth || "").replace(/^Bearer\s+/i, ""); return users[t] || tokenUser[t] || null; };
+  const sessionFor = user => {
+    const access = `synthetic-token-${user.id}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, refresh = `synthetic-refresh-${Math.random().toString(36).slice(2, 12)}`;
+    tokenUser[access] = user; refreshTokens.set(refresh, user);
+    return { access_token: access, token_type: "bearer", expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: refresh, user };
+  };
+  const mkUser = email => ({ id: `synthetic-user-${String(++userSeq).padStart(4, "0")}`, aud: "authenticated", role: "authenticated", email, app_metadata: { provider: "email" }, user_metadata: {}, created_at: new Date().toISOString() });
   const filter = (url, col) => { const v = url.searchParams.get(col); return v && v.startsWith("eq.") ? v.slice(3) : null; };
   const cloneSnap = s => JSON.parse(JSON.stringify(s));
   const txnIds = s => (s?.txns || []).map(t => String(t.id));
@@ -50,6 +59,24 @@ export function startFakeSupabase({ port = 54399, users = {} } = {}) {
     if (faults.latencyMs) await new Promise(r => setTimeout(r, faults.latencyMs));
     if (faults.offline) { req.socket.destroy(); return; }
 
+    if (url.pathname === "/auth/v1/otp" && req.method === "POST") {
+      const body = JSON.parse(raw || "{}"); const email = String(body.email || "").toLowerCase();
+      authLog.push({ op: "otp", email, create_user: body.create_user });
+      if (!accounts.has(email)) { if (body.create_user === false) return send(res, 422, { code: 422, error_code: "otp_disabled", msg: "Signups not allowed for otp" }); accounts.set(email, mkUser(email)); }
+      return send(res, 200, {});
+    }
+    if (url.pathname === "/auth/v1/verify" && req.method === "POST") {
+      const body = JSON.parse(raw || "{}"); const email = String(body.email || "").toLowerCase();
+      authLog.push({ op: "verify", email, ok: body.token === "123456" });
+      if (!accounts.has(email) || body.token !== "123456") return send(res, 403, { code: 403, error_code: "otp_expired", msg: "Token has expired or is invalid" });
+      return send(res, 200, sessionFor(accounts.get(email)));
+    }
+    if (url.pathname === "/auth/v1/token" && req.method === "POST") {
+      const body = JSON.parse(raw || "{}"); const u = refreshTokens.get(body.refresh_token);
+      if (!u) return send(res, 400, { code: 400, error_code: "refresh_token_not_found", msg: "Invalid Refresh Token" });
+      return send(res, 200, sessionFor(u));
+    }
+    if (url.pathname === "/auth/v1/logout") { authLog.push({ op: "logout" }); return send(res, 204, null); }
     if (url.pathname === "/auth/v1/user") { const u = userForToken(req.headers.authorization); return u ? send(res, 200, u) : send(res, 401, { message: "invalid token" }); }
     if (url.pathname !== "/rest/v1/arth_snapshots") return send(res, 404, { message: "not found" });
     const u = userForToken(req.headers.authorization);
@@ -97,7 +124,9 @@ export function startFakeSupabase({ port = 54399, users = {} } = {}) {
   });
 
   return new Promise(resolve => server.listen(port, "127.0.0.1", () => resolve({
-    port, rows, writeLog, requestLog, faults, stats,
+    port, rows, writeLog, requestLog, authLog, faults, stats, accounts,
+    resetAccounts() { accounts.clear(); userSeq = 0; },      // so the next account is synthetic-user-0001 again
+    addAccount(email) { const u = mkUser(email.toLowerCase()); accounts.set(email.toLowerCase(), u); return u; },
     seed(userId, snapshot, tokenIso = new Date().toISOString()) { rows.set(userId, { snapshot: cloneSnap(snapshot), micros: microsOf(tokenIso) }); writeLog.push({ seq: ++seq, kind: "seed", outcome: "seeded", token: tokenIso, txnIds: txnIds(snapshot) }); return fmt(microsOf(tokenIso)); },
     cloudIds: userId => txnIds(rows.get(userId)?.snapshot).sort(),
     close: () => new Promise(r => server.close(r)),

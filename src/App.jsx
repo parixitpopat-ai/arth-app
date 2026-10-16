@@ -16,6 +16,7 @@ import { createTabOwnership, watchForeignWrites } from "./sync/tabOwnership";
 import { createSyncEngine } from "./sync/syncEngine";
 import { createSupabaseCasClient } from "./sync/supabaseCasClient";
 import { backupText } from "./sync/statusText";
+import { readSafetyBackups, REASON_LABELS } from "./sync/safetyBackup";
 import CloudStateUnknownScreen from "./screens/CloudStateUnknownScreen";
 // smsBridge — stub (native SMS not available in web PWA)
 const isNativeSmsAvailable = () => false;
@@ -9165,6 +9166,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const backupFileInputRef = useRef(null);
   const applyingCloudSnapshotRef = useRef(false);
   const cloudSnapshotRef = useRef(null);
+  const syncEngineRef = useRef(null);   // the current sync engine (set once it exists); read by handlers declared before it
   // P1 — Master User / Signup. masterUserSetupComplete is explicit, snapshot-side
   // state (P1-002 §3) — deliberately never inferred from name/emoji/relation.
   const [masterUserSetupComplete, setMasterUserSetupComplete] = useState(()=>JSON.parse(localStorage.getItem("arth_master_user_setup_complete") ?? "false"));
@@ -9376,7 +9378,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, []);
 
-  const restoreBackupSnapshot = useCallback((snapshot, label = "selected backup") => {
+  const restoreBackupSnapshot = useCallback(async (snapshot, label = "selected backup") => {
     const looksValid = snapshot && typeof snapshot === "object" && (
       Array.isArray(snapshot.txns) ||
       Array.isArray(snapshot.accounts) ||
@@ -9387,10 +9389,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(!looksValid) throw new Error("Please choose a valid Arth backup JSON file.");
     const stamp = formatBackupStamp(snapshot?.savedAt || "");
     const summary = `${Array.isArray(snapshot.txns) ? snapshot.txns.length : 0} txns · ${Array.isArray(snapshot.accounts) ? snapshot.accounts.length : 0} accounts`;
-    const proceed = window.confirm(`Restore ${label}${stamp ? ` (${stamp})` : ""}? This will replace current data on this device.\n\n${summary}`);
+    const engine = syncEngineRef.current;
+    const signedIn = Boolean(engine);
+    const proceed = window.confirm(`Restore ${label}${stamp ? ` (${stamp})` : ""}? This will replace current data on this device${signedIn ? " and, once it syncs, the cloud copy. Both are saved as verified backups first (Settings, Backup & Restore, Sync safety backups)" : ""}.\n\n${summary}`);
     if(!proceed) return false;
+    if(engine){
+      // Restoring an older copy would also replace the cloud copy on the next sync: secure both sides first, or do not restore.
+      const prep = await engine.prepareRestore();
+      if(!prep.ok){ setBackupStatus(`Restore stopped, nothing was replaced: ${prep.error}`); return false; }
+    }
     applyCloudSnapshot(snapshot);
-    if(cloudUser?.id && isCloudSyncConfigured) setCloudStatus("Backup restored on this device. It will be sent to the cloud; if the cloud copy changed in the meantime you will be asked before anything is replaced.");
+    if(cloudUser?.id && isCloudSyncConfigured) setCloudStatus("Backup restored on this device. It will be sent to the cloud; both the old device data and the old cloud copy were backed up first.");
     setBackupStatus(`Backup restored${stamp ? ` · ${stamp}` : ""}`);
     return true;
   }, [applyCloudSnapshot, cloudUser?.id, formatBackupStamp]);
@@ -9453,7 +9462,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const snapshot = parsed?.snapshot && typeof parsed.snapshot === "object" ? parsed.snapshot : parsed;
       const backupTime = parsed?.exportedAt || snapshot?.savedAt || (file.lastModified ? new Date(file.lastModified).toISOString() : "");
       const stamp = formatBackupStamp(backupTime);
-      restoreBackupSnapshot(snapshot, stamp ? `backup from ${stamp}` : (file.name || "backup file"));
+      await restoreBackupSnapshot(snapshot, stamp ? `backup from ${stamp}` : (file.name || "backup file"));
     }catch(err){
       setBackupStatus(`Restore failed: ${err.message}`);
     }finally{
@@ -9529,6 +9538,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     return ()=>{ engine.stop(); };
   }, [cloudUser?.id, applyCloudSnapshot]);
   const syncEngine = syncKit?.engine || null;
+  syncEngineRef.current = syncEngine;
   useEffect(()=>{ if(!syncEngine) setSyncStatus({ kind:"idle" }); }, [syncEngine]);
   const syncDownload = useCallback((snapshot, prefix)=>{ if(snapshot) downloadBackupPayload(buildBackupPayload(snapshot, "sync-conflict"), prefix); }, [downloadBackupPayload, buildBackupPayload]);
   const resolveSyncConflict = useCallback(async (choice)=>{
@@ -15056,7 +15066,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div style={{ color:T.sub,fontSize:10 }}>{Array.isArray(item.snapshot?.txns) ? item.snapshot.txns.length : 0} txns · {Array.isArray(item.snapshot?.accounts) ? item.snapshot.accounts.length : 0} accounts</div>
                   </div>
                   <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                    <button onClick={()=>{ try{ restoreBackupSnapshot(item.snapshot, `auto backup from ${formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "") || "recent backup"}`); } catch(err){ setBackupStatus(`Restore failed: ${err.message}`); } }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Restore</button>
+                    <button onClick={async ()=>{ try{ await restoreBackupSnapshot(item.snapshot, `auto backup from ${formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "") || "recent backup"}`); } catch(err){ setBackupStatus(`Restore failed: ${err.message}`); } }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Restore</button>
                     <button onClick={()=>{ try{ downloadBackupPayload(buildBackupPayload(item.snapshot, "auto", item.exportedAt || item.snapshot?.savedAt || new Date().toISOString()), "arth-auto-backup"); setBackupStatus(`Backup downloaded · ${formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "")}`); } catch(err){ setBackupStatus(`Backup failed: ${err.message}`); } }} style={{ background:"none",border:`1px solid ${T.border}`,color:T.sub,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Download</button>
                   </div>
                 </div>)}
@@ -15064,6 +15074,33 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             )}
           </> : <div style={{ color:T.sub,fontSize:10 }}>Turn this on to keep a rolling history of automatic backups on this device.</div>}
         </div>
+        {(()=>{
+          // Sync safety backups: the verified copies the sync engine keeps before it replaces anything, and both copies while a conflict is undecided.
+          let entries = [];
+          try{ entries = readSafetyBackups(window.localStorage).slice().reverse(); }catch{ entries = []; }
+          return (
+            <div data-testid="sync-safety-backups-card" style={{ background:T.card,borderRadius:14,padding:"14px 16px",marginTop:12 }}>
+              <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:4 }}>Sync safety backups</div>
+              <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>Arth saves one of these (checked and read back) before sync replaces any data, and keeps both copies while a conflict is undecided. You can restore or download any of them.</div>
+              {entries.length===0 ? <div style={{ color:T.sub,fontSize:10 }}>None yet. They appear here only when a sync needs to replace data or finds a conflict.</div> : (
+                <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                  {entries.slice(0,10).map(b=>(
+                    <div key={b.id} data-testid="sync-safety-backup-row" style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:10,padding:"9px 10px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap" }}>
+                      <div>
+                        <div style={{ color:T.text,fontSize:11,fontWeight:800 }}>{REASON_LABELS[b.reason] || b.reason}{b.pinned?" · held":""}</div>
+                        <div style={{ color:T.sub,fontSize:10 }}>{formatBackupStamp(b.at)} · {b.txnCount} txns · {Array.isArray(b.snapshot?.accounts)?b.snapshot.accounts.length:0} accounts</div>
+                      </div>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                        <button onClick={async ()=>{ try{ await restoreBackupSnapshot(b.snapshot, `${REASON_LABELS[b.reason]||"safety backup"} (${formatBackupStamp(b.at)})`); } catch(err){ setBackupStatus(`Restore failed: ${err.message}`); } }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:8,padding:"6px 10px",fontSize:10,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Restore</button>
+                        <button onClick={()=>{ try{ downloadBackupPayload(buildBackupPayload(b.snapshot, "sync-safety", b.at), "arth-sync-safety-backup"); setBackupStatus(`Backup downloaded · ${formatBackupStamp(b.at)}`); } catch(err){ setBackupStatus(`Download failed: ${err.message}`); } }} style={{ background:T.card,border:`1px solid ${T.border}`,color:T.text,borderRadius:8,padding:"6px 10px",fontSize:10,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Download</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         <div style={{ ...card,marginBottom:12 }}>
           <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:8 }}>What gets included</div>
           <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>

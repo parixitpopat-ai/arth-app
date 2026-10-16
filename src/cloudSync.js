@@ -1,7 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://iggsdctjjkdknmcnibwi.supabase.co";
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlnZ3NkY3Rqamtka25tY25pYndpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NjU0MDAsImV4cCI6MjA5MDU0MTQwMH0.oU1u7t6f6ygGzUmSEIgtaBCoHogywauu9R6NmmNLQN0";
+import { resolveCloudConfig } from "./cloudConfig";
+
+const CLOUD = resolveCloudConfig({ url: import.meta.env.VITE_SUPABASE_URL, key: import.meta.env.VITE_SUPABASE_ANON_KEY, vercelEnv: import.meta.env.VITE_VERCEL_ENV, dev: import.meta.env.DEV, forceBypass: import.meta.env.VITE_FORCE_DEV_AUTH_BYPASS });
+const SUPABASE_URL = CLOUD.url;
+const SUPABASE_ANON_KEY = CLOUD.key;
 
 // DEV-ONLY BYPASS: import.meta.env.DEV is a Vite compile-time constant, true only under
 // `npm run dev`. Vite statically replaces this with `false` during `npm run build` — the
@@ -9,8 +12,7 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJ
 // toggle. It cannot be reached, inspected, or exploited on arth-app.vercel.app.
 // Set VITE_FORCE_DEV_AUTH_BYPASS=false in .env.local to opt back into real cloud-sync testing
 // locally without editing this file again.
-const DEV_AUTH_BYPASS = import.meta.env.DEV && import.meta.env.VITE_FORCE_DEV_AUTH_BYPASS !== "false";
-export const isCloudSyncConfigured = !DEV_AUTH_BYPASS && Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+export const isCloudSyncConfigured = CLOUD.configured;
 export const supabase = isCloudSyncConfigured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
 export const getCurrentCloudUser = async () => {
