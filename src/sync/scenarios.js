@@ -9,6 +9,7 @@ export const USER = "synthetic-user-0001";
 const BASE_TXNS = [1, 2, 3].map(n => ({ id: `base-${n}`, type: "expense", desc: `Base ${n}`, amount: 100 * n, date: "2026-10-01", catId: "food", catIds: ["food"], accId: "syn_bank", people: {} }));
 export const baseData = () => ({ txns: BASE_TXNS.map(t => ({ ...t })), accounts: [{ id: "syn_bank", name: "SYN Bank", type: "bank", balance: 100000 }], bills: [], people: [], planNudges: {} });
 const baseSnapshot = () => ({ version: 1, ...baseData() });
+export const richData = () => ({ ...baseData(), bills: [{ id: "bill1", paidByTxnId: "base-1" }], contributions: [{ id: "c1", obligationType: "bill", obligationId: "bill1", txnId: "base-1" }], membershipRelationships: [{ id: "r1", billerAccountId: "ba1" }], billerAccounts: [{ id: "ba1" }], feeSchedules: [{ id: "s1" }], feePeriods: [{ id: "p1", scheduleId: "s1" }], planNudges: { "2026-11": { status: "dismissed" } } });
 
 export function makeKit(kind, cloudOpts = {}, engineOpts = {}) {
   const clock = createClock(); const cloud = createFakeCloud({ clock, ...cloudOpts });
@@ -104,4 +105,15 @@ export async function cleanDeviceFastForwards(kit) {
   const A = kit.mk("A"), B = kit.mk("B"); await A.start(); await B.start(); await A.settle(100); await B.settle(100);
   const bId = B.addTxn("b"); await B.settle(1500);
   return { devices: [A, B], A, B, bId };
+}
+
+/** Divergence where the device keeps editing while "Decide later" is in force, and the other device pushes again. */
+export async function decideLaterWhileBothMove(kit) {
+  const r = await divergentDevices(kit, 10_000);
+  const { A, B } = r;
+  const cloudAtConflict = (kit.cloud.rows.get(USER)?.snapshot.txns || []).map(t => t.id);
+  const bLater = B.addTxn("b-after-conflict"); await B.settle(3000);
+  const aLater = A.addTxn("a-after-conflict"); await A.settle(3000);   // A keeps syncing and moves the cloud copy on
+  await B.engine.resolveConflict("later");
+  return { ...r, bLater, aLater, cloudAtConflict };
 }

@@ -60,22 +60,23 @@ export function createFakeCloud({ clock, serverAssignsToken = false, tokenPrecis
 }
 
 export function createMemoryStorage(initial = {}) {
-  const m = new Map(Object.entries(initial)); const limit = { bytes: Infinity };
+  const m = new Map(Object.entries(initial)); const limit = { bytes: Infinity }; const failKeys = new Set();
   return {
     getItem: k => (m.has(k) ? m.get(k) : null),
     setItem(k, v) {
+      if (failKeys.has(k)) { const e = new Error("QuotaExceededError"); e.name = "QuotaExceededError"; throw e; }
       const used = [...m.entries()].filter(([kk]) => kk !== k).reduce((n, [, vv]) => n + vv.length, 0);
       if (used + String(v).length > limit.bytes) { const e = new Error("QuotaExceededError"); e.name = "QuotaExceededError"; throw e; }
       m.set(k, String(v));
     },
     removeItem: k => { m.delete(k); },
-    limit, raw: m,
+    limit, failKeys, raw: m,
   };
 }
 
 const BASE_ACCOUNTS = [{ id: "syn_bank", name: "SYN Bank", type: "bank", balance: 100000 }];
 
-export function createDevice({ name, userId = "synthetic-user-0001", clock, cloud: cloudRoot, storage = createMemoryStorage(), engineOpts = {} }) {
+export function createDevice({ name, userId = "synthetic-user-0001", clock, cloud: cloudRoot, storage = createMemoryStorage(), engineOpts = {}, applyTransform = null }) {
   const cloud = cloudRoot.client ? cloudRoot.client(name) : cloudRoot;
   let seq = 0, data = null, engine = null, lastRebuild = clock.now(), idc = 0;
   const KEY = "arth_data";
@@ -92,7 +93,7 @@ export function createDevice({ name, userId = "synthetic-user-0001", clock, clou
       userId, deviceId: name, cloud, storage, now: clock.now, setTimer, clearTimer,
       genId: () => `${name}-id${++idc}`,
       getSnapshot: snapshot,
-      applySnapshot: async s => { const { savedAt, syncMeta, ...rest } = s; data = JSON.parse(JSON.stringify(rest)); persist(); lastRebuild = clock.now(); },
+      applySnapshot: async s => { const { savedAt, syncMeta, ...rest } = s; data = JSON.parse(JSON.stringify(rest)); if (applyTransform) data = applyTransform(data); persist(); lastRebuild = clock.now(); },
       readLocalAfterApply: async () => snapshot(),
       ...engineOpts,
     });
@@ -100,7 +101,7 @@ export function createDevice({ name, userId = "synthetic-user-0001", clock, clou
   }
   dev.start = async () => { boot(); await engine.boot(); };
   /** A normal restart (app closed and reopened): in-memory work is lost, persisted data and sync state remain. */
-  dev.reload = async () => { [...mine].forEach(id => clock.clearTimer(id)); mine.clear(); boot(); await engine.boot(); };
+  dev.reload = async () => { if (engine) engine.stop(); [...mine].forEach(id => clock.clearTimer(id)); mine.clear(); boot(); await engine.boot(); };   // a reload kills the old page's engine, like a real tab
   dev.addTxn = (desc, amount = 100) => { const id = `${name}-t${++seq}`; data.txns.push({ id, type: "expense", desc, amount, date: "2026-10-15", catId: "food", catIds: ["food"], accId: "syn_bank", people: {} }); persist(); lastRebuild = clock.now(); created.push(id); engine.notifyChange(); return id; };
   dev.settle = async (ms = 1000) => { await clock.advance(ms, async () => { await engine.whenIdle(); }); await engine.whenIdle(); };
   dev.ids = () => txnIdsOf(snapshot());
