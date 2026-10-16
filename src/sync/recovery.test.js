@@ -165,3 +165,15 @@ test("a restore is refused, with nothing replaced, when the cloud copy cannot be
   const r2 = await A.restoreFrom(old);
   assert.equal(r2.ok, false); assert.deepEqual(A.ids(), before);
 });
+
+test("the engine re-checks a file backup's checksum itself: a UI that reports success for the wrong data is not trusted", async () => {
+  const kit = S.makeKit("new", {}, { requestExternalBackup: async () => ({ ok: true, digest: "0".repeat(64), txnCount: 3 }) });
+  const A = kit.mk("A"), B = kit.mk("B"); kit.seed(0); await A.start(); await B.start(); await A.settle(100); await B.settle(100);
+  const bId = B.addTxn("b"); await B.settle(1500);
+  A.storage.failKeys.add(SAFETY_BACKUPS_KEY);
+  const before = A.ids();
+  await A.engine.onVisible(); await A.settle(500);
+  assert.equal(A.status().kind, "blocked-backup");
+  assert.deepEqual(A.ids(), before, "nothing replaced");
+  assert.ok(!A.ids().includes(bId));
+});
