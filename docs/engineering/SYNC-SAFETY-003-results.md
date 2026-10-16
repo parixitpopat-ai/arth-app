@@ -59,3 +59,54 @@ All five safety properties pass on the local, deterministic, synthetic-data harn
 
 ## Owner decisions still open
 D6 (read-only look at the production table definition) and D2 (authorise isolated real-service testing) gate any claim about real Supabase. D4 (backup storage) was implemented as browser storage with the replacement refused if it cannot be written; a forced file download fallback and IndexedDB were not built. Merge to `main` needs the owner's explicit approval.
+
+
+---
+
+# Second work package (SYNC-SAFETY-004): local safety gaps closed — 16 Oct 2026
+
+Branch `wp-sync-safety-2`, based on local `main` `8be4052`. **Not pushed, not deployed; `origin/main` untouched.** Code commits: `ad5b200` (integrity, verified backups, pinned conflict copies, file fallback, tab gate), `d458a60` (nudge / recovery / two-tab / sign-in scenarios, restore safeguards, preview-build guard, perf benchmark), `adc4cbf` (engine re-checks file-backup checksum). The docs/records commit on top changes no code; its SHA is reported in the hand-off message (a file cannot cite its own commit). Preview-verification proposal: `SYNC-SAFETY-005-preview-verification-plan.md`.
+
+## Checks on code at `adc4cbf`
+- `npm test`: **1,801 / 1,801 pass**, 0 skipped.
+- Production build passes. `eslint src`: **exactly the 4 baseline problems** (2 errors, 2 warnings), none new.
+- Browser harness against the local fake Supabase + fake sign-in, two consecutive runs: **31 of 31 pass in each**, identical outcome vector (same MD5 `cfc4f8dc17df27558119e6d675143c87`), 0 requests to any Supabase host, 0 unconditional cloud writes. Records: `results/run-2026-10-16T04-47-20-427Z.json`, `results/run-2026-10-16T04-56-32-841Z.json`.
+- New scenarios: two tabs (TAB1–3), Plan Ahead nudge (BN1–3), backup-file fallback (FB1–2), restore from a safety backup (RB1), sign-in/recovery incl. existing installs with no history and divergent copies (SI1–SI6).
+
+## What closed
+- **Whole-snapshot verification:** backups and reconciliation compare every list record-by-record plus dangling references (transaction↔bill↔payment↔membership↔relationship↔fee links), not just transactions.
+- **"Decide later" keeps both copies:** both versions are pinned (never pruned) until the conflict is resolved.
+- **File fallback:** if browser storage cannot hold a backup, a recoverable export is downloaded and re-selected, verified against the exact data digest; if no verified backup can be secured, the replacement is refused.
+- **Two tabs:** one owner tab (Web Locks, localStorage-lease fallback); other tabs show a paused screen; a foreign write marks a tab stale and its engine stops.
+- **Manual restore** backs up both this device and the cloud copy first, and refuses if either cannot be secured.
+- **Preview builds** cannot use the production Supabase project (`src/cloudConfig.js`).
+
+## Bugs found by this work (fixed)
+1. Browser harness: fresh installs auto-create a few lists, so every new device raised a conflict screen. Fixed (`hasUserData`).
+2. A runtime-only initialisation-order crash in `App.jsx` (invisible to build and lint) was caught by the first harness scenario. Fixed.
+3. A simulated device reload left the old engine running (duplicate backups). Fixed (`engine.stop()`).
+
+## Test-quality checks
+12 deliberate breaks of the code: 11 caught by tests (one needed a new test, added in `adc4cbf`). One ("backup restore rehearsal skipped") is behaviourally equivalent because a backup read back identical to its source cannot restore worse than the source; documented, not a gap.
+
+## Performance (synthetic snapshots; device timings measured on loopback, phone times ESTIMATED from stated link profiles; verify on real devices)
+Data: `tools/sync-sim/results/perf-2026-10-16.json`. Read-back adds roughly 40–50% to the time of each write and doubles the data moved per write; the dominant cost is the pre-existing whole-snapshot upload.
+| Snapshot | Size | Digest | 4G good write (+read-back) | 3G write (+read-back) |
+|---|---|---|---|---|
+| typical year, no images | 0.28 MB | 13 ms | well under 1 s | 6.2 s (+2.7 s) |
+| 500 txns, no images | 1.9 MB | 76 ms | n/a here | 40 s (+16 s) |
+| 500 txns + 10 photos | 2.07 MB | n/a here | n/a here | 44 s (+18 s) |
+| 500 txns + 25 photos | 5 MB | n/a here | 4.3 s (+1.7 s) | 105 s (+42 s) |
+| 1000 txns + 60 photos | 12 MB | n/a here | n/a here | 251 s (+101 s) |
+5 MB is about the usual localStorage ceiling (not verified per browser): large photo sets are the risk. "n/a here" = not tabulated in this document; see the JSON.
+
+## Remaining limitations (stated plainly)
+1. **Real Supabase is still unverified** (zero-row PATCH response, `updated_at` type/precision/trigger, UPDATE policy). If the column is coarser than a millisecond, a `version` column migration is needed.
+2. Two-tab, nudge and sign-in evidence is local fake-backend only; fake sign-in is not real email OTP. No real-device or deployed-site test.
+3. Web Locks in Android WebView unverified; the lease fallback is not atomic.
+4. Pinned conflict copies (two) may not fit on very tight storage; there is no file fallback for those holds (status tells the person to use Download).
+5. A normaliser (`dedupeSettlementTxns`) may drop records; this is reported (restore drops / reconcile pause), not prevented.
+6. The preview-build guard relies on `VERCEL_ENV` at build time; verified in a local build only, not on Vercel. Earlier preview deployments of previous branches may have used the production backend.
+7. A stale tab stays halted until reload. Signed-out edits cannot sync until sign-in.
+8. One-time conflict screen for existing installs whose local and cloud copies differ.
+**Cloud sync is NOT declared production-safe.**

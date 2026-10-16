@@ -3,9 +3,9 @@
   "backupType": "sync-safety-backup",
   "kind": "sync-safety-backup",
   "formatVersion": 1,
-  "exportedAt": "2026-10-16T04:25:30.953Z",
+  "exportedAt": "2026-10-16T04:53:30.201Z",
   "reason": "before-use-cloud",
-  "digest": "d1992f7aafc8939ec4894de6c8656a7f48c54cadd15f3685a74de0a000ce3bac",
+  "digest": "2f97f0103a547673d9f55904f0c12433fd1358bce9049223466aaa1eb2a6108a",
   "txnCount": 13,
   "counts": {
     "cats": 19,
@@ -59,7 +59,7 @@
   },
   "snapshot": {
     "version": 1,
-    "savedAt": "2026-10-16T04:25:30.117Z",
+    "savedAt": "2026-10-16T04:53:29.375Z",
     "dark": true,
     "masterUserSetupComplete": true,
     "autoDetectExpenseCategory": true,
@@ -716,7 +716,7 @@
     "itemCatalog": [],
     "txns": [
       {
-        "id": "g6o1hwk",
+        "id": "rsx975z",
         "type": "expense",
         "amount": 700,
         "date": "2026-10-16",
@@ -739,9 +739,9 @@
         "tagMode": null,
         "note": "",
         "lineItems": null,
-        "createdAt": 1792124724698,
+        "createdAt": 1792126403951,
         "createdDate": "2026-10-16",
-        "updatedAt": 1792124724699,
+        "updatedAt": 1792126403952,
         "groupCollectiveAmount": 0
       },
       {
