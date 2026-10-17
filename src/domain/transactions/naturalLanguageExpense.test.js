@@ -134,8 +134,10 @@ test("paying a credit-card BILL is not a purchase and is never drafted as one", 
   ]) {
     const r = parse(t);
     assert.equal(r.intent, "card_payment", t);
-    assert.equal(r.amount, null, "no draft fields for a refused sentence");
-    assert.ok(r.message);
+    assert.equal(r.detected, "card_payment");
+    assert.equal(r.merchant, null, "no draft fields for a refused sentence");
+    assert.equal(r.payment.kind, null);
+    assert.match(r.message, /card bill payment\. Use the full form/);
   }
 });
 test("repayments, refunds and money received are not purchases", () => {
@@ -157,7 +159,7 @@ test("one credit card ends in 3445: resolved, charged to the card, no bank and n
 test("the same four digits on a DEBIT card never satisfy a credit-card expectation", () => {
   const r = resolvePaymentAccount({ kind: "cc", last4: "3445" }, [bank, debit3445, cc7777]);
   assert.equal(r.status, "wrong-type"); assert.equal(r.accId, undefined);
-  assert.match(r.message, /No credit card ends in 3445/);
+  assert.match(r.message, /No credit card ending 3445, but .*3445 \(debit\) does\. Pick the account below\./);
 });
 test("a debit card resolves to its linked bank with the card as the payment method", () => {
   const r = resolvePaymentAccount({ kind: "debit", last4: "3445" }, accounts);
@@ -179,7 +181,7 @@ test("two credit cards with the same suffix: multiple matches need a choice", ()
 test("no card ends in the stated digits: clarification, and no account is invented", () => {
   const before = JSON.stringify(accounts);
   const r = resolvePaymentAccount({ kind: "cc", last4: "0000" }, accounts);
-  assert.equal(r.status, "none"); assert.match(r.message, /nothing was created/);
+  assert.equal(r.status, "none"); assert.equal(r.message, "No card ending 0000. Pick one below or check the number.");
   assert.equal(JSON.stringify(accounts), before);
 });
 test("a card named without digits resolves only when exactly one card of that kind exists", () => {
@@ -277,4 +279,32 @@ test("regression: the boundary stores exactly one transaction for one submission
   const d = buildExpenseDraft("I paid ₹3,000 to Domino's via credit card ending 3445", { accounts, cats, now: NOW });
   await submitTransactionThroughBoundary({ operation: "create", draft: quickAddShapedRecord(d), dispatcher, repository, legacyUpsert: r => legacy.push(r) });
   assert.equal(store.length + legacy.length, 1);
+});
+
+// ---- what a refused sentence is, and the amount carried to the full form ---------------------------------------------
+test("refused sentences name what was detected, say what to do, and carry the amount over", () => {
+  const cases = [
+    ["paid my credit card bill 5000", "card_payment", 5000, /card bill payment\. Use the full form for that\./],
+    ["paid ₹5,000 to my HDFC credit card ending 3445", "card_payment", 5000, /card bill payment/],
+    ["salary credited 50000", "income", 50000, /^Income isn't supported here yet\. Use the full form for that\.$/],
+    ["received ₹1,200 from Rahul", "income", 1200, /Income isn't supported/],
+    ["received ₹500 refund from Amazon", "refund", 500, /a refund\. Use the full form/],
+    ["Rahul paid me back 500", "repayment", 500, /a repayment\. Use the full form/],
+  ];
+  for (const [text, detected, amount, msg] of cases) {
+    const r = parse(text);
+    assert.equal(r.detected, detected, text);
+    assert.equal(r.amount, amount, `${text}: amount carried`);
+    assert.match(r.message, msg, text);
+    assert.notEqual(r.intent, "expense", text);
+  }
+  assert.equal(parse("salary credited").amount, null, "no amount in the sentence: nothing invented");
+});
+test("an account message that names the wrong type or no match always says what to do next", () => {
+  for (const r of [
+    resolvePaymentAccount({ kind: "cc", last4: "0000" }, accounts),
+    resolvePaymentAccount({ kind: "cc", last4: "3445" }, [bank, debit3445]),
+    resolvePaymentAccount({ kind: "cc", last4: null }, [bank]),
+    resolvePaymentAccount({ kind: null, last4: null }, accounts),
+  ]) assert.match(r.message, /Pick|Which/, r.message);
 });

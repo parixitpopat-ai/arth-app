@@ -49,7 +49,12 @@ const LAST4_RX = new RegExp(
 );
 
 // ---- intent: purchase vs card-bill payment vs repayment/incoming ------------------------------------------------
-const INCOMING_RX = /\b(received|refund(?:ed)?|reimburs\w*|credited|salary|paid\s+me|paid\s+back|pay(?:ing)?\s+back|repaid|repay|settled\s+up|got\s+back|cashback)\b/i;
+// Sentences that are not purchases, and what each one is. Order matters: the first match names it.
+const NOT_A_PURCHASE = [
+  { kind: "refund", rx: /\b(refund(?:ed)?|reimburs\w*|cashback|got\s+back)\b/i, name: "a refund" },
+  { kind: "repayment", rx: /\b(paid\s+me|paid\s+back|pay(?:ing)?\s+back|repaid|repay|settled\s+up|returned)\b/i, name: "a repayment" },
+  { kind: "income", rx: /\b(received|credited|salary)\b/i, name: "income" },
+];
 const PAYMENT_PREPOSITIONS = /^(via|using|with|by|through|from|on|at|in)$/i;
 
 function isCardBillPayment(lower) {
@@ -73,10 +78,10 @@ function isCardBillPayment(lower) {
 }
 
 // ---- main parser ------------------------------------------------------------------------------------------------
-export function parseExpenseText(input, { now = new Date() } = {}) {
+export function parseExpenseText(input, { now = new Date(), _amountOnly = false } = {}) {
   const raw = String(input ?? "").trim();
   const result = {
-    raw, intent: "expense", message: null,
+    raw, intent: "expense", message: null, detected: null,
     amount: null, merchant: null, description: null,
     date: null, dateStated: false,
     payment: { kind: null, last4: null },
@@ -89,15 +94,23 @@ export function parseExpenseText(input, { now = new Date() } = {}) {
   let work = raw.replace(/[‘’ʼ]/g, "'").replace(/[“”]/g, '"');
   const lower = work.toLowerCase();
 
-  if (isCardBillPayment(lower)) {
-    result.intent = "card_payment";
-    result.message = "This looks like a payment of a credit-card bill, not a purchase. Quick Add does not record those; use More options and choose a card payment.";
+  const refuse = (kind, message) => {
+    result.intent = kind === "card_payment" ? "card_payment" : "not_a_purchase";
+    result.detected = kind;
+    result.message = message;
+    // Carry the amount over so the full form does not need it typed again.
+    const amountOnly = parseExpenseText(raw, { now, _amountOnly: true });
+    result.amount = amountOnly.amount;
     return result;
-  }
-  if (INCOMING_RX.test(lower)) {
-    result.intent = "not_a_purchase";
-    result.message = "This looks like money received, a refund or a repayment, not a purchase. Quick Add records purchases only; use More options for those.";
-    return result;
+  };
+  if (!_amountOnly) {
+    if (isCardBillPayment(lower)) return refuse("card_payment", "This looks like a card bill payment. Use the full form for that.");
+    const hit = NOT_A_PURCHASE.find(n => n.rx.test(lower));
+    if (hit) {
+      return refuse(hit.kind, hit.kind === "income"
+        ? "Income isn't supported here yet. Use the full form for that."
+        : `This looks like ${hit.name}. Use the full form for that.`);
+    }
   }
 
   // 1. card suffix (also blanked so its digits are never read as an amount)
@@ -232,7 +245,7 @@ export function parseExpenseText(input, { now = new Date() } = {}) {
 const EXPECTED_TYPES = { cc: ["cc"], debit: ["debit"], upi: ["upi"], cash: ["cash"], bank: ["bank"], card: ["cc", "debit"] };
 const KIND_LABEL = { cc: "credit card", debit: "debit card", upi: "UPI", cash: "cash account", bank: "bank account", card: "card" };
 const last4Of = a => String(a?.last4 ?? "").trim();
-const label = a => `${a.name}${last4Of(a) ? ` ···${last4Of(a)}` : ""}`;
+const label = a => `${a.name}${last4Of(a) ? ` ··${last4Of(a)}` : ""}`;
 
 // Where the expense is recorded: a credit card is charged directly (the bank is untouched until the bill is paid);
 // a debit card or UPI handle is a way of paying from its linked bank (or card), exactly as Quick Add already does.
@@ -272,14 +285,15 @@ export function resolvePaymentAccount(payment, accounts, { paidFrom = null } = {
   }
   const otherType = last4 ? list.filter(a => !expected.includes(a.type) && last4Of(a) === last4) : [];
   if (otherType.length) {
-    return { status: "wrong-type", candidates: [], otherType, message: `No ${KIND_LABEL[kind]} ends in ${last4}, but ${otherType.map(a => `${label(a)} (${a.type})`).join(" and ")} does. Pick the account yourself.` };
+    return { status: "wrong-type", candidates: [], otherType, message: `No ${KIND_LABEL[kind]} ending ${last4}, but ${otherType.map(a => `${label(a)} (${a.type})`).join(" and ")} does. Pick the account below.` };
   }
   if (unusable) {
-    return { status: "none", candidates: [], message: `I found that ${KIND_LABEL[kind]}, but it is not linked to an account an expense can be recorded against. Pick the account yourself.` };
+    return { status: "none", candidates: [], message: `That ${KIND_LABEL[kind]} is not linked to an account an expense can be recorded against. Pick the account below.` };
   }
+  const cardWord = kind === "cc" || kind === "debit" || kind === "card" ? "card" : KIND_LABEL[kind];
   return { status: "none", candidates: [], message: last4
-    ? `No ${KIND_LABEL[kind]} ends in ${last4}. Pick the account yourself; nothing was created.`
-    : `You have no ${KIND_LABEL[kind]} set up. Pick the account yourself; nothing was created.` };
+    ? `No ${cardWord} ending ${last4}. Pick one below or check the number.`
+    : `No ${KIND_LABEL[kind]} set up. Pick an account below.` };
 }
 
 // ---- which existing category? ---------------------------------------------------------------------------------------

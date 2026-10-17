@@ -219,7 +219,7 @@ async function typeSentence(page, text) { await page.getByTestId("qa-nl-input").
   await p3.close(); const p4 = await d.ctx.newPage(); d.page = p4; await p4.goto(URL_); await enterPin(p4, false); await waitFor(() => hasHome(p4), 15000);   // plain address: typed entry is on by default
   const before4 = (await L.localTxns(p4)).length; await openQuickAdd(p4); await typeSentence(p4, "paid my credit card bill 5000");
   const refused = await p4.getByTestId("qa-nl-refused").innerText().catch(() => "");
-  rec("CI3 card-bill payment sentence is refused offline and writes nothing", /credit-card bill/.test(refused) && (await L.localTxns(p4)).length === before4, { refused: refused.slice(0, 60), before: before4, after: (await L.localTxns(p4)).length });
+  rec("CI3 card-bill payment sentence is refused offline and writes nothing", /card bill payment/.test(refused) && (await L.localTxns(p4)).length === before4, { refused: refused.slice(0, 60), before: before4, after: (await L.localTxns(p4)).length });
   await p4.getByRole("button", { name: "Cancel" }).click(); await p4.waitForTimeout(300);
   // reconnect: confirm account, ask; nothing sent before the choice
   await d.ctx.setOffline(false);
@@ -236,7 +236,7 @@ async function typeSentence(page, text) { await page.getByTestId("qa-nl-input").
   await p4.reload(); await enterPin(p4, false); await p4.waitForTimeout(1500);
   await p4.goto(URL_); await enterPin(p4, false); await waitFor(() => hasHome(p4), 15000);
   await openQuickAdd(p4); await typeSentence(p4, SENTENCE);
-  const dup = await p4.getByTestId("qa-nl-duplicate").count(); const dis = await p4.getByRole("button", { name: /Save Expense/ }).isDisabled();
+  const dup = await p4.getByTestId("qa-nl-q-duplicate").count(); const dis = await p4.getByRole("button", { name: /Save Expense/ }).isDisabled();
   rec("CI6 same sentence after sync: flagged as possible duplicate, Save still available, nothing written by filling", dup === 1 && !dis && (await nlLocal(p4)).length === 1 && nlRows().length === 1, { dup, saveDisabled: dis });
   await d.ctx.close();
 }

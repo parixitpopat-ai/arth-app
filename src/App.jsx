@@ -3472,17 +3472,25 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     });
 
     // Typed-sentence entry. Parsing only PREPARES the fields below; nothing is saved until the person taps
-    // Save, exactly as with the keyboard form. An account the sentence does not pin down is left empty and
-    // blocks Save until chosen (never defaulted to the last-used account).
+    // Save, exactly as with the keyboard form. An account the sentence does not pin down is left empty; Save then
+    // asks for it (it never defaults to the last-used account and never saves without one).
     // On unless the address has ?nl=0 (emergency off switch); read once when Quick Add opens.
     const [nlEnabled] = useState(()=>isNaturalLanguageEntryEnabled(window.location.search));
     const [nlText, setNlText] = useState("");
     const [nlDraft, setNlDraft] = useState(null);
+    const [nlCollapsed, setNlCollapsed] = useState(false);   // after a successful fill: one line with Edit
+    const [nlFilled, setNlFilled] = useState({});            // fields the sentence filled; each clears when the person edits it
+    const [nlAccError, setNlAccError] = useState(false);     // Save was tapped with no account
+    const [nlCardNote, setNlCardNote] = useState(false);     // the "bank isn't debited" line: only the first few times
+    const accFieldRef = useRef(null);
+    const FilledTag = () => <span data-testid="qa-filled-tag" style={{ marginLeft:8,fontSize:10,fontWeight:800,background:T.accentSoft,color:T.accent,borderRadius:6,padding:"1px 6px",textTransform:"none",letterSpacing:0,verticalAlign:"middle" }}>Filled</span>;
+    const clearFilled = key => setNlFilled(f=>f[key] ? { ...f, [key]:false } : f);
     const fillFromText = () => {
-      if(!nlEnabled) return;
+      if(!nlEnabled || !nlText.trim()) return;
       const d = buildExpenseDraft(nlText, { accounts, cats, paidFrom:paidViaAccounts, now:new Date() });
       setNlDraft(d);
-      if(d.intent!=="expense") return;
+      setNlAccError(false);
+      if(d.intent!=="expense"){ setNlCollapsed(false); setNlFilled({}); return; }
       setQaType("expense");
       setQaAmount(d.amount!=null ? String(d.amount) : "");
       setQaWho(d.merchant||"");
@@ -3490,9 +3498,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setQaCatId(d.category?.status==="resolved" ? d.category.catId : "");
       setQaAccId(d.account.status==="resolved" ? d.account.accId : "");
       setQaPaymentMethod(d.account.status==="resolved" ? (d.account.paymentMethod||"") : "");
+      setNlFilled({ amount:d.amount!=null, who:Boolean(d.merchant), date:Boolean(d.dateStated && d.date), cat:d.category?.status==="resolved", acc:d.account.status==="resolved" });
+      setNlCollapsed(true);
+      const isCard = d.account.status==="resolved" && accounts.find(a=>a.id===d.account.accId)?.type==="cc";
+      let seen = 0;
+      try{ seen = Number(localStorage.getItem("arth_nl_card_note_seen")||0); if(isCard && seen<3) localStorage.setItem("arth_nl_card_note_seen", String(seen+1)); }catch{ /* storage unavailable: just show it */ }
+      setNlCardNote(Boolean(isCard) && seen<3);
     };
-    const pickNlAccount = c => { setQaAccId(c.accId); setQaPaymentMethod(c.paymentMethod||""); };
+    const pickNlAccount = c => { setQaAccId(c.accId); setQaPaymentMethod(c.paymentMethod||""); setNlAccError(false); };
     const nlNeedsAccount = nlDraft?.intent==="expense" && !qaAccId;
+    // For a sentence that is not a purchase: open the full form with the amount already in it.
+    const openFullFormFromText = type => {
+      setAddPrefill({ amount: nlDraft?.amount!=null ? String(nlDraft.amount) : "", who:"", accId:"", catId:"", date:todayStr() });
+      setDefaultAddType(type);
+      setShowQuickAdd(false);
+      setShowAdd(true);
+    };
 
     // Same ranked-match approach AddModal uses for its own suggestion (history match, then
     // keyword rules) — kept independent so this never has to reach into AddModal's internals.
@@ -3536,7 +3557,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const effectiveCat = qaCatId ? cats.find(c=>c.id===qaCatId) : (nlDraft?.intent==="expense" ? null : detected);
     // WP-B-2: vendor is now OPTIONAL -- item-first entry or a vendor-first multi-item selection
     // are equally valid ways to satisfy this gate.
-    const canSave = parseFloat(qaAmount)>0 && (qaWho.trim() || qaItemName.trim() || qaLineItems.length>0) && !nlNeedsAccount;
+    const canSave = parseFloat(qaAmount)>0 && (qaWho.trim() || qaItemName.trim() || qaLineItems.length>0);
     const nlDuplicates = useMemo(()=> nlDraft?.intent==="expense" && qaAccId
       ? findPossibleDuplicate({ amount:parseFloat(qaAmount)||0, merchant:qaWho, date:qaDate, accId:qaAccId }, txns)
       : [], [nlDraft, qaAmount, qaWho, qaDate, qaAccId, txns]);
@@ -3573,7 +3594,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // through "More options" instead. A ref guard (not state) blocks a fast double-tap: setState
     // doesn't take effect until next render, too slow to close that gap.
     const saveDirect = () => {
-      if(savingRef.current || !canSave) return;
+      if(savingRef.current || !canSave || nlNeedsAccount) return;   // never save a typed entry without an account
       savingRef.current = true;
       setSaving(true);
       const shareCount = 1 + qaSplitWith.length;
@@ -3620,6 +3641,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setToast({ message: `${sym}${fmt(record.amount)} saved to ${effectiveCat?.name||itemCatalogSuggestion?.name||(qaType==="income"?"Income":"Uncategorized")}` });
       onClose();
     };
+    // Save stays enabled when only the account is missing: ask for it where it is, instead of a dead button.
+    const trySave = () => {
+      if(nlNeedsAccount){
+        setNlAccError(true);
+        accFieldRef.current?.scrollIntoView?.({ block:"center", behavior:"smooth" });
+        return;
+      }
+      saveDirect();
+    };
     const goToFullForm = () => {
       setAddPrefill({ amount:qaAmount, who:qaWho.trim(), accId:qaAccId, catId:effectiveCat?.id||"", date:todayStr() });
       setDefaultAddType(qaType);
@@ -3635,46 +3665,46 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <button onClick={goToFullForm} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>More options →</button>
           </div>
 
-          {/* Type it: one sentence fills the fields below; the person reviews and saves as usual. */}
-          {nlEnabled&&(
-          <div data-testid="qa-nl" style={{ marginBottom:16 }}>
-            <span style={lbl}>Or type it</span>
-            <div style={{ display:"flex",gap:8 }}>
-              <input data-testid="qa-nl-input" style={{ ...inp,flex:1,fontSize:13 }} placeholder="e.g. Paid ₹45 to Swiggy via credit card ending 1234" value={nlText}
-                onChange={e=>setNlText(e.target.value)}
-                onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); fillFromText(); } }}/>
-              <button data-testid="qa-nl-fill" onClick={fillFromText} disabled={!nlText.trim()} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,borderRadius:10,padding:"0 14px",fontSize:12,fontWeight:800,cursor:"pointer",opacity:nlText.trim()?1:0.4,fontFamily:"Nunito,sans-serif" }}>Fill</button>
-            </div>
-            {nlDraft&&nlDraft.intent!=="expense"&&nlDraft.intent!=="empty"&&(
-              <div data-testid="qa-nl-refused" style={{ color:T.warn,fontSize:12,fontWeight:700,marginTop:8 }}>{nlDraft.message}</div>
-            )}
-            {nlDraft?.intent==="expense"&&(
-              <div data-testid="qa-nl-notes" style={{ marginTop:8,display:"grid",gap:6 }}>
-                {nlDraft.questions.map(q=>(
-                  <div key={q.code} data-testid={`qa-nl-q-${q.code}`} style={{ color:T.warn,fontSize:12,fontWeight:700 }}>{q.message}</div>
-                ))}
-                {nlDraft.account.status==="ambiguous"&&!qaAccId&&(
-                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                    {nlDraft.account.candidates.map(c=>(
-                      <button key={c.accId+(c.paymentMethod||"")} data-testid="qa-nl-candidate" onClick={()=>pickNlAccount(c)} style={{ background:T.input,border:`1px solid ${T.border}`,color:T.text,borderRadius:10,padding:"6px 10px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>{c.label}</button>
-                    ))}
-                  </div>
-                )}
-                {nlDraft.account.status==="resolved"&&qaAccId===nlDraft.account.accId&&(
-                  <div data-testid="qa-nl-resolved" style={{ color:T.sub,fontSize:12 }}>
-                    Recorded against {nlDraft.account.via}{accounts.find(a=>a.id===nlDraft.account.accId)?.type==="cc"?". The bank is not debited until the card bill is paid.":"."}
-                  </div>
-                )}
-                {nlDraft.category.status!=="resolved"&&!qaCatId&&detected&&(
-                  <button data-testid="qa-nl-suggest-cat" onClick={()=>setQaCatId(detected.id)} style={{ justifySelf:"start",background:T.input,border:`1px solid ${T.border}`,color:T.sub,borderRadius:10,padding:"6px 10px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Suggested category: {detected.icon} {detected.name} (tap to use)</button>
-                )}
-                {nlDuplicates.length>0&&(
-                  <div data-testid="qa-nl-duplicate" style={{ color:T.warn,fontSize:12,fontWeight:700 }}>You already have a matching entry for this amount, merchant, date and account. Save only if this is a separate purchase.</div>
-                )}
+          {/* Type it: one 48 px row. A sentence fills the fields below; the person reviews and saves as usual. */}
+          {nlEnabled&&(()=>{
+            const open = nlDraft?.intent==="expense" ? nlDraft.questions.filter(q=>!(
+              (q.field==="payment"&&qaAccId) || (q.field==="amount"&&parseFloat(qaAmount)>0) || (q.field==="merchant"&&qaWho.trim()) || (q.field==="category"&&qaCatId))) : [];
+            const note = open[0]
+              ? { code:open[0].code, text:open[0].message }
+              : (nlDraft?.intent==="expense" && nlDuplicates.length>0 ? { code:"duplicate", text:"You already have a matching entry. Save only if this is a separate purchase." } : null);
+            const refusedType = nlDraft?.detected==="card_payment" ? "cc_payment" : nlDraft?.detected==="income" ? "income" : "expense";
+            const Msg = ({ testid, text, action }) => (
+              <div data-testid={testid} style={{ display:"flex",alignItems:"flex-start",gap:8,marginTop:8,color:T.warn,fontSize:13,fontWeight:700,lineHeight:1.35 }}>
+                <span aria-hidden="true" style={{ flexShrink:0 }}>⚠️</span>
+                <span style={{ flex:1 }}>{text}{action&&<button data-testid="qa-nl-open-full" onClick={action.onClick} style={{ display:"block",marginTop:8,minHeight:44,background:"none",border:`1px solid ${T.warn}`,color:T.warn,borderRadius:10,padding:"0 14px",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>{action.label}</button>}</span>
+              </div>
+            );
+            return (
+          <div data-testid="qa-nl" style={{ marginBottom:14 }}>
+            {nlCollapsed && nlDraft?.intent==="expense" ? (
+              <div data-testid="qa-nl-summary" style={{ display:"flex",alignItems:"center",gap:8,minHeight:44,padding:"0 4px 0 12px",background:T.input,borderRadius:12 }}>
+                <span style={{ flex:1,minWidth:0,color:T.sub,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>“{nlText}”</span>
+                <button data-testid="qa-nl-edit" onClick={()=>setNlCollapsed(false)} style={{ minHeight:44,minWidth:44,background:"none",border:"none",color:T.accent,fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Edit</button>
+              </div>
+            ) : (
+              <div style={{ display:"flex",alignItems:"center",height:48,background:T.input,border:`1px solid ${T.border}`,borderRadius:12,paddingLeft:12 }}>
+                <input data-testid="qa-nl-input" aria-label="Type the expense in a sentence" placeholder="Type it: ₹450 Swiggy on card 1234" value={nlText}
+                  style={{ flex:1,minWidth:0,height:"100%",background:"none",border:"none",outline:"none",color:T.text,fontFamily:"Nunito,sans-serif" }}
+                  onChange={e=>setNlText(e.target.value)}
+                  onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); fillFromText(); } }}/>
+                <button data-testid="qa-nl-fill" aria-label="Fill the form from this text" onClick={fillFromText} disabled={!nlText.trim()} style={{ width:48,height:48,flexShrink:0,background:"none",border:"none",color:T.accent,fontSize:20,fontWeight:900,cursor:nlText.trim()?"pointer":"default",opacity:nlText.trim()?1:0.35 }}>↵</button>
               </div>
             )}
+            {nlDraft&&nlDraft.intent!=="expense"&&nlDraft.intent!=="empty"&&(
+              <Msg testid="qa-nl-refused" text={nlDraft.message} action={{ label:"Open full form", onClick:()=>openFullFormFromText(refusedType) }}/>
+            )}
+            {note&&<Msg testid={`qa-nl-q-${note.code==="duplicate"?"duplicate":note.code}`} text={note.text}/>}
+            {nlDraft?.intent==="expense"&&nlCardNote&&nlDraft.account.status==="resolved"&&qaAccId===nlDraft.account.accId&&(
+              <div data-testid="qa-nl-resolved" style={{ color:T.sub,fontSize:12,marginTop:8 }}>Recorded against {nlDraft.account.via}. Your bank isn't debited until the card bill is paid.</div>
+            )}
           </div>
-          )}
+            );
+          })()}
 
           {/* Expense / Income toggle */}
           <div style={{ display:"flex",background:T.input,borderRadius:14,padding:4,marginBottom:18 }}>
@@ -3686,15 +3716,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {/* Amount */}
           <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:4,marginBottom:18 }}>
             <span style={{ color:T.sub,fontSize:26,fontWeight:700 }}>{sym}</span>
-            <input autoFocus type="number" inputMode="decimal" placeholder="0" value={qaAmount} onChange={e=>setQaAmount(e.target.value)}
+            <input autoFocus type="number" inputMode="decimal" placeholder="0" value={qaAmount} onChange={e=>{ setQaAmount(e.target.value); clearFilled("amount"); }}
               style={{ background:"none",border:"none",outline:"none",color:T.text,fontSize:40,fontWeight:900,width:200,textAlign:"center",fontFamily:"Nunito,sans-serif" }}/>
           </div>
 
+          {nlFilled.amount&&<div style={{ textAlign:"center",marginTop:-10,marginBottom:12 }}><FilledTag/></div>}
+
           {/* What was it */}
           <div style={{ marginBottom:14 }}>
-            <span style={lbl}>{qaType==="expense"?"What was it?":"Source"}</span>
+            <span style={lbl}>{qaType==="expense"?"What was it?":"Source"}{nlFilled.who&&<FilledTag/>}</span>
             <input style={{ ...inp,fontSize:15,fontWeight:700 }} placeholder={qaType==="expense"?"e.g. Petrol, Swiggy, Netflix":"e.g. Salary, Freelance"} value={qaWho}
-              onChange={e=>{ setQaWho(e.target.value); setShowVendorSuggestions(true); }}
+              onChange={e=>{ setQaWho(e.target.value); setShowVendorSuggestions(true); clearFilled("who"); }}
               onFocus={()=>setShowVendorSuggestions(true)}
               onBlur={()=>setTimeout(()=>setShowVendorSuggestions(false),150)}/>
             {showVendorSuggestions&&vendorSuggestions.length>0&&(
@@ -3764,20 +3796,35 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ display:"grid",gridTemplateColumns:(qaType==="expense"&&qaLineItems.length===0)?"1fr 1fr":"1fr",gap:10,marginBottom:14 }}>
             {qaType==="expense"&&qaLineItems.length===0&&(
               <div>
-                <span style={lbl}>Category</span>
-                <button onClick={()=>setShowCatPicker(true)} style={{ ...inp,display:"flex",alignItems:"center",gap:6,cursor:"pointer",textAlign:"left" }}>
-                  {effectiveCat?<><span>{effectiveCat.icon}</span><span style={{ fontSize:13 }}>{effectiveCat.name}</span></>:<span style={{ color:T.sub,fontSize:13 }}>Pick one</span>}
-                </button>
+                <span style={lbl}>Category{nlFilled.cat&&<FilledTag/>}</span>
+                <div style={{ ...inp,display:"flex",alignItems:"center",flexWrap:"wrap",gap:6,padding:0 }}>
+                  <button onClick={()=>setShowCatPicker(true)} style={{ flex:1,minHeight:44,minWidth:96,display:"flex",alignItems:"center",gap:6,background:"none",border:"none",color:"inherit",cursor:"pointer",textAlign:"left",padding:"0 12px",fontFamily:"inherit" }}>
+                    {effectiveCat?<><span>{effectiveCat.icon}</span><span style={{ fontSize:13 }}>{effectiveCat.name}</span></>:<span style={{ color:T.sub,fontSize:13 }}>Pick one</span>}
+                  </button>
+                  {nlDraft?.intent==="expense"&&!qaCatId&&detected&&(
+                    <button data-testid="qa-nl-suggest-cat" onClick={()=>{ setQaCatId(detected.id); }} style={{ minHeight:36,margin:"0 6px 6px",background:T.accentSoft,border:`1px solid ${T.accent}55`,color:T.accent,borderRadius:18,padding:"0 10px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>＋ {detected.name} · Suggested</button>
+                  )}
+                </div>
               </div>
             )}
-            <div>
-              <span style={lbl}>Account</span>
-              <select data-testid="qa-account" style={inp} value={qaAccId} onChange={e=>setQaAccId(e.target.value)}>
-                {!qaAccId&&<option value="" disabled>Choose account…</option>}
+            <div ref={accFieldRef}>
+              <span style={lbl}>Account{nlFilled.acc&&<FilledTag/>}</span>
+              <select data-testid="qa-account" style={{ ...inp,color:qaAccId?T.text:T.sub,...(nlAccError&&!qaAccId?{ borderColor:T.warn,outline:`2px solid ${T.warn}` }:{}) }} value={qaAccId} onChange={e=>{ setQaAccId(e.target.value); clearFilled("acc"); setNlAccError(false); }}>
+                {!qaAccId&&<option value="" disabled>Choose account</option>}
                 {paidViaAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
+              {nlAccError&&!qaAccId&&(
+                <div data-testid="qa-nl-acc-error" style={{ display:"flex",gap:8,marginTop:6,color:T.warn,fontSize:13,fontWeight:700 }}><span aria-hidden="true">⚠️</span><span>Choose an account to save</span></div>
+              )}
             </div>
           </div>
+          {nlDraft?.intent==="expense"&&nlDraft.account.status==="ambiguous"&&!qaAccId&&(
+            <div data-testid="qa-nl-candidates" style={{ display:"flex",gap:8,flexWrap:"wrap",marginTop:-6,marginBottom:14 }}>
+              {nlDraft.account.candidates.map(c=>(
+                <button key={c.accId+(c.paymentMethod||"")} data-testid="qa-nl-candidate" onClick={()=>pickNlAccount(c)} style={{ minHeight:44,background:T.input,border:`1px solid ${T.border}`,color:T.text,borderRadius:12,padding:"0 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>{c.label}</button>
+              ))}
+            </div>
+          )}
 
           {/* Payment Method — only Expense + Bank account (ADR-018/021). Shows the ACTUAL debit
               cards/UPI handles configured under this specific bank account (linkedBank/linkedAccount
@@ -3800,8 +3847,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {/* Date — tappable pill, native date input so it opens the OS picker directly. Defaults
               to today; being able to backdate without leaving Quick Add is worth the one row. */}
           <div style={{ marginBottom:14 }}>
-            <span style={lbl}>Date</span>
-            <input type="date" value={qaDate} max={todayStr()} onChange={e=>setQaDate(e.target.value||todayStr())} style={{ ...inp,display:"inline-flex",width:"auto",cursor:"pointer" }}/>
+            <span style={lbl}>Date{nlFilled.date&&<FilledTag/>}</span>
+            <input type="date" value={qaDate} max={todayStr()} onChange={e=>{ setQaDate(e.target.value||todayStr()); clearFilled("date"); }} style={{ ...inp,display:"inline-flex",width:"auto",cursor:"pointer" }}/>
           </div>
 
           {/* Vehicle — only for Transport-category expenses, and only if any vehicles exist.
@@ -3880,7 +3927,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </button>
           )}
 
-          <button onClick={saveDirect} disabled={!canSave||saving} style={{ ...btnP,opacity:canSave&&!saving?1:0.4 }}>{saving?"Saving…":qaSplitWith.length>0?`✓ Save & Split (${1+qaSplitWith.length} ways)`:`✓ Save ${qaType==="expense"?"Expense":"Income"}`}</button>
+          <button data-testid="qa-save" onClick={trySave} disabled={!canSave||saving} style={{ ...btnP,opacity:canSave&&!saving?1:0.4 }}>{saving?"Saving…":qaSplitWith.length>0?`✓ Save & Split (${1+qaSplitWith.length} ways)`:`✓ Save ${qaType==="expense"?"Expense":"Income"}`}</button>
         </div>
 
         {showSplitPicker&&(
@@ -3936,7 +3983,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
               <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
                 {cats.map(c=>(
-                  <button key={c.id} onClick={()=>{ setQaCatId(c.id); setShowCatPicker(false); }} style={{ display:"flex",alignItems:"center",gap:10,background:T.input,border:"none",borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
+                  <button key={c.id} onClick={()=>{ setQaCatId(c.id); clearFilled("cat"); setShowCatPicker(false); }} style={{ display:"flex",alignItems:"center",gap:10,background:T.input,border:"none",borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif",textAlign:"left" }}>
                     <span style={{ fontSize:16 }}>{c.icon}</span>
                     <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{c.name}</span>
                   </button>
