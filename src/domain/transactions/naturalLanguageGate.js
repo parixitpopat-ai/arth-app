@@ -1,13 +1,12 @@
-// Feature gate for the typed-sentence input in Quick Add.
+// Switch for the typed-sentence input in Quick Add.
 //
-// On only when the page address carries exactly one `nl` parameter whose value is exactly "1" (for example
-// https://host/?nl=1). Anything else leaves it off: no parameter, nl=0, nl=true, nl=11, an empty value, a
-// repeated or conflicting nl, or a different parameter name. Nothing is stored: the address is the only
-// switch, so opening the app without it always shows the ordinary Quick Add.
+// ON by default. It is turned off only when the page address carries exactly one `nl` parameter equal to "0"
+// (for example https://host/?nl=0): an emergency off switch that needs no new deployment. Any other address,
+// including ?nl=1, shows it. Nothing is stored: the address is the only switch.
 export function isNaturalLanguageEntryEnabled(search) {
   try {
-    return new URLSearchParams(String(search ?? "")).getAll("nl").join(",") === "1";
+    return new URLSearchParams(String(search ?? "")).getAll("nl").join(",") !== "0";
   } catch {
-    return false;
+    return true;
   }
 }

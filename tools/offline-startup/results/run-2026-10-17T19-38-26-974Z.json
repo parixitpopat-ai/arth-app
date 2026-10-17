@@ -1,5 +1,5 @@
 {
-  "at": "2026-10-17T17:40:46.977Z",
+  "at": "2026-10-17T19:38:26.974Z",
   "results": [
     {
       "id": "OS1 valid session: reopens offline, shows saved data, banner shown, entry saved locally",
@@ -70,11 +70,11 @@
       "pass": true
     },
     {
-      "id": "CI1b offline cold start again: still exactly one typed entry (no duplicate), gate still on with ?nl=1",
+      "id": "CI1b offline cold start again: still exactly one typed entry (no duplicate), typed entry on at the plain address",
       "pass": true
     },
     {
-      "id": "CI2 plain address (no ?nl=1) offline: input hidden, ordinary Quick Add saves one entry, nothing sent",
+      "id": "CI2 ?nl=0 offline: input hidden, ordinary Quick Add saves one entry, nothing sent",
       "pass": true
     },
     {

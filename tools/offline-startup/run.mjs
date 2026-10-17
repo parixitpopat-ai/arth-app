@@ -196,7 +196,7 @@ async function openQuickAdd(page) { await page.getByText("+", { exact: true }).f
 async function typeSentence(page, text) { await page.getByTestId("qa-nl-input").fill(text); await page.getByTestId("qa-nl-fill").click(); await page.waitForTimeout(300); }
 {
   const d = await phone({ cards: true }); const writes0 = fake.writeLog.length;
-  const { page } = await reopenOffline(d, { query: "?nl=1" }); await waitFor(() => hasHome(page), 15000);
+  const { page } = await reopenOffline(d, {}); await waitFor(() => hasHome(page), 15000);
   await openQuickAdd(page);
   const gateOn = await page.getByTestId("qa-nl-input").count();
   await typeSentence(page, SENTENCE);
@@ -206,17 +206,17 @@ async function typeSentence(page, text) { await page.getByTestId("qa-nl-input").
   const saved = await nlLocal(page);
   rec("CI1 typed entry while offline-resumed: gate on, fill writes nothing, double-tap Save stores exactly one, charged to card 3445, nothing sent", gateOn === 1 && filled.amount === "3000" && filled.who === "Domino's" && filled.account === "syn_cc_a" && afterFill === 0 && saved.length === 1 && saved[0].accId === "syn_cc_a" && saved[0].amount === 3000 && fake.writeLog.length === writes0 && (await banner(page)) === 1, { gateOn, filled, afterFill, saved: saved.length, accId: saved[0]?.accId, cloudWrites: fake.writeLog.length - writes0, banner: await banner(page) });
   // second offline cold start (still ?nl=1): no duplicate appears
-  await page.close(); const p2 = await d.ctx.newPage(); d.page = p2; await p2.goto(URL_ + "?nl=1"); await enterPin(p2, false); await waitFor(() => hasHome(p2), 15000);
-  rec("CI1b offline cold start again: still exactly one typed entry (no duplicate), gate still on with ?nl=1", (await nlLocal(p2)).length === 1 && fake.writeLog.length === writes0, { local: (await nlLocal(p2)).length });
+  await page.close(); const p2 = await d.ctx.newPage(); d.page = p2; await p2.goto(URL_); await enterPin(p2, false); await waitFor(() => hasHome(p2), 15000);
+  rec("CI1b offline cold start again: still exactly one typed entry (no duplicate), typed entry on at the plain address", (await nlLocal(p2)).length === 1 && fake.writeLog.length === writes0, { local: (await nlLocal(p2)).length });
   // plain address while offline: gate off, ordinary Quick Add works and writes one entry
-  await p2.close(); const p3 = await d.ctx.newPage(); d.page = p3; await p3.goto(URL_); await enterPin(p3, false); await waitFor(() => hasHome(p3), 15000);
+  await p2.close(); const p3 = await d.ctx.newPage(); d.page = p3; await p3.goto(URL_ + "?nl=0"); await enterPin(p3, false); await waitFor(() => hasHome(p3), 15000);
   await openQuickAdd(p3); const hidden = (await p3.getByTestId("qa-nl-input").count()) === 0;
   await p3.getByPlaceholder("0", { exact: true }).fill("22"); await p3.getByPlaceholder("e.g. Petrol, Swiggy, Netflix", { exact: true }).fill("PLAINTEST 22");
   await p3.getByRole("button", { name: /Save Expense/ }).click(); await p3.waitForTimeout(900);
   const plain = (await L.localTxns(p3)).filter(t => t.merchant === "PLAINTEST 22");
-  rec("CI2 plain address (no ?nl=1) offline: input hidden, ordinary Quick Add saves one entry, nothing sent", hidden && plain.length === 1 && fake.writeLog.length === writes0, { hidden, plain: plain.length });
+  rec("CI2 ?nl=0 offline: input hidden, ordinary Quick Add saves one entry, nothing sent", hidden && plain.length === 1 && fake.writeLog.length === writes0, { hidden, plain: plain.length });
   // refused sentences stay refused offline (reopen with ?nl=1)
-  await p3.close(); const p4 = await d.ctx.newPage(); d.page = p4; await p4.goto(URL_ + "?nl=1"); await enterPin(p4, false); await waitFor(() => hasHome(p4), 15000);
+  await p3.close(); const p4 = await d.ctx.newPage(); d.page = p4; await p4.goto(URL_); await enterPin(p4, false); await waitFor(() => hasHome(p4), 15000);   // plain address: typed entry is on by default
   const before4 = (await L.localTxns(p4)).length; await openQuickAdd(p4); await typeSentence(p4, "paid my credit card bill 5000");
   const refused = await p4.getByTestId("qa-nl-refused").innerText().catch(() => "");
   rec("CI3 card-bill payment sentence is refused offline and writes nothing", /credit-card bill/.test(refused) && (await L.localTxns(p4)).length === before4, { refused: refused.slice(0, 60), before: before4, after: (await L.localTxns(p4)).length });
@@ -234,7 +234,7 @@ async function typeSentence(page, text) { await page.getByTestId("qa-nl-input").
   rec("CI5b the synced typed entry is a card expense: charged to the card, dated today, no bank movement recorded", cardRow && cardRow.type === "expense" && cardRow.accId === "syn_cc_a" && !((fake.rows.get(uid)?.snapshot?.txns) || []).some(t => t.type === "cc_payment"), { type: cardRow?.type, accId: cardRow?.accId });
   // after sync: the same sentence is flagged as a possible duplicate, not blocked
   await p4.reload(); await enterPin(p4, false); await p4.waitForTimeout(1500);
-  await p4.goto(URL_ + "?nl=1"); await enterPin(p4, false); await waitFor(() => hasHome(p4), 15000);
+  await p4.goto(URL_); await enterPin(p4, false); await waitFor(() => hasHome(p4), 15000);
   await openQuickAdd(p4); await typeSentence(p4, SENTENCE);
   const dup = await p4.getByTestId("qa-nl-duplicate").count(); const dis = await p4.getByRole("button", { name: /Save Expense/ }).isDisabled();
   rec("CI6 same sentence after sync: flagged as possible duplicate, Save still available, nothing written by filling", dup === 1 && !dis && (await nlLocal(p4)).length === 1 && nlRows().length === 1, { dup, saveDisabled: dis });
@@ -243,7 +243,7 @@ async function typeSentence(page, text) { await page.getByTestId("qa-nl-input").
 // both devices changed + a typed entry made offline: nothing lost before the choice; choosing the cloud copy backs the typed entry up
 {
   const other = [{ id: "C001", type: "expense", desc: "Other device expense", merchant: "OTHER", date: "2026-10-05", amount: 77, catId: "food", catIds: ["food"], accId: "syn_bank", people: {} }];
-  const d = await phone({ cards: true }); const { page } = await reopenOffline(d, { query: "?nl=1" }); await waitFor(() => hasHome(page), 15000);
+  const d = await phone({ cards: true }); const { page } = await reopenOffline(d, {}); await waitFor(() => hasHome(page), 15000);
   await openQuickAdd(page); await typeSentence(page, SENTENCE); await page.getByRole("button", { name: /Save Expense/ }).click(); await page.waitForTimeout(900);
   const w = fake.writeLog.length;
   fake.rows.set(uid, { snapshot: JSON.parse(JSON.stringify(snapshot(other))), micros: BigInt(Date.now()) * 1000n });

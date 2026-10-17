@@ -3474,7 +3474,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Typed-sentence entry. Parsing only PREPARES the fields below; nothing is saved until the person taps
     // Save, exactly as with the keyboard form. An account the sentence does not pin down is left empty and
     // blocks Save until chosen (never defaulted to the last-used account).
-    // Off unless the address has ?nl=1; read once when Quick Add opens.
+    // On unless the address has ?nl=0 (emergency off switch); read once when Quick Add opens.
     const [nlEnabled] = useState(()=>isNaturalLanguageEntryEnabled(window.location.search));
     const [nlText, setNlText] = useState("");
     const [nlDraft, setNlDraft] = useState(null);

@@ -38,8 +38,10 @@ const txns = page => page.evaluate(() => JSON.parse(localStorage.getItem("arth_t
 async function openQuickAdd(page) { await page.getByText("+", { exact: true }).first().click(); await page.waitForTimeout(500); }
 async function fill(page, text) { await page.getByTestId("qa-nl-input").fill(text); await page.getByTestId("qa-nl-fill").click(); await page.waitForTimeout(250); }
 const val = (page, ph) => page.getByPlaceholder(ph, { exact: true }).first().inputValue();
+// The browser runs in Asia/Kolkata, so "today" must be computed there too (the machine itself runs in UTC).
+const ymdIST = d => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 const today = new Date(); const pad = n => String(n).padStart(2, "0");
-const TODAY = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+const TODAY = ymdIST(today);
 const SENTENCE = "I paid ₹3,000 to Domino's via credit card ending 3445.";
 
 // NL1: the example sentence, card 3445 exists once. Fill writes nothing; Save (double-clicked) writes exactly one.
@@ -120,8 +122,7 @@ const SENTENCE = "I paid ₹3,000 to Domino's via credit card ending 3445.";
   const date = await page.locator('input[type="date"]').first().inputValue();
   await page.getByRole("button", { name: /Save Expense/ }).click(); await page.waitForTimeout(500);
   const saved = await txns(page);
-  const y = new Date(today); y.setDate(y.getDate() - 1);
-  const YD = `${y.getFullYear()}-${pad(y.getMonth() + 1)}-${pad(y.getDate())}`;
+  const YD = ymdIST(new Date(today.getTime() - 86400000));
   rec("NL7 yesterday is used; unknown category is asked and left unassigned", q === 1 && date === YD && saved.length === 1 && saved[0].date === YD && !saved[0].catId, { q, date, saved: saved.map(t => ({ date: t.date, catId: t.catId })) });
   await ctx.close();
 }
@@ -148,44 +149,43 @@ const SENTENCE = "I paid ₹3,000 to Domino's via credit card ending 3445.";
   await ctx.close();
 }
 
-// G1: default (no parameter): the input is absent and the ordinary Quick Add works exactly as before.
+// G1: ?nl=0 (the off switch): input hidden and the ordinary Quick Add works exactly as before.
 {
-  const { ctx, page } = await open([cards.bank, cards.a], [], "");
+  const { ctx, page } = await open([cards.bank, cards.a], [], "?nl=0");
   await openQuickAdd(page);
   const present = await page.getByTestId("qa-nl").count() + await page.getByTestId("qa-nl-input").count();
   await page.getByPlaceholder("0", { exact: true }).fill("120"); await page.getByPlaceholder("e.g. Petrol, Swiggy, Netflix", { exact: true }).fill("Tea");
   const acc = await page.getByTestId("qa-account").inputValue();
   await page.getByRole("button", { name: /Save Expense/ }).click(); await page.waitForTimeout(500);
   const saved = await txns(page);
-  rec("G1 no parameter: input hidden, ordinary Quick Add saves as before", present === 0 && acc === "b1" && saved.length === 1 && saved[0].amount === 120, { present, acc, n: saved.length });
+  rec("G1 ?nl=0: input hidden, ordinary Quick Add saves as before", present === 0 && acc === "b1" && saved.length === 1 && saved[0].amount === 120, { present, acc, n: saved.length });
   await ctx.close();
 }
-// G2: ?nl=1 shows it; unrelated or near-miss parameters do not.
-for (const [query, want] of [["?nl=1", 1], ["?utm_source=x&nl=1&ref=y", 1], ["?foo=bar", 0], ["?nl=0", 0], ["?nl=true", 0], ["?NL=1", 0], ["?nl=1&nl=0", 0], ["?cfError=1", 0]]) {
+// G2: on by default (no parameter), on with ?nl=1 and with unrelated parameters; off only for exactly nl=0.
+for (const [query, want] of [["", 1], ["?nl=1", 1], ["?utm_source=x&nl=1&ref=y", 1], ["?foo=bar", 1], ["?nl=true", 1], ["?NL=0", 1], ["?nl=0&nl=1", 1], ["?cfError=1", 1], ["?nl=0", 0], ["?utm=1&nl=0", 0]]) {
   const { ctx, page } = await open([cards.bank, cards.a], [], query);
   await openQuickAdd(page);
   const n = await page.getByTestId("qa-nl-input").count();
-  rec(`G2 ${query || "(none)"} -> input ${want ? "shown" : "hidden"}`, n === want, { n });
+  rec(`G2 ${query || "(plain address)"} -> input ${want ? "shown" : "hidden"}`, n === want, { n });
   await ctx.close();
 }
-// G3: reload keeps it (the address is unchanged); navigating around the app and reopening keeps it; opening
-// the app again WITHOUT the parameter hides it (nothing is remembered).
+// G3: reload and in-app navigation keep the state; nothing is stored, so ?nl=0 only ever applies to the address it is on.
 {
-  const { ctx, page } = await open([cards.bank, cards.a], [], "?nl=1");
-  await openQuickAdd(page); const first = await page.getByTestId("qa-nl-input").count();
+  const { ctx, page } = await open([cards.bank, cards.a], [], "?nl=0");
+  await openQuickAdd(page); const off1 = await page.getByTestId("qa-nl-input").count();
   await page.getByRole("button", { name: "Cancel" }).click(); await page.waitForTimeout(300);
   const visited = [];
   for (const tab of ["Payments", "People", "Home"]) { await page.locator("span", { hasText: new RegExp(`^${tab}$`) }).last().click(); await page.waitForTimeout(400); visited.push(tab); }
-  await openQuickAdd(page); const afterNav = await page.getByTestId("qa-nl-input").count();
+  await openQuickAdd(page); const offNav = await page.getByTestId("qa-nl-input").count();
   const urlAfterNav = new URL(page.url()).search;
   await page.reload(); await page.waitForTimeout(900);
   for (let i = 0; i < 2; i++) if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (const d of ["1", "2", "3", "4"]) { await page.getByRole("button", { name: d, exact: true }).click(); await page.waitForTimeout(60); } await page.waitForTimeout(500); }
-  await openQuickAdd(page); const afterReload = await page.getByTestId("qa-nl-input").count();
+  await openQuickAdd(page); const offReload = await page.getByTestId("qa-nl-input").count();
   const stored = await page.evaluate(() => Object.keys(localStorage).filter(k => /nl/i.test(k) && !/arth_(txns|accounts|master)/.test(k)));
   await page.goto(APP); await page.waitForTimeout(900);
   for (let i = 0; i < 2; i++) if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (const d of ["1", "2", "3", "4"]) { await page.getByRole("button", { name: d, exact: true }).click(); await page.waitForTimeout(60); } await page.waitForTimeout(500); }
-  await openQuickAdd(page); const withoutParam = await page.getByTestId("qa-nl-input").count();
-  rec("G3 reload and in-app navigation keep it; nothing is remembered once the parameter is gone", first === 1 && visited.length === 3 && afterNav === 1 && afterReload === 1 && urlAfterNav === "?nl=1" && withoutParam === 0, { first, visited, afterNav, afterReload, urlAfterNav, storedKeys: stored, withoutParam });
+  await openQuickAdd(page); const backOn = await page.getByTestId("qa-nl-input").count();
+  rec("G3 ?nl=0 survives reload and in-app navigation; nothing is stored; the plain address is on again", off1 === 0 && visited.length === 3 && offNav === 0 && offReload === 0 && urlAfterNav === "?nl=0" && backOn === 1 && stored.length === 0, { off1, visited, offNav, offReload, urlAfterNav, storedKeys: stored, backOn });
   await ctx.close();
 }
 await browser.close();
