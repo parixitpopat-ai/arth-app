@@ -3,6 +3,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 const _bt = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : new Date();
 const APP_VERSION = `V4.${String(_bt.getDate()).padStart(2,"0")}${String(_bt.getMonth()+1).padStart(2,"0")}${String(_bt.getFullYear()).slice(-2)}${String(_bt.getHours()).padStart(2,"0")}${String(_bt.getMinutes()).padStart(2,"0")}${String(_bt.getSeconds()).padStart(2,"0")}`;
 import { buildExpenseDraft, findPossibleDuplicate } from "./domain/transactions/naturalLanguageExpense.js";
+import { isNaturalLanguageEntryEnabled } from "./domain/transactions/naturalLanguageGate.js";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
 import { getCurrentCloudUser, isCloudSyncConfigured, loadCloudSnapshot, saveCloudSnapshot, signInWithPassword, signOutCloud, signUpWithPassword, supabase, hasEverAuthenticatedOnThisDevice } from "./cloudSync";
 import { hasMeaningfulData, isMasterUserSetupComplete, determineFirstAuthAction, FIRST_AUTH_ACTIONS, summarizeMeaningfulData, mergeMasterUserProfileFields } from "./domain/identity/masterUserSetup";
@@ -3491,9 +3492,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Typed-sentence entry. Parsing only PREPARES the fields below; nothing is saved until the person taps
     // Save, exactly as with the keyboard form. An account the sentence does not pin down is left empty and
     // blocks Save until chosen (never defaulted to the last-used account).
+    // Off unless the address has ?nl=1; read once when Quick Add opens.
+    const [nlEnabled] = useState(()=>isNaturalLanguageEntryEnabled(window.location.search));
     const [nlText, setNlText] = useState("");
     const [nlDraft, setNlDraft] = useState(null);
     const fillFromText = () => {
+      if(!nlEnabled) return;
       const d = buildExpenseDraft(nlText, { accounts, cats, paidFrom:paidViaAccounts, now:new Date() });
       setNlDraft(d);
       if(d.intent!=="expense") return;
@@ -3650,6 +3654,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
 
           {/* Type it: one sentence fills the fields below; the person reviews and saves as usual. */}
+          {nlEnabled&&(
           <div data-testid="qa-nl" style={{ marginBottom:16 }}>
             <span style={lbl}>Or type it</span>
             <div style={{ display:"flex",gap:8 }}>
@@ -3687,6 +3692,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
             )}
           </div>
+          )}
 
           {/* Expense / Income toggle */}
           <div style={{ display:"flex",background:T.input,borderRadius:14,padding:4,marginBottom:18 }}>

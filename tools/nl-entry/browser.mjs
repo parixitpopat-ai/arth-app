@@ -14,7 +14,7 @@ const cards = {
 };
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 
-async function open(accounts, txns = []) {
+async function open(accounts, txns = [], query = "?nl=1") {
   const ctx = await browser.newContext({ timezoneId: "Asia/Kolkata", viewport: { width: 420, height: 900 } });
   await ctx.route(u => { try { return !["localhost", "127.0.0.1"].includes(new URL(u).hostname); } catch { return false; } }, r => { blocked.push(r.request().url()); r.abort(); });
   await ctx.addInitScript(({ accounts, txns }) => {
@@ -25,7 +25,7 @@ async function open(accounts, txns = []) {
   }, { accounts, txns });
   const page = await ctx.newPage(); const errors = [];
   page.on("pageerror", e => errors.push(String(e)));
-  await page.goto(APP); await page.waitForTimeout(900);
+  await page.goto(APP.replace(/\/?$/, "/") + query); await page.waitForTimeout(900);
   for (let i = 0; i < 2; i++) { // set / enter a PIN if asked
     if (await page.getByRole("button", { name: "1", exact: true }).count()) {
       for (const d of ["1", "2", "3", "4"]) { await page.getByRole("button", { name: d, exact: true }).click(); await page.waitForTimeout(60); }
@@ -145,6 +145,47 @@ const SENTENCE = "I paid ₹3,000 to Domino's via credit card ending 3445.";
   await page.getByRole("button", { name: /Save Expense/ }).click(); await page.waitForTimeout(500);
   const saved = await txns(page);
   rec("NL9 without the text box: default account still preselected, Save works as before", acc !== "" && !disabled && saved.length === 1 && saved[0].amount === 120, { acc, disabled, n: saved.length });
+  await ctx.close();
+}
+
+// G1: default (no parameter): the input is absent and the ordinary Quick Add works exactly as before.
+{
+  const { ctx, page } = await open([cards.bank, cards.a], [], "");
+  await openQuickAdd(page);
+  const present = await page.getByTestId("qa-nl").count() + await page.getByTestId("qa-nl-input").count();
+  await page.getByPlaceholder("0", { exact: true }).fill("120"); await page.getByPlaceholder("e.g. Petrol, Swiggy, Netflix", { exact: true }).fill("Tea");
+  const acc = await page.getByTestId("qa-account").inputValue();
+  await page.getByRole("button", { name: /Save Expense/ }).click(); await page.waitForTimeout(500);
+  const saved = await txns(page);
+  rec("G1 no parameter: input hidden, ordinary Quick Add saves as before", present === 0 && acc === "b1" && saved.length === 1 && saved[0].amount === 120, { present, acc, n: saved.length });
+  await ctx.close();
+}
+// G2: ?nl=1 shows it; unrelated or near-miss parameters do not.
+for (const [query, want] of [["?nl=1", 1], ["?utm_source=x&nl=1&ref=y", 1], ["?foo=bar", 0], ["?nl=0", 0], ["?nl=true", 0], ["?NL=1", 0], ["?nl=1&nl=0", 0], ["?cfError=1", 0]]) {
+  const { ctx, page } = await open([cards.bank, cards.a], [], query);
+  await openQuickAdd(page);
+  const n = await page.getByTestId("qa-nl-input").count();
+  rec(`G2 ${query || "(none)"} -> input ${want ? "shown" : "hidden"}`, n === want, { n });
+  await ctx.close();
+}
+// G3: reload keeps it (the address is unchanged); navigating around the app and reopening keeps it; opening
+// the app again WITHOUT the parameter hides it (nothing is remembered).
+{
+  const { ctx, page } = await open([cards.bank, cards.a], [], "?nl=1");
+  await openQuickAdd(page); const first = await page.getByTestId("qa-nl-input").count();
+  await page.getByRole("button", { name: "Cancel" }).click(); await page.waitForTimeout(300);
+  const visited = [];
+  for (const tab of ["Payments", "People", "Home"]) { await page.locator("span", { hasText: new RegExp(`^${tab}$`) }).last().click(); await page.waitForTimeout(400); visited.push(tab); }
+  await openQuickAdd(page); const afterNav = await page.getByTestId("qa-nl-input").count();
+  const urlAfterNav = new URL(page.url()).search;
+  await page.reload(); await page.waitForTimeout(900);
+  for (let i = 0; i < 2; i++) if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (const d of ["1", "2", "3", "4"]) { await page.getByRole("button", { name: d, exact: true }).click(); await page.waitForTimeout(60); } await page.waitForTimeout(500); }
+  await openQuickAdd(page); const afterReload = await page.getByTestId("qa-nl-input").count();
+  const stored = await page.evaluate(() => Object.keys(localStorage).filter(k => /nl/i.test(k) && !/arth_(txns|accounts|master)/.test(k)));
+  await page.goto(APP); await page.waitForTimeout(900);
+  for (let i = 0; i < 2; i++) if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (const d of ["1", "2", "3", "4"]) { await page.getByRole("button", { name: d, exact: true }).click(); await page.waitForTimeout(60); } await page.waitForTimeout(500); }
+  await openQuickAdd(page); const withoutParam = await page.getByTestId("qa-nl-input").count();
+  rec("G3 reload and in-app navigation keep it; nothing is remembered once the parameter is gone", first === 1 && visited.length === 3 && afterNav === 1 && afterReload === 1 && urlAfterNav === "?nl=1" && withoutParam === 0, { first, visited, afterNav, afterReload, urlAfterNav, storedKeys: stored, withoutParam });
   await ctx.close();
 }
 await browser.close();
