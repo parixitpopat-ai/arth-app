@@ -1,0 +1,37 @@
+# OFFLINE-STARTUP-001 — reopening Arth with no connection (17 Oct 2026)
+
+Branch `wp-offline-startup`, based on `origin/main` (`5fc65e7`, the current production code). Independent of the typed-entry feature and of the sync-safety branches. Local only: not pushed, not deployed. Real Supabase, real phones and the deployed site are untested.
+
+## Trace: why a device with saved data was treated as a first sign-in
+1. `src/cloudSync.js` `getCurrentCloudUser()` calls `supabase.auth.getUser()`, which always asks the server. Offline it returns `{user:null, error: AuthRetryableFetchError}`; the function turns that into `null` (checked against `@supabase/auth-js` 2.102.0 source and a node trace).
+2. `src/App.jsx` startup effect: `sessionRestoredOnBootRef = Boolean(user)` was therefore **false**, although the device had a saved session and data. That ref is what distinguishes "returning device" from "first sign-in on this device".
+3. Separately the SDK announces the saved session through `onAuthStateChange` (valid token: immediately). That set `cloudUser`. So the app held a cloud user with the ref still false: the first-sign-in path ran: `runFirstAuthMigration` -> `determineFirstAuthAction`, which returns `BLOCKED_OFFLINE` whenever the network is down, whatever local data exists, giving "Can't reach your Arth account".
+4. If the saved access token had EXPIRED (they last about an hour, I did not verify this project's setting), the SDK retries its refresh with backoff and neither `getUser()` nor `getSession()` answered for at least 25 s in a node trace; the app showed nothing useful (no events, no user) meanwhile.
+5. Independently, nothing could even load offline: no service worker, no manifest, `index.html` served `no-store`.
+
+## What the change does (and does not)
+- `public/sw.js` + registration in `src/main.jsx`: caches the app's own files so the page opens offline. Registered only in production builds, over http(s), outside the native Android app. Page is network-first (a new deployment is used as soon as there is a connection); `/assets/*` cache-first. It ignores non-GET and cross-origin requests (so it never touches the cloud calls) and stores nothing the person entered.
+- `src/domain/identity/offlineResume.js` (pure, unit-tested): `classifyAuthCheck` (verified / unreachable / signed-out; "could not reach the server" is never "signed out"), `canResumeOffline` (needs ALL of: a saved session on the device, first-time setup finished, saved data present).
+- `src/cloudSync.js` `checkCloudUser()`: same call as before, but reports why there is no user.
+- `src/App.jsx` startup effect: if the check says "unreachable" (or does not finish within 5 s) and the device qualifies, open in **offline resume**: cloud user stays empty, nothing is sent, a banner says so. Anything else behaves exactly as before (the previous outcome is kept: signed-out / blocked screens). A saved session is **never** trusted: its events are ignored while offline-resumed.
+- Reconnecting: the server must confirm the account (`online` event, returning to the app, the banner's "Try again", or the SDK refreshing its token). After an offline resume the account is then handled by the **first-sign-in comparison**, not the returning-device path: when this device and the cloud both hold data the person is asked which copy to keep (the existing screen; the other copy is backed up first). Automatic upload stays off until that finishes (`cloudHydrated` held false). If the connection drops again before it finishes, the app returns to offline resume instead of the "Can't reach" wall. The first conclusive answer wins; a late second answer is ignored (found by testing: without this, a duplicate "verified" turned the device into a plain returning device and uploaded over the cloud).
+- If the server says the session is not valid, the person goes to the ordinary sign-in screen; saved data stays on the device and nothing is uploaded.
+- Not changed: sign-in, sign-out, account switching, `pullCloudSnapshot`/`pushCloudSnapshot`, the sync engine (this branch is on the production base), the first-sign-in matrix, accounting.
+
+## Why reconnect asks instead of syncing
+The production sync is whole-snapshot last-writer-wins with a timestamp guess. With the returning-device path, a reconnect after offline use pushed this device's copy over the cloud and **destroyed another device's record** in my test (a record added elsewhere meanwhile). The first-sign-in comparison never merges or overwrites silently. Cost: after offline use, once back online, the person sees the "Two versions of your data found" screen even if nothing differs. The proper fix for that is the sync-safety engine (base tokens, dirty tracking), which is on other, not yet production-verified branches; this change does not depend on it.
+
+## Evidence (production build, local fake backend, synthetic data) — `tools/offline-startup/run.mjs`
+19 of 19 pass, two runs, identical outcome hash `044d43a190eba3c27c695dd373118a08` (records in `tools/offline-startup/results/`). Summary: valid and expired saved sessions reopen offline (twice) with saved data and a banner, entry saved locally, zero cloud writes; reconnect confirms the account, asks, nothing sent before the choice, then the entry reaches the cloud exactly once with every other record unchanged; first-time device, signed-in-but-empty device and setup-unfinished device are not let in; a session revoked meanwhile leads to sign-in, data kept, nothing uploaded; connection dropping mid-check returns to offline mode; both devices changed: nothing lost before the choice and choosing the cloud copy first backs up the offline entry; online start, online sign-in and sign-out unchanged (and a signed-out device does not resume offline).
+Also: 1,709 / 1,709 unit tests (1,699 + 10 new), production build, lint = 4 baseline problems.
+
+## Erratum to OFFLINE-ENTRY-001
+The fake backend used for that first investigation answered a "give me one object" request with an array, so the app saw "no cloud row" and uploaded the device's copy. Its statement that the entry "synced exactly once, 13 = 13" came from that artefact and is **not evidence**. The fake in `tools/offline-startup/fakeSupabase.mjs` now behaves like PostgREST for that request (object, or HTTP 406 `PGRST116` for no row). The offline-reopen failure findings (no service worker; blocked startup) stand.
+
+## Remaining risks
+- Real Supabase unverified (error shapes of an offline/expired `getUser`, refresh behaviour, token lifetime). Real phones and the installed-app case untested.
+- Service worker risks: a stale cached copy offline until the next online visit; a first-ever visit while offline cannot work; the browser may evict the cache. A faulty worker is replaced by deploying a new one.
+- The confirmation screen after offline use even when nothing differs (see above).
+- The startup wait is 5 s before a qualifying device is let in offline; a very slow but working connection can briefly show the offline banner, then self-correct.
+- After an offline resume the saved session is used again only after the server confirms it; if the refresh token has been revoked the person must sign in again (saved data is kept).
+- This branch is based on production (`5fc65e7`). Cherry-picking it onto the sync-safety branches gives 3 text conflicts in `src/App.jsx` and `package.json` (the gate line, the banner position and the imports); resolving them needs a fresh run of the 31-scenario sync harness plus this one.
