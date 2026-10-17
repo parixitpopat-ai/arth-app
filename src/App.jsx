@@ -2,6 +2,8 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 // Build-time version stamp: V4.DDMMYYHHmmss
 const _bt = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : new Date();
 const APP_VERSION = `V4.${String(_bt.getDate()).padStart(2,"0")}${String(_bt.getMonth()+1).padStart(2,"0")}${String(_bt.getFullYear()).slice(-2)}${String(_bt.getHours()).padStart(2,"0")}${String(_bt.getMinutes()).padStart(2,"0")}${String(_bt.getSeconds()).padStart(2,"0")}`;
+import { buildExpenseDraft, findPossibleDuplicate } from "./domain/transactions/naturalLanguageExpense.js";
+import { isNaturalLanguageEntryEnabled } from "./domain/transactions/naturalLanguageGate.js";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
 import { getCurrentCloudUser, isCloudSyncConfigured, loadCloudSnapshot, saveCloudSnapshot, signInWithPassword, signOutCloud, signUpWithPassword, supabase, hasEverAuthenticatedOnThisDevice } from "./cloudSync";
 import { hasMeaningfulData, isMasterUserSetupComplete, determineFirstAuthAction, FIRST_AUTH_ACTIONS, summarizeMeaningfulData, mergeMasterUserProfileFields } from "./domain/identity/masterUserSetup";
@@ -3487,6 +3489,29 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       return last || (accounts.find(a=>a.type==="bank")||accounts.find(a=>a.type==="upi")||accounts.find(a=>a.type==="cash")||accounts[0])?.id || "";
     });
 
+    // Typed-sentence entry. Parsing only PREPARES the fields below; nothing is saved until the person taps
+    // Save, exactly as with the keyboard form. An account the sentence does not pin down is left empty and
+    // blocks Save until chosen (never defaulted to the last-used account).
+    // Off unless the address has ?nl=1; read once when Quick Add opens.
+    const [nlEnabled] = useState(()=>isNaturalLanguageEntryEnabled(window.location.search));
+    const [nlText, setNlText] = useState("");
+    const [nlDraft, setNlDraft] = useState(null);
+    const fillFromText = () => {
+      if(!nlEnabled) return;
+      const d = buildExpenseDraft(nlText, { accounts, cats, paidFrom:paidViaAccounts, now:new Date() });
+      setNlDraft(d);
+      if(d.intent!=="expense") return;
+      setQaType("expense");
+      setQaAmount(d.amount!=null ? String(d.amount) : "");
+      setQaWho(d.merchant||"");
+      setQaDate(d.date || todayStr());
+      setQaCatId(d.category?.status==="resolved" ? d.category.catId : "");
+      setQaAccId(d.account.status==="resolved" ? d.account.accId : "");
+      setQaPaymentMethod(d.account.status==="resolved" ? (d.account.paymentMethod||"") : "");
+    };
+    const pickNlAccount = c => { setQaAccId(c.accId); setQaPaymentMethod(c.paymentMethod||""); };
+    const nlNeedsAccount = nlDraft?.intent==="expense" && !qaAccId;
+
     // Same ranked-match approach AddModal uses for its own suggestion (history match, then
     // keyword rules) — kept independent so this never has to reach into AddModal's internals.
     // Only runs for expenses — income categories aren't merchant-driven the same way.
@@ -3524,10 +3549,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       return rule ? cats.find(c=>c.id===rule.catId) : null;
     }, [qaWho, qaType]);
 
-    const effectiveCat = qaCatId ? cats.find(c=>c.id===qaCatId) : detected;
+    // A typed sentence leaves the category unassigned unless it named one that exists; the usual merchant-based
+    // suggestion is offered as a tap-to-use chip instead of being applied.
+    const effectiveCat = qaCatId ? cats.find(c=>c.id===qaCatId) : (nlDraft?.intent==="expense" ? null : detected);
     // WP-B-2: vendor is now OPTIONAL -- item-first entry or a vendor-first multi-item selection
     // are equally valid ways to satisfy this gate.
-    const canSave = parseFloat(qaAmount)>0 && (qaWho.trim() || qaItemName.trim() || qaLineItems.length>0);
+    const canSave = parseFloat(qaAmount)>0 && (qaWho.trim() || qaItemName.trim() || qaLineItems.length>0) && !nlNeedsAccount;
+    const nlDuplicates = useMemo(()=> nlDraft?.intent==="expense" && qaAccId
+      ? findPossibleDuplicate({ amount:parseFloat(qaAmount)||0, merchant:qaWho, date:qaDate, accId:qaAccId }, txns)
+      : [], [nlDraft, qaAmount, qaWho, qaDate, qaAccId, txns]);
     // WP-B-2: keep qaAmount in sync with the sum of selected items once any are chosen (vendor-
     // first multi-item path) -- avoids a manually-typed amount silently disagreeing with the
     // items actually selected.
@@ -3622,6 +3652,47 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <button onClick={onClose} style={{ background:"none",border:"none",color:T.sub,fontSize:14,cursor:"pointer",padding:"4px 0" }}>Cancel</button>
             <button onClick={goToFullForm} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>More options →</button>
           </div>
+
+          {/* Type it: one sentence fills the fields below; the person reviews and saves as usual. */}
+          {nlEnabled&&(
+          <div data-testid="qa-nl" style={{ marginBottom:16 }}>
+            <span style={lbl}>Or type it</span>
+            <div style={{ display:"flex",gap:8 }}>
+              <input data-testid="qa-nl-input" style={{ ...inp,flex:1,fontSize:13 }} placeholder="e.g. Paid ₹45 to Swiggy via credit card ending 1234" value={nlText}
+                onChange={e=>setNlText(e.target.value)}
+                onKeyDown={e=>{ if(e.key==="Enter"){ e.preventDefault(); fillFromText(); } }}/>
+              <button data-testid="qa-nl-fill" onClick={fillFromText} disabled={!nlText.trim()} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,borderRadius:10,padding:"0 14px",fontSize:12,fontWeight:800,cursor:"pointer",opacity:nlText.trim()?1:0.4,fontFamily:"Nunito,sans-serif" }}>Fill</button>
+            </div>
+            {nlDraft&&nlDraft.intent!=="expense"&&nlDraft.intent!=="empty"&&(
+              <div data-testid="qa-nl-refused" style={{ color:T.warn,fontSize:12,fontWeight:700,marginTop:8 }}>{nlDraft.message}</div>
+            )}
+            {nlDraft?.intent==="expense"&&(
+              <div data-testid="qa-nl-notes" style={{ marginTop:8,display:"grid",gap:6 }}>
+                {nlDraft.questions.map(q=>(
+                  <div key={q.code} data-testid={`qa-nl-q-${q.code}`} style={{ color:T.warn,fontSize:12,fontWeight:700 }}>{q.message}</div>
+                ))}
+                {nlDraft.account.status==="ambiguous"&&!qaAccId&&(
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                    {nlDraft.account.candidates.map(c=>(
+                      <button key={c.accId+(c.paymentMethod||"")} data-testid="qa-nl-candidate" onClick={()=>pickNlAccount(c)} style={{ background:T.input,border:`1px solid ${T.border}`,color:T.text,borderRadius:10,padding:"6px 10px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>{c.label}</button>
+                    ))}
+                  </div>
+                )}
+                {nlDraft.account.status==="resolved"&&qaAccId===nlDraft.account.accId&&(
+                  <div data-testid="qa-nl-resolved" style={{ color:T.sub,fontSize:12 }}>
+                    Recorded against {nlDraft.account.via}{accounts.find(a=>a.id===nlDraft.account.accId)?.type==="cc"?". The bank is not debited until the card bill is paid.":"."}
+                  </div>
+                )}
+                {nlDraft.category.status!=="resolved"&&!qaCatId&&detected&&(
+                  <button data-testid="qa-nl-suggest-cat" onClick={()=>setQaCatId(detected.id)} style={{ justifySelf:"start",background:T.input,border:`1px solid ${T.border}`,color:T.sub,borderRadius:10,padding:"6px 10px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Suggested category: {detected.icon} {detected.name} (tap to use)</button>
+                )}
+                {nlDuplicates.length>0&&(
+                  <div data-testid="qa-nl-duplicate" style={{ color:T.warn,fontSize:12,fontWeight:700 }}>You already have a matching entry for this amount, merchant, date and account. Save only if this is a separate purchase.</div>
+                )}
+              </div>
+            )}
+          </div>
+          )}
 
           {/* Expense / Income toggle */}
           <div style={{ display:"flex",background:T.input,borderRadius:14,padding:4,marginBottom:18 }}>
@@ -3719,7 +3790,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             )}
             <div>
               <span style={lbl}>Account</span>
-              <select style={inp} value={qaAccId} onChange={e=>setQaAccId(e.target.value)}>
+              <select data-testid="qa-account" style={inp} value={qaAccId} onChange={e=>setQaAccId(e.target.value)}>
+                {!qaAccId&&<option value="" disabled>Choose account…</option>}
                 {paidViaAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>

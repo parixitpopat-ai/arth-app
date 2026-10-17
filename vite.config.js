@@ -7,6 +7,8 @@ export default defineConfig({
   plugins: [react()],
   define: {
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    // Which Vercel environment is building (production / preview / development; empty off Vercel). See src/cloudConfig.js.
+    'import.meta.env.VITE_VERCEL_ENV': JSON.stringify(process.env.VERCEL_ENV || ''),
   },
   server: {
     host: "localhost",
