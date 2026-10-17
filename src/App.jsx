@@ -5,8 +5,9 @@ const APP_VERSION = `V4.${String(_bt.getDate()).padStart(2,"0")}${String(_bt.get
 import { buildExpenseDraft, findPossibleDuplicate } from "./domain/transactions/naturalLanguageExpense.js";
 import { isNaturalLanguageEntryEnabled } from "./domain/transactions/naturalLanguageGate.js";
 import { dedupeSettlementTxns } from "./domain/transactions/settlementDedupe.js";
+import { canResumeOffline, OFFLINE_CHECK_TIMEOUT_MS } from "./domain/identity/offlineResume";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
-import { getCurrentCloudUser, isCloudSyncConfigured, loadCloudSnapshot, saveCloudSnapshot, signInWithPassword, signOutCloud, signUpWithPassword, supabase, hasEverAuthenticatedOnThisDevice } from "./cloudSync";
+import { checkCloudUser, isCloudSyncConfigured, loadCloudSnapshot, saveCloudSnapshot, signInWithPassword, signOutCloud, signUpWithPassword, supabase, hasEverAuthenticatedOnThisDevice } from "./cloudSync";
 import { hasMeaningfulData, isMasterUserSetupComplete, determineFirstAuthAction, FIRST_AUTH_ACTIONS, summarizeMeaningfulData, mergeMasterUserProfileFields } from "./domain/identity/masterUserSetup";
 import WelcomeScreen from "./screens/WelcomeScreen";
 import AuthGateScreen from "./screens/AuthGateScreen";
@@ -9211,6 +9212,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // for a normal returning user. A ref reset every load is exactly right
   // for "was there already a session when THIS load started."
   const sessionRestoredOnBootRef = useRef(false);
+  // Offline resume: this device has signed in before, finished setup and holds saved data, but the startup account
+  // check could not reach the server. It opens locally with cloud sync OFF (no cloud user, nothing sent); the saved
+  // session is never trusted until the server confirms it. See domain/identity/offlineResume.js.
+  const [offlineResume, setOfflineResume] = useState(false);
+  const offlineResumeRef = useRef(false);
+  const offlineRetryRef = useRef(null);
+  const offlineReenterRef = useRef(null);
+  // True from the moment the account is confirmed after an offline resume until the first-sign-in check has finished.
+  // While true, cloudHydrated stays false so the automatic upload below cannot run ahead of the person's choice.
+  const resumedFromOfflineRef = useRef(false);
   const firstAuthRanRef = useRef(false); // guards against re-running the matrix twice for one session
   // pullCloudSnapshot - blocks auto-push until the user explicitly resolves the conflict, since
   // cloudHydrated alone isn't a safe enough signal (that flag used to double as "safe to push",
@@ -9799,17 +9810,74 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   useEffect(() => {
     if(!isCloudSyncConfigured || !supabase) return;
     let mounted = true;
-    getCurrentCloudUser()
-      .then(user => {
+    let verifying = false;
+    // The startup check and the later re-checks can both answer; only the first conclusive answer counts, otherwise a
+    // second "verified" would arrive after offline resume has ended and be mistaken for a plain returning device.
+    let settled = false;
+    // Server confirmed the saved session.
+    const applyVerified = user => {
+      // A session found here was restored from the SDK's own persisted
+      // token — it existed before this code ran. That's the "returning
+      // device" signal; a session that shows up later via the auth
+      // listener below (after an explicit OTP verify) leaves this false.
+      //
+      // After an OFFLINE resume it is deliberately NOT treated as a plain returning device: this device may hold
+      // changes the cloud has never seen while the cloud may hold changes this device has never seen, and the
+      // returning-device path would push or pull on a timestamp guess. The first-sign-in path compares both sides and,
+      // when both hold data, asks the person to choose; it never merges or overwrites silently.
+      const fromOffline = offlineResumeRef.current;
+      sessionRestoredOnBootRef.current = !fromOffline;
+      resumedFromOfflineRef.current = fromOffline;
+      offlineResumeRef.current = false;
+      setOfflineResume(false);
+      setCloudUser(user);
+      setCloudHydrated(false);
+      if(user?.email) setSyncEmail(user.email);
+    };
+    // No valid session (server said so, or this device may not resume offline): the previous behaviour exactly.
+    const applySignedOut = () => {
+      sessionRestoredOnBootRef.current = false;
+      offlineResumeRef.current = false;
+      setOfflineResume(false);
+      setCloudUser(null);
+      setCloudHydrated(true);
+    };
+    const mayResumeOffline = () => canResumeOffline({
+      sessionOnDevice: hasEverAuthenticatedOnThisDevice(),
+      setupComplete: JSON.parse(localStorage.getItem("arth_master_user_setup_complete") ?? "false") === true,
+      localMeaningful: hasMeaningfulData(cloudSnapshotRef.current || {}),
+    });
+    const enterOfflineResume = () => {
+      settled = false;
+      offlineResumeRef.current = true;
+      sessionRestoredOnBootRef.current = false;
+      setOfflineResume(true);
+      setCloudUser(null);
+      setCloudHydrated(true);
+      setCloudStatus("Offline: changes are saved on this device and will sync after Arth can confirm your account.");
+    };
+    offlineReenterRef.current = () => { enterOfflineResume(); };
+    const handle = res => {
+      if(!mounted || settled) return;
+      if(res.status === "verified"){ settled = true; return applyVerified(res.user); }
+      if(res.status === "signed-out"){ settled = true; return applySignedOut(); }
+      // unreachable: says nothing about the saved session
+      if(offlineResumeRef.current) return;
+      if(mayResumeOffline()) return enterOfflineResume();
+      applySignedOut();
+    };
+    const timeoutAfter = ms => new Promise(resolve => setTimeout(() => resolve({ status:"unreachable", user:null, timedOut:true }), ms));
+    const boot = checkCloudUser();
+    Promise.race([boot, timeoutAfter(OFFLINE_CHECK_TIMEOUT_MS)])
+      .then(res => {
         if(!mounted) return;
-        // A session found here was restored from the SDK's own persisted
-        // token — it existed before this code ran. That's the "returning
-        // device" signal; a session that shows up later via the auth
-        // listener below (after an explicit OTP verify) leaves this false.
-        sessionRestoredOnBootRef.current = Boolean(user);
-        setCloudUser(user);
-        setCloudHydrated(!user);
-        if(user?.email) setSyncEmail(user.email);
+        if(res.timedOut){
+          // Slow or absent network. A device that may resume offline is let in now (and still gets the late answer);
+          // anything else keeps waiting for the real answer, exactly as before.
+          if(mayResumeOffline()) enterOfflineResume();
+          return boot.then(late => handle(late));
+        }
+        handle(res);
       })
       .catch(err => {
         if(!mounted) return;
@@ -9817,8 +9885,31 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         setCloudHydrated(true);
       });
 
+    // While offline-resumed, ask the server again (reconnect, return to the app, Try again, or the SDK refreshing its token).
+    const reverify = async () => {
+      if(!mounted || !offlineResumeRef.current || verifying) return;
+      verifying = true;
+      try{
+        const res = await Promise.race([checkCloudUser(), timeoutAfter(8000)]);
+        if(!res.timedOut) handle(res);
+      }finally{ verifying = false; }
+    };
+    offlineRetryRef.current = reverify;
+    const onOnline = () => { reverify(); };
+    const onVisible = () => { if(document.visibilityState === "visible") reverify(); };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       if(!mounted) return;
+      if(offlineResumeRef.current){
+        // A saved session proves nothing while the server cannot be reached: ignore it, and ignore "no session"
+        // events too. Only an explicit sign-out ends offline resume; a refreshed or new session means the server
+        // answered, so confirm it with a real account check.
+        if(_event === "SIGNED_OUT"){ settled = true; applySignedOut(); }
+        else if(_event !== "INITIAL_SESSION" && session?.user) reverify();
+        return;
+      }
       const nextUser = session?.user ?? null;
       // Supabase fires this listener on periodic token refresh too, not just real sign-in/out —
       // calling setCloudUser with a fresh object every time forces a full app re-render on a
@@ -9833,6 +9924,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
     return () => {
       mounted = false;
+      offlineRetryRef.current = null;
+      offlineReenterRef.current = null;
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
       authListener?.subscription?.unsubscribe();
     };
   }, []);
@@ -9856,6 +9951,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(firstAuthRanRef.current || firstAuthState) return;
     runFirstAuthMigration();
   }, [cloudUser?.id, isCloudSyncConfigured, firstAuthState, runFirstAuthMigration]);
+
+  // After an offline resume, once the first-sign-in check has settled: let automatic sync start again (ready), or
+  // go back to offline mode if the connection dropped again before the check could finish.
+  useEffect(() => {
+    if(!resumedFromOfflineRef.current) return;
+    if(firstAuthState === "ready"){
+      resumedFromOfflineRef.current = false;
+      setCloudHydrated(true);
+    } else if(firstAuthState === "blocked-offline"){
+      resumedFromOfflineRef.current = false;
+      firstAuthRanRef.current = false;
+      setFirstAuthState(null);
+      setFirstAuthError("");
+      offlineReenterRef.current?.();
+    }
+  }, [firstAuthState]);
 
   // P1 revision: true once the cloud/profile gate below would otherwise
   // fall through to the main app — computed once here so both the effect
@@ -19948,7 +20059,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // respect to the Rules of Hooks. Deliberately sits in front of the render
   // only; nothing below this block (tab/settings navigation, all domain
   // state) is touched.
-  if(isCloudSyncConfigured){
+  if(isCloudSyncConfigured && !offlineResume){
     if(!cloudUser){
       // P1 revision: Welcome (Sign Up / Sign In choice) shown first — no
       // more single "Continue with email" entry point (reverses P1-001,
@@ -20020,6 +20131,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         @keyframes arth-spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
       `}</style>
       <div style={{ maxWidth:430,margin:"0 auto",minHeight:"100vh",position:"relative",paddingBottom:80,fontFamily:"Nunito,sans-serif" }}>
+
+        {offlineResume&&(
+          <div data-testid="offline-resume-banner" style={{ background:T.warn+"22",borderBottom:`1px solid ${T.warn}44`,color:T.text,fontSize:12,fontWeight:700,padding:"8px 14px",display:"flex",alignItems:"center",gap:10 }}>
+            <span style={{ flex:1 }}>📡 Offline. Changes are saved on this device and will sync after Arth can confirm your account.</span>
+            <button data-testid="offline-resume-retry" onClick={()=>offlineRetryRef.current?.()} style={{ background:"none",border:`1px solid ${T.warn}`,color:T.text,borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Try again</button>
+          </div>
+        )}
 
         {/* Top bar */}
         {!showSettings&&<div style={{ background:T.nav,borderBottom:`1px solid ${T.border}`,padding:"10px 18px 8px",position:"sticky",top:0,zIndex:50 }}>

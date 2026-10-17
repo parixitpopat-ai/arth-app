@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { classifyAuthCheck } from "./domain/identity/offlineResume";
 
 import { resolveCloudConfig } from "./cloudConfig";
 
@@ -14,6 +15,18 @@ const SUPABASE_ANON_KEY = CLOUD.key;
 // locally without editing this file again.
 export const isCloudSyncConfigured = CLOUD.configured;
 export const supabase = isCloudSyncConfigured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+// Like getCurrentCloudUser, but reports WHY there is no user: the server confirmed one ("verified"), the server could not
+// be reached ("unreachable": says nothing about the saved session), or there is no valid session ("signed-out").
+export const checkCloudUser = async () => {
+  if (!supabase) return { status: "signed-out", user: null };
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    return { status: classifyAuthCheck({ user: data?.user ?? null, error }), user: data?.user ?? null };
+  } catch (error) {
+    return { status: classifyAuthCheck({ error }), user: null };
+  }
+};
 
 export const getCurrentCloudUser = async () => {
   if (!supabase) return null;
