@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 // Build-time version stamp: V4.DDMMYYHHmmss
 const _bt = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : new Date();
 const APP_VERSION = `V4.${String(_bt.getDate()).padStart(2,"0")}${String(_bt.getMonth()+1).padStart(2,"0")}${String(_bt.getFullYear()).slice(-2)}${String(_bt.getHours()).padStart(2,"0")}${String(_bt.getMinutes()).padStart(2,"0")}${String(_bt.getSeconds()).padStart(2,"0")}`;
+import { dedupeSettlementTxns } from "./domain/transactions/settlementDedupe.js";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
 import { getCurrentCloudUser, isCloudSyncConfigured, loadCloudSnapshot, saveCloudSnapshot, signInWithPassword, signOutCloud, signUpWithPassword, supabase, hasEverAuthenticatedOnThisDevice } from "./cloudSync";
 import { hasMeaningfulData, isMasterUserSetupComplete, determineFirstAuthAction, FIRST_AUTH_ACTIONS, summarizeMeaningfulData, mergeMasterUserProfileFields } from "./domain/identity/masterUserSetup";
@@ -536,26 +537,6 @@ const findSmsAccountMatches = (txt, accounts=[]) => {
     })
     .filter(Boolean)
     .sort((a,b)=>b.score-a.score || String(a.account?.name||"").localeCompare(String(b.account?.name||"")));
-};
-const linkedSettlementKey = t => t?.type==="settlement_in" && t?.againstTxnId
-  ? [t.fromPersonId||"", t.againstTxnId||"", t.date||"", Number(t.amount||0), t.accId||""].join("|")
-  : null;
-const dedupeSettlementTxns = txns => {
-  const seenLinked = new Set();
-  const seenLegacy = new Set();
-  return txns.filter(t=>{
-    if(t.type!=="settlement_in") return true;
-    const linkedKey = linkedSettlementKey(t);
-    if(linkedKey){
-      if(seenLinked.has(linkedKey)) return false;
-      seenLinked.add(linkedKey);
-      return true;
-    }
-    const legacyKey = `${t.fromPersonId||""}_${t.date||""}_${Number(t.amount||0)}`;
-    if(seenLegacy.has(legacyKey)) return false;
-    seenLegacy.add(legacyKey);
-    return true;
-  });
 };
 const CAT_MAP = {"food":"food","grocery":"groceries","groceries":"groceries","transport":"transport","bills":"utilities","utilities":"utilities","health":"health","shopping":"lifestyle","household":"housing","selfcare":"lifestyle","baby":"family","entertainment":"entertainment","financial":"financial","fitness":"fitness","travel":"travel","misc":"misc","donations":"donations","professional":"professional","taxes":"taxes","emergency":"emergency","personaldev":"personaldev","family":"family","lifestyle":"lifestyle","housing":"housing"};
 const normalizeCats = stored => {
@@ -8028,8 +8009,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
       const newSettleTxn = { id:settleId, type:"settlement_in", desc:settleDesc, merchant:"", date:settleDate||todayStr(), note:`Against: ${t.desc||"unknown"} · Account: ${getAcc(accId)?.name||"unnamed"}${extraAmt>0?` · Extra ${sym}${fmt(extraAmt)} kept as advance`:""}`, amount:requestedAmt, appliedAmount:appliedAmt, extraAmount:extraAmt, accId, fromPersonId:pid, groupId:t.groupId||null, againstTxnId:(t._isBillSettle||t._isFallbackSettle)?null:t.id, settlementLinks, imageBase64:receiptImg, transactionRef:settleRef.trim()||null };
       const upsertSettlement = prev => {
-        const newKey = linkedSettlementKey(newSettleTxn);
-        if(newKey && prev.some(x=>linkedSettlementKey(x)===newKey)) return prev;
+        // Guard on the record's own id only. A same-day repeat of the same amount is a real second
+        // repayment; skipping it here would still apply its allocations (see below) with no record.
+        if(prev.some(x=>String(x.id)===String(newSettleTxn.id))) return prev;
         return [newSettleTxn,...prev];
       };
       // Settlement effects (reduce owed amounts, recompute settled/bill status,
