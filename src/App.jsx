@@ -3793,7 +3793,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {/* Category (expense only) + Account, side by side. Category hidden when itemized
               lines are selected (WP-B-2 vendor-first path) -- each item already carries its own
               category, matching AddModal's own established convention for itemized purchases. */}
-          <div style={{ display:"grid",gridTemplateColumns:(qaType==="expense"&&qaLineItems.length===0)?"1fr 1fr":"1fr",gap:10,marginBottom:14 }}>
+          <div style={{ display:"grid",gridTemplateColumns:(qaType==="expense"&&qaLineItems.length===0&&nlDraft?.intent!=="expense")?"1fr 1fr":"1fr",gap:10,marginBottom:14 }}>
             {qaType==="expense"&&qaLineItems.length===0&&(
               <div>
                 <span style={lbl}>Category{nlFilled.cat&&<FilledTag/>}</span>
