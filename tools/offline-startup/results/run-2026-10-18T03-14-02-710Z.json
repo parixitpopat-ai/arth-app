@@ -1,5 +1,5 @@
 {
-  "at": "2026-10-17T20:28:46.985Z",
+  "at": "2026-10-18T03:14:02.710Z",
   "results": [
     {
       "id": "OS1 valid session: reopens offline, shows saved data, banner shown, entry saved locally",
@@ -74,7 +74,7 @@
       "pass": true
     },
     {
-      "id": "CI2 ?nl=0 offline: input hidden, ordinary Quick Add saves one entry, nothing sent",
+      "id": "CI2 offline with the old ?nl=0 address: typed entry still shown (no switch), ordinary typing saves one entry, nothing sent",
       "pass": true
     },
     {

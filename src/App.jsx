@@ -3,7 +3,6 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 const _bt = typeof __BUILD_TIME__ !== "undefined" ? new Date(__BUILD_TIME__) : new Date();
 const APP_VERSION = `V4.${String(_bt.getDate()).padStart(2,"0")}${String(_bt.getMonth()+1).padStart(2,"0")}${String(_bt.getFullYear()).slice(-2)}${String(_bt.getHours()).padStart(2,"0")}${String(_bt.getMinutes()).padStart(2,"0")}${String(_bt.getSeconds()).padStart(2,"0")}`;
 import { buildExpenseDraft, findPossibleDuplicate } from "./domain/transactions/naturalLanguageExpense.js";
-import { isNaturalLanguageEntryEnabled } from "./domain/transactions/naturalLanguageGate.js";
 import { dedupeSettlementTxns } from "./domain/transactions/settlementDedupe.js";
 import { canResumeOffline, OFFLINE_CHECK_TIMEOUT_MS } from "./domain/identity/offlineResume";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
@@ -3474,8 +3473,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Typed-sentence entry. Parsing only PREPARES the fields below; nothing is saved until the person taps
     // Save, exactly as with the keyboard form. An account the sentence does not pin down is left empty; Save then
     // asks for it (it never defaults to the last-used account and never saves without one).
-    // On unless the address has ?nl=0 (emergency off switch); read once when Quick Add opens.
-    const [nlEnabled] = useState(()=>isNaturalLanguageEntryEnabled(window.location.search));
     const [nlText, setNlText] = useState("");
     const [nlDraft, setNlDraft] = useState(null);
     const [nlCollapsed, setNlCollapsed] = useState(false);   // after a successful fill: one line with Edit
@@ -3486,7 +3483,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const FilledTag = () => <span data-testid="qa-filled-tag" style={{ marginLeft:8,fontSize:10,fontWeight:800,background:T.accentSoft,color:T.accent,borderRadius:6,padding:"1px 6px",textTransform:"none",letterSpacing:0,verticalAlign:"middle" }}>Filled</span>;
     const clearFilled = key => setNlFilled(f=>f[key] ? { ...f, [key]:false } : f);
     const fillFromText = () => {
-      if(!nlEnabled || !nlText.trim()) return;
+      if(!nlText.trim()) return;
       const d = buildExpenseDraft(nlText, { accounts, cats, paidFrom:paidViaAccounts, now:new Date() });
       setNlDraft(d);
       setNlAccError(false);
@@ -3666,7 +3663,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
 
           {/* Type it: one 48 px row. A sentence fills the fields below; the person reviews and saves as usual. */}
-          {nlEnabled&&(()=>{
+          {(()=>{
             const open = nlDraft?.intent==="expense" ? nlDraft.questions.filter(q=>!(
               (q.field==="payment"&&qaAccId) || (q.field==="amount"&&parseFloat(qaAmount)>0) || (q.field==="merchant"&&qaWho.trim()) || (q.field==="category"&&qaCatId))) : [];
             const note = open[0]

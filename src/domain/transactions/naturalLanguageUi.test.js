@@ -26,3 +26,9 @@ test("each filled field's tag is cleared by the edit handler of that field", () 
 test("the card note is limited to the first three times", () => {
   assert.ok(quickAdd.includes("arth_nl_card_note_seen") && /seen<3/.test(quickAdd));
 });
+
+test("typed entry has no address switch: Quick Add never reads the page address", () => {
+  assert.ok(!quickAdd.includes("window.location"), "Quick Add does not look at the URL");
+  assert.ok(!/nlEnabled|isNaturalLanguageEntryEnabled/.test(src), "no leftover switch");
+  assert.ok(/\{\(\(\)=>\{\s*const open = nlDraft/.test(quickAdd), "the typed-entry row is always rendered");
+});

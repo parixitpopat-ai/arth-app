@@ -14,7 +14,7 @@ const cards = {
 };
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 
-async function open(accounts, txns = [], query = "?nl=1") {
+async function open(accounts, txns = [], query = "") {
   const ctx = await browser.newContext({ timezoneId: "Asia/Kolkata", viewport: { width: 420, height: 900 } });
   await ctx.route(u => { try { return !["localhost", "127.0.0.1"].includes(new URL(u).hostname); } catch { return false; } }, r => { blocked.push(r.request().url()); r.abort(); });
   await ctx.addInitScript(({ accounts, txns }) => {
@@ -255,43 +255,38 @@ for (const [text, want, formCheck] of [["paid my credit card bill 5000", /card b
   rec(`UX8 "${text}": message names it, button opens the full form with ${formCheck} carried over`, want.test(msg) && /Open full form/.test(msg) && carried && (await txns(page)).length === 0, { msg: msg.replace(/\s+/g, " ").slice(0, 90), carried });
   await ctx.close();
 }
-// G1: ?nl=0 (the off switch): input hidden and the ordinary Quick Add works exactly as before.
-{
-  const { ctx, page } = await open([cards.bank, cards.a], [], "?nl=0");
+// G1: no address switch: the typed-entry row is shown whatever the address says (including the old ?nl=0 / ?nl=1).
+for (const query of ["", "?nl=0", "?nl=1", "?utm_source=x&nl=0&ref=y", "?foo=bar", "?v=4"]) {
+  const { ctx, page } = await open([cards.bank, cards.a], [], query);
   await openQuickAdd(page);
-  const present = await page.getByTestId("qa-nl").count() + await page.getByTestId("qa-nl-input").count();
+  const n = await page.getByTestId("qa-nl-input").count();
+  rec(`G1 ${query || "(plain address)"} -> typed entry shown`, n === 1, { n });
+  await ctx.close();
+}
+// G2: ordinary keyboard entry is unchanged next to the typed row.
+{
+  const { ctx, page } = await open([cards.bank, cards.a], [], "");
+  await openQuickAdd(page);
   await page.getByPlaceholder("0", { exact: true }).fill("120"); await page.getByPlaceholder("e.g. Petrol, Swiggy, Netflix", { exact: true }).fill("Tea");
   const acc = await page.getByTestId("qa-account").inputValue();
   await page.getByRole("button", { name: /Save Expense/ }).click(); await page.waitForTimeout(500);
   const saved = await txns(page);
-  rec("G1 ?nl=0: input hidden, ordinary Quick Add saves as before", present === 0 && acc === "b1" && saved.length === 1 && saved[0].amount === 120, { present, acc, n: saved.length });
+  rec("G2 ordinary entry beside the typed row: default account preselected, one entry saved", acc === "b1" && saved.length === 1 && saved[0].amount === 120, { acc, n: saved.length });
   await ctx.close();
 }
-// G2: on by default (no parameter), on with ?nl=1 and with unrelated parameters; off only for exactly nl=0.
-for (const [query, want] of [["", 1], ["?nl=1", 1], ["?utm_source=x&nl=1&ref=y", 1], ["?foo=bar", 1], ["?nl=true", 1], ["?NL=0", 1], ["?nl=0&nl=1", 1], ["?cfError=1", 1], ["?nl=0", 0], ["?utm=1&nl=0", 0]]) {
-  const { ctx, page } = await open([cards.bank, cards.a], [], query);
-  await openQuickAdd(page);
-  const n = await page.getByTestId("qa-nl-input").count();
-  rec(`G2 ${query || "(plain address)"} -> input ${want ? "shown" : "hidden"}`, n === want, { n });
-  await ctx.close();
-}
-// G3: reload and in-app navigation keep the state; nothing is stored, so ?nl=0 only ever applies to the address it is on.
+// G3: reload and in-app navigation keep it; nothing is stored about it.
 {
-  const { ctx, page } = await open([cards.bank, cards.a], [], "?nl=0");
-  await openQuickAdd(page); const off1 = await page.getByTestId("qa-nl-input").count();
+  const { ctx, page } = await open([cards.bank, cards.a], [], "");
+  await openQuickAdd(page); const first = await page.getByTestId("qa-nl-input").count();
   await page.getByRole("button", { name: "Cancel" }).click(); await page.waitForTimeout(300);
   const visited = [];
   for (const tab of ["Payments", "People", "Home"]) { await page.locator("span", { hasText: new RegExp(`^${tab}$`) }).last().click(); await page.waitForTimeout(400); visited.push(tab); }
-  await openQuickAdd(page); const offNav = await page.getByTestId("qa-nl-input").count();
-  const urlAfterNav = new URL(page.url()).search;
+  await openQuickAdd(page); const afterNav = await page.getByTestId("qa-nl-input").count();
   await page.reload(); await page.waitForTimeout(900);
   for (let i = 0; i < 2; i++) if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (const d of ["1", "2", "3", "4"]) { await page.getByRole("button", { name: d, exact: true }).click(); await page.waitForTimeout(60); } await page.waitForTimeout(500); }
-  await openQuickAdd(page); const offReload = await page.getByTestId("qa-nl-input").count();
-  const stored = await page.evaluate(() => Object.keys(localStorage).filter(k => /nl/i.test(k) && !/arth_(txns|accounts|master)/.test(k)));
-  await page.goto(APP); await page.waitForTimeout(900);
-  for (let i = 0; i < 2; i++) if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (const d of ["1", "2", "3", "4"]) { await page.getByRole("button", { name: d, exact: true }).click(); await page.waitForTimeout(60); } await page.waitForTimeout(500); }
-  await openQuickAdd(page); const backOn = await page.getByTestId("qa-nl-input").count();
-  rec("G3 ?nl=0 survives reload and in-app navigation; nothing is stored; the plain address is on again", off1 === 0 && visited.length === 3 && offNav === 0 && offReload === 0 && urlAfterNav === "?nl=0" && backOn === 1 && stored.length === 0, { off1, visited, offNav, offReload, urlAfterNav, storedKeys: stored, backOn });
+  await openQuickAdd(page); const afterReload = await page.getByTestId("qa-nl-input").count();
+  const stored = await page.evaluate(() => Object.keys(localStorage).filter(k => /\bnl\b|nl_/i.test(k) && !/arth_nl_card_note_seen/.test(k)));
+  rec("G3 typed entry survives in-app navigation and reload; no setting stored", first === 1 && visited.length === 3 && afterNav === 1 && afterReload === 1 && stored.length === 0, { first, visited, afterNav, afterReload, storedKeys: stored });
   await ctx.close();
 }
 await browser.close();

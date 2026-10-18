@@ -209,12 +209,12 @@ async function typeSentence(page, text) { await page.getByTestId("qa-nl-input").
   await page.close(); const p2 = await d.ctx.newPage(); d.page = p2; await p2.goto(URL_); await enterPin(p2, false); await waitFor(() => hasHome(p2), 15000);
   rec("CI1b offline cold start again: still exactly one typed entry (no duplicate), typed entry on at the plain address", (await nlLocal(p2)).length === 1 && fake.writeLog.length === writes0, { local: (await nlLocal(p2)).length });
   // plain address while offline: gate off, ordinary Quick Add works and writes one entry
-  await p2.close(); const p3 = await d.ctx.newPage(); d.page = p3; await p3.goto(URL_ + "?nl=0"); await enterPin(p3, false); await waitFor(() => hasHome(p3), 15000);
-  await openQuickAdd(p3); const hidden = (await p3.getByTestId("qa-nl-input").count()) === 0;
+  await p2.close(); const p3 = await d.ctx.newPage(); d.page = p3; await p3.goto(URL_ + "?nl=0"); await enterPin(p3, false); await waitFor(() => hasHome(p3), 15000);   // the old off switch no longer exists
+  await openQuickAdd(p3); const hidden = (await p3.getByTestId("qa-nl-input").count()) === 1;
   await p3.getByPlaceholder("0", { exact: true }).fill("22"); await p3.getByPlaceholder("e.g. Petrol, Swiggy, Netflix", { exact: true }).fill("PLAINTEST 22");
   await p3.getByRole("button", { name: /Save Expense/ }).click(); await p3.waitForTimeout(900);
   const plain = (await L.localTxns(p3)).filter(t => t.merchant === "PLAINTEST 22");
-  rec("CI2 ?nl=0 offline: input hidden, ordinary Quick Add saves one entry, nothing sent", hidden && plain.length === 1 && fake.writeLog.length === writes0, { hidden, plain: plain.length });
+  rec("CI2 offline with the old ?nl=0 address: typed entry still shown (no switch), ordinary typing saves one entry, nothing sent", hidden && plain.length === 1 && fake.writeLog.length === writes0, { hidden, plain: plain.length });
   // refused sentences stay refused offline (reopen with ?nl=1)
   await p3.close(); const p4 = await d.ctx.newPage(); d.page = p4; await p4.goto(URL_); await enterPin(p4, false); await waitFor(() => hasHome(p4), 15000);   // plain address: typed entry is on by default
   const before4 = (await L.localTxns(p4)).length; await openQuickAdd(p4); await typeSentence(p4, "paid my credit card bill 5000");
