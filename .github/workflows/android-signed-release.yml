@@ -27,8 +27,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    env:
-      ARTH_KEYSTORE_PATH: ${{ runner.temp }}/arth-release.jks
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,6 +44,7 @@ jobs:
           KK: ${{ secrets.ARTH_KEY_PASSWORD }}
           THROWAWAY: ${{ github.event_name == 'push' || inputs.throwaway }}
         run: |
+          ARTH_KEYSTORE_PATH="$RUNNER_TEMP/arth-release.jks"; echo "ARTH_KEYSTORE_PATH=$ARTH_KEYSTORE_PATH" >> "$GITHUB_ENV"
           if [ "$THROWAWAY" = "true" ]; then
             P="$(openssl rand -hex 16)"
             keytool -genkeypair -keystore "$ARTH_KEYSTORE_PATH" -alias throwaway -keyalg RSA -keysize 2048 -validity 30 -storepass "$P" -keypass "$P" -dname "CN=Arth TEST ONLY" > /dev/null
