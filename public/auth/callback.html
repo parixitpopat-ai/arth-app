@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><meta name="robots" content="noindex">
+<title>Open Arth</title>
+<style>body{font-family:system-ui,sans-serif;margin:0;padding:24px;background:#fafafa;color:#222;max-width:420px;margin:auto}a.b{display:block;text-align:center;background:#16a34a;color:#fff;padding:14px;border-radius:12px;font-weight:700;text-decoration:none;margin:20px 0}</style>
+</head><body>
+<h1>Open Arth to finish signing in</h1>
+<p id="msg">If Arth is installed on this phone, tap the button. Your sign-in link is used by the app, not by this page.</p>
+<a class="b" id="open" href="#">Open Arth</a>
+<p>Arth not installed, or the button does nothing? Go back to your email, copy the 6-digit code and type it into Arth on the sign-in screen. Links and codes expire quickly and work once.</p>
+<script>
+// Only forwards the query string to the app's own package; this page never reads, stores or sends the code anywhere else.
+(function(){
+  var q=location.search||"";
+  document.getElementById("open").href="intent://arth-app.vercel.app/auth/callback"+q+"#Intent;scheme=https;package=com.parixitpopat.arth;end";
+  try{history.replaceState(null,"",location.pathname)}catch(e){}
+})();
+</script>
+</body></html>

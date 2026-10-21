@@ -1,0 +1,69 @@
+# Builds a SIGNED release APK + AAB for phone testing. NOT run automatically: GitHub -> Actions -> "Android signed release" -> Run workflow.
+# Needs four repository secrets (see docs/engineering/ANDROID-AUTH-HANDOFF-001.md): ARTH_KEYSTORE_BASE64, ARTH_KEYSTORE_PASSWORD,
+# ARTH_KEY_ALIAS, ARTH_KEY_PASSWORD. Without them the job stops before building. The signing certificate SHA-256 is printed in the
+# run summary: put THAT value in public/.well-known/assetlinks.json (this workflow never edits it). UNTESTED until first run.
+name: Android signed release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Require signing secrets
+        env:
+          KS: ${{ secrets.ARTH_KEYSTORE_BASE64 }}
+          KP: ${{ secrets.ARTH_KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.ARTH_KEY_ALIAS }}
+          KK: ${{ secrets.ARTH_KEY_PASSWORD }}
+        run: |
+          for v in KS KP KA KK; do [ -n "${!v}" ] || { echo "::error::Missing signing secret ($v). See docs/engineering/ANDROID-AUTH-HANDOFF-001.md"; exit 1; }; done
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/arth-release.jks"
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx cap sync android
+
+      - name: Build signed APK and AAB
+        working-directory: android
+        env:
+          ARTH_KEYSTORE_PATH: ${{ runner.temp }}/arth-release.jks
+          ARTH_KEYSTORE_PASSWORD: ${{ secrets.ARTH_KEYSTORE_PASSWORD }}
+          ARTH_KEY_ALIAS: ${{ secrets.ARTH_KEY_ALIAS }}
+          ARTH_KEY_PASSWORD: ${{ secrets.ARTH_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
+
+      - name: Report signing fingerprint (for assetlinks.json)
+        env:
+          KP: ${{ secrets.ARTH_KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.ARTH_KEY_ALIAS }}
+        run: |
+          {
+            echo "### Release signing certificate"
+            keytool -list -v -keystore "$RUNNER_TEMP/arth-release.jks" -alias "$KA" -storepass "$KP" | grep -E "SHA256:|SHA-256:" | head -1
+            APKS=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+            "$APKS" verify --print-certs android/app/build/outputs/apk/release/app-release.apk | grep -i "SHA-256" | head -1
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f "$RUNNER_TEMP/arth-release.jks"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arth-signed-release
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14

@@ -16,8 +16,21 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Release signing comes only from environment variables (set by the signed-release workflow from repository secrets).
+    // Without them the release build stays unsigned, exactly as before. No key material is stored in the repo.
+    signingConfigs {
+        release {
+            if (System.getenv("ARTH_KEYSTORE_PATH")) {
+                storeFile file(System.getenv("ARTH_KEYSTORE_PATH"))
+                storePassword System.getenv("ARTH_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ARTH_KEY_ALIAS")
+                keyPassword System.getenv("ARTH_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
+            if (System.getenv("ARTH_KEYSTORE_PATH")) { signingConfig signingConfigs.release }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

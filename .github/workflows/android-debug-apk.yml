@@ -60,6 +60,9 @@ jobs:
       # built-in defaults (src/cloudSync.js), exactly as in the Web build.
       - name: Build the Web app
         run: npm run build
+        env:
+          # Debug APKs also accept the debug-only custom-scheme sign-in link (see ANDROID-AUTH-HANDOFF-001.md).
+          VITE_AUTH_ALLOW_DEV_SCHEME: "1"
 
       - name: Copy the Web build into the Android project
         run: npx cap sync android

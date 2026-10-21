@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { classifyAuthCheck } from "./domain/identity/offlineResume";
 
 import { resolveCloudConfig } from "./cloudConfig";
+import { isNativeApp, authCallbackUrl } from "./authRedirect";
 
 const CLOUD = resolveCloudConfig({ url: import.meta.env.VITE_SUPABASE_URL, key: import.meta.env.VITE_SUPABASE_ANON_KEY, vercelEnv: import.meta.env.VITE_VERCEL_ENV, dev: import.meta.env.DEV, forceBypass: import.meta.env.VITE_FORCE_DEV_AUTH_BYPASS });
 const SUPABASE_URL = CLOUD.url;
@@ -14,7 +15,11 @@ const SUPABASE_ANON_KEY = CLOUD.key;
 // Set VITE_FORCE_DEV_AUTH_BYPASS=false in .env.local to opt back into real cloud-sync testing
 // locally without editing this file again.
 export const isCloudSyncConfigured = CLOUD.configured;
-export const supabase = isCloudSyncConfigured ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+// Installed Android app: PKCE, so an emailed link carries only a one-time code that is useless without the verifier kept in
+// this app; the app handles the returning link itself (nativeAuthLinks), so the URL is never auto-parsed. Web is unchanged.
+export const supabase = isCloudSyncConfigured
+  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, isNativeApp() ? { auth: { flowType: "pkce", detectSessionInUrl: false } } : undefined)
+  : null;
 
 // Like getCurrentCloudUser, but reports WHY there is no user: the server confirmed one ("verified"), the server could not
 // be reached ("unreachable": says nothing about the saved session), or there is no valid session ("signed-out").
@@ -77,7 +82,7 @@ export const requestEmailOtp = async (email, shouldCreateUser = true) => {
   // shouldCreateUser now explicit per call site (revised P1 decision: Sign
   // Up and Sign In are separate again — Sign In passes false so an
   // unrecognized email errors instead of silently creating an account).
-  const { data, error } = await supabase.auth.signInWithOtp({ email, options: { shouldCreateUser } });
+  const { data, error } = await supabase.auth.signInWithOtp({ email, options: isNativeApp() ? { shouldCreateUser, emailRedirectTo: authCallbackUrl() } : { shouldCreateUser } });
   if (error) throw error;
   return data;
 };

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 // Synthetic Supabase stand-in for sync-safety tests (SYNTHETIC DATA ONLY; listens on 127.0.0.1; never talks to the network).
 // Models only what src/cloudSync.js + src/sync/supabaseCasClient.js use:
 //   GET   /auth/v1/user                                                (restore a stored session)
@@ -32,6 +33,7 @@ export function startFakeSupabase({ port = 54399, users = {} } = {}) {
     res.end(body == null ? "" : JSON.stringify(body));
   };
   // Synthetic accounts for the sign-in flow (email -> user); the one-time code is always 123456. Tokens map to users.
+  const pkcePending = new Map(), authCodes = new Map();
   const accounts = new Map(); const refreshTokens = new Map(); let userSeq = 0;
   const tokenUser = {};
   // The harness seeds sessions with this refresh token; make it valid for the seeded users (a refresh can then succeed).
@@ -57,6 +59,12 @@ export function startFakeSupabase({ port = 54399, users = {} } = {}) {
 
     if (url.pathname.startsWith("/__ctl/")) {
       const op = url.pathname.slice(7);
+      if (op === "issueCode") {   // stands in for tapping the emailed link: mints the one-time code for the latest pending sign-in
+        const email = url.searchParams.get("email"), pend = pkcePending.get(email); if (!pend) return send(res, 404, { error: "no pending pkce sign-in" });
+        const code = "authcode-" + Math.random().toString(36).slice(2, 14) + Math.random().toString(36).slice(2, 8);
+        authCodes.set(code, { email, challenge: pend.challenge, used: false, expired: url.searchParams.get("expired") === "1" }); return send(res, 200, { code });
+      }
+      if (op === "authlog") return send(res, 200, authLog);
       if (op === "faults") { Object.assign(faults, JSON.parse(raw || "{}")); return send(res, 200, faults); }
       return send(res, 404, { error: "unknown control" });
     }
@@ -65,7 +73,8 @@ export function startFakeSupabase({ port = 54399, users = {} } = {}) {
 
     if (url.pathname === "/auth/v1/otp" && req.method === "POST") {
       const body = JSON.parse(raw || "{}"); const email = String(body.email || "").toLowerCase();
-      authLog.push({ op: "otp", email, create_user: body.create_user });
+      authLog.push({ op: "otp", email, create_user: body.create_user, pkce: Boolean(body.code_challenge), redirectTo: url.searchParams.get("redirect_to") || null });
+      if (body.code_challenge) pkcePending.set(email, { challenge: body.code_challenge, method: body.code_challenge_method });
       if (!accounts.has(email)) { if (body.create_user === false) return send(res, 422, { code: 422, error_code: "otp_disabled", msg: "Signups not allowed for otp" }); accounts.set(email, mkUser(email)); }
       return send(res, 200, {});
     }
@@ -74,6 +83,17 @@ export function startFakeSupabase({ port = 54399, users = {} } = {}) {
       authLog.push({ op: "verify", email, ok: body.token === "123456" });
       if (!accounts.has(email) || body.token !== "123456") return send(res, 403, { code: 403, error_code: "otp_expired", msg: "Token has expired or is invalid" });
       return send(res, 200, sessionFor(accounts.get(email)));
+    }
+    if (url.pathname === "/auth/v1/token" && req.method === "POST" && url.searchParams.get("grant_type") === "pkce") {
+      const body = JSON.parse(raw || "{}"); const ent = authCodes.get(body.auth_code);
+      const bad = (error_code, msg) => { authLog.push({ op: "pkce", ok: false, error_code }); return send(res, 400, { code: 400, error_code, msg }); };
+      if (!ent) return bad("flow_state_not_found", "invalid flow state, no valid flow state found");
+      if (ent.used) return bad("flow_state_not_found", "invalid flow state, no valid flow state found");
+      if (ent.expired) return bad("flow_state_expired", "flow state expired");
+      const verifier = String(body.code_verifier || "").split("/")[0];
+      if (crypto.createHash("sha256").update(verifier).digest("base64url") !== ent.challenge) return bad("bad_code_verifier", "code challenge does not match previously saved code verifier");
+      ent.used = true; authLog.push({ op: "pkce", ok: true, email: ent.email });
+      return send(res, 200, sessionFor(accounts.get(ent.email)));
     }
     if (url.pathname === "/auth/v1/token" && req.method === "POST") {
       const body = JSON.parse(raw || "{}"); const u = refreshTokens.get(body.refresh_token);
