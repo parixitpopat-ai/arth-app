@@ -108,6 +108,25 @@ const kept = page => page.evaluate(() => localStorage.getItem("arth_marker_local
   const e = (await authLog()).slice(before).find(x => x.op === "otp"); out.web = { pkce: e?.pkce, redirectTo: e?.redirectTo }; await p.getByPlaceholder("······").fill("123456"); await p.getByRole("button", { name: /Verify/ }).click(); await p.waitForTimeout(2200);
   out.web.typedCodeSignsIn = await session(p); await d.ctx.close(); }
 
+// 8. Real local data + a different cloud copy: signing in through the LINK must behave exactly like the typed code (conflict choice, nothing lost).
+{
+  const snap = txns => ({ ...L.syntheticSnapshot(txns, new Date().toISOString()), masterUserSetupComplete: true });
+  const LOCAL = L.syntheticTxns("L", 6), CLOUD = L.syntheticTxns("C", 9);
+  const accts = snap([]).accounts;
+  const run = async (via, email) => {
+    const u = fake.addAccount(email); fake.rows.set(u.id, { snapshot: JSON.parse(JSON.stringify(snap(CLOUD))), micros: BigInt(Date.now()) * 1000n });
+    const d = await phone("data-" + via, { seed: { arth_txns: LOCAL, arth_accounts: accts, arth_master_user_setup_complete: true } }); const p = d.page;
+    await requestCode(p, email, "signin");
+    if (via === "link") { const code = await issue(email); await p.evaluate(x => window.__openUrl(x), `${CB}?code=${code}`); }
+    else { await p.getByPlaceholder("······").fill("123456"); await p.getByRole("button", { name: /Verify/ }).click(); }
+    await p.waitForTimeout(3500);
+    const o = { choiceScreen: /Two versions of your data found/.test(await body(p)), localIds: (await L.localTxnIds(p)).sort().join(","), cloudIds: L.cloudTxnIds(fake, u.id).join(","), session: await session(p) };
+    await d.ctx.close(); return o;
+  };
+  const viaLink = await run("link", "data-link@example.invalid"), viaCode = await run("code", "data-code@example.invalid");
+  out.localData = { viaLink, sameAsTypedCode: JSON.stringify(viaLink) === JSON.stringify(viaCode), localUntouched: viaLink.localIds === L.syntheticTxns("L", 6).map(t => t.id).sort().join(",") };
+}
+
 out.productionRequests = blocked.length;
 const json = JSON.stringify(out, null, 1);
 console.log("ANDROID_AUTH " + JSON.stringify(out)); console.log("HASH " + crypto.createHash("md5").update(JSON.stringify(out)).digest("hex"));

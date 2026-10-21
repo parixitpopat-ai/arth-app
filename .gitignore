@@ -36,3 +36,9 @@ trx-*-bundle*
 trx-*-bundle*.zip
 
 .env*
+
+# Android signing material: never commit
+*.jks
+*.keystore
+*.p12
+arth-release-keystore/

@@ -1,6 +1,6 @@
 # ANDROID-AUTH-HANDOFF-001 — returning the sign-in link to the installed Android app
 
-Status: implemented on branch `wp-android-auth-handoff`, **local only: not pushed, not deployed.** No production setting has been changed.
+Status: implemented on branch `wp-android-auth-handoff`, **pushed for review only. Not merged to `main`, not deployed.** No production setting has been changed.
 
 ## 1. Root cause (from the code; not yet observed on a real phone)
 The app asked Supabase for an email code with no redirect target and no PKCE (`src/cloudSync.js`), and the Android project had no
@@ -37,11 +37,13 @@ tests `src/authCallback.test.js`, harness `tools/android-auth/run.mjs`, fake-bac
 4. **`public/.well-known/assetlinks.json`:** replace `REPLACE_WITH_RELEASE_SIGNING_SHA256_FINGERPRINT` with the SHA-256 printed by that run, then deploy the web app. Until then verified App Links will NOT work (the placeholder is intentional; no fingerprint was invented). If Play App Signing is used later, add Play's app-signing certificate fingerprint too.
 5. Deploy the web build (adds `/auth/callback`, `assetlinks.json`).
 
-## 5. Keystore and signed build (untested pipeline)
-Locally on your own computer (keep the file and passwords private; back them up, losing the key means no updates):
-`keytool -genkeypair -v -keystore arth-release.jks -alias arth -keyalg RSA -keysize 2048 -validity 10000`, then `base64 -w0 arth-release.jks` for the secret
-`ARTH_KEYSTORE_BASE64`; also set `ARTH_KEYSTORE_PASSWORD`, `ARTH_KEY_ALIAS`, `ARTH_KEY_PASSWORD`. The workflow runs tests, builds a signed APK and AAB,
-and prints the signing SHA-256 in the run summary. Not run here (no Android SDK / Google Maven in this environment).
+## 5. Keystore and signed build
+The production release key is created by YOU on your own computer with `tools/android-release/make-keystore.sh` (random password, private files, prints the four
+GitHub secrets and the certificate SHA-256). It is deliberately not generated in a cloud session or committed (`.gitignore` blocks `*.jks`, `*.keystore`, `*.p12`).
+Back it up offline: losing it means no updates under the same signature and a changed App Link fingerprint.
+`.github/workflows/android-signed-release.yml` has two modes: PRODUCTION (your secrets; fails unless `assetlinks.json` contains the built APK's real certificate SHA-256)
+and TEST (one-off throwaway key generated inside the run; runs automatically on pushes to this branch to prove the pipeline, package id and manifest; its fingerprint is meaningless for production).
+It verifies with `apksigner`/`aapt2`: package id, versionCode, certificate SHA-256, https+host+path+autoVerify in the built manifest, no custom scheme in release, and `assetlinks.json` package == APK package.
 
 ## 6. Verification performed here
 * Unit/static tests (`src/authCallback.test.js`, 8 tests) and the full suite pass; production build passes.
@@ -65,3 +67,38 @@ and prints the signing SHA-256 in the run summary. Not run here (no Android SDK 
 7. Uninstall the app → tap the link → browser page "Open Arth to finish signing in".
 8. Airplane mode: open the app → local data, PIN, offline startup unchanged.
 9. Signed in: tap an old link → "already signed in", account unchanged.
+
+## 9. Review findings (gate 3) and verified lint baseline
+* **Lint baseline:** the production commit `faaf01d` has exactly the same 5 problems (3 errors, 2 warnings: `App.jsx:3 __BUILD_TIME__`, `App.jsx:4205` and `19156` unused disable directives,
+  `PeriodSelector.jsx:16`, `vite.config.js:11 process`). This branch adds none. My earlier "baseline 4" was a miscount.
+* **Fixed during review:** the fallback page forwarded the whole query string into the `intent://` URL; it now forwards only a code matching `^[A-Za-z0-9-]{10,200}$` (or a short `error_code`).
+  The signed-release workflow now always deletes the keystore (`if: always()`), has no `pull_request` trigger, and fails if the APK, manifest and `assetlinks.json` disagree.
+* **Checked, no change needed:** redirect validation is exact-match on origin and path (no prefix/suffix/userinfo/http tricks; tested); PKCE verifier is supabase-js's own, kept in app storage and discarded on an attempt;
+  tokens in links are never read; an already-signed-in session blocks any link (no account switch); no console/log calls in the auth modules (tested); secrets only reach steps through `env`.
+* **Residual risks:** (a) `android:allowBackup="true"` is pre-existing; Android backup could copy app data including a stored session. Consider `false` or backup rules as a separate reviewed change. (b) The code appears in the browser address bar/history when the fallback page is shown (the page scrubs it with `replaceState`); it is useless without the app's verifier. (c) A bogus-but-well-formed code sent to the app burns the pending verifier, so the user must request a new code (nuisance only; requires delivering a link to the phone).
+* **PRE-EXISTING PRODUCTION HAZARD FOUND (not caused or fixed by this branch):** against the synthetic fake backend, the production build (`faaf01d`) uploads this device's local data over the account's
+  cloud copy while the "Two versions of your data found" screen is still waiting for a choice (account-switch harness, `B_HAS_DATA=1`: cloud B 5 -> 12 transactions). The unmerged branch `wp-sync-safety-2` leaves cloud B at 5 in the same test.
+  The link sign-in goes through exactly the same code path as the typed code (harness scenario 8: identical outcome both ways), so this branch neither introduces nor worsens it, but it makes signing in on a phone easier.
+  Evidence is from the fake backend: it shows what the app *sends*, not a confirmed loss on the real service. **Until the sync-safety package is reviewed and merged, do not phone-test with an account that holds real cloud data on a device that holds different local data. Use a fresh test account.**
+
+## 10. Supabase configuration inspection (gate 4)
+Not possible from this session: the Supabase tools available expose no auth-configuration read, and outbound access to the project and to `arth-app.vercel.app` is blocked by the session's egress policy
+(I did not work around it). Project ref used by the app: `iggsdctjjkdknmcnibwi` (the same single project the connector lists). So the current Site URL, Redirect URLs and email templates are **unknown to me**.
+Supabase docs confirm: redirect URLs are matched against an allow list in Authentication > URL Configuration; if `redirectTo` is not allowed the Site URL is used (the old behaviour, so an un-updated allow list fails safe);
+`{{ .Token }}` is the 6-digit code and `{{ .ConfirmationURL }}` the link; `{{ .RedirectTo }}` exists for templates.
+**Before any change, you capture the current state** (Authentication > URL Configuration: Site URL and every Redirect URL; Authentication > Emails: copy the full HTML of "Confirm sign up" and "Magic Link" into a private file). Then change only additively:
+add the one redirect URL; if a template lacks `{{ .Token }}`, add a line showing the code and leave everything else as is. Do not replace templates, do not add wildcards.
+
+## 11. Staged rollout
+0. (done) Branch pushed for review; TEST-key signed build produced by CI to prove the pipeline.
+1. You review the diff and this doc. Also decide on the sync-safety package (section 9) before wider use.
+2. You run `make-keystore.sh`, add the four secrets, run "Android signed release" (PRODUCTION mode). It will fail the fingerprint check on purpose; note the printed SHA-256.
+3. Change `assetlinks.json` to that SHA-256 on this branch (commit, review). Do not merge yet.
+4. Supabase (additive only, after you save the current state): add the redirect URL; add `{{ .Token }}` to the templates if absent.
+5. Merge to `main` (web deploy adds `/auth/callback` + `assetlinks.json`). Verify in a browser: `https://arth-app.vercel.app/.well-known/assetlinks.json` returns the JSON with `application/json`, and `/auth/callback` shows the fallback page.
+6. Install the signed APK on ONE phone with a fresh test account; run the checklist. Only then distribute further.
+## 12. Rollback
+* App: uninstall/stop distributing the APK (the web app and the typed-code path are unaffected).
+* Web: revert the merge commit on `main` (Vercel redeploys); `/auth/callback` and `assetlinks.json` disappear, links fall back to the Site URL like before.
+* Supabase: remove the added redirect URL; restore the saved template HTML. Because the allow list is additive and the Site URL is untouched, nothing else depends on it.
+* Key: never rotate casually; if the key is lost or leaked, create a new key, ship a new app version signed with it and update `assetlinks.json` (both fingerprints can be listed during transition).

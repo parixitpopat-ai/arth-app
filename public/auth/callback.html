@@ -9,9 +9,12 @@
 <a class="b" id="open" href="#">Open Arth</a>
 <p>Arth not installed, or the button does nothing? Go back to your email, copy the 6-digit code and type it into Arth on the sign-in screen. Links and codes expire quickly and work once.</p>
 <script>
-// Only forwards the query string to the app's own package; this page never reads, stores or sends the code anywhere else.
+// Forwards ONLY a well-formed one-time code (or a short error code) to the app's own package; never the raw query string.
+// This page never stores or sends the code anywhere else. The code is useless without the verifier held inside the app.
 (function(){
-  var q=location.search||"";
+  var p=new URLSearchParams(location.search), code=p.get("code"), err=p.get("error_code")||p.get("error"), q="";
+  if(code&&/^[A-Za-z0-9-]{10,200}$/.test(code)) q="?code="+encodeURIComponent(code);
+  else if(err&&/^[a-z_]{1,40}$/.test(err)) q="?error_code="+encodeURIComponent(err);
   document.getElementById("open").href="intent://arth-app.vercel.app/auth/callback"+q+"#Intent;scheme=https;package=com.parixitpopat.arth;end";
   try{history.replaceState(null,"",location.pathname)}catch(e){}
 })();

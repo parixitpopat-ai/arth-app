@@ -80,6 +80,13 @@ test("static: manifest, assetlinks, rewrite, native-only PKCE", () => {
   const a = JSON.parse(fs.readFileSync("public/.well-known/assetlinks.json", "utf8"));
   assert.equal(a[0].target.package_name, "com.parixitpopat.arth");
   assert.ok(JSON.parse(fs.readFileSync("vercel.json", "utf8")).rewrites.some(r => r.source === "/auth/callback"));
+  const cb = fs.readFileSync("public/auth/callback.html", "utf8");
+  assert.ok(!/location\.search\s*\|\|/.test(cb) && /\^\[A-Za-z0-9-\]\{10,200\}\$/.test(cb), "fallback page must forward only a validated code");
+  assert.match(cb, /intent:\/\/arth-app\.vercel\.app\/auth\/callback/);
+  const wf = fs.readFileSync(".github/workflows/android-signed-release.yml", "utf8");
+  assert.match(wf, /if: always\(\)[\s\S]*rm -f/);
+  assert.ok(!/pull_request/.test(wf), "signed release must never run on pull requests");
+  assert.match(fs.readFileSync(".gitignore", "utf8"), /\*\.jks/);
   const c = fs.readFileSync("src/cloudSync.js", "utf8");
   assert.match(c, /isNativeApp\(\) \? \{ auth: \{ flowType: "pkce", detectSessionInUrl: false \} \} : undefined/);
   assert.match(c, /isNativeApp\(\) \? \{ shouldCreateUser, emailRedirectTo: authCallbackUrl\(\) \} : \{ shouldCreateUser \}/);

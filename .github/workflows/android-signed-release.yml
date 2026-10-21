@@ -1,11 +1,24 @@
-# Builds a SIGNED release APK + AAB for phone testing. NOT run automatically: GitHub -> Actions -> "Android signed release" -> Run workflow.
-# Needs four repository secrets (see docs/engineering/ANDROID-AUTH-HANDOFF-001.md): ARTH_KEYSTORE_BASE64, ARTH_KEYSTORE_PASSWORD,
-# ARTH_KEY_ALIAS, ARTH_KEY_PASSWORD. Without them the job stops before building. The signing certificate SHA-256 is printed in the
-# run summary: put THAT value in public/.well-known/assetlinks.json (this workflow never edits it). UNTESTED until first run.
+# Builds a SIGNED release APK + AAB and checks that the built app matches public/.well-known/assetlinks.json.
+#
+# Two modes:
+#  * PRODUCTION key  (manual run, secrets present): signs with your keystore from repository secrets ARTH_KEYSTORE_BASE64,
+#    ARTH_KEYSTORE_PASSWORD, ARTH_KEY_ALIAS, ARTH_KEY_PASSWORD (create it with tools/android-release/make-keystore.sh on your computer).
+#    The consistency check FAILS unless assetlinks.json contains the built app's real certificate SHA-256.
+#  * THROWAWAY key   (push to wp-android-auth-handoff, or manual run with throwaway=true): generates a one-off key inside the run,
+#    proves the signing pipeline and manifest/package checks, and is labelled TEST. Its fingerprint is meaningless for production.
+# Secrets are only passed through env, never echoed; the keystore file is deleted at the end of the job.
 name: Android signed release
 
 on:
   workflow_dispatch:
+    inputs:
+      throwaway:
+        description: "Sign with a one-off throwaway key (pipeline test only)"
+        type: boolean
+        default: false
+  push:
+    branches:
+      - wp-android-auth-handoff
 
 permissions:
   contents: read
@@ -14,6 +27,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    env:
+      ARTH_KEYSTORE_PATH: ${{ runner.temp }}/arth-release.jks
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,15 +37,27 @@ jobs:
         with: { distribution: temurin, java-version: 21 }
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Require signing secrets
+      - name: Prepare signing key
+        id: key
         env:
           KS: ${{ secrets.ARTH_KEYSTORE_BASE64 }}
           KP: ${{ secrets.ARTH_KEYSTORE_PASSWORD }}
           KA: ${{ secrets.ARTH_KEY_ALIAS }}
           KK: ${{ secrets.ARTH_KEY_PASSWORD }}
+          THROWAWAY: ${{ github.event_name == 'push' || inputs.throwaway }}
         run: |
-          for v in KS KP KA KK; do [ -n "${!v}" ] || { echo "::error::Missing signing secret ($v). See docs/engineering/ANDROID-AUTH-HANDOFF-001.md"; exit 1; }; done
-          echo "$KS" | base64 -d > "$RUNNER_TEMP/arth-release.jks"
+          if [ "$THROWAWAY" = "true" ]; then
+            P="$(openssl rand -hex 16)"
+            keytool -genkeypair -keystore "$ARTH_KEYSTORE_PATH" -alias throwaway -keyalg RSA -keysize 2048 -validity 30 -storepass "$P" -keypass "$P" -dname "CN=Arth TEST ONLY" > /dev/null
+            echo "::add-mask::$P"
+            echo "ARTH_KEYSTORE_PASSWORD=$P" >> "$GITHUB_ENV"; echo "ARTH_KEY_PASSWORD=$P" >> "$GITHUB_ENV"; echo "ARTH_KEY_ALIAS=throwaway" >> "$GITHUB_ENV"
+            echo "mode=TEST" >> "$GITHUB_OUTPUT"
+          else
+            for v in KS KP KA KK; do [ -n "${!v}" ] || { echo "::error::Missing signing secret ($v). Run tools/android-release/make-keystore.sh locally and add the four secrets."; exit 1; }; done
+            echo "$KS" | base64 -d > "$ARTH_KEYSTORE_PATH"
+            echo "ARTH_KEYSTORE_PASSWORD=$KP" >> "$GITHUB_ENV"; echo "ARTH_KEY_PASSWORD=$KK" >> "$GITHUB_ENV"; echo "ARTH_KEY_ALIAS=$KA" >> "$GITHUB_ENV"
+            echo "mode=PRODUCTION" >> "$GITHUB_OUTPUT"
+          fi
 
       - run: npm ci
       - run: npm test
@@ -39,31 +66,52 @@ jobs:
 
       - name: Build signed APK and AAB
         working-directory: android
-        env:
-          ARTH_KEYSTORE_PATH: ${{ runner.temp }}/arth-release.jks
-          ARTH_KEYSTORE_PASSWORD: ${{ secrets.ARTH_KEYSTORE_PASSWORD }}
-          ARTH_KEY_ALIAS: ${{ secrets.ARTH_KEY_ALIAS }}
-          ARTH_KEY_PASSWORD: ${{ secrets.ARTH_KEY_PASSWORD }}
         run: ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
 
-      - name: Report signing fingerprint (for assetlinks.json)
+      - name: Verify signature, package and App Link consistency
         env:
-          KP: ${{ secrets.ARTH_KEYSTORE_PASSWORD }}
-          KA: ${{ secrets.ARTH_KEY_ALIAS }}
+          MODE: ${{ steps.key.outputs.mode }}
         run: |
+          set -euo pipefail
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/certs.txt"
+          FP=$(grep -m1 "certificate SHA-256 digest" "$RUNNER_TEMP/certs.txt" | awk '{print $NF}')
+          PKG=$("$BT/aapt2" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+          VC=$("$BT/aapt2" dump badging "$APK" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")
+          "$BT/aapt2" dump xmltree --file AndroidManifest.xml "$APK" > "$RUNNER_TEMP/manifest.txt"
+          fail=0; chk(){ if grep -q "$2" "$RUNNER_TEMP/manifest.txt"; then echo "ok   manifest: $1"; else echo "FAIL manifest: $1"; fail=1; fi; }
+          chk "https scheme" 'scheme.*"https"'; chk "host arth-app.vercel.app" 'host.*"arth-app.vercel.app"'; chk "path /auth/callback" 'path.*"/auth/callback"'
+          chk "autoVerify" 'autoVerify'
+          if grep -q 'scheme.*"com.parixitpopat.arth"' "$RUNNER_TEMP/manifest.txt"; then echo "FAIL manifest: debug custom scheme present in release"; fail=1; fi
+          AL=public/.well-known/assetlinks.json
+          ALPKG=$(python3 -c "import json;print(json.load(open('$AL'))[0]['target']['package_name'])")
+          [ "$ALPKG" = "$PKG" ] && echo "ok   assetlinks package = $PKG" || { echo "FAIL assetlinks package $ALPKG != APK $PKG"; fail=1; }
+          if python3 - "$AL" "$FP" <<'PY'
+          import json,sys
+          fps=[f.replace(':','').lower() for f in json.load(open(sys.argv[1]))[0]['target']['sha256_cert_fingerprints']]
+          sys.exit(0 if sys.argv[2].replace(':','').lower() in fps else 1)
+          PY
+          then echo "ok   assetlinks contains the APK certificate fingerprint"
+          else
+            if [ "$MODE" = "PRODUCTION" ]; then echo "FAIL assetlinks.json does not contain this APK's fingerprint: $FP"; fail=1; else echo "note (TEST key) assetlinks does not contain the throwaway fingerprint, as expected"; fi
+          fi
           {
-            echo "### Release signing certificate"
-            keytool -list -v -keystore "$RUNNER_TEMP/arth-release.jks" -alias "$KA" -storepass "$KP" | grep -E "SHA256:|SHA-256:" | head -1
-            APKS=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-            "$APKS" verify --print-certs android/app/build/outputs/apk/release/app-release.apk | grep -i "SHA-256" | head -1
+            echo "### Signed release ($MODE key)"; echo "- package: \`$PKG\`  versionCode: \`$VC\`"; echo "- signing certificate SHA-256: \`$FP\`"
+            [ "$MODE" = "TEST" ] && echo "- **TEST KEY: do not install for real use and do not put this fingerprint in assetlinks.json**"
+            echo "- AAB: $(ls android/app/build/outputs/bundle/release/*.aab)"
           } >> "$GITHUB_STEP_SUMMARY"
-          rm -f "$RUNNER_TEMP/arth-release.jks"
+          exit $fail
+
+      - name: Delete keystore
+        if: always()
+        run: rm -f "$ARTH_KEYSTORE_PATH"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: arth-signed-release
+          name: arth-${{ steps.key.outputs.mode }}-signed-release
           path: |
             android/app/build/outputs/apk/release/app-release.apk
             android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 7
