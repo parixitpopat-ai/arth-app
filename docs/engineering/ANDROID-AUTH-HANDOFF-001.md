@@ -102,3 +102,10 @@ add the one redirect URL; if a template lacks `{{ .Token }}`, add a line showing
 * Web: revert the merge commit on `main` (Vercel redeploys); `/auth/callback` and `assetlinks.json` disappear, links fall back to the Site URL like before.
 * Supabase: remove the added redirect URL; restore the saved template HTML. Because the allow list is additive and the Site URL is untouched, nothing else depends on it.
 * Key: never rotate casually; if the key is lost or leaked, create a new key, ship a new app version signed with it and update `assetlinks.json` (both fingerprints can be listed during transition).
+
+## 13. CI signed-build result (TEST key)
+GitHub Actions run 39693494568 on commit `8499fa3` (workflow "Android signed release", TEST mode): npm ci, full test suite, web build, `cap sync`, `assembleRelease bundleRelease`, signature/package/manifest/assetlinks
+consistency step, keystore deletion and artifact upload (`arth-TEST-signed-release`, ~6.9 MB) all succeeded. The consistency step exits non-zero on any mismatch, so success means: APK signature verifies, APK package id equals the package in `assetlinks.json`,
+the built manifest contains https + `arth-app.vercel.app` + `/auth/callback` + autoVerify, and the release manifest has no custom scheme. This was the first real Android build of this project; the first attempt (925aacd) failed before any job started because of a workflow syntax error (`runner` context in job `env`), fixed in 8499fa3.
+Not visible to me: the log text and artifact download are served from hosts this session's GitHub proxy does not contact, so the exact printed values (versionCode, throwaway fingerprint) were not read by me. The throwaway fingerprint is irrelevant for production.
+The PRODUCTION fingerprint does not exist yet: it needs your keystore (section 5).
