@@ -366,6 +366,15 @@ async function finishSignIn(page, { name = "Synthetic Tester", newPin = true } =
   await L.completeProfile(page, name);
   await L.pin(page, newPin); await page.waitForTimeout(2000);
 }
+// SYNC-SAFETY-008: a phone that already holds data with no recorded owner is asked, on an interactive sign-in, what to do with it
+// before anything is sent. These scenarios model such a phone ("an existing install"), so they answer "Add it to this account".
+async function signInAddingExisting(page, email) {
+  const r = await L.signIn(page, email, { mode: "signin" });
+  const asked = Boolean(await L.waitFor(() => page.getByTestId("ownership-screen").count(), { timeout: 8000 }));
+  const before = asked ? JSON.stringify(cloud()) : null;
+  if (asked) await page.getByTestId("ownership-transfer").click();
+  return { r, asked, cloudBeforeAnswer: before };
+}
 const EMAIL = "sync-test-a@example.invalid";
 const NTX = L.syntheticTxns("N", 5);
 {
@@ -382,18 +391,18 @@ const NTX = L.syntheticTxns("N", 5);
 {
   await resetWorld(); fake.resetAccounts(); fake.addAccount(EMAIL);
   const N = await device("N", { signedIn: false, seedLocal: { arth_txns: BASE, arth_accounts: accounts } }); ctxs.push(N.ctx);
-  await L.signIn(N.page, EMAIL, { mode: "signin" }); await finishSignIn(N.page);
+  const q = await signInAddingExisting(N.page, EMAIL); await finishSignIn(N.page);
   const ok = await L.waitFor(() => JSON.stringify(cloud()) === JSON.stringify(baseIds), { timeout: 20000 });
   const sawConflict = await N.page.getByText("Two versions of your data found").count();
-  record("SI2", "sign-in: an existing install with no sync history uploads its data when the account is empty", Boolean(ok) && sawConflict === 0 && JSON.stringify(await ids(N.page)) === JSON.stringify(baseIds), { cloudHoldsAllLocalTransactions: Boolean(ok), noConflictScreen: sawConflict === 0, localUnchanged: JSON.stringify(await ids(N.page)) === JSON.stringify(baseIds) });
+  record("SI2", "sign-in: an existing install with no recorded owner is asked first (nothing uploaded before the answer); 'Add it to this account' then uploads its data to the empty account", q.asked && q.cloudBeforeAnswer === "[]" && Boolean(ok) && sawConflict === 0 && JSON.stringify(await ids(N.page)) === JSON.stringify(baseIds), { asked: q.asked, cloudBeforeAnswer: q.cloudBeforeAnswer, cloudHoldsAllLocalTransactions: Boolean(ok), noConflictScreen: sawConflict === 0, localUnchanged: JSON.stringify(await ids(N.page)) === JSON.stringify(baseIds) });
 }
 for (const choice of ["keep-cloud", "keep-local"]) {
   await resetWorld(); fake.resetAccounts(); fake.addAccount(EMAIL);
   const X = await device("X", { signedIn: false, seedLocal: { arth_txns: BASE, arth_accounts: accounts } }); ctxs.push(X.ctx);
-  await L.signIn(X.page, EMAIL, { mode: "signin" }); await finishSignIn(X.page);
+  await signInAddingExisting(X.page, EMAIL); await finishSignIn(X.page);
   await L.waitFor(() => JSON.stringify(cloud()) === JSON.stringify(baseIds), { timeout: 20000 });
   const N = await device("N", { signedIn: false, seedLocal: { arth_txns: NTX, arth_accounts: accounts } }); ctxs.push(N.ctx);
-  await L.signIn(N.page, EMAIL, { mode: "signin" });
+  await signInAddingExisting(N.page, EMAIL);
   const screen = await L.waitFor(() => N.page.getByText("Two versions of your data found").count(), { timeout: 15000 });
   const nIds = NTX.map(t => t.id).sort();
   await N.page.getByRole("button", { name: choice === "keep-cloud" ? /Use the cloud version/ : /Keep this device's data/ }).click();
@@ -409,7 +418,7 @@ for (const choice of ["keep-cloud", "keep-local"]) {
 {
   await resetWorld(); fake.resetAccounts(); fake.addAccount(EMAIL);
   const N = await device("N", { signedIn: false, seedLocal: { arth_txns: BASE, arth_accounts: accounts } }); ctxs.push(N.ctx);
-  await L.signIn(N.page, EMAIL, { mode: "signin" }); await finishSignIn(N.page);
+  await signInAddingExisting(N.page, EMAIL); await finishSignIn(N.page);
   await L.waitFor(synced(N.page), { timeout: 20000 });
   const before = await L.syncState(N.page);
   await L.openCloudSettings(N.page); await N.page.getByText("Sign Out", { exact: true }).click(); await N.page.waitForTimeout(1500);

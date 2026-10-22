@@ -1,5 +1,7 @@
 # SYNC-SAFETY-007 — sync-safety work rebased onto production `main`
 
+> **Update:** risk R2 below (account isolation across sign-out) is addressed by the guard in `SYNC-SAFETY-008-account-isolation.md`; the "empty cloud" account-switch row and the D1/D2 notes are read together with that document. Verification numbers in §4 are from the integration commit; the final numbers are in SYNC-SAFETY-008 §7.
+
 Branch `wp-sync-safety-3`, built on `origin/main` = `faaf01d` (the deployed production commit). **Local candidate for review: not pushed to `main`, not merged, not deployed, no production setting changed.**
 Supersedes the branch `wp-sync-safety-2` (merge base `5fc65e7`, 15 commits behind production, no offline resume). The Android auth branch is NOT part of this work.
 
@@ -54,7 +56,7 @@ Final code: `wp-sync-safety-3` head (see the commit hash in the report). Results
 
 ## 6. Unresolved risks (not verified; do not read synthetic results as proof)
 * **R1 — real Supabase compare-and-swap and RLS are unverified.** PostgREST's answer to a zero-row UPDATE (assumed `[]`, no error), the real `arth_snapshots.updated_at` column type (a `timestamp(0)` would make distinct writes share a token), any trigger that rewrites `updated_at`, and the UPDATE/INSERT row-level-security policies are unknown to me. This session cannot read them (no auth-config tool; outbound access to the project is blocked). **Needs your approval to run read-only structure queries** (column types, triggers, policies; no row data) on the production project, or for you to run them. Until then the engine's conditional writes are verified only on a local PostgreSQL and a fake server.
-* **R2 — account isolation across sign-out (pre-existing).** Signing out keeps the device's data. Signing in as a different account whose cloud is empty uploads the previous account's data into it without a question (identical on production). Different data in the new account now asks first. A guard (remember which account the device's data belongs to; ask when it differs) is a separate decision.
+* **R2 — account isolation across sign-out (pre-existing): RESOLVED in `SYNC-SAFETY-008`.** The phone's data now has a recorded owner; a different account signing in is asked, and nothing is uploaded or replaced until the person chooses (with a verified backup first).
 * **R3 — two real devices.** Two-device behaviour is modelled (seeded randomised model, two browser contexts on one fake server). It has not been run on two physical devices against the real service.
 * **R4 — mobile data-transfer overhead.** Every successful write is followed by a read of the whole cloud copy (reconciliation), roughly doubling transfer per write; measured only on the synthetic benchmark (`tools/sync-sim/perf.mjs`, earlier record `results/perf-2026-10-16.json`, not re-run here). Large images inside transactions make this matter on mobile data. A relaxed verification interval exists (`fullVerifyEveryMs`) at the price of a longer detection window. Needs a real-device measurement.
 * **R5 — real-device verification** of the whole flow (Android app and phone browsers, flaky networks, the PIN screen interplay, storage-full behaviour) has not been done.
