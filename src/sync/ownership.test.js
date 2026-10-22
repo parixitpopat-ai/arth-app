@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { createClock, createFakeCloud, createDevice, createMemoryStorage, lostIds } from "./testing/sim.js";
+import { createSyncEngine } from "./syncEngine.js";
 import { classifyOwnership, readOwner, writeOwner, startFreshSnapshot, OWNER_KEY } from "./deviceOwner.js";
 import { backedUpTxnIds, readSafetyBackups } from "./safetyBackup.js";
 import { txnIdsOf, digestSnapshot } from "./digest.js";
@@ -244,6 +245,187 @@ test("decision table: a write without a question requires a recorded common poin
 test("a common point recorded for another account is not a common point for this one (history is per account)", () => {
   const st = createMemoryStorage(); saveSyncState(st, { ...loadSyncState(st, A), baseToken: "t1", baseDigest: "D" });
   assert.equal(loadSyncState(st, A).baseToken, "t1"); assert.equal(loadSyncState(st, B).baseToken, null);
+});
+
+// ═══ Decisions D1–D5 (review round): exact behaviours ═══════════════════════════════════════════════════════════════════════════
+const uploads = w => w.cloud.log.filter(l => l.outcome === "applied").length;
+const dropWrites = (storage, key) => { const set = storage.setItem.bind(storage); storage.setItem = (k, v) => { if (k === key) return; set(k, v); }; return () => { storage.setItem = set; }; };   // a write that silently does not land
+
+test("D1: a common point needs BOTH a token and the content it stood for; half a history is no history and asks instead of writing", async () => {
+  const base = { networkOk: true, localMeaningful: true, localDigest: "L" };
+  const cloud = { token: "t1", digest: "C", meaningful: true };
+  assert.equal(decideSync({ ...base, hasBase: true, baseToken: "t1", baseDigest: undefined, cloud }).action, SYNC_ACTIONS.CONFLICT);
+  assert.equal(decideSync({ ...base, hasBase: true, baseToken: "t1", baseDigest: "", cloud }).action, SYNC_ACTIONS.CONFLICT);
+  assert.equal(decideSync({ ...base, hasBase: true, baseToken: "", baseDigest: "B", cloud }).action, SYNC_ACTIONS.CONFLICT);
+  assert.equal(decideSync({ ...base, hasBase: true, baseToken: "t1", baseDigest: "B", cloud }).action, SYNC_ACTIONS.PUSH, "the full history still allows the unchanged-cloud write");
+  // in the engine: damage the stored history, then edit and reconnect: the cloud must not be written
+  const w = world({ phoneIds: ["a1"], clouds: { [A]: ["a1", "other"] } });
+  const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(500);
+  const st = JSON.parse(w.storage.getItem("arth_sync_state")); delete st.baseDigest; w.storage.setItem("arth_sync_state", JSON.stringify(st));
+  const before = uploads(w); w.cloud.cloud = null;
+  await a.reload(); a.addTxn("edit"); await a.settle(5000);
+  assert.equal(uploads(w), before, "nothing was written on the strength of a half history");
+  assert.equal(a.status().kind, "conflict");
+});
+
+test("D1: reconnect after offline edits -> cloud UNCHANGED is written once with no question; cloud CHANGED asks and sends nothing", async () => {
+  for (const cloudMoved of [false, true]) {
+    const w = world({ phoneIds: ["a1"], clouds: { [A]: ["a1"] } });
+    const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(500);
+    w.cloud.faults.offlineDevices.add(a.name); const mine = a.addTxn("offline"); await a.settle(2000);
+    if (cloudMoved) w.cloud.seed(A, snapWith(["a1", "from-another-device"]), 0);
+    const before = uploads(w); w.cloud.faults.offlineDevices.delete(a.name);
+    await a.reload(); await a.settle(20000);
+    if (cloudMoved) { assert.equal(a.status().kind, "conflict"); assert.equal(uploads(w), before, "nothing sent while the two copies are undecided"); assert.ok(a.ids().includes(mine)); }
+    else { assert.equal(a.status().kind === "synced" || a.status().kind === "sent", true); assert.equal(uploads(w), before + 1, "exactly one conditional write"); assert.ok(w.rowIds(A).includes(mine)); }
+  }
+});
+
+test("D2: transferred data never replaces an existing cloud row, even one with no user data; with no row it is created", async () => {
+  const profileOnly = { version: 1, savedAt: "2026-10-01T00:00:00.000Z", txns: [], accounts: [{ id: "syn_bank", name: "SYN Bank", type: "bank", balance: 5 }], bills: [], people: [], planNudges: {}, monthOverrides: {}, masterUserSetupComplete: true };
+  const w = world({ phoneIds: ["a1", "a2"], clouds: { [A]: ["a1", "a2"] } }); w.cloud.seed(B, profileOnly, 0);
+  const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(200); a.signOut();
+  const b = w.signIn(B); await b.start(); await b.engine.resolveOwnership("transfer");
+  const rowBefore = JSON.stringify(w.cloud.rows.get(B)); const out = await b.engine.boot(); await b.settle(3000);
+  assert.equal(out.outcome, "conflict"); assert.equal(JSON.stringify(w.cloud.rows.get(B)), rowBefore, "B's existing row is untouched until the person chooses");
+  assert.deepEqual(sorted(b.ids()), ["a1", "a2"]);
+});
+
+test("D3: signing out with unsynced edits -> reported from local content, a verified backup is taken, NOTHING is sent and nothing is removed", async () => {
+  const w = world({ phoneIds: ["a1"], clouds: { [A]: ["a1"] } });
+  const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(500);
+  const clean = await a.engine.prepareSignOut(); assert.equal(clean.unsynced, false); assert.equal(clean.backup, undefined);
+  assert.equal(readSafetyBackups(w.storage).some(b => b.reason === "before-sign-out"), false, "no backup when nothing is unsynced");
+  w.cloud.faults.rejectNext = 99; const id = a.addTxn("unsent"); await a.settle(3000);
+  const before = uploads(w);
+  const info = await a.engine.prepareSignOut();
+  assert.equal(info.unsynced, true); assert.equal(info.backup.verified, true);
+  const bk = readSafetyBackups(w.storage).find(b => b.reason === "before-sign-out");
+  assert.ok(bk.pinned && txnIdsOf(bk.snapshot).includes(id), "the unsent change is in the verified pinned backup");
+  assert.deepEqual((await a.engine.prepareSignOut()).backup.id, info.backup.id, "asking again reuses the same backup");
+  a.signOut(); await a.settle(900000);
+  assert.equal(uploads(w), before, "sign-out sent nothing"); assert.ok(a.ids().includes(id), "and removed nothing"); assert.ok(!w.rowIds(A).includes(id));
+});
+
+test("D3: a phone that never completed a sync for the account, and a pending conflict, both count as unsynced", async () => {
+  { const w = world({ phoneIds: ["x1"], clouds: {} }); const a = w.signIn(A, { fresh: false }); w.cloud.faults.offlineDevices.add(a.name); await a.start(); await a.settle(200);
+    const i = await a.engine.prepareSignOut(); assert.equal(i.unsynced, true); assert.equal(i.neverSynced, true); }
+  { const w = world({ phoneIds: ["a1"], clouds: { [A]: ["a1"] } }); const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(300);
+    w.cloud.seed(A, snapWith(["a1", "c1"]), 0); a.addTxn("l"); await a.settle(100); await a.engine.syncNow(); await a.settle(300);
+    assert.equal(a.status().kind, "conflict"); const i = await a.engine.prepareSignOut(); assert.equal(i.unsynced, true); assert.equal(i.conflict, true); }
+});
+
+test("D3: offline sign-out check works with no connection (it needs none) and still takes the backup", async () => {
+  const w = world({ phoneIds: ["a1"], clouds: { [A]: ["a1"] } });
+  const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(500);
+  w.cloud.faults.offlineDevices.add(a.name); const id = a.addTxn("offline-edit"); await a.settle(2000);
+  const i = await a.engine.prepareSignOut();
+  assert.equal(i.unsynced, true); assert.equal(i.backup.verified, true);
+  assert.ok(backedUpTxnIds(w.storage).has(id));
+});
+
+test("D3: interrupted backups are reported honestly: a failed write and a write that silently does not land are both 'not verified'; nothing is cleared", async () => {
+  for (const mode of ["throws", "silent"]) {
+    const w = world({ phoneIds: ["a1"], clouds: { [A]: ["a1"] } });
+    const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(500);
+    w.cloud.faults.rejectNext = 99; const id = a.addTxn("unsent"); await a.settle(2000);
+    if (mode === "throws") w.storage.failKeys.add("arth_sync_safety_backups"); else dropWrites(w.storage, "arth_sync_safety_backups");
+    const i = await a.engine.prepareSignOut();
+    assert.equal(i.unsynced, true, mode); assert.equal(i.backup.verified, false, mode); assert.ok(i.backup.error, mode);
+    assert.ok(a.ids().includes(id), `${mode}: the phone still holds the change`);
+    assert.equal(readSafetyBackups(w.storage).some(b => b.reason === "before-sign-out"), false, `${mode}: no unverified backup is claimed`);
+  }
+});
+
+test("D3: if the check itself cannot run the answer is 'unknown' (the app warns), never 'nothing to worry about'", async () => {
+  const eng = createSyncEngine({ userId: "u", deviceId: "d", cloud: { read: async () => null, insert: async () => ({}), swap: async () => ({}) }, storage: createMemoryStorage(), getSnapshot: () => { throw new Error("cannot read the app data"); }, applySnapshot: async () => {}, readLocalAfterApply: async () => ({}), genId: () => "g" });
+  const i = await eng.prepareSignOut(); assert.equal(i.unsynced, null); assert.ok(i.error);
+});
+
+test("D3 + restart: sign out with unsynced edits, close the app, reopen: the edit is still on the phone; the same account signing back in sends it once; another account is told about it", async () => {
+  for (const next of ["same", "other"]) {
+    const w = world({ phoneIds: ["a1"], clouds: { [A]: ["a1"], [B]: ["b1"] } });
+    const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(500);
+    w.cloud.faults.rejectNext = 99; const id = a.addTxn("unsent"); await a.settle(2000);
+    await a.engine.prepareSignOut(); a.signOut(); w.cloud.faults.rejectNext = 0;
+    const before = uploads(w);
+    if (next === "same") {
+      const a2 = w.signIn(A); const out = await a2.start(); await a2.settle(5000);
+      assert.notEqual(out.outcome, "ownership"); assert.ok(w.rowIds(A).includes(id)); assert.equal(uploads(w), before + 1, "sent exactly once, after the account signed back in");
+    } else {
+      const b = w.signIn(B); const out = await b.start();
+      assert.equal(out.outcome, "ownership"); assert.equal(out.ownership.unsynced, true); assert.equal(uploads(w), before);
+      await b.engine.resolveOwnership("start-fresh"); assert.ok(!b.ids().includes(id)); assert.ok(backedUpTxnIds(w.storage).has(id), "the unsent edit survives in the pinned backup");
+      assert.deepEqual(lostIds(w.devs, w.cloud), []);
+    }
+  }
+});
+
+test("D4 failed transfers: backup not verifiable / owner record unwritable / upload rejected / app closed before the first sync: nothing uploaded early, nothing removed, nothing duplicated", async () => {
+  const setup = async () => { const w = world({ phoneIds: ["a1", "a2"], clouds: { [A]: ["a1", "a2"] } }); const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(200); a.signOut(); const b = w.signIn(B); await b.start(); return { w, b }; };
+  { // (1) the backup silently does not land
+    const { w, b } = await setup(); const undo = dropWrites(w.storage, "arth_sync_safety_backups");
+    const r = await b.engine.resolveOwnership("transfer"); assert.equal(r.outcome, "blocked-backup");
+    assert.equal(readOwner(w.storage).userId, A); assert.equal(w.cloud.rows.has(B), false); assert.deepEqual(sorted(b.ids()), ["a1", "a2"]); undo();
+  }
+  { // (2) the owner record cannot be written: reported, nothing uploaded; fixing storage lets it complete
+    const { w, b } = await setup(); w.storage.failKeys.add(OWNER_KEY);
+    const r = await b.engine.resolveOwnership("transfer"); assert.equal(r.outcome, "failed"); assert.match(r.error, /Nothing was uploaded/);
+    assert.equal(readOwner(w.storage).userId, A); assert.equal(w.cloud.rows.has(B), false); assert.deepEqual(sorted(b.ids()), ["a1", "a2"]);
+    w.storage.failKeys.delete(OWNER_KEY); const r2 = await b.engine.resolveOwnership("transfer"); assert.equal(r2.outcome, "transferred");
+  }
+  { // (3) the upload is rejected after the transfer: data stays, retried, lands once
+    const { w, b } = await setup(); await b.engine.resolveOwnership("transfer"); w.cloud.faults.rejectNext = 2; const u0 = uploads(w);
+    await b.engine.boot(); await b.settle(1000); assert.equal(w.cloud.rows.has(B), false); assert.deepEqual(sorted(b.ids()), ["a1", "a2"]);
+    await b.settle(60000); assert.deepEqual(w.rowIds(B), ["a1", "a2"]); assert.equal(uploads(w), u0 + 1, "retried until it landed, and landed exactly once");
+  }
+  { // (4) the app is closed right after the transfer, before any sync: on reopening the data is still there and still goes up exactly once
+    const { w, b } = await setup(); await b.engine.resolveOwnership("transfer"); b.signOut();
+    const b2 = w.signIn(B, { fresh: false }); const out = await b2.start(); await b2.settle(3000);
+    assert.notEqual(out.outcome, "ownership"); assert.deepEqual(w.rowIds(B), ["a1", "a2"]);
+  }
+});
+
+test("D4 start fresh: nothing is cleared until the backup is verified; an interrupted apply or an unwritable owner record loses nothing and uploads nothing", async () => {
+  { // order: at the moment the phone's data is replaced the verified pinned backup already exists
+    const w = world({ phoneIds: ["a1", "a2"], clouds: { [A]: ["a1", "a2"], [B]: ["b1"] } });
+    const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(200); a.signOut();
+    let backupSeenAtClear = null;
+    const b = createDevice({ name: "phone-B-x", userId: B, userEmail: "b@example.invalid", continuedSession: false, clock: w.clock, cloud: w.cloud, storage: w.storage, applyTransform: d => { backupSeenAtClear = readSafetyBackups(w.storage).some(x => x.reason === "other-account-device-copy" && x.pinned && txnIdsOf(x.snapshot).includes("a1")); return d; } });
+    await b.start(); await b.engine.resolveOwnership("start-fresh");
+    assert.equal(backupSeenAtClear, true, "the verified backup existed before the phone's data was replaced");
+  }
+  { // an apply that dies half way
+    const w = world({ phoneIds: ["a1", "a2"], clouds: { [A]: ["a1", "a2"], [B]: ["b1"] } });
+    const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(200); a.signOut();
+    const b = createDevice({ name: "phone-B-y", userId: B, userEmail: "b@example.invalid", continuedSession: false, clock: w.clock, cloud: w.cloud, storage: w.storage, applyTransform: () => { throw new Error("apply interrupted"); } });
+    await b.start(); const before = uploads(w); const r = await b.engine.resolveOwnership("start-fresh");
+    assert.equal(r.outcome, "failed"); assert.equal(uploads(w), before); assert.equal(readOwner(w.storage).userId, A, "ownership not claimed");
+    assert.ok(backedUpTxnIds(w.storage).has("a1") && backedUpTxnIds(w.storage).has("a2"), "A's data is in the verified backup");
+    assert.deepEqual(w.rowIds(A), ["a1", "a2"]); assert.deepEqual(w.rowIds(B), ["b1"]);
+  }
+  { // the owner record cannot be written after the switch
+    const w = world({ phoneIds: ["a1"], clouds: { [A]: ["a1"], [B]: ["b1"] } });
+    const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(200); a.signOut();
+    const b = w.signIn(B); await b.start(); w.storage.failKeys.add(OWNER_KEY); const before = uploads(w);
+    const r = await b.engine.resolveOwnership("start-fresh"); assert.equal(r.outcome, "failed"); assert.equal(uploads(w), before);
+    assert.ok(backedUpTxnIds(w.storage).has("a1")); assert.deepEqual(sorted(b.ids()), ["b1"]); assert.equal(readOwner(w.storage).userId, A);
+    assert.deepEqual(w.rowIds(A), ["a1"]); assert.deepEqual(w.rowIds(B), ["b1"]);
+  }
+  { // same, when the new account has NO cloud row yet (a separate code path)
+    const w = world({ phoneIds: ["a1"], clouds: { [A]: ["a1"] } });
+    const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(200); a.signOut();
+    const b = w.signIn(B); await b.start(); dropWrites(w.storage, "arth_sync_safety_backups"); const before = uploads(w);
+    const r = await b.engine.resolveOwnership("start-fresh"); assert.equal(r.outcome, "blocked-backup");
+    assert.deepEqual(sorted(b.ids()), ["a1"], "nothing cleared"); assert.equal(uploads(w), before); assert.equal(w.cloud.rows.has(B), false); assert.equal(readOwner(w.storage).userId, A);
+  }
+  { // the backup silently does not land: the phone is left exactly as it was
+    const w = world({ phoneIds: ["a1"], clouds: { [A]: ["a1"], [B]: ["b1"] } });
+    const a = w.signIn(A, { fresh: false }); await a.start(); await a.settle(200); a.signOut();
+    const b = w.signIn(B); await b.start(); dropWrites(w.storage, "arth_sync_safety_backups"); const before = uploads(w);
+    const r = await b.engine.resolveOwnership("start-fresh"); assert.equal(r.outcome, "blocked-backup");
+    assert.deepEqual(sorted(b.ids()), ["a1"]); assert.equal(uploads(w), before); assert.equal(readOwner(w.storage).userId, A);
+  }
 });
 
 // ── randomised multi-account model ──

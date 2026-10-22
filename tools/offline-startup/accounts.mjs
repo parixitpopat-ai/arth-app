@@ -30,7 +30,7 @@ async function login(p, email, { first = true } = {}) {
   if (await p.getByPlaceholder("e.g. Priya Sharma").count()) { await p.getByPlaceholder("e.g. Priya Sharma").fill("Synthetic Tester"); await p.getByRole("button", { name: /Continue into Arth/ }).click(); await p.waitForTimeout(1500); }
 }
 /** A phone on which account A has signed in (its cloud holds A's data), synced, and signed out. */
-async function phoneAfterA({ bCloud = null, seedLocalExtra = {}, afterA = null } = {}) {
+async function phoneAfterA({ bCloud = null, seedLocalExtra = {}, afterA = null, signOut = true } = {}) {
   fake.rows.clear(); fake.writeLog.length = 0; fake.stats.unconditionalWrites = 0; fake.resetAccounts();
   const ua = fake.addAccount(EA), ub = fake.addAccount(EB);
   fake.rows.set(ua.id, { snapshot: JSON.parse(JSON.stringify(snap(ATX))), micros: BigInt(Date.now()) * 1000n });
@@ -39,10 +39,19 @@ async function phoneAfterA({ bCloud = null, seedLocalExtra = {}, afterA = null }
   await login(p, EA); await L.pin(p, true).catch(() => {}); await p.waitForTimeout(2500);
   const syncedA = await wait(async () => (await L.localTxnIds(p)).length === 12);
   if (afterA) await afterA(p);
-  await L.openCloudSettings(p); await p.getByText("Sign Out", { exact: true }).click(); await p.waitForTimeout(2000);
+  if (signOut) { await L.openCloudSettings(p); await p.getByText("Sign Out", { exact: true }).click(); await p.waitForTimeout(2000); }
   return { d, p, ua, ub, syncedA };
 }
 async function signInB(p) { await login(p, EB); await L.pin(p, false).catch(() => {}); await p.waitForTimeout(2500); }
+async function addTest(page, label) {
+  await page.getByText("+", { exact: true }).first().click(); await page.waitForTimeout(500);
+  await page.getByPlaceholder("0", { exact: true }).fill("11");
+  await page.getByPlaceholder("e.g. Petrol, Swiggy, Netflix", { exact: true }).fill(label);
+  await page.getByRole("button", { name: /Save Expense/ }).click(); await page.waitForTimeout(900);
+}
+const hasLabel = (p, label) => L.localTxns(p).then(a => a.some(t => t.merchant === label));
+const cloudHas = (u, label) => ((fake.rows.get(u.id)?.snapshot?.txns) || []).some(t => t.merchant === label);
+const inBackups = (p, label) => p.evaluate(l => (JSON.parse(localStorage.getItem("arth_sync_safety_backups") || "[]")).some(b => (b.snapshot?.txns || []).some(t => t.merchant === l)), label);
 const onOwnership = p => body(p).then(t => /has account-a@example\.invalid's data|Nothing has been sent to the cloud or deleted/.test(t));
 
 // AS1: B's cloud EMPTY.
@@ -120,6 +129,69 @@ if (run("AS10")) { fake.rows.clear(); fake.writeLog.length = 0; fake.resetAccoun
   const d = await device("fresh", { signedIn: false }); const p = d.page; await login(p, EB); await L.pin(p, true).catch(() => {}); await p.waitForTimeout(2500);
   const asked = await onOwnership(p);
   rec("AS10 fresh install: no question, B's 5 transactions arrive, phone is claimed by B", !asked && (await L.localTxnIds(p)).length === 5 && (await ownerOf(p))?.email === EB, { asked, local: (await L.localTxnIds(p)).length, owner: (await ownerOf(p))?.source });
+  await d.ctx.close(); }
+
+// AS11: sign out with a change the server has not received (the server is rejecting writes): warned, can cancel, nothing sent, nothing removed.
+if (run("AS11")) { const { d, p, ua, ub } = await phoneAfterA({ signOut: false, bCloud: snap(BTX) }); const LAB = "SOEDIT 11";
+  await L.setFaults({ rejectWrites: 9999 }); await addTest(p, LAB); await p.waitForTimeout(4000);
+  const w0 = fake.writeLog.length; await L.openCloudSettings(p); await p.getByTestId("settings-sign-out").click();
+  const shown = await wait(async () => (await p.getByTestId("signout-warning").count()) === 1, 8000); const t = await body(p);
+  rec("AS11a sign-out with an unsent change: a warning appears that says the change stays on this phone, is not being sent, and that a verified backup holds it",
+    shown && /aren't saved to your account/.test(t) && /stay on this phone/.test(t) && /will not send them/.test(t) && (await p.getByTestId("signout-backup-verified").count()) === 1 && (await inBackups(p, LAB)) && fake.writeLog.length === w0,
+    { shown, backupVerified: await p.getByTestId("signout-backup-verified").count(), inBackup: await inBackups(p, LAB), writes: fake.writeLog.length - w0 });
+  await p.getByTestId("signout-stay").click(); await p.waitForTimeout(600);
+  rec("AS11b 'Stay signed in': still signed in, the change is still on the phone, nothing sent, nothing removed", (await p.getByTestId("settings-sign-out").count()) === 1 && (await p.getByTestId("signout-warning").count()) === 0 && await hasLabel(p, LAB) && !cloudHas(ua, LAB) && fake.stats.unconditionalWrites === 0, { signedIn: (await p.getByTestId("settings-sign-out").count()) === 1, onPhone: await hasLabel(p, LAB), inCloud: cloudHas(ua, LAB) });
+  await p.getByTestId("settings-sign-out").click(); await wait(async () => (await p.getByTestId("signout-warning").count()) === 1, 8000);
+  await p.getByTestId("signout-anyway").click(); await p.waitForTimeout(2500);
+  rec("AS11c 'Sign out anyway': signed out, but the change was not sent and was not removed from the phone, and is still in the backup", /Sign in to Arth|Welcome to Arth|Sign In/.test(await body(p)) && await hasLabel(p, LAB) && !cloudHas(ua, LAB) && await inBackups(p, LAB), { onPhone: await hasLabel(p, LAB), inCloud: cloudHas(ua, LAB), inBackup: await inBackups(p, LAB) });
+  // app restart while signed out, then another account: told about the unsent change; start fresh keeps it in the backup only
+  await L.setFaults({ rejectWrites: 0 }); await p.reload({ waitUntil: "networkidle" }); await L.pin(p, false).catch(() => {}); await p.waitForTimeout(1500);
+  rec("AS11d app restarted while signed out: the unsent change is still on the phone", await hasLabel(p, LAB), { onPhone: await hasLabel(p, LAB) });
+  const wB = fake.writeLog.length; await signInB(p); await wait(() => onOwnership(p), 15000);
+  const warned = (await p.getByTestId("ownership-unsynced").count()) === 1;
+  await p.getByTestId("ownership-start-fresh").click(); await p.waitForTimeout(3500);
+  rec("AS11e another account signs in: told the data includes changes never sent; 'Start fresh' removes it from the phone only after it is in a verified backup; nothing reached either cloud copy", warned && !(await hasLabel(p, LAB)) && await inBackups(p, LAB) && !cloudHas(ua, LAB) && !cloudHas(ub, LAB), { warned, onPhone: await hasLabel(p, LAB), inBackup: await inBackups(p, LAB), aCloud: cloudHas(ua, LAB), bCloud: cloudHas(ub, LAB), writesBeforeChoice: wB });
+  await d.ctx.close(); }
+
+// AS12: sign out while OFFLINE with an unsent change: warned (the check needs no connection); whatever the sign-out does, nothing is sent or lost.
+if (run("AS12")) { const { d, p, ua } = await phoneAfterA({ signOut: false }); const LAB = "OFFSO 11";
+  await d.ctx.setOffline(true); await addTest(p, LAB); await p.waitForTimeout(1500);
+  const w0 = fake.writeLog.length; await L.openCloudSettings(p); await p.getByTestId("settings-sign-out").click();
+  const shown = await wait(async () => (await p.getByTestId("signout-warning").count()) === 1, 8000);
+  const verified = (await p.getByTestId("signout-backup-verified").count()) === 1;
+  await p.getByTestId("signout-anyway").click(); await p.waitForTimeout(3000);
+  const still = (await p.getByTestId("settings-sign-out").count()) === 1;
+  rec("AS12 offline sign-out with an unsent change: the warning and a verified backup need no connection; after 'Sign out anyway' the change is still on the phone, in the backup, and nothing was sent",
+    shown && verified && await hasLabel(p, LAB) && await inBackups(p, LAB) && !cloudHas(ua, LAB) && fake.writeLog.length === w0, { shown, verified, signedInStill: still, onPhone: await hasLabel(p, LAB), inBackup: await inBackups(p, LAB), writes: fake.writeLog.length - w0 });
+  await d.ctx.close(); }
+
+// AS13: a phone with data that has no recorded owner: the transfer needs a second, explicit confirmation and says what will and will not happen.
+if (run("AS13")) { fake.rows.clear(); fake.writeLog.length = 0; fake.resetAccounts(); const ub = fake.addAccount(EB);
+  const d = await device("unowned", { signedIn: false, seedLocal: { arth_txns: ATX, arth_accounts: snap([]).accounts, arth_master_user_setup_complete: true } }); const p = d.page;
+  await login(p, EB); await wait(async () => (await p.getByTestId("ownership-screen").count()) === 1, 15000);
+  const t1 = await body(p); const hasConsequences = /saved and checked/.test(t1) && /Nothing is uploaded/.test(t1);
+  await p.getByTestId("ownership-transfer").click(); await p.waitForTimeout(400);
+  const t2 = await body(p), confirm = (await p.getByTestId("ownership-confirm").count()) === 1;
+  const spelled = /nothing is overwritten/.test(t2) && /backup of this phone's data/.test(t2) && /check/.test(t2);
+  rec("AS13a unowned data: 'Add this phone's data' only opens a confirmation (what happens, in order); nothing is uploaded yet", hasConsequences && confirm && spelled && !fake.rows.has(ub.id) && fake.writeLog.length === 0, { hasConsequences, confirm, spelled, bRow: fake.rows.has(ub.id), writes: fake.writeLog.length });
+  await p.getByTestId("ownership-confirm-no").click(); await p.waitForTimeout(400);
+  rec("AS13b 'No, go back' returns to the choices; still nothing uploaded", (await p.getByTestId("ownership-start-fresh").count()) === 1 && !fake.rows.has(ub.id), {});
+  await p.getByTestId("ownership-transfer").click(); await p.getByTestId("ownership-confirm-yes").click(); await p.waitForTimeout(3500);
+  rec("AS13c confirming adds the data to the account (empty cloud) exactly once", await wait(async () => cloudIds(ub).length === 12, 15000) && fake.writeLog.filter(w => w.outcome === "applied").length === 1, { bCloud: cloudIds(ub).length, writes: fake.writeLog.filter(w => w.outcome === "applied").length });
+  await d.ctx.close(); }
+
+// AS14: a transfer whose upload fails (data service unreachable right after confirming): data kept, nothing uploaded, retry sends it once.
+if (run("AS14")) { const { d, p, ub } = await phoneAfterA(); await signInB(p); await wait(() => onOwnership(p), 15000);
+  await p.getByTestId("ownership-transfer").click(); await d.ctx.route("**/rest/v1/**", r => r.abort()); await p.getByTestId("ownership-confirm-yes").click();
+  const cant = await wait(async () => /Can't reach your Arth account|Try again/.test(await body(p)), 25000); const t = await body(p);
+  rec("AS14a transfer confirmed but the cloud is unreachable: the app says it can't reach the account and that the phone's data is untouched; the data is still on the phone; nothing uploaded", cant && /data on this phone is untouched/.test(t) && !/nothing saved on this device/.test(t) && (await L.localTxnIds(p)).length === 12 && !fake.rows.has(ub.id) && (await ownerOf(p))?.source === "transfer", { cant, text: t.slice(0, 160), local: (await L.localTxnIds(p)).length, bRow: fake.rows.has(ub.id), owner: (await ownerOf(p))?.source });
+  await p.reload({ waitUntil: "networkidle" }); await L.pin(p, false).catch(() => {}); await p.waitForTimeout(2500);
+  rec("AS14b app restarted in that state: still no upload, data still there", (await L.localTxnIds(p)).length === 12 && !fake.rows.has(ub.id), { local: (await L.localTxnIds(p)).length });
+  await d.ctx.unroute("**/rest/v1/**");
+  const w0 = fake.writeLog.filter(w => w.outcome === "applied").length;
+  if (await p.getByRole("button", { name: "Try again" }).count()) await p.getByRole("button", { name: "Try again" }).click(); else await p.reload({ waitUntil: "networkidle" });
+  await p.waitForTimeout(1500); await L.pin(p, false).catch(() => {});
+  rec("AS14c once the connection returns the data reaches the account exactly once", await wait(async () => cloudIds(ub).length === 12, 20000) && fake.writeLog.filter(w => w.outcome === "applied").length === w0 + 1, { bCloud: cloudIds(ub).length, newWrites: fake.writeLog.filter(w => w.outcome === "applied").length - w0 });
   await d.ctx.close(); }
 
 await browser.close(); web.close();

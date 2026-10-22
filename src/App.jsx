@@ -13,6 +13,7 @@ import AuthGateScreen from "./screens/AuthGateScreen";
 import MasterUserProfileScreen from "./screens/MasterUserProfileScreen";
 import CloudConflictScreen from "./screens/CloudConflictScreen";
 import DeviceOwnershipScreen from "./screens/DeviceOwnershipScreen";
+import SignOutWarningSheet from "./components/SignOutWarningSheet";
 import SyncConflictSheet from "./components/SyncConflictSheet";
 import SyncBackupFileSheet from "./components/SyncBackupFileSheet";
 import TabGate from "./components/TabGate";
@@ -9723,6 +9724,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     }
   }, []);
 
+  // Sign-out never sends anything. If this phone holds changes the account's cloud copy has not received, say so first (and whether a
+  // verified backup also holds them), and let the person cancel. The check and the backup need no connection.
+  const [signOutPrompt, setSignOutPrompt] = useState(null);
+  const [signOutChecking, setSignOutChecking] = useState(false);
+  const requestSignOut = useCallback(async () => {
+    const engine = syncEngineRef.current;
+    if(!engine){ handleCloudSignOut(); return; }
+    setSignOutChecking(true);
+    try{
+      const info = await engine.prepareSignOut();
+      if(info.unsynced === false) handleCloudSignOut(); else setSignOutPrompt(info);
+    }finally{ setSignOutChecking(false); }
+  }, [handleCloudSignOut]);
+
   useEffect(() => {
     if(!isCloudSyncConfigured || !supabase) return;
     let mounted = true;
@@ -15158,7 +15173,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
             <button data-testid="sync-now" onClick={()=>syncEngine?.syncNow()} disabled={cloudBusy||!syncEngine} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>🔄 Sync Now</button>
             {syncStatus.kind==="conflict" && <button data-testid="sync-review-conflict" onClick={()=>setSyncConflictOpen(true)} style={{ background:T.attention+"22",border:`1px solid ${T.attention}55`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.text,fontFamily:"Nunito,sans-serif" }}>Review the conflict</button>}
-            <button onClick={handleCloudSignOut} disabled={cloudBusy} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.danger,fontFamily:"Nunito,sans-serif" }}>Sign Out</button>
+            <button data-testid="settings-sign-out" onClick={requestSignOut} disabled={cloudBusy||signOutChecking} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.danger,fontFamily:"Nunito,sans-serif" }}>Sign Out</button>
             {cloudStatus&&<div style={{ color:T.sub,fontSize:11,textAlign:"center",marginTop:4 }}>{cloudStatus}</div>}
           </div>
         ) : (
@@ -20011,7 +20026,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(!sessionRestoredOnBootRef.current){
       // First-auth-on-this-device path (P1-002 §5 matrix).
       if(firstAuthState==="blocked-offline"){
-        return <CloudStateUnknownScreen T={T} busy={cloudBusy} error={firstAuthError} onRetry={runFirstAuthMigration}/>;
+        return <CloudStateUnknownScreen T={T} busy={cloudBusy} error={firstAuthError} onRetry={runFirstAuthMigration} localHasData={hasMeaningfulData(cloudSnapshotRef.current || {})}/>;
       }
       if(firstAuthState==="conflict" && conflictData){
         return <>{fileBackupSheet}<CloudConflictScreen
@@ -21417,6 +21432,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           />
         )}
         {fileBackupSheet}
+        {signOutPrompt&&<SignOutWarningSheet T={T} info={signOutPrompt} accountEmail={cloudUser?.email} busy={cloudBusy} onStay={()=>setSignOutPrompt(null)} onSignOut={()=>{ setSignOutPrompt(null); handleCloudSignOut(); }}/>}
         {syncEngine && syncStatus.kind==="conflict" && syncConflictOpen && firstAuthState!=="conflict" && (
           <SyncConflictSheet
             T={T}

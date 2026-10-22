@@ -20,13 +20,16 @@ export const SYNC_ACTIONS = Object.freeze({
  * @param {{
  *   networkOk: boolean,
  *   hasBase: boolean, baseToken?: string, baseDigest?: string,
+ *   transferred?: boolean,   // this device's data was just handed over from another account by the person (no history with this account yet)
  *   localDigest: string, localMeaningful: boolean,
  *   cloud: null | { token: string, digest: string, meaningful: boolean },
  * }} input
  * @returns {{ action: string, reason: string, expectedToken?: string, dirty: boolean }}
  */
 export function decideSync(input) {
-  const { networkOk, hasBase, baseToken, baseDigest, localDigest, localMeaningful, cloud } = input;
+  const { networkOk, baseToken, baseDigest, localDigest, localMeaningful, cloud, transferred = false } = input;
+  // A recorded common point needs BOTH halves. A token without the content it stood for (or the reverse) is an unreadable history: treated as none.
+  const hasBase = Boolean(input.hasBase) && typeof baseToken === "string" && baseToken !== "" && typeof baseDigest === "string" && baseDigest !== "";
   const dirty = hasBase ? localDigest !== baseDigest : localMeaningful;
   const out = (action, reason, expectedToken) => ({ action, reason, dirty, ...(expectedToken !== undefined ? { expectedToken } : {}) });
 
@@ -49,6 +52,9 @@ export function decideSync(input) {
   // No history on this device (existing install, new device, or account switch).
   if (localDigest === cloud.digest) return out(SYNC_ACTIONS.ADOPT_BASE, "identical-no-history");
   if (!localMeaningful) return out(SYNC_ACTIONS.FAST_FORWARD, "device-without-data-takes-cloud");      // a verified backup of the device is taken first
+  // Data the person handed over from another account never replaces anything in a cloud row that already exists, even one that holds no
+  // user data (profile, settings): the two copies are shown and the person chooses.
+  if (transferred) return out(SYNC_ACTIONS.CONFLICT, "transferred-data-meets-existing-cloud-row");
   if (!cloud.meaningful) return out(SYNC_ACTIONS.PUSH, "cloud-row-has-no-user-data", cloud.token);
   return out(SYNC_ACTIONS.CONFLICT, "both-have-data-no-history");
 }

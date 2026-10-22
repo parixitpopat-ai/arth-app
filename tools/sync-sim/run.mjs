@@ -372,7 +372,7 @@ async function signInAddingExisting(page, email) {
   const r = await L.signIn(page, email, { mode: "signin" });
   const asked = Boolean(await L.waitFor(() => page.getByTestId("ownership-screen").count(), { timeout: 8000 }));
   const before = asked ? JSON.stringify(cloud()) : null;
-  if (asked) await page.getByTestId("ownership-transfer").click();
+  if (asked) { await page.getByTestId("ownership-transfer").click(); await page.getByTestId("ownership-confirm-yes").click(); }   // the transfer always needs the second, explicit confirmation
   return { r, asked, cloudBeforeAnswer: before };
 }
 const EMAIL = "sync-test-a@example.invalid";

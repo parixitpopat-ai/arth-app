@@ -8,18 +8,19 @@
 // local state never reaches this screen (it keeps using the existing,
 // unmodified offline-capable path instead — see App.jsx's gate).
 
-export default function CloudStateUnknownScreen({ onRetry, busy, error, T }) {
+export default function CloudStateUnknownScreen({ onRetry, busy, error, T, localHasData = false }) {
   return (
     <div style={{ background: T.bg, minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center" }}>
       <div style={{ maxWidth: 400, margin: "0 auto", width: "100%", padding: "24px 24px", textAlign: "center" }}>
         <div style={{ fontSize: 40, marginBottom: 12 }}>📡</div>
         <div style={{ fontSize: 18, fontWeight: 900, color: T.text, marginBottom: 8 }}>Can't reach your Arth account</div>
         <div style={{ fontSize: 13, color: T.sub, marginBottom: 4 }}>
-          You're signed in, but this device can't confirm your account's existing data yet, and there's
-          nothing saved on this device to fall back on.
+          {localHasData
+            ? <>You're signed in, but this device can't reach your account yet. <strong>The data on this phone is untouched, and nothing has been sent or replaced.</strong></>
+            : <>You're signed in, but this device can't confirm your account's existing data yet, and there's nothing saved on this device to fall back on.</>}
         </div>
         <div style={{ fontSize: 13, color: T.sub, marginBottom: 24 }}>
-          To make sure nothing gets overwritten or lost, Arth won't continue until it can check.
+          {localHasData ? "Arth will keep trying, and will not continue until it can check, so that nothing is overwritten or lost." : "To make sure nothing gets overwritten or lost, Arth won't continue until it can check."}
         </div>
         {error && (
           <div style={{ background: T.danger + "18", border: `1px solid ${T.danger}33`, borderRadius: 10, padding: "10px 12px", marginBottom: 16, color: T.danger, fontSize: 12, fontWeight: 700, textAlign: "left" }}>

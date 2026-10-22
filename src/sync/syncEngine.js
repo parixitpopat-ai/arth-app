@@ -13,7 +13,7 @@
 
 import { decideSync, SYNC_ACTIONS } from "./decideSync.js";
 import { digestSnapshot, summarizeDiff, txnIdsOf } from "./digest.js";
-import { createSafetyBackup, releasePinned } from "./safetyBackup.js";
+import { createSafetyBackup, releasePinned, readSafetyBackups } from "./safetyBackup.js";
 import { missingFrom, introducedDangling, describeMissing, listSummary } from "./snapshotIntegrity.js";
 import { differences } from "./differences.js";
 import { loadSyncState, saveSyncState } from "./syncState.js";
@@ -230,6 +230,13 @@ export function createSyncEngine({
    * Either way nothing changes unless the backup was verified.
    */
   async function resolveOwnership(choice) {
+    try { return await resolveOwnershipInner(choice); }
+    catch (e) {
+      if (e && e.halted) return { outcome: "stopped" };
+      return { outcome: "failed", error: `That could not be completed (${String((e && e.message) || e)}). Nothing was uploaded and nothing on this phone was removed.` };
+    }
+  }
+  async function resolveOwnershipInner(choice) {
     if (!pendingOwnership) return { outcome: "none" };
     if (running) await running;
     if (halted) return { outcome: "stopped" };
@@ -238,7 +245,8 @@ export function createSyncEngine({
       const bk = await backupOrBlock(local, "before-account-transfer", { pinned: true, conflictId: hold });
       if (!bk.ok) return { outcome: "blocked-backup", error: bk.error };
       save(withBackup(load(), bk, "before-account-transfer"));
-      writeOwner(storage, { userId, email: userEmail, now, source: "transfer", transferredFrom: prev.ownerUserId });
+      try { writeOwner(storage, { userId, email: userEmail, now, source: "transfer", transferredFrom: prev.ownerUserId }); }
+      catch (e) { return { outcome: "failed", error: `The change of owner could not be recorded (${String((e && e.message) || e)}). Nothing was uploaded and nothing on this phone was removed.` }; }
       pendingOwnership = null; setStatus({ kind: "idle" });
       return { outcome: "transferred", backupId: bk.id };
     }
@@ -258,16 +266,41 @@ export function createSyncEngine({
       if (r.result.outcome !== "pulled") return r.result;
     } else {
       const bk = await backupOrBlock(local, "other-account-device-copy", { pinned: true, conflictId: hold });
-      if (!bk.ok) return { outcome: "blocked-backup", error: bk.error };
+      if (!bk.ok) return { outcome: "blocked-backup", error: bk.error };   // nothing has been cleared yet
       save(withBackup(reset, bk, "other-account-device-copy"));
       if (halted) throw HALTED();
       await applySnapshot(target);
       const after = await readLocalAfterApply();
       if (leaked(after).length) { const st = save({ ...load(), paused: "reconcile-mismatch", lastReconcile: { at: iso(now()), ok: false, localCount: txnIdsOf(after).length, detail: `${leaked(after).length} transaction(s) of the previous account were still on the device after the switch` } }); setStatus(pausedStatus(st)); return { outcome: "paused", error: st.lastReconcile.detail }; }
     }
-    writeOwner(storage, { userId, email: userEmail, now, source: "start-fresh" });
+    try { writeOwner(storage, { userId, email: userEmail, now, source: "start-fresh" }); }
+    catch (e) { return { outcome: "failed", error: `The phone was switched, but that could not be recorded (${String((e && e.message) || e)}). The previous account's data is in a verified backup and was not uploaded. You will be asked again; choose Start fresh once more.` }; }
     pendingOwnership = null; setStatus({ kind: "idle" });
     return { outcome: "started-fresh", backupId: load().lastBackup && load().lastBackup.id };
+  }
+
+  /**
+   * Before the person signs out: are there changes this account's cloud copy has not received? Answered from local content only (no
+   * network, nothing is sent). If there are, a verified pinned backup of the phone's data is taken NOW, so the sign-out message can say
+   * truthfully whether those changes are also kept in a backup. Never changes or removes anything on the phone. Never throws.
+   * @returns {Promise<{unsynced:boolean|null, neverSynced?:boolean, conflict?:boolean, backup?:{verified:boolean,id?:string,at?:string,txnCount?:number,error?:string}, error?:string}>}
+   */
+  async function prepareSignOut() {
+    try {
+      if (pendingOwnership) return { unsynced: false, ownershipPending: true };
+      const local = getSnapshot(), st = load(), d = await digestSnapshot(local);
+      const hasBase = Boolean(st.baseToken && st.baseDigest);
+      const dirty = hasBase ? d !== st.baseDigest : hasUserData(local);
+      const unsynced = Boolean(st.pendingWrite) || Boolean(st.conflict) || dirty;
+      if (!unsynced) return { unsynced: false };
+      const prior = readSafetyBackups(storage).slice().reverse().find(b => b.reason === "before-sign-out" && b.digest === d);
+      if (prior) return { unsynced: true, neverSynced: !hasBase, conflict: Boolean(st.conflict), backup: { verified: true, id: prior.id, at: prior.at, txnCount: prior.txnCount } };
+      const bk = await createSafetyBackup(storage, { reason: "before-sign-out", snapshot: local, now, genId, normalizers, pinned: true, conflictId: `so_${now()}` });
+      if (bk.ok) { try { save(withBackup(load(), bk, "before-sign-out")); } catch { /* the backup itself is verified; recording it in the sync history is secondary */ } }
+      return { unsynced: true, neverSynced: !hasBase, conflict: Boolean(st.conflict), backup: bk.ok ? { verified: true, id: bk.id, at: bk.at, txnCount: bk.txnCount } : { verified: false, error: bk.error } };
+    } catch (e) {
+      return { unsynced: null, error: String((e && e.message) || e) };
+    }
   }
 
   /** Called as the person signs out: the data now on this device belongs to the account that is leaving. */
@@ -293,7 +326,7 @@ export function createSyncEngine({
     try { localDigest = await digestSnapshot(local); } catch (e) { return failed(e, true); }   // unknown content is never treated as synced
 
     // Fast path for ordinary edits: no full download; the conditional write itself detects a stale base.
-    if (trigger === "change" && st.baseToken && !st.pendingWrite) {
+    if (trigger === "change" && st.baseToken && st.baseDigest && !st.pendingWrite) {
       if (localDigest === st.baseDigest) return { outcome: "noop" };
       const r = await pushLocal(st, local, localDigest, st.baseToken, trigger);
       if (r.result.outcome !== "conflict-retry") return r.result;
@@ -305,7 +338,8 @@ export function createSyncEngine({
     st = resolvePendingWrite(st, rec);
     const cloudDigest = rec ? await digestSnapshot(rec.snapshot) : null;
     const d = decideSync({
-      networkOk: true, hasBase: Boolean(st.baseToken), baseToken: st.baseToken, baseDigest: st.baseDigest,
+      networkOk: true, hasBase: Boolean(st.baseToken && st.baseDigest), baseToken: st.baseToken, baseDigest: st.baseDigest,
+      transferred: Boolean(!st.baseToken && (() => { const o = readOwner(storage); return o && o.userId === userId && o.source === "transfer"; })()),
       localDigest, localMeaningful: hasUserData(local),
       cloud: rec ? { token: rec.token, digest: cloudDigest, meaningful: hasUserData(rec.snapshot) } : null,
     });
@@ -423,7 +457,7 @@ export function createSyncEngine({
   return {
     prepareRestore,
     boot: opts => syncOnce("boot", opts),
-    resolveOwnership, recordOwnerForSignOut, getOwnership: () => pendingOwnership,
+    resolveOwnership, prepareSignOut, recordOwnerForSignOut, getOwnership: () => pendingOwnership,
     syncNow: () => syncOnce("manual"),
     notifyChange() { if (debounceTimer != null) clearTimer(debounceTimer); debounceTimer = setTimer(() => { debounceTimer = null; syncOnce("change"); }, debounceMs); },
     onOnline() { clearRetry(); return syncOnce("online"); },
