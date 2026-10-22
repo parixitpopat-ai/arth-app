@@ -1,0 +1,107 @@
+# SYNC-SAFETY-002 — design and test plan for the sync-safety work package
+
+Status: **IMPLEMENTED on branch `wp-sync-safety` (not merged). Results: `SYNC-SAFETY-003-results.md`.** Changes from this proposal: the unsynced indicator says "not synced yet" with the next retry time rather than a count; every write is read back by default (§3.8); the first sign-in path uses the same engine. Branch `wp-sync-safety`, based on `wp-sync-evidence` `7bf8ffa`. `origin/main` = `5fc65e7` and is not touched. Evidence this answers: `SYNC-SAFETY-001.md` (3 of 5 safety properties fail; silent loss reproduced in 3 cases).
+
+## 1. Invariants the design must guarantee
+- **I1 No silent loss.** At every moment, every transaction ID ever saved on any device is present in at least one of: that device's live data, the cloud row, or a verified safety backup on a device. Replacing data never happens without a verified backup that contains what is being replaced.
+- **I2 No newer-by-guess.** "Which side is newer" is never decided from a clock or from `savedAt`. It is decided from recorded sync history (below).
+- **I3 Conflicts are surfaced, never auto-resolved.** If both sides changed since their last common point, nothing is overwritten; the person chooses, with both sides backed up first.
+- **I4 Status text is true.** Every sync/backup message is produced from verified state, and says "saved" only after a read-back confirmed it.
+- **I5 Reconciled.** After each sync the IDs/counts on both sides are compared and any difference is shown, not hidden.
+
+## 2. Root causes being removed (from SYNC-SAFETY-001)
+`savedAt` is re-stamped on every in-memory rebuild; the 60 s margin guesses "newer"; the push is blocked or the cloud copy wins on that guess; the pre-sync backup is throttled to one per 2 min and trimmed to 3 persisted entries; Sync Now forces the pull on the first tap; the push overwrites the whole row with no check of what it overwrites; a failed push is not remembered across a reload.
+
+## 3. Design
+
+### 3.1 Sync history kept on each device (persisted, `arth_sync_state`)
+`{ deviceId, baseToken, baseDigest, pendingWrite, conflict, lastReconcile, lastVerifiedAt }`
+- `baseToken`: the cloud row's `updated_at` value (as returned by the server) at the last moment this device and the cloud were known identical.
+- `baseDigest`: SHA-256 of the canonical synced content at that moment (the snapshot without volatile fields `savedAt`, `syncMeta`).
+- **Dirty is derived, not flagged:** `dirty = digest(current content) ≠ baseDigest`. Because it is recomputed from data on every boot, an unsynced change survives a reload, a crash, or a close inside the push delay with no ordering race (this removes the "closed within 900 ms" loss).
+- `pendingWrite = { writeId, digest }` is persisted *before* a push is sent (for lost replies, §3.4).
+
+### 3.2 Decision table (pure function `decideSync`, no I/O, exhaustively unit-tested)
+Inputs: `{ hasBase, dirty, cloud: none | { token, digest, writeId } , networkOk }`.
+| Situation | Action |
+|---|---|
+| Network/read failed | Stay as is; status "Not synced"; retry (§3.5). Never push, never replace. |
+| Cloud row missing, local has data | Create the row (insert; fails if one appeared meanwhile → re-decide). |
+| `cloud.token = baseToken`, clean | Nothing to do. |
+| `cloud.token = baseToken`, dirty | Push with compare-and-swap on `baseToken` (§3.3). |
+| `cloud.token ≠ baseToken`, clean | Fast-forward: verified safety backup of local, then adopt cloud, set base. |
+| `cloud.token ≠ baseToken`, dirty | **Conflict** (I3): no write either way; backups of both sides; show resolution screen (§3.7). |
+| No base yet (existing install or first sign-in), digests equal | Adopt token silently (nothing differs). |
+| No base yet, both sides have data and differ | Conflict screen (reuses the existing first-sign-in conflict wording). |
+| No base yet, local empty | Pull (with backup of the empty state skipped as nothing to lose). |
+`pendingWrite` is resolved before the table is applied (§3.4).
+
+### 3.3 Compare-and-swap push (D1 decided by the owner: `updated_at` provisionally, verified first; version column in an approved migration if it cannot be made reliable)
+The push is one conditional `UPDATE ... WHERE user_id = me AND updated_at = baseToken ... RETURNING updated_at`; zero rows means someone else wrote first and the decision table is re-run. First-ever write is a plain `INSERT`; a duplicate-key failure means a row appeared, so re-decide. **No read-then-write sequence is ever used as the check** (shown below to lose updates). The token is always the **server-returned** value.
+
+Verification status (script `tools/sync-sim/pg-verify/cas-semantics.sh`, run 15 Oct 2026 on a throwaway local PostgreSQL 16.13 over a unix socket; no Supabase, no network):
+| Question | Result | Basis |
+|---|---|---|
+| Does a conditional UPDATE reliably stop a concurrent overwrite? | **Yes** under overlapping transactions at the default READ COMMITTED level: the second writer blocked on the row lock, re-checked its WHERE after the first committed, and updated 0 rows. | Run on real PostgreSQL |
+| Does check-then-write stop it? | **No**: both writers read the same token, the second silently overwrote the first. | Run on real PostgreSQL |
+| Does the app's current `upsert` (`ON CONFLICT DO UPDATE`) check anything? | **No**: unconditional overwrite. | Run on real PostgreSQL |
+| Precision | `timestamptz` and `timestamp(6)` round-trip millisecond client values exactly and match an equality filter. **`timestamp(0)` rounds to whole seconds, so distinct writes in the same second can share a token and the check fails.** | Run on real PostgreSQL |
+| Trigger behaviour | A `BEFORE UPDATE` trigger that sets `now()` overrides a client-supplied `updated_at`. That is harmless **only because** the token is always read back from the server; it is not usable as a client clock. | Run on real PostgreSQL |
+| supabase-js builds the call as expected | `update(...).eq(...).eq(...).select()` sends a filtered PATCH asking for the representation; the Supabase reference documents `.select()` after filters to return updated rows. | Installed `postgrest-js` 2.102 source and the Supabase docs |
+| Zero matched rows gives an empty result, not an error | Expected from PostgREST behaviour but **not confirmed** by anything I could read or run here. | **Unverified** |
+| The production table's actual column type and precision, any trigger on it, and whether its row-level-security policy allows UPDATE with these filters | **Unverified.** Needs a read-only look at the table definition (owner decision D6, not yet granted) or an isolated real test (D2, explicitly deferred). | **Unverified** |
+
+Consequences for the design:
+1. The compare-and-swap is correct only if the production `updated_at` is `timestamptz` (or `timestamp(6)`), or if a trigger makes it advance on every write. **If it turned out to be `timestamp(0)`, it would not be reliable and the version-column migration would be required.** This is a release gate: no production use until that is confirmed.
+2. Runtime self-protection: the client writes `updated_at = max(now, baseToken + 1 ms)`, so tokens never repeat; after every successful write it checks that the returned token differs from the base token. If not (rounding or a trigger collapsing the value), the engine enters a **paused, safe** state ("concurrency check unreliable: needs the version column") and makes no further overwriting writes. This detects the problem on the device that causes the collision; it cannot undo a collision that already let another device overwrite, which is why the production definition must be confirmed first.
+3. The token is hidden behind a small `CasClient` interface (`read()`, `insert()`, `swap(baseToken, snapshot)`), so moving to a `version` column changes one module, not the engine.
+
+### 3.4 Lost replies and interruptions
+Each snapshot carries `syncMeta = { deviceId, writeId, digest, txnCount }`. If a push's reply is lost, the stored `pendingWrite.writeId` is compared with the cloud row's `syncMeta.writeId` on the next contact: equal → our write did land, adopt its token and mark synced; different/absent → the write did not land, still dirty, retry. Rejected writes (HTTP errors) leave `dirty` true, so they are retried, and reloading cannot discard them because nothing replaces local data unless it is clean (or backed up and chosen).
+
+### 3.5 Retry and recovery
+While dirty and not in conflict: retry with backoff (2 s, 5 s, 15 s, 60 s, then every 5 min), and immediately on the browser `online` event, on tab becoming visible, and on boot. The visible status shows the number of unsynced changes and the next retry. A failure never clears dirty.
+
+### 3.6 Backup before any replacement (guarantee, not best effort)
+A separate store `arth_sync_safety_backups` (not the rolling auto-backups, no 2-minute throttle, no 3-entry trim, newest 10 kept, never pruned below what the last replacement used). Procedure: write → read back → compare digest and transaction count → only then replace. If the write fails (for example browser storage full) the replacement **does not happen**; the person is offered a downloaded file of the data and must confirm before anything is replaced. The existing `createVerifiedBackup` read-back pattern is reused.
+
+### 3.7 Conflict resolution (decision D3: explicit choice, no automatic merge)
+Screen shows counts and the IDs/descriptions present only on this device and only in the cloud. Choices: **Keep this device** (cloud copy backed up locally first, then replaced by this device's), **Use cloud copy** (this device backed up first, then replaced), **Decide later** (sync paused with a persistent banner, local edits keep saving locally), plus **Download both as files**. After a choice, base is reset and a reconciliation is run.
+Why not auto-merge transactions: a transaction also moves account balances, card outstanding, bill and contribution links, budget and person totals, which live in other arrays; merging only `txns` could leave those inconsistent. A safe merge needs a per-record change log (architecture change) and is out of scope; the cost is that a true conflict needs one decision from the person and may mean re-entering a few records, which the difference list makes possible.
+
+### 3.8 Reconciliation after every sync
+After a push: read back `syncMeta` from the row and require `writeId`, `digest` and `txnCount` to equal what was sent. After a pull/adopt: recompute digest and ID set from the applied data and compare with the cloud's. A mismatch is shown ("N transactions differ", with IDs) and keeps the device dirty/blocked; it is never reported as synced. The last result is stored in `lastReconcile` and shown in Settings. (Reading back the full row after every push would double traffic; the full ID-set comparison happens on pulls, on conflict, and on Sync Now.)
+
+### 3.9 Sync Now and status messages
+Sync Now never forces anything: it runs the decision table once and reports the outcome. The status line is produced by one pure function from the state `synced (verified at T) | pending (n changes, retry at T) | offline/failed (reason) | conflict | reconcile-mismatch | paused`. The strings "Every change saves to cloud automatically" and "saved to Backup & Restore" are removed; the latter appears only as "Backup <time> verified, contains <n> transactions" after §3.6 succeeded.
+
+### 3.10 Code layout (keeps the ARCH-004 freeze)
+Logic goes in new modules, with App.jsx only wired to them (this is a data-integrity bug fix, which the freeze permits, but extraction keeps App.jsx from growing): `src/sync/decideSync.js`, `syncState.js`, `digest.js`, `safetyBackup.js`, `cloudClient.js` (CAS push/pull over an injected client), `syncEngine.js` (timers, network and storage injected), `statusText.js`. `cloudSync.js` keeps its production URL fallback unchanged (the harness guards cover it). The first-sign-in path (`runFirstAuthMigration` / `resolveConflict`) is kept and routed through the same client.
+
+## 4. Migration of existing installs
+Existing devices have no `baseToken`. First run after the update: if the local and cloud digests are equal, the token is adopted silently. If they differ, the conflict screen appears once (safe; no data replaced). This is a visible behaviour change for anyone currently out of sync.
+
+## 5. Test plan
+**Layer 1 — deterministic Node tests (fast, in `npm test`).** Engine and modules run against an in-memory backend and storage with a fake clock, fake timers and fault injection; no browser, no network.
+1. `decideSync` table: every row above, plus stale-cloud (10 min / 10 s / future-dated) cases proving the age never matters.
+2. Each reproduced failure as a named regression test (written first and shown failing against today's behaviour by porting the current rule into a reference implementation test, then passing): reject-then-reload; close inside the push delay then reopen at 10 s and 10 min; stale cloud then edit then Sync Now (one tap); divergent devices at both ages; lost reply; write applied twice.
+3. Backups: replacement refused when the backup write fails; backup not throttled; backup read-back mismatch blocks replacement; newest 10 retained.
+4. CAS: a stale token is rejected and re-decided; insert race; token is the server value.
+5. Retry/backoff schedule, `online`/visibility triggers, dirty survives restart.
+6. Reconciliation: induced mismatch (server drops a transaction) is detected and reported, not called synced.
+7. Status text: one test per state; forbidden strings never appear in non-verified states.
+8. **Randomised two-device model test with fixed seeds** (edit, push, reject, drop reply, go offline/online, reload, conflict choice): after every step assert I1 (every created ID is live somewhere or in a verified backup) and that the run's event log hash is identical across two executions of the same seed.
+**Layer 2 — browser harness (existing `tools/sync-sim`).** The nine scenarios already recorded become pass requirements; run twice; compare result vectors and evidence hashes for identity; add scenarios for: conflict screen choices both ways, "Decide later", quota-full backup refusal, reconciliation mismatch display.
+**Isolation guards (all layers):** synthetic users/data only; local fake backend; the harness refuses to start unless the configured Supabase URL host is `localhost`/`127.0.0.1`; every non-local request is aborted and recorded and fails the run if it targets `*.supabase.co`; tests never read real `localStorage` profiles.
+**Gate before any proposal to merge:** full `npm test`, production build, lint (`src` = 4 baseline), both harness runs identical with all five properties passing, evidence and matrix updated with exact SHAs.
+
+## 6. Decisions needed from the owner
+- **D1 — DECIDED:** `updated_at` provisionally, verified first (see §3.3); a `version` column in an approved migration if it cannot be made reliable.
+- **D2 — DECIDED:** no project is created and no cost incurred. Finish the deterministic local harness first. Real-service behaviour stays explicitly **unverified** until separately authorised isolated testing.
+- **D3 — Conflict policy:** explicit choice with backups, no automatic merge (this design). Confirm.
+- **D4 — Backup storage:** localStorage with a forced file download if full (this design), or add IndexedDB for larger backups (more code).
+- **D5 — One-time conflict screen** for existing installs whose local and cloud copies differ (§4). Confirm.
+- **D6 — Read-only look at the production table definition** (column list, policies, triggers only; no rows) to check §3.3's assumptions. I have not done this; say yes or no.
+
+## 7. Known limits that remain after this work package
+Two tabs of the same device can still race (a cross-tab lock would be a follow-up); no per-record merge; reconciliation after a push checks `syncMeta`, not every ID; real-Supabase behaviour unverified unless D2 is approved; Plan Ahead nudge sync is covered only through the same snapshot and stays **Unverified** until its own scenario passes against the real client.

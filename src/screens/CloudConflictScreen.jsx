@@ -88,7 +88,7 @@ export default function CloudConflictScreen({
         </button>
 
         <div style={{ fontSize: 10, color: T.sub, marginTop: 16, textAlign: "center" }}>
-          Whichever you don't choose is saved to Backup & Restore before it's replaced.
+          Whichever you don't choose is saved first as a verified backup on this device (Settings, then Backup & Restore, then Sync safety backups) before it's replaced.
         </div>
       </div>
     </div>

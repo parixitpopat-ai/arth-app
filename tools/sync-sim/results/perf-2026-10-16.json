@@ -1,0 +1,232 @@
+{
+  "at": "2026-10-16T04:10:07.457Z",
+  "node": "v22.22.2",
+  "note": "device-side timings are measured on this machine (loopback); phone network times are estimates from stated link profiles",
+  "links": [
+    {
+      "name": "4G good (10 up / 25 down Mbps, 60 ms RTT)",
+      "up": 10000000,
+      "down": 25000000,
+      "rtt": 60
+    },
+    {
+      "name": "4G poor (2 up / 5 down Mbps, 150 ms RTT)",
+      "up": 2000000,
+      "down": 5000000,
+      "rtt": 150
+    },
+    {
+      "name": "3G (0.4 up / 1 down Mbps, 300 ms RTT)",
+      "up": 400000,
+      "down": 1000000,
+      "rtt": 300
+    }
+  ],
+  "rows": [
+    {
+      "case": "typical year, no images",
+      "txns": 1200,
+      "images": 0,
+      "jsonMB": 0.28,
+      "stringifyMs": 1.6,
+      "digestMs": 13.3,
+      "parseMs": 5.2,
+      "integrityMs": 1.3,
+      "differencesMs": 20.2,
+      "safetyBackupMs": 27.4,
+      "loopbackWriteMs": 15.7,
+      "loopbackReadBackMs": 8,
+      "estimates": [
+        {
+          "link": "4G good (10 up / 25 down Mbps, 60 ms RTT)",
+          "writeS": 0.3,
+          "readBackS": 0.15,
+          "withVerifyS": 0.45,
+          "extraPct": 50
+        },
+        {
+          "link": "4G poor (2 up / 5 down Mbps, 150 ms RTT)",
+          "writeS": 1.34,
+          "readBackS": 0.62,
+          "withVerifyS": 1.96,
+          "extraPct": 46
+        },
+        {
+          "link": "3G (0.4 up / 1 down Mbps, 300 ms RTT)",
+          "writeS": 6.24,
+          "readBackS": 2.67,
+          "withVerifyS": 8.91,
+          "extraPct": 43
+        }
+      ],
+      "dataPerWriteMB": {
+        "writeOnly": 0.28,
+        "withReadBack": 0.57
+      }
+    },
+    {
+      "case": "heavy history, no images",
+      "txns": 8000,
+      "images": 0,
+      "jsonMB": 1.9,
+      "stringifyMs": 8.2,
+      "digestMs": 76.3,
+      "parseMs": 13.1,
+      "integrityMs": 8.9,
+      "differencesMs": 125.7,
+      "safetyBackupMs": 178,
+      "loopbackWriteMs": 63.8,
+      "loopbackReadBackMs": 45.5,
+      "estimates": [
+        {
+          "link": "4G good (10 up / 25 down Mbps, 60 ms RTT)",
+          "writeS": 1.66,
+          "readBackS": 0.7,
+          "withVerifyS": 2.36,
+          "extraPct": 42
+        },
+        {
+          "link": "4G poor (2 up / 5 down Mbps, 150 ms RTT)",
+          "writeS": 8.14,
+          "readBackS": 3.34,
+          "withVerifyS": 11.48,
+          "extraPct": 41
+        },
+        {
+          "link": "3G (0.4 up / 1 down Mbps, 300 ms RTT)",
+          "writeS": 40.23,
+          "readBackS": 16.27,
+          "withVerifyS": 56.5,
+          "extraPct": 40
+        }
+      ],
+      "dataPerWriteMB": {
+        "writeOnly": 1.9,
+        "withReadBack": 3.81
+      }
+    },
+    {
+      "case": "500 txns + 10 receipt photos (150 KB)",
+      "txns": 500,
+      "images": 10,
+      "jsonMB": 2.07,
+      "stringifyMs": 8.4,
+      "digestMs": 26.2,
+      "parseMs": 3.3,
+      "integrityMs": 0.5,
+      "differencesMs": 31.4,
+      "safetyBackupMs": 64.4,
+      "loopbackWriteMs": 37.3,
+      "loopbackReadBackMs": 23.7,
+      "estimates": [
+        {
+          "link": "4G good (10 up / 25 down Mbps, 60 ms RTT)",
+          "writeS": 1.8,
+          "readBackS": 0.75,
+          "withVerifyS": 2.55,
+          "extraPct": 42
+        },
+        {
+          "link": "4G poor (2 up / 5 down Mbps, 150 ms RTT)",
+          "writeS": 8.84,
+          "readBackS": 3.62,
+          "withVerifyS": 12.46,
+          "extraPct": 41
+        },
+        {
+          "link": "3G (0.4 up / 1 down Mbps, 300 ms RTT)",
+          "writeS": 43.74,
+          "readBackS": 17.67,
+          "withVerifyS": 61.41,
+          "extraPct": 40
+        }
+      ],
+      "dataPerWriteMB": {
+        "writeOnly": 2.07,
+        "withReadBack": 4.14
+      }
+    },
+    {
+      "case": "500 txns + 25 receipt photos (150 KB)",
+      "txns": 500,
+      "images": 25,
+      "jsonMB": 5,
+      "stringifyMs": 19.7,
+      "digestMs": 59.5,
+      "parseMs": 7.3,
+      "integrityMs": 0.5,
+      "differencesMs": 70.7,
+      "safetyBackupMs": 155.1,
+      "loopbackWriteMs": 91.3,
+      "loopbackReadBackMs": 56.7,
+      "estimates": [
+        {
+          "link": "4G good (10 up / 25 down Mbps, 60 ms RTT)",
+          "writeS": 4.26,
+          "readBackS": 1.74,
+          "withVerifyS": 6,
+          "extraPct": 41
+        },
+        {
+          "link": "4G poor (2 up / 5 down Mbps, 150 ms RTT)",
+          "writeS": 21.13,
+          "readBackS": 8.54,
+          "withVerifyS": 29.67,
+          "extraPct": 40
+        },
+        {
+          "link": "3G (0.4 up / 1 down Mbps, 300 ms RTT)",
+          "writeS": 105.19,
+          "readBackS": 42.26,
+          "withVerifyS": 147.45,
+          "extraPct": 40
+        }
+      ],
+      "dataPerWriteMB": {
+        "writeOnly": 5,
+        "withReadBack": 10
+      }
+    },
+    {
+      "case": "1000 txns + 60 receipt photos (150 KB)",
+      "txns": 1000,
+      "images": 60,
+      "jsonMB": 11.96,
+      "stringifyMs": 49.1,
+      "digestMs": 161.3,
+      "parseMs": 19.9,
+      "integrityMs": 1,
+      "differencesMs": 151.6,
+      "safetyBackupMs": 366.1,
+      "loopbackWriteMs": 204,
+      "loopbackReadBackMs": 136.4,
+      "estimates": [
+        {
+          "link": "4G good (10 up / 25 down Mbps, 60 ms RTT)",
+          "writeS": 10.09,
+          "readBackS": 4.07,
+          "withVerifyS": 14.16,
+          "extraPct": 40
+        },
+        {
+          "link": "4G poor (2 up / 5 down Mbps, 150 ms RTT)",
+          "writeS": 50.3,
+          "readBackS": 20.21,
+          "withVerifyS": 70.51,
+          "extraPct": 40
+        },
+        {
+          "link": "3G (0.4 up / 1 down Mbps, 300 ms RTT)",
+          "writeS": 251.05,
+          "readBackS": 100.6,
+          "withVerifyS": 351.65,
+          "extraPct": 40
+        }
+      ],
+      "dataPerWriteMB": {
+        "writeOnly": 11.96,
+        "withReadBack": 23.91
+      }
+    }
+  ]
+}

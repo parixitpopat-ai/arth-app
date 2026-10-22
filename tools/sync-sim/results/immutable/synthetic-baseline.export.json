@@ -1,0 +1,182 @@
+{
+  "dataset": "synthetic",
+  "txns": [
+    {
+      "id": "B001",
+      "type": "expense",
+      "desc": "Synthetic expense 1",
+      "merchant": "SYN",
+      "date": "2026-10-01",
+      "amount": 107,
+      "catId": "food",
+      "catIds": [
+        "food"
+      ],
+      "accId": "syn_bank",
+      "people": {}
+    },
+    {
+      "id": "B002",
+      "type": "expense",
+      "desc": "Synthetic expense 2",
+      "merchant": "SYN",
+      "date": "2026-10-02",
+      "amount": 114,
+      "catId": "food",
+      "catIds": [
+        "food"
+      ],
+      "accId": "syn_bank",
+      "people": {}
+    },
+    {
+      "id": "B003",
+      "type": "expense",
+      "desc": "Synthetic expense 3",
+      "merchant": "SYN",
+      "date": "2026-10-03",
+      "amount": 121,
+      "catId": "food",
+      "catIds": [
+        "food"
+      ],
+      "accId": "syn_bank",
+      "people": {}
+    },
+    {
+      "id": "B004",
+      "type": "expense",
+      "desc": "Synthetic expense 4",
+      "merchant": "SYN",
+      "date": "2026-10-04",
+      "amount": 128,
+      "catId": "food",
+      "catIds": [
+        "food"
+      ],
+      "accId": "syn_bank",
+      "people": {}
+    },
+    {
+      "id": "B005",
+      "type": "expense",
+      "desc": "Synthetic expense 5",
+      "merchant": "SYN",
+      "date": "2026-10-05",
+      "amount": 135,
+      "catId": "food",
+      "catIds": [
+        "food"
+      ],
+      "accId": "syn_bank",
+      "people": {}
+    },
+    {
+      "id": "B006",
+      "type": "expense",
+      "desc": "Synthetic expense 6",
+      "merchant": "SYN",
+      "date": "2026-10-06",
+      "amount": 142,
+      "catId": "food",
+      "catIds": [
+        "food"
+      ],
+      "accId": "syn_bank",
+      "people": {}
+    },
+    {
+      "id": "B007",
+      "type": "expense",
+      "desc": "Synthetic expense 7",
+      "merchant": "SYN",
+      "date": "2026-10-07",
+      "amount": 149,
+      "catId": "food",
+      "catIds": [
+        "food"
+      ],
+      "accId": "syn_bank",
+      "people": {}
+    },
+    {
+      "id": "B008",
+      "type": "expense",
+      "desc": "Synthetic expense 8",
+      "merchant": "SYN",
+      "date": "2026-10-08",
+      "amount": 156,
+      "catId": "food",
+      "catIds": [
+        "food"
+      ],
+      "accId": "syn_bank",
+      "people": {}
+    },
+    {
+      "id": "B009",
+      "type": "expense",
+      "desc": "Synthetic expense 9",
+      "merchant": "SYN",
+      "date": "2026-10-09",
+      "amount": 163,
+      "catId": "food",
+      "catIds": [
+        "food"
+      ],
+      "accId": "syn_bank",
+      "people": {}
+    },
+    {
+      "id": "B010",
+      "type": "expense",
+      "desc": "Synthetic expense 10",
+      "merchant": "SYN",
+      "date": "2026-10-10",
+      "amount": 170,
+      "catId": "food",
+      "catIds": [
+        "food"
+      ],
+      "accId": "syn_bank",
+      "people": {}
+    },
+    {
+      "id": "B011",
+      "type": "expense",
+      "desc": "Synthetic expense 11",
+      "merchant": "SYN",
+      "date": "2026-10-11",
+      "amount": 177,
+      "catId": "food",
+      "catIds": [
+        "food"
+      ],
+      "accId": "syn_bank",
+      "people": {}
+    },
+    {
+      "id": "B012",
+      "type": "expense",
+      "desc": "Synthetic expense 12",
+      "merchant": "SYN",
+      "date": "2026-10-12",
+      "amount": 184,
+      "catId": "food",
+      "catIds": [
+        "food"
+      ],
+      "accId": "syn_bank",
+      "people": {}
+    }
+  ],
+  "accounts": [
+    {
+      "id": "syn_bank",
+      "name": "SYN Bank",
+      "type": "bank",
+      "balance": 100000,
+      "color": "#3b82f6"
+    }
+  ]
+}

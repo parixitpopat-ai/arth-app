@@ -1,0 +1,486 @@
+{
+  "at": "2026-10-16T04:47:20.427Z",
+  "outcomeVector": [
+    {
+      "id": "P1",
+      "pass": true
+    },
+    {
+      "id": "P2",
+      "pass": true
+    },
+    {
+      "id": "P5a",
+      "pass": true
+    },
+    {
+      "id": "P5b",
+      "pass": true
+    },
+    {
+      "id": "P5c",
+      "pass": true
+    },
+    {
+      "id": "L1",
+      "pass": true
+    },
+    {
+      "id": "P3/P4",
+      "pass": true
+    },
+    {
+      "id": "C-later",
+      "pass": true
+    },
+    {
+      "id": "C-keep-local",
+      "pass": true
+    },
+    {
+      "id": "C-use-cloud",
+      "pass": true
+    },
+    {
+      "id": "Q1",
+      "pass": true
+    },
+    {
+      "id": "R1",
+      "pass": true
+    },
+    {
+      "id": "T1",
+      "pass": true
+    },
+    {
+      "id": "TAB1",
+      "pass": true
+    },
+    {
+      "id": "TAB2",
+      "pass": true
+    },
+    {
+      "id": "TAB3",
+      "pass": true
+    },
+    {
+      "id": "BN1",
+      "pass": true
+    },
+    {
+      "id": "BN2",
+      "pass": true
+    },
+    {
+      "id": "BN3",
+      "pass": true
+    },
+    {
+      "id": "FB1",
+      "pass": true
+    },
+    {
+      "id": "FB2",
+      "pass": true
+    },
+    {
+      "id": "RB1",
+      "pass": true
+    },
+    {
+      "id": "SI1",
+      "pass": true
+    },
+    {
+      "id": "SI2",
+      "pass": true
+    },
+    {
+      "id": "SI3-keep-cloud",
+      "pass": true
+    },
+    {
+      "id": "SI3-keep-local",
+      "pass": true
+    },
+    {
+      "id": "SI4",
+      "pass": true
+    },
+    {
+      "id": "SI5",
+      "pass": true
+    },
+    {
+      "id": "SI6",
+      "pass": true
+    },
+    {
+      "id": "SAFE",
+      "pass": true
+    },
+    {
+      "id": "P2-after",
+      "pass": true
+    }
+  ],
+  "results": [
+    {
+      "id": "P1",
+      "property": "1 durable local save before async sync",
+      "pass": true,
+      "evidence": {
+        "savedLocallyImmediately": true,
+        "cloudHadItThen": false,
+        "serverWritesWhileOffline": 0,
+        "survivedReloadOffline": true
+      }
+    },
+    {
+      "id": "P2",
+      "property": "2 recoverable immutable export",
+      "pass": true,
+      "evidence": {
+        "harnessExportIntact": true,
+        "harnessExportIds": 12,
+        "appDownloadIds": 12,
+        "appDownloadEqualsDevice": true,
+        "appDownloadHashed": true
+      }
+    },
+    {
+      "id": "P5a",
+      "property": "5 server rejects the write",
+      "pass": true,
+      "evidence": {
+        "localKeptThroughReload": true,
+        "userToldChangesNotSynced": true,
+        "deliveredAfterServerRecovered": true,
+        "rejectedWrites": 3
+      }
+    },
+    {
+      "id": "P5b",
+      "property": "5 reply lost after the server applied the write",
+      "pass": true,
+      "evidence": {
+        "cloudHasIt": true,
+        "deviceAndCloudIdentical": true,
+        "noRepeatedWrites": true,
+        "localIds": 13,
+        "cloudIds": 13
+      }
+    },
+    {
+      "id": "P5c",
+      "property": "5 closed before the change was sent",
+      "pass": true,
+      "evidence": {
+        "savedLocallyBeforeClose": true,
+        "presentAfterReopen": true,
+        "deliveredToCloud": true
+      }
+    },
+    {
+      "id": "L1",
+      "property": "3/4 Sync Now never replaces unsynced data; status is verified",
+      "pass": true,
+      "evidence": {
+        "editSyncedAutomatically": true,
+        "survivedOneSyncNowTap": true,
+        "inCloudAfterTap": true,
+        "forbiddenPhraseShown": false,
+        "headline": "Synced"
+      }
+    },
+    {
+      "id": "P3/P4",
+      "property": "3 conflict detected, 4 reconciliation",
+      "pass": true,
+      "evidence": {
+        "conflictRecorded": true,
+        "bKeptItsTxn": true,
+        "bOverwroteCloud": false,
+        "cloudKeptAsTxn": true,
+        "bannerShown": true,
+        "sheetShown": true,
+        "sheetOnlyHere": true,
+        "sheetOnlyCloud": true,
+        "unionSize": 14,
+        "lostAcrossDevices": 0
+      }
+    },
+    {
+      "id": "C-later",
+      "property": "3 decide later keeps sync paused and replaces nothing",
+      "pass": true,
+      "evidence": {
+        "stillConflict": true,
+        "localKept": true,
+        "serverWrites": 0
+      }
+    },
+    {
+      "id": "C-keep-local",
+      "property": "3 conflict choice: keep this device; the cloud copy is backed up first",
+      "pass": true,
+      "evidence": {
+        "resolved": true,
+        "cloudNowHasBs": true,
+        "cloudCopyBackedUpFirst": true,
+        "asTxnRecoverableFromBackup": true,
+        "otherDeviceAdoptedResult": true,
+        "lost": 0
+      }
+    },
+    {
+      "id": "C-use-cloud",
+      "property": "3 conflict choice: use the cloud copy; this device is backed up first",
+      "pass": true,
+      "evidence": {
+        "resolved": true,
+        "bNowHasAs": true,
+        "deviceBackedUpFirst": true,
+        "bsTxnRecoverableFromBackup": true,
+        "lost": 0
+      }
+    },
+    {
+      "id": "Q1",
+      "property": "backup-before-replacement: a failed backup blocks the replacement",
+      "pass": true,
+      "evidence": {
+        "fileSheetOffered": true,
+        "deviceUntouched": true,
+        "conflictStillOpen": true
+      }
+    },
+    {
+      "id": "R1",
+      "property": "4 reconciliation mismatch is detected and sync pauses",
+      "pass": true,
+      "evidence": {
+        "paused": true,
+        "localIntact": true,
+        "bannerShown": true,
+        "cloudHasOneFewerThanDevice": true
+      }
+    },
+    {
+      "id": "T1",
+      "property": "concurrency token unreliable: sync pauses instead of overwriting",
+      "pass": true,
+      "evidence": {
+        "paused": true,
+        "noFurtherWrites": true
+      }
+    },
+    {
+      "id": "TAB1",
+      "property": "two-tab: only one tab runs Arth; the second mounts nothing and cannot sync",
+      "pass": true,
+      "evidence": {
+        "secondTabPaused": true,
+        "secondTabMountedNoApp": true,
+        "secondTabTitleOk": true,
+        "ownerStillSyncs": true,
+        "ownerWritesOnly": true
+      }
+    },
+    {
+      "id": "TAB2",
+      "property": "two-tab: 'Use this tab' hands over with the latest data; nothing is lost",
+      "pass": true,
+      "evidence": {
+        "newOwnerSawOldOwnersChange": true,
+        "oldOwnerPaused": true,
+        "newOwnerSynced": true,
+        "handedBackWithLatest": true,
+        "lost": 0
+      }
+    },
+    {
+      "id": "TAB3",
+      "property": "two-tab: a foreign write marks the tab stale; it stops, then reloads cleanly",
+      "pass": true,
+      "evidence": {
+        "staleOverlayShown": true,
+        "reloadedWithLatestData": true
+      }
+    },
+    {
+      "id": "BN1",
+      "property": "Plan Ahead: 'Not now' reaches the cloud and the other device stops offering the card",
+      "pass": true,
+      "evidence": {
+        "otherDeviceSawCardBefore": true,
+        "dismissalInCloud": true,
+        "otherDeviceReceivedIt": true,
+        "otherDeviceCardGone": true
+      }
+    },
+    {
+      "id": "BN2",
+      "property": "Plan Ahead: accepting a raise syncs the nudge record and the budget override together",
+      "pass": true,
+      "evidence": {
+        "raiseAndOverrideInCloud": true,
+        "otherDeviceGotBoth": true,
+        "reconcile": true
+      }
+    },
+    {
+      "id": "BN3",
+      "property": "Plan Ahead: a nudge-only conflict is described and both copies are held",
+      "pass": true,
+      "evidence": {
+        "conflictRecorded": true,
+        "sheetNamesPlanAhead": true,
+        "sheetNamesBudgetChange": true,
+        "bothCopiesHeld": true,
+        "cloudKeptDismissal": true
+      }
+    },
+    {
+      "id": "FB1",
+      "property": "backup-file fallback: a downloaded, re-selected, verified file secures the replacement",
+      "pass": true,
+      "evidence": {
+        "fileContainsTheReplacedData": true,
+        "replacementProceededAfterVerification": true,
+        "recordedAsFileBackup": true,
+        "fileHasChecksum": true
+      }
+    },
+    {
+      "id": "FB2",
+      "property": "backup-file fallback: wrong or damaged files are refused and nothing is replaced",
+      "pass": true,
+      "evidence": {
+        "wrongFileRefused": true,
+        "damagedFileRefused": true,
+        "deviceUntouched": true,
+        "conflictStillOpen": true
+      }
+    },
+    {
+      "id": "RB1",
+      "property": "recovery: restoring a sync safety backup backs up the device AND the cloud copy first, and loses nothing",
+      "pass": true,
+      "evidence": {
+        "safetyBackupsListedInUi": true,
+        "restoredOldDeviceData": true,
+        "deviceBackedUpFirst": true,
+        "cloudCopyBackedUpFirst": true,
+        "restoredDataSyncedToCloud": true,
+        "bothVersionsStillRecoverable": true,
+        "lost": 0
+      }
+    },
+    {
+      "id": "SI1",
+      "property": "sign-in: a brand-new account reaches the app, creates its cloud copy, and syncs the first transaction",
+      "pass": true,
+      "evidence": {
+        "signedIn": true,
+        "cloudCopyCreated": true,
+        "firstTransactionSynced": true,
+        "profileInCloud": true,
+        "noConflict": true
+      }
+    },
+    {
+      "id": "SI2",
+      "property": "sign-in: an existing install with no sync history uploads its data when the account is empty",
+      "pass": true,
+      "evidence": {
+        "cloudHoldsAllLocalTransactions": true,
+        "noConflictScreen": true,
+        "localUnchanged": true
+      }
+    },
+    {
+      "id": "SI3-keep-cloud",
+      "property": "sign-in: existing install and a different cloud copy -> explicit choice, the replaced side is backed up first",
+      "pass": true,
+      "evidence": {
+        "conflictScreenShown": true,
+        "chosenSideWon": true,
+        "replacedSideRecoverableFromBackup": true,
+        "backupReasons": [
+          "before-use-cloud",
+          "conflict-cloud-copy",
+          "conflict-device-copy"
+        ]
+      }
+    },
+    {
+      "id": "SI3-keep-local",
+      "property": "sign-in: existing install and a different cloud copy -> explicit choice, the replaced side is backed up first",
+      "pass": true,
+      "evidence": {
+        "conflictScreenShown": true,
+        "chosenSideWon": true,
+        "replacedSideRecoverableFromBackup": true,
+        "backupReasons": [
+          "before-keep-local",
+          "conflict-cloud-copy",
+          "conflict-device-copy"
+        ]
+      }
+    },
+    {
+      "id": "SI4",
+      "property": "sign-in: signing out and back in keeps the sync history; no conflict, nothing re-uploaded or lost",
+      "pass": true,
+      "evidence": {
+        "signedOutToWelcome": true,
+        "noConflictScreen": true,
+        "historyKept": true,
+        "dataUnchanged": true
+      }
+    },
+    {
+      "id": "SI5",
+      "property": "recovery: a reinstalled app signs in and gets every record back, reconciled",
+      "pass": true,
+      "evidence": {
+        "allTransactionsRestored": true,
+        "reconciled": true,
+        "recordsChecked": true,
+        "noConflict": true
+      }
+    },
+    {
+      "id": "SI6",
+      "property": "sign-in: a wrong code and an unknown email are refused cleanly",
+      "pass": true,
+      "evidence": {
+        "wrongCodeRefused": true,
+        "unknownEmailHint": true
+      }
+    },
+    {
+      "id": "SAFE",
+      "property": "isolation from production",
+      "pass": true,
+      "evidence": {
+        "supabaseRequestsAttempted": 0,
+        "unconditionalCloudWrites": 0,
+        "otherNonLocalAborted": [
+          "fonts.googleapis.com"
+        ]
+      }
+    },
+    {
+      "id": "P2-after",
+      "property": "export unchanged after all scenarios",
+      "pass": true,
+      "evidence": {
+        "sha256": "b7778ace9479a49cf669d42b9d16857c1beab05de0faee5f320e5cece6a1e4b0"
+      }
+    }
+  ]
+}

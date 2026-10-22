@@ -6,12 +6,20 @@ import { buildExpenseDraft, findPossibleDuplicate } from "./domain/transactions/
 import { dedupeSettlementTxns } from "./domain/transactions/settlementDedupe.js";
 import { canResumeOffline, OFFLINE_CHECK_TIMEOUT_MS } from "./domain/identity/offlineResume";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from "recharts";
-import { checkCloudUser, isCloudSyncConfigured, loadCloudSnapshot, saveCloudSnapshot, signInWithPassword, signOutCloud, signUpWithPassword, supabase, hasEverAuthenticatedOnThisDevice } from "./cloudSync";
+import { checkCloudUser, isCloudSyncConfigured, signInWithPassword, signOutCloud, signUpWithPassword, supabase, hasEverAuthenticatedOnThisDevice } from "./cloudSync";
 import { hasMeaningfulData, isMasterUserSetupComplete, determineFirstAuthAction, FIRST_AUTH_ACTIONS, summarizeMeaningfulData, mergeMasterUserProfileFields } from "./domain/identity/masterUserSetup";
 import WelcomeScreen from "./screens/WelcomeScreen";
 import AuthGateScreen from "./screens/AuthGateScreen";
 import MasterUserProfileScreen from "./screens/MasterUserProfileScreen";
 import CloudConflictScreen from "./screens/CloudConflictScreen";
+import SyncConflictSheet from "./components/SyncConflictSheet";
+import SyncBackupFileSheet from "./components/SyncBackupFileSheet";
+import TabPausedScreen from "./components/TabPausedScreen";
+import { createTabOwnership, watchForeignWrites } from "./sync/tabOwnership";
+import { createSyncEngine } from "./sync/syncEngine";
+import { createSupabaseCasClient } from "./sync/supabaseCasClient";
+import { backupText } from "./sync/statusText";
+import { readSafetyBackups, REASON_LABELS } from "./sync/safetyBackup";
 import CloudStateUnknownScreen from "./screens/CloudStateUnknownScreen";
 // smsBridge — stub (native SMS not available in web PWA)
 const isNativeSmsAvailable = () => false;
@@ -706,7 +714,35 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// SYNC-SAFETY-004: only ONE tab of this browser profile runs Arth at a time (two tabs share storage but not memory; a stale tab would
+// save over the other's data and then sync it). Other tabs mount nothing, so they cannot save or sync; the person can take over explicitly.
+function TabGate({ children }) {
+  const [own, setOwn] = useState("waiting");     // waiting | owner | lost
+  const [showWaiting, setShowWaiting] = useState(false);
+  const [stale, setStale] = useState(false);
+  const ctlRef = useRef(null);
+  useEffect(()=>{
+    const tabId = `tab_${Math.random().toString(36).slice(2,10)}${Date.now().toString(36)}`;
+    const locks = typeof navigator!=="undefined" && navigator.locks && typeof navigator.locks.request==="function" ? navigator.locks : null;
+    const o = createTabOwnership({ locks, storage:window.localStorage, tabId, onChange:setOwn });
+    ctlRef.current = o; o.start();
+    const t = setTimeout(()=>setShowWaiting(true), 700);   // a reload briefly queues behind the old page; do not flash the pause screen for that
+    return ()=>{ clearTimeout(t); o.stop(); };
+  }, []);
+  useEffect(()=>{
+    if(own!=="owner") return undefined;
+    return watchForeignWrites(window, window.localStorage, ()=>setStale(true));   // another tab changed the synced data under this one
+  }, [own]);
+  if(own==="owner" && !stale) return children;
+  if(own==="waiting" && !showWaiting) return <div style={{ minHeight:"100vh",background:"#08080f" }}/>;
+  return <TabPausedScreen reason={stale?"stale":"other"} onTakeOver={()=>{ setStale(false); ctlRef.current?.takeOver(); }} onReload={()=>window.location.reload()}/>;
+}
+
 export default function Arth() {
+  return <TabGate><ArthInner/></TabGate>;
+}
+
+function ArthInner() {
   const [appPin, setAppPin] = useState(()=>localStorage.getItem("arth_pin")||"");
   const [unlocked, setUnlocked] = useState(false);
   const idleTimer = useRef(null);
@@ -9229,7 +9265,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const backupFileInputRef = useRef(null);
   const applyingCloudSnapshotRef = useRef(false);
   const cloudSnapshotRef = useRef(null);
-  const syncConflictPendingRef = useRef(false); // set when "local looks newer than cloud" fires in
+  const syncEngineRef = useRef(null);   // the current sync engine (set once it exists); read by handlers declared before it
   // P1 — Master User / Signup. masterUserSetupComplete is explicit, snapshot-side
   // state (P1-002 §3) — deliberately never inferred from name/emoji/relation.
   const [masterUserSetupComplete, setMasterUserSetupComplete] = useState(()=>JSON.parse(localStorage.getItem("arth_master_user_setup_complete") ?? "false"));
@@ -9267,11 +9303,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // While true, cloudHydrated stays false so the automatic upload below cannot run ahead of the person's choice.
   const resumedFromOfflineRef = useRef(false);
   const firstAuthRanRef = useRef(false); // guards against re-running the matrix twice for one session
-  // pullCloudSnapshot - blocks auto-push until the user explicitly resolves the conflict, since
-  // cloudHydrated alone isn't a safe enough signal (that flag used to double as "safe to push",
-  // which is exactly how a fresh device's own just-computed timestamp could silently overwrite
-  // genuine cloud data moments after its own pull was correctly blocked).
-
   useEffect(() => {
     safeSetLocalStorage("arth_card_order", JSON.stringify(cardOrder));
   }, [cardOrder]);
@@ -9456,7 +9487,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, []);
 
-  const restoreBackupSnapshot = useCallback((snapshot, label = "selected backup") => {
+  const restoreBackupSnapshot = useCallback(async (snapshot, label = "selected backup") => {
     const looksValid = snapshot && typeof snapshot === "object" && (
       Array.isArray(snapshot.txns) ||
       Array.isArray(snapshot.accounts) ||
@@ -9467,10 +9498,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(!looksValid) throw new Error("Please choose a valid Arth backup JSON file.");
     const stamp = formatBackupStamp(snapshot?.savedAt || "");
     const summary = `${Array.isArray(snapshot.txns) ? snapshot.txns.length : 0} txns · ${Array.isArray(snapshot.accounts) ? snapshot.accounts.length : 0} accounts`;
-    const proceed = window.confirm(`Restore ${label}${stamp ? ` (${stamp})` : ""}? This will replace current data on this device.\n\n${summary}`);
+    const engine = syncEngineRef.current;
+    const signedIn = Boolean(engine);
+    const proceed = window.confirm(`Restore ${label}${stamp ? ` (${stamp})` : ""}? This will replace current data on this device${signedIn ? " and, once it syncs, the cloud copy. Both are saved as verified backups first (Settings, Backup & Restore, Sync safety backups)" : ""}.\n\n${summary}`);
     if(!proceed) return false;
+    if(engine){
+      // Restoring an older copy would also replace the cloud copy on the next sync: secure both sides first, or do not restore.
+      const prep = await engine.prepareRestore();
+      if(!prep.ok){ setBackupStatus(`Restore stopped, nothing was replaced: ${prep.error}`); return false; }
+    }
     applyCloudSnapshot(snapshot);
-    if(cloudUser?.id && isCloudSyncConfigured) setCloudStatus("Backup restored locally. Syncing your updated data...");
+    if(cloudUser?.id && isCloudSyncConfigured) setCloudStatus("Backup restored on this device. It will be sent to the cloud; both the old device data and the old cloud copy were backed up first.");
     setBackupStatus(`Backup restored${stamp ? ` · ${stamp}` : ""}`);
     return true;
   }, [applyCloudSnapshot, cloudUser?.id, formatBackupStamp]);
@@ -9533,7 +9571,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const snapshot = parsed?.snapshot && typeof parsed.snapshot === "object" ? parsed.snapshot : parsed;
       const backupTime = parsed?.exportedAt || snapshot?.savedAt || (file.lastModified ? new Date(file.lastModified).toISOString() : "");
       const stamp = formatBackupStamp(backupTime);
-      restoreBackupSnapshot(snapshot, stamp ? `backup from ${stamp}` : (file.name || "backup file"));
+      await restoreBackupSnapshot(snapshot, stamp ? `backup from ${stamp}` : (file.name || "backup file"));
     }catch(err){
       setBackupStatus(`Restore failed: ${err.message}`);
     }finally{
@@ -9572,228 +9610,105 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     });
   }, [cloudSnapshot, autoBackupEnabled, autoBackupFrequency]);
 
-  const pushCloudSnapshot = useCallback(async (statusText = "Cloud sync complete.", quiet = false) => {
-    if(!cloudUser?.id || !isCloudSyncConfigured) return;
-    if(!quiet) setCloudBusy(true);
+  // ── SYNC-SAFETY-002 ── every sync decision lives in src/sync/* (design: docs/engineering/SYNC-SAFETY-002-design.md).
+  // Local data is saved first (the per-key effects above). The engine then syncs with a compare-and-swap on the cloud
+  // version this device last agreed with, backs up (verified) before replacing anything, keeps "unsynced" derived from
+  // content so it survives reloads, retries failures, and reports only verified outcomes.
+  const [syncStatus, setSyncStatus] = useState({ kind:"idle" });
+  const [syncConflictOpen, setSyncConflictOpen] = useState(true);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const [fileBackupRequest, setFileBackupRequest] = useState(null);
+  const [syncKit, setSyncKit] = useState(null);
+  useEffect(()=>{
+    if(!cloudUser?.id || !isCloudSyncConfigured || !supabase){ setSyncKit(null); return undefined; }
+    const cloud = createSupabaseCasClient(supabase);
+    const deviceId = (()=>{ try{ let d = localStorage.getItem("arth_device_id"); if(!d){ d = `dev_${Math.random().toString(36).slice(2,10)}${Date.now().toString(36)}`; localStorage.setItem("arth_device_id", d); } return d; }catch{ return "dev_unknown"; } })();
+    // What the restore path (applyCloudSnapshot) does to each list, so a backup can be checked for recoverability.
+    const normalizers = { cats:normalizeCats, accountTypes:v=>normalizeAccountTypes(v, []), incomeTypes:normalizeIncomeTypes, liabilityTypes:normalizeLiabilityTypes, accounts:normalizeAccounts, people:normalizePeople, measureUnits:normalizeMeasureUnits, itemCatalog:normalizeItemCatalog, txns:normalizeTxns, loans:normalizeLoans };
+    const engine = createSyncEngine({
+      userId: cloudUser.id, deviceId, cloud, storage: window.localStorage, normalizers,
+      getSnapshot: ()=>cloudSnapshotRef.current || {},
+      applySnapshot: async (snapshot)=>{ applyCloudSnapshot(snapshot); },
+      // After applying, wait for React to rebuild the snapshot from the new state so the result can be reconciled against the cloud copy.
+      readLocalAfterApply: async ()=>{
+        const before = cloudSnapshotRef.current, t0 = Date.now();
+        while(cloudSnapshotRef.current===before && Date.now()-t0<3000) await new Promise(r=>setTimeout(r,25));
+        await new Promise(r=>setTimeout(r,60));
+        return cloudSnapshotRef.current || {};
+      },
+      // Browser storage cannot hold a backup: the person saves a file and selects it again (see SyncBackupFileSheet).
+      requestExternalBackup: (snapshot, reason)=>new Promise(resolve=>setFileBackupRequest({ snapshot, reason, resolve })),
+      genId: ()=>(globalThis.crypto && globalThis.crypto.randomUUID ? globalThis.crypto.randomUUID() : genId()),
+      isOnline: ()=>typeof navigator==="undefined" || navigator.onLine!==false,
+      onStatus: (s, t)=>{ setSyncStatus({ ...s, text:t }); if(s.verifiedAt) setLastSyncedAt(s.verifiedAt); },
+    });
+    setSyncKit({ engine, cloud });
+    return ()=>{ engine.stop(); };
+  }, [cloudUser?.id, applyCloudSnapshot]);
+  const syncEngine = syncKit?.engine || null;
+  syncEngineRef.current = syncEngine;
+  useEffect(()=>{ if(!syncEngine) setSyncStatus({ kind:"idle" }); }, [syncEngine]);
+  const syncDownload = useCallback((snapshot, prefix)=>{ if(snapshot) downloadBackupPayload(buildBackupPayload(snapshot, "sync-conflict"), prefix); }, [downloadBackupPayload, buildBackupPayload]);
+  const resolveSyncConflict = useCallback(async (choice)=>{
+    if(!syncEngine) return;
+    setSyncBusy(true); setSyncError("");
     try{
-      const nextSnapshot = cloudSnapshotRef.current || {};
-      const saved = await saveCloudSnapshot(cloudUser.id, nextSnapshot);
-      setLastSyncedAt(saved?.updated_at || nextSnapshot.savedAt || new Date().toISOString());
-      setCloudStatus(statusText);
-    }catch(err){
-      setCloudStatus(`Sync failed: ${err.message}`);
-    }finally{
-      if(!quiet) setCloudBusy(false);
-    }
-  }, [cloudUser]);
-
-  const pullCloudSnapshot = useCallback(async (force = false) => {
-    if(!cloudUser?.id || !isCloudSyncConfigured) return;
-    setCloudBusy(true);
-    try{
-      const record = await loadCloudSnapshot(cloudUser.id);
-      if(record?.snapshot){
-        // Before overwriting local state with the cloud version, ALWAYS save what's about to be
-        // discarded into the local auto-backup list first (a separate localStorage key that pull
-        // never touches). This is the safety net for the exact failure mode that just happened:
-        // local data accumulated while signed out getting silently replaced by an older cloud
-        // snapshot with no way back. Never discard local state without a path to recover it.
-        const localBeforePull = cloudSnapshotRef.current;
-        const localSavedAt = localBeforePull?.savedAt ? new Date(localBeforePull.savedAt).getTime() : 0;
-        const cloudSavedAt = record.snapshot?.savedAt ? new Date(record.snapshot.savedAt).getTime() : 0;
-        if(localBeforePull){
-          const exportedAt = new Date().toISOString();
-          setAutoBackups(prev=>{
-            const list = Array.isArray(prev) ? prev : [];
-            // Real incident this fix responds to: rapid successive syncs (e.g. troubleshooting a
-            // sync issue) created several pre-sync backups within minutes of each other, evicting
-            // the one older backup that actually mattered under the old 3-slot cap. Two changes:
-            // (1) skip creating a new snapshot if the most recent pre-sync backup is under 2
-            // minutes old — rapid re-syncs shouldn't each consume a rotation slot; (2) raise the
-            // cap from 3 to 10, so a real day's worth of distinct sync events has room to coexist
-            // instead of the newest few silently evicting anything older within the same day.
-            const mostRecentPreSync = list.find(b=>b.backupType==="pre-sync");
-            const tooSoon = mostRecentPreSync && (Date.now()-new Date(mostRecentPreSync.exportedAt).getTime()) < 2*60*1000;
-            if(tooSoon) return list;
-            const nextItem = { id:`presync_${Date.now()}`, backupType:"pre-sync", exportedAt, snapshot:{ ...localBeforePull, savedAt:localBeforePull.savedAt||exportedAt } };
-            const others = list.filter(b=>b.backupType!=="pre-sync");
-            const sameType = list.filter(b=>b.backupType==="pre-sync");
-            return [...others, nextItem, ...sameType].slice(0, 20);
-          });
-        }
-        // Local data looks newer than what's in the cloud (e.g. changes made while signed out) —
-        // don't silently overwrite it. The backup above is already saved either way, so nothing
-        // is at risk while the person decides.
-        if(!force && localSavedAt && cloudSavedAt && localSavedAt>cloudSavedAt+60000){
-          setCloudStatus("Your device has newer local data than the cloud. It's been saved to Backup & Restore — review before syncing to avoid losing it. Tap Sync Now again to pull the cloud version anyway.");
-          setCloudBusy(false);
-          setCloudHydrated(true);
-          syncConflictPendingRef.current = true; // blocks auto-push until the user explicitly
-          // resolves this (Sync Now again) — cloudHydrated alone used to be enough to unlock the
-          // auto-push effect, meaning a fresh device's own just-computed timestamp (near-always
-          // "newer" than real cloud data, since genuine edits take time to accumulate) would block
-          // the pull here, then silently push that same stale/empty local state over the cloud a
-          // moment later. This is the confirmed cause of "recorded on device A, opened device B,
-          // lost the day's transactions" — the safety check was protecting local data from a pull,
-          // but had no equivalent protection against auto-pushing over the cloud right after.
-          return;
-        }
-        applyCloudSnapshot(record.snapshot);
-        syncConflictPendingRef.current = false; // conflict resolved - the pull succeeded, this
-        // device's state now matches the cloud, safe to allow auto-push again going forward.
-        setLastSyncedAt(record.updated_at || record.snapshot?.savedAt || new Date().toISOString());
-        setCloudStatus("Cloud data loaded for this account.");
-      } else {
-        const nextSnapshot = cloudSnapshotRef.current || {};
-        const seeded = await saveCloudSnapshot(cloudUser.id, nextSnapshot);
-        setLastSyncedAt(seeded?.updated_at || nextSnapshot.savedAt || new Date().toISOString());
-        setCloudStatus("First sync complete. Current data is now shared across your web and desktop apps.");
-      }
-    }catch(err){
-      setCloudStatus(`Cloud load failed: ${err.message}`);
-    }finally{
-      setCloudBusy(false);
-      setCloudHydrated(true);
-    }
-  }, [cloudUser, applyCloudSnapshot]);
+      const out = await syncEngine.resolveConflict(choice);
+      if(out.outcome==="conflict") { if(choice==="later") setSyncConflictOpen(false); else setSyncError("The cloud copy changed again while you were choosing. Review the updated difference and choose again."); }
+      else if(out.outcome==="blocked-backup" || out.outcome==="failed" || out.outcome==="paused") setSyncError(out.error || "That choice could not be completed, so nothing was replaced.");
+    }finally{ setSyncBusy(false); }
+  }, [syncEngine]);
 
   // --- P1 — Master User / Signup: first-auth migration orchestration -----
-  // Writes directly to localStorage and reads back before trusting the
-  // write, per final review rule #2 ("create AND VERIFY a recoverable
-  // backup... before any destructive overwrite") — setAutoBackups alone is
-  // an async React state update with no confirmation the write landed.
-  const createVerifiedBackup = useCallback((snapshotToBackup, backupType, label) => {
-    if(!snapshotToBackup) return true; // nothing to back up is not a failure
-    const exportedAt = new Date().toISOString();
-    const item = { id:`${backupType}_${Date.now()}`, backupType, exportedAt, label, snapshot:{ ...snapshotToBackup, savedAt:snapshotToBackup.savedAt||exportedAt } };
-    let nextList;
-    try{
-      const current = JSON.parse(localStorage.getItem("arth_auto_backups") || "[]");
-      nextList = [...(Array.isArray(current) ? current : []), item].slice(-20);
-      localStorage.setItem("arth_auto_backups", JSON.stringify(nextList));
-    }catch(err){
-      console.error("createVerifiedBackup: write failed", err);
-      return false;
-    }
-    try{
-      const readBack = JSON.parse(localStorage.getItem("arth_auto_backups") || "[]");
-      const verified = Array.isArray(readBack) && readBack.some(b=>b.id===item.id);
-      if(!verified) return false;
-    }catch(err){
-      console.error("createVerifiedBackup: verification read failed", err);
-      return false;
-    }
-    setAutoBackups(nextList);
-    return true;
-  }, []);
-
-  // Runs once per session, only on a first-auth-on-this-device path
-  // (sessionRestoredOnBootRef.current === false). Never called for a
-  // returning/session-restored device — that path is untouched and uses
-  // the existing pullCloudSnapshot/offline-capable behavior instead.
+  // Runs once per session, only on a first-auth-on-this-device path (sessionRestoredOnBootRef.current === false).
+  // SYNC-SAFETY-002: the decisions (adopt cloud / push local / conflict) now come from the sync engine's decision table;
+  // nothing here writes to the cloud directly, and a conflict replaces nothing until the person chooses (with a verified backup).
   const runFirstAuthMigration = useCallback(async () => {
-    if(!cloudUser?.id || !isCloudSyncConfigured) return;
+    if(!cloudUser?.id || !isCloudSyncConfigured || !syncKit) return;
     setFirstAuthState("checking");
     setFirstAuthError("");
-    const localMeaningful = hasMeaningfulData(cloudSnapshotRef.current || {});
-    let record = null;
-    let networkOk = true;
-    try{
-      record = await loadCloudSnapshot(cloudUser.id);
-    }catch(err){
-      networkOk = false;
-      setFirstAuthError(err.message || "Couldn't reach your Arth account.");
-    }
-    const cloudRowExists = Boolean(record?.snapshot);
-    const cloudMeaningful = cloudRowExists && hasMeaningfulData(record.snapshot);
-    const action = determineFirstAuthAction({ networkOk, cloudRowExists, cloudMeaningful, localMeaningful });
-
-    if(action === FIRST_AUTH_ACTIONS.BLOCKED_OFFLINE){
+    const out = await syncKit.engine.boot();
+    if(out.outcome==="failed" || out.outcome==="blocked-backup" || out.outcome==="paused"){
+      setFirstAuthError(out.error || "Couldn't reach your Arth account.");
       setFirstAuthState("blocked-offline");
       return;
     }
-    if(action === FIRST_AUTH_ACTIONS.CONFLICT){
+    if(out.outcome==="conflict"){
+      let record = null;
+      try{ record = await syncKit.cloud.read(cloudUser.id); }catch{ /* summary falls back to empty; the engine still holds the conflict */ }
       setConflictData({
         localSummary: summarizeMeaningfulData(cloudSnapshotRef.current || {}),
-        cloudSummary: summarizeMeaningfulData(record.snapshot),
-        cloudSnapshot: record.snapshot,
-        cloudSavedAt: record.updated_at || record.snapshot?.savedAt || "",
+        cloudSummary: summarizeMeaningfulData(record?.snapshot || {}),
+        cloudSnapshot: record?.snapshot || null,
+        cloudSavedAt: record?.snapshot?.savedAt || "",
       });
       setFirstAuthState("conflict");
       return;
     }
-    if(action === FIRST_AUTH_ACTIONS.PULL_CLOUD_THEN_CHECK){
-      // Local isn't meaningful — safe to bypass the ordinary "Sync Now"
-      // timestamp heuristic entirely (force=true) rather than reusing it,
-      // per final review: mandatory first-auth is not an ordinary sync.
-      await pullCloudSnapshot(true);
-      setFirstAuthState(isMasterUserSetupComplete(record.snapshot) ? "ready" : "needs-setup");
-      firstAuthRanRef.current = true;
-      return;
-    }
-    // SETUP: both sides empty — nothing to lose either way; still route
-    // through an explicit push (not pullCloudSnapshot) for one consistent,
-    // auditable code path rather than two.
-    // PUSH_LOCAL_THEN_SETUP: local has real data. This must NEVER call
-    // pullCloudSnapshot here — that function's push-local-to-cloud
-    // behavior only fires in its "no row exists at all" branch. A cloud
-    // row that exists but happens to be empty (cloudRowExists=true,
-    // cloudMeaningful=false — a real, reachable case, e.g. a signup that
-    // never entered data) would instead hit pullCloudSnapshot's OTHER
-    // branch and call applyCloudSnapshot on that empty snapshot, silently
-    // overwriting this device's real local data. Caught during
-    // implementation review before shipping — pushing directly here
-    // instead, unconditionally, regardless of whether a row already
-    // exists (saveCloudSnapshot upserts either way).
-    try{
-      const pushed = await saveCloudSnapshot(cloudUser.id, cloudSnapshotRef.current || {});
-      setLastSyncedAt(pushed?.updated_at || cloudSnapshotRef.current?.savedAt || new Date().toISOString());
-      setCloudStatus(action === FIRST_AUTH_ACTIONS.PUSH_LOCAL_THEN_SETUP ? "This device's data is now backing up to the cloud." : "Cloud account ready.");
-    }catch(err){
-      setFirstAuthError(err.message || "Couldn't set up your cloud account. Please try again.");
-      setFirstAuthState("blocked-offline");
-      return;
-    }
-    setFirstAuthState(masterUserSetupComplete ? "ready" : "needs-setup");
     firstAuthRanRef.current = true;
-  }, [cloudUser, isCloudSyncConfigured, masterUserSetupComplete]);
+    setFirstAuthState(isMasterUserSetupComplete(cloudSnapshotRef.current || {}) ? "ready" : "needs-setup");
+  }, [cloudUser, syncKit]);
 
-  // Explicit source-of-truth selection, never a merge (final review rule #2).
+  // Explicit source-of-truth selection, never a merge. The side that is replaced is backed up (and the backup read back) first.
   const resolveConflict = useCallback(async (choice) => {
-    if(!conflictData || !cloudUser?.id) return;
+    if(!syncKit || !cloudUser?.id) return;
     setCloudBusy(true);
     setFirstAuthError("");
-    if(choice === "keep-local"){
-      const backedUp = createVerifiedBackup(conflictData.cloudSnapshot, "pre-conflict-cloud", "cloud version replaced by this device");
-      if(!backedUp){
-        setFirstAuthError("Couldn't verify a backup of your cloud data — nothing was changed. Please try again.");
-        setCloudBusy(false);
+    try{
+      const out = await syncKit.engine.resolveConflict(choice==="keep-local" ? "keep-local" : "use-cloud");
+      if(out.outcome!=="resolved-keep-local" && out.outcome!=="resolved-use-cloud"){
+        setFirstAuthError(out.error || "Couldn't complete that choice. Nothing was replaced. Please try again.");
         return;
       }
-      try{
-        await saveCloudSnapshot(cloudUser.id, cloudSnapshotRef.current);
-      }catch(err){
-        setFirstAuthError(err.message || "Couldn't push this device's data to the cloud. Please try again.");
-        setCloudBusy(false);
-        return;
-      }
-    } else if(choice === "keep-cloud"){
-      const backedUp = createVerifiedBackup(cloudSnapshotRef.current, "pre-conflict-local", "this device's version replaced by cloud");
-      if(!backedUp){
-        setFirstAuthError("Couldn't verify a backup of this device's data — nothing was changed. Please try again.");
-        setCloudBusy(false);
-        return;
-      }
-      applyCloudSnapshot(conflictData.cloudSnapshot);
-    } else {
+      setConflictData(null);
+      firstAuthRanRef.current = true;
+      setFirstAuthState(isMasterUserSetupComplete(cloudSnapshotRef.current || {}) ? "ready" : "needs-setup");
+    }finally{
       setCloudBusy(false);
-      return;
     }
-    setCloudBusy(false);
-    setConflictData(null);
-    firstAuthRanRef.current = true;
-    setFirstAuthState(isMasterUserSetupComplete(choice === "keep-cloud" ? conflictData.cloudSnapshot : cloudSnapshotRef.current) ? "ready" : "needs-setup");
-  }, [conflictData, cloudUser, createVerifiedBackup, applyCloudSnapshot]);
+  }, [syncKit, cloudUser]);
+
 
   // Partial merge onto __me__ only (name/emoji/phone/dob) — every other
   // existing field on the record, and every other domain array, untouched.
@@ -9977,16 +9892,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   }, []);
 
   useEffect(() => {
-    if(!cloudUser?.id || !isCloudSyncConfigured) return;
-    // P1: a first-auth-on-this-device session is handled by
-    // runFirstAuthMigration below instead — that path deliberately does not
-    // reuse this ordinary pull/heuristic route (final review: mandatory
-    // first-auth is not an ordinary "Sync Now").
+    if(!cloudUser?.id || !isCloudSyncConfigured || !syncKit) return;
+    // P1: a first-auth-on-this-device session is handled by runFirstAuthMigration below instead (it uses the same engine).
     if(!sessionRestoredOnBootRef.current) return;
     setCloudHydrated(false);
-    setCloudStatus("Loading cloud data...");
-    pullCloudSnapshot();
-  }, [cloudUser?.id, pullCloudSnapshot]);
+    // Returning device: one sync cycle (never replaces unsynced local data; offline is fine, the app opens from local data).
+    syncKit.engine.boot().finally(()=>setCloudHydrated(true));
+  }, [cloudUser?.id, syncKit]);
 
   // P1 — first-auth-on-this-device path only (see sessionRestoredOnBootRef).
   useEffect(() => {
@@ -10030,41 +9942,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(suppressMainApp && cloudSetupSatisfied) onCloudSetupComplete?.();
   }, [suppressMainApp, cloudSetupSatisfied, onCloudSetupComplete]);
 
-  // A tab left open for days never otherwise re-checks the cloud — it would keep operating on
-  // whatever it loaded at sign-in, and its own auto-push could then overwrite newer changes made
-  // elsewhere (e.g. on phone) with its stale local state. Pulling fresh whenever the tab becomes
-  // visible again closes that gap without changing the push behavior at all.
+  // A tab left open for days, or a device that was offline, re-checks the cloud when it becomes visible or reconnects.
+  // The engine decides what that means (it never replaces unsynced local data; a divergence becomes a conflict to resolve).
   useEffect(() => {
-    if(!cloudUser?.id || !isCloudSyncConfigured) return;
-    const handle = () => {
-      if(document.visibilityState!=="visible") return;
-      // If a push is still waiting on its debounce timer (a change was made in the last 900ms),
-      // pulling right now would fetch stale cloud data and silently overwrite that fresh local
-      // change — exactly the bug that made vehicles/transactions "randomly disappear." Push
-      // first, whatever's pending, then pull — never pull ahead of an unsaved local change.
-      if(pendingPushRef.current){
-        pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true).then(()=>{
-          pendingPushRef.current = false;
-          pullCloudSnapshot();
-        });
-        return;
-      }
-      pullCloudSnapshot();
-    };
-    document.addEventListener("visibilitychange", handle);
-    return () => document.removeEventListener("visibilitychange", handle);
-  }, [cloudUser?.id, pullCloudSnapshot, pushCloudSnapshot]);
+    if(!syncEngine) return;
+    const onVisible = () => { if(document.visibilityState==="visible") syncEngine.onVisible(); };
+    const onOnline = () => { syncEngine.onOnline(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onOnline);
+    return () => { document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("online", onOnline); };
+  }, [syncEngine]);
 
-  const pendingPushRef = useRef(false);
+  // Every change to the synced data: local data is already saved (per-key effects); this schedules the cloud write.
+  // Not before this device's first sync cycle has finished (returning: cloudHydrated, first sign-in: firstAuthState ready).
+  const syncReady = sessionRestoredOnBootRef.current ? cloudHydrated : firstAuthState==="ready";
   useEffect(() => {
-    if(!cloudUser?.id || !isCloudSyncConfigured || !cloudHydrated || applyingCloudSnapshotRef.current || syncConflictPendingRef.current) return;
-    pendingPushRef.current = true;
-    const timer = window.setTimeout(() => {
-      pendingPushRef.current = false;
-      pushCloudSnapshot("Synced across your signed-in web and desktop apps.", true);
-    }, 900);
-    return () => window.clearTimeout(timer);
-  }, [cloudUser?.id, cloudHydrated, dark, masterUserSetupComplete, autoDetectExpenseCategory, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, mandatoryCommitments, payGroups, budgetSpreads, planNudges, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards, pushCloudSnapshot]);
+    if(!syncEngine || !syncReady) return;
+    syncEngine.notifyChange();
+  }, [syncEngine, syncReady, cloudSnapshot]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
@@ -15294,13 +15189,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ background:T.success+"16",border:`1px solid ${T.success}33`,borderRadius:14,padding:"14px 16px" }}>
               <div style={{ color:T.success,fontSize:13,fontWeight:800 }}>✅ Signed in</div>
               <div style={{ color:T.sub,fontSize:12,marginTop:4 }}>{cloudUser.email}</div>
-              {lastSyncedAt&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Last synced: {formatBackupStamp(lastSyncedAt)}</div>}
+              {lastSyncedAt&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Cloud copy last verified: {formatBackupStamp(lastSyncedAt)}</div>}
             </div>
-            <div style={{ background:T.card,borderRadius:14,padding:"14px 16px" }}>
-              <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>Auto-syncing across devices</div>
-              <div style={{ color:T.sub,fontSize:11 }}>Every change saves to cloud automatically. Sign in on any device to access your data.</div>
+            <div data-testid="sync-status-card" style={{ background:T.card,borderRadius:14,padding:"14px 16px",border:`1px solid ${syncStatus.text?.tone==="error"?T.danger+"55":syncStatus.text?.tone==="warn"?T.attention+"55":T.border}` }}>
+              <div data-testid="sync-status-headline" style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:6 }}>{syncStatus.text?.headline || "Sync not started yet"}</div>
+              <div data-testid="sync-status-detail" style={{ color:T.sub,fontSize:11 }}>{syncStatus.text?.detail || "Changes are saved on this device first, then sent to the cloud."}</div>
+              {(()=>{ const st = syncEngine?.getState(); return (<>
+                <div data-testid="sync-backup-line" style={{ color:T.sub,fontSize:10,marginTop:8 }}>{backupText(st?.lastBackup)}</div>
+                {st?.lastReconcile && <div data-testid="sync-reconcile-line" style={{ color:T.sub,fontSize:10,marginTop:2 }}>Last check {formatBackupStamp(st.lastReconcile.at)}: {st.lastReconcile.ok===true?`${st.lastReconcile.localCount} transactions match the cloud copy`:st.lastReconcile.ok===false?`copies differ${st.lastReconcile.detail?` (${st.lastReconcile.detail})`:""}`:"sent, not read back yet"}</div>}
+              </>); })()}
             </div>
-            <button onClick={()=>pullCloudSnapshot(syncConflictPendingRef.current)} disabled={cloudBusy} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>{cloudBusy?"🔄 Syncing...":"🔄 Sync Now"}</button>
+            <button data-testid="sync-now" onClick={()=>syncEngine?.syncNow()} disabled={cloudBusy||!syncEngine} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>🔄 Sync Now</button>
+            {syncStatus.kind==="conflict" && <button data-testid="sync-review-conflict" onClick={()=>setSyncConflictOpen(true)} style={{ background:T.attention+"22",border:`1px solid ${T.attention}55`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.text,fontFamily:"Nunito,sans-serif" }}>Review the conflict</button>}
             <button onClick={handleCloudSignOut} disabled={cloudBusy} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.danger,fontFamily:"Nunito,sans-serif" }}>Sign Out</button>
             {cloudStatus&&<div style={{ color:T.sub,fontSize:11,textAlign:"center",marginTop:4 }}>{cloudStatus}</div>}
           </div>
@@ -15375,7 +15275,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div style={{ color:T.sub,fontSize:10 }}>{Array.isArray(item.snapshot?.txns) ? item.snapshot.txns.length : 0} txns · {Array.isArray(item.snapshot?.accounts) ? item.snapshot.accounts.length : 0} accounts</div>
                   </div>
                   <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                    <button onClick={()=>{ try{ restoreBackupSnapshot(item.snapshot, `auto backup from ${formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "") || "recent backup"}`); } catch(err){ setBackupStatus(`Restore failed: ${err.message}`); } }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Restore</button>
+                    <button onClick={async ()=>{ try{ await restoreBackupSnapshot(item.snapshot, `auto backup from ${formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "") || "recent backup"}`); } catch(err){ setBackupStatus(`Restore failed: ${err.message}`); } }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Restore</button>
                     <button onClick={()=>{ try{ downloadBackupPayload(buildBackupPayload(item.snapshot, "auto", item.exportedAt || item.snapshot?.savedAt || new Date().toISOString()), "arth-auto-backup"); setBackupStatus(`Backup downloaded · ${formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "")}`); } catch(err){ setBackupStatus(`Backup failed: ${err.message}`); } }} style={{ background:"none",border:`1px solid ${T.border}`,color:T.sub,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Download</button>
                   </div>
                 </div>)}
@@ -15383,6 +15283,33 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             )}
           </> : <div style={{ color:T.sub,fontSize:10 }}>Turn this on to keep a rolling history of automatic backups on this device.</div>}
         </div>
+        {(()=>{
+          // Sync safety backups: the verified copies the sync engine keeps before it replaces anything, and both copies while a conflict is undecided.
+          let entries = [];
+          try{ entries = readSafetyBackups(window.localStorage).slice().reverse(); }catch{ entries = []; }
+          return (
+            <div data-testid="sync-safety-backups-card" style={{ background:T.card,borderRadius:14,padding:"14px 16px",marginTop:12 }}>
+              <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:4 }}>Sync safety backups</div>
+              <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>Arth saves one of these (checked and read back) before sync replaces any data, and keeps both copies while a conflict is undecided. You can restore or download any of them.</div>
+              {entries.length===0 ? <div style={{ color:T.sub,fontSize:10 }}>None yet. They appear here only when a sync needs to replace data or finds a conflict.</div> : (
+                <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                  {entries.slice(0,10).map(b=>(
+                    <div key={b.id} data-testid="sync-safety-backup-row" style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:10,padding:"9px 10px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap" }}>
+                      <div>
+                        <div style={{ color:T.text,fontSize:11,fontWeight:800 }}>{REASON_LABELS[b.reason] || b.reason}{b.pinned?" · held":""}</div>
+                        <div style={{ color:T.sub,fontSize:10 }}>{formatBackupStamp(b.at)} · {b.txnCount} txns · {Array.isArray(b.snapshot?.accounts)?b.snapshot.accounts.length:0} accounts</div>
+                      </div>
+                      <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                        <button onClick={async ()=>{ try{ await restoreBackupSnapshot(b.snapshot, `${REASON_LABELS[b.reason]||"safety backup"} (${formatBackupStamp(b.at)})`); } catch(err){ setBackupStatus(`Restore failed: ${err.message}`); } }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:8,padding:"6px 10px",fontSize:10,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Restore</button>
+                        <button onClick={()=>{ try{ downloadBackupPayload(buildBackupPayload(b.snapshot, "sync-safety", b.at), "arth-sync-safety-backup"); setBackupStatus(`Backup downloaded · ${formatBackupStamp(b.at)}`); } catch(err){ setBackupStatus(`Download failed: ${err.message}`); } }} style={{ background:T.card,border:`1px solid ${T.border}`,color:T.text,borderRadius:8,padding:"6px 10px",fontSize:10,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Download</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         <div style={{ ...card,marginBottom:12 }}>
           <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:8 }}>What gets included</div>
           <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
@@ -20103,6 +20030,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // respect to the Rules of Hooks. Deliberately sits in front of the render
   // only; nothing below this block (tab/settings navigation, all domain
   // state) is touched.
+  // Shown on top of whatever is on screen while the sync engine needs a backup FILE (browser storage full) before replacing data.
+  const fileBackupSheet = fileBackupRequest ? (
+    <SyncBackupFileSheet T={T} request={fileBackupRequest} downloadPayload={downloadBackupPayload}
+      onDone={res=>{ fileBackupRequest.resolve(res); setFileBackupRequest(null); }}/>
+  ) : null;
   if(isCloudSyncConfigured && !offlineResume){
     if(!cloudUser){
       // P1 revision: Welcome (Sign Up / Sign In choice) shown first — no
@@ -20119,7 +20051,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         return <CloudStateUnknownScreen T={T} busy={cloudBusy} error={firstAuthError} onRetry={runFirstAuthMigration}/>;
       }
       if(firstAuthState==="conflict" && conflictData){
-        return <CloudConflictScreen
+        return <>{fileBackupSheet}<CloudConflictScreen
           T={T}
           localSummary={conflictData.localSummary}
           cloudSummary={conflictData.cloudSummary}
@@ -20128,14 +20060,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           error={firstAuthError}
           onKeepLocal={()=>resolveConflict("keep-local")}
           onKeepCloud={()=>resolveConflict("keep-cloud")}
-        />;
+        /></>;
       }
       if(firstAuthState==="needs-setup"){
         return <MasterUserProfileScreen T={T} isFirstRun mePerson={people.find(p=>p.isMe)} accountEmail={cloudUser.email} onSave={completeMasterUserSetup}/>;
       }
       if(firstAuthState!=="ready"){
         // 'checking' or null — brief moment while runFirstAuthMigration runs.
-        return <div style={{ background:T.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:T.sub,fontSize:13,fontFamily:"Nunito,sans-serif" }}>Checking your account…</div>;
+        return <>{fileBackupSheet}<div style={{ background:T.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:T.sub,fontSize:13,fontFamily:"Nunito,sans-serif" }}>Checking your account…</div></>;
       }
     } else {
       // Returning/session-restored device — existing offline-capable
@@ -20180,6 +20112,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div data-testid="offline-resume-banner" style={{ background:T.warn+"22",borderBottom:`1px solid ${T.warn}44`,color:T.text,fontSize:12,fontWeight:700,padding:"8px 14px",display:"flex",alignItems:"center",gap:10 }}>
             <span style={{ flex:1 }}>📡 Offline. Changes are saved on this device and will sync after Arth can confirm your account.</span>
             <button data-testid="offline-resume-retry" onClick={()=>offlineRetryRef.current?.()} style={{ background:"none",border:`1px solid ${T.warn}`,color:T.text,borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Try again</button>
+          </div>
+        )}
+
+        {["conflict","paused-token","paused-reconcile","blocked-backup"].includes(syncStatus.kind) && (
+          <div data-testid="sync-attention-banner" onClick={()=>{ setShowSettings(true); setSettingsSection("cloudsync"); if(syncStatus.kind==="conflict") setSyncConflictOpen(true); }} style={{ background:T.attention,color:"#1a1a1a",fontSize:12,fontWeight:800,padding:"8px 14px",textAlign:"center",cursor:"pointer" }}>
+            ⚠️ {syncStatus.text?.headline} — tap to review
           </div>
         )}
 
@@ -21513,6 +21451,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             linkablePayments={isRechargeBiller(markingBillPaid.billerCategory) ? getLinkablePayments(txns, markingBillPaid) : []}
             getAccountName={id=>getAcc(id).name}
             onLinkPayment={txn=>linkExistingPaymentToBill(markingBillPaid, txn)}
+          />
+        )}
+        {fileBackupSheet}
+        {syncEngine && syncStatus.kind==="conflict" && syncConflictOpen && firstAuthState!=="conflict" && (
+          <SyncConflictSheet
+            T={T}
+            diff={syncEngine.getState().conflict?.diff}
+            busy={syncBusy}
+            error={syncError}
+            onKeepLocal={()=>resolveSyncConflict("keep-local")}
+            onUseCloud={()=>resolveSyncConflict("use-cloud")}
+            onLater={()=>setSyncConflictOpen(false)}
+            onDownloadLocal={()=>syncDownload(cloudSnapshotRef.current, "arth-this-device")}
+            onDownloadCloud={async()=>{ try{ const rec = await syncKit.cloud.read(cloudUser.id); syncDownload(rec?.snapshot, "arth-cloud-copy"); }catch(e){ setSyncError(`Couldn't download the cloud copy: ${e.message}`); } }}
           />
         )}
         {billMatchSuggestion&&(

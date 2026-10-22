@@ -1,0 +1,1003 @@
+{
+  "app": "Arth",
+  "backupType": "sync-safety-backup",
+  "kind": "sync-safety-backup",
+  "formatVersion": 1,
+  "exportedAt": "2026-10-16T04:53:30.201Z",
+  "reason": "before-use-cloud",
+  "digest": "2f97f0103a547673d9f55904f0c12433fd1358bce9049223466aaa1eb2a6108a",
+  "txnCount": 13,
+  "counts": {
+    "cats": 19,
+    "accountTypes": 5,
+    "customBaseBehaviors": 0,
+    "incomeTypes": 7,
+    "liabilityTypes": 0,
+    "accounts": 1,
+    "balanceCheckpoints": 0,
+    "people": 1,
+    "groups": 0,
+    "measureUnits": 8,
+    "itemCatalog": 0,
+    "txns": 13,
+    "investments": 0,
+    "bills": 0,
+    "billerAccounts": 0,
+    "billers": 0,
+    "memberships": 0,
+    "membershipRelationships": 0,
+    "feePayments": 0,
+    "vehicles": 0,
+    "events": 0,
+    "perPersonBudgets": 0,
+    "gifts": 0,
+    "dismissedAlerts": 0,
+    "wealthSnapshots": 1,
+    "goals": 0,
+    "expectedIncome": 0,
+    "insurancePolicies": 0,
+    "gymCheckIns": 0,
+    "arthHolidays": 0,
+    "feeSchedules": 0,
+    "feePeriods": 0,
+    "contributions": 0,
+    "schoolCreditNotes": 0,
+    "schoolRelationships": 0,
+    "trackedAssets": 0,
+    "loans": 0,
+    "monthOverrides": 0,
+    "mandatoryCommitments": 0,
+    "payGroups": 0,
+    "budgetSpreads": 0,
+    "planNudges": 0,
+    "cardOrder": 8,
+    "liabilities": 0,
+    "recurringSchedules": 0,
+    "ccEmiPlans": 0,
+    "skippedInvestmentMonths": 0,
+    "hiddenCards": 0
+  },
+  "snapshot": {
+    "version": 1,
+    "savedAt": "2026-10-16T04:53:29.375Z",
+    "dark": true,
+    "masterUserSetupComplete": true,
+    "autoDetectExpenseCategory": true,
+    "workTripMode": false,
+    "autoBackupEnabled": true,
+    "autoBackupFrequency": "daily",
+    "cats": [
+      {
+        "id": "housing",
+        "name": "Housing",
+        "icon": "🏠",
+        "color": "#06b6d4",
+        "budget": 15000,
+        "fixed": true,
+        "subs": [
+          {
+            "id": "h1",
+            "name": "Rent / EMI"
+          },
+          {
+            "id": "h2",
+            "name": "Maintenance"
+          },
+          {
+            "id": "h3",
+            "name": "Repairs"
+          },
+          {
+            "id": "h4",
+            "name": "Furniture & Appliances"
+          },
+          {
+            "id": "h5",
+            "name": "Renovation / Interiors"
+          },
+          {
+            "id": "h6",
+            "name": "Property Tax"
+          }
+        ]
+      },
+      {
+        "id": "utilities",
+        "name": "Utilities",
+        "icon": "⚡",
+        "color": "#f59e0b",
+        "budget": 5000,
+        "fixed": true,
+        "subs": [
+          {
+            "id": "u1",
+            "name": "Electricity"
+          },
+          {
+            "id": "u2",
+            "name": "Water"
+          },
+          {
+            "id": "u3",
+            "name": "Gas"
+          },
+          {
+            "id": "u4",
+            "name": "Internet / WiFi"
+          },
+          {
+            "id": "u5",
+            "name": "Mobile Bills"
+          },
+          {
+            "id": "u6",
+            "name": "Software Subscriptions"
+          },
+          {
+            "id": "u7",
+            "name": "Cloud Storage"
+          }
+        ]
+      },
+      {
+        "id": "groceries",
+        "name": "Groceries",
+        "icon": "🛒",
+        "color": "#22c55e",
+        "budget": 10000,
+        "fixed": true,
+        "subs": [
+          {
+            "id": "g1",
+            "name": "Staples"
+          },
+          {
+            "id": "g2",
+            "name": "Vegetables"
+          },
+          {
+            "id": "g3",
+            "name": "Fruits"
+          },
+          {
+            "id": "g4",
+            "name": "Dairy"
+          },
+          {
+            "id": "g5",
+            "name": "Snacks & Packaged Food"
+          }
+        ]
+      },
+      {
+        "id": "food",
+        "name": "Food & Dining",
+        "icon": "🍽️",
+        "color": "#f97316",
+        "budget": 8000,
+        "fixed": false,
+        "subs": [
+          {
+            "id": "f1",
+            "name": "Swiggy / Zomato"
+          },
+          {
+            "id": "f2",
+            "name": "Restaurants"
+          },
+          {
+            "id": "f3",
+            "name": "Cafes"
+          },
+          {
+            "id": "f4",
+            "name": "Treating Others"
+          }
+        ]
+      },
+      {
+        "id": "transport",
+        "name": "Transport",
+        "icon": "🚗",
+        "color": "#3b82f6",
+        "budget": 5000,
+        "fixed": false,
+        "subs": [
+          {
+            "id": "t1",
+            "name": "Fuel"
+          },
+          {
+            "id": "t2",
+            "name": "Uber / Ola"
+          },
+          {
+            "id": "t3",
+            "name": "Public Transport"
+          },
+          {
+            "id": "t4",
+            "name": "EMI"
+          },
+          {
+            "id": "t5",
+            "name": "Insurance"
+          },
+          {
+            "id": "t6",
+            "name": "Servicing & Repairs"
+          },
+          {
+            "id": "t7",
+            "name": "Parking & Tolls"
+          },
+          {
+            "id": "t8",
+            "name": "PUC"
+          },
+          {
+            "id": "t9",
+            "name": "Challan / Fine"
+          }
+        ]
+      },
+      {
+        "id": "financial",
+        "name": "Financial",
+        "icon": "💳",
+        "color": "#8b5cf6",
+        "budget": 30000,
+        "fixed": true,
+        "subs": [
+          {
+            "id": "fi1",
+            "name": "SIP / Mutual Funds"
+          },
+          {
+            "id": "fi2",
+            "name": "Stocks"
+          },
+          {
+            "id": "fi3",
+            "name": "PPF / NPS"
+          },
+          {
+            "id": "fi4",
+            "name": "Term Insurance"
+          },
+          {
+            "id": "fi5",
+            "name": "Health Insurance"
+          },
+          {
+            "id": "fi6",
+            "name": "Credit Card Bills"
+          },
+          {
+            "id": "fi7",
+            "name": "Loan EMI"
+          },
+          {
+            "id": "fi8",
+            "name": "Bank Charges"
+          }
+        ]
+      },
+      {
+        "id": "health",
+        "name": "Health",
+        "icon": "💊",
+        "color": "#ec4899",
+        "budget": 3000,
+        "fixed": true,
+        "subs": [
+          {
+            "id": "he1",
+            "name": "Doctor Consultation"
+          },
+          {
+            "id": "he2",
+            "name": "Medicines"
+          },
+          {
+            "id": "he3",
+            "name": "Diagnostics / Tests"
+          },
+          {
+            "id": "he4",
+            "name": "Health Checkups"
+          },
+          {
+            "id": "he5",
+            "name": "Supplements"
+          }
+        ]
+      },
+      {
+        "id": "fitness",
+        "name": "Fitness",
+        "icon": "🏋️",
+        "color": "#14b8a6",
+        "budget": 2000,
+        "fixed": false,
+        "subs": [
+          {
+            "id": "fit1",
+            "name": "Gym"
+          },
+          {
+            "id": "fit2",
+            "name": "Sports"
+          },
+          {
+            "id": "fit3",
+            "name": "Yoga / Trainer"
+          },
+          {
+            "id": "fit4",
+            "name": "Fitness Apps"
+          }
+        ]
+      },
+      {
+        "id": "personaldev",
+        "name": "Personal Development",
+        "icon": "📚",
+        "color": "#0ea5e9",
+        "budget": 2000,
+        "fixed": false,
+        "subs": [
+          {
+            "id": "pd1",
+            "name": "Courses"
+          },
+          {
+            "id": "pd2",
+            "name": "Books"
+          },
+          {
+            "id": "pd3",
+            "name": "Workshops"
+          },
+          {
+            "id": "pd4",
+            "name": "Coaching / Mentorship"
+          }
+        ]
+      },
+      {
+        "id": "education",
+        "name": "Education",
+        "icon": "🎓",
+        "color": "#6366f1",
+        "budget": 0,
+        "fixed": false,
+        "subs": [
+          {
+            "id": "edu_school_fees",
+            "name": "School Fees"
+          },
+          {
+            "id": "edu_registration",
+            "name": "Registration Fees"
+          },
+          {
+            "id": "edu_uniform",
+            "name": "Uniform"
+          },
+          {
+            "id": "edu_books",
+            "name": "Books"
+          },
+          {
+            "id": "edu_activities",
+            "name": "Activities"
+          },
+          {
+            "id": "edu_exams",
+            "name": "Exams"
+          },
+          {
+            "id": "edu_other",
+            "name": "Other"
+          }
+        ]
+      },
+      {
+        "id": "lifestyle",
+        "name": "Lifestyle",
+        "icon": "👗",
+        "color": "#a855f7",
+        "budget": 5000,
+        "fixed": false,
+        "subs": [
+          {
+            "id": "l1",
+            "name": "Clothes"
+          },
+          {
+            "id": "l2",
+            "name": "Shoes"
+          },
+          {
+            "id": "l3",
+            "name": "Grooming / Salon"
+          },
+          {
+            "id": "l4",
+            "name": "Skincare / Cosmetics"
+          },
+          {
+            "id": "l5",
+            "name": "Accessories / Gadgets"
+          }
+        ]
+      },
+      {
+        "id": "entertainment",
+        "name": "Entertainment",
+        "icon": "🎬",
+        "color": "#f43f5e",
+        "budget": 2000,
+        "fixed": false,
+        "subs": [
+          {
+            "id": "e1",
+            "name": "OTT Subscriptions"
+          },
+          {
+            "id": "e2",
+            "name": "Movies"
+          },
+          {
+            "id": "e3",
+            "name": "Events / Shows"
+          }
+        ]
+      },
+      {
+        "id": "travel",
+        "name": "Travel",
+        "icon": "✈️",
+        "color": "#06b6d4",
+        "budget": 5000,
+        "fixed": false,
+        "subs": [
+          {
+            "id": "tr1",
+            "name": "Flights"
+          },
+          {
+            "id": "tr2",
+            "name": "Trains / Buses"
+          },
+          {
+            "id": "tr3",
+            "name": "Hotels"
+          },
+          {
+            "id": "tr4",
+            "name": "Local Transport"
+          },
+          {
+            "id": "tr5",
+            "name": "Activities"
+          },
+          {
+            "id": "tr6",
+            "name": "Shopping"
+          }
+        ]
+      },
+      {
+        "id": "family",
+        "name": "Groups & Social",
+        "icon": "👥",
+        "color": "#f0a500",
+        "budget": 5000,
+        "fixed": false,
+        "subs": [
+          {
+            "id": "fa1",
+            "name": "Gifts"
+          },
+          {
+            "id": "fa2",
+            "name": "Family Support"
+          },
+          {
+            "id": "fa3",
+            "name": "Festivals"
+          },
+          {
+            "id": "fa4",
+            "name": "Weddings / Functions"
+          }
+        ]
+      },
+      {
+        "id": "donations",
+        "name": "Donations",
+        "icon": "🙏",
+        "color": "#84cc16",
+        "budget": 1000,
+        "fixed": false,
+        "subs": [
+          {
+            "id": "d1",
+            "name": "Charity"
+          },
+          {
+            "id": "d2",
+            "name": "Religious Contributions"
+          }
+        ]
+      },
+      {
+        "id": "professional",
+        "name": "Professional",
+        "icon": "💼",
+        "color": "#475569",
+        "budget": 2000,
+        "fixed": false,
+        "subs": [
+          {
+            "id": "pr1",
+            "name": "Work Travel"
+          },
+          {
+            "id": "pr2",
+            "name": "Networking"
+          },
+          {
+            "id": "pr3",
+            "name": "Tools / Software"
+          },
+          {
+            "id": "pr4",
+            "name": "Office Setup"
+          }
+        ]
+      },
+      {
+        "id": "taxes",
+        "name": "Taxes",
+        "icon": "🏛️",
+        "color": "#dc2626",
+        "budget": 5000,
+        "fixed": true,
+        "subs": [
+          {
+            "id": "tx1",
+            "name": "Income Tax"
+          },
+          {
+            "id": "tx2",
+            "name": "CA / Filing Fees"
+          }
+        ]
+      },
+      {
+        "id": "emergency",
+        "name": "Emergency",
+        "icon": "🚑",
+        "color": "#ef4444",
+        "budget": 5000,
+        "fixed": true,
+        "subs": [
+          {
+            "id": "em1",
+            "name": "Medical Emergency"
+          },
+          {
+            "id": "em2",
+            "name": "Urgent Repairs"
+          },
+          {
+            "id": "em3",
+            "name": "Contingency"
+          }
+        ]
+      },
+      {
+        "id": "misc",
+        "name": "Miscellaneous",
+        "icon": "📦",
+        "color": "#78716c",
+        "budget": 2000,
+        "fixed": false,
+        "subs": [
+          {
+            "id": "m1",
+            "name": "Cash Expenses"
+          },
+          {
+            "id": "m2",
+            "name": "Tips"
+          },
+          {
+            "id": "m3",
+            "name": "Unplanned Purchases"
+          }
+        ]
+      }
+    ],
+    "accountTypes": [
+      {
+        "id": "bank",
+        "label": "Bank Account",
+        "icon": "🏦",
+        "baseType": "bank",
+        "bucket": "cash",
+        "custom": false
+      },
+      {
+        "id": "cc",
+        "label": "Credit Card",
+        "icon": "💳",
+        "baseType": "cc",
+        "bucket": "liability",
+        "custom": false
+      },
+      {
+        "id": "debit",
+        "label": "Debit Card",
+        "icon": "🏧",
+        "baseType": "debit",
+        "bucket": "cash",
+        "custom": false
+      },
+      {
+        "id": "upi",
+        "label": "UPI",
+        "icon": "📱",
+        "baseType": "upi",
+        "bucket": "cash",
+        "custom": false
+      },
+      {
+        "id": "cash",
+        "label": "Cash",
+        "icon": "💵",
+        "baseType": "cash",
+        "bucket": "cash",
+        "custom": false
+      }
+    ],
+    "customBaseBehaviors": [],
+    "incomeTypes": [
+      "salary",
+      "interest",
+      "freelance",
+      "rental",
+      "royalty",
+      "dividend",
+      "capital_gains"
+    ],
+    "liabilityTypes": [],
+    "accounts": [
+      {
+        "id": "syn_bank",
+        "name": "SYN Bank",
+        "type": "bank",
+        "balance": 100000,
+        "color": "#3b82f6",
+        "accountTypeId": "bank",
+        "typeLabel": "Bank Account",
+        "typeIcon": "🏦",
+        "typeBucket": "cash",
+        "openingBalance": 0,
+        "openingBalanceDate": ""
+      }
+    ],
+    "balanceCheckpoints": {},
+    "people": [
+      {
+        "id": "__me__",
+        "name": "Me",
+        "emoji": "🧑",
+        "relation": "Self",
+        "color": "#f0a500",
+        "personType": "dependant",
+        "isMe": true
+      }
+    ],
+    "groups": [],
+    "measureUnits": [
+      "kg",
+      "g",
+      "ltr",
+      "ml",
+      "nos",
+      "pkt",
+      "dozen",
+      "box"
+    ],
+    "itemCatalog": [],
+    "txns": [
+      {
+        "id": "rsx975z",
+        "type": "expense",
+        "amount": 700,
+        "date": "2026-10-16",
+        "merchant": "B-OFFLINE",
+        "desc": "B-OFFLINE",
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "subId": null,
+        "accId": "syn_bank",
+        "people": {},
+        "forPerson": "",
+        "groupId": null,
+        "vehicleId": null,
+        "paymentMethod": null,
+        "excludeFromSpend": false,
+        "splitMode": "none",
+        "trackingMode": "none",
+        "tagMode": null,
+        "note": "",
+        "lineItems": null,
+        "createdAt": 1792126403951,
+        "createdDate": "2026-10-16",
+        "updatedAt": 1792126403952,
+        "groupCollectiveAmount": 0
+      },
+      {
+        "id": "B001",
+        "type": "expense",
+        "desc": "Synthetic expense 1",
+        "merchant": "SYN",
+        "date": "2026-10-01",
+        "amount": 107,
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "accId": "syn_bank",
+        "people": {},
+        "trackingMode": "none",
+        "groupCollectiveAmount": 0
+      },
+      {
+        "id": "B002",
+        "type": "expense",
+        "desc": "Synthetic expense 2",
+        "merchant": "SYN",
+        "date": "2026-10-02",
+        "amount": 114,
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "accId": "syn_bank",
+        "people": {},
+        "trackingMode": "none",
+        "groupCollectiveAmount": 0
+      },
+      {
+        "id": "B003",
+        "type": "expense",
+        "desc": "Synthetic expense 3",
+        "merchant": "SYN",
+        "date": "2026-10-03",
+        "amount": 121,
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "accId": "syn_bank",
+        "people": {},
+        "trackingMode": "none",
+        "groupCollectiveAmount": 0
+      },
+      {
+        "id": "B004",
+        "type": "expense",
+        "desc": "Synthetic expense 4",
+        "merchant": "SYN",
+        "date": "2026-10-04",
+        "amount": 128,
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "accId": "syn_bank",
+        "people": {},
+        "trackingMode": "none",
+        "groupCollectiveAmount": 0
+      },
+      {
+        "id": "B005",
+        "type": "expense",
+        "desc": "Synthetic expense 5",
+        "merchant": "SYN",
+        "date": "2026-10-05",
+        "amount": 135,
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "accId": "syn_bank",
+        "people": {},
+        "trackingMode": "none",
+        "groupCollectiveAmount": 0
+      },
+      {
+        "id": "B006",
+        "type": "expense",
+        "desc": "Synthetic expense 6",
+        "merchant": "SYN",
+        "date": "2026-10-06",
+        "amount": 142,
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "accId": "syn_bank",
+        "people": {},
+        "trackingMode": "none",
+        "groupCollectiveAmount": 0
+      },
+      {
+        "id": "B007",
+        "type": "expense",
+        "desc": "Synthetic expense 7",
+        "merchant": "SYN",
+        "date": "2026-10-07",
+        "amount": 149,
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "accId": "syn_bank",
+        "people": {},
+        "trackingMode": "none",
+        "groupCollectiveAmount": 0
+      },
+      {
+        "id": "B008",
+        "type": "expense",
+        "desc": "Synthetic expense 8",
+        "merchant": "SYN",
+        "date": "2026-10-08",
+        "amount": 156,
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "accId": "syn_bank",
+        "people": {},
+        "trackingMode": "none",
+        "groupCollectiveAmount": 0
+      },
+      {
+        "id": "B009",
+        "type": "expense",
+        "desc": "Synthetic expense 9",
+        "merchant": "SYN",
+        "date": "2026-10-09",
+        "amount": 163,
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "accId": "syn_bank",
+        "people": {},
+        "trackingMode": "none",
+        "groupCollectiveAmount": 0
+      },
+      {
+        "id": "B010",
+        "type": "expense",
+        "desc": "Synthetic expense 10",
+        "merchant": "SYN",
+        "date": "2026-10-10",
+        "amount": 170,
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "accId": "syn_bank",
+        "people": {},
+        "trackingMode": "none",
+        "groupCollectiveAmount": 0
+      },
+      {
+        "id": "B011",
+        "type": "expense",
+        "desc": "Synthetic expense 11",
+        "merchant": "SYN",
+        "date": "2026-10-11",
+        "amount": 177,
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "accId": "syn_bank",
+        "people": {},
+        "trackingMode": "none",
+        "groupCollectiveAmount": 0
+      },
+      {
+        "id": "B012",
+        "type": "expense",
+        "desc": "Synthetic expense 12",
+        "merchant": "SYN",
+        "date": "2026-10-12",
+        "amount": 184,
+        "catId": "food",
+        "catIds": [
+          "food"
+        ],
+        "accId": "syn_bank",
+        "people": {},
+        "trackingMode": "none",
+        "groupCollectiveAmount": 0
+      }
+    ],
+    "investments": [],
+    "bills": [],
+    "billerAccounts": [],
+    "billers": [],
+    "memberships": [],
+    "membershipRelationships": [],
+    "feePayments": [],
+    "vehicles": [],
+    "events": [],
+    "perPersonBudgets": {},
+    "gifts": [],
+    "dismissedAlerts": [],
+    "wealthSnapshots": [
+      {
+        "date": "2026-10-16",
+        "netWorth": -1746,
+        "cash": -1746,
+        "investments": 0,
+        "assets": 0,
+        "liabilities": 0,
+        "owedToMe": 0,
+        "monthSpend": 1746,
+        "monthBudget": 50000,
+        "savingsRate": null
+      }
+    ],
+    "goals": [],
+    "expectedIncome": [],
+    "insurancePolicies": [],
+    "gymCheckIns": [],
+    "arthHolidays": [],
+    "feeSchedules": [],
+    "feePeriods": [],
+    "contributions": [],
+    "schoolCreditNotes": [],
+    "schoolRelationships": [],
+    "trackedAssets": [],
+    "loans": [],
+    "annualBudget": 600000,
+    "lastFYTarget": 0,
+    "monthOverrides": {},
+    "mandatoryCommitments": [],
+    "payGroups": [],
+    "budgetSpreads": [],
+    "planNudges": {},
+    "cardOrder": [
+      "safeToSpend",
+      "moneyRequired",
+      "healthScore",
+      "bills",
+      "budgetHealth",
+      "aiInsight",
+      "recent",
+      "quickActions"
+    ],
+    "liabilities": [],
+    "recurringSchedules": [],
+    "ccEmiPlans": [],
+    "skippedInvestmentMonths": [],
+    "budgetCarryForward": false,
+    "defaultGroupId": "",
+    "hiddenCards": []
+  }
+}
