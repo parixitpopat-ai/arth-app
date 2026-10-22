@@ -68,7 +68,7 @@ export const cloudTxnIds = (fake, uid) => ((fake.rows.get(uid)?.snapshot?.txns) 
 
 export async function addExpense(page, desc, amount) {
   await page.getByText("+", { exact: true }).first().click(); await page.waitForTimeout(500);
-  await page.getByPlaceholder("0").first().fill(String(amount));
+  await page.getByPlaceholder("0", { exact: true }).fill(String(amount));   // exact: the typed-entry box's placeholder ("₹450 …") also contains "0"
   await page.getByPlaceholder("e.g. Petrol, Swiggy, Netflix").fill(desc);
   await page.getByRole("button", { name: "Pick one" }).click(); await page.waitForTimeout(300);
   await page.getByRole("button", { name: /Food & Dining/ }).click(); await page.waitForTimeout(300);
