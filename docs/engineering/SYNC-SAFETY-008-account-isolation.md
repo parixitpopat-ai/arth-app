@@ -87,18 +87,19 @@ Other observation (Vercel, names only; no values read): the project has one envi
 **Copy fix found while testing.** The existing "Can't reach your Arth account" screen said "there's nothing saved on this device to fall back on" even when the phone holds data (for example right after a transfer whose upload could not start). It now says the data on this phone is untouched and nothing has been sent or replaced when that is the case (`localHasData`); the original wording remains for a phone with no data.
 
 ## 7. Verification (final candidate; all synthetic data, fake backends, local only)
-Commit: see the report (the commit that carries this table is the head of `wp-sync-safety-3`).
+The commit that carries this table is the head of `wp-sync-safety-3` (reported with the push). Code was frozen at `c05e244`; later commits are documentation and run records only.
 
 | Gate | Result |
 |---|---|
-| `npm test` | 1,898 / 1,898 pass (production baseline 1,758; +140: sync engine/model tests, 41 ownership tests) |
+| `npm test` | 1,909 / 1,909 pass (production baseline 1,758) |
 | Production build | passes |
 | Lint | 5 problems = production baseline; none added |
-| Sync-safety harness, 31 scenarios (`tools/sync-sim/run.mjs`) | 31 / 31, two consecutive runs, identical outcome vectors (`results/run-2026-10-22T07-35-20-394Z.json`, `…T07-45-21-418Z.json`). SI2–SI4 updated to the new contract (an existing install with no recorded owner is asked first; "Add it to this account" then behaves as before) |
-| Offline-startup / offline-resume suite (`tools/offline-startup/run.mjs`) | 29 / 29 (unchanged expectations) |
-| Account-isolation suite in the real app (`tools/offline-startup/accounts.mjs`) | 13 / 13 (AS1–AS10, SAFE) |
-| Original account-switch script (`switch.mjs`) | other account has data: cloud stays at 5 (production: 12). Other account's cloud empty: stays empty, 0 (production: 12) |
-| Typed-entry browser harness (`tools/nl-entry/browser.mjs`) | 28 / 28 |
-| Android auth harness against a scratch merge of `wp-android-auth-handoff` (not committed) | 1,906 unit tests pass; all link flows unchanged; in "local data + a different cloud copy" the person now meets the ownership question first, local data and the cloud copy are untouched, and the link behaves identically to the typed code. The only merge conflict is the `package.json` test list |
+| Unit tests for this round | `ownership.test.js`: 52 tests (decision hardening, transfer rules, sign-out check, interrupted backups, failed transfers, restart); **mutation checks:** removing the gate fails 34 of the earlier 41; removing the full-history rule, the transferred-data rule, the unsynced check, or the empty-cloud backup guard each fails a test |
+| Sync-safety harness, 31 scenarios | 31 / 31 twice, identical outcome vectors (`results/run-2026-10-22T10-01-42-671Z.json`, `…T10-09-37-932Z.json`) |
+| Offline-startup / offline-resume suite | 29 / 29 (unchanged expectations) |
+| Account-isolation browser suite (`accounts.mjs`) | 25 / 25 checks: AS1-AS10 as before; **AS11a-e** sign-out warning (shown; verified backup line; stay; sign out anyway; restart; another account told, start fresh keeps it in the backup only), **AS12** offline sign-out, **AS13a-c** transfer confirmation for unowned data, **AS14a-c** transfer when the cloud is unreachable (truthful screen, restart, retry lands once), SAFE |
+| Original account-switch script | other account has data: its cloud stays at 5 (production 12); other account empty: stays 0 (production 12) |
+| Typed-entry browser harness | 28 / 28 |
+| Android auth harness on a scratch merge (not committed) | 1,917 unit tests pass; outcome identical to the previous run (same hash); only `package.json` test list conflicts |
 
-Not verified: real Supabase conditional-write behaviour (zero-row UPDATE response, token round-trip through the filter), two real devices, mobile data overhead, any real device; see `SYNC-SAFETY-007` §6 (R1, R3–R5) and §4 above.
+Not verified: real Supabase conditional-write behaviour (zero-row UPDATE response, token round-trip through the filter), two real devices, mobile data overhead, any real device; see `SYNC-SAFETY-007` §6 (R1, R3-R5) and §4 above.
