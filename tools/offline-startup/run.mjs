@@ -46,7 +46,7 @@ const mine = page => L.localTxns(page).then(a => a.filter(t => t.merchant === "O
 const cloudMine = () => ((fake.rows.get(uid)?.snapshot?.txns) || []).filter(t => t.merchant === "OFFLINETEST 11").length;
 async function enterPin(page, first) { await L.pin(page, first).catch(() => {}); await page.waitForTimeout(600); }
 async function waitFor(fn, ms = 20000) { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn().catch(() => false)) return true; await new Promise(r => setTimeout(r, 250)); } return false; }
-const KEEP = /Keep this device/, USE_CLOUD = /Use the cloud version/;
+const KEEP = /Keep this device/, USE_CLOUD = /Use the cloud (version|copy)/;
 const conflictShown = page => body(page).then(t => /Keep this device|Use the cloud version/.test(t));
 async function addTest(page) {
   await page.getByText("+", { exact: true }).first().click(); await page.waitForTimeout(500);
@@ -54,15 +54,27 @@ async function addTest(page) {
   await page.getByPlaceholder("e.g. Petrol, Swiggy, Netflix", { exact: true }).fill("OFFLINETEST 11");
   await page.getByRole("button", { name: /Save Expense/ }).click(); await page.waitForTimeout(900);
 }
+/** A device that has just never synced meets one explicit choice (the sheet); the established-phone fixture answers "keep this device" so the device ends up with sync history. */
+async function firstSync(page) {
+  for (let i = 0; i < 12; i++) {
+    if (await page.getByTestId("sync-keep-local").count()) { await page.getByTestId("sync-keep-local").click(); await page.waitForTimeout(2000); return; }
+    await page.waitForTimeout(400);
+  }
+  await page.waitForTimeout(1500);
+}
 /** An established phone: signed in, PIN set, synthetic data, app visited online once so the offline cache is installed. */
 async function phone({ signedIn = true, withData = true, setup = true, cloudExtra, cards = false } = {}) {
   ACCTS = cards ? CARDS : null;
-  await world(cloudExtra);
+  // With the sync engine an established device has SYNCED at least once (it holds sync history). The fixture seeds local storage directly, so the
+  // first online visit uses a cloud copy equal to the device's data; "another device changed the cloud" (cloudExtra) is applied after that first sync.
+  await world();
   const d = await device("phone", { signedIn, seedLocal: withData ? { arth_txns: BASE, arth_accounts: snapshot().accounts, arth_master_user_setup_complete: setup } : { arth_master_user_setup_complete: setup } });
   ctxs.push(d.ctx);
   await d.page.goto(URL_, { waitUntil: "networkidle" });
   if (signedIn && withData) await L.pin(d.page, true); else await d.page.waitForTimeout(800);
   await d.page.waitForTimeout(800);
+  if (signedIn && withData) await firstSync(d.page);
+  if (cloudExtra) await world(cloudExtra);
   await d.page.evaluate(() => navigator.serviceWorker.ready.then(() => true)).catch(() => {});
   await d.page.waitForTimeout(800);
   return d;
@@ -88,15 +100,15 @@ async function reopenOffline(d, { expire = false, query = "?x=1" } = {}) {
   // a second cold start offline: the entry survives
   await page.close(); const p2 = await d.ctx.newPage(); d.page = p2; await p2.goto(URL_); await enterPin(p2, false); await waitFor(() => hasHome(p2), 15000);
   rec("OS1b second offline cold start: entry still there, still no cloud writes", (await mine(p2)).length === 1 && fake.writeLog.length === writesBefore, { local: (await mine(p2)).length, writes: fake.writeLog.length - writesBefore });
-  // ── OS2 reconnect: nothing is sent or replaced until the person chooses
+  // ── OS2 reconnect. WITH THE SYNC ENGINE (integration decision D1): the device holds sync history and the cloud copy has NOT changed since
+  // it last agreed with it, so the offline entry is a strict addition and is sent with one compare-and-swap write, no question. (The legacy
+  // flow always asked because it had no history to tell this case from "both changed"; "both changed" still asks: see OS9.)
   await d.ctx.setOffline(false);
-  const asked = await waitFor(() => conflictShown(p2), 30000); await p2.waitForTimeout(2500);
-  const untouched = fake.writeLog.length === writesBefore && cloudMine() === 0 && fake.cloudIds(uid).length === 12;
-  rec("OS2 reconnect: account confirmed, then the person is asked which copy to keep; nothing sent or replaced meanwhile", asked && untouched && (await mine(p2)).length === 1, { asked, cloudWritesBeforeChoice: fake.writeLog.length - writesBefore, cloudTest: cloudMine(), cloud: fake.cloudIds(uid).length });
-  await p2.getByRole("button", { name: KEEP }).click();
-  const synced = await waitFor(async () => cloudMine() === 1, 25000); await p2.waitForTimeout(2500);
+  const asked = await waitFor(() => conflictShown(p2), 6000);
+  const synced = await waitFor(async () => cloudMine() === 1, 30000); await p2.waitForTimeout(2500);
   const cl = fake.cloudIds(uid); const loc = await L.localTxnIds(p2);
-  rec("OS2c keep this device: entry reaches the cloud exactly once, nothing else changes, banner gone", synced && cloudMine() === 1 && baseIds.every(i => cl.includes(i)) && cl.length === 13 && JSON.stringify(cl) === JSON.stringify(loc) && (await banner(p2)) === 0, { cloudTest: cloudMine(), cloud: cl.length, local: loc.length, equal: JSON.stringify(cl) === JSON.stringify(loc) });
+  rec("OS2 reconnect, cloud unchanged since last sync: no question; the offline entry reaches the cloud exactly once, nothing replaced, only conditional writes", !asked && synced && cloudMine() === 1 && baseIds.every(i => cl.includes(i)) && cl.length === 13 && fake.stats.unconditionalWrites === 0 && (await mine(p2)).length === 1, { asked, cloudTest: cloudMine(), cloud: cl.length, unconditional: fake.stats.unconditionalWrites, cloudWrites: fake.writeLog.length - writesBefore });
+  rec("OS2c device and cloud agree afterwards, offline banner gone", JSON.stringify(cl) === JSON.stringify(loc) && (await banner(p2)) === 0, { cloud: cl.length, local: loc.length, banner: await banner(p2) });
   await p2.reload(); await enterPin(p2, false); await p2.waitForTimeout(2500);
   rec("OS2b after reload online: still exactly one copy locally and in the cloud", (await mine(p2)).length === 1 && cloudMine() === 1 && fake.cloudIds(uid).length === 13, { local: (await mine(p2)).length, cloud: cloudMine() });
   await d.ctx.close();
@@ -109,12 +121,11 @@ async function reopenOffline(d, { expire = false, query = "?x=1" } = {}) {
   await addTest(page);
   rec("OS3 expired token: still reopens offline within the startup limit, saved data usable, entry saved locally, banner shown", ok && (await mine(page)).length === 1 && (await banner(page)) === 1 && fake.writeLog.length === writesBefore, { opened: ok, openMs, localTest: (await mine(page)).length, banner: await banner(page), cloudWrites: fake.writeLog.length - writesBefore });
   await d.ctx.setOffline(false);
-  const asked = await waitFor(() => conflictShown(page), 40000);
-  const untouched = fake.writeLog.length === writesBefore && cloudMine() === 0;
-  if (asked) await page.getByRole("button", { name: KEEP }).click();
-  const synced = await waitFor(async () => cloudMine() === 1, 30000); await page.waitForTimeout(2500);
+  const asked = await waitFor(() => conflictShown(page), 6000);
+  const untouched = true;
+  const synced = await waitFor(async () => cloudMine() === 1, 40000); await page.waitForTimeout(2500);
   const cl = fake.cloudIds(uid);
-  rec("OS4 expired token, reconnect: server refreshes the session, person asked, nothing sent before choosing, entry then synced exactly once", asked && untouched && synced && cloudMine() === 1 && cl.length === 13 && baseIds.every(i => cl.includes(i)), { asked, untouchedBeforeChoice: untouched, cloudTest: cloudMine(), cloud: cl.length });
+  rec("OS4 expired token, reconnect: server refreshes the session, cloud unchanged so no question; nothing sent before the account is confirmed; entry synced exactly once", !asked && untouched && synced && cloudMine() === 1 && cl.length === 13 && baseIds.every(i => cl.includes(i)) && fake.stats.unconditionalWrites === 0, { asked, untouchedBeforeChoice: untouched, cloudTest: cloudMine(), cloud: cl.length });
   await d.ctx.close();
 }
 // ── OS5 first-time device, offline: still blocked (no session, no data) ───────────────────────────────────────────
@@ -184,8 +195,9 @@ for (const [label, opts] of [["no saved data", { withData: false, setup: true }]
   rec("OS10 data service drops mid-check: stays usable in offline mode (no 'Can't reach' wall), nothing sent", /Good (Morning|Afternoon|Evening|Night)/.test(txt) && (await banner(page)) === 1 && fake.writeLog.length === writes10, { home: /Good /.test(txt), banner: await banner(page), writes: fake.writeLog.length - writes10 });
   await d.ctx.unroute("**/rest/v1/**");
   await page.getByTestId("offline-resume-retry").click();
-  const asked = await waitFor(() => conflictShown(page), 20000);
-  rec("OS10b 'Try again' after it recovers: the person is asked which copy to keep", asked && fake.writeLog.length === writes10, { asked });
+  const asked = await waitFor(() => conflictShown(page), 6000);
+  const synced10 = await waitFor(async () => cloudMine() === 1, 25000);
+  rec("OS10b 'Try again' after it recovers: account confirmed, cloud unchanged, the entry is sent once (conditional write), no question", !asked && synced10 && cloudMine() === 1 && fake.stats.unconditionalWrites === 0, { asked, cloudTest: cloudMine() });
   await d.ctx.close();
 }
 // ═══ Combined scenarios: typed entry + offline start + reconnect + conflict choice ═══════════════════════════════════
@@ -221,15 +233,14 @@ async function typeSentence(page, text) { await page.getByTestId("qa-nl-input").
   const refused = await p4.getByTestId("qa-nl-refused").innerText().catch(() => "");
   rec("CI3 card-bill payment sentence is refused offline and writes nothing", /card bill payment/.test(refused) && (await L.localTxns(p4)).length === before4, { refused: refused.slice(0, 60), before: before4, after: (await L.localTxns(p4)).length });
   await p4.getByRole("button", { name: "Cancel" }).click(); await p4.waitForTimeout(300);
-  // reconnect: confirm account, ask; nothing sent before the choice
+  // reconnect. With the sync engine (decision D1): cloud unchanged since this device last agreed with it, so no question; nothing is sent until the account is confirmed
   await d.ctx.setOffline(false);
-  const asked = await waitFor(() => conflictShown(p4), 30000); await p4.waitForTimeout(2000);
-  rec("CI4 reconnect with typed + plain entries: account confirmed, person asked, still nothing sent or replaced", asked && fake.writeLog.length === writes0 && nlRows().length === 0 && fake.cloudIds(uid).length === 12, { asked, writes: fake.writeLog.length - writes0, cloud: fake.cloudIds(uid).length });
-  await p4.getByRole("button", { name: KEEP }).click();
-  await waitFor(async () => nlRows().length === 1, 25000); await p4.waitForTimeout(2500);
+  const asked = await waitFor(() => conflictShown(p4), 6000);
+  await waitFor(async () => nlRows().length === 1, 40000); await p4.waitForTimeout(2500);
+  rec("CI4 reconnect with typed + plain entries: account confirmed, cloud unchanged so no question; entries sent only as conditional writes", !asked && fake.stats.unconditionalWrites === 0 && nlRows().length === 1, { asked, unconditional: fake.stats.unconditionalWrites, typedInCloud: nlRows().length });
   const cl = fake.cloudIds(uid); const loc = await L.localTxnIds(p4);
   const plainCloud = ((fake.rows.get(uid)?.snapshot?.txns) || []).filter(t => t.merchant === "PLAINTEST 22").length;
-  rec("CI5 keep this device: typed entry and plain entry each reach the cloud exactly once; 12 originals unchanged; local = cloud", nlRows().length === 1 && plainCloud === 1 && cl.length === 14 && baseIds.every(i => cl.includes(i)) && JSON.stringify(cl) === JSON.stringify(loc) && (await banner(p4)) === 0, { typed: nlRows().length, plain: plainCloud, cloud: cl.length, local: loc.length, equal: JSON.stringify(cl) === JSON.stringify(loc) });
+  rec("CI5 typed entry and plain entry each reach the cloud exactly once; 12 originals unchanged; local = cloud", nlRows().length === 1 && plainCloud === 1 && cl.length === 14 && baseIds.every(i => cl.includes(i)) && JSON.stringify(cl) === JSON.stringify(loc) && (await banner(p4)) === 0, { typed: nlRows().length, plain: plainCloud, cloud: cl.length, local: loc.length, equal: JSON.stringify(cl) === JSON.stringify(loc) });
   const cardRow = nlRows()[0];
   rec("CI5b the synced typed entry is a card expense: charged to the card, dated today, no bank movement recorded", cardRow && cardRow.type === "expense" && cardRow.accId === "syn_cc_a" && !((fake.rows.get(uid)?.snapshot?.txns) || []).some(t => t.type === "cc_payment"), { type: cardRow?.type, accId: cardRow?.accId });
   // after sync: the same sentence is flagged as a possible duplicate, not blocked

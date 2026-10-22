@@ -14,10 +14,8 @@ import MasterUserProfileScreen from "./screens/MasterUserProfileScreen";
 import CloudConflictScreen from "./screens/CloudConflictScreen";
 import SyncConflictSheet from "./components/SyncConflictSheet";
 import SyncBackupFileSheet from "./components/SyncBackupFileSheet";
-import TabPausedScreen from "./components/TabPausedScreen";
-import { createTabOwnership, watchForeignWrites } from "./sync/tabOwnership";
-import { createSyncEngine } from "./sync/syncEngine";
-import { createSupabaseCasClient } from "./sync/supabaseCasClient";
+import TabGate from "./components/TabGate";
+import { useSyncEngine } from "./sync/useSyncEngine";
 import { backupText } from "./sync/statusText";
 import { readSafetyBackups, REASON_LABELS } from "./sync/safetyBackup";
 import CloudStateUnknownScreen from "./screens/CloudStateUnknownScreen";
@@ -712,30 +710,6 @@ class ErrorBoundary extends React.Component {
     );
     return this.props.children;
   }
-}
-
-// SYNC-SAFETY-004: only ONE tab of this browser profile runs Arth at a time (two tabs share storage but not memory; a stale tab would
-// save over the other's data and then sync it). Other tabs mount nothing, so they cannot save or sync; the person can take over explicitly.
-function TabGate({ children }) {
-  const [own, setOwn] = useState("waiting");     // waiting | owner | lost
-  const [showWaiting, setShowWaiting] = useState(false);
-  const [stale, setStale] = useState(false);
-  const ctlRef = useRef(null);
-  useEffect(()=>{
-    const tabId = `tab_${Math.random().toString(36).slice(2,10)}${Date.now().toString(36)}`;
-    const locks = typeof navigator!=="undefined" && navigator.locks && typeof navigator.locks.request==="function" ? navigator.locks : null;
-    const o = createTabOwnership({ locks, storage:window.localStorage, tabId, onChange:setOwn });
-    ctlRef.current = o; o.start();
-    const t = setTimeout(()=>setShowWaiting(true), 700);   // a reload briefly queues behind the old page; do not flash the pause screen for that
-    return ()=>{ clearTimeout(t); o.stop(); };
-  }, []);
-  useEffect(()=>{
-    if(own!=="owner") return undefined;
-    return watchForeignWrites(window, window.localStorage, ()=>setStale(true));   // another tab changed the synced data under this one
-  }, [own]);
-  if(own==="owner" && !stale) return children;
-  if(own==="waiting" && !showWaiting) return <div style={{ minHeight:"100vh",background:"#08080f" }}/>;
-  return <TabPausedScreen reason={stale?"stale":"other"} onTakeOver={()=>{ setStale(false); ctlRef.current?.takeOver(); }} onReload={()=>window.location.reload()}/>;
 }
 
 export default function Arth() {
@@ -9614,51 +9588,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Local data is saved first (the per-key effects above). The engine then syncs with a compare-and-swap on the cloud
   // version this device last agreed with, backs up (verified) before replacing anything, keeps "unsynced" derived from
   // content so it survives reloads, retries failures, and reports only verified outcomes.
-  const [syncStatus, setSyncStatus] = useState({ kind:"idle" });
-  const [syncConflictOpen, setSyncConflictOpen] = useState(true);
-  const [syncBusy, setSyncBusy] = useState(false);
-  const [syncError, setSyncError] = useState("");
-  const [fileBackupRequest, setFileBackupRequest] = useState(null);
-  const [syncKit, setSyncKit] = useState(null);
-  useEffect(()=>{
-    if(!cloudUser?.id || !isCloudSyncConfigured || !supabase){ setSyncKit(null); return undefined; }
-    const cloud = createSupabaseCasClient(supabase);
-    const deviceId = (()=>{ try{ let d = localStorage.getItem("arth_device_id"); if(!d){ d = `dev_${Math.random().toString(36).slice(2,10)}${Date.now().toString(36)}`; localStorage.setItem("arth_device_id", d); } return d; }catch{ return "dev_unknown"; } })();
+  const { syncStatus, syncConflictOpen, setSyncConflictOpen, syncBusy, syncError, setSyncError, fileBackupRequest, setFileBackupRequest, syncKit, syncEngine, resolveSyncConflict } = useSyncEngine({
+    cloudUser, isCloudSyncConfigured, supabase, applyCloudSnapshot, cloudSnapshotRef, genId, setLastSyncedAt,
     // What the restore path (applyCloudSnapshot) does to each list, so a backup can be checked for recoverability.
-    const normalizers = { cats:normalizeCats, accountTypes:v=>normalizeAccountTypes(v, []), incomeTypes:normalizeIncomeTypes, liabilityTypes:normalizeLiabilityTypes, accounts:normalizeAccounts, people:normalizePeople, measureUnits:normalizeMeasureUnits, itemCatalog:normalizeItemCatalog, txns:normalizeTxns, loans:normalizeLoans };
-    const engine = createSyncEngine({
-      userId: cloudUser.id, deviceId, cloud, storage: window.localStorage, normalizers,
-      getSnapshot: ()=>cloudSnapshotRef.current || {},
-      applySnapshot: async (snapshot)=>{ applyCloudSnapshot(snapshot); },
-      // After applying, wait for React to rebuild the snapshot from the new state so the result can be reconciled against the cloud copy.
-      readLocalAfterApply: async ()=>{
-        const before = cloudSnapshotRef.current, t0 = Date.now();
-        while(cloudSnapshotRef.current===before && Date.now()-t0<3000) await new Promise(r=>setTimeout(r,25));
-        await new Promise(r=>setTimeout(r,60));
-        return cloudSnapshotRef.current || {};
-      },
-      // Browser storage cannot hold a backup: the person saves a file and selects it again (see SyncBackupFileSheet).
-      requestExternalBackup: (snapshot, reason)=>new Promise(resolve=>setFileBackupRequest({ snapshot, reason, resolve })),
-      genId: ()=>(globalThis.crypto && globalThis.crypto.randomUUID ? globalThis.crypto.randomUUID() : genId()),
-      isOnline: ()=>typeof navigator==="undefined" || navigator.onLine!==false,
-      onStatus: (s, t)=>{ setSyncStatus({ ...s, text:t }); if(s.verifiedAt) setLastSyncedAt(s.verifiedAt); },
-    });
-    setSyncKit({ engine, cloud });
-    return ()=>{ engine.stop(); };
-  }, [cloudUser?.id, applyCloudSnapshot]);
-  const syncEngine = syncKit?.engine || null;
+    getNormalizers: ()=>({ cats:normalizeCats, accountTypes:v=>normalizeAccountTypes(v, []), incomeTypes:normalizeIncomeTypes, liabilityTypes:normalizeLiabilityTypes, accounts:normalizeAccounts, people:normalizePeople, measureUnits:normalizeMeasureUnits, itemCatalog:normalizeItemCatalog, txns:normalizeTxns, loans:normalizeLoans }),
+  });
   syncEngineRef.current = syncEngine;
-  useEffect(()=>{ if(!syncEngine) setSyncStatus({ kind:"idle" }); }, [syncEngine]);
   const syncDownload = useCallback((snapshot, prefix)=>{ if(snapshot) downloadBackupPayload(buildBackupPayload(snapshot, "sync-conflict"), prefix); }, [downloadBackupPayload, buildBackupPayload]);
-  const resolveSyncConflict = useCallback(async (choice)=>{
-    if(!syncEngine) return;
-    setSyncBusy(true); setSyncError("");
-    try{
-      const out = await syncEngine.resolveConflict(choice);
-      if(out.outcome==="conflict") { if(choice==="later") setSyncConflictOpen(false); else setSyncError("The cloud copy changed again while you were choosing. Review the updated difference and choose again."); }
-      else if(out.outcome==="blocked-backup" || out.outcome==="failed" || out.outcome==="paused") setSyncError(out.error || "That choice could not be completed, so nothing was replaced.");
-    }finally{ setSyncBusy(false); }
-  }, [syncEngine]);
 
   // --- P1 — Master User / Signup: first-auth migration orchestration -----
   // Runs once per session, only on a first-auth-on-this-device path (sessionRestoredOnBootRef.current === false).

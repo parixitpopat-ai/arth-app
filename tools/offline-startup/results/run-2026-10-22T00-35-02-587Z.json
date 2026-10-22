@@ -1,0 +1,121 @@
+{
+  "at": "2026-10-22T00:35:02.587Z",
+  "results": [
+    {
+      "id": "OS1 valid session: reopens offline, shows saved data, banner shown, entry saved locally",
+      "pass": true
+    },
+    {
+      "id": "OS1b second offline cold start: entry still there, still no cloud writes",
+      "pass": true
+    },
+    {
+      "id": "OS2 reconnect, cloud unchanged since last sync: no question; the offline entry reaches the cloud exactly once, nothing replaced, only conditional writes",
+      "pass": true
+    },
+    {
+      "id": "OS2c device and cloud agree afterwards, offline banner gone",
+      "pass": true
+    },
+    {
+      "id": "OS2b after reload online: still exactly one copy locally and in the cloud",
+      "pass": true
+    },
+    {
+      "id": "OS3 expired token: still reopens offline within the startup limit, saved data usable, entry saved locally, banner shown",
+      "pass": true
+    },
+    {
+      "id": "OS4 expired token, reconnect: server refreshes the session, cloud unchanged so no question; nothing sent before the account is confirmed; entry synced exactly once",
+      "pass": true
+    },
+    {
+      "id": "OS5 first-time device offline: not let in (welcome / sign-in shown, no app, no banner)",
+      "pass": true
+    },
+    {
+      "id": "OS6 signed in, no saved data, offline: not offered the offline resume (no banner)",
+      "pass": true
+    },
+    {
+      "id": "OS6 signed in, setup not finished, offline: not offered the offline resume (no banner)",
+      "pass": true
+    },
+    {
+      "id": "OS7 session revoked meanwhile: reconnect sends the person to sign-in; saved data kept; nothing uploaded",
+      "pass": true
+    },
+    {
+      "id": "OS8 online start: no offline banner, entry syncs exactly once",
+      "pass": true
+    },
+    {
+      "id": "OS9 both devices changed: the person is asked; the other device's record and this device's entry both still exist; nothing sent",
+      "pass": true
+    },
+    {
+      "id": "OS9b choosing the cloud copy first backs up this device's version (the offline entry is recoverable)",
+      "pass": true
+    },
+    {
+      "id": "OS10 data service drops mid-check: stays usable in offline mode (no 'Can't reach' wall), nothing sent",
+      "pass": true
+    },
+    {
+      "id": "OS10b 'Try again' after it recovers: account confirmed, cloud unchanged, the entry is sent once (conditional write), no question",
+      "pass": true
+    },
+    {
+      "id": "CI1 typed entry while offline-resumed: gate on, fill writes nothing, double-tap Save stores exactly one, charged to card 3445, nothing sent",
+      "pass": true
+    },
+    {
+      "id": "CI1b offline cold start again: still exactly one typed entry (no duplicate), typed entry on at the plain address",
+      "pass": true
+    },
+    {
+      "id": "CI2 offline with the old ?nl=0 address: typed entry still shown (no switch), ordinary typing saves one entry, nothing sent",
+      "pass": true
+    },
+    {
+      "id": "CI3 card-bill payment sentence is refused offline and writes nothing",
+      "pass": true
+    },
+    {
+      "id": "CI4 reconnect with typed + plain entries: account confirmed, cloud unchanged so no question; entries sent only as conditional writes",
+      "pass": true
+    },
+    {
+      "id": "CI5 typed entry and plain entry each reach the cloud exactly once; 12 originals unchanged; local = cloud",
+      "pass": true
+    },
+    {
+      "id": "CI5b the synced typed entry is a card expense: charged to the card, dated today, no bank movement recorded",
+      "pass": true
+    },
+    {
+      "id": "CI6 same sentence after sync: flagged as possible duplicate, Save still available, nothing written by filling",
+      "pass": true
+    },
+    {
+      "id": "CI7 other device changed the cloud meanwhile: person asked; the other device's record and the typed entry both exist; nothing sent",
+      "pass": true
+    },
+    {
+      "id": "CI7b choosing the cloud copy: other device's record kept, typed entry recoverable from the backup, cloud not overwritten",
+      "pass": true
+    },
+    {
+      "id": "OS11 online sign-in on a new device: reaches the app with the account's data, no offline banner",
+      "pass": true
+    },
+    {
+      "id": "OS11b signed out: Welcome shown, data kept on the device, and reopening offline does NOT resume (no saved session)",
+      "pass": true
+    },
+    {
+      "id": "SAFE no request ever went to a supabase host",
+      "pass": true
+    }
+  ]
+}
