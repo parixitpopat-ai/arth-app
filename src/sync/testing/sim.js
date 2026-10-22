@@ -77,7 +77,7 @@ export function createMemoryStorage(initial = {}) {
 
 const BASE_ACCOUNTS = [{ id: "syn_bank", name: "SYN Bank", type: "bank", balance: 100000 }];
 
-export function createDevice({ name, userId = "synthetic-user-0001", clock, cloud: cloudRoot, storage = createMemoryStorage(), engineOpts = {}, applyTransform = null }) {
+export function createDevice({ name, userId = "synthetic-user-0001", userEmail = "", continuedSession = true, clock, cloud: cloudRoot, storage = createMemoryStorage(), engineOpts = {}, applyTransform = null }) {
   const cloud = cloudRoot.client ? cloudRoot.client(name) : cloudRoot;
   let seq = 0, data = null, engine = null, lastRebuild = clock.now(), idc = 0;
   const KEY = "arth_data";
@@ -91,7 +91,7 @@ export function createDevice({ name, userId = "synthetic-user-0001", clock, clou
   function boot() {
     loadData(); lastRebuild = clock.now();
     engine = createSyncEngine({
-      userId, deviceId: name, cloud, storage, now: clock.now, setTimer, clearTimer,
+      userId, userEmail, deviceId: name, cloud, storage, now: clock.now, setTimer, clearTimer,
       genId: () => `${name}-id${++idc}`,
       getSnapshot: snapshot,
       applySnapshot: async s => { const { savedAt, syncMeta, ...rest } = s; data = JSON.parse(JSON.stringify(rest)); if (applyTransform) data = applyTransform(data); persist(); lastRebuild = clock.now(); },
@@ -102,9 +102,11 @@ export function createDevice({ name, userId = "synthetic-user-0001", clock, clou
     if (dev.idler) clock.idlers.delete(dev.idler);
     dev.idler = () => engine.whenIdle(); clock.idlers.add(dev.idler);
   }
-  dev.start = async () => { boot(); await engine.boot(); };
+  dev.start = async () => { boot(); return engine.boot({ continuedSession }); };
   /** A normal restart (app closed and reopened): in-memory work is lost, persisted data and sync state remain. */
-  dev.reload = async () => { if (engine) engine.stop(); [...mine].forEach(id => clock.clearTimer(id)); mine.clear(); boot(); await engine.boot(); };   // a reload kills the old page's engine, like a real tab
+  dev.reload = async () => { if (engine) engine.stop(); [...mine].forEach(id => clock.clearTimer(id)); mine.clear(); boot(); return engine.boot({ continuedSession }); };   // a reload kills the old page's engine, like a real tab
+  /** Signing out of the app on this phone: the leaving account is recorded as the data's owner, the engine stops, its timers die. Data and storage stay. */
+  dev.signOut = () => { if (engine) { engine.recordOwnerForSignOut(); engine.stop(); } [...mine].forEach(id => clock.clearTimer(id)); mine.clear(); if (dev.idler) clock.idlers.delete(dev.idler); };
   dev.addTxn = (desc, amount = 100) => { const id = `${name}-t${++seq}`; data.txns.push({ id, type: "expense", desc, amount, date: "2026-10-15", catId: "food", catIds: ["food"], accId: "syn_bank", people: {} }); persist(); lastRebuild = clock.now(); created.push(id); engine.notifyChange(); return id; };
   // Waits for EVERY engine on this clock (not just this device's) after each timer: two devices whose timers fall on the same instant would otherwise run
   // concurrently and race through real async crypto, so which write wins would vary between runs and event logs would not be reproducible.

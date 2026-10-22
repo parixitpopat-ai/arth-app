@@ -19,6 +19,7 @@ import { differences } from "./differences.js";
 import { loadSyncState, saveSyncState } from "./syncState.js";
 import { statusText } from "./statusText.js";
 import { hasUserData } from "./userData.js";
+import { readOwner, writeOwner, ownerFromSyncHistory, classifyOwnership, startFreshSnapshot } from "./deviceOwner.js";
 
 export const DEFAULT_BACKOFF_MS = [2000, 5000, 15000, 60000, 300000];
 // Default: read the saved copy back after EVERY write (reconciliation is never skipped). Costs one extra download per write;
@@ -34,7 +35,7 @@ export function advanceToken(baseToken, nowMs) {
 const sameMeta = (a, b) => Boolean(a && b) && a.writeId === b.writeId && a.digest === b.digest && a.txnCount === b.txnCount;
 
 export function createSyncEngine({
-  userId, deviceId, cloud: cloudIn, storage, getSnapshot, applySnapshot, readLocalAfterApply,
+  userId, userEmail = "", deviceId, cloud: cloudIn, storage, getSnapshot, applySnapshot, readLocalAfterApply,
   now = () => Date.now(), setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = h => clearTimeout(h),
   genId, onStatus = () => {}, isOnline = () => true,
   normalizers, requestExternalBackup,
@@ -166,13 +167,16 @@ export function createSyncEngine({
   }
 
   /** Replace this device's data with the cloud copy, after a verified backup of what is replaced. */
-  async function takeCloud(st, local, rec, cloudDigest, reason) {
-    const bk = await backupOrBlock(local, reason);
+  async function takeCloud(st, local, rec, cloudDigest, reason, opts = {}) {
+    const bk = await backupOrBlock(local, reason, opts.backup || {});
     if (!bk.ok) return { st, result: { outcome: "blocked-backup", error: bk.error } };
     st = withBackup(st, bk, reason);
     if (halted) throw HALTED();
-    await applySnapshot(rec.snapshot);
+    await applySnapshot(opts.target || rec.snapshot);
     const after = await readLocalAfterApply();
+    // Extra check by the caller (account hand-over: nothing of the previous account may remain). A failure pauses sync and records nothing as agreed.
+    const extra = opts.verifyAfter ? opts.verifyAfter(after) : null;
+    if (extra) { st = save({ ...st, paused: "reconcile-mismatch", lastReconcile: { at: iso(now()), ok: false, localCount: txnIdsOf(after).length, cloudCount: txnIdsOf(rec.snapshot).length, detail: extra } }); setStatus(pausedStatus(st)); return { st, result: { outcome: "paused", error: extra } }; }
     // Reconcile EVERY list, not just transactions: no record of the cloud copy may be missing from the device after applying it
     // (bills, payments, allocations, relationships, schedules, nudges ...), and applying must not create dangling references.
     const lost = missingFrom(after, rec.snapshot), dangling = introducedDangling(after, rec.snapshot);
@@ -189,10 +193,97 @@ export function createSyncEngine({
     return { st, result: { outcome: "pulled", backupId: bk.id } };
   }
 
+  // ── Account-isolation guard (SYNC-SAFETY-008): whose data is on this device? ──────────────────────────────────────────────
+  // Checked before ANY cloud call in every cycle. Data that belongs to another account (or has no recorded owner on a fresh sign-in)
+  // is never uploaded, never replaced and never merged: the cycle stops and the person decides (resolveOwnership).
+  let continuedSession = false;      // set by boot(): the server-verified session this device already had (restored, or resumed from offline)
+  let pendingOwnership = null;
+  const freshDefaultKeys = Object.keys(normalizers || {}).filter(k => k !== "txns" && k !== "loans");
+  async function ownershipGate(local) {
+    const owner = readOwner(storage);
+    if (owner && owner.userId === userId) { pendingOwnership = null; return null; }
+    const meaningful = hasUserData(local);
+    const c = classifyOwnership({ owner, historyOwner: ownerFromSyncHistory(storage), userId, localMeaningful: meaningful, continuedSession });
+    if (c.kind === "own" || c.kind === "claim") {
+      writeOwner(storage, { userId, email: userEmail, now, source: c.kind === "own" ? "sync-history" : (meaningful ? "session" : "clean-device") });
+      pendingOwnership = null;
+      return null;
+    }
+    // Blocked. Does the other account's data include changes it never sent to its own cloud copy? (so the person is told)
+    let unsynced = null;
+    try {
+      const hs = ownerFromSyncHistory(storage);
+      if (hs && hs.userId === c.ownerUserId && hs.state) unsynced = Boolean(hs.state.pendingWrite) || (hs.state.baseDigest ? (await digestSnapshot(local)) !== hs.state.baseDigest : true);
+    } catch { unsynced = null; }
+    const ids = txnIdsOf(local);
+    pendingOwnership = { kind: c.kind, ownerUserId: c.ownerUserId, ownerEmail: c.ownerEmail, unsynced, txnCount: ids.length, detectedAt: iso(now()) };
+    setStatus({ kind: "ownership", ownership: pendingOwnership });
+    return { outcome: "ownership", ownership: pendingOwnership };
+  }
+
+  /**
+   * The person's decision about data that belongs to another account (or to no known account).
+   *   "start-fresh"  this device's data is saved as a verified, pinned backup, then replaced with ONLY this account's own data (or an
+   *                  empty account). Requires a connection (this account's cloud copy is read first). Nothing is uploaded.
+   *   "transfer"     this device's data becomes this account's: a verified, pinned backup is taken and the owner is recorded. Nothing is
+   *                  uploaded here; the next sync still goes through the normal rules, so a populated cloud copy still asks.
+   * Either way nothing changes unless the backup was verified.
+   */
+  async function resolveOwnership(choice) {
+    if (!pendingOwnership) return { outcome: "none" };
+    if (running) await running;
+    if (halted) return { outcome: "stopped" };
+    const prev = pendingOwnership, local = getSnapshot(), hold = `own_${now()}`;
+    if (choice === "transfer") {
+      const bk = await backupOrBlock(local, "before-account-transfer", { pinned: true, conflictId: hold });
+      if (!bk.ok) return { outcome: "blocked-backup", error: bk.error };
+      save(withBackup(load(), bk, "before-account-transfer"));
+      writeOwner(storage, { userId, email: userEmail, now, source: "transfer", transferredFrom: prev.ownerUserId });
+      pendingOwnership = null; setStatus({ kind: "idle" });
+      return { outcome: "transferred", backupId: bk.id };
+    }
+    if (choice !== "start-fresh") return { outcome: "none" };
+    if (!isOnline()) return { outcome: "failed", error: "No connection. Arth must read this account's own cloud copy first. Nothing was changed." };
+    let rec;
+    try { rec = await cloud.read(userId); } catch (e) { return { outcome: "failed", error: `This account's cloud copy could not be read (${String((e && e.message) || e)}). Nothing was changed.` }; }
+    const target = startFreshSnapshot(local, rec ? rec.snapshot : null, freshDefaultKeys, iso(now()));
+    const mine = new Set(txnIdsOf(local)), theirs = new Set(rec ? txnIdsOf(rec.snapshot) : []);
+    const leaked = after => txnIdsOf(after).filter(id => mine.has(id) && !theirs.has(id));
+    const reset = { ...load(), baseToken: null, baseDigest: null, pendingWrite: null, conflict: null, paused: null };
+    if (rec) {
+      const r = await takeCloud(reset, local, rec, await digestSnapshot(rec.snapshot), "other-account-device-copy", {
+        backup: { pinned: true, conflictId: hold }, target,
+        verifyAfter: after => (leaked(after).length ? `${leaked(after).length} transaction(s) of the previous account were still on the device after the switch` : null),
+      });
+      if (r.result.outcome !== "pulled") return r.result;
+    } else {
+      const bk = await backupOrBlock(local, "other-account-device-copy", { pinned: true, conflictId: hold });
+      if (!bk.ok) return { outcome: "blocked-backup", error: bk.error };
+      save(withBackup(reset, bk, "other-account-device-copy"));
+      if (halted) throw HALTED();
+      await applySnapshot(target);
+      const after = await readLocalAfterApply();
+      if (leaked(after).length) { const st = save({ ...load(), paused: "reconcile-mismatch", lastReconcile: { at: iso(now()), ok: false, localCount: txnIdsOf(after).length, detail: `${leaked(after).length} transaction(s) of the previous account were still on the device after the switch` } }); setStatus(pausedStatus(st)); return { outcome: "paused", error: st.lastReconcile.detail }; }
+    }
+    writeOwner(storage, { userId, email: userEmail, now, source: "start-fresh" });
+    pendingOwnership = null; setStatus({ kind: "idle" });
+    return { outcome: "started-fresh", backupId: load().lastBackup && load().lastBackup.id };
+  }
+
+  /** Called as the person signs out: the data now on this device belongs to the account that is leaving. */
+  function recordOwnerForSignOut() {
+    try {
+      const o = readOwner(storage);
+      if ((!o || o.userId === userId) && hasUserData(getSnapshot())) writeOwner(storage, { userId, email: userEmail, now, source: "sign-out" });
+    } catch { /* never block sign-out */ }
+  }
+
   async function runCycle(trigger, depth = 0) {
     let st = load();
     if (known === null) known = { baseToken: st.baseToken, baseDigest: st.baseDigest };
     if (foreignAdvanced(st)) return markStale("another tab synced");
+    const blocked = await ownershipGate(getSnapshot());
+    if (blocked) return blocked;
     if (st.paused) { setStatus(pausedStatus(st)); return { outcome: "paused" }; }
     if (st.conflict) { setStatus(conflictStatus(st)); return { outcome: "conflict" }; }
     if (!isOnline()) return failed(new Error("offline"), true);
@@ -259,7 +350,8 @@ export function createSyncEngine({
     }
   }
 
-  function syncOnce(trigger) {
+  function syncOnce(trigger, opts) {
+    if (opts && opts.continuedSession) continuedSession = true;
     if (running) { rerun = true; return running; }
     running = (async () => {
       try {
@@ -330,7 +422,8 @@ export function createSyncEngine({
 
   return {
     prepareRestore,
-    boot: () => syncOnce("boot"),
+    boot: opts => syncOnce("boot", opts),
+    resolveOwnership, recordOwnerForSignOut, getOwnership: () => pendingOwnership,
     syncNow: () => syncOnce("manual"),
     notifyChange() { if (debounceTimer != null) clearTimer(debounceTimer); debounceTimer = setTimer(() => { debounceTimer = null; syncOnce("change"); }, debounceMs); },
     onOnline() { clearRetry(); return syncOnce("online"); },

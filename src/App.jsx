@@ -12,6 +12,7 @@ import WelcomeScreen from "./screens/WelcomeScreen";
 import AuthGateScreen from "./screens/AuthGateScreen";
 import MasterUserProfileScreen from "./screens/MasterUserProfileScreen";
 import CloudConflictScreen from "./screens/CloudConflictScreen";
+import DeviceOwnershipScreen from "./screens/DeviceOwnershipScreen";
 import SyncConflictSheet from "./components/SyncConflictSheet";
 import SyncBackupFileSheet from "./components/SyncBackupFileSheet";
 import TabGate from "./components/TabGate";
@@ -9604,7 +9605,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(!cloudUser?.id || !isCloudSyncConfigured || !syncKit) return;
     setFirstAuthState("checking");
     setFirstAuthError("");
-    const out = await syncKit.engine.boot();
+    // An offline-resumed device continues the session it had (the server just confirmed it); a plain sign-in does not.
+    const out = await syncKit.engine.boot({ continuedSession:resumedFromOfflineRef.current });
+    if(out.outcome==="ownership"){ setFirstAuthState("ownership"); return; }   // the data on this phone belongs to another account: nothing was sent; the person is asked
     if(out.outcome==="failed" || out.outcome==="blocked-backup" || out.outcome==="paused"){
       setFirstAuthError(out.error || "Couldn't reach your Arth account.");
       setFirstAuthState("blocked-offline");
@@ -9625,6 +9628,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     firstAuthRanRef.current = true;
     setFirstAuthState(isMasterUserSetupComplete(cloudSnapshotRef.current || {}) ? "ready" : "needs-setup");
   }, [cloudUser, syncKit]);
+
+  // Account-isolation guard: the person's decision about data that belongs to another account (SYNC-SAFETY-008).
+  const [ownershipBusy, setOwnershipBusy] = useState(false);
+  const [ownershipError, setOwnershipError] = useState("");
+  const resolveOwnershipChoice = useCallback(async (choice) => {
+    if(!syncKit) return;
+    setOwnershipBusy(true); setOwnershipError("");
+    try{
+      const out = await syncKit.engine.resolveOwnership(choice);
+      if(out.outcome!=="transferred" && out.outcome!=="started-fresh"){
+        setOwnershipError(out.error || "That could not be completed, so nothing was changed. Please try again.");
+        return;
+      }
+      if(sessionRestoredOnBootRef.current){ setCloudHydrated(false); await syncKit.engine.boot({ continuedSession:true }); setCloudHydrated(true); }
+      else { firstAuthRanRef.current = false; setConflictData(null); setFirstAuthState(null); }   // the first-sign-in check runs again, now that ownership is settled
+    }finally{ setOwnershipBusy(false); }
+  }, [syncKit]);
 
   // Explicit source-of-truth selection, never a merge. The side that is replaced is backed up (and the backup read back) first.
   const resolveConflict = useCallback(async (choice) => {
@@ -9689,6 +9709,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const handleCloudSignOut = useCallback(async () => {
     setCloudBusy(true);
     try{
+      syncEngineRef.current?.recordOwnerForSignOut?.();   // the data now on this phone belongs to the account that is leaving
       await signOutCloud();
       setCloudUser(null);
       setCloudHydrated(true);
@@ -9833,7 +9854,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(!sessionRestoredOnBootRef.current) return;
     setCloudHydrated(false);
     // Returning device: one sync cycle (never replaces unsynced local data; offline is fine, the app opens from local data).
-    syncKit.engine.boot().finally(()=>setCloudHydrated(true));
+    syncKit.engine.boot({ continuedSession:true }).finally(()=>setCloudHydrated(true));   // a session the server already knew: it continues, so this device's data is this account's
   }, [cloudUser?.id, syncKit]);
 
   // P1 — first-auth-on-this-device path only (see sessionRestoredOnBootRef).
@@ -19972,6 +19993,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       onDone={res=>{ fileBackupRequest.resolve(res); setFileBackupRequest(null); }}/>
   ) : null;
   if(isCloudSyncConfigured && !offlineResume){
+    // Data on this phone belongs to another account (or to none): nothing is sent or replaced until the person decides.
+    if(cloudUser && syncStatus.kind==="ownership" && syncStatus.ownership){
+      return <>{fileBackupSheet}<DeviceOwnershipScreen T={T} ownership={syncStatus.ownership} accountEmail={cloudUser.email}
+        localSummary={summarizeMeaningfulData(cloudSnapshotRef.current || {})} busy={ownershipBusy} error={ownershipError}
+        onStartFresh={()=>resolveOwnershipChoice("start-fresh")} onTransfer={()=>resolveOwnershipChoice("transfer")} onSignOut={handleCloudSignOut}/></>;
+    }
     if(!cloudUser){
       // P1 revision: Welcome (Sign Up / Sign In choice) shown first — no
       // more single "Continue with email" entry point (reverses P1-001,

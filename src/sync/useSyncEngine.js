@@ -41,7 +41,7 @@ export function useSyncEngine({ cloudUser, isCloudSyncConfigured, supabase, appl
     if (!cloudUser?.id || !isCloudSyncConfigured || !supabase) { setSyncKit(null); return undefined; }
     const cloud = createSupabaseCasClient(supabase);
     const engine = createSyncEngine({
-      userId: cloudUser.id, deviceId: deviceIdOnThisDevice(), cloud, storage: window.localStorage, normalizers: latest.current.getNormalizers(),
+      userId: cloudUser.id, userEmail: cloudUser.email || "", deviceId: deviceIdOnThisDevice(), cloud, storage: window.localStorage, normalizers: latest.current.getNormalizers(),
       getSnapshot: () => cloudSnapshotRef.current || {},
       applySnapshot: async snapshot => { applyCloudSnapshot(snapshot); },
       // After applying, wait for React to rebuild the snapshot from the new state so the result can be reconciled against the cloud copy.

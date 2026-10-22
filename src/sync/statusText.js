@@ -7,7 +7,7 @@ import { describeDifferenceLines } from "./differences.js";
 
 const when = iso => { try { return new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }); } catch { return String(iso); } };
 
-export const STATUS_KINDS = Object.freeze(["idle", "syncing", "synced", "sent", "pending", "failed", "conflict", "blocked-backup", "paused-token", "paused-reconcile", "stale-tab", "local-only"]);
+export const STATUS_KINDS = Object.freeze(["idle", "syncing", "synced", "sent", "pending", "failed", "conflict", "blocked-backup", "paused-token", "paused-reconcile", "stale-tab", "local-only", "ownership"]);
 
 /**
  * @param {{kind:string, verifiedAt?:string, nextRetryAt?:string, error?:string, detail?:string, backup?:{at:string,txnCount:number}, diff?:{onlyLocal:string[],onlyCloud:string[]}}} s
@@ -41,6 +41,8 @@ export function statusText(s) {
       return { headline: "Sync paused: copies don't match", detail: `After syncing, the cloud copy did not match what was sent${s.detail ? ` (${s.detail})` : ""}. Nothing further was overwritten.`, tone: "error" };
     case "stale-tab":
       return { headline: "Arth changed in another tab", detail: "This tab's data is out of date, so it has stopped syncing and will not save over the other tab's changes. Reload this tab to continue.", tone: "error" };
+    case "ownership":
+      return { headline: "This device holds another account's data", detail: "Nothing has been sent to the cloud or replaced. Choose what to do with the data on this device.", tone: "warn" };
     case "local-only":
       return { headline: "Not signed in", detail: "Data is saved on this device only.", tone: "neutral" };
     default:
