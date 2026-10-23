@@ -191,6 +191,7 @@ import CreditCardStatementSheet from "./components/CreditCardStatementSheet";
 import ChangeBillingModal from "./components/ChangeBillingModal";
 import CreditCardsListScreen from "./components/CreditCardsListScreen";
 import MarkBillPaidModal from "./components/MarkBillPaidModal";
+import InvoiceImportScreen from "./screens/InvoiceImportScreen";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import { validateFill, normalizeFill } from "./domain/vehicles/fuelFills";
 import Chip from "./components/Chip";
@@ -15220,6 +15221,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       />
     );
 
+    if(settingsSection==="importinvoice") return <InvoiceImportScreen accounts={accounts} txns={txns} T={T} sym={sym} onBack={()=>setSettingsSection(null)} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }}/>;
     if(settingsSection==="backup") return (
       <div style={{ padding:"14px 16px 0" }}>
         <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
@@ -15554,6 +15556,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               (per the Screen Inventory). Export exists via CSV, listed below under Backup. */}
           <Row icon="🙂" title="My Profile" subtitle={(people.find(p=>p.isMe)?.name)||"Set up your identity in Arth"} onClick={()=>setSettingsSection("myprofile")}/>
           <Row icon="🔑" title="Cloud Sync & Account" subtitle={cloudUser?.email ? `Signed in as ${cloudUser.email}${lastSyncedAt ? " · synced" : ""}` : "Sign in to sync across devices"} onClick={()=>setSettingsSection("cloudsync")}/>
+          <Row icon="🧾" title="Import invoice" subtitle="Preview a Blinkit invoice PDF (nothing is saved)" onClick={()=>setSettingsSection("importinvoice")}/>
           <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
         </div>
 
