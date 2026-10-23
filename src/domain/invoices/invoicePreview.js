@@ -55,10 +55,10 @@ function buildInvoiceView(parsed) {
   let handling = null;
   if (rows.length) {
     const sourceRows = rows.map(c => ({ afterItem: c.followsSrNo, taxable: rup(c.taxableMilli), cgst: rup(c.cgstMilli), sgst: rup(c.sgstMilli), total: rup(c.totalMilli), raw: c.source.raw }));
-    if (ca && ca.linked && parsed.annexure.length === 1) {
-      const a = parsed.annexure[0];
-      handling = { verified: true, consolidated: true, label: a.nature || "Handling charge", taxable: rup(sumOf("taxableMilli")), cgst: rup(sumOf("cgstMilli")), sgst: rup(sumOf("sgstMilli")), total: rup(sumOf("totalMilli")), taxRate: a.taxRate,
-        annexure: { taxable: rup(a.taxableMilli), cgst: rup(a.cgstMilli), sgst: rup(a.sgstMilli) }, sourceRows,
+    if (ca && ca.linked && parsed.annexure.length >= 1 && parsed.annexure.every(x => String(x.nature || "").trim().toLowerCase() === String(parsed.annexure[0].nature || "").trim().toLowerCase())) {
+      const a = parsed.annexure[0];     // one kind of charge; the invoice may list it once per tax rate (e.g. 5% and 18%)
+      handling = { verified: true, consolidated: true, label: a.nature || "Handling charge", taxable: rup(sumOf("taxableMilli")), cgst: rup(sumOf("cgstMilli")), sgst: rup(sumOf("sgstMilli")), total: rup(sumOf("totalMilli")), taxRate: parsed.annexure.every(x => x.taxRate === a.taxRate) ? a.taxRate : null,
+        annexure: { taxable: rup(parsed.annexure.reduce((t, x) => t + x.taxableMilli, 0)), cgst: rup(parsed.annexure.reduce((t, x) => t + x.cgstMilli, 0)), sgst: rup(parsed.annexure.reduce((t, x) => t + x.sgstMilli, 0)) }, sourceRows,
         note: `Printed as ${rows.length} "Delivery and other charges" rows, one under each item. They add up to the invoice's ${a.nature || "charge"} table, so they are one shared charge.` };
     } else {
       handling = { verified: false, consolidated: false, label: "Delivery and other charges", total: rup(sumOf("totalMilli")), sourceRows,

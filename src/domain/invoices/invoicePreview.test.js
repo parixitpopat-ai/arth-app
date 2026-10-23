@@ -177,3 +177,19 @@ test("a page object from the layout path carries reason codes the UI can act on"
   const p = analysePage({ number: 1, items: [], textChars: 3, imageOps: 1 });
   assert.deepEqual([p.status, p.reasonCodes], ["requires-ocr", ["no-text-layer"]]);
 });
+
+// A real invoice listed ONE "Handling charge" twice in the annexure, once per tax rate (5% and 18%). The rows still add up to it, so they are one charge.
+test("charge rows consolidate when the annexure lists the same charge once per tax rate; a different kind of charge does not", async () => {
+  const { parseBlinkitGstInvoice } = await import("./blinkitGst.js");
+  const { BLINKIT_FIXTURE_1 } = await import("./fixtures/blinkitGstInvoice.fixture.js");
+  const view = rows => {
+    const parsed = parseBlinkitGstInvoice({ ...BLINKIT_FIXTURE_1, annexureRows: [BLINKIT_FIXTURE_1.annexureRows[0], ...rows, ["Total", "", "", "", "12.381", "0.310", "0.310", "0.000"]] });
+    const out = buildInvoicePreviews({ status: "supported", fileHash: "h", pages: [{ page: 1, status: "supported", parsed }] });
+    return out.invoices ? out.invoices[0].view : out[0].view;
+  };
+  const same = view([["1", "Handling charge", "18.00", "0.00", "3.000", "0.270", "0.270", "0.000"], ["2", "Handling charge", "5.00", "0.00", "9.381", "0.040", "0.040", "0.000"]]);
+  assert.equal(same.handling.consolidated, true);
+  assert.equal(same.handling.taxRate, null);
+  const mixed = view([["1", "Handling charge", "5.00", "0.00", "6.000", "0.150", "0.150", "0.000"], ["2", "Packaging fee", "5.00", "0.00", "6.381", "0.160", "0.160", "0.000"]]);
+  assert.equal(mixed.handling.consolidated, false);
+});
