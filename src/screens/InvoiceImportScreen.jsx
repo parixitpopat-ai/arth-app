@@ -126,6 +126,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], T, sym =
 
         <div style={label}>Might already be in Arth</div>
         <div style={{ color: T.sub, fontSize: 11, marginBottom: 6 }}>Suggestions only. Arth never links anything on its own, and a match does not need the exact amount.</div>
+        <div data-testid="match-rules-note" style={{ color: "#f0a500", fontSize: 11, marginBottom: 6 }}>Early matching rules, not yet verified on real data: an expense within 3 days; a similar amount means within ₹25 or 5%, and the expense must mention Blinkit.</div>
         {inv.matches.length === 0 && <div data-testid="no-matches" style={{ ...card, color: T.sub, fontSize: 12 }}>No expense within 3 days looks like this invoice.</div>}
         {inv.matches.map(m => (
           <button key={m.id} data-testid="match-row" data-id={m.id} data-strength={m.strength} data-selected={String(sel === m.id)} onClick={() => setPicked({ ...picked, [key]: sel === m.id ? null : m.id })} style={{ ...card, display: "block", width: "100%", textAlign: "left", cursor: "pointer", border: `2px solid ${sel === m.id ? T.accent : T.border}`, marginBottom: 8 }}>

@@ -55,6 +55,7 @@ rec("IV4 delivery rows are ONE verified handling charge (₹13) with the 3 print
 rec("IV5 invoice total ₹1,125.00 and the reconciliation line names the invoice's own ₹0.01 rounding", /1,125/.test(await T("invoice-total").innerText()) && (await T("reconciliation").getAttribute("data-level")) === "adds-up-with-printed-rounding", {});
 const ms = await T("match-row").evaluateAll(els => els.map(e => [e.getAttribute("data-id"), e.getAttribute("data-strength"), e.getAttribute("data-selected")]));
 rec("IV6 matching: same-amount t1 first, similar t2 second, none auto-selected; other-merchant t4 and far txn absent; larger t3 only a hint", JSON.stringify(ms) === JSON.stringify([["t1", "same-amount", "false"], ["t2", "similar", "false"]]) && (await T("match-hint").count()) === 1 && /Test Bank/.test(await T("match-row").first().innerText()), { ms });
+rec("IV6b the matching rules are labelled as unverified on the screen", /not yet verified on real data/.test(await T("match-rules-note").innerText()), {});
 rec("IV7 the save button is disabled and says saving arrives later", (await T("save-disabled").isDisabled()) && /later update/.test(await T("save-disabled").innerText()), {});
 await T("match-row").first().click(); await page.waitForTimeout(200);
 rec("IV8 choosing a suggestion only changes the explanation (link wording); nothing is written", /would link this invoice to your ₹1,125 expense/.test(await T("next-step").innerText()) && JSON.stringify(await snap()) === JSON.stringify(before), {});

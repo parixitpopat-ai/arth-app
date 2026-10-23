@@ -17,6 +17,11 @@ android {
         }
     }
     buildTypes {
+        // Debug builds install NEXT TO a real Arth app (different application id) and are labelled "Arth Preview" (src/debug/res).
+        debug {
+            applicationIdSuffix ".invoicepreview"
+            versionNameSuffix "-invoice-preview"
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
