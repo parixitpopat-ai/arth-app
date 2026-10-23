@@ -32,7 +32,7 @@ const qtyInputs = page => page.locator('input[type="number"][max]');
 
 const body = page => page.locator("body").innerText().then(t => t.replace(/\s+/g, " "));
 { const s = await open("none"); const { page } = s;
-  rec("CS1 the handling line shows as a charge, and the charges breakup lists it", (await page.getByText("Charge · Handling charge").count()) >= 1 && /CHARGES IN THIS EXPENSE/i.test(await body(page)) && /Handling charge ₹13/.test(await body(page)), {});
+  rec("CS1 the handling line shows as a charge, and the charges breakup lists it", (await page.getByText("Charge", { exact: true }).count()) >= 1 && /CHARGES IN THIS EXPENSE/i.test(await body(page)) && /Handling charge ₹13/.test(await body(page)), {});
   await addTarget(page, "Vyom"); await page.getByText(/Link to specific items instead/).click(); await page.waitForTimeout(300);
   rec("CS2 a charge line cannot be given to a person as an item (only Chips and Coke have quantity boxes)", (await qtyInputs(page).count()) === 2, { n: await qtyInputs(page).count() });
   await qtyInputs(page).nth(0).fill("1"); await qtyInputs(page).nth(1).fill("1"); await page.waitForTimeout(200);
@@ -70,6 +70,11 @@ const body = page => page.locator("body").innerText().then(t => t.replace(/\s+/g
 { const s = await open("none", true); const { page } = s;
   const t = await body(page);
   rec("CS13 the expense's detail view shows the charges breakup (Handling charge ₹13)", /Charges in this expense/i.test(t) && /Handling charge ₹13/.test(t), { t: t.slice(t.search(/Charges in this/i), t.search(/Charges in this/i) + 80) });
+  await s.ctx.close(); }
+
+{ const s = await open("none"); const { page } = s;
+  const first = await page.locator('[data-testid^="item-calc-"]').first().getAttribute("data-testid");
+  rec("CS14 the charge line is listed first in the items, above Chips and Coke", first === "item-calc-l3", { first });
   await s.ctx.close(); }
 
 console.log("outcome vector:", JSON.stringify(results));

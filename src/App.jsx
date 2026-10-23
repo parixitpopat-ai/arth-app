@@ -6392,12 +6392,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     {lineItems.length===0&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>No items yet. Tap + Add item to start.</div>}
                     {lineItems.length>0&&(
                       <div style={{ marginTop:8,display:"flex",flexDirection:"column",gap:6 }}>
-                        {lineItems.map(item=>{
+                        {/* charges (handling, delivery, platform fee, GST) are listed first; the saved order of the lines is not changed */}
+                        {[...lineItems].sort((a,b)=>Number(isCharge(b))-Number(isCharge(a))).map(item=>{
                           const itemTotal = lineItemAmount(item);
                           return (
                             <div key={item.id} style={{ display:"flex",alignItems:"center",gap:8,background:T.card||T.bg,borderRadius:10,padding:"8px 10px",border:`1px solid ${T.border}` }}>
                               <div style={{ flex:1,minWidth:0 }}>
-                                <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.label||"Unnamed item"}{isCharge(item)&&<span data-testid={`charge-tag-${item.id}`} style={{ marginLeft:6,background:T.warn+"22",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>Charge · {chargeTypeLabel(item.chargeType)}</span>}</div>
+                                <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.label||"Unnamed item"}{isCharge(item)&&<span data-testid={`charge-tag-${item.id}`} style={{ marginLeft:6,background:T.warn+"22",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>Charge{String(item.label||"").trim().toLowerCase()===chargeTypeLabel(item.chargeType).toLowerCase()?"":` · ${chargeTypeLabel(item.chargeType)}`}</span>}</div>
                                 <div data-testid={`item-calc-${item.id}`} style={{ color:T.sub,fontSize:10,marginTop:2 }}>{item.basis==="unit"
                                   ? describeLine({ basis:"unit", qty:item.qty||1, unit:item.unit||"nos", price:item.price, rateUnit:item.rateUnit }, sym, fmt)
                                   : describeLine({ basis:"total", qty:item.qty||1, unit:item.unit||"nos", price:itemTotal }, sym, fmt)}</div>
