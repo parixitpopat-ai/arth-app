@@ -54,3 +54,12 @@ Item names on the expense are shown WITHOUT the brand ("Lay's India's Magic Masa
 * Review screen: each item has a name box and a brand box (both editable), and a switch "Show item names without the brand" (on by default). Clearing a brand brings that item's full name back.
 * Category memory is now keyed by the plain product name (so "Chips" is remembered across brands); older full-name entries still match.
 * Not done: the brand-comparison view itself (nothing reads `lines` yet), and brands for items that are not in the starter list until they are corrected once.
+
+## Addendum: charges shared by splits (added after the brand work)
+Delivery, handling, platform fee and GST lines on an itemised expense are CHARGES, not items. A line has `kind: "charge"` and a `chargeType` (handling, delivery, platform, cgst, sgst, other). The invoice import marks its delivery / handling lines this way and keeps the GST printed inside them (`taxIncluded`) for the breakup.
+* Rule (the person's own): charges are divided EQUALLY by the number of splits, not by item price. A split is a person or group given items on the expense; the payer ("me") also counts, with a switch "Count me in the charge split" (on by default; saved as `chargeIncludeMe`). An explicit "Me" row is one split, never counted twice. The odd paisa stays with me (or the first split when me is not counted).
+* Only rows linked to specific items are splits. A flat-amount row keeps exactly the amount typed. Charge lines cannot be picked as items.
+* Each person's amount = their items + their share; the allocation also stores `chargeAmount`. The expense total and its lines are unchanged.
+* Breakup: the form and both transaction detail views list the charges by type, with the GST inside them when known. Code: `domain/transactions/chargeShare.js` (`chargeBreakdown` is the function a monthly report would call).
+* NOT done: a monthly "platform fee paid" report or screen (nothing reads the breakup across months yet); charges on expenses that were not edited after this release keep their old, unmarked lines.
+* Chromium only: `tools/invoice-import/charges-browser.mjs` (13 checks). Not run on Android.

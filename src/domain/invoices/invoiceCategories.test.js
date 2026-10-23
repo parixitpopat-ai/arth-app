@@ -90,3 +90,15 @@ test("a remembered category that no longer exists in the person's categories is 
   assert.deepEqual(suggestLineCats(v, catalog, ["groceries", "food"]), {});
   assert.deepEqual(suggestLineCats(v, catalog, ["deleted-cat"]), { 3: "deleted-cat" });
 });
+
+test("delivery / handling lines are marked as CHARGES (shared by splits, not by item); items are not", () => {
+  const items = buildLineItems(rowsAsPrinted(), { orderCatId: "groceries", genId });
+  assert.deepEqual(items.map(l => l.kind || "item"), ["item", "item", "item", "charge", "charge", "charge"]);
+  assert.ok(items.slice(3).every(l => l.chargeType === "delivery"));
+  const one = buildLineItems(previewOf(base()).view, { orderCatId: "groceries", genId });
+  const h = one[one.length - 1];
+  assert.equal(h.kind, "charge");
+  assert.equal(h.chargeType, "handling");
+  assert.deepEqual(h.taxIncluded, { cgst: 0.31, sgst: 0.31 });          // the GST inside the ₹13.00, for the breakup
+  assert.equal(one.slice(0, -1).some(l => l.kind), false);
+});

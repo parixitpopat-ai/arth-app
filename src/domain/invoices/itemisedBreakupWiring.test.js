@@ -19,3 +19,11 @@ test("'Link to specific items instead' really switches item mode on (and 'Use fl
   assert.match(app, /useItems\?\{\.\.\.r,items:\[\],byItems:false\}:\{\.\.\.r,items:\[\],byItems:true,amount:""\}/);
   assert.doesNotMatch(app, /r\.id===row\.id\?\{\.\.\.r,items: \[\]\}:r\)\)\} style=\{\{ background:"none"/);     // the old no-op toggle
 });
+
+test("charges: the Add form shares them through chargeShare (not by item), keeps charge lines out of the item picker, and saves the charge part on each allocation", () => {
+  assert.match(app, /const chargeShares = shareCharges\(\{ lineItems, rows:allocRows, includeMe:chargeIncludeMe \}\);/);
+  assert.match(app, /\(lineItems\|\|\[\]\)\.filter\(li=>!isCharge\(li\)\)\.map\(li=>\{/);
+  assert.match(app, /\(chargeShares\.rows\[row\.id\]\?\.totalPaise\|\|0\)\/100/);
+  assert.match(app, /\.\.\.\(chargePart>0 \? \{ chargeAmount:chargePart \} : \{\}\)/);
+  assert.match(app, /\.\.\.\(item\.kind==="charge" \? \{ kind:"charge", chargeType:item\.chargeType\|\|"other" \} : \{\}\),\n\s+\.\.\.\(item\.taxIncluded/);
+});

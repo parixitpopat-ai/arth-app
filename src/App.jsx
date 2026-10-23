@@ -205,6 +205,7 @@ import { RangeFieldGrid, RangeField, MonthRangeSheet } from "./components/RangeF
 import CashFlowScreen, { CashFlowCard } from "./screens/CashFlowScreen";
 import ReportsScreen, { ReportsCard } from "./screens/ReportsScreen";
 import { computeLine, describeLine, reconcileLines, rateUnitsFor, defaultRateUnit } from "./domain/transactions/itemLineMath";
+import { shareCharges, chargeBreakdown, chargeTypeLabel, CHARGE_TYPES, isCharge } from "./domain/transactions/chargeShare";
 import {
   EDUCATION_CAT_ID, EDUCATION_SUB_DESC, EDU_SUB, findEducationCategory, roleOfEducationSub, ensureEducationCategory, feeKindForEducationSub, educationSubNeedsPeriod,
   selectionNeedsSchool, monthRangeToDates, dateRangeToDates, findApplicablePeriods, planFeeAllocation,
@@ -900,6 +901,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // wireTransactionApplication/submitTransactionThroughBoundary functions either way; only this
   // thin per-caller wrapper is separate, deliberately, so AddModal's own call sites are not
   // touched by this change at all.
+  // The charges on an itemised expense (handling, delivery, platform fee, GST…), by type, for the transaction views.
+  const chargeBreakupCard = t => {
+    const cb = chargeBreakdown(t.lineItems);
+    if(!(cb.total>0)) return null;
+    const gst = (t.lineItems||[]).filter(isCharge).reduce((a,l)=>({ cgst:a.cgst+Number(l.taxIncluded?.cgst||0), sgst:a.sgst+Number(l.taxIncluded?.sgst||0) }),{ cgst:0, sgst:0 });
+    return (
+      <div data-testid="txn-charges" style={{ background:T.card,borderRadius:8,padding:"8px 10px",fontSize:11,marginBottom:8,display:"flex",flexDirection:"column",gap:4 }}>
+        <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginBottom:2 }}>Charges in this expense</div>
+        {Object.entries(cb.byType).map(([type,v])=><div key={type} style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub }}>{chargeTypeLabel(type)}</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(v)}</span></div>)}
+        {(gst.cgst>0||gst.sgst>0)&&<div style={{ color:T.sub,fontSize:10 }}>Includes GST: CGST {sym}{fmt(gst.cgst)} + SGST {sym}{fmt(gst.sgst)}</div>}
+      </div>
+    );
+  };
   const createTransactionThroughBoundary = (draft) => {
     const statePort = {
       getAll: () => txns,
@@ -3361,6 +3375,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {t.type==="expense"&&groupCollectiveDue>0&&<div style={{ fontSize:11,color:T.info,marginBottom:8,fontWeight:700 }}>👥 {getGroup(t.groupId)?.name||"Group"} collectively owes {sym}{fmt(groupCollectiveDue)}</div>}
             {t.transactionRef&&<div style={{ fontSize:11,color:T.sub,marginBottom:8 }}>🔖 Transaction ID: {t.transactionRef}</div>}
             {t.note&&<div style={{ fontSize:11,color:T.sub,marginBottom:8 }}>📝 {t.note}</div>}
+            {t.type==="expense"&&chargeBreakupCard(t)}
             {t.type==="expense"&&(t.priceMrp||t.priceInterestRate||t.priceInterest||t.priceProcessingFee)&&(
               <div style={{ background:T.card,borderRadius:8,padding:"8px 10px",fontSize:11,marginBottom:8,display:"flex",flexDirection:"column",gap:4 }}>
                 <div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8,marginBottom:2 }}>Price Breakdown</div>
@@ -4336,6 +4351,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             unitPrice:String(item.unitPrice ?? ""),
             catId:item.catId||"",
             subId:item.subId||"",
+            ...(item.kind==="charge" ? { kind:"charge", chargeType:item.chargeType||"other" } : {}),
+            ...(item.taxIncluded ? { taxIncluded:item.taxIncluded } : {}),
             splits:Array.isArray(item.splits)
               ? item.splits.map(split=>({
                   id:split.id||genId(),
@@ -4423,6 +4440,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const lineItemsTotal = lineItems.reduce((sum,item)=>sum+lineItemAmount(item),0);
     // Payments v2 G1/G2 — in Itemised the ONLY check is that the lines add up to the transaction total.
     const itemsRecon = reconcileLines(lineItems.map(lineItemAmount), parseFloat(amount)||0);
+    // Charges (handling, delivery, platform fee, GST…) are shared equally by the number of splits; see domain/transactions/chargeShare.js.
+    const [chargeIncludeMe, setChargeIncludeMe] = useState(isEditing ? sourceTxn?.chargeIncludeMe!==false : true);
+    const chargeShares = shareCharges({ lineItems, rows:allocRows, includeMe:chargeIncludeMe });
+    const chargeSummary = chargeBreakdown(lineItems);
     const lineSplitQtyTotal = item => (item.splits||[]).reduce((sum,split)=>sum+(parseFloat(split.qty)||0),0);
 
     // ── auto-save draft ──
@@ -5445,7 +5466,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           allocRows.forEach(row=>{
             if(!row.targetId) return;
             const rowAmt = row.items?.length
-              ? row.items.reduce((s,i)=>s+allocItemAmount(i),0)
+              ? (chargeShares.rows[row.id]?.totalPaise||0)/100
               : parseFloat(row.amount)||0;
             if(!(rowAmt>0)) return;
             if(row.targetType==="person"){
@@ -5486,7 +5507,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const allocTotal = allocRows.reduce((sum,row)=>{
             if(!row.targetId) return sum;
             const rowAmt = row.items?.length
-              ? row.items.reduce((s,i)=>s+allocItemAmount(i),0)
+              ? (chargeShares.rows[row.id]?.totalPaise||0)/100
               : parseFloat(row.amount)||0;
             return sum + Math.max(0,rowAmt);
           },0);
@@ -5558,6 +5579,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   amount:Math.round(amountVal*100)/100,
                   catId:item.catId||null,
                   subId:item.subId||null,
+                  ...(item.kind==="charge" ? { kind:"charge", chargeType:item.chargeType||"other" } : {}),
+                  ...(item.taxIncluded ? { taxIncluded:item.taxIncluded } : {}),
                   splits:normalizedSplits.length ? normalizedSplits : null,
                 };
               })
@@ -5662,8 +5685,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 };
               })
               .filter(i=>(i.sourceItemId && i.qty>0) || i.amount>0 || i.label);
-            const effAmt = normalizedItems.length ? normalizedItems.reduce((s,i)=>s+Number(i.amount||0),0) : parseFloat(r.amount)||0;
-            return { id:r.id, targetType:r.targetType, targetId:r.targetId, amount:effAmt, mode:r.mode, items:normalizedItems };
+            const chargePart = normalizedItems.length ? (chargeShares.rows[r.id]?.chargePaise||0)/100 : 0;
+            const effAmt = normalizedItems.length ? Math.round((normalizedItems.reduce((s,i)=>s+Number(i.amount||0),0)+chargePart)*100)/100 : parseFloat(r.amount)||0;
+            return { id:r.id, targetType:r.targetType, targetId:r.targetId, amount:effAmt, mode:r.mode, items:normalizedItems, ...(chargePart>0 ? { chargeAmount:chargePart } : {}) };
           }).filter(r=>r.amount>0):null,
           groupAllocations:(splitMode==="allocate" || splitMode==="unified")&&groupAllocationsVal.length?groupAllocationsVal:null,
           // FIX: was hasCategorySplit?catAllocNumeric:null -- silently discarded the user's
@@ -5671,6 +5695,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // at all, regardless of whether it sums exactly (warned above, never blocked).
           catAllocations:catIds.length>1?catAllocNumeric:null,
           lineItems:normalizedLineItems?.length ? normalizedLineItems : null,
+          ...(chargeSummary.total>0 ? { chargeIncludeMe } : {}),
           // Education flow — ONE Transaction, one real line per ticked Education subcategory. Overrides
           // the generic category/line fields above (Education is the only category here by construction).
           ...(eduMode ? {
@@ -6372,7 +6397,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           return (
                             <div key={item.id} style={{ display:"flex",alignItems:"center",gap:8,background:T.card||T.bg,borderRadius:10,padding:"8px 10px",border:`1px solid ${T.border}` }}>
                               <div style={{ flex:1,minWidth:0 }}>
-                                <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.label||"Unnamed item"}</div>
+                                <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.label||"Unnamed item"}{isCharge(item)&&<span data-testid={`charge-tag-${item.id}`} style={{ marginLeft:6,background:T.warn+"22",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>Charge · {chargeTypeLabel(item.chargeType)}</span>}</div>
                                 <div data-testid={`item-calc-${item.id}`} style={{ color:T.sub,fontSize:10,marginTop:2 }}>{item.basis==="unit"
                                   ? describeLine({ basis:"unit", qty:item.qty||1, unit:item.unit||"nos", price:item.price, rateUnit:item.rateUnit }, sym, fmt)
                                   : describeLine({ basis:"total", qty:item.qty||1, unit:item.unit||"nos", price:itemTotal }, sym, fmt)}</div>
@@ -6412,6 +6437,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                             </div>
                           );
                         })}
+                        {chargeSummary.total>0&&(
+                          <div data-testid="charge-breakup" style={{ marginTop:6,paddingTop:8,borderTop:`1px solid ${T.border}`,display:"flex",flexDirection:"column",gap:2 }}>
+                            <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>CHARGES IN THIS EXPENSE</div>
+                            {Object.entries(chargeSummary.byType).map(([type,v])=>(
+                              <div key={type} style={{ display:"flex",justifyContent:"space-between",fontSize:11 }}><span style={{ color:T.sub }}>{chargeTypeLabel(type)}</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(v)}</span></div>
+                            ))}
+                          </div>
+                        )}
                         <div data-testid="items-reconcile" style={{ marginTop:6,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
                           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8 }}>
                             <span style={{ color:T.sub,fontSize:11 }}>Lines add up to</span>
@@ -7389,11 +7422,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       {allocRows.map(row=>{
                         const target = row.targetType==="group" ? groups.find(g=>g.id===row.targetId) : getPerson(row.targetId);
                         const useItems = Boolean(row.byItems) || (row.items||[]).length>0;     // byItems: the person tapped "Link to specific items" and has not entered quantities yet
-                        const rowItemTotal = (row.items||[]).reduce((s,i)=>{
-                          const src = (lineItems||[]).find(li=>li.id===i.sourceItemId);
-                          const unit = src ? (Number(src.qty)>0 ? Number(src.unitPrice||0) : Number(src.amount||0)) : 0;
-                          return s+(Number(i.qty)||0)*unit;
-                        },0);
+                        const rowShare = chargeShares.rows[row.id];
+                        const rowItemTotal = (rowShare?.totalPaise||0)/100;
                         if(!target) return null;
                         return (
                           <div key={row.id} style={{ display:"flex",flexDirection:"column",gap:6,background:T.card,borderRadius:10,padding:"8px 10px" }}>
@@ -7408,14 +7438,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                             </div>
                             <div style={{ display:"flex",gap:6,alignItems:"center" }}>
                               {!useItems&&<input style={{ ...inpSm,flex:1,textAlign:"right" }} type="number" min="0" placeholder="0" value={row.amount} onChange={e=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,amount:e.target.value}:r))}/>}
-                              {useItems&&<div style={{ flex:1,textAlign:"right",color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(rowItemTotal)} (from items)</div>}
+                              {useItems&&<div style={{ flex:1,textAlign:"right",color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(rowItemTotal)} {rowShare&&rowShare.chargePaise>0?`(items ${sym}${fmt(rowShare.itemsPaise/100)} + charges ${sym}${fmt(rowShare.chargePaise/100)})`:"(from items)"}</div>}
                             </div>
                             {lineItems?.length>0&&(
                               <button onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?(useItems?{...r,items:[],byItems:false}:{...r,items:[],byItems:true,amount:""}):r))} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:10,fontWeight:700,textAlign:"left",fontFamily:"Nunito,sans-serif" }}>{useItems?"← Use flat amount instead":"Link to specific items instead →"}</button>
                             )}
                             {useItems&&(
                               <div style={{ display:"flex",flexDirection:"column",gap:4,paddingLeft:8 }}>
-                                {(lineItems||[]).map(li=>{
+                                {(lineItems||[]).filter(li=>!isCharge(li)).map(li=>{
                                   const existing = (row.items||[]).find(i=>i.sourceItemId===li.id);
                                   const boughtQty = Math.max(0, parseFloat(li.qty)||0)||1;
                                   return (
@@ -7438,14 +7468,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           </div>
                         );
                       })}
+                      {chargeSummary.total>0&&chargeShares.splitCount>0&&(
+                        <div data-testid="charge-split-note" style={{ background:T.accent+"12",borderRadius:8,padding:"8px 10px",display:"flex",flexDirection:"column",gap:6 }}>
+                          <div style={{ color:T.text,fontSize:11,fontWeight:700 }}>Charges {sym}{fmt(chargeSummary.total)} are shared equally between {chargeShares.splitCount} split{chargeShares.splitCount>1?"s":""}{chargeShares.meCounts?`, you included (your part ${sym}${fmt(chargeShares.meSharePaise/100)})`:""}.</div>
+                          <label style={{ display:"flex",alignItems:"center",gap:8,cursor:"pointer" }}>
+                            <input data-testid="charge-include-me" type="checkbox" checked={chargeIncludeMe} onChange={e=>setChargeIncludeMe(e.target.checked)} style={{ width:16,height:16,accentColor:T.accent,cursor:"pointer" }}/>
+                            <span style={{ color:T.sub,fontSize:11 }}>Count me in the charge split</span>
+                          </label>
+                        </div>
+                      )}
                       <div style={{ color:T.sub,fontSize:10 }}>Total allocated: {sym}{fmt(allocRows.reduce((s,r)=>{
-                        if((r.items||[]).length>0){
-                          return s+r.items.reduce((si,i)=>{
-                            const src=(lineItems||[]).find(li=>li.id===i.sourceItemId);
-                            const unit = src ? (Number(src.qty)>0?Number(src.unitPrice||0):Number(src.amount||0)) : 0;
-                            return si+(Number(i.qty)||0)*unit;
-                          },0);
-                        }
+                        if((r.items||[]).length>0) return s+(chargeShares.rows[r.id]?.totalPaise||0)/100;
                         return s+(parseFloat(r.amount)||0);
                       },0))} of {sym}{fmt(amt)}</div>
                     </div>
@@ -7814,6 +7847,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [iPrice, setIPrice] = useState(String(
       editItem ? (editItem.price ?? (editItem.basis==="unit" ? editItem.unitPrice : ((parseFloat(editItem.qty)||0)*(parseFloat(editItem.unitPrice)||0)))) || ""
       : (prefill?.unitPrice || "")));
+    const [iChargeType, setIChargeType] = useState(editItem?.kind==="charge" ? (editItem.chargeType||"other") : "");     // "" = an ordinary item
     const [iCatId, setICatId] = useState(editItem?.catId || (!editItem && prefill?.catId) || "");
     const [iSubId, setISubId] = useState(editItem?.subId||"");
     // FIX: Category/Sub-category are no longer always-visible dropdowns. A known item (catalog
@@ -7842,7 +7876,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(!iName.trim()) return;
       const calc = computeLine({ basis:iBasis, qty:iQty, unit:iUnit, price:iPrice, rateUnit:iRateUnit });
       try{ localStorage.setItem("arth_item_basis", iBasis); }catch{}
-      onSave({ id: editingItemId||genId(), label:iName.trim(), qty:iQty, unit:iUnit, unitPrice:String(calc.unitPrice), basis:iBasis, price:iPrice, rateUnit:iRateUnit, catId:iCatId||null, subId:iSubId||null });
+      onSave({ id: editingItemId||genId(), label:iName.trim(), qty:iQty, unit:iUnit, unitPrice:String(calc.unitPrice), basis:iBasis, price:iPrice, rateUnit:iRateUnit, catId:iCatId||null, subId:iSubId||null, kind:iChargeType?"charge":undefined, chargeType:iChargeType||undefined });
       // WP-A: the TRANSACTION's own lineItem above always gets whatever was chosen — unconditional,
       // unchanged. The CATALOG (Arth's future suggestion for this item name) is a separate
       // decision: a brand-new item is still auto-learned (no friction for genuinely new items,
@@ -7854,7 +7888,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       // Add form and lost the item just added (reproduced on main). The write is now handed to the form
       // (onLearn) which applies it when the transaction is actually saved.
       const learn = fn => (onLearn ? onLearn(fn) : fn());
-      if(!catalogMatch){
+      if(iChargeType){
+        // a charge is not an item: nothing is learned for it
+      } else if(!catalogMatch){
         learn(()=>setItemCatalog(prev=>[...prev, { id: genId(), name:nameKey, unit:iUnit||"nos", catId:iCatId||"", subId:iSubId||"" }]));
       } else if(rememberForFuture){
         learn(()=>setItemCatalog(prev=>prev.map(it=>it.id===catalogMatch.id ? { ...it, unit:iUnit||"nos", catId:iCatId||"", subId:iSubId||"" } : it)));
@@ -7864,7 +7900,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(editingItemId){
         onClose();
       } else {
-        setIName(""); setIQty("1"); setIPrice(""); setICatId(""); setISubId(""); setRememberForFuture(false); setShowCategoryPicker(false);
+        setIName(""); setIQty("1"); setIPrice(""); setIChargeType(""); setICatId(""); setISubId(""); setRememberForFuture(false); setShowCategoryPicker(false);
       }
     };
     return (
@@ -7906,6 +7942,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <span style={lbl}>Unit</span>
                 <select style={inp} value={iUnit} onChange={e=>{ setIUnit(e.target.value); setIRateUnit(defaultRateUnit(e.target.value)); }}>{(measureUnits||[]).map(u=><option key={u} value={u}>{formatMeasureUnitLabel?formatMeasureUnitLabel(u):u}</option>)}</select>
               </div>
+            </div>
+            <div>
+              <span style={lbl}>This line is</span>
+              <select data-testid="line-kind" style={inp} value={iChargeType} onChange={e=>setIChargeType(e.target.value)}>
+                <option value="">An item</option>
+                {CHARGE_TYPES.map(t=><option key={t.value} value={t.value}>A charge · {t.label}</option>)}
+              </select>
+              {iChargeType&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>A charge is shared equally between the people and groups on this expense (you too), not by item.</div>}
             </div>
             {/* FIX: Category auto-applied silently for a known item -- compact one-line summary,
                 tap to override. A genuinely new/unmatched item shows a "Define category" prompt
@@ -21870,6 +21914,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   {attrGroup&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>{attrGroupLabel}</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{attrGroup.icon||"👥"} {attrGroup.name}</span></div>}
                   {attrPerson&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>{attrPersonLabel||"Who is this for"}</span><span style={{ color:T.accent,fontSize:12,fontWeight:700 }}>{attrPerson.emoji||"👤"} {attrPerson.name}</span></div>}
                   {t.note&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Note</span><span style={{ color:T.text,fontSize:12 }}>{t.note}</span></div>}
+                  {chargeBreakupCard(t)}
                   {t.transactionRef&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Ref</span><span style={{ color:T.text,fontSize:12 }}>{t.transactionRef}</span></div>}
                   {t.priceMrp&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>MRP</span><span style={{ color:T.text,fontSize:12 }}>{sym}{fmt(t.priceMrp)}</span></div>}
                   {t.priceDiscount&&<div style={{ display:"flex",justifyContent:"space-between" }}><span style={{ color:T.sub,fontSize:12 }}>Discount</span><span style={{ color:T.success,fontSize:12,fontWeight:700 }}>-{sym}{fmt(t.priceDiscount)}</span></div>}

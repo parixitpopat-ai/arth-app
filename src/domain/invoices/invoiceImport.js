@@ -39,12 +39,14 @@ const err = (code, message) => ({ code, message });
 export function buildLineItems(view, { orderCatId = null, lineCats = {}, suggestedCats = {}, names = null, genId }) {
   const lines = [], catOf = {};
   const nameOf = i => (names && names[i.srNo] && names[i.srNo].label) || i.name;
-  const push = (label, qty, total, catId) => {
+  const push = (label, qty, total, catId, extra = null) => {
     const unit = r2(total / qty), exact = Math.abs(qty * unit - total) < 0.005;
     // If the printed total cannot be split into whole-paise units, keep it as ONE line so the sum stays exact.
-    lines.push(exact ? { id: genId(), label, qty, unitPrice: unit, amount: total, catId, subId: null, splits: null }
-                     : { id: genId(), label: `${label} (×${qty})`, qty: 1, unitPrice: total, amount: total, catId, subId: null, splits: null });
+    lines.push(exact ? { id: genId(), label, qty, unitPrice: unit, amount: total, catId, subId: null, splits: null, ...extra }
+                     : { id: genId(), label: `${label} (×${qty})`, qty: 1, unitPrice: total, amount: total, catId, subId: null, splits: null, ...extra });
   };
+  // A delivery / handling line is a CHARGE (not an item): the expense shares it equally between the splits instead of by item. Its GST (inside the printed total) is kept for the breakup.
+  const charge = (type, row) => ({ kind: "charge", chargeType: type, ...(row && (row.cgst || row.sgst) ? { taxIncluded: { cgst: row.cgst || 0, sgst: row.sgst || 0 } } : {}) });
   // An item's category: what the person chose for it, else what Arth remembers for that item name (the item catalogue), else the order's category.
   for (const i of view.items) {
     const c = lineCats[i.srNo] !== undefined ? lineCats[i.srNo] : (suggestedCats[i.srNo] || orderCatId || null);
@@ -56,10 +58,10 @@ export function buildLineItems(view, { orderCatId = null, lineCats = {}, suggest
     // row carries the category of the item it belongs to: the delivery of the atta counts as groceries, of the nachos as snacks. One combined handling charge takes the
     // order category, else the category of the biggest categorised item. A fee line is never left needing a category when an item has one.
     const biggest = view.items.slice().sort((a, b) => b.lineTotal - a.lineTotal).map(i => catOf[i.srNo]).find(Boolean) || null;
-    if (h.consolidated) push(h.label || "Handling charge", 1, h.total, orderCatId || biggest);
+    if (h.consolidated) push(h.label || "Handling charge", 1, h.total, orderCatId || biggest, charge("handling", h));
     else for (const r of h.sourceRows) {
       const parent = view.items.find(i => i.srNo === r.afterItem);
-      push(`Delivery and other charges · ${parent ? String(nameOf(parent)).slice(0, 30) : `after item ${r.afterItem}`}`, 1, r.total, catOf[r.afterItem] || orderCatId || biggest);   // not verified as one charge: kept as printed rows
+      push(`Delivery and other charges · ${parent ? String(nameOf(parent)).slice(0, 30) : `after item ${r.afterItem}`}`, 1, r.total, catOf[r.afterItem] || orderCatId || biggest, charge("delivery", r));   // not verified as one charge: kept as printed rows
     }
   }
   return lines;
