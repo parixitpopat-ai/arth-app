@@ -36,7 +36,7 @@ test("create: one itemised expense of the invoice total on the chosen account, l
 
 test("the invoice record keeps only the key, identifiers, total and the expense it points to: no customer data, no PDF", () => {
   const r = planConfirm(good(), ctx());
-  assert.deepEqual(Object.keys(r.record).sort(), ["fileHash", "id", "importedAt", "importedAtDate", "invoiceDate", "invoiceNumber", "key", "mode", "orderId", "parserVersion", "sellerGstin", "totalPaise", "txnId"]);
+  assert.deepEqual(Object.keys(r.record).sort(), ["fileHash", "id", "importedAt", "importedAtDate", "invoiceDate", "invoiceNumber", "key", "lines", "mode", "orderId", "parserVersion", "sellerGstin", "totalPaise", "txnId"]);
   assert.deepEqual([r.record.key, r.record.mode, r.record.totalPaise, r.record.txnId], ["blinkit|30AAFCG9846E1ZO|C00000T000000001", "created", 112500, r.create.id]);
 });
 

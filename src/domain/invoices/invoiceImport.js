@@ -8,15 +8,37 @@ import { reconcileLines } from "../transactions/itemLineMath.js";
 import { computeLineItemCategoryRollup } from "../transactions/lineItemCategoryRollup.js";
 import { validatePaymentDate } from "./invoicePreview.js";
 import { localIsoDate } from "../vehicles/fuelFills.js";
+import { splitBrand, cleanProduct, sizeOf } from "./brands.js";
 
 export const PARSER_VERSION = "blinkit-gst-1";
+
+/**
+ * What each item is called on the expense, and which brand it is. The expense shows the plain product ("Magic Masala Chips"); the brand, size and barcode are kept in the
+ * background record for comparing brands later. Order of authority: what the person typed here, then what they told Arth about this barcode last time, then the starter brand list,
+ * else no brand is assumed and the full printed name is kept. Returns { srNo: { label, brand, full, size, upc, source } }.
+ */
+export function resolveItemNames(view, records = [], { itemNames = {}, itemBrands = {}, stripBrands = true } = {}) {
+  const remembered = [];
+  for (const r of records || []) for (const l of (r && r.lines) || []) if (l && l.upc) remembered.push({ upc: l.upc, brand: l.brand || null, product: l.product });   // newest record first
+  const out = {};
+  for (const i of view.items) {
+    const base = splitBrand(i.name, { upc: i.upc, remembered });
+    const brand = itemBrands[i.srNo] !== undefined ? (String(itemBrands[i.srNo] || "").trim() || null) : base.brand;
+    let label = base.product;
+    if (!stripBrands || (itemBrands[i.srNo] !== undefined && !brand && base.brand)) label = cleanProduct(base.full);       // brand not removed / the person says there is no brand: full name
+    if (itemNames[i.srNo] !== undefined && String(itemNames[i.srNo]).trim()) label = String(itemNames[i.srNo]).trim();
+    out[i.srNo] = { label, brand, full: base.full, size: sizeOf(base.full), upc: i.upc || null, source: base.source };
+  }
+  return out;
+}
 const r2 = n => Math.round(n * 100) / 100;
 const lineAmount = li => (parseFloat(li.qty) || 0) * (parseFloat(li.unitPrice) || 0);
 const err = (code, message) => ({ code, message });
 
 /** Items (+ handling / delivery rows) as expense lines. Discounts stay inside the printed line total; no negative line is ever produced. */
-export function buildLineItems(view, { orderCatId = null, lineCats = {}, suggestedCats = {}, genId }) {
+export function buildLineItems(view, { orderCatId = null, lineCats = {}, suggestedCats = {}, names = null, genId }) {
   const lines = [], catOf = {};
+  const nameOf = i => (names && names[i.srNo] && names[i.srNo].label) || i.name;
   const push = (label, qty, total, catId) => {
     const unit = r2(total / qty), exact = Math.abs(qty * unit - total) < 0.005;
     // If the printed total cannot be split into whole-paise units, keep it as ONE line so the sum stays exact.
@@ -26,7 +48,7 @@ export function buildLineItems(view, { orderCatId = null, lineCats = {}, suggest
   // An item's category: what the person chose for it, else what Arth remembers for that item name (the item catalogue), else the order's category.
   for (const i of view.items) {
     const c = lineCats[i.srNo] !== undefined ? lineCats[i.srNo] : (suggestedCats[i.srNo] || orderCatId || null);
-    catOf[i.srNo] = c; push(i.name, i.qty || 1, i.lineTotal, c);
+    catOf[i.srNo] = c; push(nameOf(i), i.qty || 1, i.lineTotal, c);
   }
   const h = view.handling;
   if (h) {
@@ -37,17 +59,19 @@ export function buildLineItems(view, { orderCatId = null, lineCats = {}, suggest
     if (h.consolidated) push(h.label || "Handling charge", 1, h.total, orderCatId || biggest);
     else for (const r of h.sourceRows) {
       const parent = view.items.find(i => i.srNo === r.afterItem);
-      push(`Delivery and other charges · ${parent ? String(parent.name).slice(0, 30) : `after item ${r.afterItem}`}`, 1, r.total, catOf[r.afterItem] || orderCatId || biggest);   // not verified as one charge: kept as printed rows
+      push(`Delivery and other charges · ${parent ? String(nameOf(parent)).slice(0, 30) : `after item ${r.afterItem}`}`, 1, r.total, catOf[r.afterItem] || orderCatId || biggest);   // not verified as one charge: kept as printed rows
     }
   }
   return lines;
 }
 
 /** What Arth already remembers for each item NAME (the app's item catalogue: exact name, case-insensitive). Returns { srNo: catId } only for items it knows. */
-export function suggestLineCats(view, catalog = [], validCatIds = null) {
+export function suggestLineCats(view, catalog = [], validCatIds = null, names = null) {
   const out = {}, valid = validCatIds ? new Set(validCatIds.map(String)) : null;
+  const same = (c, n) => String(c.name || "").trim().toLowerCase() === String(n || "").trim().toLowerCase();
   for (const i of view.items) {
-    const m = (catalog || []).find(c => c && c.catId && String(c.name || "").trim().toLowerCase() === String(i.name).trim().toLowerCase());
+    // the plain product name first (so "Chips" is remembered across brands), then the full printed name (what earlier imports remembered)
+    const m = (catalog || []).find(c => c && c.catId && names && names[i.srNo] && same(c, names[i.srNo].label)) || (catalog || []).find(c => c && c.catId && same(c, i.name));
     if (m && (!valid || valid.has(String(m.catId)))) out[i.srNo] = m.catId;          // a remembered category that no longer exists is not suggested
   }
   return out;
@@ -59,7 +83,7 @@ export function suggestLineCats(view, catalog = [], validCatIds = null) {
  * @returns {{ok:boolean, errors:Array<{code,message}>, create?:object, patch?:{txnId:string, lineItems:Array, previousLineItems:any}, record?:object, lines?:Array, sentence?:string}}
  */
 export function planConfirm(input, ctx) {
-  const { view, status, mode, accountId, paymentDate, orderCatId = null, lineCats = {}, suggestedCats = {}, linkTxnId, fileHash = null, rememberCats = true } = input;
+  const { view, status, mode, accountId, paymentDate, orderCatId = null, lineCats = {}, suggestedCats = {}, linkTxnId, fileHash = null, rememberCats = true, itemNames = {}, itemBrands = {}, stripBrands = true } = input;
   const { accounts = [], txns = [], records = [], catalog = [], genId, now = Date.now(), today = localIsoDate(), acknowledgeNoKey = false, importAgain = false } = ctx;
   const errors = [];
   if (!view || !view.totals) return { ok: false, errors: [err("no-total", "This invoice has no readable total.")] };
@@ -68,7 +92,8 @@ export function planConfirm(input, ctx) {
   const total = r2(view.totals.invoiceTotal);
   if (!(total > 0)) errors.push(err("bad-total", "The invoice total must be more than zero."));
 
-  const lines = buildLineItems(view, { orderCatId, lineCats, suggestedCats, genId: genId || (() => "x") });
+  const names = resolveItemNames(view, records, { itemNames, itemBrands, stripBrands });
+  const lines = buildLineItems(view, { orderCatId, lineCats, suggestedCats, names, genId: genId || (() => "x") });
   const recon = reconcileLines(lines.map(lineAmount), total);
   if (!recon.matches) errors.push(err("lines-dont-add-up", `The items add up to ${recon.linesTotal} but the invoice total is ${total}.`));
 
@@ -109,20 +134,24 @@ export function planConfirm(input, ctx) {
   if (errors.length) return { ok: false, errors, lines };
   const txnId = create ? create.id : patch.txnId;
   const record = { id: genId(), key: key || null, sellerGstin: view.sellerGstin || null, invoiceNumber: view.invoiceNumber || null, orderId: view.orderId || null, invoiceDate: view.invoiceDate || null,
-    totalPaise: Math.round(total * 100), txnId, mode: create ? "created" : "linked", importedAt: now, importedAtDate: today, fileHash, parserVersion: PARSER_VERSION };
+    totalPaise: Math.round(total * 100), txnId, mode: create ? "created" : "linked", importedAt: now, importedAtDate: today, fileHash, parserVersion: PARSER_VERSION,
+    // Background memory for brand comparison (not shown on the expense): the full printed name, the brand and plain product, the size in the name, the barcode, and what it cost.
+    // The barcode also lets Arth reuse a brand correction the next time the same product comes up.
+    lines: view.items.map((i, idx) => ({ upc: i.upc || null, full: names[i.srNo].full, brand: names[i.srNo].brand, product: names[i.srNo].label, size: names[i.srNo].size, qty: i.qty || 1, amount: i.lineTotal, unitPrice: lines[idx] ? lines[idx].unitPrice : null })) };
   const n = lines.length, accName = create ? (accounts.find(a => String(a.id) === String(accountId)) || {}).name : null;
   const sentence = create ? `Add 1 expense of ₹${total} to ${accName} on ${paymentDate}, with ${n} item line${n === 1 ? "" : "s"}.`
                           : `Add ${n} item line${n === 1 ? "" : "s"} to your ₹${total} expense. Its amount, date and account stay as they are.`;
   // Learning (the app's item catalogue, same rule as the item sheet): an item name Arth has never seen is remembered with the category it ended up with; a known name changes
   // only when the person explicitly chose a different category for it here and left "remember" on. Applied by the app only AFTER the save is verified.
   const learn = [];
-  if (rememberCats) for (const i of view.items) {
-    const line = lines.find(l => String(l.label).startsWith(String(i.name))), catId = line && line.catId;
-    if (!catId) continue;
-    const known = (catalog || []).find(c => c && String(c.name || "").trim().toLowerCase() === String(i.name).trim().toLowerCase());
-    if (!known) learn.push({ op: "add", name: i.name, catId });
-    else if (lineCats[i.srNo] !== undefined && lineCats[i.srNo] && known.catId !== lineCats[i.srNo]) learn.push({ op: "update", id: known.id, name: i.name, catId: lineCats[i.srNo] });
-  }
+  const sameName = (c, n) => String(c.name || "").trim().toLowerCase() === String(n || "").trim().toLowerCase();
+  if (rememberCats) view.items.forEach((i, idx) => {
+    const catId = lines[idx] && lines[idx].catId, plain = names[i.srNo].label;                       // remembered under the plain product name, so it carries across brands
+    if (!catId) return;
+    const known = (catalog || []).find(c => c && sameName(c, plain)) || (catalog || []).find(c => c && sameName(c, i.name));
+    if (!known) learn.push({ op: "add", name: plain, catId });
+    else if (lineCats[i.srNo] !== undefined && lineCats[i.srNo] && known.catId !== lineCats[i.srNo]) learn.push({ op: "update", id: known.id, name: plain, catId: lineCats[i.srNo] });
+  });
   const uncategorised = lines.filter(l => !l.catId).length;
   return { ok: true, errors: [], create, patch, record, lines, sentence, learn, uncategorised };
 }

@@ -133,5 +133,31 @@ const sum = lines => Math.round(lines.reduce((s, l) => s + l.qty * l.unitPrice, 
   rec("CF27 with 'remember' switched off nothing is learned", (await s.store("arth_item_catalog")).length === 0 && (await s.store("arth_txns")).length === 1, {});
   await s.ctx.close(); }
 
+// ---- I: brand removed from the item names; brand kept in the background record ----
+{ const s = await openScenario([]); const { T, page } = s;
+  await s.pick("good");
+  rec("CF28 items show the plain product name, with the brand in its own box", (await T("item-label-1").innerText()) === "Moong Dal Namkeen" && (await T("item-brand-1").inputValue()) === "Haldiram's Nagpur" && (await T("item-label-3").innerText()) === "Fresh Chakki Atta (0% Maida)" && (await T("item-brand-3").inputValue()) === "Pillsbury", { l1: await T("item-label-1").innerText() });
+  rec("CF29 a note says the brand is kept in the background", /kept in the background/.test(await T("brand-note-1").innerText()), {});
+  await T("confirm-account").selectOption("b1"); await T("confirm-import").click(); await page.waitForTimeout(1800);
+  const t = (await s.store("arth_txns"))[0], r = (await s.store("arth_invoice_imports"))[0];
+  rec("CF30 the saved expense lines have no brand in their names", t && t.lineItems.slice(0, 3).every(l => !/Haldiram|Pillsbury/.test(l.label)) && t.lineItems[0].label === "Moong Dal Namkeen", { labels: t && t.lineItems.map(l => l.label) });
+  rec("CF31 the brand, full printed name, barcode and price are remembered in the background record", r && r.lines.length === 3 && r.lines[0].brand === "Haldiram's Nagpur" && /^Haldiram/.test(r.lines[0].full) && r.lines[2].brand === "Pillsbury" && r.lines[2].upc === "8906000210321" && r.lines[2].unitPrice === 466, { l: r && r.lines[0] });
+  await s.ctx.close(); }
+{ const s = await openScenario([]); const { T, page } = s;
+  await s.pick("good");
+  await T("item-brand-2").fill(""); await page.waitForTimeout(200);
+  rec("CF32 clearing a brand brings that item's full name back", /^Haldiram's Nagpur Sev Bhujia/.test(await T("item-label-2").innerText()), { l: await T("item-label-2").innerText() });
+  await T("strip-brands").uncheck(); await page.waitForTimeout(200);
+  rec("CF33 the switch 'show names without the brand' off keeps every full name", /^Haldiram's Nagpur Moong Dal/.test(await T("item-label-1").innerText()) && /^Pillsbury Fresh/.test(await T("item-label-3").innerText()), {});
+  await T("confirm-account").selectOption("b1"); await T("confirm-import").click(); await page.waitForTimeout(1800);
+  const t = (await s.store("arth_txns"))[0], r = (await s.store("arth_invoice_imports"))[0];
+  rec("CF34 with the switch off the expense keeps full names but the brand is STILL remembered", /^Pillsbury/.test(t.lineItems[2].label) && r.lines[2].brand === "Pillsbury", {});
+  await s.ctx.close(); }
+{ const s = await openScenario([]); const { T, page } = s;
+  await s.pick("good"); await T("item-name-1").fill("Moong Dal"); await T("item-brand-1").fill("Haldirams"); await T("confirm-account").selectOption("b1"); await T("confirm-import").click(); await page.waitForTimeout(1800);
+  const t = (await s.store("arth_txns"))[0], r = (await s.store("arth_invoice_imports"))[0];
+  rec("CF35 a typed name and brand are what gets saved (name on the expense, brand in the background)", t.lineItems[0].label === "Moong Dal" && r.lines[0].brand === "Haldirams", {});
+  await s.ctx.close(); }
+
 console.log("outcome vector:", JSON.stringify(results));
 await browser.close(); process.exit(results.every(r => r.pass) ? 0 : 1);

@@ -46,3 +46,11 @@ Create path (one transaction, lines sum to total, chosen account); link path (am
 
 ## Release
 Own branch, own release, never combined with sync-safety work. No production deploy without explicit approval.
+
+## Addendum: brands (added after the first phone use)
+Item names on the expense are shown WITHOUT the brand ("Lay's India's Magic Masala Chips" becomes "India's Magic Masala Chips"); the brand is kept in the background for brand comparison.
+* Where it is kept: each `invoiceImports` record has a `lines` list: barcode (UPC), full printed name, brand, plain product, size found in the name (e.g. "1 l"), quantity, line amount and unit price. No new synced list and no new field on the transaction.
+* How the brand is found (`brands.js`): (1) what the person told Arth about that barcode last time, including "no brand"; (2) a STARTER list of common brands matched at the START of the name only (longest first, so "Haldiram's Nagpur" beats "Haldiram's"); (3) otherwise no brand is assumed and the full name is kept. The starter list is **unverified and not exhaustive**; corrections made on the review screen are remembered by barcode.
+* Review screen: each item has a name box and a brand box (both editable), and a switch "Show item names without the brand" (on by default). Clearing a brand brings that item's full name back.
+* Category memory is now keyed by the plain product name (so "Chips" is remembered across brands); older full-name entries still match.
+* Not done: the brand-comparison view itself (nothing reads `lines` yet), and brands for items that are not in the starter list until they are corrected once.

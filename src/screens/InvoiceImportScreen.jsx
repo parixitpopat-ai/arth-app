@@ -3,7 +3,7 @@
 // The PDF is never stored. See docs/engineering/INVOICE-IMPORT-001 (decisions) and -003 (Phase 2).
 import { useRef, useState } from "react";
 import { buildInvoicePreviews, diagnosticEntry, validatePaymentDate } from "../domain/invoices/invoicePreview.js";
-import { planConfirm, suggestLineCats } from "../domain/invoices/invoiceImport.js";
+import { planConfirm, suggestLineCats, resolveItemNames } from "../domain/invoices/invoiceImport.js";
 
 const money = (n, sym = "₹") => (n == null ? "—" : `${sym}${Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 3 }).replace(/(\.\d\d)0$/, "$1")}`);
 
@@ -77,8 +77,10 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
     const orderCat = f.orderCat === undefined ? defaultCat : f.orderCat, mode = f.mode === "link" && chosen && chosen.strength === "same-amount" ? "link" : "create";
     const lineCats = Object.fromEntries(Object.entries(f.lineCats || {}).filter(([, val]) => val !== "__order").map(([k, val]) => [k, val || null]));   // "" = left uncategorised on purpose
     const sameAmount = inv.matches.find(m => m.strength === "same-amount");
-    const suggested = suggestLineCats(v, itemCatalog, cats.map(c => c.id));                   // what Arth already remembers for these item names
-    const plan = planConfirm({ view: v, status: inv.status, mode, accountId: f.accountId, paymentDate: typed, orderCatId: orderCat || null, lineCats, suggestedCats: suggested, rememberCats: f.remember !== false, linkTxnId: mode === "link" ? chosen.id : undefined, fileHash: state.fileHash },
+    // What each item is called on the expense (brand removed; the brand is kept in the background) and which brand it is. The person can correct either.
+    const names = resolveItemNames(v, invoiceImports, { itemNames: f.itemNames || {}, itemBrands: f.itemBrands || {}, stripBrands: f.stripBrands !== false });
+    const suggested = suggestLineCats(v, itemCatalog, cats.map(c => c.id), names);            // what Arth already remembers for these item names
+    const plan = planConfirm({ view: v, status: inv.status, mode, accountId: f.accountId, paymentDate: typed, orderCatId: orderCat || null, lineCats, suggestedCats: suggested, itemNames: f.itemNames || {}, itemBrands: f.itemBrands || {}, stripBrands: f.stripBrands !== false, rememberCats: f.remember !== false, linkTxnId: mode === "link" ? chosen.id : undefined, fileHash: state.fileHash },
       { accounts, txns, records: invoiceImports, catalog: itemCatalog, genId, acknowledgeNoKey: !!f.ackNoKey, importAgain: !!f.importAgain });
     const selStyle = { width: "100%", padding: 9, borderRadius: 10, border: `1px solid ${T.border}`, background: T.card, color: T.text, fontSize: 13 };
     const confirm = async () => {
@@ -115,13 +117,20 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
         {v.items.map(i => (
           <div key={i.srNo} data-testid="item-row" style={{ ...card, marginBottom: 8, padding: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-              <div style={{ color: T.text, fontSize: 13, fontWeight: 700, overflowWrap: "anywhere" }}>{i.name}</div>
+              <div data-testid={`item-label-${i.srNo}`} style={{ color: T.text, fontSize: 13, fontWeight: 700, overflowWrap: "anywhere" }}>{names[i.srNo].label}</div>
               <div data-testid="item-total" style={{ color: T.text, fontSize: 13, fontWeight: 800, whiteSpace: "nowrap", fontFamily: "'IBM Plex Mono', monospace" }}>{money(i.lineTotal, sym)}</div>
             </div>
             <div style={{ color: T.sub, fontSize: 11, marginTop: 4 }}>{i.qty} × MRP {money(i.mrp, sym)}{i.discount > 0 ? ` · discount ${money(i.discount, sym)} is already inside the line total` : ""}</div>
             {i.qty > 1 && <div style={{ color: T.sub, fontSize: 11 }}>≈ {money(i.perUnitAfterDiscount, sym)} each after discount (calculated, not printed)</div>}
             <div style={{ color: T.sub, fontSize: 11 }}>Taxable {money(i.taxable, sym)} · CGST {i.cgstRate}% {money(i.cgst, sym)} · SGST {i.sgstRate}% {money(i.sgst, sym)}</div>
             <div style={{ color: T.sub, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}>UPC {i.upc} · HSN {i.hsn}</div>
+            {mode === "create" && !oc.done && (
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                <input data-testid={`item-name-${i.srNo}`} aria-label={`Name on the expense for ${i.name}`} value={names[i.srNo].label} onChange={e => setForm(key, { itemNames: { ...(f.itemNames || {}), [i.srNo]: e.target.value } })} style={{ ...selStyle, flex: 2, fontSize: 12, padding: 6 }} />
+                <input data-testid={`item-brand-${i.srNo}`} aria-label={`Brand of ${i.name}`} placeholder="Brand" value={names[i.srNo].brand || ""} onChange={e => setForm(key, { itemBrands: { ...(f.itemBrands || {}), [i.srNo]: e.target.value } })} style={{ ...selStyle, flex: 1, fontSize: 12, padding: 6 }} />
+              </div>
+            )}
+            {names[i.srNo].brand && names[i.srNo].label !== names[i.srNo].full && <div data-testid={`brand-note-${i.srNo}`} style={{ color: T.sub, fontSize: 10, marginTop: 2 }}>Brand {names[i.srNo].brand} is kept in the background for comparing brands; the expense shows the plain name.</div>}
             {mode === "create" && !oc.done && (
               <select data-testid={`line-cat-${i.srNo}`} aria-label={`Category for ${i.name}`} value={(f.lineCats || {})[i.srNo] === undefined ? (suggested[i.srNo] || "__order") : (f.lineCats || {})[i.srNo]} onChange={e => setForm(key, { lineCats: { ...(f.lineCats || {}), [i.srNo]: e.target.value } })} style={{ ...selStyle, marginTop: 6, fontSize: 12, padding: 6 }}>
                 <option value="__order">Category: same as the order</option>
@@ -202,6 +211,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
             {plan.errors.some(e => e.code === "no-key") && <label style={{ display: "flex", gap: 8, color: T.text, fontSize: 12, marginTop: 8 }}><input data-testid="ack-no-key" type="checkbox" checked={!!f.ackNoKey} onChange={e => setForm(key, { ackNoKey: e.target.checked })} />I understand duplicates cannot be checked for this invoice</label>}
             {plan.errors.some(e => e.code === "orphan") && <label style={{ display: "flex", gap: 8, color: T.text, fontSize: 12, marginTop: 8 }}><input data-testid="import-again" type="checkbox" checked={!!f.importAgain} onChange={e => setForm(key, { importAgain: e.target.checked })} />Add it again (the earlier expense no longer exists)</label>}
             {mode === "create" && <label style={{ display: "flex", gap: 8, alignItems: "center", color: T.text, fontSize: 12, marginTop: 8 }}><input data-testid="remember-cats" type="checkbox" checked={f.remember !== false} onChange={e => setForm(key, { remember: e.target.checked })} />Remember these item categories for next time</label>}
+            {mode === "create" && <label style={{ display: "flex", gap: 8, alignItems: "center", color: T.text, fontSize: 12, marginTop: 8 }}><input data-testid="strip-brands" type="checkbox" checked={f.stripBrands !== false} onChange={e => setForm(key, { stripBrands: e.target.checked })} />Show item names without the brand (the brand is still kept in the background)</label>}
             {plan.ok && plan.uncategorised > 0 && <div data-testid="uncategorised-note" style={{ color: "#f0a500", fontSize: 11, marginTop: 8 }}>{plan.uncategorised} line{plan.uncategorised === 1 ? " has" : "s have"} no category. Arth's edit screen will ask for it the next time you edit this expense.</div>}
             <div data-testid="review-sentence" style={{ background: T.accentSoft, borderRadius: 10, padding: "8px 10px", color: T.text, fontSize: 12, marginTop: 10 }}>
               {plan.ok ? <>Arth will: {plan.sentence}</> : <>Not ready: {plan.errors.map(e => e.message).join(" ")}</>}
