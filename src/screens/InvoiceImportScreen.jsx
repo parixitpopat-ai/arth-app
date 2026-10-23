@@ -3,11 +3,11 @@
 // The PDF is never stored. See docs/engineering/INVOICE-IMPORT-001 (decisions) and -003 (Phase 2).
 import { useRef, useState } from "react";
 import { buildInvoicePreviews, diagnosticEntry, validatePaymentDate } from "../domain/invoices/invoicePreview.js";
-import { planConfirm } from "../domain/invoices/invoiceImport.js";
+import { planConfirm, suggestLineCats } from "../domain/invoices/invoiceImport.js";
 
 const money = (n, sym = "₹") => (n == null ? "—" : `${sym}${Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 3 }).replace(/(\.\d\d)0$/, "$1")}`);
 
-export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [], invoiceImports = [], genId, onConfirmInvoice, onUndoInvoice, T, sym = "₹", onBack, onAddByHand }) {
+export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [], itemCatalog = [], invoiceImports = [], genId, onConfirmInvoice, onUndoInvoice, T, sym = "₹", onBack, onAddByHand }) {
   const fileRef = useRef(null);
   const [state, setState] = useState({ phase: "idle" });
   const [payDates, setPayDates] = useState({});
@@ -77,8 +77,9 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
     const orderCat = f.orderCat === undefined ? defaultCat : f.orderCat, mode = f.mode === "link" && chosen && chosen.strength === "same-amount" ? "link" : "create";
     const lineCats = Object.fromEntries(Object.entries(f.lineCats || {}).filter(([, val]) => val !== "__order").map(([k, val]) => [k, val || null]));   // "" = left uncategorised on purpose
     const sameAmount = inv.matches.find(m => m.strength === "same-amount");
-    const plan = planConfirm({ view: v, status: inv.status, mode, accountId: f.accountId, paymentDate: typed, orderCatId: orderCat || null, lineCats, linkTxnId: mode === "link" ? chosen.id : undefined, fileHash: state.fileHash },
-      { accounts, txns, records: invoiceImports, genId, acknowledgeNoKey: !!f.ackNoKey, importAgain: !!f.importAgain });
+    const suggested = suggestLineCats(v, itemCatalog, cats.map(c => c.id));                   // what Arth already remembers for these item names
+    const plan = planConfirm({ view: v, status: inv.status, mode, accountId: f.accountId, paymentDate: typed, orderCatId: orderCat || null, lineCats, suggestedCats: suggested, rememberCats: f.remember !== false, linkTxnId: mode === "link" ? chosen.id : undefined, fileHash: state.fileHash },
+      { accounts, txns, records: invoiceImports, catalog: itemCatalog, genId, acknowledgeNoKey: !!f.ackNoKey, importAgain: !!f.importAgain });
     const selStyle = { width: "100%", padding: 9, borderRadius: 10, border: `1px solid ${T.border}`, background: T.card, color: T.text, fontSize: 13 };
     const confirm = async () => {
       if (!plan.ok || oc.busy) return;
@@ -122,12 +123,13 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
             <div style={{ color: T.sub, fontSize: 11 }}>Taxable {money(i.taxable, sym)} · CGST {i.cgstRate}% {money(i.cgst, sym)} · SGST {i.sgstRate}% {money(i.sgst, sym)}</div>
             <div style={{ color: T.sub, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}>UPC {i.upc} · HSN {i.hsn}</div>
             {mode === "create" && !oc.done && (
-              <select data-testid={`line-cat-${i.srNo}`} aria-label={`Category for ${i.name}`} value={(f.lineCats || {})[i.srNo] === undefined ? "__order" : (f.lineCats || {})[i.srNo]} onChange={e => setForm(key, { lineCats: { ...(f.lineCats || {}), [i.srNo]: e.target.value } })} style={{ ...selStyle, marginTop: 6, fontSize: 12, padding: 6 }}>
+              <select data-testid={`line-cat-${i.srNo}`} aria-label={`Category for ${i.name}`} value={(f.lineCats || {})[i.srNo] === undefined ? (suggested[i.srNo] || "__order") : (f.lineCats || {})[i.srNo]} onChange={e => setForm(key, { lineCats: { ...(f.lineCats || {}), [i.srNo]: e.target.value } })} style={{ ...selStyle, marginTop: 6, fontSize: 12, padding: 6 }}>
                 <option value="__order">Category: same as the order</option>
                 <option value="">Leave uncategorised</option>
                 {cats.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ` : ""}{c.name}</option>)}
               </select>
             )}
+            {mode === "create" && !oc.done && suggested[i.srNo] && (f.lineCats || {})[i.srNo] === undefined && <div data-testid={`remembered-${i.srNo}`} style={{ color: T.accent, fontSize: 10, marginTop: 2 }}>Remembered for this item from your earlier entries</div>}
           </div>
         ))}
         {v.handling && (
@@ -199,6 +201,8 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
             </>)}
             {plan.errors.some(e => e.code === "no-key") && <label style={{ display: "flex", gap: 8, color: T.text, fontSize: 12, marginTop: 8 }}><input data-testid="ack-no-key" type="checkbox" checked={!!f.ackNoKey} onChange={e => setForm(key, { ackNoKey: e.target.checked })} />I understand duplicates cannot be checked for this invoice</label>}
             {plan.errors.some(e => e.code === "orphan") && <label style={{ display: "flex", gap: 8, color: T.text, fontSize: 12, marginTop: 8 }}><input data-testid="import-again" type="checkbox" checked={!!f.importAgain} onChange={e => setForm(key, { importAgain: e.target.checked })} />Add it again (the earlier expense no longer exists)</label>}
+            {mode === "create" && <label style={{ display: "flex", gap: 8, alignItems: "center", color: T.text, fontSize: 12, marginTop: 8 }}><input data-testid="remember-cats" type="checkbox" checked={f.remember !== false} onChange={e => setForm(key, { remember: e.target.checked })} />Remember these item categories for next time</label>}
+            {plan.ok && plan.uncategorised > 0 && <div data-testid="uncategorised-note" style={{ color: "#f0a500", fontSize: 11, marginTop: 8 }}>{plan.uncategorised} line{plan.uncategorised === 1 ? " has" : "s have"} no category. Arth's edit screen will ask for it the next time you edit this expense.</div>}
             <div data-testid="review-sentence" style={{ background: T.accentSoft, borderRadius: 10, padding: "8px 10px", color: T.text, fontSize: 12, marginTop: 10 }}>
               {plan.ok ? <>Arth will: {plan.sentence}</> : <>Not ready: {plan.errors.map(e => e.message).join(" ")}</>}
             </div>

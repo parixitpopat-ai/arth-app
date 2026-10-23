@@ -1170,7 +1170,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const saved = JSON.parse(localStorage.getItem("arth_txns")||"[]"), recs = JSON.parse(localStorage.getItem("arth_invoice_imports")||"[]");
       const t = saved.find(x=>String(x.id)===String(plan.record.txnId));
       const expected = plan.create ? plan.create.lineItems.length : plan.patch.lineItems.length;
-      if(t && Array.isArray(t.lineItems) && t.lineItems.length===expected && recs.some(x=>x.id===plan.record.id)) return { ok:true };
+      if(t && Array.isArray(t.lineItems) && t.lineItems.length===expected && recs.some(x=>x.id===plan.record.id)){
+        // Saved and read back: only now teach the item catalogue (the same one Quick Add and the item sheet use) which category each item name got.
+        (plan.learn||[]).forEach(op=>{
+          if(op.op==="add") setItemCatalog(prev=>prev.some(x=>String(x.name||"").trim().toLowerCase()===String(op.name).trim().toLowerCase()) ? prev : [...prev, { id: genId(), name:String(op.name).trim(), unit:"nos", catId:op.catId, subId:"" }]);
+          else setItemCatalog(prev=>prev.map(x=>x.id===op.id ? { ...x, catId:op.catId, subId:"" } : x));
+        });
+        return { ok:true };
+      }
     }catch(e){ console.error("invoice import read-back failed", e); }
     setInvoiceImports(prev=>prev.filter(x=>x.id!==plan.record.id));
     if(plan.create) setTxns(prev=>prev.filter(t=>String(t.id)!==String(plan.create.id)));
@@ -20236,7 +20243,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="outlook"&&<OutlookPage/>}
         {!showSettings&&tab==="insights"&&<InsightsPage/>}
         {/* The invoice screen is rendered HERE, not inside Settings: Settings is re-created on every AppContent render, which would reset this screen (its review state, the success message, Undo) the moment the import saves. */}
-        {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>setSettingsSection(null)} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }}/>}
+        {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} itemCatalog={itemCatalog} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>setSettingsSection(null)} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }}/>}
         {showSettings&&settingsSection!=="importinvoice"&&<Settings/>}
 
       {/* Universal Search Overlay */}

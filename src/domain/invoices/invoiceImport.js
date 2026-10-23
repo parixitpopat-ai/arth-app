@@ -15,21 +15,42 @@ const lineAmount = li => (parseFloat(li.qty) || 0) * (parseFloat(li.unitPrice) |
 const err = (code, message) => ({ code, message });
 
 /** Items (+ handling / delivery rows) as expense lines. Discounts stay inside the printed line total; no negative line is ever produced. */
-export function buildLineItems(view, { orderCatId = null, lineCats = {}, genId }) {
-  const lines = [];
+export function buildLineItems(view, { orderCatId = null, lineCats = {}, suggestedCats = {}, genId }) {
+  const lines = [], catOf = {};
   const push = (label, qty, total, catId) => {
     const unit = r2(total / qty), exact = Math.abs(qty * unit - total) < 0.005;
     // If the printed total cannot be split into whole-paise units, keep it as ONE line so the sum stays exact.
     lines.push(exact ? { id: genId(), label, qty, unitPrice: unit, amount: total, catId, subId: null, splits: null }
                      : { id: genId(), label: `${label} (×${qty})`, qty: 1, unitPrice: total, amount: total, catId, subId: null, splits: null });
   };
-  for (const i of view.items) push(i.name, i.qty || 1, i.lineTotal, lineCats[i.srNo] !== undefined ? lineCats[i.srNo] : orderCatId);
+  // An item's category: what the person chose for it, else what Arth remembers for that item name (the item catalogue), else the order's category.
+  for (const i of view.items) {
+    const c = lineCats[i.srNo] !== undefined ? lineCats[i.srNo] : (suggestedCats[i.srNo] || orderCatId || null);
+    catOf[i.srNo] = c; push(i.name, i.qty || 1, i.lineTotal, c);
+  }
   const h = view.handling;
   if (h) {
-    if (h.consolidated) push(h.label || "Handling charge", 1, h.total, orderCatId);
-    else for (const r of h.sourceRows) push(`Delivery and other charges (after item ${r.afterItem})`, 1, r.total, orderCatId);   // not verified as one charge: kept as printed
+    // A delivery / handling charge is a FEE, not an item. The invoice prints one "Delivery and other charges" row under each item (its share of the charge), so each
+    // row carries the category of the item it belongs to: the delivery of the atta counts as groceries, of the nachos as snacks. One combined handling charge takes the
+    // order category, else the category of the biggest categorised item. A fee line is never left needing a category when an item has one.
+    const biggest = view.items.slice().sort((a, b) => b.lineTotal - a.lineTotal).map(i => catOf[i.srNo]).find(Boolean) || null;
+    if (h.consolidated) push(h.label || "Handling charge", 1, h.total, orderCatId || biggest);
+    else for (const r of h.sourceRows) {
+      const parent = view.items.find(i => i.srNo === r.afterItem);
+      push(`Delivery and other charges · ${parent ? String(parent.name).slice(0, 30) : `after item ${r.afterItem}`}`, 1, r.total, catOf[r.afterItem] || orderCatId || biggest);   // not verified as one charge: kept as printed rows
+    }
   }
   return lines;
+}
+
+/** What Arth already remembers for each item NAME (the app's item catalogue: exact name, case-insensitive). Returns { srNo: catId } only for items it knows. */
+export function suggestLineCats(view, catalog = [], validCatIds = null) {
+  const out = {}, valid = validCatIds ? new Set(validCatIds.map(String)) : null;
+  for (const i of view.items) {
+    const m = (catalog || []).find(c => c && c.catId && String(c.name || "").trim().toLowerCase() === String(i.name).trim().toLowerCase());
+    if (m && (!valid || valid.has(String(m.catId)))) out[i.srNo] = m.catId;          // a remembered category that no longer exists is not suggested
+  }
+  return out;
 }
 
 /**
@@ -38,8 +59,8 @@ export function buildLineItems(view, { orderCatId = null, lineCats = {}, genId }
  * @returns {{ok:boolean, errors:Array<{code,message}>, create?:object, patch?:{txnId:string, lineItems:Array, previousLineItems:any}, record?:object, lines?:Array, sentence?:string}}
  */
 export function planConfirm(input, ctx) {
-  const { view, status, mode, accountId, paymentDate, orderCatId = null, lineCats = {}, linkTxnId, fileHash = null } = input;
-  const { accounts = [], txns = [], records = [], genId, now = Date.now(), today = localIsoDate(), acknowledgeNoKey = false, importAgain = false } = ctx;
+  const { view, status, mode, accountId, paymentDate, orderCatId = null, lineCats = {}, suggestedCats = {}, linkTxnId, fileHash = null, rememberCats = true } = input;
+  const { accounts = [], txns = [], records = [], catalog = [], genId, now = Date.now(), today = localIsoDate(), acknowledgeNoKey = false, importAgain = false } = ctx;
   const errors = [];
   if (!view || !view.totals) return { ok: false, errors: [err("no-total", "This invoice has no readable total.")] };
   if (status !== "supported") errors.push(err("not-supported", "This invoice needs review first, so it cannot be added."));
@@ -47,7 +68,7 @@ export function planConfirm(input, ctx) {
   const total = r2(view.totals.invoiceTotal);
   if (!(total > 0)) errors.push(err("bad-total", "The invoice total must be more than zero."));
 
-  const lines = buildLineItems(view, { orderCatId, lineCats, genId: genId || (() => "x") });
+  const lines = buildLineItems(view, { orderCatId, lineCats, suggestedCats, genId: genId || (() => "x") });
   const recon = reconcileLines(lines.map(lineAmount), total);
   if (!recon.matches) errors.push(err("lines-dont-add-up", `The items add up to ${recon.linesTotal} but the invoice total is ${total}.`));
 
@@ -92,7 +113,18 @@ export function planConfirm(input, ctx) {
   const n = lines.length, accName = create ? (accounts.find(a => String(a.id) === String(accountId)) || {}).name : null;
   const sentence = create ? `Add 1 expense of ₹${total} to ${accName} on ${paymentDate}, with ${n} item line${n === 1 ? "" : "s"}.`
                           : `Add ${n} item line${n === 1 ? "" : "s"} to your ₹${total} expense. Its amount, date and account stay as they are.`;
-  return { ok: true, errors: [], create, patch, record, lines, sentence };
+  // Learning (the app's item catalogue, same rule as the item sheet): an item name Arth has never seen is remembered with the category it ended up with; a known name changes
+  // only when the person explicitly chose a different category for it here and left "remember" on. Applied by the app only AFTER the save is verified.
+  const learn = [];
+  if (rememberCats) for (const i of view.items) {
+    const line = lines.find(l => String(l.label).startsWith(String(i.name))), catId = line && line.catId;
+    if (!catId) continue;
+    const known = (catalog || []).find(c => c && String(c.name || "").trim().toLowerCase() === String(i.name).trim().toLowerCase());
+    if (!known) learn.push({ op: "add", name: i.name, catId });
+    else if (lineCats[i.srNo] !== undefined && lineCats[i.srNo] && known.catId !== lineCats[i.srNo]) learn.push({ op: "update", id: known.id, name: i.name, catId: lineCats[i.srNo] });
+  }
+  const uncategorised = lines.filter(l => !l.catId).length;
+  return { ok: true, errors: [], create, patch, record, lines, sentence, learn, uncategorised };
 }
 
 /** Can this import be undone safely? Only if the expense is exactly as the import left it. */

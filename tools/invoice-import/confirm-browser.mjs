@@ -17,14 +17,14 @@ const TXNS = [
   { id: "t2", type: "expense", merchant: "Blinkit", desc: "Groceries", date: "2026-01-15", amount: 1135, accId: "b1", catIds: [], subIds: [] }];
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const requests = [];
-async function openScenario(txns, { failTxnWrites = false } = {}) {
+async function openScenario(txns, { failTxnWrites = false, extra = {} } = {}) {
   const ctx = await browser.newContext({ timezoneId: "Asia/Kolkata", viewport: { width: 420, height: 900 } });
   ctx.on("request", r => requests.push(r.url()));
   await ctx.route(u => { try { return !["localhost", "127.0.0.1"].includes(new URL(u).hostname); } catch { return false; } }, r => r.abort());
-  await ctx.addInitScript(([accs, tx, fail]) => { if (localStorage.getItem("__init")) return; localStorage.setItem("__init", "1");
+  await ctx.addInitScript(([accs, tx, fail, extra]) => { if (localStorage.getItem("__init")) return; localStorage.setItem("__init", "1"); for (const [k, v] of Object.entries(extra)) localStorage.setItem(k, JSON.stringify(v));
     localStorage.setItem("arth_accounts", JSON.stringify(accs)); localStorage.setItem("arth_txns", JSON.stringify(tx));
     localStorage.setItem("arth_master_user_setup_complete", "true"); localStorage.setItem("arth_vehicles", "[]");
-    if (fail) { window.__failTxns = false; const orig = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (window.__failTxns && k === "arth_txns") throw new DOMException("quota", "QuotaExceededError"); return orig.call(this, k, v); }; } }, [ACCOUNTS, txns, failTxnWrites]);
+    if (fail) { window.__failTxns = false; const orig = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (window.__failTxns && k === "arth_txns") throw new DOMException("quota", "QuotaExceededError"); return orig.call(this, k, v); }; } }, [ACCOUNTS, txns, failTxnWrites, extra]);
   const page = await ctx.newPage(); const errors = []; page.on("pageerror", e => errors.push(String(e)));
   await page.goto(APP); await page.waitForTimeout(900);
   for (let i = 0; i < 2; i++) { if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await page.getByRole("button", { name: "1", exact: true }).click(); await page.waitForTimeout(120); } await page.waitForTimeout(500); } }
@@ -117,6 +117,20 @@ const sum = lines => Math.round(lines.reduce((s, l) => s + l.qty * l.unitPrice, 
   await s.pick("credit");
   rec("CF22 a credit note shows no 'Add to Arth' section at all", (await T("confirm-import").count()) === 0 && (await T("add-to-arth").count()) === 0, {});
   rec("CF23 nothing changed after those two", JSON.stringify(await s.store("arth_txns")) === before && (await s.store("arth_invoice_imports")).length === 0, {});
+  await s.ctx.close(); }
+
+// ---- H: categories are remembered (item catalogue), delivery/handling is a fee that never needs its own category ----
+{ const s = await openScenario([], { extra: { arth_item_catalog: [{ id: "k1", name: "Pillsbury Fresh Chakki Atta (0% Maida)(Bag)", unit: "nos", catId: "health", subId: "" }] } }); const { T, page } = s;
+  await s.pick("good");
+  rec("CF24 an item Arth already knows gets its remembered category preselected, with a note saying so", (await T("line-cat-3").inputValue()) === "health" && (await T("remembered-3").count()) === 1 && (await T("line-cat-1").inputValue()) === "__order", { v: await T("line-cat-3").inputValue() });
+  await T("confirm-account").selectOption("b1"); await T("confirm-import").click(); await page.waitForTimeout(1800);
+  const t = (await s.store("arth_txns"))[0], catalog = await s.store("arth_item_catalog");
+  rec("CF25 the saved lines: remembered item keeps health, the others follow the order (groceries), and the handling charge has a category (no line needs one)", t && t.lineItems[2].catId === "health" && t.lineItems[0].catId === "groceries" && t.lineItems[3].label === "Handling charge" && t.lineItems.every(l => l.catId), { cats: t && t.lineItems.map(l => l.catId) });
+  rec("CF26 after the verified save Arth learned the two NEW item names (and left the known one alone)", catalog.length === 3 && catalog.filter(c => c.catId === "groceries").length === 2 && catalog.find(c => c.id === "k1").catId === "health", { n: catalog.length });
+  await s.ctx.close(); }
+{ const s = await openScenario([], { extra: { arth_item_catalog: [] } }); const { T, page } = s;
+  await s.pick("good"); await T("confirm-account").selectOption("b1"); await T("remember-cats").uncheck(); await T("confirm-import").click(); await page.waitForTimeout(1800);
+  rec("CF27 with 'remember' switched off nothing is learned", (await s.store("arth_item_catalog")).length === 0 && (await s.store("arth_txns")).length === 1, {});
   await s.ctx.close(); }
 
 console.log("outcome vector:", JSON.stringify(results));
