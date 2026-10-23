@@ -34,12 +34,9 @@ await ctx.addInitScript(() => { if (localStorage.getItem("__init")) return; loca
 const page = await ctx.newPage(); const errors = []; page.on("pageerror", e => errors.push(String(e))); page.on("console", m => { if (m.type() === "error") errors.push(m.text().slice(0, 200)); });
 await page.goto(APP); await page.waitForTimeout(900);
 for (let i = 0; i < 2; i++) { if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await page.getByRole("button", { name: "1", exact: true }).click(); await page.waitForTimeout(120); } await page.waitForTimeout(500); } }
-await page.getByText("☰", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(500);
-await page.getByText("Vehicles").first().click(); await page.waitForTimeout(400);
-await page.getByText("←", { exact: true }).first().click(); await page.waitForTimeout(400);
 const keys = ["arth_txns", "arth_accounts"]; const snap = () => page.evaluate(k => k.map(x => localStorage.getItem(x)), keys);
 const before = await snap(); const keysBefore = await page.evaluate(() => Object.keys(localStorage).sort());
-await page.getByText("Import invoice", { exact: true }).first().click(); await page.waitForTimeout(400);
+await page.getByRole("button", { name: /➖/ }).first().click(); await page.waitForTimeout(500); await page.getByText("From invoice", { exact: true }).click(); await page.waitForTimeout(500);
 const T = id => page.getByTestId(id), body = async () => (await page.evaluate(() => document.body.innerText)).replace(/\s+/g, " ");
 requests.length = 0;                                          // the app's own page-load requests (fonts) are not part of PDF reading
 const pick = async f => { await T("invoice-file").setInputFiles(paths[f]); await page.waitForTimeout(1500); };

@@ -63,3 +63,9 @@ Delivery, handling, platform fee and GST lines on an itemised expense are CHARGE
 * Breakup: the form and both transaction detail views list the charges by type, with the GST inside them when known. Code: `domain/transactions/chargeShare.js` (`chargeBreakdown` is the function a monthly report would call).
 * NOT done: a monthly "platform fee paid" report or screen (nothing reads the breakup across months yet); charges on expenses that were not edited after this release keep their old, unmarked lines.
 * Chromium only: `tools/invoice-import/charges-browser.mjs` (13 checks). Not run on Android.
+
+## Addendum: design approved from the mock-up (charges section; import from Add expense)
+* Charges are no longer part of the items list. The Add/Edit form shows a **Charges** card ABOVE Items: Handling charge, Platform fee and Delivery charge rows (type an amount to add one) and + CGST / + SGST / + Other chips. The Items card lists items only. The data is unchanged (charge lines in `lineItems`, `kind: "charge"`), so older records still work. A charge line takes the category of the biggest categorised item (it never needs its own), and zero-amount charge lines are not saved.
+* The Settings → Import invoice row is removed. Invoice import starts from Add expense: "From invoice" in Quick Add's header and as a third choice beside Standard / Itemised in the full form. Back returns to the home screen. The review screen itself is unchanged.
+* "Who is this for" stays on the expense form, after the charges (the sharing rule above is unchanged).
+* Chromium only. Checks: `charges-browser.mjs` (19), `confirm-browser.mjs` (36), `preview-browser.mjs` (21), `itemised-people-browser.mjs` (11).

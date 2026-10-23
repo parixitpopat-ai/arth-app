@@ -28,10 +28,7 @@ async function openScenario(txns, { failTxnWrites = false, extra = {} } = {}) {
   const page = await ctx.newPage(); const errors = []; page.on("pageerror", e => errors.push(String(e)));
   await page.goto(APP); await page.waitForTimeout(900);
   for (let i = 0; i < 2; i++) { if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await page.getByRole("button", { name: "1", exact: true }).click(); await page.waitForTimeout(120); } await page.waitForTimeout(500); } }
-  await page.getByText("☰", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(500);
-  await page.getByText("Vehicles").first().click(); await page.waitForTimeout(400);
-  await page.getByText("←", { exact: true }).first().click(); await page.waitForTimeout(400);
-  await page.getByText("Import invoice", { exact: true }).first().click(); await page.waitForTimeout(400);
+  await page.getByRole("button", { name: /➖/ }).first().click(); await page.waitForTimeout(500); await page.getByText("From invoice", { exact: true }).click(); await page.waitForTimeout(500);
   return { ctx, page, errors, T: id => page.getByTestId(id), store: k => page.evaluate(x => JSON.parse(localStorage.getItem(x) || "[]"), k),
     pick: async f => { await page.getByTestId("invoice-file").setInputFiles(paths[f]); await page.waitForTimeout(1500); } };
 }

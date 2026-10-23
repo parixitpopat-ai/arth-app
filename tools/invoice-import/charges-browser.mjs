@@ -32,7 +32,7 @@ const qtyInputs = page => page.locator('input[type="number"][max]');
 
 const body = page => page.locator("body").innerText().then(t => t.replace(/\s+/g, " "));
 { const s = await open("none"); const { page } = s;
-  rec("CS1 the handling line shows as a charge, and the charges breakup lists it", (await page.getByText("Charge", { exact: true }).count()) >= 1 && /CHARGES IN THIS EXPENSE/i.test(await body(page)) && /Handling charge ₹13/.test(await body(page)), {});
+  rec("CS1 the handling charge is in its own Charges card (amount 13), not in the items list", (await page.getByTestId("charges-card").count()) === 1 && (await page.getByTestId("charge-amount-handling").inputValue()) === "13" && (await page.getByTestId("item-calc-l3").count()) === 0 && (await page.getByTestId("item-calc-l1").count()) === 1, {});
   await addTarget(page, "Vyom"); await page.getByText(/Link to specific items instead/).click(); await page.waitForTimeout(300);
   rec("CS2 a charge line cannot be given to a person as an item (only Chips and Coke have quantity boxes)", (await qtyInputs(page).count()) === 2, { n: await qtyInputs(page).count() });
   await qtyInputs(page).nth(0).fill("1"); await qtyInputs(page).nth(1).fill("1"); await page.waitForTimeout(200);
@@ -57,14 +57,19 @@ const body = page => page.locator("body").innerText().then(t => t.replace(/\s+/g
   rec("CS10 no page errors", s.errors.length === 0, s.errors.slice(0, 2));
   await s.ctx.close(); }
 
-// ---- adding a charge by hand on an itemised expense ----
+// ---- adding charges by hand in the Charges card ----
 { const s = await open("none"); const { page } = s;
-  await page.getByText("+ Add item").click(); await page.waitForTimeout(400);
-  await page.getByPlaceholder("e.g. Milk, Petrol, Shampoo").fill("Platform fee");
-  await page.getByTestId("line-kind").selectOption("platform");
-  const note = await body(page);
-  rec("CS11 the item sheet can mark a line as a charge, and says how it is shared", /A charge is shared equally between the people and groups/.test(note), {});
-  rec("CS12 no page errors while adding", s.errors.length === 0, s.errors.slice(0, 2));
+  await page.getByTestId("charge-amount-platform").fill("5"); await page.waitForTimeout(300);
+  await page.getByTestId("charge-add-cgst").click(); await page.waitForTimeout(200);
+  await page.getByTestId("charge-amount-cgst").fill("1.5"); await page.waitForTimeout(300);
+  let t = await body(page);
+  rec("CS11 platform fee 5 and CGST 1.5 are added; the card total is 19.50 and the lines no longer match the 93 total", /Charges ₹19\.50/.test(t) && /not on any line|more than the total/.test(t), { t: t.slice(t.indexOf("Charges ₹"), t.indexOf("Charges ₹") + 60) });
+  await page.getByTestId("items-set-total").click(); await page.waitForTimeout(300);
+  await page.getByText(/Save Changes/).click(); await page.waitForTimeout(2500);
+  const tx = (await s.store("arth_txns")).find(x => x.id === "t1");
+  const kinds = (tx.lineItems || []).filter(l => l.kind === "charge").map(l => `${l.chargeType}:${l.unitPrice}`).sort();
+  rec("CS12 saved: three charge lines (handling 13, platform 5, cgst 1.5), amount 99.5, and each charge line got an item category", tx.amount === 99.5 && JSON.stringify(kinds) === JSON.stringify(["cgst:1.5", "handling:13", "platform:5"]) && tx.lineItems.filter(l => l.kind === "charge").every(l => l.catId === "groceries"), { kinds, amount: tx.amount });
+  rec("CS12b no page errors while adding", s.errors.length === 0, s.errors.slice(0, 2));
   await s.ctx.close(); }
 
 { const s = await open("none", true); const { page } = s;
@@ -73,9 +78,33 @@ const body = page => page.locator("body").innerText().then(t => t.replace(/\s+/g
   await s.ctx.close(); }
 
 { const s = await open("none"); const { page } = s;
-  const first = await page.locator('[data-testid^="item-calc-"]').first().getAttribute("data-testid");
-  rec("CS14 the charge line is listed first in the items, above Chips and Coke", first === "item-calc-l3", { first });
+  const first = await page.locator('[data-testid^="charge-row-"]').first().getAttribute("data-testid");
+  rec("CS14 the Charges card comes before the items: Handling first, then Platform fee and Delivery rows", first === "charge-row-handling" && (await page.getByTestId("charge-row-platform").count()) === 1 && (await page.getByTestId("charge-row-delivery").count()) === 1, { first });
   await s.ctx.close(); }
+
+{ const ctx = await browser.newContext({ timezoneId: "Asia/Kolkata", viewport: { width: 420, height: 900 } });
+  await ctx.route(u => { try { return !["localhost", "127.0.0.1"].includes(new URL(u).hostname); } catch { return false; } }, r => r.abort());
+  await ctx.addInitScript(() => { if (localStorage.getItem("__init")) return; localStorage.setItem("__init", "1");
+    localStorage.setItem("arth_accounts", JSON.stringify([{ id: "b1", name: "Test Bank", type: "bank", openingBalance: 100000, openingBalanceDate: "2026-01-01", last4: "9001" }]));
+    localStorage.setItem("arth_txns", JSON.stringify([{ id: "t1", type: "expense", merchant: "Cafe", desc: "Lunch", date: "2026-10-20", amount: 100, accId: "b1", catIds: [], subIds: [] }]));
+    localStorage.setItem("arth_master_user_setup_complete", "true"); localStorage.setItem("arth_vehicles", "[]"); });
+  const page = await ctx.newPage(); const errors = []; page.on("pageerror", e => errors.push(String(e)));
+  await page.goto(APP); await page.waitForTimeout(900);
+  for (let i = 0; i < 2; i++) { if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await page.getByRole("button", { name: "1", exact: true }).click(); await page.waitForTimeout(120); } await page.waitForTimeout(500); } }
+  await page.getByText("☰", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(500);
+  await page.getByText("Vehicles").first().click(); await page.waitForTimeout(400);
+  await page.getByText("←", { exact: true }).first().click(); await page.waitForTimeout(400);
+  if (process.env.DEBUG) console.log("SETTINGS:", (await body(page)).slice(0, 500));
+  rec("CS15 Settings (Data section) no longer has an 'Import invoice' row", (await page.getByText("Import invoice", { exact: true }).count()) === 0, {});
+  await page.getByText("←", { exact: true }).first().click({ timeout: 4000 }).catch(() => {}); await page.waitForTimeout(400);
+  await page.getByRole("button", { name: /➖/ }).first().click(); await page.waitForTimeout(500);
+  rec("CS16 Add expense (Quick Add) offers 'From invoice'", (await page.getByTestId("quick-from-invoice").count()) === 1, {});
+  await page.getByTestId("quick-from-invoice").click(); await page.waitForTimeout(500);
+  rec("CS17 it opens the invoice import screen", (await page.getByText("Import invoice").count()) >= 1 && (await page.getByTestId("invoice-file").count()) === 1, {});
+  await page.getByText("←", { exact: true }).first().click(); await page.waitForTimeout(400);
+  rec("CS18 Back returns to the home screen, not to Settings", /Good (Morning|Afternoon|Evening|Night)/.test(await body(page)) && (await page.getByText("Import invoice", { exact: true }).count()) === 0, {});
+  rec("CS19 no page errors", errors.length === 0, errors.slice(0, 2));
+  await ctx.close(); }
 
 console.log("outcome vector:", JSON.stringify(results));
 await browser.close(); process.exit(results.every(r => r.pass) ? 0 : 1);

@@ -3734,7 +3734,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 32px",width:"100%",maxWidth:430,maxHeight:"88vh",overflowY:"auto" }}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
             <button onClick={onClose} style={{ background:"none",border:"none",color:T.sub,fontSize:14,cursor:"pointer",padding:"4px 0" }}>Cancel</button>
-            <button onClick={goToFullForm} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>More options →</button>
+            <div style={{ display:"flex",alignItems:"center",gap:14 }}>
+              {/* Invoice import starts from Add expense (it used to be under Settings). */}
+              <button data-testid="quick-from-invoice" onClick={()=>{ onClose(); setShowSettings(true); setSettingsSection("importinvoice"); }} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>From invoice</button>
+              <button onClick={goToFullForm} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer" }}>More options →</button>
+            </div>
           </div>
 
           {/* Type it: one 48 px row. A sentence fills the fields below; the person reviews and saves as usual. */}
@@ -4444,6 +4448,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [chargeIncludeMe, setChargeIncludeMe] = useState(isEditing ? sourceTxn?.chargeIncludeMe!==false : true);
     const chargeShares = shareCharges({ lineItems, rows:allocRows, includeMe:chargeIncludeMe });
     const chargeSummary = chargeBreakdown(lineItems);
+    // A charge line takes the category of the biggest categorised item, so charges never need a category of their own.
+    const topItemCat = computeLineItemCategoryRollup(lineItems.filter(l=>!isCharge(l))).catId;
+    const lineItemsResolved = lineItems.map(l=>isCharge(l)&&!l.catId&&topItemCat ? { ...l, catId:topItemCat } : l);
+    const itemOnlyLines = lineItems.filter(l=>!isCharge(l));
+    const chargeLines = lineItems.filter(isCharge);
+    const addChargeLine = type => setLineItems(prev=>[...prev,{ id:genId(), label:chargeTypeLabel(type), qty:"1", unit:"nos", unitPrice:"", catId:"", subId:"", kind:"charge", chargeType:type, splits:[] }]);
+    const setChargeAmount = (type, lineId, raw) => setLineItems(prev=>{
+      const v = cleanMoneyInput(raw);
+      if(lineId) return v==="" ? prev.filter(l=>l.id!==lineId) : prev.map(l=>l.id===lineId ? { ...l, qty:"1", unitPrice:v } : l);
+      if(!(parseFloat(v)>0)) return prev;
+      return [...prev,{ id:genId(), label:chargeTypeLabel(type), qty:"1", unit:"nos", unitPrice:v, catId:"", subId:"", kind:"charge", chargeType:type, splits:[] }];
+    });
+    const removeChargeLine = id => setLineItems(prev=>prev.filter(l=>l.id!==id));
     const lineSplitQtyTotal = item => (item.splits||[]).reduce((sum,split)=>sum+(parseFloat(split.qty)||0),0);
 
     // ── auto-save draft ──
@@ -5558,7 +5575,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           setRefDupWarning(`Note: category split totals ${sym}${fmt(categorySplitTotal)}, not ${sym}${fmt(amt)} -- saved anyway, but double-check the split.`);
         }
         const normalizedLineItems = useItemizedLines
-          ? lineItems
+          ? lineItemsResolved
               .map(item=>{
                 const qty = Math.max(0, parseFloat(item.qty)||0);
                 const unitPrice = Math.max(0, parseFloat(item.unitPrice)||0);
@@ -5584,7 +5601,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   splits:normalizedSplits.length ? normalizedSplits : null,
                 };
               })
-              .filter(item=>item.label || item.amount>0 || item.catId)
+              .filter(item=>item.kind==="charge" ? item.amount>0 : (item.label || item.amount>0 || item.catId))
           : null;
         if(useItemizedLines && normalizedLineItems?.length){
           const itemsTotal = normalizedLineItems.reduce((sum,item)=>sum+Number(item.amount||0),0);
@@ -6056,7 +6073,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // version it replaces.
     const itemCategoryRollup = useMemo(() => {
       if(!(txnType==="expense" && useItemizedLines && lineItems.length>0)) return null;
-      return computeLineItemCategoryRollup(lineItems);
+      return computeLineItemCategoryRollup(lineItemsResolved);
     }, [txnType, useItemizedLines, lineItems]);
 
     const itemsBlock = txnType==="expense" && useItemizedLines && lineItems.length>0 && !itemsRecon.matches;
@@ -6338,10 +6355,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div>
                   <span style={lbl}>Purchase type</span>
                   <Segmented
-                    options={[{value:"standard",label:"Standard"},{value:"itemised",label:"Itemised"}]}
+                    options={[{value:"standard",label:"Standard"},{value:"itemised",label:"Itemised"},...(!isEditing&&txnType==="expense"&&!isBillPayment&&onClose ? [{value:"invoice",label:"From invoice"}] : [])]}
                     value={useItemizedLines?"itemised":"standard"}
                     onChange={(val)=>{
-                      if(val==="itemised"){
+                      if(val==="invoice"){
+                        // Invoice import starts here (it used to be under Settings): the invoice review is its own screen, so the form closes first.
+                        onClose(); setShowSettings(true); setSettingsSection("importinvoice");
+                      } else if(val==="itemised"){
                         // Standard -> Itemised: instant, never blocked, never asks.
                         setUseItemizedLines(true);
                       } else if(lineItems.length===0){
@@ -6378,22 +6398,53 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     entry UI stayed far below in the form while this toggle lived up here,
                     so flipping it ON hid Category with nothing visible taking its place. */}
                 {useItemizedLines&&(
+                  <div data-testid="charges-card" style={{ background:T.input,borderRadius:10,padding:10,border:`1.5px solid ${T.accent}` }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                      <div style={{ color:T.accent,fontSize:10,fontWeight:700,letterSpacing:1 }}>CHARGES · not items</div>
+                    </div>
+                    <div style={{ marginTop:8,display:"flex",flexDirection:"column",gap:6 }}>
+                      {(()=>{
+                        const seen = {};
+                        const rows = chargeLines.map(l=>{ const t = l.chargeType||"other"; seen[t]=(seen[t]||0)+1; return { type:t, line:l, n:seen[t]-1 }; });
+                        ["handling","platform","delivery"].forEach(t=>{ if(!seen[t]) rows.push({ type:t, line:null, n:0 }); });
+                        const order = ["handling","platform","delivery","cgst","sgst","other"];
+                        rows.sort((a,b)=>order.indexOf(a.type)-order.indexOf(b.type) || a.n-b.n);
+                        return rows.map(({type,line,n})=>(
+                          <div key={`${type}-${n}`} data-testid={`charge-row-${type}${n?`-${n}`:""}`} style={{ display:"flex",alignItems:"center",gap:8,background:T.card||T.bg,borderRadius:10,padding:"8px 10px",border:`1px solid ${T.border}` }}>
+                            <div style={{ flex:1,minWidth:0 }}>
+                              <div style={{ color:line?T.text:T.sub,fontSize:12,fontWeight:700 }}>{line&&line.label&&line.label!==chargeTypeLabel(type)?line.label:chargeTypeLabel(type)}</div>
+                              {line?.taxIncluded&&(Number(line.taxIncluded.cgst)>0||Number(line.taxIncluded.sgst)>0)&&<div style={{ color:T.sub,fontSize:10 }}>includes CGST {sym}{fmt(line.taxIncluded.cgst||0)} + SGST {sym}{fmt(line.taxIncluded.sgst||0)}</div>}
+                            </div>
+                            <input data-testid={`charge-amount-${type}${n?`-${n}`:""}`} style={{ ...inp,width:92,textAlign:"right" }} type="text" inputMode="decimal" placeholder="+ add" value={line?String(line.unitPrice??""):""} onChange={e=>setChargeAmount(type, line?line.id:null, e.target.value)}/>
+                            {line&&!["handling","platform","delivery"].includes(type)||line&&n>0?<button onClick={()=>removeChargeLine(line.id)} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:11,color:T.danger,fontFamily:"Nunito,sans-serif" }}>x</button>:null}
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:8 }}>
+                      {["cgst","sgst","other"].filter(t=>!chargeLines.some(l=>l.chargeType===t)).map(t=>(
+                        <button key={t} data-testid={`charge-add-${t}`} onClick={()=>addChargeLine(t)} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ {t==="other"?"Other":t.toUpperCase()}</button>
+                      ))}
+                    </div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:8 }}>{chargeSummary.total>0?`Charges ${sym}${fmt(chargeSummary.total)}. `:""}Charges are shared equally between the people and groups you choose below, you included. GST already inside an item's price is not added again.</div>
+                  </div>
+                )}
+                {useItemizedLines&&(
                   <div style={{ background:T.input,borderRadius:10,padding:10 }}>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                       <div style={{ display:"flex",alignItems:"center",gap:8 }}>
                         <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>ITEMS</div>
-                        {lineItems.length>0&&<span style={{ background:T.accent+"22",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>{lineItems.length} item{lineItems.length>1?"s":""}</span>}
+                        {itemOnlyLines.length>0&&<span style={{ background:T.accent+"22",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>{itemOnlyLines.length} item{itemOnlyLines.length>1?"s":""}</span>}
                         {/* T3-9b: summary count, so blocking Save has an immediate, visible
                             reason without scrolling every item. */}
                         {itemCategoryRollup&&itemCategoryRollup.uncategorizedCount>0&&<span style={{ background:T.warn+"22",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>⚠️ {itemCategoryRollup.uncategorizedCount} need{itemCategoryRollup.uncategorizedCount>1?"":"s"} a category</span>}
                       </div>
                       <button onClick={()=>{setEditingItemId(null);setShowItemSheet(true);}} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"3px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add item</button>
                     </div>
-                    {lineItems.length===0&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>No items yet. Tap + Add item to start.</div>}
+                    {itemOnlyLines.length===0&&<div style={{ color:T.sub,fontSize:10,marginTop:6 }}>No items yet. Tap + Add item to start.</div>}
                     {lineItems.length>0&&(
                       <div style={{ marginTop:8,display:"flex",flexDirection:"column",gap:6 }}>
-                        {/* charges (handling, delivery, platform fee, GST) are listed first; the saved order of the lines is not changed */}
-                        {[...lineItems].sort((a,b)=>Number(isCharge(b))-Number(isCharge(a))).map(item=>{
+                        {itemOnlyLines.map(item=>{
                           const itemTotal = lineItemAmount(item);
                           return (
                             <div key={item.id} style={{ display:"flex",alignItems:"center",gap:8,background:T.card||T.bg,borderRadius:10,padding:"8px 10px",border:`1px solid ${T.border}` }}>
@@ -6438,15 +6489,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                             </div>
                           );
                         })}
-                        {chargeSummary.total>0&&(
-                          <div data-testid="charge-breakup" style={{ marginTop:6,paddingTop:8,borderTop:`1px solid ${T.border}`,display:"flex",flexDirection:"column",gap:2 }}>
-                            <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>CHARGES IN THIS EXPENSE</div>
-                            {Object.entries(chargeSummary.byType).map(([type,v])=>(
-                              <div key={type} style={{ display:"flex",justifyContent:"space-between",fontSize:11 }}><span style={{ color:T.sub }}>{chargeTypeLabel(type)}</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(v)}</span></div>
-                            ))}
-                          </div>
-                        )}
                         <div data-testid="items-reconcile" style={{ marginTop:6,paddingTop:8,borderTop:`1px solid ${T.border}` }}>
+                          {chargeSummary.total>0&&(
+                            <div style={{ display:"flex",flexDirection:"column",gap:2,marginBottom:6 }}>
+                              <div style={{ display:"flex",justifyContent:"space-between",fontSize:11 }}><span style={{ color:T.sub }}>Items</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(Math.round((itemsRecon.linesTotal-chargeSummary.total)*100)/100)}</span></div>
+                              <div style={{ display:"flex",justifyContent:"space-between",fontSize:11 }}><span style={{ color:T.sub }}>Charges</span><span style={{ color:T.text,fontWeight:700 }}>{sym}{fmt(chargeSummary.total)}</span></div>
+                            </div>
+                          )}
                           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8 }}>
                             <span style={{ color:T.sub,fontSize:11 }}>Lines add up to</span>
                             <span style={{ color:T.text,fontSize:14,fontWeight:800 }}>{sym}{fmt(itemsRecon.linesTotal)}{itemsRecon.matches?" · matches total":""}</span>
@@ -7943,14 +7992,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <span style={lbl}>Unit</span>
                 <select style={inp} value={iUnit} onChange={e=>{ setIUnit(e.target.value); setIRateUnit(defaultRateUnit(e.target.value)); }}>{(measureUnits||[]).map(u=><option key={u} value={u}>{formatMeasureUnitLabel?formatMeasureUnitLabel(u):u}</option>)}</select>
               </div>
-            </div>
-            <div>
-              <span style={lbl}>This line is</span>
-              <select data-testid="line-kind" style={inp} value={iChargeType} onChange={e=>setIChargeType(e.target.value)}>
-                <option value="">An item</option>
-                {CHARGE_TYPES.map(t=><option key={t.value} value={t.value}>A charge · {t.label}</option>)}
-              </select>
-              {iChargeType&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>A charge is shared equally between the people and groups on this expense (you too), not by item.</div>}
             </div>
             {/* FIX: Category auto-applied silently for a known item -- compact one-line summary,
                 tap to override. A genuinely new/unmatched item shows a "Define category" prompt
@@ -15642,7 +15683,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               (per the Screen Inventory). Export exists via CSV, listed below under Backup. */}
           <Row icon="🙂" title="My Profile" subtitle={(people.find(p=>p.isMe)?.name)||"Set up your identity in Arth"} onClick={()=>setSettingsSection("myprofile")}/>
           <Row icon="🔑" title="Cloud Sync & Account" subtitle={cloudUser?.email ? `Signed in as ${cloudUser.email}${lastSyncedAt ? " · synced" : ""}` : "Sign in to sync across devices"} onClick={()=>setSettingsSection("cloudsync")}/>
-          <Row icon="🧾" title="Import invoice" subtitle="Add a Blinkit invoice PDF as an itemised expense (you review first)" onClick={()=>setSettingsSection("importinvoice")}/>
           <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
         </div>
 
@@ -20291,7 +20331,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="outlook"&&<OutlookPage/>}
         {!showSettings&&tab==="insights"&&<InsightsPage/>}
         {/* The invoice screen is rendered HERE, not inside Settings: Settings is re-created on every AppContent render, which would reset this screen (its review state, the success message, Undo) the moment the import saves. */}
-        {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} itemCatalog={itemCatalog} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>setSettingsSection(null)} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }}/>}
+        {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} itemCatalog={itemCatalog} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>{ setSettingsSection(null); setShowSettings(false); }} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }}/>}
         {showSettings&&settingsSection!=="importinvoice"&&<Settings/>}
 
       {/* Universal Search Overlay */}
