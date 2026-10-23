@@ -4095,11 +4095,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       ? getTxnSubIds(sourceTxn)
       : (Array.isArray(safePrefill.subIds) ? safePrefill.subIds.filter(Boolean) : (safePrefill.subId ? [safePrefill.subId] : [])))
       .filter(sid=>initialCatIds.some(cid=>getCat(cid)?.subs?.some(sub=>sub.id===sid)));
-    const initialTrackingMode = isEditing && sourceTxn?.type==="expense"
+    // An expense saved with no split ("none": Quick Add and the invoice import save it that way) opens in the normal "unified" mode, the same one a new expense starts in.
+    // Otherwise "Who is this for?" (shown only for allocate/unified) was missing entirely when editing, so no person, group or per-item breakup could be added afterwards.
+    const savedTrackingMode = isEditing && sourceTxn?.type==="expense"
       ? (sourceTxn.splitMode || sourceTxn.trackingMode ||
           (Object.keys(sourceTxn.people||{}).some(pid=>pid!=="__me__"&&sourceTxn.people[pid]?.mode==="owes") ? "split" :
           (sourceTxn.forPerson||sourceTxn.taggedPersonId||sourceTxn.groupId ? "tag" : "none")))
       : "unified";
+    const initialTrackingMode = savedTrackingMode==="none" ? "unified" : savedTrackingMode;
     const initialSplitPeople = isEditing && sourceTxn?.type==="expense"
       ? Object.fromEntries(Object.entries(sourceTxn.people||{}).filter(([pid])=>pid!=="__me__").map(([pid])=>[pid, true]))
       : {};
@@ -7385,7 +7388,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
                       {allocRows.map(row=>{
                         const target = row.targetType==="group" ? groups.find(g=>g.id===row.targetId) : getPerson(row.targetId);
-                        const useItems = (row.items||[]).length>0;
+                        const useItems = Boolean(row.byItems) || (row.items||[]).length>0;     // byItems: the person tapped "Link to specific items" and has not entered quantities yet
                         const rowItemTotal = (row.items||[]).reduce((s,i)=>{
                           const src = (lineItems||[]).find(li=>li.id===i.sourceItemId);
                           const unit = src ? (Number(src.qty)>0 ? Number(src.unitPrice||0) : Number(src.amount||0)) : 0;
@@ -7408,7 +7411,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                               {useItems&&<div style={{ flex:1,textAlign:"right",color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(rowItemTotal)} (from items)</div>}
                             </div>
                             {lineItems?.length>0&&(
-                              <button onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,items: []}:r))} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:10,fontWeight:700,textAlign:"left",fontFamily:"Nunito,sans-serif" }}>{useItems?"← Use flat amount instead":"Link to specific items instead →"}</button>
+                              <button onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?(useItems?{...r,items:[],byItems:false}:{...r,items:[],byItems:true,amount:""}):r))} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:10,fontWeight:700,textAlign:"left",fontFamily:"Nunito,sans-serif" }}>{useItems?"← Use flat amount instead":"Link to specific items instead →"}</button>
                             )}
                             {useItems&&(
                               <div style={{ display:"flex",flexDirection:"column",gap:4,paddingLeft:8 }}>
