@@ -1,6 +1,8 @@
 # INVOICE-IMPORT-003 — Phase 2 definition: confirmed import (proposal; nothing built)
 
-Status: PROPOSAL for approval. Phase 1 (preview) is local only. Phase 2 adds the one write the user asked for: after review, **Confirm** adds the invoice to Arth. Nothing is written before Confirm. Unverified items are marked.
+Status: IMPLEMENTED (P2a) on branch `feat-invoice-discovery`, after the user asked for invoices to be added to Arth as itemised transactions. The open decisions were taken at the recommended defaults, which the user can still change: whole-order category defaulting to Groceries with per-line override and uncategorised lines allowed; link only for same-amount matches; one account per invoice; metadata only, no PDF. Nothing is written before Confirm. Unverified items are marked.
+
+Verification done: 2,024 unit/static tests; real-screen runs in Chromium (create, itemised lines, undo, duplicate blocked, link, similar-amount not linkable, credit-card account, per-line categories, simulated save failure with rollback, wrong-total and credit-note refusals). NOT done: Android app run, two-device sync of the new list, real Supabase. One existing defect was worked around: Settings is re-created on every data change, so the invoice screen is rendered outside it.
 
 ## What Confirm does (P2a)
 Exactly one of these, chosen by the user on a review screen that states it in a sentence:

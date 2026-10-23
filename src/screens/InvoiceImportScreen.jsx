@@ -1,15 +1,21 @@
-// Invoice import — PHASE 1 PREVIEW ONLY. Reads a Blinkit tax invoice PDF on this device, shows what is printed, flags what needs checking and suggests
-// possible matching expenses. Nothing is saved, linked or created; the PDF is not stored. (See docs/engineering/INVOICE-IMPORT-001-discovery-and-decisions.md.)
+// Invoice import. Reads a Blinkit tax invoice PDF on this device, shows what is printed, flags what needs checking, suggests possible matching expenses, and —
+// only after the person reviews it and presses Confirm — adds it to Arth as ONE itemised expense (or adds its items to one same-amount expense they chose).
+// The PDF is never stored. See docs/engineering/INVOICE-IMPORT-001 (decisions) and -003 (Phase 2).
 import { useRef, useState } from "react";
-import { buildInvoicePreviews, describeNextStep, diagnosticEntry, validatePaymentDate } from "../domain/invoices/invoicePreview.js";
+import { buildInvoicePreviews, diagnosticEntry, validatePaymentDate } from "../domain/invoices/invoicePreview.js";
+import { planConfirm } from "../domain/invoices/invoiceImport.js";
 
 const money = (n, sym = "₹") => (n == null ? "—" : `${sym}${Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 3 }).replace(/(\.\d\d)0$/, "$1")}`);
 
-export default function InvoiceImportScreen({ accounts = [], txns = [], T, sym = "₹", onBack, onAddByHand }) {
+export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [], invoiceImports = [], genId, onConfirmInvoice, onUndoInvoice, T, sym = "₹", onBack, onAddByHand }) {
   const fileRef = useRef(null);
   const [state, setState] = useState({ phase: "idle" });
   const [payDates, setPayDates] = useState({});
   const [picked, setPicked] = useState({});
+  const [forms, setForms] = useState({});                                 // per invoice: mode, accountId, orderCat, lineCats, importAgain, ackNoKey
+  const [outcomes, setOutcomes] = useState({});                           // per invoice: { busy, done:{record,plan,sentence}, error, undone }
+  const setForm = (k, patch) => setForms(f => ({ ...f, [k]: { ...(f[k] || {}), ...patch } }));
+  const setOutcome = (k, patch) => setOutcomes(o => ({ ...o, [k]: { ...(o[k] || {}), ...patch } }));
   const [seen, setSeen] = useState([]);                                   // invoice keys looked at in THIS session (memory only)
   const lastRef = useRef(null);                                           // the last analysis, kept in memory so a changed payment date can re-run the matching without re-reading the file
 
@@ -21,14 +27,14 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], T, sym =
   );
 
   const compute = (analysis, dates, fileName) => {
-    const previews = buildInvoicePreviews(analysis, { transactions: txns, accounts, paymentDates: dates });
-    return { phase: "result", previews, diag: diagnosticEntry(analysis, analysis.__bytes || 0), fileName };
+    const previews = buildInvoicePreviews(analysis, { transactions: txns, accounts, paymentDates: dates, existingKeys: invoiceImports.map(r => r.key).filter(Boolean) });
+    return { phase: "result", previews, diag: diagnosticEntry(analysis, analysis.__bytes || 0), fileName, fileHash: analysis.fileHash || null };
   };
 
   const onFile = async e => {
     const f = e.target.files && e.target.files[0]; e.target.value = "";
     if (!f) return;
-    setState({ phase: "reading" }); setPayDates({}); setPicked({});
+    setState({ phase: "reading" }); setPayDates({}); setPicked({}); setForms({}); setOutcomes({});
     try {
       const bytes = new Uint8Array(await f.arrayBuffer());
       const [{ analyseBlinkitPdf }, { default: workerSrc }] = await Promise.all([import("../domain/invoices/blinkitPdf.js"), import("../domain/invoices/pdfWorkerUrl.js")]);
@@ -42,7 +48,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], T, sym =
     } catch { setState({ phase: "result", previews: { status: "unreadable", outcome: { tone: "amb", title: "Couldn't open this file", message: "Something went wrong while reading it. Choose the file again.", actions: [{ id: "choose-another", label: "Choose another file" }] }, invoices: [], notes: [] }, diag: { status: "unreadable", pages: 0, pageStatuses: [], codes: ["read-failed"], sizeBucket: "unknown" } }); }
   };
 
-  const reset = () => { setState({ phase: "idle" }); setPayDates({}); setPicked({}); lastRef.current = null; };
+  const reset = () => { setState({ phase: "idle" }); setPayDates({}); setPicked({}); setForms({}); setOutcomes({}); lastRef.current = null; };
   const act = id => { if (id === "choose-another") fileRef.current && fileRef.current.click(); else if (id === "add-by-hand") onAddByHand && onAddByHand(); else reset(); };
   const setPayDate = (page, v) => {
     const next = { ...payDates, [page]: v }; setPayDates(next);
@@ -67,6 +73,21 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], T, sym =
 
   const invoiceCard = (inv, idx, total) => {
     const v = inv.view, key = `p${inv.page}`, sel = picked[key], chosen = inv.matches.find(m => m.id === sel) || null, typed = payDates[inv.page] ?? inv.paymentDate, dateCheck = validatePaymentDate(typed);
+    const f = forms[key] || {}, oc = outcomes[key] || {}, defaultCat = (cats.find(c => c.id === "groceries") || {}).id || "";
+    const orderCat = f.orderCat === undefined ? defaultCat : f.orderCat, mode = f.mode === "link" && chosen && chosen.strength === "same-amount" ? "link" : "create";
+    const lineCats = Object.fromEntries(Object.entries(f.lineCats || {}).filter(([, val]) => val !== "__order").map(([k, val]) => [k, val || null]));   // "" = left uncategorised on purpose
+    const sameAmount = inv.matches.find(m => m.strength === "same-amount");
+    const plan = planConfirm({ view: v, status: inv.status, mode, accountId: f.accountId, paymentDate: typed, orderCatId: orderCat || null, lineCats, linkTxnId: mode === "link" ? chosen.id : undefined, fileHash: state.fileHash },
+      { accounts, txns, records: invoiceImports, genId, acknowledgeNoKey: !!f.ackNoKey, importAgain: !!f.importAgain });
+    const selStyle = { width: "100%", padding: 9, borderRadius: 10, border: `1px solid ${T.border}`, background: T.card, color: T.text, fontSize: 13 };
+    const confirm = async () => {
+      if (!plan.ok || oc.busy) return;
+      setOutcome(key, { busy: true, error: null });
+      const r = await onConfirmInvoice(plan);
+      if (r && r.ok) setOutcome(key, { busy: false, done: { record: plan.record, plan, sentence: plan.sentence }, undone: false });
+      else setOutcome(key, { busy: false, error: (r && r.error) || "Couldn't add this invoice." });
+    };
+    const undo = () => { const r = onUndoInvoice(oc.done.record, oc.done.plan); setOutcome(key, r.ok ? { undone: true, done: null, undoError: null } : { undoError: r.reason }); };
     return (
       <div key={key} data-testid="invoice-card" data-status={inv.status} style={{ marginBottom: 16 }}>
         {total > 1 && <div style={{ color: T.sub, fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Invoice {idx + 1} of {total}</div>}
@@ -99,7 +120,14 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], T, sym =
             <div style={{ color: T.sub, fontSize: 11, marginTop: 4 }}>{i.qty} × MRP {money(i.mrp, sym)}{i.discount > 0 ? ` · discount ${money(i.discount, sym)} is already inside the line total` : ""}</div>
             {i.qty > 1 && <div style={{ color: T.sub, fontSize: 11 }}>≈ {money(i.perUnitAfterDiscount, sym)} each after discount (calculated, not printed)</div>}
             <div style={{ color: T.sub, fontSize: 11 }}>Taxable {money(i.taxable, sym)} · CGST {i.cgstRate}% {money(i.cgst, sym)} · SGST {i.sgstRate}% {money(i.sgst, sym)}</div>
-            <div style={{ color: T.sub, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}>UPC {i.upc} · HSN {i.hsn} · Uncategorised</div>
+            <div style={{ color: T.sub, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}>UPC {i.upc} · HSN {i.hsn}</div>
+            {mode === "create" && !oc.done && (
+              <select data-testid={`line-cat-${i.srNo}`} aria-label={`Category for ${i.name}`} value={(f.lineCats || {})[i.srNo] === undefined ? "__order" : (f.lineCats || {})[i.srNo]} onChange={e => setForm(key, { lineCats: { ...(f.lineCats || {}), [i.srNo]: e.target.value } })} style={{ ...selStyle, marginTop: 6, fontSize: 12, padding: 6 }}>
+                <option value="__order">Category: same as the order</option>
+                <option value="">Leave uncategorised</option>
+                {cats.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ` : ""}{c.name}</option>)}
+              </select>
+            )}
           </div>
         ))}
         {v.handling && (
@@ -126,6 +154,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], T, sym =
 
         <div style={label}>Might already be in Arth</div>
         <div style={{ color: T.sub, fontSize: 11, marginBottom: 6 }}>Suggestions only. Arth never links anything on its own, and a match does not need the exact amount.</div>
+        <div data-testid="match-rules-note" style={{ color: "#f0a500", fontSize: 11, marginBottom: 6 }}>Early matching rules, not yet verified on real data: an expense within 3 days; a similar amount means within ₹25 or 5%, and the expense must mention Blinkit.</div>
         {inv.matches.length === 0 && <div data-testid="no-matches" style={{ ...card, color: T.sub, fontSize: 12 }}>No expense within 3 days looks like this invoice.</div>}
         {inv.matches.map(m => (
           <button key={m.id} data-testid="match-row" data-id={m.id} data-strength={m.strength} data-selected={String(sel === m.id)} onClick={() => setPicked({ ...picked, [key]: sel === m.id ? null : m.id })} style={{ ...card, display: "block", width: "100%", textAlign: "left", cursor: "pointer", border: `2px solid ${sel === m.id ? T.accent : T.border}`, marginBottom: 8 }}>
@@ -135,10 +164,48 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], T, sym =
           </button>
         ))}
         {inv.hints.map(h => <div key={h.id} data-testid="match-hint" style={{ color: T.sub, fontSize: 11, marginBottom: 6 }}>Note: {h.label} on {h.date} is {money(h.amount, sym)}. {h.message}</div>)}
-        <div data-testid="next-step" style={{ ...card, background: T.accentSoft }}>
-          <div style={{ color: T.text, fontSize: 12 }}>{describeNextStep(v, chosen)}</div>
-          <button disabled data-testid="save-disabled" style={{ ...btn(true, true), marginTop: 8, width: "100%" }}>Saving arrives in a later update</button>
-        </div>
+        {/* ---- Add to Arth: nothing below writes anything until Confirm ---- */}
+        <div style={label}>Add to Arth</div>
+        {oc.done ? (
+          <div data-testid="import-done" style={{ ...card, borderColor: "#22c55e" }}>
+            <div style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>Added to Arth</div>
+            <div data-testid="import-done-sentence" style={{ color: T.sub, fontSize: 12, margin: "4px 0 10px" }}>{oc.done.sentence}</div>
+            <button data-testid="undo-import" onClick={undo} style={btn(false)}>Undo</button>
+            {oc.undoError && <div data-testid="undo-error" style={{ color: "#f0a500", fontSize: 11, marginTop: 6 }}>{oc.undoError}</div>}
+          </div>
+        ) : (
+          <div data-testid="add-to-arth" style={card}>
+            {oc.undone && <div data-testid="undone-note" style={{ color: T.sub, fontSize: 12, marginBottom: 8 }}>Undone. Nothing from this invoice is in Arth.</div>}
+            {sameAmount && mode === "create" && <div data-testid="double-count-warning" style={{ color: "#f0a500", fontSize: 12, marginBottom: 8 }}>You already have a {money(sameAmount.amount, sym)} expense that looks like this invoice ({sameAmount.date}). Adding it as a new expense would count the spend twice. Select it above to add the items to it instead.</div>}
+            {chosen && chosen.strength === "same-amount" && (
+              <label style={{ display: "flex", gap: 8, alignItems: "center", color: T.text, fontSize: 13, marginBottom: 8 }}>
+                <input data-testid="mode-link" type="checkbox" checked={mode === "link"} onChange={e => setForm(key, { mode: e.target.checked ? "link" : "create" })} />
+                Add the items to the selected {money(chosen.amount, sym)} expense instead of creating a new one
+              </label>
+            )}
+            {chosen && chosen.strength === "similar" && <div style={{ color: T.sub, fontSize: 11, marginBottom: 8 }}>A similar-amount expense can't be linked yet (the amounts differ). You can add this invoice as a new expense, or edit that expense yourself.</div>}
+            {mode === "create" && (<>
+              <div style={label}>Paid from (required)</div>
+              <select data-testid="confirm-account" value={f.accountId || ""} onChange={e => setForm(key, { accountId: e.target.value })} style={selStyle}>
+                <option value="">Choose the account you paid from</option>
+                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <div style={{ color: T.sub, fontSize: 11, margin: "4px 0 8px" }}>The invoice doesn't say how it was paid. A credit-card purchase is added to that card; paying the card bill later is not counted again.</div>
+              <div style={label}>Category for the order</div>
+              <select data-testid="confirm-category" value={orderCat} onChange={e => setForm(key, { orderCat: e.target.value })} style={selStyle}>
+                <option value="">Leave uncategorised</option>
+                {cats.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ` : ""}{c.name}</option>)}
+              </select>
+            </>)}
+            {plan.errors.some(e => e.code === "no-key") && <label style={{ display: "flex", gap: 8, color: T.text, fontSize: 12, marginTop: 8 }}><input data-testid="ack-no-key" type="checkbox" checked={!!f.ackNoKey} onChange={e => setForm(key, { ackNoKey: e.target.checked })} />I understand duplicates cannot be checked for this invoice</label>}
+            {plan.errors.some(e => e.code === "orphan") && <label style={{ display: "flex", gap: 8, color: T.text, fontSize: 12, marginTop: 8 }}><input data-testid="import-again" type="checkbox" checked={!!f.importAgain} onChange={e => setForm(key, { importAgain: e.target.checked })} />Add it again (the earlier expense no longer exists)</label>}
+            <div data-testid="review-sentence" style={{ background: T.accentSoft, borderRadius: 10, padding: "8px 10px", color: T.text, fontSize: 12, marginTop: 10 }}>
+              {plan.ok ? <>Arth will: {plan.sentence}</> : <>Not ready: {plan.errors.map(e => e.message).join(" ")}</>}
+            </div>
+            {oc.error && <div data-testid="import-error" style={{ color: "#f0a500", fontSize: 12, marginTop: 8 }}>{oc.error}</div>}
+            <button data-testid="confirm-import" disabled={!plan.ok || oc.busy} onClick={confirm} style={{ ...btn(true, !plan.ok || oc.busy), marginTop: 10, width: "100%" }}>{oc.busy ? "Adding…" : mode === "link" ? "Confirm: add the items" : "Confirm: add this expense"}</button>
+          </div>
+        )}
       </div>
     );
   };
@@ -150,7 +217,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], T, sym =
         <button onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", color: T.accent, cursor: "pointer", fontSize: 22, padding: 0 }}>←</button>
         <div style={{ color: T.text, fontSize: 18, fontWeight: 900, flex: 1 }}>Import invoice</div>
       </div>
-      {banner("mute", <><b>Preview only. Nothing is saved.</b> No expense is created or changed, and the PDF is not stored.</>, "import-preview-banner")}
+      {banner("mute", <><b>Review first. Nothing is added until you press Confirm.</b> Reading the PDF creates or changes nothing, and the PDF itself is never stored.</>, "import-preview-banner")}
       <div style={card}>
         <div style={label}>Platform</div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -174,7 +241,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], T, sym =
           <span data-testid="diag-code" style={{ color: T.sub, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}>Code: {state.diag.status}{state.diag.codes.length ? ` · ${state.diag.codes.join(", ")}` : ""}</span>
         </div>
       )}
-      <div data-testid="preview-footer" style={{ color: T.sub, fontSize: 11, textAlign: "center", marginTop: 16 }}>Preview only · nothing is saved</div>
+      <div data-testid="preview-footer" style={{ color: T.sub, fontSize: 11, textAlign: "center", marginTop: 16 }}>Nothing is added until you press Confirm</div>
     </div>
   );
 }

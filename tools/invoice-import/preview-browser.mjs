@@ -43,7 +43,7 @@ await page.getByText("Import invoice", { exact: true }).first().click(); await p
 const T = id => page.getByTestId(id), body = async () => (await page.evaluate(() => document.body.innerText)).replace(/\s+/g, " ");
 requests.length = 0;                                          // the app's own page-load requests (fonts) are not part of PDF reading
 const pick = async f => { await T("invoice-file").setInputFiles(paths[f]); await page.waitForTimeout(1500); };
-rec("IV1 screen opens: preview-only banner, Blinkit active, footer says nothing is saved", (await T("invoice-import").count()) === 1 && /Preview only\. Nothing is saved/.test(await T("import-preview-banner").innerText()) && /nothing is saved/.test(await T("preview-footer").innerText()), {});
+rec("IV1 screen opens: review-first banner, Blinkit active, footer says nothing is added until Confirm", (await T("invoice-import").count()) === 1 && /Nothing is added until you press Confirm/.test(await T("import-preview-banner").innerText()) && /Nothing is added until you press Confirm/.test(await T("preview-footer").innerText()), {});
 
 await pick("good");
 const f = async id => (await T(`field-${id}`).innerText()).replace(/\s+/g, " ");
@@ -55,9 +55,10 @@ rec("IV4 delivery rows are ONE verified handling charge (₹13) with the 3 print
 rec("IV5 invoice total ₹1,125.00 and the reconciliation line names the invoice's own ₹0.01 rounding", /1,125/.test(await T("invoice-total").innerText()) && (await T("reconciliation").getAttribute("data-level")) === "adds-up-with-printed-rounding", {});
 const ms = await T("match-row").evaluateAll(els => els.map(e => [e.getAttribute("data-id"), e.getAttribute("data-strength"), e.getAttribute("data-selected")]));
 rec("IV6 matching: same-amount t1 first, similar t2 second, none auto-selected; other-merchant t4 and far txn absent; larger t3 only a hint", JSON.stringify(ms) === JSON.stringify([["t1", "same-amount", "false"], ["t2", "similar", "false"]]) && (await T("match-hint").count()) === 1 && /Test Bank/.test(await T("match-row").first().innerText()), { ms });
-rec("IV7 the save button is disabled and says saving arrives later", (await T("save-disabled").isDisabled()) && /later update/.test(await T("save-disabled").innerText()), {});
+rec("IV6b the matching rules are labelled as unverified on the screen", /not yet verified on real data/.test(await T("match-rules-note").innerText()), {});
+rec("IV7 Confirm is disabled until an account is chosen", (await T("confirm-import").isDisabled()), {});
 await T("match-row").first().click(); await page.waitForTimeout(200);
-rec("IV8 choosing a suggestion only changes the explanation (link wording); nothing is written", /would link this invoice to your ₹1,125 expense/.test(await T("next-step").innerText()) && JSON.stringify(await snap()) === JSON.stringify(before), {});
+rec("IV8 choosing a same-amount suggestion only offers the link option; nothing is written", (await T("mode-link").count()) === 1 && JSON.stringify(await snap()) === JSON.stringify(before), {});
 await T("payment-date").fill("2026-01-18"); await page.waitForTimeout(500);
 const ids = await T("match-row").evaluateAll(els => els.map(e => e.getAttribute("data-id")));
 rec("IV9 editing the payment date re-runs the matching (txn dated 19 Jan now appears); the invoice date is unchanged", ids.includes("tx") && (await f("invoice-date")).includes("2026-01-15"), { ids });

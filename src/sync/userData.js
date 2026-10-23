@@ -10,7 +10,7 @@ import { hasMeaningfulData } from "../domain/identity/masterUserSetup.js";
 
 const LISTS = ["groups", "membershipRelationships", "vehicles", "insurancePolicies", "mandatoryCommitments", "recurringSchedules", "events",
   "contributions", "feeSchedules", "feePeriods", "feePayments", "schoolCreditNotes", "gymCheckIns", "dismissedAlerts", "liabilities", "ccEmiPlans", "trackedAssets",
-  "expectedIncome", "payGroups", "budgetSpreads", "memberships", "bills", "investments", "loans", "gifts", "goals", "fuelFills", "txns"];
+  "expectedIncome", "payGroups", "budgetSpreads", "memberships", "bills", "investments", "loans", "gifts", "goals", "fuelFills", "invoiceImports", "txns"];
 const MAPS = ["planNudges", "monthOverrides", "perPersonBudgets", "balanceCheckpoints"];
 
 export function hasUserData(snapshot) {

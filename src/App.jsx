@@ -194,6 +194,7 @@ import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import InvoiceImportScreen from "./screens/InvoiceImportScreen";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import { validateFill, normalizeFill } from "./domain/vehicles/fuelFills";
+import { planUndo as planInvoiceUndo } from "./domain/invoices/invoiceImport";
 import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
 import { computeLineItemCategoryRollup, rollupToCatAllocations } from "./domain/transactions/lineItemCategoryRollup";
@@ -928,6 +929,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [vehicleTab, setVehicleTab] = useState("overview");
   // Odometer capture at every refuelling (mileage history, km/L, fuel cost per km). Synced with the rest of the snapshot; see domain/vehicles/fuelFills.js.
+  // Confirmed invoice imports (INVOICE-IMPORT-003): one small record per invoice added to Arth (key, identifiers, total, the expense it points to). Synced with the snapshot.
+  const [invoiceImports, setInvoiceImports] = useState(()=>{ try{ const v = JSON.parse(localStorage.getItem("arth_invoice_imports")||"[]"); return Array.isArray(v) ? v : []; }catch{ return []; } });
   const [fuelFills, setFuelFills] = useState(()=>{ try{ const v = JSON.parse(localStorage.getItem("arth_fuel_fills")||"[]"); return Array.isArray(v) ? v : []; }catch{ return []; } });
   // Daily wealth/budget snapshot history — recorded silently every day even with no UI to view it
   // yet. Net Worth Trend, Wealth Timeline, and the Financial Health chapters all depend on history
@@ -1155,6 +1158,33 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   useEffect(()=>safeSetLocalStorage("arth_skipped_investments",JSON.stringify(skippedInvestmentMonths)),[skippedInvestmentMonths]);
   useEffect(()=>safeSetLocalStorage("arth_gifts",JSON.stringify(gifts)),[gifts]);
   useEffect(()=>safeSetLocalStorage("arth_fuel_fills",JSON.stringify(fuelFills)),[fuelFills]);
+  useEffect(()=>safeSetLocalStorage("arth_invoice_imports",JSON.stringify(invoiceImports)),[invoiceImports]);
+  // Confirmed invoice import (INVOICE-IMPORT-003). The expense (through the same boundary Quick Add uses, or only its items for a link) and the invoice record are written
+  // together; then the device copy is READ BACK. If either is missing (the boundary refused it, or the device could not save), both are rolled back and the person is told.
+  const confirmInvoiceImport = async plan => {
+    if(plan.create) createTransactionThroughBoundary(plan.create);
+    else setTxns(prev=>prev.map(t=>String(t.id)===String(plan.patch.txnId) ? { ...t, lineItems: plan.patch.lineItems } : t));
+    setInvoiceImports(prev=>[plan.record, ...prev]);
+    await new Promise(r=>setTimeout(r, 700));
+    try{
+      const saved = JSON.parse(localStorage.getItem("arth_txns")||"[]"), recs = JSON.parse(localStorage.getItem("arth_invoice_imports")||"[]");
+      const t = saved.find(x=>String(x.id)===String(plan.record.txnId));
+      const expected = plan.create ? plan.create.lineItems.length : plan.patch.lineItems.length;
+      if(t && Array.isArray(t.lineItems) && t.lineItems.length===expected && recs.some(x=>x.id===plan.record.id)) return { ok:true };
+    }catch(e){ console.error("invoice import read-back failed", e); }
+    setInvoiceImports(prev=>prev.filter(x=>x.id!==plan.record.id));
+    if(plan.create) setTxns(prev=>prev.filter(t=>String(t.id)!==String(plan.create.id)));
+    else setTxns(prev=>prev.map(t=>String(t.id)===String(plan.patch.txnId) ? { ...t, lineItems: plan.patch.previousLineItems } : t));
+    return { ok:false, error:"Couldn't save on this device, so nothing was added. Free up some space or download a backup (Settings, Backup & Restore), then try again." };
+  };
+  const undoInvoiceImport = (record, plan) => {
+    const r = planInvoiceUndo(record, plan, txns);
+    if(!r.ok) return r;
+    if(r.action==="remove-expense") setTxns(prev=>prev.filter(t=>String(t.id)!==String(record.txnId)));
+    else setTxns(prev=>prev.map(t=>String(t.id)===String(record.txnId) ? { ...t, lineItems: r.previousLineItems } : t));
+    setInvoiceImports(prev=>prev.filter(x=>x.id!==record.id));
+    return { ok:true };
+  };
   useEffect(()=>safeSetLocalStorage("arth_wealth_snapshots",JSON.stringify(wealthSnapshots)),[wealthSnapshots]);
   useEffect(()=>safeSetLocalStorage("arth_goals",JSON.stringify(goals)),[goals]);
   useEffect(()=>safeSetLocalStorage("arth_expected_income",JSON.stringify(expectedIncome)),[expectedIncome]);
@@ -9344,6 +9374,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     perPersonBudgets,
     gifts,
     fuelFills,
+    invoiceImports,
     dismissedAlerts,
     wealthSnapshots,
     goals,
@@ -9374,7 +9405,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     budgetCarryForward,
     defaultGroupId,
     hiddenCards:[...hiddenCards],
-  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, fuelFills, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, mandatoryCommitments, payGroups, budgetSpreads, planNudges, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards]);
+  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, fuelFills, invoiceImports, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, mandatoryCommitments, payGroups, budgetSpreads, planNudges, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -9415,6 +9446,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
     if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
     if(Array.isArray(snapshot.fuelFills)) setFuelFills(snapshot.fuelFills);
+    if(Array.isArray(snapshot.invoiceImports)) setInvoiceImports(snapshot.invoiceImports);
     if(Array.isArray(snapshot.dismissedAlerts)) setDismissedAlerts(snapshot.dismissedAlerts);
     if(Array.isArray(snapshot.wealthSnapshots)) setWealthSnapshots(snapshot.wealthSnapshots);
     if(Array.isArray(snapshot.goals)) setGoals(snapshot.goals);
@@ -15221,7 +15253,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       />
     );
 
-    if(settingsSection==="importinvoice") return <InvoiceImportScreen accounts={accounts} txns={txns} T={T} sym={sym} onBack={()=>setSettingsSection(null)} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }}/>;
     if(settingsSection==="backup") return (
       <div style={{ padding:"14px 16px 0" }}>
         <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
@@ -15556,7 +15587,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               (per the Screen Inventory). Export exists via CSV, listed below under Backup. */}
           <Row icon="🙂" title="My Profile" subtitle={(people.find(p=>p.isMe)?.name)||"Set up your identity in Arth"} onClick={()=>setSettingsSection("myprofile")}/>
           <Row icon="🔑" title="Cloud Sync & Account" subtitle={cloudUser?.email ? `Signed in as ${cloudUser.email}${lastSyncedAt ? " · synced" : ""}` : "Sign in to sync across devices"} onClick={()=>setSettingsSection("cloudsync")}/>
-          <Row icon="🧾" title="Import invoice" subtitle="Preview a Blinkit invoice PDF (nothing is saved)" onClick={()=>setSettingsSection("importinvoice")}/>
+          <Row icon="🧾" title="Import invoice" subtitle="Add a Blinkit invoice PDF as an itemised expense (you review first)" onClick={()=>setSettingsSection("importinvoice")}/>
           <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
         </div>
 
@@ -20204,7 +20235,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           : <MoneyPage/>)}
         {!showSettings&&tab==="outlook"&&<OutlookPage/>}
         {!showSettings&&tab==="insights"&&<InsightsPage/>}
-        {showSettings&&<Settings/>}
+        {/* The invoice screen is rendered HERE, not inside Settings: Settings is re-created on every AppContent render, which would reset this screen (its review state, the success message, Undo) the moment the import saves. */}
+        {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>setSettingsSection(null)} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }}/>}
+        {showSettings&&settingsSection!=="importinvoice"&&<Settings/>}
 
       {/* Universal Search Overlay */}
       {showSearch&&(
