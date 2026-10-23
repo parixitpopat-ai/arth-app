@@ -9,6 +9,8 @@
 import React, { useState } from "react";
 import { RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY } from "../constants/theme";
 import EmptyState from "../components/EmptyState";
+import FuelFillSheet from "../components/FuelFillSheet";
+import { fillsForVehicle, buildFuelHistory, fuelSummary } from "../domain/vehicles/fuelFills";
 import {
   getVehicleRunningCostBuckets, getVehicleTCO, getVehicleStatusTiles, getVehicleRecentTxns,
   getVehicleTxnsByMonth, getVehicleFuelSummary, getVehicleMaintenanceSummary,
@@ -77,8 +79,12 @@ function BulkLinkVehicleSheet({ vehicle, candidates, onClose, onLink, T, sym, fm
 export default function VehicleProfileScreen({
   vehicle, txns, insurancePolicies = [], T, sym, fmt, formatShortDate,
   onClose, onEdit, onAddExpense, onOpenTxn, onBulkLink, onAddInsurancePolicy, onOpenPolicy,
+  fuelFills = [], onSaveFill, onDeleteFill, tab: controlledTab, onTabChange,
 }) {
-  const [tab, setTab] = useState("overview");
+  const [ownTab, setOwnTab] = useState("overview");
+  const tab = controlledTab ?? ownTab;                                  // the app can hold the tab so it survives a parent re-creation
+  const setTab = t => { if (onTabChange) onTabChange(t); else setOwnTab(t); };
+  const [fillSheet, setFillSheet] = useState(undefined); // undefined = closed, null = new refuel, object = editing that refuel
   const [bulkLinkSubId, setBulkLinkSubId] = useState(undefined); // undefined = closed, null = any Transport subcat
 
   const linkedPolicy = insurancePolicies.find(p => String(p.vehicleId) === String(vehicle.id));
@@ -220,8 +226,43 @@ export default function VehicleProfileScreen({
 
       {tab === "fuel" && (() => {
         const fs = getVehicleFuelSummary(vehicle, txns);
+        const myFills = fillsForVehicle(fuelFills, vehicle.id), ms = fuelSummary(myFills), history = buildFuelHistory(myFills).reverse();
+        const km = n => Number(n).toLocaleString("en-IN");
+        const tile = (label, value, testid) => <div style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: RADIUS.md, padding: 12, display: "flex", flexDirection: "column", gap: 4 }}><span style={{ color: T.sub, fontSize: 12 }}>{label}</span><span data-testid={testid} style={{ ...MONEY.row, color: T.text }}>{value}</span></div>;
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingBottom: 30 }}>
+            <div data-testid="mileage-section" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <SectionLabel T={T}>Mileage</SectionLabel>
+                <div data-testid="add-refuel" onClick={() => setFillSheet(null)} style={{ minHeight: 40, padding: "0 14px", borderRadius: RADIUS.md, background: T.accent, color: T.accentInk, fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", cursor: "pointer" }}>+ Add refuel</div>
+              </div>
+              {ms.count === 0 ? (
+                <div style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: RADIUS.lg, padding: 14, color: T.sub, fontSize: 14, lineHeight: 1.45 }}>Note the odometer at every refuel to see this vehicle's mileage (km/L) and what each kilometre costs in fuel.</div>
+              ) : (<>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                  {tile("Odometer", `${km(ms.latestOdometer)} km`, "mileage-odometer")}
+                  {tile("Avg km/L", ms.avgKmpl != null ? ms.avgKmpl.toFixed(1) : "—", "mileage-avg")}
+                  {tile("Fuel per km", ms.fuelCostPerKm != null ? `${sym}${ms.fuelCostPerKm.toFixed(2)}` : "—", "mileage-costkm")}
+                </div>
+                {ms.needsFullFills && <div style={{ color: T.sub, fontSize: 13, lineHeight: 1.45 }}>Mileage needs two full-tank refuels. Tick "Filled the tank to full" when you fill up.</div>}
+                <div style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: RADIUS.lg, padding: "0 14px" }}>
+                  {history.map(r => (
+                    <div key={r.id} data-testid="refuel-row" onClick={() => setFillSheet(myFills.find(f => String(f.id) === String(r.id)))} style={{ minHeight: 60, padding: "8px 0", display: "flex", alignItems: "center", gap: 12, borderBottom: `1px solid ${T.border}`, cursor: "pointer" }}>
+                      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                        <span style={{ ...TYPE_SCALE.rowTitle, color: T.text }}>{km(r.odometer)} km{r.full ? "" : " · top-up"}</span>
+                        <span style={{ ...TYPE_SCALE.meta, color: T.sub }}>{formatShortDate(r.date) || r.date} · {r.litres} L{r.pricePerL != null ? ` · ${sym}${r.pricePerL.toFixed(2)}/L` : ""}{r.distanceSincePrev != null ? ` · +${km(r.distanceSincePrev)} km` : ""}</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                        {r.kmpl != null && <span data-testid="refuel-kmpl" style={{ color: r.suspect ? T.warn : T.text, fontSize: 14, fontWeight: 700 }}>{r.suspect ? "⚠️ " : ""}{r.kmpl.toFixed(1)} km/L</span>}
+                        {r.costPerKm != null && <span style={{ color: T.sub, fontSize: 12 }}>{sym}{r.costPerKm.toFixed(2)}/km</span>}
+                        {r.amount != null && <span style={{ color: T.sub, fontSize: 12 }}>{sym}{fmt(r.amount)}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <span style={{ color: T.subDim, fontSize: 12, lineHeight: 1.4 }}>km/L and fuel per km are worked out between full tanks and count only the refuels recorded here. They do not change your expenses.</span>
+              </>)}
+            </div>
             {fs.twelveMonth.count === 0 ? (
               <EmptyState icon="⛽" title="No fuel linked to this vehicle" subtitle="Link recent fuel payments, or add one now." T={T}
                 action={<div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -254,7 +295,6 @@ export default function VehicleProfileScreen({
                     {fs.thisMonthTxns.map(t => <TxnRow key={t.id} title={t.desc || t.merchant || "Fuel"} meta={formatShortDate(t.date) || t.date} amount={t.amount} sym={sym} fmt={fmt} onClick={() => onOpenTxn?.(t)} T={T} />)}
                   </div>
                 </div>
-                <div style={{ border: `1px dashed ${T.warn}`, borderRadius: RADIUS.md, padding: "10px 12px", color: T.sub, fontSize: 13, lineHeight: 1.45 }}>Litres, price per litre and mileage need fuel fields on the transaction. Not shown today.</div>
               </>
             )}
           </div>
@@ -380,6 +420,8 @@ export default function VehicleProfileScreen({
         );
       })()}
 
+      {fillSheet !== undefined && <FuelFillSheet T={T} vehicle={vehicle} fills={fuelFills} existing={fillSheet} sym={sym}
+        onSave={f => { onSaveFill?.(f); setFillSheet(undefined); }} onDelete={id => { onDeleteFill?.(id); setFillSheet(undefined); }} onClose={() => setFillSheet(undefined)} />}
       {bulkLinkSubId !== undefined && (
         <BulkLinkVehicleSheet
           vehicle={vehicle}

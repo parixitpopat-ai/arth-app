@@ -192,6 +192,7 @@ import ChangeBillingModal from "./components/ChangeBillingModal";
 import CreditCardsListScreen from "./components/CreditCardsListScreen";
 import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
+import { validateFill, normalizeFill } from "./domain/vehicles/fuelFills";
 import Chip from "./components/Chip";
 import EntityCard from "./components/EntityCard";
 import { computeLineItemCategoryRollup, rollupToCatAllocations } from "./domain/transactions/lineItemCategoryRollup";
@@ -919,6 +920,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [recurringSchedules, setRecurringSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_recurring")||"[]"));
   const [skippedInvestmentMonths, setSkippedInvestmentMonths] = useState(()=>JSON.parse(localStorage.getItem("arth_skipped_investments")||"[]"));
   const [gifts, setGifts] = useState(()=>JSON.parse(localStorage.getItem("arth_gifts")||"[]"));
+  // Vehicle screen state lives here, not inside Settings: Settings is re-created on every AppContent render, so state held in it is lost whenever
+  // any app data changes (saving a refuel, linking expenses), which closed the open vehicle. The selected tab is kept for the same reason.
+  const [showAddVehicle, setShowAddVehicle] = useState(false);
+  const [editingVehicleObj, setEditingVehicleObj] = useState(null);
+  const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const [vehicleTab, setVehicleTab] = useState("overview");
+  // Odometer capture at every refuelling (mileage history, km/L, fuel cost per km). Synced with the rest of the snapshot; see domain/vehicles/fuelFills.js.
+  const [fuelFills, setFuelFills] = useState(()=>{ try{ const v = JSON.parse(localStorage.getItem("arth_fuel_fills")||"[]"); return Array.isArray(v) ? v : []; }catch{ return []; } });
   // Daily wealth/budget snapshot history — recorded silently every day even with no UI to view it
   // yet. Net Worth Trend, Wealth Timeline, and the Financial Health chapters all depend on history
   // that can never be reconstructed retroactively — every day this doesn't run is data lost for good.
@@ -1144,6 +1153,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   useEffect(()=>safeSetLocalStorage("arth_recurring",JSON.stringify(recurringSchedules)),[recurringSchedules]);
   useEffect(()=>safeSetLocalStorage("arth_skipped_investments",JSON.stringify(skippedInvestmentMonths)),[skippedInvestmentMonths]);
   useEffect(()=>safeSetLocalStorage("arth_gifts",JSON.stringify(gifts)),[gifts]);
+  useEffect(()=>safeSetLocalStorage("arth_fuel_fills",JSON.stringify(fuelFills)),[fuelFills]);
   useEffect(()=>safeSetLocalStorage("arth_wealth_snapshots",JSON.stringify(wealthSnapshots)),[wealthSnapshots]);
   useEffect(()=>safeSetLocalStorage("arth_goals",JSON.stringify(goals)),[goals]);
   useEffect(()=>safeSetLocalStorage("arth_expected_income",JSON.stringify(expectedIncome)),[expectedIncome]);
@@ -9332,6 +9342,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     events,
     perPersonBudgets,
     gifts,
+    fuelFills,
     dismissedAlerts,
     wealthSnapshots,
     goals,
@@ -9362,7 +9373,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     budgetCarryForward,
     defaultGroupId,
     hiddenCards:[...hiddenCards],
-  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, mandatoryCommitments, payGroups, budgetSpreads, planNudges, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards]);
+  }), [dark, masterUserSetupComplete, autoDetectExpenseCategory, workTripMode, autoBackupEnabled, autoBackupFrequency, cats, accountTypes, incomeTypes, customLiabilityTypes, accounts, balanceCheckpoints, people, groups, measureUnits, itemCatalog, txns, investments, bills, billerAccounts, billers, memberships, membershipRelationships, feePayments, vehicles, events, perPersonBudgets, gifts, fuelFills, dismissedAlerts, wealthSnapshots, goals, expectedIncome, insurancePolicies, gymCheckIns, arthHolidays, feeSchedules, feePeriods, contributions, schoolCreditNotes, schoolRelationships, liabilities, trackedAssets, loans, annualBudget, lastFYTarget, monthOverrides, mandatoryCommitments, payGroups, budgetSpreads, planNudges, cardOrder, recurringSchedules, ccEmiPlans, skippedInvestmentMonths, budgetCarryForward, defaultGroupId, hiddenCards]);
 
   useEffect(() => {
     cloudSnapshotRef.current = cloudSnapshot;
@@ -9402,6 +9413,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(snapshot.perPersonBudgets) setPerPersonBudgets(snapshot.perPersonBudgets);
     if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
     if(Array.isArray(snapshot.gifts)) setGifts(snapshot.gifts);
+    if(Array.isArray(snapshot.fuelFills)) setFuelFills(snapshot.fuelFills);
     if(Array.isArray(snapshot.dismissedAlerts)) setDismissedAlerts(snapshot.dismissedAlerts);
     if(Array.isArray(snapshot.wealthSnapshots)) setWealthSnapshots(snapshot.wealthSnapshots);
     if(Array.isArray(snapshot.goals)) setGoals(snapshot.goals);
@@ -14655,9 +14667,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // causing React to fully unmount/remount it (and lose input focus) on every character typed.
     // Reusable AddVehicleModal (Vehicle Experience brief) replaced the old inline
     // vType/vNumber/vName/vColor form fields — the modal owns its own field state now.
-    const [showAddVehicle, setShowAddVehicle] = useState(false);
-    const [editingVehicleObj, setEditingVehicleObj] = useState(null);
-    const [selectedVehicle, setSelectedVehicle] = useState(null);
     const [addSubTo,setAddSubTo]=useState(null);
     const [subInput,setSubInput]=useState("");
     const [newCatName,setNewCatName]=useState("");
@@ -14932,7 +14941,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       // profile itself needs to open the same reusable AddVehicleModal without leaving the
       // profile behind it.
       const modals = (<>
-        {showAddVehicle&&<AddVehicleModal vehicles={vehicles} setVehicles={setVehicles} onClose={()=>setShowAddVehicle(false)} onCreated={v=>setSelectedVehicle(v)} T={T}/>}
+        {showAddVehicle&&<AddVehicleModal vehicles={vehicles} setVehicles={setVehicles} onClose={()=>setShowAddVehicle(false)} onCreated={v=>{ setVehicleTab("overview"); setSelectedVehicle(v); }} T={T}/>}
         {editingVehicleObj&&<AddVehicleModal existing={editingVehicleObj} vehicles={vehicles} setVehicles={setVehicles} linkedTxnCount={txns.filter(t=>t.vehicleId===editingVehicleObj.id).length} onClose={()=>{ setEditingVehicleObj(null); setSelectedVehicle(null); }} T={T}/>}
       </>);
 
@@ -14951,6 +14960,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             onBulkLink={(ids,vId)=>setTxns(prev=>prev.map(t=>ids.map(String).includes(String(t.id))?{...t,vehicleId:vId}:t))}
             onAddInsurancePolicy={prefill=>{ setAddPolicyPrefill(prefill); setShowAddPolicy(true); }}
             onOpenPolicy={policy=>setViewingPolicy(policy)}
+            tab={vehicleTab} onTabChange={setVehicleTab}
+            fuelFills={fuelFills}
+            onSaveFill={f=>setFuelFills(prev=>{
+              if(!validateFill(prev, f).ok) return prev;   // the sheet validates too; this guards against a change made in between
+              const n = normalizeFill(f);
+              return f.id!=null && prev.some(x=>String(x.id)===String(f.id)) ? prev.map(x=>String(x.id)===String(f.id)?{ ...n, id:x.id }:x) : [...prev, { ...n, id:genId() }];
+            })}
+            onDeleteFill={id=>setFuelFills(prev=>prev.filter(x=>String(x.id)!==String(id)))}
           />
           {modals}
         </>);
@@ -14980,7 +14997,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   title={v.name||v.number}
                   subtitle={`${vt.label} · ${v.number}${linkedTxns.length?` · Last 12 months · ${linkedTxns.length} transaction${linkedTxns.length===1?"":"s"}`:" · No spending linked yet"}`}
                   T={T}
-                  onClick={()=>setSelectedVehicle(v)}
+                  onClick={()=>{ setVehicleTab("overview"); setSelectedVehicle(v); }}
                   trailing={linkedTxns.length>0?<span style={{ color:T.text,fontSize:14,fontWeight:800,fontFamily:"IBM Plex Mono,monospace" }}>{sym}{fmt(running)}</span>:null}
                 />
               </div>

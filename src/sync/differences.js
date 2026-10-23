@@ -9,7 +9,7 @@ export const LABELS = {
   memberships: "memberships", membershipRelationships: "membership relationships", billerAccounts: "biller accounts", billers: "billers",
   loans: "loans", investments: "investments", goals: "goals", feePayments: "fee payments", feeSchedules: "fee schedules", feePeriods: "fee periods",
   planNudges: "Plan Ahead choices", monthOverrides: "monthly budget changes", budgetSpreads: "budget spreads", payGroups: "pay-together groups",
-  mandatoryCommitments: "mandatory commitments", recurringSchedules: "recurring schedules", insurancePolicies: "insurance policies", vehicles: "vehicles",
+  mandatoryCommitments: "mandatory commitments", recurringSchedules: "recurring schedules", fuelFills: "fuel fill-ups", insurancePolicies: "insurance policies", vehicles: "vehicles",
   cats: "categories", dismissedAlerts: "dismissed alerts", hiddenCards: "hidden cards", wealthSnapshots: "net-worth snapshots", gymCheckIns: "gym check-ins",
 };
 const label = key => LABELS[key] || key;
