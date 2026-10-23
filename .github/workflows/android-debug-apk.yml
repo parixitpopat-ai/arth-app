@@ -58,7 +58,11 @@ jobs:
 
       # The existing production Web build (Vite, base "./"). Cloud-sync settings are the app's own
       # built-in defaults (src/cloudSync.js), exactly as in the Web build.
-      - name: Build the Web app
+      # INVOICE-PREVIEW BUILD: VERCEL_ENV=preview makes src/cloudConfig.js run the app LOCAL-ONLY (no Supabase, no sync, no sign-in to the
+      # production backend). Without it the Android build falls back to the production project. Remove this env for any real release build.
+      - name: Build the Web app (local-only, no production backend)
+        env:
+          VERCEL_ENV: preview
         run: npm run build
 
       - name: Copy the Web build into the Android project
