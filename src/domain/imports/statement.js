@@ -6,7 +6,7 @@
 // Dates are read day-first (DD/MM/YYYY), the Indian convention; a value like 03/04/2026 is read as 3 April. Nothing is saved here.
 
 const ALIASES = {
-  date: ["transaction date", "txn date", "tran date", "date", "posting date"],
+  date: ["transaction date", "transaction date & time", "transaction date and time", "txn date", "tran date", "date", "posting date"],
   valueDate: ["value date", "value dt"],
   desc: ["particulars", "narration", "description", "transaction remarks", "remarks", "details", "transaction details"],
   ref: ["cheque no", "cheque no.", "chq no", "chq/ref no", "cheque/ref no", "ref no", "reference no", "reference", "utr", "transaction id"],

@@ -147,3 +147,10 @@ test("xlsx: refuses non-zip, old .xls and oversized input with plain messages", 
   await assert.rejects(() => readXlsx(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])), /not a valid \.xlsx/);
   await assert.rejects(() => readXlsx(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0])), /old-format/);
 });
+
+test("statement: heading 'Transaction Date & Time' (as printed on the IDFC statement) is recognised", () => {
+  const p = parseStatementRows([["Transaction Date & Time", "Value Date", "Particulars", "Cheque No", "Debit", "Credit", "Balance"], ["", "", "Opening Balance", "", "", "", "10,067.30"], ["01-Feb-2022", "01-Feb-2022", "UPI/MOB/1/Payment f rom PhonePe", "", "50.00", "", "10,017.30"], ["01-Feb-2022", "01-Feb-2022", "NEFT/2/SALARY", "", "", "75,000.00", "85,017.30"]]);
+  assert.equal(p.ok, true);
+  assert.deepEqual(p.rows.map(r => r.amountPaise), [-5000, 7500000]);
+  assert.deepEqual(p.balance.mismatches, []);
+});
