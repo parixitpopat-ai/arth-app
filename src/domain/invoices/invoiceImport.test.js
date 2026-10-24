@@ -127,10 +127,15 @@ test("undo: allowed only while the expense is exactly as the import left it (ext
   assert.equal(planUndo(r.record, r, [{ ...stored, amount: 999 }]).ok, false);
   assert.equal(planUndo(r.record, r, [{ ...stored, lineItems: [] }]).ok, false);
   assert.equal(planUndo(r.record, r, []).ok, false);
+  // anything added to the expense since (people / groups / allocations / a note / a settlement) is not thrown away silently
+  for (const extra of [{ people: { p1: { amount: 10 } } }, { allocations: [{ targetId: "g1", amount: 10 }] }, { groupAllocations: [{ groupId: "g1", amount: 5 }] }, { groupId: "g1" }, { forPerson: "p1" }, { note: "edited" }, { settlementLinks: [{ id: "s" }] }])
+    assert.equal(planUndo(r.record, r, [{ ...stored, ...extra }]).ok, false, JSON.stringify(extra));
+  assert.equal(planUndo(r.record, r, [{ ...stored, people: {}, allocations: [], groupAllocations: null, groupId: null, forPerson: "" }]).ok, true);
   const target = { id: "t9", type: "expense", amount: 1125, date: "2026-01-16", accId: "c1" };
   const l = planConfirm({ ...good(), mode: "link", linkTxnId: "t9" }, ctx({ txns: [target] }));
   assert.equal(planUndo(l.record, l, [{ ...target, lineItems: l.patch.lineItems }]).ok, true);
   assert.equal(planUndo(l.record, l, [{ ...target, lineItems: l.patch.lineItems, amount: 5 }]).ok, false);
+  assert.equal(planUndo(l.record, l, [{ ...target, lineItems: l.patch.lineItems, allocations: [{ targetId: "p1", amount: 5, items: [{ sourceItemId: "x", qty: 1 }] }] }]).ok, false);
 });
 
 test("the plan module cannot write anywhere: no storage, no state setters, no network", () => {

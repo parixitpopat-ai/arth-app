@@ -158,6 +158,17 @@ export function planConfirm(input, ctx) {
   return { ok: true, errors: [], create, patch, record, lines, sentence, learn, uncategorised };
 }
 
+/** True when the expense carries something the import did not put there. For a created expense: any person/group split, allocation, note change or settlement. For a linked one (created == null): item-level allocations that would dangle if the items were taken off again. */
+function touchedSince(t, created) {
+  const hasAlloc = Array.isArray(t.allocations) && t.allocations.length > 0;
+  if (!created) return hasAlloc;
+  const people = t.people && typeof t.people === "object" ? Object.keys(t.people).length > 0 : false;
+  const splitPeople = t.splitPeople && typeof t.splitPeople === "object" ? Object.keys(t.splitPeople).length > 0 : false;
+  const groups = Array.isArray(t.groupAllocations) && t.groupAllocations.length > 0;
+  const links = Array.isArray(t.settlementLinks) && t.settlementLinks.length > 0;
+  return hasAlloc || people || splitPeople || groups || links || Boolean(t.groupId) || Boolean(t.forPerson) || String(t.note || "") !== String(created.note || "");
+}
+
 /** Can this import be undone safely? Only if the expense is exactly as the import left it. */
 export function planUndo(record, plan, txns) {
   const t = txns.find(x => String(x.id) === String(record.txnId));
@@ -165,8 +176,11 @@ export function planUndo(record, plan, txns) {
   if (record.mode === "created") {
     const same = ["id", "amount", "date", "accId", "merchant", "catId"].every(k => String(t[k]) === String(plan.create[k])) && JSON.stringify(t.lineItems) === JSON.stringify(plan.create.lineItems);   // the boundary may add its own fields
     if (!same) return { ok: false, reason: "The expense was changed after it was added, so it was left alone." };
+    // Anything added since (people or groups it is split with, a note, a settlement) would be thrown away with the expense, so Undo refuses.
+    if (touchedSince(t, plan.create)) return { ok: false, reason: "The expense was changed after it was added (people, notes or payments), so it was left alone." };
     return { ok: true, action: "remove-expense" };
   }
+  if (touchedSince(t, null)) return { ok: false, reason: "The expense was changed after the items were added to it (people or groups were tagged to the items), so it was left alone." };
   if (JSON.stringify(t.lineItems) !== JSON.stringify(plan.patch.lineItems) || Math.abs(Number(t.amount) - record.totalPaise / 100) >= 0.005) return { ok: false, reason: "The expense was changed after the items were added, so it was left alone." };
   return { ok: true, action: "restore-items", previousLineItems: plan.patch.previousLineItems };
 }
