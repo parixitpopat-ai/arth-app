@@ -31,7 +31,7 @@ import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY, S
 import { Compass, Calendar, ChevronRight, ChevronDown, Landmark, GraduationCap, Dumbbell, Shield, Repeat, CreditCard, Receipt, TrendingUp } from "lucide-react";
 import { groupFutureMoneyByRhythm } from "./domain/futureMoney/rhythm";
 import { getSourceTypeLabel, getDisplayStatus, isEstimatedOccurrence } from "./domain/futureMoney/sourceTypeMeta";
-import { todayStr, toLocalDateStr, addDaysToDateStr, addMonthsClamped, dateAtDay, getPeriodEffectiveEnd, daysInMonth, daysLeft, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
+import { todayStr, toLocalDateStr, addDaysToDateStr, addMonthsClamped, dateAtDay, getPeriodEffectiveEnd, daysInMonth, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
 import { getMembershipRenewalStatus } from "./domain/membership/renewalStatus";
 import { getPendingGymCatchUp, recordGymCheckIn, recordGymBreak } from "./domain/membership/checkIn";
 import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
@@ -59,6 +59,7 @@ import useOnline from "./hooks/useOnline";
 import { splitAllocation } from "./domain/budget/commitmentSplit";
 import { buildReadiness, shiftMonthKey } from "./domain/budget/readiness";
 import { planNudge } from "./domain/budget/nudge";
+import { getBudgetLeft } from "./domain/budget/budgetLeft";
 import { createGroup as createPayGroup, removeItem as removePayGroupItem, listPayableInstalments, liveItems as livePayGroupItems } from "./domain/payTogether/group";
 import { planGroupPayment } from "./domain/payTogether/payPlan";
 import PayGroupSheet from "./screens/PayGroupSheet";
@@ -126,7 +127,7 @@ import { withMembershipPaymentSynced } from "./domain/membership/paymentSync";
 import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
-import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getEffectiveMonthlyBudget, getCarryForwardPrevSpend, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getSafeToSpendPerDay, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope, buildRefundTotalsByExpense } from "../domain/allocations/adapter";
+import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getEffectiveMonthlyBudget, getCarryForwardPrevSpend, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope, buildRefundTotalsByExpense } from "../domain/allocations/adapter";
 // WP8 — the central Insights read model. Every Insights card on InsightsPage (and
 // BudgetInsights, which imports the spending/budgetPerformance pair directly) is required to
 // consume these, never compute independently — see domain/insights/*.js file headers.
@@ -2594,7 +2595,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   },[txns,bills,getGroupCollectiveDue]);
   const totalOwedToMe = useMemo(()=>directOwedToMe + collectiveGroupReceivable,[directOwedToMe,collectiveGroupReceivable]);
   const remaining = monthBudget-myActual;
-  const safePerDay = monthBudget>0?Math.max(0,Math.round(remaining/Math.max(1,daysLeft()))):null;
 
   const expenseBaseTxns = useMemo(()=>txns.filter(t=>t.type==="expense" && isDateInRange(t.date, txnDateFrom, txnDateTo)),[txns,txnDateFrom,txnDateTo]);
   const incomeBaseTxns = useMemo(()=>txns.filter(t=>t.type==="income" && isDateInRange(t.date, txnDateFrom, txnDateTo)),[txns,txnDateFrom,txnDateTo]);
@@ -10245,9 +10245,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const homeThisMonthTxns = txns.filter(t=>t.date&&t.date.startsWith(homeMonthKey));
     const homeMonthSpend = getHouseholdAttributedTotal({ periodTransactions: homeThisMonthTxns, allTransactions: txns });
     const homeMonthBudget = getEffectiveMonthlyBudget({ annualBudget, monthOverrides, monthKey:homeMonthKey, carryForwardEnabled:budgetCarryForward, transactions:txns }).effective;
-    const homeSafeToSpend = homeMonthBudget - homeMonthSpend;
-    const homeDaysLeftInMonth = new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth()+1, 0).getDate() - homeTodayDate.getDate() + 1;
-    const homeSafeToSpendPerDay = homeDaysLeftInMonth>0 ? homeSafeToSpend/homeDaysLeftInMonth : homeSafeToSpend;
+    const homeBudgetLeft = getBudgetLeft({ budget:homeMonthBudget, spent:homeMonthSpend, today:homeTodayDate, monthKey:homeMonthKey });
+    const homeSafeToSpend = homeBudgetLeft.remaining;
     // homeCashRequired = Committed Spending (unpaid) + Committed Saving, summed together per the
     // approved array-scope decision — this is the "Protected Money" concept, architecturally the
     // same shape as Outlook's "Next Month Cash Outflow" lens, just not month-scoped here (Home
@@ -10278,7 +10277,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const diff = monthly - myActual;
     const isOver = diff < 0;
 
-    const leftDays = daysLeft(viewMonth);
     // Recurring investment reminders
     const todayDate = new Date();
     const todayDay = todayDate.getDate();
@@ -10384,8 +10382,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         );
       })(),
       safeToSpend: (
-        <div key="safeToSpend" onClick={()=>setTab("outlook")} style={{ ...card,textAlign:"center",cursor:"pointer",background:`linear-gradient(135deg,${T.accent}1c,${T.card})`,border:`1px solid ${T.accent}33`,padding:20 }}>
-          <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>SAFE TO SPEND · {homeTodayDate.toLocaleString("en-IN",{month:"long"}).toUpperCase()}</div>
+        <div key="safeToSpend" onClick={()=>setTab("budget")} style={{ ...card,textAlign:"center",cursor:"pointer",background:`linear-gradient(135deg,${T.accent}1c,${T.card})`,border:`1px solid ${T.accent}33`,padding:20 }}>
+          <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>LEFT IN BUDGET · {homeTodayDate.toLocaleString("en-IN",{month:"long"}).toUpperCase()}</div>
           {homeMonthBudget<=0 ? (
             <div style={{ color:T.sub,fontSize:12,padding:"8px 0" }}>No budget set yet.</div>
           ) : (()=>{
@@ -10397,7 +10395,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             const pct = v => `${Math.max(0,Math.min(100,(v/homeMonthBudget)*100))}%`;
             return (
               <>
-                <div style={{ color:homeSafeToSpend>=0?T.accent:T.danger,fontSize:34,fontWeight:900,margin:"6px 0 2px",fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(homeSafeToSpend)}</div>
+                <div style={{ color:homeSafeToSpend>=0?T.accent:T.danger,fontSize:34,fontWeight:900,margin:"6px 0 2px",fontVariantNumeric:"tabular-nums" }}>{homeBudgetLeft.state==="over"?`Overspent by ${sym}${fmt(homeBudgetLeft.overBy)}`:`${sym}${fmt(homeSafeToSpend)}`}</div>
                 <div style={{ display:"flex",alignItems:"baseline",justifyContent:"center",gap:8 }}>
                   <span style={{ color:T.text,fontSize:20,fontWeight:900,fontVariantNumeric:"tabular-nums" }}>Spent {sym}{fmt(homeMonthSpend)}</span>
                   <span style={{ color:T.sub,fontSize:14,fontWeight:600 }}>of {sym}{fmt(homeMonthBudget)}</span>
@@ -10408,7 +10406,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
                 <div style={{ display:"flex",justifyContent:"space-between",color:T.sub,fontSize:11,fontVariantNumeric:"tabular-nums" }}><span>{sym}0</span><span>{sym}{fmt(homeMonthBudget)}</span></div>
                 {expected!=null&&<div style={{ color:T.sub,fontSize:12,marginTop:6 }}>Expected by today <span style={{ color:T.text,fontWeight:800 }}>{sym}{fmt(expected)}</span></div>}
-                <div style={{ color:T.sub,fontSize:12,marginTop:6 }}>~{sym}{fmt(Math.round(homeSafeToSpendPerDay))}/day · available until {new Date(homeTodayDate.getFullYear(),homeTodayDate.getMonth()+1,0).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</div>
+                <div style={{ color:T.sub,fontSize:12,marginTop:6 }}>~{sym}{fmt(homeBudgetLeft.perDay)}/day · available until {new Date(homeTodayDate.getFullYear(),homeTodayDate.getMonth()+1,0).toLocaleDateString(undefined,{day:"numeric",month:"short"})}</div>
               </>
             );
           })()}
@@ -15983,8 +15981,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const dashMonthly = dashBudget.effective;
           const dashSpend = getHouseholdAttributedTotal({ periodTransactions: txns.filter(t=>t.date&&t.date.startsWith(viewMonth)), allTransactions: txns });
           const dashRemaining = getBudgetVariance(dashSpend, dashMonthly).variance;
-          const dashLeftDays = daysLeft(viewMonth);
-          const dashSafePerDay = getSafeToSpendPerDay(dashRemaining, dashLeftDays, dashMonthly);
+          const dashBudgetLeft = getBudgetLeft({ budget:dashMonthly, spent:dashSpend, today:new Date(), monthKey:viewMonth });
+          const dashLeftDays = dashBudgetLeft.daysLeft;
+          const dashSafePerDay = dashBudgetLeft.perDay;
           // WP11 — dashPct and the month-end forecast/health classification (getMonthEndForecast/
           // getBudgetHealthStatus) were only ever consumed by the Budget Health + Forecast cards
           // removed below per the handoff (Flag 4: "month-end forecasting moves to Insights").
