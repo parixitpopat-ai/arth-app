@@ -72,3 +72,13 @@ moneyPlan = {
 * No automatic transfers or transactions; no overwrite of `cats[].budget`, `annualBudget`, `monthOverrides` or commitments.
 * Recommendations are illustrative defaults, shown with their reasons; they are not financial advice.
 * Verification so far is by reading code; no behaviour has been run. Android and two-device behaviour of the new object is untested until it exists.
+
+## 8. Designer handoff: constraints from the audit (design is not blocked by the engine)
+The designer can start now. Increments 1 and 2 (engine, reserve verification) have no screens, so design runs in parallel and gates increments 3 to 5 only.
+* **Fit:** the Plan lives inside the existing Budget tab (a section/entry card above the Monthly Dashboard), edits in a `BottomSheet`, no new tab and no second dashboard. Reuse `src/components`: `Segmented`, `StatCard`, `BottomSheet`, `Chip`, `EmptyState`, `ConfirmDialog`, `Toast`, `PeriodSelector`, `CashBudgetStrip`, and Budget's existing progress bars (no new chart types).
+* **Words that already exist and must be reused, not renamed:** Monthly Budget, Mandatory Commitments, Discretionary Pool, Unallocated, Safe to Spend, "the plan" / "the cash" (Outlook). The design must make the relation between "Monthly Money Plan" (income allocated) and "Monthly Budget" (spend limit) obvious in one sentence, because both are on screen.
+* **Rules the screens must show, not hide:** over-allocation is refused (the typed value stays on screen with the overage), never clamped; insufficient income when commitments alone exceed income; every recommendation has a one-line "why" (rule + numbers); planned is visibly different from actual and from verified balance.
+* **States to design (all five):** empty (no income known), insufficient income, over-allocated, emergency target reached (contribution shows ₹0 and why), withdrawal detected (replenishment *recommendation*, no transfer). "Loading" is short: data is local-first, so it only appears while a cloud sync or a verified-balance check is running.
+* **Alerts:** at most one alert per bucket per month (existing dismiss mechanism); Budget, Insights, Outlook and Cash Flow show the same number and wording, so design one alert component and one explanation pattern.
+* **Open design questions that depend on decisions 1 to 5 above:** where the user picks income (expected income vs typed); how slabs are shown if only one exists; the bucket-to-category mapping step on first setup; how the reserve account is shown if it is later excluded from Available Cash.
+* Reference scenario for mock-ups: ₹30,000 → 7,500 / 3,000 / 4,500 / 4,500 / 10,500 (all editable, labelled "illustrative defaults").
