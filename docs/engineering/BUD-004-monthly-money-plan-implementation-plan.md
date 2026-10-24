@@ -1,5 +1,7 @@
 # BUD-004 — Monthly Money Plan: audit, integration plan, data model (for review; nothing built)
 
+**Superseded in part:** sections 3 (data model: fixed buckets and slabs) and 4 (engine: percentage template) are replaced by BUD-005 (data-driven specification). Sections 1, 2, 5 (decisions 4 and 5), 7 and 8 still apply.
+
 Status: Phase 1 audit done (read-only). No code, no data change, no deployment. Items marked **UNVERIFIED** were not confirmed in code; items marked **DECISION** need an answer before the increment that depends on them.
 
 ## 1. What already exists (and must not be duplicated)
