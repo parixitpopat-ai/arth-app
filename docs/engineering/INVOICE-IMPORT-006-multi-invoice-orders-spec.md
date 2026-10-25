@@ -1,4 +1,4 @@
-# INVOICE-IMPORT-006 — Orders with many invoices: inputs, order summary, reconciliation, categorisation (SPEC ONLY, revision 4)
+# INVOICE-IMPORT-006 — Orders with many invoices: inputs, order summary, reconciliation, categorisation (SPEC ONLY, revision 5)
 
 Status: **documentation only. No code change, implementation commit, push to `main` or deployment is authorised.** Builds on INVOICE-IMPORT-005 (privacy rules, single-invoice Amazon reader, preview only).
 Out of scope for this increment: the **Standard/Itemised purchase-entry redesign** (amount paid at the top, items underneath). It has its own spec, `PURCHASE-ENTRY-001-amount-paid-anchor-spec.md` (§12).
@@ -59,6 +59,7 @@ The two scopes stay separate: this spec owns reading and reconciling invoices; `
 - **Confirm is withheld** for any order where a discount, promotion or instant bank discount is known (the order summary shows one) **or** can be inferred (the amount paid is lower than the invoiced total plus known shipping and fees). The preview shows the exact reconciliation and the message in §4.1.
 - The importer **never** nets a discount into item prices, **never** adds a negative line, **never** hides a difference and **never** changes the amount paid.
 - With no order summary and no typed amount, the order is "Unverified — no order summary" and Confirm stays withheld; with a typed amount that differs from the invoiced total, the exact difference is shown and Confirm stays withheld (today's expense model also refuses lines that do not add up to the amount).
+- **EMI-paid orders** (an order summary or card statement showing the order was financed) are previewed only; **Confirm is withheld** and the importer **never creates a loan, instalments or a down-payment expense.** Existing EMI accounting is preserved and owned by `PURCHASE-ENTRY-001` §16.
 - Later, the importer writes the same `purchase` record as the manual form, through the same functions, and adds no accounting logic of its own.
 
 ## 5. Duplicates, one payment = one expense, evidence (decision 4)
