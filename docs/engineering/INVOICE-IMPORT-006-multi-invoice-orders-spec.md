@@ -1,7 +1,7 @@
-# INVOICE-IMPORT-006 — Orders with many invoices: inputs, order summary, reconciliation, categorisation (SPEC ONLY, revision 2)
+# INVOICE-IMPORT-006 — Orders with many invoices: inputs, order summary, reconciliation, categorisation (SPEC ONLY, revision 3)
 
 Status: **documentation only. No code change, implementation commit, push to `main` or deployment is authorised.** Builds on INVOICE-IMPORT-005 (privacy rules, single-invoice Amazon reader, preview only).
-Out of scope for this increment: the **Standard/Itemised purchase-entry redesign** (amount paid at the top, items underneath). Its four open decisions need their own reviewed spec (§12).
+Out of scope for this increment: the **Standard/Itemised purchase-entry redesign** (amount paid at the top, items underneath). It has its own spec, `PURCHASE-ENTRY-001-amount-paid-anchor-spec.md` (§12).
 Labels: **[VERIFIED]** = seen in the code or a real file. **[NOT VERIFIED]** = reasoned or proposed. Every amount in an example is **invented**, except where a real figure is named.
 
 ## 1. Facts about today's app that constrain the design [VERIFIED in code]
@@ -9,7 +9,7 @@ Labels: **[VERIFIED]** = seen in the code or a real file. **[NOT VERIFIED]** = r
 - **No ZIP library** is installed (only `pdfjs-dist`).
 - Item categories are remembered by **exact item name** only (case-insensitive). Nothing is remembered by product id, product type or seller.
 - Brand stripping uses a **starter brand list that is grocery-oriented and unverified** (Lay's, Haldiram's, Amul…). It knows no brands for batteries, cushions or pillows, so product-type extraction for Amazon items cannot reuse it as is.
-- An itemised expense today must have its lines add up **exactly** to its total, or Save is blocked. Whether a **negative line** (a discount) is accepted by the item form is [NOT VERIFIED].
+- An itemised expense today must have its lines add up **exactly** to its total, or Save is blocked. A **negative line** (a discount) is mishandled by the form, category reporting and charge sharing: see §4.1 [VERIFIED].
 - The Amazon reader built in 005 reads **single-row invoices only** and there is **no order-summary reader**.
 
 ## 2. Inputs (decision 1)
@@ -30,7 +30,29 @@ Supported, alone or **mixed in one selection**: (a) several PDFs chosen together
 ## 4. Reconciliation rules
 Per order, by component: **Items · Fees · Shipping · Promotions/discounts · Refunds · Grand total**. Components that only the summary carries (shipping, an instant bank discount) are marked *summary-only*, not as errors. A mismatch is an exact rupee figure with a direction. Never corrected silently; the amount paid is never changed to force a match.
 States: **Matches · Missing coverage ₹X (not on any invoice read) · Invoices exceed the summary by ₹X · Unreadable files n · Unresolved items n · Unverified — no order summary.**
-**Amounts and the expense model in this increment.** The purchase-entry redesign is out, so an imported order must fit **today's** expense model: one expense, lines that add up exactly to its amount. Shipping and fees from the summary become charge lines. A discount can only be represented in one of two ways: (a) a negative line — [NOT VERIFIED] that the form accepts it — or (b) an **allocated** reduction of the item amounts, shown as "allocated", never as the seller's confirmed net price. Which one is used is an open decision (§12).
+**Amounts and the expense model in this increment.** The purchase-entry redesign is out (see `PURCHASE-ENTRY-001`), so an imported order must fit **today's** expense model: one expense, lines that add up exactly to its amount. Shipping and fees from the summary become charge lines.
+
+### 4.1 Discount decision and its verification (revision 3)
+**Decision (owner):** prefer a **negative discount line** for this increment, **recorded exactly once**, with the final expense equal to the amount actually paid, **provided** the existing expense model, category reporting, splits, undo and sync all handle it correctly. **If any existing behaviour breaks, do not force a workaround: document the blocker and defer** until the purchase-entry model supports discounts properly. The current expense model must not dictate incorrect accounting.
+
+**Read-only verification done so far** (existing code read, and its pure functions run in a throwaway script outside the repository; nothing in the repository was changed):
+| Area | Result | Label |
+|---|---|---|
+| Arithmetic reconcile (`reconcileLines`) | Accepts a negative line; 2,547 + 50 + 9 − 134.11 reconciles to 2,471.89 | VERIFIED |
+| Domain `LineItem` class | **Rejects** a negative price ("Money amount cannot be negative"). The class is not on today's live save path (it is not constructed outside its tests), so nothing breaks today, but the domain model says line amounts are non-negative | VERIFIED |
+| Add/Edit item form | The money input removes every character that is not a digit or a dot, so a **minus sign cannot be typed**. If an imported expense with a negative line is opened and that line is touched, the sign would be **silently lost**, turning a discount into a charge | VERIFIED by reading `cleanMoneyInput`; behaviour in the live form NOT RUN |
+| Category reporting (`computeLineItemCategoryRollup`) | A negative line reduces whichever **single** category it is tagged with, so a whole-order discount lands on one category instead of being spread over the items it reduced. A negative line with **no** category is treated as uncategorised. **Per-category totals would be wrong** | VERIFIED by running it |
+| Charge sharing between people (`chargeShare`) | Charges with an amount of zero or less are **skipped**, so a discount typed as a charge line is **not shared** between people. A plain negative line given to a person: NOT VERIFIED | VERIFIED (charge-type) |
+| Undo (`planUndo`) | Compares the stored line items as JSON, so a negative line does not disturb it | VERIFIED by reading |
+| Sync | Line items are generic JSON in the synced snapshot, so a negative line should sync like any other; the two-device behaviour was not run | NOT VERIFIED |
+| Reports other than category rollup (budget, insights, person/group shares) | Not traced | NOT VERIFIED |
+
+**Result: blocked.** Three existing behaviours mishandle a negative line: the form silently flips its sign on edit, category totals attribute the whole discount to one category, and people-sharing ignores a discount typed as a charge. Under the decision above this means **do not ship the workaround**.
+
+**Consequence for this increment (proposal for approval):**
+- An Amazon order **with no discount** (items + fees + shipping = amount paid) fits today's model and can be confirmed once the other gates in §12 are settled.
+- An Amazon order **with any discount or promotion** is imported as a **preview with its reconciliation shown, but Confirm is withheld** with a plain message ("This order has a discount of ₹X. Arth cannot record discounts accurately yet."). The discount is never netted into item prices, never hidden, and the amount is never changed.
+- The proper fix belongs to the purchase-entry spec, where the top-level discount is a first-class field (Arth already stores a top-level `priceDiscount` on expenses; today it feeds a computed total and is displayed, nothing more).
 
 ## 5. Duplicates, one payment = one expense, evidence (decision 4)
 - **Exact repeats** (same file fingerprint, or same seller + invoice number) are **counted once** and listed.
@@ -116,4 +138,4 @@ Order cards and seller groups are collapsed by default; counts are tappable; tar
 7. Phone verification is separate and is not claimed from desktop tests.
 
 ## 12. Decisions still open
-1. ZIP library choice, after the §2 gate. 2. Production categorisation thresholds, after the §7.2 report. 3. Discount representation in this increment: negative line vs allocated reduction (§4). 4. Evidence record shape and size. 5. The blanked order-summary sample. 6. The **separate purchase-entry spec** and its four decisions (EMI interest, storage of top-level charges, discount splitting between people, category of an unassigned remainder). Confirm for Amazon orders is not built until the items in 3–6 are settled.
+1. ZIP library choice, after the §2 gate. 2. Production categorisation thresholds, after the §7.2 report. 3. ~~Discount representation~~ **Decided, see §4.1:** negative line preferred but **blocked by verification**; orders with discounts wait for the purchase-entry model. 4. Evidence record shape and size. 5. The blanked order-summary sample. 6. The **separate purchase-entry spec** and its four decisions (EMI interest, storage of top-level charges, discount splitting between people, category of an unassigned remainder). Confirm for Amazon orders is not built until the items in 4–6 are settled, and never for an order with a discount until the purchase-entry spec is implemented.
