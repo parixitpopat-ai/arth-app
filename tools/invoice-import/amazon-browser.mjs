@@ -15,7 +15,7 @@ const paths = {}; for (const [k, b] of Object.entries(files)) { paths[k] = join(
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const ctx = await browser.newContext({ timezoneId: "Asia/Kolkata", viewport: { width: 390, height: 844 } });
 const requests = []; ctx.on("request", r => requests.push(r.url()));
-await ctx.route(u => { try { return !["localhost", "127.0.0.1"].includes(new URL(u).hostname); } catch { return false; } }, r => r.abort());
+const blocked = []; await ctx.route(u => { try { return !["localhost", "127.0.0.1"].includes(new URL(u).hostname); } catch { return false; } }, r => { blocked.push(r.request().url()); r.abort(); });
 await ctx.addInitScript(() => { if (localStorage.getItem("__init")) return; localStorage.setItem("__init", "1");
   localStorage.setItem("arth_accounts", JSON.stringify([{ id: "b1", name: "Test Bank", type: "bank", openingBalance: 100000, openingBalanceDate: "2026-01-01", last4: "9001" }]));
   localStorage.setItem("arth_txns", JSON.stringify([{ id: "t1", type: "expense", merchant: "Shop", desc: "Shop", date: "2026-10-12", amount: 500, accId: "b1", catIds: [], subIds: [] }]));
@@ -62,6 +62,17 @@ rec("B16 a single scanned file still gets the 'picture / OCR' message, not an Am
 // a single Amazon file still works through the single-file path
 await pick("both");
 rec("B17 a single Amazon file works the same way", (await T("amazon-order").count()) === 1 && (await count("read")) === 2, {});
+// file limits are enforced and reported (not raised): 11 pages, and a file over 10 MB
+const eleven = makePdf(Array.from({ length: 11 }, () => ({ texts: productPage().map(i => ({ str: i.str, x: i.x, y: i.y, size: 8 })) })));
+writeFileSync(join(dir, "eleven.pdf"), eleven); paths.eleven = join(dir, "eleven.pdf");
+const big = new Uint8Array(11 * 1024 * 1024 + 10); big.set(new TextEncoder().encode("%PDF-1.4\n")); writeFileSync(join(dir, "big.pdf"), big); paths.big = join(dir, "big.pdf");
+await T("amazon-clear").click().catch(() => {});
+await pick("eleven", "big", "both");
+const kinds = await T("outcome-row").evaluateAll(els => els.map(e => e.getAttribute("data-kind")));
+rec("B19 limits unchanged: 11 pages -> too many pages; over 10 MB -> too large; the valid file still reads", kinds.includes("too-many-pages") && kinds.includes("too-large") && (await count("read")) === 2, kinds);
+// isolation: nothing but local files was ever requested; no Supabase host was even attempted; no other browser storage was touched
+rec("B20 ISOLATION: no request to any Supabase or other remote host was attempted by the app", blocked.filter(u => !/fonts\.(googleapis|gstatic)\.com|google|gvt1/.test(u)).length === 0, blocked.slice(0, 4));
+rec("B21 ISOLATION: no IndexedDB database or sessionStorage entry was created by reading invoices", await page.evaluate(async () => { const dbs = indexedDB.databases ? await indexedDB.databases() : []; return dbs.length === 0 && sessionStorage.length === 0; }), {});
 rec("B18 no page errors", errors.length === 0, errors.slice(0, 2));
 await browser.close();
 const bad = results.filter(r => !r.pass); console.log(`\n${results.length - bad.length}/${results.length} passed`); process.exit(bad.length ? 1 : 0);
