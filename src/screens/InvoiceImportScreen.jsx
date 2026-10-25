@@ -4,7 +4,7 @@
 import { useRef, useState } from "react";
 import { buildInvoicePreviews, diagnosticEntry, validatePaymentDate } from "../domain/invoices/invoicePreview.js";
 import { planConfirm, suggestLineCats, resolveItemNames } from "../domain/invoices/invoiceImport.js";
-import { groupAmazonOrders } from "../domain/invoices/amazonInvoice.js";
+import { summariseOrders, batchCounts } from "../domain/invoices/amazonBatch.js";
 import AmazonOrderPreview from "./AmazonOrderPreview.jsx";
 
 const money = (n, sym = "₹") => (n == null ? "—" : `${sym}${Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 3 }).replace(/(\.\d\d)0$/, "$1")}`);
@@ -18,7 +18,9 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
   const [outcomes, setOutcomes] = useState({});                           // per invoice: { busy, done:{record,plan,sentence}, error, undone }
   const setForm = (k, patch) => setForms(f => ({ ...f, [k]: { ...(f[k] || {}), ...patch } }));
   const setOutcome = (k, patch) => setOutcomes(o => ({ ...o, [k]: { ...(o[k] || {}), ...patch } }));
-  const [amazon, setAmazon] = useState([]);                              // Amazon invoice readings (seller + item table only), memory only, cleared with the screen
+  const [amazon, setAmazon] = useState({ parsed: [], outcomes: [] });     // Amazon invoice readings (seller + item table only), memory only, cleared with the screen
+  const knownRef = useRef({ files: new Set(), invoices: new Set() });    // what earlier batches in this session already read (repeats are counted once)
+  const stopRef = useRef(false);
   const [seen, setSeen] = useState([]);                                   // invoice keys looked at in THIS session (memory only)
   const lastRef = useRef(null);                                           // the last analysis, kept in memory so a changed payment date can re-run the matching without re-reading the file
 
@@ -34,18 +36,34 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
     return { phase: "result", previews, diag: diagnosticEntry(analysis, analysis.__bytes || 0), fileName, fileHash: analysis.fileHash || null };
   };
 
+  // Several PDFs (any mix of Amazon invoices, merged PDFs) are read one after another in memory, with progress and a per-file result.
+  const readBatch = async picked => {
+    stopRef.current = false;
+    setState({ phase: "reading", progress: { done: 0, total: picked.length } });
+    const [{ readInvoiceBatch }, { default: workerSrc }] = await Promise.all([import("../domain/invoices/amazonBatch.js"), import("../domain/invoices/pdfWorkerUrl.js")]);
+    const r = await readInvoiceBatch(picked, { workerSrc, known: knownRef.current, shouldStop: () => stopRef.current,
+      readFile: async f => new Uint8Array(await f.arrayBuffer()), onProgress: p => setState(prev => (prev.phase === "reading" ? { ...prev, progress: p } : prev)) });
+    setAmazon(prev => ({ parsed: [...prev.parsed, ...r.parsed], outcomes: [...prev.outcomes, ...r.outcomes.map((o, i) => ({ ...o, index: prev.outcomes.length + i + 1 }))] }));
+    setState({ phase: "amazon" });
+    return r;
+  };
+
   const onFile = async e => {
-    const f = e.target.files && e.target.files[0]; e.target.value = "";
-    if (!f) return;
-    setState({ phase: "reading" }); setPayDates({}); setPicked({}); setForms({}); setOutcomes({});
+    const picked = e.target.files ? [...e.target.files] : []; e.target.value = "";
+    if (!picked.length) return;
+    setPayDates({}); setPicked({}); setForms({}); setOutcomes({});
     try {
+      if (picked.length > 1 || state.phase === "amazon") { lastRef.current = null; await readBatch(picked); return; }
+      const f = picked[0];
+      setState({ phase: "reading" });
       const bytes = new Uint8Array(await f.arrayBuffer());
       const [{ analyseBlinkitPdf }, { default: workerSrc }] = await Promise.all([import("../domain/invoices/blinkitPdf.js"), import("../domain/invoices/pdfWorkerUrl.js")]);
       const analysis = await analyseBlinkitPdf(bytes, { workerSrc }); analysis.__bytes = bytes.length;
-      if (!analysis.pages.some(p => p.parsed)) {                                   // not a Blinkit invoice: is it an Amazon.in one?
-        const { analyseAmazonPdf, isAmazonAnalysis } = await import("../domain/invoices/amazonPdf.js");
-        const az = await analyseAmazonPdf(bytes, { workerSrc });
-        if (isAmazonAnalysis(az)) { lastRef.current = null; setAmazon(prev => [...prev, ...az.pages.filter(p => p.parsed).map(p => p.parsed)]); setState({ phase: "amazon" }); return; }
+      if (!analysis.pages.some(p => p.parsed)) {                                   // not a Blinkit invoice: try it as Amazon.in invoice(s)
+        lastRef.current = null;
+        const r = await readBatch([f]);
+        if (r.parsed.length || r.outcomes.some(o => o.kind === "exact-duplicate")) return;
+        setAmazon({ parsed: [], outcomes: [] });                                   // nothing Amazon-like: show the Blinkit-style explanation below
       }
       lastRef.current = { analysis, fileName: f.name };
       const next = compute(analysis, {}, f.name);
@@ -53,10 +71,10 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
       setState(next);
       const keys = next.previews.invoices.map(i => i.view && i.view.importKey).filter(Boolean);
       setSeen(prev => [...new Set([...prev, ...keys])]);
-    } catch { setState({ phase: "result", previews: { status: "unreadable", outcome: { tone: "amb", title: "Couldn't open this file", message: "Something went wrong while reading it. Choose the file again.", actions: [{ id: "choose-another", label: "Choose another file" }] }, invoices: [], notes: [] }, diag: { status: "unreadable", pages: 0, pageStatuses: [], codes: ["read-failed"], sizeBucket: "unknown" } }); }
+    } catch { setState({ phase: "result", previews: { status: "unreadable", outcome: { tone: "amb", title: "Couldn't open this file", message: "Something went wrong while reading it. Choose the file again.", actions: [{ id: "choose-another", label: "Choose another file" }, { id: "add-by-hand", label: "Add expense by hand" }] }, invoices: [], notes: [] }, diag: { status: "unreadable", codes: [] } }); }
   };
 
-  const reset = () => { setAmazon([]); setState({ phase: "idle" }); setPayDates({}); setPicked({}); setForms({}); setOutcomes({}); lastRef.current = null; };
+  const reset = () => { setAmazon({ parsed: [], outcomes: [] }); knownRef.current = { files: new Set(), invoices: new Set() }; stopRef.current = true; setState({ phase: "idle" }); setPayDates({}); setPicked({}); setForms({}); setOutcomes({}); lastRef.current = null; };
   const act = id => { if (id === "choose-another") fileRef.current && fileRef.current.click(); else if (id === "add-by-hand") onAddByHand && onAddByHand(); else reset(); };
   const setPayDate = (page, v) => {
     const next = { ...payDates, [page]: v }; setPayDates(next);
@@ -249,12 +267,12 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
         </div>
         <label style={{ display: "block", marginTop: 12, textAlign: "center", padding: 12, borderRadius: 12, border: `1px dashed ${T.accent}`, color: T.accent, fontWeight: 800, cursor: "pointer" }}>
           Choose invoice PDF
-          <input ref={fileRef} data-testid="invoice-file" type="file" accept=".pdf,application/pdf" onChange={onFile} style={{ display: "none" }} />
+          <input ref={fileRef} data-testid="invoice-file" type="file" multiple accept=".pdf,application/pdf" onChange={onFile} style={{ display: "none" }} />
         </label>
-        <div style={{ color: T.sub, fontSize: 11, marginTop: 8 }}>Use the tax invoice PDF from Blinkit or Amazon.in: one invoice per page, up to 10 MB. Screenshots and photos are not read. Arth reads the file on this device; it is not uploaded or stored.</div>
+        <div style={{ color: T.sub, fontSize: 11, marginTop: 8 }}>Use the tax invoice PDF from Blinkit or Amazon.in: one invoice per page; several files can be chosen together, up to 10 MB. Screenshots and photos are not read. Arth reads the file on this device; it is not uploaded or stored.</div>
       </div>
-      {state.phase === "amazon" && <AmazonOrderPreview orders={groupAmazonOrders(amazon)} T={T} sym={sym} card={card} label={label} onAddAnother={() => fileRef.current && fileRef.current.click()} onClear={reset} />}
-      {state.phase === "reading" && <div style={card} data-testid="invoice-reading"><div style={{ color: T.sub, fontSize: 13 }}>Reading the invoice on this device…</div></div>}
+      {state.phase === "amazon" && <AmazonOrderPreview orders={summariseOrders(amazon.parsed)} counts={batchCounts(amazon.outcomes, amazon.parsed)} outcomes={amazon.outcomes} T={T} sym={sym} card={card} label={label} onAddAnother={() => fileRef.current && fileRef.current.click()} onClear={reset} />}
+      {state.phase === "reading" && <div style={card} data-testid="invoice-reading"><div data-testid="reading-progress" style={{ color: T.sub, fontSize: 13 }}>{state.progress && state.progress.total > 1 ? `Reading ${Math.min(state.progress.done + 1, state.progress.total)} of ${state.progress.total} on this device…` : "Reading the invoice on this device…"}</div>{state.progress && state.progress.total > 1 && <button data-testid="reading-cancel" onClick={() => { stopRef.current = true; }} style={{ ...btn(false), marginTop: 8, minHeight: 44 }}>Stop</button>}</div>}
       {res && res.outcome && outcomeCard(res.outcome, "top", { status: res.status })}
       {res && res.notes.map(n => <div key={n}>{banner("info", n, "multi-page-note")}</div>)}
       {res && res.invoices.map((inv, i) => inv.view ? invoiceCard(inv, i, res.invoices.length) : outcomeCard(inv.outcome, `o${i}`, { status: inv.status }))}
