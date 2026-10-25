@@ -99,3 +99,10 @@ test("the same non-invoice file chosen twice (a picture-only PDF) is counted onc
   const r = await readInvoiceBatch([scan, scan]);
   assert.deepEqual(r.outcomes.map(o => o.kind), ["requires-ocr", "exact-duplicate"]);
 });
+
+test("identical processing-fee invoices are expected and are NOT flagged as probable duplicates", async () => {
+  const same = n => fee(n);
+  const r = await readInvoiceBatch([draw(same(1)), draw(same(2)), draw(same(3))]);
+  assert.equal(r.parsed.length, 3); assert.deepEqual(findProbableDuplicates(r.parsed), []);
+  assert.equal(batchCounts(r.outcomes, r.parsed).probableDuplicateGroups, 0);
+});

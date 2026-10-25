@@ -51,11 +51,12 @@ export async function readInvoiceBatch(files, opts = {}) {
   return { outcomes, parsed: parsedAll, known };
 }
 
-/** Probable duplicates: same seller, date, total and first description, different invoice number. Both are KEPT; they are only flagged. */
+/** Probable duplicates: same seller, date, total and first description, different invoice number. Both are KEPT; they are only flagged.
+ *  Fee-only invoices (one processing-fee invoice per seller invoice) are expected to look identical, so they are not flagged; they are grouped for display instead. */
 export function findProbableDuplicates(parsed) {
   const sig = p => [p.seller && p.seller.name, p.invoiceDate, p.totalPaise, p.rows[0] && p.rows[0].label].join("|");
   const groups = new Map();
-  for (const p of parsed) { const s = sig(p); (groups.get(s) || groups.set(s, []).get(s)).push(p); }
+  for (const p of parsed.filter(p => !p.rows.every(r => r.kind === "charge"))) { const s = sig(p); (groups.get(s) || groups.set(s, []).get(s)).push(p); }
   return [...groups.values()].filter(g => g.length > 1 && new Set(g.map(p => p.invoiceNumber)).size > 1).map(g => g.map(p => p.invoiceNumber));
 }
 

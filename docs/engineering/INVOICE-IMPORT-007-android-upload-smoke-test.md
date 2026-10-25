@@ -14,9 +14,9 @@ The **Arth Preview** test build (separate app id `com.parixitpopat.arth.invoicep
 | 1 | Settings → Data (or Add expense → From invoice) → **Import invoice** | The screen opens; "Review first… nothing is added until you press Confirm" |
 | 2 | Tap **Choose invoice PDF** | The file picker opens and lets you select **several** files |
 | 3 | Select **A1 + A2 + A3 + A5 + A6 + A7** together | A "Reading 1 of 6…" line with a **Stop** button while it works, then the preview |
-| 4 | Look at **What was read** | Files 6 · invoices read 6 (A1, 3 fees, A3 — A5 is a repeat) · exact duplicates 1 · unreadable 1 · picture needing OCR 1 |
+| 4 | Look at **What was read** | Files 6 · invoices read 5 (A1, 3 fee invoices, A3; A5 is a repeat of A1) · exact duplicates 1 · probable duplicates 0 · unreadable 1 · picture needing OCR 1 |
 | 5 | Tap **Result for each file** | One line per file or page, "File n", with its outcome; **no file names** |
-| 6 | Look at the order card | "Unverified — no order summary" · "6 invoices read" · sellers collapsed · "Processing fees × 3" collapsed |
+| 6 | Look at the order card | "Unverified — no order summary" · "5 invoices read" · sellers collapsed · "Processing fees × 3" collapsed |
 | 7 | Open a seller group and the fee group | Items with tax shown; fee group lists each source invoice and amount |
 | 8 | Read the warning under the total | "This is not necessarily what you paid…" and it mentions discounts and shipping |
 | 9 | Look for a Confirm / Save button | **None** for Amazon; a note says it is not available yet |
