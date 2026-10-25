@@ -1,94 +1,118 @@
-# PURCHASE-ENTRY-001 — Amount-paid anchor, top-level charges and discounts, optional itemisation (SPEC ONLY)
+# PURCHASE-ENTRY-001 — Amount-paid anchor, top-level charges and discounts, optional itemisation (SPEC AND IMPLEMENTATION PLAN, revision 2)
 
-Status: **documentation only; nothing here is approved for code, push or deployment.** Separate from `INVOICE-IMPORT-006`, which depends on it for orders with discounts.
-Labels: **[VERIFIED]** = read in the code or run in a throwaway script outside the repository. **[NOT VERIFIED]** = reasoned or proposed. All example amounts are invented except the Amazon figures you supplied.
-Principle (owner): **the current expense model must not dictate incorrect accounting.** If it cannot represent a payment accurately, say so; never silently change the amount or misclassify a discount.
+Status: **documentation only. Nothing here is approved for code, push to `main` or deployment.** Implementation needs your explicit approval of §13 first. Kept separate from `INVOICE-IMPORT-006` (§12).
+Labels: **[VERIFIED]** = read in the code, or run in a throwaway script outside the repository. **[NOT RUN]** = traced by reading only. **[NOT VERIFIED]** = proposal or unknown. Example amounts are invented except the Amazon figures you supplied.
+Principle (owner): **the expense model must not dictate incorrect accounting.** If it cannot represent a payment accurately, say so; never silently change the amount or misclassify a discount.
 
-## 1. Requirement (from the owner)
-- **Top = what I paid and how the amount was calculated.** Amount actually paid (the anchor, the real cash outflow), MRP if applicable, discounts including instant bank discounts, processing fees, handling/shipping/delivery, CGST/SGST/other charges, payment account, date, note, reference.
-- **Bottom = what I bought and how it is categorised.** Optional itemisation; each item has a category; items can be added, edited, removed without changing the amount paid. An empty list is fine.
-- **The item list never determines or silently changes the amount paid.**
-- **Reconcile, don't force:** *Matches* · *₹X left to assign* · *items exceed what was paid by ₹X; resolve*. No double-counted charges; no discount counted twice.
-- **Standard** = one expense, amount paid. **Itemised** = the same single expense with optional item detail. Switching never changes the total or creates a second expense.
+## 1. Decisions settled by the owner
+1. **EMI vs Full.** When **EMI** is selected, the calculated interest and applicable GST stay (today's computed total). In **Full** mode the typed **amount paid is authoritative**.
+2. **Top-level charges.** A structured list of charges at the top, usable in **both Standard and Itemised** modes.
+3. **Discounts** are allocated **proportionally across the items they apply to**, unless the receipt explicitly says otherwise. The **existing shared-charge split rules are preserved** (charges shared equally by the number of splits, payer included).
+4. **Unallocated remainder** goes to the **top-level category**, and the itemisation is **clearly marked incomplete**.
 
-## 2. How the app behaves today [VERIFIED by reading the code unless stated]
-1. Typing an **MRP** in the price breakdown makes the **saved amount** = MRP − discount + processing fee + EMI interest + GST on interest. It replaces the typed Amount. Shipping, handling and CGST/SGST are not part of it.
-2. **Itemised needs an exact match:** items + charge lines must equal the typed amount, or Save is blocked. A partial item list cannot be saved.
-3. **Charges are stored as lines** (`kind: "charge"`, with a type) inside the item list. Standard mode has no place for them. A discount has **no line representation**.
-4. **Items can change the amount:** switching Itemised → Standard sets the amount to the items total; with no amount typed, the items' sum fills it.
-5. **Category reporting reads raw item amounts.** It is correct today only because items must equal the total.
-6. A top-level **discount, processing fee, MRP and interest** are already stored on an expense (`priceDiscount`, `priceProcessingFee`, `priceMrp`, `priceInterestAmt`…). Today they feed the computed total and are displayed on the detail screen.
-7. **A negative line is unsafe** (INVOICE-IMPORT-006 §4.1): the item form drops a minus sign on edit; a category rollup puts the whole discount on one category; charge sharing skips non-positive charges. The domain `LineItem` class rejects negatives.
-8. Undo and sync treat line items as generic data (undo compares stored JSON) [undo VERIFIED; two-device sync NOT RUN].
+## 2. Requirement
+Top = what I paid and how the amount was calculated (amount paid, MRP, discounts including instant bank discounts, processing fees, handling/shipping/delivery, CGST/SGST/other, account, date, note, reference). Bottom = what I bought and how it is categorised (optional items, each with a category). **The item list never determines or silently changes the amount paid.** Switching Standard ↔ Itemised never changes the total or creates a second expense. Reconcile, never force.
 
-## 3. Proposed model (additive; smallest safe change) [NOT VERIFIED — proposal]
-**Amount paid stays `amount`.** Nothing recomputes it. Because it is unchanged, **an older app version reading new data still shows the correct amount** — a deliberate safety property.
-**New optional top-level record** on an expense, e.g. `purchase`:
-- `adjustments`: a list of `{ kind: "charge" | "discount", type, label, amountPaise }` where **every amount is positive and the sign comes from `kind`**. A discount is stored once, as a positive number under `kind: "discount"`, and subtracted by the calculation. **No negative numbers are ever stored**, which avoids every §2.7 failure by construction.
-- charge types as today (handling, delivery, platform fee, CGST, SGST, other) plus a *processing fee* and a *discount* type list (instant bank discount, coupon, other).
-- `mrp` (optional): the pre-discount list price, informational.
-**Items** stay in the existing line-item list and are **items only** from now on.
-**Legacy fields are read, not rewritten** (§8). If `purchase` exists it takes precedence over legacy `priceDiscount`, `priceProcessingFee` and charge lines, so nothing is counted twice.
+## 3. Today's behaviour [VERIFIED by reading unless stated]
+1. Typing an **MRP** makes the **saved amount** = MRP − discount + processing fee + EMI interest + GST on interest, replacing the typed amount. Shipping, handling and CGST/SGST are not in it.
+2. **Itemised needs an exact match**: items + charge lines = typed amount, or Save is blocked. A partial list cannot be saved.
+3. **Charges are lines** (`kind: "charge"`) inside the item list; Standard has no place for them. A discount has no line form.
+4. **Items can change the amount** (Itemised → Standard sets amount = items total; an empty amount is filled from the items).
+5. **A negative line is unsafe** (INVOICE-IMPORT-006 §4.1).
+6. A charge's **category** today is that of the **biggest categorised item** (charges need none of their own); charges are shared between people **equally by the number of splits**, the payer counted.
 
-## 4. The reconciliation function (pure, tested) [proposal]
-`reconcilePurchase({ paidPaise, items, adjustments })` returns:
-`itemsPaise`, `chargesPaise`, `discountsPaise`, `explainedPaise = itemsPaise + chargesPaise − discountsPaise`, `differencePaise = paidPaise − explainedPaise`, and a state:
-- **Matches** when the difference is zero and items exist; **Explained without items** when there are no items (Standard with a breakdown);
-- **₹X left to assign** when `differencePaise > 0` and there are items (partial itemisation);
-- **Items exceed what was paid by ₹X** when `differencePaise < 0`, which blocks Save until resolved.
-Rules: whole paise only; each charge and discount counted once; the function never alters `paid`; an already-included discount (a price printed net of discount) is not entered again, which is why `mrp` is informational and items are entered at the price actually charged.
+## 4. Model (additive) [NOT VERIFIED — proposal]
+**`amount` stays the amount paid** and nothing recomputes it in Full mode. Old app versions therefore still read the right amount.
+New optional record on an expense, `purchase`:
+- `v`: 1 · `paidPaise`: the amount in whole paise at save time (a **consistency stamp**, §9).
+- `mode`: `"full"` or `"emi"`. In `"emi"` today's computed-total formula is kept exactly as it is (§14 U-EMI covers the one unknown).
+- `adjustments`: list of `{ id, kind: "charge" | "discount", type, label, amountPaise, appliesTo }`. **Every amount is positive; the sign comes from `kind`**, so no negative number is ever stored. `appliesTo` is `"all"` (default) or a list of item ids when the receipt says so.
+- `mrpPaise` (optional, informational), `itemisation`: `{ state: "none" | "partial" | "complete", coveredPaise, remainderPaise, uncategorisedCount }`.
+Items stay in `lineItems`, **items only** from now on, with an optional per-item `netPaise` (the allocated net, written at save, §6). Legacy charge lines keep being read (§9).
 
-### Worked cases (your Amazon order)
-Items 329.00 + 969.00 + 1,249.00 = **2,547.00**; shipping 50.00 + processing fees 9.00 = **59.00** charges; instant bank discount **134.11**; paid **2,471.89**.
-- **A, complete:** 2,547.00 + 59.00 − 134.11 = 2,471.89 → **Matches.**
-- **B, partial:** only the 969.00 item entered: 969.00 + 59.00 − 134.11 = 893.89 → **₹1,578.00 left to assign** (2,471.89 − 893.89). Saves normally; the remainder reports under the top-level category.
-- **C, none:** no items; adjustments only → explained 2,471.89, **no itemisation**.
-- **D, over:** items total 2,700.00: 2,700.00 + 59.00 − 134.11 = 2,624.89 → **exceeds what was paid by ₹153.00** (2,624.89 − 2,471.89 = 153.00). Save blocked; amount untouched.
-- **E, double-count guard:** the same ₹134.11 discount entered as a discount and as a reduction of item prices would show as **exceeds by ₹134.11**, never silently accepted.
+## 5. Reconciliation (pure function, tested) [proposal]
+Let **P** = amount paid, **C** = charges, **D** = discounts, **L** = entered item list-price total.
+**V = P − C + D** is the item value the payment implies. For your order: 2,471.89 − 59.00 + 134.11 = **2,547.00**.
+1. **Top breakdown.** If you also enter the items' subtotal or MRP **S**, it is checked: S + C − D = P, else the exact difference is shown. The amount paid is never changed.
+2. **Itemisation coverage** compares **L with V**:
+   - L = V → **Matches** (complete).
+   - L < V → **Itemisation incomplete: ₹(V − L) of item value not itemised** (partial; Save allowed).
+   - L > V → **Items exceed what you paid for items by ₹(L − V)** (Save blocked until resolved).
+   - No items → **No itemisation** (Standard with a breakdown is valid).
+3. **Double-count hint.** If the shortfall V − L equals D to the paisa, say "Items may already include the discount" instead of silently accepting it.
+Whole paise only; each charge and discount counted once.
 
-## 5. Category allocation (reporting)
-- Reports must **sum to the amount paid exactly**. Items carry list prices, so the **net of shipping, fees and discount is spread over items in proportion to item price, rounded to the paisa with the leftover paisa given by largest remainder**, and labelled **allocated** (never presented as seller-confirmed pricing). For case A the net adjustment is 59.00 − 134.11 = −75.11, giving 319.30 / 940.42 / 1,212.17 = 2,471.89 [VERIFIED arithmetic].
-- **Partial itemisation:** the unassigned remainder reports under the expense's **top-level category**.
-- **Uncategorised items:** report under the top-level category and keep a flag that they were not individually categorised, so the screen can say so (INVOICE-IMPORT-006 §8).
-- Existing exact-match itemised expenses keep today's rollup (their adjustments are zero), so their reports do not change.
+### Worked cases (your Amazon order: P 2,471.89; C = 50.00 + 9.00 = 59.00; D = 134.11; V = 2,547.00)
+- **A. Complete.** Items 329.00 + 969.00 + 1,249.00 = 2,547.00 = V → **Matches.**
+- **B. Partial.** Only the 969.00 item → **Itemisation incomplete: ₹1,578.00 of item value not itemised** (2,547.00 − 969.00). Saves normally.
+- **C. No items.** Adjustments only → "No itemisation". Valid.
+- **D. Over.** Items 2,700.00 exceed V by **₹153.00** → Save blocked; the amount is untouched.
+- **E. Item prices already net.** Items entered at 311.68 + 917.98 + 1,183.23 = 2,412.89 and the 134.11 discount also entered → shortfall 134.11 equals D → hint "Items may already include the discount".
+- **F. No discount.** P 1,009.00, charges 40.00, items 969.00 → V = 969.00 → Matches; no allocation needed.
 
-## 6. People / group splits
-- Charges are shared **equally by the number of splits, the payer included**, as today [VERIFIED, `chargeShare`].
-- **Discounts** need a rule — see decision 3. Whatever is chosen, shares must add back to the amount paid exactly.
+## 6. Category allocation (what reports read) [proposal; arithmetic checked]
+- Reports read `catAllocations` (or `catIds`) and `amount` only (§10). The new feature must write **`catAllocations` that sum to exactly P**.
+- **Discount:** each item's share is `D × price ÷ V` for the items it applies to (default all), rounded to the paisa with the leftover paisa by **largest remainder**; item net = price − share. Case A: shares 17.32 / 51.02 / 65.77 → nets **311.68 / 917.98 / 1,183.23** (= 2,412.89 = V − D).
+- **Charges:** unchanged rule — they report under the category of the **biggest categorised item** (here the 1,249.00 item: 1,183.23 + 59.00 = **1,242.23**). Totals: 311.68 + 917.98 + 1,242.23 = **2,471.89 = P**.
+- **Partial** (case B): the entered item's net is 969.00 × (V − D) ÷ V = **917.98**; the not-itemised value (1,578.00 at list price) reports its net, **1,494.91**, under the **top-level category**; charges 59.00 as above. 917.98 + 1,494.91 + 59.00 = **2,471.89**. Shown as "Itemisation incomplete".
+- **Uncategorised items** report under the top-level category and keep their own flag ("not individually categorised").
+- A receipt-specified discount (`appliesTo` = chosen items) uses the same formula over those items only. Everything allocated is labelled **allocated**, never seller-confirmed.
 
-## 7. Standard ↔ Itemised
-Switching changes only which sections show. It **never** changes `amount`, never creates a second expense, and the silent "amount = items total" behaviours (§2.4) are removed; setting the amount from the items stays an explicit button. Going to Standard asks before dropping items, as it does now, and keeps the adjustments.
+## 7. People and groups [partly NOT RUN]
+Each person's amount = their items − their discount share + their equal share of charges (the existing rule). The payer's own share is the residual `amount − sum(others owed)`, so smaller shares for others raise the payer's share automatically [residual rule VERIFIED in `getMyExpenseShare`]. A test must show the per-person rows never exceed P.
 
-## 8. Preserving existing expenses
-- **No migration and no rewrite on load.** Every existing expense keeps its stored `amount` and fields.
-- **Read adapters:** an expense with legacy `priceDiscount` / `priceProcessingFee` / charge lines is shown in the new top block by mapping those fields; the new reconcile line shows *Matches* or the exact difference. Old expenses that used the computed MRP total keep their stored amount.
-- **Editing and saving** an old expense writes the new `purchase` record only after you edit the top section, and legacy fields are then ignored (precedence rule §3), never both counted.
-- **Tests required:** a corpus of synthetic expenses in every legacy shape must load, display, report and undo identically before and after.
+## 8. Standard ↔ Itemised
+Switching never changes `amount`, never creates a second expense, and keeps the adjustments. The silent "amount = items total" behaviours are removed; setting the amount from items stays an explicit button. Going to Standard still asks before dropping items.
 
-## 9. Phone-width top block (390 px) — proposal
-```
-Amount paid        ₹ 2,471.89            ← the anchor
-Paid via  Card ••1017   Date  25/10/2026
-Note · Reference
-▼ Breakdown (optional)
-  MRP / items price   2,547.00
-  − Discount          134.11   [Instant bank ▾]
-  + Shipping           50.00
-  + Processing fee      9.00
-  + CGST / SGST / Other  …
-  ─────────────────────────
-  Explained 2,471.89  ✔ Matches
-Standard | Itemised
-▼ Items (optional)       ₹1,578.00 left to assign
-```
-## 10. Remaining unknowns [NOT VERIFIED]
-Behaviour of reports, budget and insights on the new shape; sync size and two-device behaviour of `purchase`; how the old APK renders it; the item form's handling of a purchase with partial items; EMI interest in "Full" mode; whether other screens read `priceDiscount`.
+## 9. Reading old expenses without migration or double-counting
+No migration and no rewrite on load. One pure function `readPurchase(txn)` returns the view every screen uses:
+1. If `txn.purchase` exists **and** `txn.purchase.paidPaise === round(txn.amount × 100)` → use it. **Legacy fields are then ignored** (`priceDiscount`, `priceProcessingFee`, charge lines), so nothing is counted twice.
+2. If `purchase` exists but the stamp does not match (an old app changed the amount) → treat `purchase` as **stale**: ignore it, read legacy, and show "Breakdown out of date".
+3. Else read legacy: `priceMrp/priceDiscount/priceProcessingFee/priceInterestAmt/priceGstAmt` map to the top block; legacy `kind: "charge"` lines map to charges; an exact-match itemised expense reports as before (its adjustments are empty).
+Editing and saving an old expense writes `purchase` **only after the top section is edited**; until then the stored record is untouched. The amount is never recomputed on load.
 
-## 11. Decisions needed (recommendations)
-1. **EMI interest.** Keep the computed total only when "EMI" is selected; in "Full" the typed amount is authoritative. *Recommend yes.*
-2. **Top-level charges.** Store them in the new `purchase.adjustments` list so Standard expenses can have them. *Recommend yes.*
-3. **Discount and people-splits.** Reduce each person's share in proportion to their items, or keep the discount with the payer. *Recommend proportional; your call.*
-4. **Remainder category.** Unassigned remainder under the top-level category. *Recommend yes.*
+## 10. Impact analysis
+Reads were traced in the code; behaviour on the new shape is **NOT RUN** until built.
+| Area | What it reads today [VERIFIED] | Effect of this change | Risk / required action |
+|---|---|---|---|
+| **Budget** (Home, Budget tab, carry-forward, spent %) | `getHouseholdAttributedTotal` → `amount`, `people`, `groupAllocations`, refunds | None while `amount` = paid | Test: budget identical before/after for every legacy shape |
+| **Category totals** | `getCategoryAttributedTotal` → `catAllocations` (summed per category, not netted) else `catIds`; Insights spending carries its own copy of the same rule | Correct only if `catAllocations` sums to P | **Invariant + test:** Σ `catAllocations` = P for every new expense; both copies of the rule tested |
+| **Insights** (spending, commitments, savings rate, cash flow, runway) | `amount`, `catAllocations`, `catIds`, `people`, `groupAllocations`, `trackingMode`; none read `lineItems`, `price*` or `purchase` | None by construction | Static test that no reader outside the form and detail screens reads `purchase` |
+| **Person / group reports** | `people[*].amount/mode`, `groupAllocations` | Others' amounts shrink by their discount share; payer's residual rises | §7 test; refund interplay NOT RUN |
+| **Item-level readers** | `vendorInsights` (category spend and item totals from `item.amount`), `vehicleFinancials` (buckets from `qty × unitPrice`), `contribution` (per-item balance from `qty × unitPrice`) | These sum **list prices**; with shipping or a discount they would not equal P | **Real finding.** Change these three readers to use `netPaise` when present, else today's formula; legacy items have none, so legacy results are unchanged. A test per reader |
+| **Price fields** (`priceMrp`, `priceDiscount`…) | Only the add form and two detail views in `App.jsx` (display) | Detail views switch to `readPurchase` | Display tests |
+| **Transaction boundary** | Falls back to the legacy path for category splits; a pass-through base keeps unknown fields | `purchase` and `netPaise` must survive create and edit on **both** paths | Round-trip tests on both paths |
+| **Sync** | `txns` is one synced collection of plain JSON; digests compare structure, not individual fields | New fields travel as data | Size of 300+ item expenses NOT VERIFIED; two-device simulation test |
+| **Undo (invoice import)** | `planUndo` compares id, amount, date, account, merchant, category and the stored `lineItems` JSON; refuses if people, notes or settlements were added | `purchase` is not compared, so an edit to it would not block Undo | Add `purchase` to the comparison; test |
+| **Old-app compatibility** | Old form copies known item fields only and requires items = amount | Old app **shows the right amount**; it **cannot re-save** a partial or discounted itemised expense without the user resolving the mismatch, and it drops `netPaise` on item edit | Accept and document; the stamp (§9.2) makes stale data detectable; no corruption path found |
+| **Refunds** | `buildRefundTotalsByExpense` against `amount`; category Path 1 is not netted | Unchanged | Test with a refunded new-shape expense |
+| **Reports, FY and calendar** | `amount`, categories | None | Covered by the unchanged-behaviour corpus |
 
-## 12. Testing plan
-Unit tests for `reconcilePurchase` (cases A–E, paise rounding, no mutation of `paid`); allocation sums to paid for many random cases; legacy corpus (§8); sign-safety (no negative stored); mode-switch tests (amount unchanged); mutation checks; browser tests at phone width on synthetic data; two-device sync simulation; real-phone verification kept separate and not claimed from desktop tests.
+## 11. Tests required to prove old expenses are unchanged
+1. **Legacy corpus** of synthetic expenses in every shape: plain; MRP computed total; EMI with interest and GST; itemised exact match; itemised with legacy charge lines; person/group split; category split with `catAllocations`; refunded; paid by another person; invoice-imported. For each, golden outputs captured **before any change** for: budget total, category totals, insights spending, person/group amounts, the vendor/vehicle/contribution readers, detail-view text, the Undo plan and a sync round trip. They must match **after**.
+2. `readPurchase`: precedence, stale stamp, legacy mapping, no double counting (a discount present both as a legacy field and in `purchase` is counted once).
+3. `reconcilePurchase`: cases A–F, paise rounding, never alters P, the hint for E.
+4. Allocation: Σ `catAllocations` = P for randomised inputs; largest-remainder determinism; partial and `appliesTo` cases.
+5. Sign safety: no negative number is stored anywhere.
+6. Mode switching leaves `amount` unchanged and creates no second expense.
+7. Boundary round trip on both paths; two-device sync simulation; Undo with and without a later `purchase` edit.
+8. Static guard that only the allowed modules read `purchase`.
+9. Mutation checks on each rule; phone-width browser tests on synthetic data; real-phone verification kept separate and not claimed from desktop tests.
+
+## 12. Scope separation from INVOICE-IMPORT-006
+This spec does not build invoice import. **Until it is implemented and verified, invoice import must not alter or misrepresent a discounted purchase:** an order with a discount or promotion is previewed with its reconciliation and **Confirm is withheld** (INVOICE-IMPORT-006 §4.1–4.2). The import later writes the same `purchase` record through the same functions and adds no accounting logic of its own.
+
+## 13. Implementation plan (for your approval; nothing started)
+Each stage is its own change, tested and reviewed before the next; none is pushed or deployed without your explicit approval.
+1. **Characterisation first:** capture the golden outputs of §11.1 and commit only tests. No behaviour change.
+2. **Pure functions:** `readPurchase`, `reconcilePurchase`, `allocatePurchase`, with tests; no screen uses them yet.
+3. **Readers:** repoint the three item-level readers and the two detail views through `netPaise` and `readPurchase`; the characterisation tests must still pass.
+4. **Form, top block:** the new top section (amount paid, charges, discounts, breakdown, EMI mode) behind a switch that stays off in production builds until verified.
+5. **Form, itemisation:** partial save, "incomplete" marking, remainder to the top-level category, mode-switching rules.
+6. **People/groups, Undo, boundary and sync tests;** old-APK compatibility check.
+7. **Phone verification** (separate from desktop tests), then a release decision by you.
+Each stage reports the tests run, what was not verified, and a before/after table of any figure that changed (none are expected).
+
+## 14. Remaining unknowns [NOT VERIFIED]
+- **U-EMI:** whether the new top-level charges join the EMI-mode formula. Proposed default: they do **not**; EMI mode shows them as information and warns, so today's EMI totals cannot change.
+- Sync size and two-device behaviour of 300+ item expenses; behaviour on the real Android app; how refunds interact with allocated nets; whether any report outside those traced reads line items; whether the old APK's edit screen damages `netPaise` beyond dropping it.
