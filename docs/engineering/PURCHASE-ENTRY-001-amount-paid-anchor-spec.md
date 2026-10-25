@@ -1,4 +1,4 @@
-# PURCHASE-ENTRY-001 — Amount-paid anchor, top-level charges and discounts, optional itemisation (SPEC AND IMPLEMENTATION PLAN, revision 5)
+# PURCHASE-ENTRY-001 — Amount-paid anchor, top-level charges and discounts, optional itemisation (SPEC AND IMPLEMENTATION PLAN, revision 6)
 
 Status: **documentation only. Nothing here is approved for code, push to `main` or deployment.** Implementation needs your explicit approval of §13 first. Kept separate from `INVOICE-IMPORT-006` (§12).
 Labels: **[VERIFIED]** = read in the code, or run in a throwaway script outside the repository. **[NOT RUN]** = traced by reading only. **[NOT VERIFIED]** = proposal or unknown. Example amounts are invented except the Amazon figures you supplied.
@@ -29,6 +29,7 @@ New optional record on an expense, `purchase`:
 - `emi` (only in EMI mode): `{ netPaise, processingFeePaise, interestPaise, gstOnInterestPaise, calcTotalPaise }`, a frozen snapshot of the calculation for audit and reconciliation.
 - `adjustments`: list of `{ id, kind: "charge" | "discount", type, label, amountPaise, appliesTo, emiRelation }` (`emiRelation` is `"included"`, `"separate"` or `"unknown"`, used only in EMI mode, §15). **Every amount is positive; the sign comes from `kind`**, so no negative number is ever stored. `appliesTo` is `"all"` (default) or a list of item ids when the receipt says so.
 - `mrpPaise` (optional, informational), `itemisation`: `{ state: "none" | "partial" | "complete", coveredPaise, remainderPaise, uncategorisedCount }`.
+**EMI purchases are the exception to "the record lives on the expense":** their purchase details live **only on the loan** (§16.5); the down-payment expense carries just a loan reference.
 Items stay in `lineItems`, **items only** from now on, with an optional per-item `netPaise` (the allocated net, written at save, §6). Legacy charge lines keep being read (§9).
 
 ## 5. Reconciliation (pure function, tested) [proposal]
@@ -108,15 +109,16 @@ This spec does not build invoice import. **Until it is implemented and verified,
 Each stage is its own change, tested and reviewed before the next; none is pushed or deployed without your explicit approval.
 1. **Characterisation first:** capture the golden outputs of §11.1 and commit only tests. No behaviour change.
 2. **Pure functions:** `readPurchase`, `reconcilePurchase`, `allocatePurchase`, `checkEmiSchedule` (read-only, §16), with tests; no screen uses them yet.
+2b. **Loan-storage gate, tests only (§16.9):** run G1–G6 against the **current** code with an extra unknown field on loans and down-payment expenses. **No code that writes `loan.purchase` or `emiLoanId` may be written until all six pass;** a failure selects the fallback and the plan is re-presented to you.
 3. **Readers:** repoint the three item-level readers and the two detail views through `netPaise` and `readPurchase`; the characterisation tests must still pass.
 4. **Form, top block:** the new top section (amount paid, charges, discounts, breakdown, EMI mode) behind a switch that stays off in production builds until verified.
 5. **Form, itemisation:** partial save, "incomplete" marking, remainder to the top-level category, mode-switching rules.
-6. **People/groups, Undo, boundary and sync tests;** the EMI schedule display as a read-only informational line; **loan-storage verification gate (§16.5):** round trips through every loan writer, restore, two-device sync and an older-app edit — **if any fails, use the smallest safe alternative in §16.5 and do not widen the model**; old-APK compatibility check.
+6. **People/groups, Undo, boundary and sync tests;** the EMI schedule display as a read-only informational line; **re-run the §16.9 gates against the finished code** (they must still pass); old-APK compatibility check.
 7. **Phone verification** (separate from desktop tests), then a release decision by you.
 Each stage reports the tests run, what was not verified, and a before/after table of any figure that changed (none are expected).
 
 ## 14. Remaining unknowns [NOT VERIFIED]
-- **EMI:** §15 (owner decision) and §16 (schedule check); open unknowns are U-EMI-2, U-EMI-5 and U-EMI-6 (U-EMI-1 corrected, U-EMI-3 and U-EMI-4 decided).
+- **EMI:** §15 (owner decision) and §16 (schedule check); U-EMI-1 corrected; U-EMI-3, U-EMI-4, U-EMI-5 and U-EMI-6 decided (§16.4, §16.5, §16.8, §16.9); only **U-EMI-2** (issuer formula, unendorsed) remains open.
 - Sync size and two-device behaviour of 300+ item expenses; behaviour on the real Android app; how refunds interact with allocated nets; whether any report outside those traced reads line items; whether the old APK's edit screen damages `netPaise` beyond dropping it.
 
 ## 15. EMI mode and top-level charges (owner decision, with safeguards)
@@ -183,20 +185,12 @@ They are never added together as separate expenses, and none is derived from ano
 - Whether the full purchase value should ever be reported differently (as one expense at purchase) is **out of scope**; any such change needs its own reviewed spec so the same money is never counted both as a purchase and as instalments.
 - **Tests:** with the check present and absent, golden budget, category, insights, cash-flow, person/group, net-worth and loan figures for a corpus of EMI purchases are **identical**; a static guard that only the display component imports `checkEmiSchedule`; no writer is imported by it.
 
-### 16.5 Where the purchase details live (owner decision on U-EMI-4) and what is unknown
-**Decided:** when the down payment is ₹0 the purchase details are stored **on the loan record**. **No synthetic zero-value expense is ever created to carry metadata.** The decision is conditional on the loan record being able to carry them safely, which was checked by reading the code:
-| Check | Finding |
-|---|---|
-| Loan edit form | Builds the saved loan from `...existing` first and then its own known fields, and merges `{...old, ...new}`: unknown fields survive an edit [VERIFIED by reading] |
-| Other loan writers (repayment, bill and statement settlement, auto-EMI progress, card EMI settlement, restore through `normalizeLoans`) | All spread the existing loan before changing fields [VERIFIED by reading] |
-| Sync | `loans` is one of the synced collections of plain JSON, so extra fields travel as data [VERIFIED by reading; two-device behaviour NOT RUN] |
-| Reports and screens | No reader of loans was found that rebuilds a loan from a fixed field list [read, not exhaustive] |
-| Not yet verified | A two-device sync with the new fields; restore from a snapshot containing them; the behaviour of an **older app version** editing such a loan; any loan **deletion** path; the other ways a loan is created (the card-detail "new EMI" flow and manual Add Loan) |
-**What is stored (new entries only):** `loan.purchase = { v, purchaseValuePaise, downPaymentPaise, financedPaise, tenure, emiPaise, adjustments?, mode:"emi" }`. Legacy loans get nothing and are never rewritten; the check then reports "financed part only" (§16.3).
-**Staleness:** if the live loan's principal no longer equals `financedPaise` (the loan was edited), the purchase-value leg is reported **Unverifiable: loan changed since purchase**; the schedule leg uses the live loan.
-**If the down payment is above 0** the down-payment expense already exists; the same `loan.purchase` record is still the single home, and the expense keeps only a pointer to the loan. (This keeps one place to read; see **U-EMI-5** if you prefer the expense to carry it instead.)
-**Smallest safe alternative if verification finds loan storage unsafe:** store nothing new for EMI purchases. The check runs on the loan alone ("financed part only"), the top-level breakdown stays on the down-payment expense where one exists, and EMI purchases with no down payment simply show no breakdown. This avoids any new synced collection or broader model change; a new collection would need its own spec.
-**Open:** **U-EMI-5** one home (the loan) for every EMI purchase, or the expense when a down payment exists; **U-EMI-6** the loan deletion path and the two other loan-creation flows.
+### 16.5 Where the purchase details live (owner decisions on U-EMI-4 and U-EMI-5)
+**Decided:** the **loan record is the single authoritative home** of an EMI purchase's details, **whether or not there is a down payment.** The **down-payment expense carries only a loan reference** (`emiLoanId`, the loan's id) and **no copy of any purchase detail.** **No synthetic zero-value expense is ever created** to carry metadata. The decision holds only if every gate in §16.9 passes; if any fails, the fallback in §16.9 applies and the data model is **not** widened.
+**What is stored (new entries only):** `loan.purchase = { v, purchaseValuePaise, downPaymentPaise, financedPaise, tenure, emiPaise, adjustments?, mode:"emi" }`. `adjustments` here are the purchase's own charges and discounts (the same structure as §4), kept once, on the loan. Legacy loans get nothing and are never rewritten; the check then reports "financed part only" (§16.3).
+**Staleness:** if the live loan's principal no longer equals `financedPaise` (the loan was edited), the purchase-value leg is **Unverifiable: loan changed since purchase**; the schedule leg uses the live loan. If the down-payment expense's amount no longer equals `downPaymentPaise`, the check says **down payment changed since purchase**. Nothing is auto-corrected.
+**Evidence that the loan record can carry fields (read-only review; not run):** the loan edit form and every other loan writer (repayment, bill and statement settlement, auto-EMI progress, card EMI settlement, restore through `normalizeLoans`) spread the existing record before changing fields, so unknown fields survive; `loans` is one of the synced collections of plain JSON; the down-payment expense is written directly, so an added reference field persists, and the standard edit path keeps unknown fields through its pass-through base.
+**The reference is display-only.** It is never used to build a total, to move money or to link accounting between records.
 
 ### 16.6 Worked cases (invented figures)
 - **S1 — interest-bearing.** Purchase value 30,000.00; down payment 6,000.00; financed 24,000.00; tenure 6; EMI 4,200.00. Schedule total = 6,000.00 + 6 × 4,200.00 = **31,200.00** → **₹1,200.00 above the purchase value (implied financing cost)**. Informational.
@@ -210,7 +204,33 @@ They are never added together as separate expenses, and none is derived from ano
 - **S9 — nothing mutated.** In every case above, the stored purchase value, down payment, tenure, EMI, instalments and loan are identical before and after the check.
 
 ### 16.7 Tests for this section
-All of S1–S9; rounding boundary at exactly the tolerance and one paisa beyond; deep-frozen inputs (no mutation); a legacy-loan corpus (principal, tenure, EMI present or missing) giving the stated results; a credit-card schedule with a deleted, edited or extra instalment giving **Unverifiable**; no code path adds the down payment or instalments to any budget, category or report total as a result of the check; static guard that the check is read-only (it imports no writer); **loan-storage tests:** `loan.purchase` survives the loan edit form, a repayment, bill and statement settlement, auto-EMI progress, card EMI settlement, `normalizeLoans` restore, a snapshot round trip and a two-device sync simulation, and an older-app-style edit that drops it leaves the check at **Unverifiable**, never a false match; no zero-value expense is ever created; mutation checks that break the tolerance, the unverifiable rules and the "above is informational" rule.
+All of S1–S9; rounding boundary at exactly the tolerance and one paisa beyond; deep-frozen inputs (no mutation); a legacy-loan corpus (principal, tenure, EMI present or missing) giving the stated results; a credit-card schedule with a deleted, edited or extra instalment giving **Unverifiable**; no code path adds the down payment or instalments to any budget, category or report total as a result of the check; static guard that the check is read-only (it imports no writer); **gate tests G1–G6 (§16.9) and every row of §16.8;** no zero-value expense is ever created; the reference is never read by a total, budget, report or cash-flow calculation (static guard); mutation checks that break the tolerance, the unverifiable rules and the "above is informational" rule.
+
+### 16.8 The down-payment reference: lifecycle (defined, and each row is a test)
+The down-payment expense is an **ordinary expense** whose amount and reporting never depend on the loan. The reference changes none of that. Outcomes are fixed in advance, with **no cascade, no repair rewrite and no automatic clearing**:
+| Situation | Defined behaviour |
+|---|---|
+| **Loan missing** (dropped by a snapshot restore, a sync overwrite, a data reset, or never existed) | The expense stays exactly as it is and is counted exactly as today. The reference is **left in place** (so the link heals if the loan comes back through a later sync or restore). The screen says "EMI plan record not found"; the check is **Unverifiable: loan not found**. Nothing is deleted or rewritten. |
+| **Down-payment expense deleted** | The loan is unchanged and keeps its snapshot. The check uses the recorded `downPaymentPaise` and says "down-payment expense no longer present". |
+| **Loan closed** | Display unchanged; the check shows the schedule as history. |
+| **Loan written off or converted to an expense** | The check says "No longer an active EMI plan: schedule check not applicable" — never a match or a mismatch. |
+| **Reference to a loan with no `purchase` record** (a legacy or manually created loan) | Treated as not linked: "financed part only". |
+| **Two expenses pointing at one loan** (for example a copied record) | Each shows the link; because the reference is display-only nothing is counted twice. |
+| **Older app version rewrote the expense or the loan and dropped a field** | Reported as **Unverifiable**, never as a false match. |
+There is **no loan delete operation in the app today** (loans only change status: closed, written off, converted to expense); a loan can disappear only through restore, sync overwrite or a reset [VERIFIED by searching for loan removal; the reset path was not traced], which is why the "loan missing" row is mandatory.
+
+### 16.9 Mandatory verification gates (all must pass before any code writes `loan.purchase` or `emiLoanId`)
+Each gate is a test run **against the current code first**, using an extra unknown field on existing records, so it can be done before any write path exists.
+| Gate | What is proven |
+|---|---|
+| **G1 Loan removal** | the "loan missing" outcomes in §16.8, including a restore and a sync overwrite that drop a loan while the down-payment expense stays; every other row of §16.8 |
+| **G2 Manual Add Loan flow** | creating and editing a loan by hand neither strips nor invents `purchase`; editing an EMI-purchase loan keeps it and triggers the staleness rule when principal, tenure or EMI change |
+| **G3 Card-detail "new EMI" (`cc_emi`) flow** | loans and plans created there have no `purchase`, read as "financed part only", and are untouched by the check; the separate EMI-plan collection is not confused with it |
+| **G4 Two-device sync** | a simulated two-device run (loan and expense changed on different devices, then merged or overwritten) never leaves a state the §16.8 rules do not cover, and loses neither record's fields |
+| **G5 Snapshot restore** | a snapshot containing the fields restores byte-for-byte; a snapshot **older** than the loan restores to the "loan missing" behaviour |
+| **G6 Older-app editing** | an older-app-style edit of the loan and of the down-payment expense (rebuilding the record from known fields only) leaves the check **Unverifiable**, with amounts and totals unchanged |
+**If any gate fails:** use the documented **fallback and do not widen the model** — store **nothing new** (no `loan.purchase`, no `emiLoanId`, no new collection); the check runs on the loan alone ("financed part only"); the top-level breakdown stays on the down-payment expense where one exists, and EMI purchases with no down payment show none. A new synced collection would need its own spec and approval.
+The **issuer-interest formula stays unendorsed** (U-EMI-2): it is preserved as it is, and nothing here claims it is correct.
 
 ## 17. Safeguards that stay unchanged
 1. The current calculation is preserved and frozen by **characterisation tests** written before any change (§15, §11).
@@ -219,3 +239,6 @@ All of S1–S9; rounding boundary at exactly the tolerance and one paisa beyond;
 4. **Existing stored expenses, loans and instalments are never recomputed or rewritten** (§9, §16.3).
 5. **Existing EMI accounting is preserved:** no full-purchase expense is added; the check cannot affect any total (§16.4).
 6. **No synthetic zero-value expense** is created to carry metadata (§16.5).
+7. **One home for purchase details:** the loan. The down-payment expense carries only a reference, which is display-only and has the defined lifecycle in §16.8.
+8. **All gates in §16.9 are mandatory;** a failed gate means the fallback, not a wider data model.
+9. **The issuer-interest formula remains unendorsed** (U-EMI-2).
