@@ -1,10 +1,11 @@
 // TEST-ONLY helper: writes tiny valid PDFs (and deliberately broken ones) so the pdf.js path can be tested with no real invoice and no PDF library.
 // makePdf([{ texts:[{str,x,y,size}], image:{x,y,w,h} }]) -> Uint8Array. Text uses Helvetica; an image is a 2x2 raw RGB picture scaled to w x h.
-const esc = s => String(s).replace(/[\\()]/g, m => "\\" + m);
+// "₹" (U+20B9) is written as byte 185, which the font's Differences table names uni20B9 so pdf.js reads it back as ₹.
+const esc = s => String(s).replace(/[\\()]/g, m => "\\" + m).replace(/\u20B9/g, "\\271");
 
 export function makePdf(pages) {
   const objs = []; const add = body => { objs.push(body); return objs.length; };
-  const catalog = add(""), pagesObj = add(""), font = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+  const catalog = add(""), pagesObj = add(""), font = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /Type /Encoding /BaseEncoding /WinAnsiEncoding /Differences [185 /uni20B9] >> >>");
   const kids = [];
   for (const pg of pages) {
     let content = "", xobj = "";
