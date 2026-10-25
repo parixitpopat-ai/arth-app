@@ -1,4 +1,4 @@
-# PURCHASE-ENTRY-001 — Amount-paid anchor, top-level charges and discounts, optional itemisation (SPEC AND IMPLEMENTATION PLAN, revision 3)
+# PURCHASE-ENTRY-001 — Amount-paid anchor, top-level charges and discounts, optional itemisation (SPEC AND IMPLEMENTATION PLAN, revision 4)
 
 Status: **documentation only. Nothing here is approved for code, push to `main` or deployment.** Implementation needs your explicit approval of §13 first. Kept separate from `INVOICE-IMPORT-006` (§12).
 Labels: **[VERIFIED]** = read in the code, or run in a throwaway script outside the repository. **[NOT RUN]** = traced by reading only. **[NOT VERIFIED]** = proposal or unknown. Example amounts are invented except the Amazon figures you supplied.
@@ -98,7 +98,7 @@ Reads were traced in the code; behaviour on the new shape is **NOT RUN** until b
 6. Mode switching leaves `amount` unchanged and creates no second expense.
 7. Boundary round trip on both paths; two-device sync simulation; Undo with and without a later `purchase` edit.
 8. Static guard that only the allowed modules read `purchase`.
-9. The EMI tests listed in §15.
+9. The EMI tests listed in §15 and §16.7.
 10. Mutation checks on each rule; phone-width browser tests on synthetic data; real-phone verification kept separate and not claimed from desktop tests.
 
 ## 12. Scope separation from INVOICE-IMPORT-006
@@ -107,16 +107,16 @@ This spec does not build invoice import. **Until it is implemented and verified,
 ## 13. Implementation plan (for your approval; nothing started)
 Each stage is its own change, tested and reviewed before the next; none is pushed or deployed without your explicit approval.
 1. **Characterisation first:** capture the golden outputs of §11.1 and commit only tests. No behaviour change.
-2. **Pure functions:** `readPurchase`, `reconcilePurchase`, `allocatePurchase`, with tests; no screen uses them yet.
+2. **Pure functions:** `readPurchase`, `reconcilePurchase`, `allocatePurchase`, `checkEmiSchedule` (read-only, §16), with tests; no screen uses them yet.
 3. **Readers:** repoint the three item-level readers and the two detail views through `netPaise` and `readPurchase`; the characterisation tests must still pass.
 4. **Form, top block:** the new top section (amount paid, charges, discounts, breakdown, EMI mode) behind a switch that stays off in production builds until verified.
 5. **Form, itemisation:** partial save, "incomplete" marking, remainder to the top-level category, mode-switching rules.
-6. **People/groups, Undo, boundary and sync tests;** old-APK compatibility check.
+6. **People/groups, Undo, boundary and sync tests;** the EMI schedule display as a read-only informational line; old-APK compatibility check.
 7. **Phone verification** (separate from desktop tests), then a release decision by you.
 Each stage reports the tests run, what was not verified, and a before/after table of any figure that changed (none are expected).
 
 ## 14. Remaining unknowns [NOT VERIFIED]
-- **EMI:** resolved in §15 (owner decision); two unknowns remain there (U-EMI-1, U-EMI-2).
+- **EMI:** §15 (owner decision) and §16 (schedule check); open unknowns U-EMI-1 to U-EMI-4 are listed in §15 and §16.5.
 - Sync size and two-device behaviour of 300+ item expenses; behaviour on the real Android app; how refunds interact with allocated nets; whether any report outside those traced reads line items; whether the old APK's edit screen damages `netPaise` beyond dropping it.
 
 ## 15. EMI mode and top-level charges (owner decision, with safeguards)
@@ -143,5 +143,62 @@ Price ₹30,000 less ₹2,000 discount = ₹28,000 net; rate 15% p.a. → intere
 Characterisation of the existing formula at several inputs (including rounding, rate 0, no discount, no processing fee) before any change; no charge is ever added to the calculation by code; each `emiRelation` value drives expected-total correctly; `unknown` always yields Needs review and never Matches; the double-count flags (G5, G6); the entered amount is never mutated by the calculation after the first manual edit; stored EMI expenses reload with identical amounts and `readPurchase` maps their `priceInterestAmt`, `priceGstAmt` and `priceProcessingFee` without recomputing; the down-payment and financed-amount path (`amount − down payment`) is unchanged for existing expenses.
 
 ### Unknowns [NOT VERIFIED]
-- **U-EMI-1:** in EMI mode the saved `amount` is the full purchase value and the cash paid today is only the down payment; the rest is financed. So "amount actually paid" here means the **total payable** (down payment + EMIs), not today's cash. Whether you want that total checked against tenure × EMI + down payment is not decided.
+- **U-EMI-1 (corrected in revision 4):** an EMI purchase does **not** store one expense carrying the full purchase value. Today it stores a **down-payment expense** (only if a down payment is entered), a **loan** whose principal is the financed amount, and, for credit-card EMIs, one **instalment expense per month** (§16.1). The earlier statement that the saved amount is the full purchase value was inaccurate.
 - **U-EMI-2:** whether the calculation's one-month interest matches how your card issuers actually bill EMI interest. It is preserved as is, not endorsed.
+
+## 16. EMI schedule reconciliation check (informational only)
+### 16.1 What Arth stores for an EMI purchase today [VERIFIED by reading the save path; not run]
+When **EMI** is chosen the form does **not** create one expense for the full purchase value. It creates:
+1. a **down-payment expense**, amount = the down payment (**none at all if the down payment is 0**);
+2. a **loan** (`direction: "taken"`) with `principal` = `financedAmount` = typed amount − down payment, `tenureMonths`, `emiAmount`, `interestRate`, `hasInterest`, and an `isEmiPlan` marker;
+3. for credit-card EMIs only, **one instalment expense per month** (`isAutoEmiInstallment`), each for `emiAmount`, with the ids listed in `loan.scheduledInstallmentIds`.
+There is **no stored link from the loan to the down-payment expense** (only the words "Down payment ₹X paid upfront" in the loan's note). The typed purchase value exists only as `down payment + principal`; it is not saved as one field.
+So today a purchase reports as spending **down payment + each instalment** over time; the financed principal itself is not an expense. This spec does not change that treatment (§16.4, U-EMI-3).
+
+### 16.2 The four figures, kept distinct on screen and in code
+| Figure | Meaning | Where it comes from |
+|---|---|---|
+| **Full purchase value recorded in Arth** | what was bought | down payment + loan principal (for **new** entries also saved as a snapshot, §16.5) |
+| **Cash paid today** | the down payment | the down-payment expense (new entries: the snapshot) |
+| **Amount financed through EMI** | purchase value − down payment | the loan principal |
+| **Schedule reconciliation result** | arithmetic consistency of the schedule | the check below |
+They are never added together as separate expenses, and none is derived from another by the check.
+
+### 16.3 The check (pure function, read-only)
+`checkEmiSchedule({ purchaseValuePaise?, downPaymentPaise?, financedPaise, tenure, emiPaise, instalments? })` returns a result and **changes nothing**: no stored amount, down payment, tenure, EMI, instalment or loan is written, rounded or "fixed" to reconcile. Tests pass deep-frozen inputs to prove it.
+1. **Validate, don't recalculate.** Schedule total = `down payment + emi × tenure`, compared with the stored purchase value. (Algebraically the down payment cancels: the check equals `emi × tenure` against the loan principal. It is stated both ways because the owner asked for the whole-purchase view and because a legacy loan has only the second.)
+2. **Rounding tolerance.** The suggested EMI is rounded to the paisa, so the total can differ by up to half a paisa per instalment. Tolerance = `ceil(tenure × 0.5)` paise [proposal, arithmetic only]. Differences inside it are reported as "equal within rounding" and the actual paise are shown.
+3. **Result states:**
+   - **Equal** (within rounding): schedule total equals the purchase value.
+   - **Schedule is ₹X above the purchase value** — **informational, not an error.** An interest-bearing EMI is expected to total more than the amount financed; the excess is shown as "implied financing cost (interest, GST, fees)". The check does **not** compare it with any interest, GST or fee formula.
+   - **Schedule is ₹X below the purchase value** (beyond rounding) — **flagged**: the instalments would not repay the amount financed.
+   - **Recorded as no-interest but ₹X above** — flagged for review, nothing chosen.
+   - **Unverifiable**, never shown as a match or a mismatch, when: tenure is missing or 0; the EMI amount is unknown or 0; the principal or purchase value is unknown; a credit-card schedule is **incomplete or changed** (instalment count ≠ tenure, a listed instalment is missing, or an instalment's amount differs from the EMI); or, for a legacy loan, the down payment is **not linked** (then only the financed part, `emi × tenure` against principal, is checked and labelled "financed part only").
+4. **Scope of the claim.** It validates arithmetic consistency only. It does **not** certify that the issuer's interest, GST, fees or billing formula is correct, and the screen says so.
+
+### 16.4 No double counting
+The check adds nothing to any total. The purchase value is **one purchase**; the down payment and the future EMIs are **parts of how it is financed**, never extra expenses on top of it. This spec changes **no existing expense behaviour**: the down-payment expense and instalment expenses stay as they are today. How the full purchase value ought to be reported (as one expense at purchase, or as down payment plus instalments as now) is **not decided here** (U-EMI-3); any later change needs its own reviewed spec so the same money is never counted both as a purchase and as instalments.
+
+### 16.5 Data needed, and what is unknown
+- **New entries:** the `purchase.emi` snapshot gains `purchaseValuePaise`, `downPaymentPaise`, `financedPaise`, `tenure`, `emiPaise` and `loanId`, so the four figures and the link exist from then on. Legacy loans get no snapshot and are never rewritten.
+- **U-EMI-3:** how the full purchase value should be reported (§16.4). **U-EMI-4:** where the `purchase` record lives when the down payment is 0, because then no expense exists to carry it; proposal: on the loan, with the down-payment expense holding only a reference when it exists. Neither is decided.
+
+### 16.6 Worked cases (invented figures)
+- **S1 — interest-bearing.** Purchase value 30,000.00; down payment 6,000.00; financed 24,000.00; tenure 6; EMI 4,200.00. Schedule total = 6,000.00 + 6 × 4,200.00 = **31,200.00** → **₹1,200.00 above the purchase value (implied financing cost)**. Informational.
+- **S2 — no-cost EMI.** Value 24,000.00; down payment 0; tenure 6; EMI 4,000.00 → 24,000.00 = 24,000.00 → **Equal**.
+- **S3 — rounding.** Financed 10,000.00; tenure 3; EMI 3,333.33 → 9,999.99 vs 10,000.00, difference 1 paisa, tolerance 2 paise → **Equal within rounding (₹0.01)**.
+- **S4 — too small.** Financed 24,000.00; tenure 6; EMI 3,900.00 → 23,400.00 → **₹600.00 below**, flagged.
+- **S5 — incomplete schedule.** Tenure 12 but 9 instalment expenses exist → **Unverifiable: 9 of 12 instalments present.** Not a match, not a mismatch.
+- **S6 — EMI unknown.** `emiAmount` 0 → **Unverifiable.**
+- **S7 — legacy loan.** Down payment not linked → **financed part only:** `emi × tenure` against principal; the result is labelled accordingly.
+- **S8 — recorded as no-interest.** `hasInterest` false but schedule ₹200.00 above → **flagged for review**; the check does not decide which figure is right.
+- **S9 — nothing mutated.** In every case above, the stored purchase value, down payment, tenure, EMI, instalments and loan are identical before and after the check.
+
+### 16.7 Tests for this section
+All of S1–S9; rounding boundary at exactly the tolerance and one paisa beyond; deep-frozen inputs (no mutation); a legacy-loan corpus (principal, tenure, EMI present or missing) giving the stated results; a credit-card schedule with a deleted, edited or extra instalment giving **Unverifiable**; no code path adds the down payment or instalments to any budget, category or report total as a result of the check; static guard that the check is read-only (it imports no writer); mutation checks that break the tolerance, the unverifiable rules and the "above is informational" rule.
+
+## 17. Safeguards that stay unchanged
+1. The current calculation is preserved and frozen by **characterisation tests** written before any change (§15, §11).
+2. In **Full** mode the typed amount is authoritative **for new entries** (§1.1, §15.2).
+3. A charge with an **unknown** relationship to the EMI amount leaves the reconciliation at **Needs review**; the code **must not choose** a total (§15.5).
+4. **Existing stored expenses, loans and instalments are never recomputed or rewritten** (§9, §16.3).
