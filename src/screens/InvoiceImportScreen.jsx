@@ -6,6 +6,8 @@ import { buildInvoicePreviews, diagnosticEntry, validatePaymentDate } from "../d
 import { planConfirm, suggestLineCats, resolveItemNames } from "../domain/invoices/invoiceImport.js";
 import { summariseOrders, batchCounts } from "../domain/invoices/amazonBatch.js";
 import AmazonOrderPreview from "./AmazonOrderPreview.jsx";
+import OrderSummaryPanel from "./OrderSummaryPanel.jsx";
+import { rematch, chooseOrder, orderGate, attachmentConflicts } from "../domain/invoices/orderSummary.js";
 
 const money = (n, sym = "₹") => (n == null ? "—" : `${sym}${Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 3 }).replace(/(\.\d\d)0$/, "$1")}`);
 
@@ -21,6 +23,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
   const [amazon, setAmazon] = useState({ parsed: [], outcomes: [] });     // Amazon invoice readings (seller + item table only), memory only, cleared with the screen
   const knownRef = useRef({ files: new Set(), invoices: new Set() });    // what earlier batches in this session already read (repeats are counted once)
   const stopRef = useRef(false);
+  const [summaries, setSummaries] = useState([]);                          // order summaries typed by the person: memory only, never saved
   const [seen, setSeen] = useState([]);                                   // invoice keys looked at in THIS session (memory only)
   const lastRef = useRef(null);                                           // the last analysis, kept in memory so a changed payment date can re-run the matching without re-reading the file
 
@@ -74,7 +77,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
     } catch { setState({ phase: "result", previews: { status: "unreadable", outcome: { tone: "amb", title: "Couldn't open this file", message: "Something went wrong while reading it. Choose the file again.", actions: [{ id: "choose-another", label: "Choose another file" }, { id: "add-by-hand", label: "Add expense by hand" }] }, invoices: [], notes: [] }, diag: { status: "unreadable", codes: [] } }); }
   };
 
-  const reset = () => { setAmazon({ parsed: [], outcomes: [] }); knownRef.current = { files: new Set(), invoices: new Set() }; stopRef.current = true; setState({ phase: "idle" }); setPayDates({}); setPicked({}); setForms({}); setOutcomes({}); lastRef.current = null; };
+  const reset = () => { setSummaries([]); setAmazon({ parsed: [], outcomes: [] }); knownRef.current = { files: new Set(), invoices: new Set() }; stopRef.current = true; setState({ phase: "idle" }); setPayDates({}); setPicked({}); setForms({}); setOutcomes({}); lastRef.current = null; };
   const act = id => { if (id === "choose-another") fileRef.current && fileRef.current.click(); else if (id === "add-by-hand") onAddByHand && onAddByHand(); else reset(); };
   const setPayDate = (page, v) => {
     const next = { ...payDates, [page]: v }; setPayDates(next);
@@ -271,7 +274,15 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
         </label>
         <div style={{ color: T.sub, fontSize: 11, marginTop: 8 }}>Use the tax invoice PDF from Blinkit or Amazon.in: one invoice per page; several files can be chosen together, up to 10 MB. Screenshots and photos are not read. Arth reads the file on this device; it is not uploaded or stored.</div>
       </div>
-      {state.phase === "amazon" && <AmazonOrderPreview orders={summariseOrders(amazon.parsed)} counts={batchCounts(amazon.outcomes, amazon.parsed)} outcomes={amazon.outcomes} T={T} sym={sym} card={card} label={label} onAddAnother={() => fileRef.current && fileRef.current.click()} onClear={reset} />}
+      {state.phase === "amazon" && (() => {
+        const orders = summariseOrders(amazon.parsed);
+        const live = summaries.map(x => ({ ...x, match: rematch(x.match, x.orderNumber, orders) }));            // unresolved matches are re-evaluated as invoices are added
+        const conflicts = attachmentConflicts(live);
+        const withViews = orders.map(o => { const sm = live.find(x => x.match.orderNumber === o.orderNumber && !x.match.blocks); return sm ? { ...o, summaryView: { summary: sm, gate: orderGate({ summary: sm, order: o, conflicts }) } } : o; });
+        const choose = (id, orderNumber) => setSummaries(prev => prev.map(x => (x.id !== id ? x : orderNumber === undefined ? { ...x, match: { state: "choose", reason: "no-number", hints: [], blocks: true } } : { ...x, match: chooseOrder(x.match, orderNumber, orders) })));
+        const panel = <OrderSummaryPanel T={T} sym={sym} card={card} label={label} orders={orders} summaries={live} onAdd={sm => setSummaries(prev => [...prev, sm])} onChoose={choose} onRemove={id => setSummaries(prev => prev.filter(x => x.id !== id))} />;
+        return <AmazonOrderPreview orders={withViews} counts={batchCounts(amazon.outcomes, amazon.parsed)} outcomes={amazon.outcomes} panel={panel} T={T} sym={sym} card={card} label={label} onAddAnother={() => fileRef.current && fileRef.current.click()} onClear={reset} />;
+      })()}
       {state.phase === "reading" && <div style={card} data-testid="invoice-reading"><div data-testid="reading-progress" style={{ color: T.sub, fontSize: 13 }}>{state.progress && state.progress.total > 1 ? `Reading ${Math.min(state.progress.done + 1, state.progress.total)} of ${state.progress.total} on this device…` : "Reading the invoice on this device…"}</div>{state.progress && state.progress.total > 1 && <button data-testid="reading-cancel" onClick={() => { stopRef.current = true; }} style={{ ...btn(false), marginTop: 8, minHeight: 44 }}>Stop</button>}</div>}
       {res && res.outcome && outcomeCard(res.outcome, "top", { status: res.status })}
       {res && res.notes.map(n => <div key={n}>{banner("info", n, "multi-page-note")}</div>)}
