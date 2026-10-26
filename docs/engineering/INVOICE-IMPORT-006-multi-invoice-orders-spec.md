@@ -22,6 +22,7 @@ Supported, alone or **mixed in one selection**: (a) several PDFs chosen together
 - **ZIP safety rules** (whichever library): only `.pdf` entries; no nested ZIPs; caps on entry count and total uncompressed size; entry names are never trusted, shown or stored.
 
 ## 3. Order summary (decision 4)
+- **How a picture-only summary and a text summary are read is specified in `INVOICE-IMPORT-009`** (assisted on-device OCR with arithmetic checks, label parser shared with a text version); the reader is not built.
 - **No reader is specified or built until you supply a real sample** (name, address, phone and card details blanked). Its layout is unknown; nothing here guesses it.
 - Once a reader has been **validated against a real sample**, the summary is the **source of truth for the order total**, and the invoices reconcile against it.
 - It is an **allow-list reader**: order number, seller, item totals, shipping, fees, promotions/discounts, refunds if applicable, grand total. Every other line is ignored.
