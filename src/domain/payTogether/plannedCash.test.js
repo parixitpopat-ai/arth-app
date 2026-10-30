@@ -131,6 +131,8 @@ test("App.jsx feeds Money Required, the timeline and the rhythm from the planned
   assert.match(src, /buildCommitmentTimeline\(\{ futureMoney:futureMoneyPlanned,/);
   assert.match(src, /groupFutureMoneyByRhythm\(futureMoneyPlanned,/);
   assert.equal(/getMoneyRequiredForPeriod\(\{ futureMoney,/.test(src), false);
+  assert.match(src, /createPayGroup\(\{[^}]*groups:payGroups \}\)/); // creation sees the existing groups
+  assert.match(src, /effectiveGroups\(payGroups\)\.find/); // paying a group uses the same one-fee-one-group view
   assert.match(src, /buildReadiness\(\{[\s\S]{0,200}events: \[\.\.\.\(futureMoney\.committedSpending/); // Readiness keeps the unmodified events
 });
 
@@ -143,4 +145,59 @@ test("an event already marked paid is never moved, and an item in two groups fol
   assert.equal(moved.find(e => e.sourceId === "b1").date, "2026-09-05");
   assert.equal(moved.find(e => e.sourceId === "Sep").date, "2026-09-25");
   assert.equal(moved.find(e => e.sourceId === "Oct").date, "2026-10-28");
+});
+
+// ---- Duplicate membership: one fee, one group (first group wins) ----
+import { effectiveGroups } from "./group.js";
+const it = i => ({ sourceType: "feePeriod", sourceId: i });
+const G1 = { id: "g1", createdAt: 1, date: "2026-09-25", items: [it("Sep"), it("Oct")] };
+const G2 = { id: "g2", createdAt: 2, date: "2026-09-28", items: [it("Oct"), it("Nov")] };
+
+test("creation refuses a fee already in another group, names it, and moves nothing", () => {
+  const today = "2026-09-01", periods = [SEP, OCT, NOV], events = flat(fmOf(periods));
+  const before = JSON.stringify([G1]);
+  const r = createGroup({ events, keys: ["feePeriod:Oct", "feePeriod:Nov"], date: "2026-09-28", genId: () => "g2", today, groups: [G1] });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.duplicates, ["feePeriod:Oct"]);
+  assert.match(r.reason, /Oct is already planned in another Pay together group/);
+  assert.equal(JSON.stringify([G1]), before);
+  assert.equal(createGroup({ events, keys: ["feePeriod:Nov", "feePeriod:Oct"], date: "2026-09-28", genId: () => "g3", today, groups: [] }).ok, true);
+});
+
+test("duplicate records (sync / older app): the first group keeps Oct, the second keeps Nov; 30-day need is 12,000", () => {
+  const today = "2026-09-01", fm = fmOf([SEP, OCT, NOV]);
+  const eff = effectiveGroups([G2, G1]);                      // stored order does not matter: earliest created wins
+  assert.deepEqual(eff.map(g => [g.id, g.items.map(i => i.sourceId)]), [["g1", ["Sep", "Oct"]], ["g2", ["Nov"]]]);
+  const planned = flat(applyGroupDates(fm, [G1, G2]));
+  assert.deepEqual(planned.map(e => `${e.name}@${e.date}`), ["Sep@2026-09-25", "Oct@2026-09-25", "Nov@2026-09-28"]);
+  const r = home(fm, [G1, G2], today, 60);
+  assert.equal(r.total, 12000);                               // not 16,000
+  assert.equal(r.count, 3);
+});
+
+test("Readiness never counts Oct twice and agrees with the 30-day need", () => {
+  const today = "2026-09-01", fm = fmOf([SEP, OCT, NOV]);
+  const r = ready(fm, [G1, G2], "2026-09", today);
+  assert.equal(r.cashNeeded, 12000);                          // was 16,000
+  const rows = r.spendingRows.map(x => [x.groupId, x.cash]).sort();
+  assert.deepEqual(rows, [["g1", 8000], ["g2", 4000]]);
+  assert.equal(r.cashNeeded, home(fm, [G1, G2], today, 60).total);
+  assert.equal(ready(fm, [G1, G2], "2026-10", today).cashNeeded, 0);
+  assert.equal(ready(fm, [G2, G1], "2026-09", today).cashNeeded, 12000); // same whichever order the records arrive in
+});
+
+test("duplicates with partly paid, overdue and settled fees: still once, still only what is outstanding", () => {
+  const today = "2026-10-03";
+  const periods = [period("Sep", "2026-09-10", { paidAmount: 1000 }), OCT, NOV], fm = fmOf(periods);
+  assert.equal(home(fm, [G1, G2], today, 60).total, 3000 + 4000 + 4000);
+  const after = fmOf(settleFeePeriods(periods, ["Oct"], 4000, "t1"));
+  assert.equal(home(after, [G1, G2], today, 60).total, 3000 + 4000);          // Oct settled: gone from both groups
+  assert.equal(ready(after, [G1, G2], "2026-09", today).cashNeeded, 7000);
+});
+
+test("a single-group setup is unchanged by the duplicate rule", () => {
+
+  assert.deepEqual(effectiveGroups([G1])[0], G1);
+  assert.deepEqual(effectiveGroups([]), []);
+  assert.deepEqual(effectiveGroups(null), []);
 });

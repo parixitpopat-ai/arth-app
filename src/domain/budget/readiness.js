@@ -18,7 +18,7 @@
 
 import { isMonthlyRhythm } from "../futureMoney/rhythm.js";
 import { isEstimatedOccurrence } from "../futureMoney/sourceTypeMeta.js";
-import { itemKey, liveItems } from "../payTogether/group.js";
+import { itemKey, liveItems, effectiveGroups } from "../payTogether/group.js";
 import { spreadInMonth } from "./spread.js";
 
 /** "YYYY-MM" shifted by whole months. */
@@ -59,7 +59,8 @@ function typeKeyOf(e) {
  * @param {Array}  [p.spreads]     Spread-over-months plans: budget shares per month, cash untouched (see spread.js)
  * @param {Array}  [p.groups]      Pay together groups ({id,date,items}); cash moves to the group's date, budget stays in each due month
  */
-export function buildReadiness({ events, commitments, monthKey, monthBudget, today, catIdOf = () => null, groups = [], spreads = [] }) {
+export function buildReadiness({ events, commitments, monthKey, monthBudget, today, catIdOf = () => null, groups: storedGroups = [], spreads = [] }) {
+  const groups = effectiveGroups(storedGroups); // one instalment, one group: the earliest group keeps it (same rule as applyGroupDates)
   const active = (commitments || []).filter(c => !(c.skippedMonths || []).includes(monthKey) && Number(c.amount) > 0);
   const byCat = new Map(active.filter(c => c.categoryId).map(c => [String(c.categoryId), c]));
 

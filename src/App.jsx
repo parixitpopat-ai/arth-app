@@ -60,7 +60,7 @@ import { splitAllocation } from "./domain/budget/commitmentSplit";
 import { buildReadiness, shiftMonthKey } from "./domain/budget/readiness";
 import { planNudge } from "./domain/budget/nudge";
 import { getBudgetLeft } from "./domain/budget/budgetLeft";
-import { createGroup as createPayGroup, removeItem as removePayGroupItem, listPayableInstalments, liveItems as livePayGroupItems, applyGroupDates } from "./domain/payTogether/group";
+import { createGroup as createPayGroup, removeItem as removePayGroupItem, listPayableInstalments, liveItems as livePayGroupItems, applyGroupDates, effectiveGroups } from "./domain/payTogether/group";
 import { planGroupPayment } from "./domain/payTogether/payPlan";
 import PayGroupSheet from "./screens/PayGroupSheet";
 import SpreadSheet from "./screens/SpreadSheet";
@@ -10144,7 +10144,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const futureMoneyPlanned = applyGroupDates(futureMoney, payGroups);
   const allFutureEvents = () => [...(futureMoney.committedSpending||[]), ...(futureMoney.committedSaving||[]), ...(futureMoney.debtService||[])];
   const confirmPayTogether = ({ keys, date }) => {
-    const res = createPayGroup({ events:allFutureEvents(), keys, date, genId, today:todayStr() });
+    const res = createPayGroup({ events:allFutureEvents(), keys, date, genId, today:todayStr(), groups:payGroups });
     if(!res.ok) return res;
     setPayGroups(p=>[...p, res.group]);
     setPayTogetherOpen(false);
@@ -10184,7 +10184,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // (several periods, several payment methods, untick to pay part), Bills through Record payment. SIP
   // instalments aren't payable from here.
   const payGroupPlan = (groupId) => {
-    const g = payGroups.find(x=>String(x.id)===String(groupId));
+    const g = effectiveGroups(payGroups).find(x=>String(x.id)===String(groupId));
     return g ? planGroupPayment({ live:livePayGroupItems(g, allFutureEvents()), feePeriods, feeSchedules, bills }) : null;
   };
   const payFeePart = (part) => {

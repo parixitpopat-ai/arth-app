@@ -22,6 +22,21 @@ export function groupedKeys(groups, exceptGroupId = null) {
   return set;
 }
 
+/**
+ * The groups as they count: one instalment belongs to ONE group - the earliest created (then lowest id, so every
+ * device agrees). A later group that lists the same instalment (a duplicate arriving by sync or an older app
+ * version) simply doesn't claim it. Stored groups are never changed; this is how every reader applies the rule.
+ */
+export function effectiveGroups(groups) {
+  const ordered = [...(groups || [])].sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) || String(a.id).localeCompare(String(b.id)));
+  const claimed = new Set();
+  return ordered.map(g => {
+    const items = (g.items || []).filter(it => !claimed.has(itemKey(it)));
+    items.forEach(it => claimed.add(itemKey(it)));
+    return items.length === (g.items || []).length ? g : { ...g, items };
+  });
+}
+
 /** Unpaid, real instalments (overdue ones included, so arrears can be cleared with later fees) that aren't already in a group, soonest first. */
 export function listPayableInstalments(events, groups) {
   const taken = groupedKeys(groups);
@@ -31,7 +46,7 @@ export function listPayableInstalments(events, groups) {
 }
 
 /** @returns {{ok:true, group:Object}|{ok:false, reason:string}} */
-export function createGroup({ events, keys, date, genId, today = null }) {
+export function createGroup({ events, keys, date, genId, today = null, groups = [] }) {
   if (!date) return { ok: false, reason: "Choose a payment date." };
   if (today && date < today) return { ok: false, reason: "Choose today or a later payment date." };
   const byKey = new Map((events || []).map(e => [itemKey(e), e]));
@@ -39,6 +54,12 @@ export function createGroup({ events, keys, date, genId, today = null }) {
     const e = byKey.get(k);
     return { sourceType: e.sourceType, sourceId: e.sourceId };
   });
+  const taken = groupedKeys(groups);
+  const dup = items.filter(it => taken.has(itemKey(it)));
+  if (dup.length) {
+    const names = dup.map(it => byKey.get(itemKey(it)).name || it.sourceId).join(", ");
+    return { ok: false, duplicates: dup.map(itemKey), reason: `${names} ${dup.length === 1 ? "is" : "are"} already planned in another Pay together group. Remove ${dup.length === 1 ? "it" : "them"} from that group first.` };
+  }
   if (items.length < 2) return { ok: false, reason: "Pick at least two instalments." };
   return { ok: true, group: { id: genId(), date, items, createdAt: Date.now() } };
 }
@@ -70,7 +91,7 @@ export function groupTotal(group, events) {
 export function applyGroupDates(futureMoney, groups) {
   if (!futureMoney || !(groups || []).length) return futureMoney;
   const dateOf = new Map();
-  for (const g of groups) for (const it of g.items || []) if (!dateOf.has(itemKey(it))) dateOf.set(itemKey(it), g.date);
+  for (const g of effectiveGroups(groups)) for (const it of g.items || []) dateOf.set(itemKey(it), g.date);
   const move = e => {
     const d = e && isOpen(e) ? dateOf.get(itemKey(e)) : null;
     return d ? { ...e, date: d, originalDate: e.date } : e;
