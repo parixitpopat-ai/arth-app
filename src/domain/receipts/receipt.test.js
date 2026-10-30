@@ -30,7 +30,7 @@ test("a printed receipt: shop, date, every item row, the printed items total and
 test("PRIVACY: phone, e-mail, GSTIN, FSSAI, address, bill and cashier numbers are never part of the result", () => {
   const text = JSON.stringify(parsed());
   for (const secret of ["9000000000", "shop@example", "99ZZZZZ", "00000000000000", "Test Yard", "T001-000001", "S000001", "XX/000001"]) assert.equal(text.includes(secret), false, secret);
-  assert.deepEqual(Object.keys(parsed()).sort(), ["conflictingPayments", "date", "items", "merchant", "paidPaise", "printed"]);
+  assert.deepEqual(Object.keys(parsed()).sort(), ["conflictingPayments", "date", "items", "merchant", "paidPaise", "printed", "unreadable"]);
 });
 
 test("a misread amount is SHOWN as failing, never corrected: the row does not multiply and the items do not add up", () => {
@@ -151,4 +151,42 @@ test("the printed quantity must match too: everything else holding is not enough
 test("a heading that merely contains a word like Phone or Email is not taken as the shop name", () => {
   assert.equal(parseReceiptLines(["Phone Helpline Number Office", "Email Support Desk Team", "REAL SHOP NAME", "Bill Dt : 30/10/2026"]).merchant, "REAL SHOP NAME");
   assert.equal(parseReceiptLines(["TAX INVOICE", "GSTIN : 99ZZZZZ0000Z1ZZ", "Phone : 9000000000"]).merchant, "");
+});
+
+// ---- rows the engine could not read: reported by AMOUNT only ----
+const GARBLED = RECEIPT.map(l => l.replace("0713 TEST DAL-500g 4 56.00 224.00", "0713 TEST DAL-500g 4 56.O0 224.00").replace("1904 TEST BISCUIT-250g 2 22.50 45.00", "1904 TEST BISCUIT-250g Z 22.50 45.00"));
+
+test("an item-area line that ends in an amount but cannot be read is reported by its amount only, never its text", () => {
+  const p = parseReceiptLines(GARBLED);
+  assert.deepEqual(p.unreadable, [4500, 22400]);
+  assert.equal(p.items.length, 3);
+  const text = JSON.stringify(p);
+  assert.equal(text.includes("BISCUIT"), false);
+  assert.equal(text.includes("56.O0"), false);
+  const c = checkReceipt(input(p));
+  assert.equal(c.allHold, false);                                   // the missing rows also show as a shortfall
+  assert.equal(c.e2.expectedPaise - c.e2.actualPaise, 4500 + 22400);
+});
+
+test("headings, tax rows, the GST breakup, totals and the footer are never reported as unreadable rows", () => {
+  assert.deepEqual(parsed().unreadable, []);
+  const withBreakup = [...RECEIPT, "GST IND Taxable Amount CGST SGST Total Amount", "1 45.00 .... .... .... 45.00", "T: 3873.20 108.20 108.20 .... 3976.60", "Software By Test Systems Pvt Ltd, Testville", "Thank You Visit Again 100.00"];
+  assert.deepEqual(parseReceiptLines(withBreakup).unreadable, []);
+  assert.deepEqual(parseReceiptLines(["SOME SHOP NAME", "Phone Number Helpline 1800.00"]).unreadable, []);     // before the item area starts
+});
+
+test("the amount paid is compared with the printed total (information; the sums already block a mismatch)", () => {
+  const p = parsed();
+  assert.deepEqual(checkReceipt({ ...input(p), paidPaise: 397680 }).paidVsPrinted, { status: "differs", printedPaise: 397660, paidPaise: 397680 });
+  assert.equal(checkReceipt(input(p)).paidVsPrinted.status, "holds");
+  assert.equal(checkReceipt({ ...input(p), printed: null }).paidVsPrinted.status, "incomplete");
+  assert.equal(checkReceipt({ ...input(p), paidPaise: 397680 }).allHold, false);
+});
+
+test("the review panel lets the person add a row, and says which unreadable amounts to add", () => {
+  const ui = readFileSync(fileURLToPath(new URL("../../screens/ReceiptPhotoReview.jsx", import.meta.url)), "utf8");
+  assert.match(ui, /data-testid="receipt-add-row"/);
+  assert.match(ui, /data-testid="receipt-unreadable"/);
+  assert.match(ui, /data-testid="receipt-paid-differs"/);
+  assert.equal(/unreadable\.map\(v => inr/.test(ui), true);       // amounts only
 });

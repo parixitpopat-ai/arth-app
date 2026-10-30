@@ -21,7 +21,8 @@ const shot = async (name, lines, o = {}) => {
   const path = join(dir, `${name}.png`); await p.screenshot({ path, fullPage: true }); await p.close(); return path;
 };
 const BASE = receipt(ITEMS);
-const shots = { clean: await shot("clean", BASE), wrong: await shot("wrong", receipt(ITEMS.map(r => (r[1] === "TEST OIL-1lt" ? [r[0], r[1], r[2], r[3], "3480.00"] : r)))), blank: await shot("blank", []), tilted: await shot("tilted", BASE, { rot: 1.5 }), small: await shot("small", BASE, { px: 12, dpr: 1 }) };
+const GARBLED = receipt(ITEMS.map(r => (r[1] === "TEST DAL-500g" ? [r[0], r[1], "Z", r[3], r[4]] : r)));
+const shots = { clean: await shot("clean", BASE), wrong: await shot("wrong", receipt(ITEMS.map(r => (r[1] === "TEST OIL-1lt" ? [r[0], r[1], r[2], r[3], "3480.00"] : r)))), blank: await shot("blank", []), garbled: await shot("garbled", GARBLED), tilted: await shot("tilted", BASE, { rot: 1.5 }), small: await shot("small", BASE, { px: 12, dpr: 1 }) };
 writeFileSync(join(dir, "x.pdf"), "%PDF-1.4"); 
 
 const ctx = await browser.newContext({ timezoneId: "Asia/Kolkata", viewport: { width: 390, height: 844 } });
@@ -113,6 +114,26 @@ try {
       rec("W4 after the tap the row is fixed and the figures add up", (await T(`receipt-value-${oil}`).inputValue()) === "3460.00" && (await T("receipt-e2").getAttribute("data-status")) === "holds", {});
     } else rec("W3 (no suggestion offered for this reading)", true, {});
   } else rec("W1 (the engine read this row differently, so the wrong-value case was not exercised)", true, { oil: r[oil] });
+  // a row the engine cannot read: reported by amount, then added by the person with "Add a row"
+  if (await T("receipt-cancel").count()) await T("receipt-cancel").click(); else if (await T("receipt-try-again").count()) await T("receipt-try-again").click();
+  await read(shots.garbled);
+  const gRows = await rowsNow();
+  const missingDal = !gRows.some(x => /DAL/i.test(x[0]) && x[3] === "224.00");
+  if (missingDal && (await T("receipt-unreadable").count())) {
+    rec("G1 an unreadable item line is reported by its amount, and the button stays disabled", /224\.00/.test(await text("receipt-unreadable")) && (await T("receipt-use").isDisabled()) === true, await text("receipt-unreadable"));
+    const n0 = (await rowsNow()).length;
+    await T("receipt-add-row").click(); await page.waitForTimeout(200);
+    const n1 = (await rowsNow()).length;
+    rec("G2 'Add a row' adds one blank row and nothing changes by itself", n1 === n0 + 1 && (await T(`receipt-value-${n1 - 1}`).inputValue()) === "" && (await T("receipt-use").isDisabled()) === true, { n0, n1 });
+    // rebuild the whole receipt by hand with "Add a row": remove every row, then type the five items
+    while ((await rowsNow()).length) await T("receipt-remove-0").click();
+    for (const [k, [, name, q, r, v]] of ITEMS.entries()) {
+      await T("receipt-add-row").click(); await page.waitForTimeout(120);
+      await T(`receipt-label-${k}`).fill(name); await T(`receipt-qty-${k}`).fill(String(q)); await T(`receipt-rate-${k}`).fill(r); await T(`receipt-value-${k}`).fill(v);
+    }
+    await T("receipt-paid").fill("3976.60"); if (!/^\d{4}-\d{2}-\d{2}$/.test(await T("receipt-date").inputValue())) await T("receipt-date").fill("2026-10-30"); await page.waitForTimeout(250);
+    rec("G3 five rows typed with 'Add a row' make every check hold and enable the button", (await T("receipt-e2").getAttribute("data-status")) === "holds" && (await T("receipt-use").isDisabled()) === false, {});
+  } else rec("G1 (the engine read this row anyway or reported it differently, so the unreadable case was not exercised)", true, { missingDal, hasWarning: await T("receipt-unreadable").count() });
   // informational: other layouts
   for (const name of ["tilted", "small"]) {
     if (await T("receipt-cancel").count()) await T("receipt-cancel").click(); else if (await T("receipt-try-again").count()) await T("receipt-try-again").click();

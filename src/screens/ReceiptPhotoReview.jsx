@@ -15,6 +15,7 @@ export default function ReceiptPhotoReview({ T, sym = "₹", card, label, onUse 
   const [shop, setShop] = useState(""), [date, setDate] = useState(""), [paid, setPaid] = useState("");
   const [rows, setRows] = useState([]);                                  // { id, label, qty, rate, value } as text
   const [printed, setPrinted] = useState(null);
+  const [unreadable, setUnreadable] = useState([]);                      // amounts of item-area lines that could not be read (never their text)
   const input = { width: "100%", boxSizing: "border-box", padding: 8, minHeight: 40, borderRadius: 10, border: `1px solid ${T.border}`, background: T.card, color: T.text, fontSize: 13 };
   const btn = (primary, disabled) => ({ minHeight: 44, padding: "10px 14px", borderRadius: 12, border: primary ? "0" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? "#fff" : T.text, fontWeight: 800, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1 });
 
@@ -33,11 +34,12 @@ export default function ReceiptPhotoReview({ T, sym = "₹", card, label, onUse 
     const r = await readReceiptFromImage(file, { baseUrl: new URL("./", document.baseURI).href });
     if (!r.ok) { setPhase({ name: "declined", message: r.reason === "engine" ? "The photo could not be read on this phone. Add the expense by hand instead." : DECLINE_MESSAGE[r.reason] }); return; }
     if (!r.found) { setPhase({ name: "declined", message: "No item rows or amount paid were found in this photo. Try a flat, well-lit, full-length photo of the receipt, or add it by hand." }); return; }
-    setShop(r.merchant || ""); setDate(r.date || ""); setPaid(two(r.paidPaise)); setPrinted(r.printed);
+    setShop(r.merchant || ""); setDate(r.date || ""); setPaid(two(r.paidPaise)); setPrinted(r.printed); setUnreadable(r.unreadable || []);
     setRows(r.items.map((it, i) => ({ id: `r${i}`, label: it.label, qty: String(it.qty), rate: two(it.ratePaise), value: two(it.valuePaise) })));
     setPhase({ name: "review", conflict: r.conflictingPayments });
   };
-  const close = () => { setPhase({ name: "idle" }); setRows([]); setShop(""); setDate(""); setPaid(""); setPrinted(null); };
+  const close = () => { setPhase({ name: "idle" }); setRows([]); setShop(""); setDate(""); setPaid(""); setPrinted(null); setUnreadable([]); };
+  const addRow = () => setRows(prev => [...prev, { id: `n${Date.now()}${prev.length}`, label: "", qty: "1", rate: "", value: "" }]);
   const setRow = (id, k, v) => setRows(prev => prev.map(r => (r.id === id ? { ...r, [k]: v } : r)));
   const use = () => {
     if (!canUse) return;
@@ -94,12 +96,15 @@ export default function ReceiptPhotoReview({ T, sym = "₹", card, label, onUse 
               {c.rows[i] && !c.rows[i].ok && <div data-testid={`receipt-rowwarn-${i}`} style={{ color: "#f0a500", fontSize: 11, marginTop: 2 }}>⚠ {c.rows[i].expectedPaise != null ? `qty × rate is ${inr(c.rows[i].expectedPaise, sym)}, the value is ${inr(numeric[i].valuePaise || 0, sym)}` : "Check this row's quantity, rate and value"}</div>}
             </div>
           ))}
+          <button data-testid="receipt-add-row" onClick={addRow} style={{ ...btn(false), marginTop: 8, width: "100%" }}>+ Add a row</button>
+          {unreadable.length > 0 && <div data-testid="receipt-unreadable" style={{ color: "#f0a500", fontSize: 12, marginTop: 8 }}>⚠ {unreadable.length === 1 ? "One line looks like an item but could not be read" : `${unreadable.length} lines look like items but could not be read`} (amounts seen: {unreadable.map(v => inr(v, sym)).join(", ")}). Add {unreadable.length === 1 ? "it" : "them"} with “Add a row”.</div>}
           <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, marginTop: 8 }}>Amount paid</div>
           <input data-testid="receipt-paid" inputMode="decimal" value={paid} onChange={e => setPaid(e.target.value)} style={input} placeholder="0.00" />
           {phase.conflict && <div data-testid="receipt-conflict" style={{ color: "#f0a500", fontSize: 11 }}>The receipt shows more than one payment amount. Type the amount you paid.</div>}
           {eqRow("receipt-e2", `Items add up to ${inr(c.sumPaise, sym)} = amount paid`, c.e2, c.e2.expectedPaise != null ? `you paid ${inr(c.e2.expectedPaise, sym)}, the items come to ${inr(c.e2.actualPaise, sym)}` : "enter the amount paid")}
           {printed && printed.totalPaise != null && eqRow("receipt-e1", `Items add up to the printed total ${inr(printed.totalPaise, sym)}`, c.e1, `printed ${inr(c.e1.expectedPaise, sym)}, the items come to ${inr(c.e1.actualPaise, sym)}`)}
           {printed && printed.qty != null && eqRow("receipt-qty", `Quantities add up to the printed ${printed.qty}`, c.qty, `printed ${c.qty.expected}, the rows come to ${c.qty.actual}`)}
+          {c.paidVsPrinted.status === "differs" && <div data-testid="receipt-paid-differs" style={{ color: "#f0a500", fontSize: 12 }}>⚠ The amount paid ({inr(c.paidVsPrinted.paidPaise, sym)}) is not the printed total ({inr(c.paidVsPrinted.printedPaise, sym)}). Check it against the receipt.</div>}
           {suggestion && (
             <div data-testid="receipt-suggestion" style={{ fontSize: 12, color: T.sub, padding: "4px 0" }}>
               Did you mean row {suggestion.index + 1} to be {inr(suggestion.valuePaise, sym)}? The items would then add up.

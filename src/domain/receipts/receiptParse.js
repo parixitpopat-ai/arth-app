@@ -17,6 +17,9 @@ const lineValue = (qty, ratePaise) => Math.round(qty * ratePaise);       // pais
 const ITEM = /^\s*(?:\d{4,8}\s+)?([A-Za-z0-9][A-Za-z0-9 .,&'()/+%-]{1,48}?)\s+(\d+(?:\.\d{1,3})?)\s+(\d+(?:,\d{3})*\.\d{2})\s+(\d+(?:,\d{3})*\.\d{2})\s*$/;
 const ITEMS_TOTAL = /\bitems?\s*[:.]?\s*(\d+)\s+qty\s*[:.]?\s*(\d+(?:\.\d{1,3})?)\s+(\d+(?:,\d{3})*\.\d{2})/i;
 const PAID = /\b(upi|cash|card|paytm|phonepe|gpay|google\s*pay|net\s*banking|amount\s*received)[^\d\n]{0,28}?(\d+(?:,\d{3})*\.\d{2})/i;
+// Lines in the item area that are headings or tax rows, never items.
+const NOT_AN_ITEM_AREA_LINE = /@|%|\b(cgst|sgst|igst|gst|cess|tax|hsn|particulars|qty|rate|value|total|round)\b/i;
+const AMOUNT_AT_END = /(\d+(?:,\d{3})*\.\d{2})\s*\W*$/;
 const NOT_A_SHOP = /tax\s*invoice|\bgstin\b|\bfssai\b|phone|e-?mail|bill\s*(no|dt)|cashier|invoice|^\W*$|@|\d{6,}/i;
 
 /** @param {string[]} lines recognised text, one per line */
@@ -34,20 +37,25 @@ export function parseReceiptLines(lines) {
     if (m && real.getFullYear() === +m[3] && real.getMonth() === +m[2] - 1 && real.getDate() === +m[1]) { date = `${m[3]}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`; break; }
   }
   const items = [];
+  const unreadable = [];            // lines in the item area that end in an amount but could not be read as an item: ONLY the amount is kept, never the text
   let printed = null; const paid = [];
+  let inItems = false;
   for (const l of all) {
+    if (/particulars/i.test(l)) inItems = true;
     const t = ITEMS_TOTAL.exec(l);
-    if (t && !printed) { printed = { count: +t[1], qty: Number(t[2]), totalPaise: toPaise(t[3]) }; continue; }
+    if (t && !printed) { printed = { count: +t[1], qty: Number(t[2]), totalPaise: toPaise(t[3]) }; inItems = false; continue; }
     const p = PAID.exec(l);
     if (p && !ITEM.test(l)) { const v = toPaise(p[2]); if (v != null) paid.push(v); continue; }
     const m = ITEM.exec(l);
-    if (!m) continue;
-    const qty = qtyOf(m[2]), rate = toPaise(m[3]), value = toPaise(m[4]);
-    if (qty == null || rate == null || value == null) continue;
-    items.push({ label: m[1].replace(/\s+/g, " ").trim(), qty, ratePaise: rate, valuePaise: value });
+    const qty = m && qtyOf(m[2]), rate = m && toPaise(m[3]), value = m && toPaise(m[4]);
+    if (m && qty != null && rate != null && value != null) { items.push({ label: m[1].replace(/\s+/g, " ").trim(), qty, ratePaise: rate, valuePaise: value }); inItems = true; continue; }
+    if (inItems && !NOT_AN_ITEM_AREA_LINE.test(l) && /[A-Za-z]{3}/.test(l)) {
+      const a = AMOUNT_AT_END.exec(l); const v = a && toPaise(a[1]);
+      if (v != null && v > 0) unreadable.push(v);
+    }
   }
   const uniquePaid = [...new Set(paid)];
-  return { merchant, date, items, printed, paidPaise: uniquePaid.length === 1 ? uniquePaid[0] : null, conflictingPayments: uniquePaid.length > 1 };
+  return { merchant, date, items, printed, paidPaise: uniquePaid.length === 1 ? uniquePaid[0] : null, conflictingPayments: uniquePaid.length > 1, unreadable };
 }
 
 /**
@@ -65,9 +73,11 @@ export function checkReceipt({ items, printed = null, paidPaise = null }) {
   const e2 = eq(paidPaise, items && items.length ? sum : null);
   const qtySum = (items || []).reduce((s, it) => s + (Number(it.qty) || 0), 0);
   const qty = printed && printed.qty != null ? { status: Math.abs(printed.qty - qtySum) < 1e-9 ? "holds" : "fails", expected: printed.qty, actual: qtySum } : { status: "incomplete", expected: null, actual: qtySum };
+  // Informational (the sums above already block): the amount paid should be the printed total unless the receipt rounds off or discounts.
+  const paidVsPrinted = printed && printed.totalPaise != null && paidPaise != null ? { status: printed.totalPaise === paidPaise ? "holds" : "differs", printedPaise: printed.totalPaise, paidPaise } : { status: "incomplete" };
   const linesOk = rows.length > 0 && rows.every(r => r.ok);
   const sumsHold = e2.status === "holds" && e1.status !== "fails";
-  return { rows, sumPaise: sum, e1, e2, qty, linesOk, allHold: linesOk && sumsHold && qty.status !== "fails" };
+  return { rows, sumPaise: sum, e1, e2, qty, paidVsPrinted, linesOk, allHold: linesOk && sumsHold && qty.status !== "fails" };
 }
 
 /**
