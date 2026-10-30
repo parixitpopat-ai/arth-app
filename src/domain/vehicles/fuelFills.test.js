@@ -113,3 +113,31 @@ test("refuels are part of the synced snapshot and the restore path (otherwise th
   assert.ok(owner.DATA_KEYS.includes("arth_fuel_fills"), "and registered as synced data");
   assert.equal(user.hasUserData({ fuelFills: [{ id: "x" }] }), true, "and counts as user data (ownership and sync decisions)");
 });
+
+// ---- odometer entered on the FUEL EXPENSE (the refuel is linked to it by txnId) ----
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+test("a refuel keeps the id of the expense it was entered on; a fill with no expense has none", () => {
+  assert.equal(normalizeFill({ ...F("x", "2026-03-01", 2000, 10, 1000), txnId: 1793371508954 }).txnId, "1793371508954");
+  assert.equal("txnId" in normalizeFill(F("x", "2026-03-01", 2000, 10, 1000)), false);
+  assert.equal("txnId" in normalizeFill({ ...F("x", "2026-03-01", 2000, 10, 1000), txnId: "" }), false);
+});
+
+test("re-checking a linked refuel after its expense is edited never counts the refuel against itself", () => {
+  const all = [...SET, { ...F("e", "2026-03-01", 2100, 20, 2000), txnId: "t9" }];
+  const v = validateFill(all, { ...F("e", "2026-03-01", 2100, 20, 2500), txnId: "t9" }, { today: "2026-10-23" });
+  assert.equal(v.ok, true);                                                            // same row, new amount: not a duplicate of itself
+  assert.equal(validateFill(all, { ...F(undefined, "2026-03-01", 2100, 20, 2500) }, { today: "2026-10-23" }).ok, false);   // the same fill as a NEW one is a duplicate
+});
+
+test("the fuel expense form: odometer fields only for a Fuel sub-category with a vehicle; edit and delete keep the refuel in step", () => {
+  const app = readFileSync(fileURLToPath(new URL("../../App.jsx", import.meta.url)), "utf8");
+  assert.match(app, /const isFuelSub = sid => \/\^fuel\$\/i\.test\(/);
+  assert.match(app, /const showFuelFields = txnType==="expense" && validCatIds\.includes\("transport"\) && Boolean\(vehicleId\) && validSubIds\.some\(isFuelSub\)/);
+  assert.match(app, /const isFuelExpense = txnType==="expense" && effectiveCatIds\.includes\("transport"\) && Boolean\(newTxn\.vehicleId\) && validSubIds\.some\(isFuelSub\)/);
+  assert.match(app, /validateFill\(fuelFills, candidate\)/);                                       // the same odometer checks as the Add refuel sheet
+  assert.match(app, /Expense saved\. Refuel not added:/);                                          // a bad reading never blocks the expense
+  assert.match(app, /setFuelFills\(prev=>prev\.some\(f=>f\.txnId!=null && String\(f\.txnId\)===String\(txn\.id\)\)/);   // deleting the expense removes its refuel
+  assert.match(app, /existingFill \? prev\.map\(f=>String\(f\.id\)===String\(existingFill\.id\)/);   // editing updates the same refuel
+});

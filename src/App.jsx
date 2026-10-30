@@ -2110,6 +2110,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
   const removeTxnAndLinkedInvestment = useCallback(txn=>{
     if(!txn) return;
+    setFuelFills(prev=>prev.some(f=>f.txnId!=null && String(f.txnId)===String(txn.id)) ? prev.filter(f=>!(f.txnId!=null && String(f.txnId)===String(txn.id))) : prev);   // a refuel entered on this expense goes with it
     if(getAcc(txn.accId)?.type==="cc" && txn.type==="expense"){
       setAccounts(prev=>prev.map(a=>a.id===txn.accId?{...a,outstanding:Math.max(0,(a.outstanding||0)-Number(txn.amount||0))}:a));
     }
@@ -4338,6 +4339,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [emiGstOnInterest, setEmiGstOnInterest] = useState("");
     const [isBillPayment, setIsBillPayment] = useState(isEditing ? Boolean(sourceTxn?.isBillPayment) : false);
     const [vehicleId, setVehicleId] = useState(isEditing ? (sourceTxn?.vehicleId||"") : (safePrefill.vehicleId||""));
+    // Odometer on a FUEL expense: the refuel (date and amount taken from this expense) is created, updated and removed with it.
+    const linkedFill = isEditing ? (fuelFills.find(f=>f.txnId!=null && String(f.txnId)===String(sourceTxn?.id)) || null) : null;
+    const [fuelOdo, setFuelOdo] = useState(linkedFill ? String(linkedFill.odometer) : "");
+    const [fuelLitres, setFuelLitres] = useState(linkedFill ? String(linkedFill.litres) : "");
+    const [fuelFull, setFuelFull] = useState(linkedFill ? linkedFill.full !== false : true);
     const [showAddVehicleInline, setShowAddVehicleInline] = useState(false);
     const [tagPersonAmount, setTagPersonAmount] = useState(isEditing && sourceTxn?.tagPersonAmount ? String(sourceTxn.tagPersonAmount) : "");
     const [tagGroupAmount, setTagGroupAmount] = useState(isEditing && sourceTxn?.tagGroupAmount ? String(sourceTxn.tagGroupAmount) : "");
@@ -4670,6 +4676,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
     const validCatIds = catIds.filter(cid=>getCat(cid));
     const validSubIds = subIds.filter(sid=>validCatIds.some(cid=>getCat(cid)?.subs?.some(sub=>sub.id===sid)));
+    // Only a Transport expense whose sub-category is Fuel, with a vehicle chosen, asks for the odometer.
+    const isFuelSub = sid => /^fuel$/i.test(String(getCat("transport")?.subs?.find(s=>s.id===sid)?.name||"").trim());
+    const showFuelFields = txnType==="expense" && validCatIds.includes("transport") && Boolean(vehicleId) && validSubIds.some(isFuelSub);
+    const fuelCheck = showFuelFields && String(fuelOdo).trim()!=="" ? validateFill(fuelFills, { id:linkedFill?.id, vehicleId, date, odometer:fuelOdo, litres:fuelLitres, amount:Number(amount)||null, full:fuelFull, txnId:sourceTxn?.id }) : null;
     const catId = validCatIds[0]||null;  // primary cat for backward compat
     const nonCCAccs = paidViaAccounts.filter(a=>a.type!=="cc");
     // Transfer between accounts: never a debit card or UPI handle at either end (they are payment methods, not accounts); a PPF/FD/NPS account may be either end (deposit / withdrawal). An old transfer keeps the account it already used.
@@ -5742,6 +5752,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         }
         if(!isEditing && !(txnType==="expense" && paidByPersonId) && getAcc(accId)?.type==="cc") setAccounts(prev=>prev.map(a=>a.id===accId?{...a,outstanding:(a.outstanding||0)+amt}:a));
 
+        // Odometer on a fuel expense: create / update / remove the refuel linked to THIS expense (domain/vehicles/fuelFills.js). The expense is already saved;
+        // if the reading does not pass the odometer checks the person is told and the refuel is simply not added.
+        {
+          const isFuelExpense = txnType==="expense" && effectiveCatIds.includes("transport") && Boolean(newTxn.vehicleId) && validSubIds.some(isFuelSub);
+          const existingFill = fuelFills.find(f=>f.txnId!=null && String(f.txnId)===String(resolvedTxnId));
+          if(isFuelExpense && String(fuelOdo).trim()!==""){
+            const candidate = { id:existingFill?.id, vehicleId:newTxn.vehicleId, date, odometer:fuelOdo, litres:fuelLitres, amount:amt, full:fuelFull, txnId:resolvedTxnId };
+            const verdict = validateFill(fuelFills, candidate);
+            if(verdict.ok){
+              const n = normalizeFill(candidate);
+              setFuelFills(prev=>existingFill ? prev.map(f=>String(f.id)===String(existingFill.id)?{ ...n, id:existingFill.id }:f) : [...prev,{ ...n, id:genId() }]);
+            } else {
+              setToast({ message:`Expense saved. Refuel not added: ${Object.values(verdict.errors)[0]}`, icon:"!" });
+            }
+          } else if(existingFill){
+            setFuelFills(prev=>prev.filter(f=>String(f.id)!==String(existingFill.id)));   // odometer cleared, or no longer a fuel expense: the link goes
+          }
+        }
         // T-34 (WP-5): item-level bill links (domain/obligations/itemBillLinks.js). This transaction's earlier item-level Contributions are
         // replaced by what the items say now, so unlinking, deleting an item, or switching off Itemised removes them; a whole-transaction
         // bill payment below is unaffected. A Bill that only an unlinked item paid reopens (same guard as delete: it must point back at this transaction).
@@ -7336,6 +7364,21 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           form. */}
                       <button onClick={()=>setShowAddVehicleInline(true)} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ New Vehicle</button>
                     </div>
+                  </div>
+                )}
+                {showFuelFields&&(
+                  <div data-testid="fuel-odometer-block" style={{ marginTop:10,background:T.input,borderRadius:10,padding:"10px 12px" }}>
+                    <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Odometer (optional)</div>
+                    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                      <input data-testid="fuel-odometer" style={inp} type="text" inputMode="numeric" placeholder="Odometer (km)" value={fuelOdo} onChange={e=>setFuelOdo(e.target.value.replace(/[^0-9]/g,""))}/>
+                      <input data-testid="fuel-litres" style={inp} type="text" inputMode="decimal" placeholder="Litres" value={fuelLitres} onChange={e=>setFuelLitres(e.target.value.replace(/[^0-9.]/g,""))}/>
+                    </div>
+                    <label style={{ display:"flex",alignItems:"center",gap:8,color:T.text,fontSize:12,marginTop:8 }}>
+                      <input data-testid="fuel-full" type="checkbox" checked={fuelFull} onChange={e=>setFuelFull(e.target.checked)}/>Filled the tank to full (untick for a top-up)
+                    </label>
+                    {fuelCheck&&!fuelCheck.ok&&<div data-testid="fuel-odometer-error" style={{ color:T.warn,fontSize:11,marginTop:6 }}>{Object.values(fuelCheck.errors)[0]} The expense will still be saved without the refuel.</div>}
+                    {fuelCheck&&fuelCheck.ok&&fuelCheck.warnings.map(w=><div key={w} style={{ color:T.warn,fontSize:11,marginTop:6 }}>{w}</div>)}
+                    <div style={{ color:T.sub,fontSize:11,marginTop:6 }}>The date and amount come from this expense. Leave the odometer blank to skip.</div>
                   </div>
                 )}
                 {showAddVehicleInline&&(

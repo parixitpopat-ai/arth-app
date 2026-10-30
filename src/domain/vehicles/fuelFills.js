@@ -2,7 +2,7 @@
 //
 // Odometer capture at every refuelling: mileage history, fuel efficiency (km/L) and fuel cost per kilometre.
 // Pure functions only (no storage, no clock unless passed in). A "fill" is:
-//   { id, vehicleId, date: "YYYY-MM-DD", odometer: km, litres, amount: ₹ | null, full: boolean, note?: string }
+//   { id, vehicleId, date: "YYYY-MM-DD", odometer: km, litres, amount: ₹ | null, full: boolean, note?: string, txnId?: the fuel expense it was entered on }
 //
 // Efficiency uses the standard TANK-TO-TANK method, because a single fill-up says nothing about consumption by itself:
 //   for a FULL-tank fill that follows an earlier FULL-tank fill,
@@ -30,6 +30,7 @@ export function normalizeFill(raw) {
     odometer: num(f.odometer), litres: num(f.litres),
     amount: Number.isFinite(amount) ? amount : null,
     full: f.full !== false,                                   // full tank unless explicitly a top-up
+    ...(f.txnId != null && f.txnId !== "" ? { txnId: String(f.txnId) } : {}),   // the fuel expense this refuel came from, when it was entered on the expense
     ...(f.note && String(f.note).trim() ? { note: String(f.note).trim().slice(0, 200) } : {}),
   };
 }
