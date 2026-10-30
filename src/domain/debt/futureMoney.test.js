@@ -153,3 +153,15 @@ test("handles empty/missing loans array and malformed loan entries without throw
   assert.equal(mapLoanToDebtServiceEvent(null, [], [], toDateOnly, TODAY), null);
   assert.equal(mapLoanToDebtServiceEvent({}, [], [], toDateOnly, TODAY), null);
 });
+
+test("a closed, written-off or converted loan, or one with nothing outstanding, projects no EMI", () => {
+  for (const o of [{ status: "closed" }, { status: "written_off" }, { status: "converted_to_expense" }, { outstanding: 0 }, { status: "active", outstanding: 0 }, { outstanding: "0" }])
+    assert.equal(mapLoanToDebtServiceEvent(takenLoan(o), [], [], toDateOnly, TODAY), null, JSON.stringify(o));
+});
+
+test("active loans, and older records with no status, still project; one closed loan drops out of the list only", () => {
+  assert.ok(mapLoanToDebtServiceEvent(takenLoan({ status: "active", dueDay: 11 }), [], [], toDateOnly, TODAY));
+  assert.ok(mapLoanToDebtServiceEvent(takenLoan({ status: undefined, dueDay: 11 }), [], [], toDateOnly, TODAY));
+  const events = projectLoansToDebtServiceEvents([takenLoan({ id: "a", dueDay: 11 }), takenLoan({ id: "b", status: "closed", outstanding: 0 })], [], [], toDateOnly, TODAY);
+  assert.deepEqual(events.map(e => e.sourceId), ["a"]);
+});

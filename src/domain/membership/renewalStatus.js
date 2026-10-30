@@ -12,6 +12,20 @@
 import { getPeriodEffectiveEnd, addDaysToDateStr } from "../../helpers/dateHelpers.js";
 
 /**
+ * The period that already carries the membership on after `effectiveEnd` (the current period's end, grace
+ * included): one that starts no later than the day after it and ends after it. When it exists the membership
+ * is already renewed - there is nothing to renew. Null when there is none.
+ * @param {Array<{from:string,to:string}>} periods every period of the account
+ * @param {string} effectiveEnd "YYYY-MM-DD"
+ */
+export function getFollowingPeriod(periods, effectiveEnd) {
+  if (!effectiveEnd) return null;
+  const dayAfter = addDaysToDateStr(effectiveEnd, 1);
+  const covering = (periods || []).filter(p => p?.from && p?.to && p.from <= dayAfter && p.to > effectiveEnd);
+  return covering.sort((a, b) => String(b.to).localeCompare(String(a.to)))[0] || null;
+}
+
+/**
  * @param {Array<{m:Object, period:Object|null|undefined}>} membershipsWithPeriods - one entry per
  *   payment record, `period` from getCurrentPeriod(m) (may be null/undefined; excluded here).
  * @param {string} today - "YYYY-MM-DD"

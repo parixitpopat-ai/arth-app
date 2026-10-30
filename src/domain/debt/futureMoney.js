@@ -118,6 +118,11 @@ export function mapLoanToDebtServiceEvent(loan, accounts, txns, toDateOnly, toda
   if (!loan || typeof loan !== "object") return null;
   if (loan.direction !== "taken") return null; // "given" loans are receivables, never Debt Service
 
+  // A loan that is closed (paid off), written off or converted owes nothing more. Its EMI amount stays on the
+  // record, so without this it would keep projecting a monthly obligation forever.
+  if (loan.status && loan.status !== "active") return null;
+  if (loan.outstanding != null && loan.outstanding !== "" && Number(loan.outstanding) <= 0) return null;
+
   // Pre-materialized CC-EMI-purchase installments already exist as real,
   // dated transactions in txns[] — checked first, short-circuits everything
   // below. Never projected again, regardless of any other field present.

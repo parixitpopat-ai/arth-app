@@ -32,7 +32,7 @@ import { Compass, Calendar, ChevronRight, ChevronDown, Landmark, GraduationCap, 
 import { groupFutureMoneyByRhythm } from "./domain/futureMoney/rhythm";
 import { getSourceTypeLabel, getDisplayStatus, isEstimatedOccurrence } from "./domain/futureMoney/sourceTypeMeta";
 import { todayStr, toLocalDateStr, addDaysToDateStr, addMonthsClamped, dateAtDay, getPeriodEffectiveEnd, daysInMonth, getMonthBounds, getPreviousMonthKey } from "./helpers/dateHelpers";
-import { getMembershipRenewalStatus } from "./domain/membership/renewalStatus";
+import { getMembershipRenewalStatus, getFollowingPeriod } from "./domain/membership/renewalStatus";
 import { getPendingGymCatchUp, recordGymCheckIn, recordGymBreak } from "./domain/membership/checkIn";
 import { PERSON_MODULES, getPersonModules, GROUP_MODULES, GROUP_TYPE_DEFAULT_MODULES, getGroupModules, CAT_ICONS, INVEST_TYPES, ACC_TYPES, LIABILITY_TYPES, ASSET_TYPES, DEFAULT_INCOME_TYPES, INVESTMENT_FREQUENCY_OPTIONS, ME, DEFAULT_CATS, DEFAULT_ACCOUNTS, DEFAULT_MEASURE_UNITS, VENDOR_CATEGORY_RULES, CLOUD_SCHEMA_VERSION } from "./constants/appConstants";
 import { investmentFreqLabel, getInvestmentBudgetMeta, getInvestmentMetricConfig, getInvestmentGroupMeta, inferInvestmentTypeId } from "./constants/investmentConfig";
@@ -21317,9 +21317,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   const daysLeft = heroEffEnd ? Math.round((new Date(heroEffEnd)-new Date())/86400000) : null;
                   const daysElapsed = heroPeriod ? Math.max(0,Math.round((new Date()-new Date(heroPeriod.from))/86400000)) : 0;
                   const isActive = daysLeft!==null && daysLeft>=0;
-                  const heroColor = daysLeft===null ? T.sub : daysLeft<0 ? T.danger : daysLeft<=15 ? T.warn : T.success;
                   // Lifetime analytics — across every payment ever recorded for this account.
                   const allPeriods = sorted.flatMap(m=>getMembershipPeriods(m));
+                  // Already renewed: a later period carries on from this one's end, so no renewal is needed.
+                  const followingPeriod = heroEffEnd ? getFollowingPeriod(allPeriods, heroEffEnd) : null;
+                  const heroColor = daysLeft===null ? T.sub : daysLeft<0 ? T.danger : (daysLeft<=15 && !followingPeriod) ? T.warn : T.success;
                   const lifetimeSpend = sorted.reduce((s,m)=>s+Number(m.amount||0),0);
                   const firstStart = allPeriods.length ? [...allPeriods].sort((a,b2)=>(a.from||"").localeCompare(b2.from||""))[0].from : null;
                   const totalDaysCovered = allPeriods.reduce((s,p)=>s+Math.max(0,Math.round((new Date(p.to)-new Date(p.from))/86400000)+1),0);
@@ -21335,13 +21337,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                             </div>
                           </div>
                           <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>{formatShortDate(heroPeriod.from)||heroPeriod.from} → {formatShortDate(heroPeriod.to)||heroPeriod.to}{heroPeriod.graceDays>0?` (+${heroPeriod.graceDays}d grace)`:""}</div>
-                          <div style={{ color:heroColor,fontSize:13,fontWeight:800,marginBottom:6 }}>{daysLeft===null?"":daysLeft>=0?`${daysLeft} Days Left`:`Expired ${Math.abs(daysLeft)} days ago`}</div>
+                          <div style={{ color:heroColor,fontSize:13,fontWeight:800,marginBottom:6 }}>{daysLeft===null?"":daysLeft>=0?`${daysLeft} ${daysLeft===1?"Day":"Days"} Left`:`Expired ${Math.abs(daysLeft)} days ago`}</div>
                           <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:8 }}>
                             <div style={{ height:"100%",width:`${Math.min(100,Math.round(daysElapsed/daysTotal*100))}%`,background:heroColor,borderRadius:3 }}/>
                           </div>
                           <div style={{ color:T.sub,fontSize:11 }}>Paid {sym}{fmt(hero.m.amount)}</div>
-                          {daysLeft!==null&&daysLeft>=0&&daysLeft<=15&&(
-                            <button onClick={()=>setShowAddMembership(true)} style={{ marginTop:10,width:"100%",background:heroColor,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>⚠️ Expires in {daysLeft} days — Renew</button>
+                          {daysLeft!==null&&daysLeft>=0&&followingPeriod&&(
+                            <div style={{ marginTop:10,color:T.success,fontSize:12,fontWeight:800 }}>Renewed · next period starts {formatShortDate(followingPeriod.from)||followingPeriod.from}</div>
+                          )}
+                          {daysLeft!==null&&daysLeft>=0&&daysLeft<=15&&!followingPeriod&&(
+                            <button onClick={()=>setShowAddMembership(true)} style={{ marginTop:10,width:"100%",background:heroColor,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>⚠️ Expires in {daysLeft} {daysLeft===1?"day":"days"} — Renew</button>
                           )}
                         </div>
                       )}
