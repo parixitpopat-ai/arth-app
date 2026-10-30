@@ -102,6 +102,8 @@ Each figure has a tick or a warning with the equation it fails; a failing figure
 8. **Release:** isolated preview, your phone, your explicit release approval.
 Steps 1–3 deliver value and carry no OCR dependency, so they can ship first without any new library.
 
+**Status (30 Oct 2026).** Steps 1-3 released. Step 4 (dependency gate, local bundling, isolation test) and Steps 5-6 (the reader and the assisted panel) are built. The picture reader is switched OFF by default and is turned on per visit with a checkbox on the preview screen (nothing is stored). The reader takes PNG, JPG or WebP pictures of the Order Summary only (a PDF that is a picture is not yet routed to it). Step 7 (accuracy corpus and a real-phone measurement) is NOT done: the only measurements so far are on invented screenshots in Chromium, where the clean, dark-theme and "Rs." variants read 6 of 6 figures and a small-text variant read 0 of 6 (the rupee sign read as a digit), which the equations flag and the person must correct. Provisional limits (10 MB, 16 megapixels) are placeholders until Step 7.
+
 ## 11. Unknowns [NOT VERIFIED]
 Other Amazon screenshot layouts, languages and themes; other summary rows; accuracy beyond one sample; Android WebView support, memory and speed; whether a text print of the summary exists on your phone (so far it does not); how an OCR'd order number matches reliably (digits are the weak point); and whether bundling the engine affects first-load time of the main app (it is loaded only on demand).
 

@@ -43,7 +43,7 @@ test("the dependency is pinned exactly and the data package is dev-only", () => 
   assert.equal(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter(k => /tesseract/.test(k)).length, 2);
 });
 
-test("nothing in the app imports the engine yet, and the engine is only ever imported on demand", () => {
+test("only the OCR folder imports the engine, and it is only ever imported on demand", () => {
   const walk = d => readdirSync(d).flatMap(n => { const p = join(d, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
   const offenders = walk(join(ROOT, "src")).filter(f => /\.(js|jsx)$/.test(f) && !f.includes("/ocr/") && /ocrEngine|tesseract\.js/.test(readFileSync(f, "utf8")));
   assert.deepEqual(offenders.map(f => f.replace(ROOT, "")).filter(f => !/testInventory/.test(f)), []);
@@ -52,7 +52,7 @@ test("nothing in the app imports the engine yet, and the engine is only ever imp
   assert.match(engine, /await import\("tesseract\.js"\)/);
 });
 
-test("no CDN address appears in the app's OCR code, and a normal build does not copy the engine's files", () => {
+test("no CDN address appears in the app's OCR code, and every build ships the engine's own files", () => {
   for (const f of ["src/domain/invoices/ocr/ocrConfig.js", "src/domain/invoices/ocr/ocrEngine.js", "tools/ocr/viteOcrAssets.js"]) assert.equal(/jsdelivr|unpkg|cdnjs/i.test(read(f)), false, f);
-  assert.match(read("vite.config.js"), /process\.env\.ARTH_OCR_ASSETS === '1' \? \[ocrAssets\(\)\] : \[\]/);
+  assert.match(read("vite.config.js"), /plugins: \[react\(\), ocrAssets\(\)\]/);
 });

@@ -26,6 +26,11 @@ const LABELS = [
   ["discount", new RegExp(`instant\\s*bank\\s*discount\\s*:?\\s*${AMOUNT}`, "i")],
   ["total", new RegExp(`(?<![a-z])(?<!grand\\s)total\\s*:\\s*${AMOUNT}`, "i")],
 ];
+/** The allow-listed LABELS alone (no amount), used to find a row's label in a picture. Only these rows are ever read; nothing else is kept. */
+export const LABEL_ONLY = {
+  subtotal: /item\(s\)\s*sub\s*total/i, shipping: /\bshipping\s*(?:&\s*handling)?/i, fee: /(?:offer\s*)?processing\s*fee/i,
+  grandTotal: /grand\s*total/i, discount: /instant\s*bank\s*discount/i, total: /(?<![a-z])(?<!grand\s)total\b/i,
+};
 const MONTHS = { january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12 };
 
 /**

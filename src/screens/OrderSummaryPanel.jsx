@@ -1,6 +1,7 @@
 // Order summary, entered by hand (INVOICE-IMPORT-009 steps 2 and 3). No OCR, no file is read here. Nothing is saved; figures live in this screen's memory.
 // The person types five amounts; Total is calculated and the two equations are shown. The summary is then attached to an order: exact number, or chosen by the person.
 import { useState } from "react";
+import OcrSummaryReview from "./OcrSummaryReview.jsx";
 import { evaluateManualEntry, newSummary, acknowledge, chooseOrder, ORDER_NUMBER_FORMAT, SOURCE_LABEL } from "../domain/invoices/orderSummary.js";
 
 const inr = (paise, sym) => `${sym}${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -32,7 +33,7 @@ export default function OrderSummaryPanel({ T, sym = "₹", card, label, orders,
     <div data-testid="summary-panel">
       <div style={card}>
         <div style={label}>Order summary</div>
-        <div style={{ color: T.sub, fontSize: 12, marginBottom: 8 }}>Type the five amounts from the Amazon Order Summary. Nothing is read from a picture, and nothing is saved.</div>
+        <div style={{ color: T.sub, fontSize: 12, marginBottom: 8 }}>Type the five amounts from the Amazon Order Summary. Nothing is saved.</div>
         {!open && <button data-testid="summary-enter" onClick={() => setOpen(true)} style={btn(false)}>Enter the order summary</button>}
         {open && (
           <div data-testid="summary-form">
@@ -59,6 +60,7 @@ export default function OrderSummaryPanel({ T, sym = "₹", card, label, orders,
           </div>
         )}
       </div>
+      <OcrSummaryReview T={T} sym={sym} card={card} label={label} orders={orders} onAdd={onAdd} onManual={() => setOpen(true)} />
       {summaries.map(s => (
         <div key={s.id} style={card} data-testid="summary-card" data-state={s.match.state} data-acknowledged={String(s.acknowledged)}>
           <div style={label}>Order summary · {SOURCE_LABEL[s.source]}</div>

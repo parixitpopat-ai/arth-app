@@ -14,9 +14,19 @@ export const OCR_FILES = [
   ["ocr/eng.traineddata.gz", "@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz"],
 ];
 
+const serve = server => server.middlewares.use((req, res, next) => {
+  const hit = OCR_FILES.find(([out]) => req.url && req.url.split("?")[0] === `/${out}`);
+  if (!hit) return next();
+  res.setHeader("Content-Type", hit[0].endsWith(".gz") ? "application/gzip" : "text/javascript");
+  res.end(readFileSync(nm(hit[1])));
+});
+
 export default function ocrAssets() {
   return {
     name: "arth-ocr-assets",
+    // The same files, served under /ocr/ by the dev and preview servers.
+    configureServer(server) { serve(server); },
+    configurePreviewServer(server) { serve(server); },
     generateBundle() {
       for (const [fileName, from] of OCR_FILES) this.emitFile({ type: "asset", fileName, source: readFileSync(nm(from)) });
     },
