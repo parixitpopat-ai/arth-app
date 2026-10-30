@@ -24,7 +24,7 @@ export default function PayTogetherScreen({ T, sym, fmt, instalments, today, onB
   const nav = { background: T.input, border: "none", color: T.text, borderRadius: 10, minWidth: 44, minHeight: 44, cursor: "pointer", fontSize: 18, fontFamily: "inherit" };
   const dueDates = [...new Set(chosen.map(e => e.date))].sort();
 
-  const openDate = () => { setError(""); setDate(prev => prev || chosen.map(e => e.date).sort()[0] || today); setDateOpen(true); };
+  const openDate = () => { setError(""); setDate(prev => prev || [chosen.map(e => e.date).sort()[0], today].filter(Boolean).sort().pop()); setDateOpen(true); };
   const confirm = () => {
     const res = onConfirm({ keys: picked, date });
     if (res && res.ok === false) setError(res.reason || "Couldn’t plan this."); else setDateOpen(false);
@@ -36,7 +36,7 @@ export default function PayTogetherScreen({ T, sym, fmt, instalments, today, onB
         <button type="button" aria-label="Back" onClick={onBack} style={nav}>‹</button>
         <div style={{ color: T.text, fontSize: 17, fontWeight: 800 }}>Pay together</div>
       </div>
-      <div style={{ color: T.sub, fontSize: 13, marginBottom: 12 }}>Pick upcoming instalments to pay on one date. Their due dates don’t change.</div>
+      <div style={{ color: T.sub, fontSize: 13, marginBottom: 12 }}>Pick instalments, overdue ones too, to pay on one date. Their due dates don’t change.</div>
 
       {sections.length === 0 && (
         <div data-testid="pay-together-empty" style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: "24px 16px", textAlign: "center", color: T.sub, fontSize: 13 }}>
@@ -86,7 +86,7 @@ export default function PayTogetherScreen({ T, sym, fmt, instalments, today, onB
               <button type="button" onClick={() => setDateOpen(false)} style={{ background: T.input, border: "none", color: T.sub, borderRadius: 8, padding: "5px 12px", cursor: "pointer" }}>Done</button>
             </div>
             <label style={{ display: "block", color: T.sub, fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>Payment date</label>
-            <input data-testid="pt-date" type="date" value={date} onChange={e => { setError(""); setDate(e.target.value); }}
+            <input data-testid="pt-date" type="date" min={today} value={date} onChange={e => { setError(""); setDate(e.target.value); }}
               style={{ width: "100%", boxSizing: "border-box", minHeight: 48, background: T.input, border: `1px solid ${T.borderStrong || T.border}`, borderRadius: RADIUS.md || 12, padding: "0 12px", color: T.text, fontSize: 15, fontFamily: "inherit" }} />
             <div style={{ color: T.sub, fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", margin: "16px 0 8px" }}>Due dates stay as they are</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>

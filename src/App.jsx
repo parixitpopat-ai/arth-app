@@ -60,7 +60,7 @@ import { splitAllocation } from "./domain/budget/commitmentSplit";
 import { buildReadiness, shiftMonthKey } from "./domain/budget/readiness";
 import { planNudge } from "./domain/budget/nudge";
 import { getBudgetLeft } from "./domain/budget/budgetLeft";
-import { createGroup as createPayGroup, removeItem as removePayGroupItem, listPayableInstalments, liveItems as livePayGroupItems } from "./domain/payTogether/group";
+import { createGroup as createPayGroup, removeItem as removePayGroupItem, listPayableInstalments, liveItems as livePayGroupItems, applyGroupDates } from "./domain/payTogether/group";
 import { planGroupPayment } from "./domain/payTogether/payPlan";
 import PayGroupSheet from "./screens/PayGroupSheet";
 import SpreadSheet from "./screens/SpreadSheet";
@@ -10140,9 +10140,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     spreads: budgetSpreads,
   });
 
+  // Cash as planned (Pay together): grouped instalments sit on their group's payment date. The one list Home and Outlook read for Money Required.
+  const futureMoneyPlanned = applyGroupDates(futureMoney, payGroups);
   const allFutureEvents = () => [...(futureMoney.committedSpending||[]), ...(futureMoney.committedSaving||[]), ...(futureMoney.debtService||[])];
   const confirmPayTogether = ({ keys, date }) => {
-    const res = createPayGroup({ events:allFutureEvents(), keys, date, genId });
+    const res = createPayGroup({ events:allFutureEvents(), keys, date, genId, today:todayStr() });
     if(!res.ok) return res;
     setPayGroups(p=>[...p, res.group]);
     setPayTogetherOpen(false);
@@ -10254,7 +10256,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // One calculation shared with Outlook (domain/futureMoney/moneyRequired.js): unpaid spending + saving + loan EMIs.
     // Explicit period: everything overdue plus everything due within the next 30 days (day 30 included; undated items count as due now).
     const HOME_REQUIRED_DAYS = 30;
-    const homeMoneyRequired = getMoneyRequiredForPeriod({ futureMoney, today:todayStr(), horizonDays:HOME_REQUIRED_DAYS });
+    const homeMoneyRequired = getMoneyRequiredForPeriod({ futureMoney:futureMoneyPlanned, today:todayStr(), horizonDays:HOME_REQUIRED_DAYS });
     const homeRequiredUntil = new Date(homeTodayDate.getFullYear(), homeTodayDate.getMonth(), homeTodayDate.getDate()+HOME_REQUIRED_DAYS);
     const homeCashRequired = homeMoneyRequired.total;
     const homeBuffer = homeOpeningBalance - homeCashRequired;
@@ -13410,12 +13412,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // adapter shipped.
     // Forecast period = overdue + due in the next 30 days: the same figure and period as Home's Money Required.
     const OUTLOOK_PERIOD_DAYS = 30;
-    const moneyRequired = getMoneyRequiredForPeriod({ futureMoney, today:todayStr(), horizonDays:OUTLOOK_PERIOD_DAYS });
+    const moneyRequired = getMoneyRequiredForPeriod({ futureMoney:futureMoneyPlanned, today:todayStr(), horizonDays:OUTLOOK_PERIOD_DAYS });
     const debtServiceTotal = moneyRequired.debtServiceTotal;
     const cashRequired = moneyRequired.total;
     const cashAvailable = openingBalance;
     // One dated list of every open commitment (overdue first) with the balance after each; its last balance = Buffer.
-    const commitmentTimeline = buildCommitmentTimeline({ futureMoney, openingBalance:cashAvailable, today:todayStr(), horizonDays:OUTLOOK_PERIOD_DAYS });
+    const commitmentTimeline = buildCommitmentTimeline({ futureMoney:futureMoneyPlanned, openingBalance:cashAvailable, today:todayStr(), horizonDays:OUTLOOK_PERIOD_DAYS });
     // Financial Runway: how long Available Cash lasts on essential outflows if expected income stops (domain/cashflow/runway.js).
     const essentialOutflow = getEssentialMonthlyOutflow({ txns, cats, loans, mandatoryCommitments:mandatoryCommitments.filter(isHouseholdScopedCommitment).filter(c=>!(c.skippedMonths||[]).includes(monthKey)), monthKey });
     const runwayIncomeStops = getFinancialRunway({ availableCash:cashAvailable, essentialMonthly:essentialOutflow.total });
@@ -13525,7 +13527,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // groupFutureMoneyByRhythm takes the exact, unmodified `futureMoney` object this screen
     // already had (composeFutureMoneyCommitments's own output) — no new commitment logic, only
     // a different read over the same data.
-    const rhythm = groupFutureMoneyByRhythm(futureMoney, todayStr());
+    const rhythm = groupFutureMoneyByRhythm(futureMoneyPlanned, todayStr());
     const OUTLOOK_FILTER_CHIPS = [
       { key:"all", label:"All" },
       { key:"bill", label:"Bills" },
@@ -20303,7 +20305,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="transactions"&&<Transactions/>}
         {!showSettings&&tab==="people"&&<People/>}
         {!showSettings&&tab==="budget"&&(payTogetherOpen
-          ? <PayTogetherScreen T={T} sym={sym} fmt={fmt} today={todayStr()} instalments={listPayableInstalments(allFutureEvents(), payGroups, todayStr())}
+          ? <PayTogetherScreen T={T} sym={sym} fmt={fmt} today={todayStr()} instalments={listPayableInstalments(allFutureEvents(), payGroups)}
               onBack={()=>setPayTogetherOpen(false)} onConfirm={confirmPayTogether}/>
           : readinessMonth
           ? <ReadinessScreen T={T} sym={sym} fmt={fmt} monthKey={readinessMonth} buildFor={buildReadinessFor} nudgeFor={nudgeForReadiness}

@@ -12,9 +12,15 @@ const events = [
 ];
 let n = 0; const genId = () => `g${++n}`;
 
-test("only real, upcoming, unpaid instalments are offered (no Expected types, no overdue, no paid)", () => {
-  const list = listPayableInstalments(events, [], today);
-  assert.deepEqual(list.map(e => e.sourceId), ["f1", "f2", "f3"]);
+test("real, unpaid instalments are offered - overdue ones too - but never Expected types or paid ones", () => {
+  const list = listPayableInstalments(events, []);
+  assert.deepEqual(list.map(e => e.sourceId), ["old", "f1", "f2", "f3"]);
+});
+
+test("a payment date before today is refused when today is given", () => {
+  const keys = ["feePeriod:old", "feePeriod:f1"];
+  assert.equal(createGroup({ events, keys, date: "2026-10-02", genId, today }).ok, false);
+  assert.equal(createGroup({ events, keys, date: "2026-10-03", genId, today }).ok, true);
 });
 
 test("creating a group needs a date and at least two instalments; due dates are not stored or changed", () => {
@@ -31,7 +37,7 @@ test("creating a group needs a date and at least two instalments; due dates are 
 test("grouped instalments are no longer offered again; an unknown or paid key is ignored", () => {
   const g = createGroup({ events, keys: ["feePeriod:f1", "feePeriod:f2", "feePeriod:paid", "feePeriod:nope"], date: "2026-11-10", genId }).group;
   assert.equal(g.items.length, 2);
-  assert.deepEqual(listPayableInstalments(events, [g], today).map(e => e.sourceId), ["f3"]);
+  assert.deepEqual(listPayableInstalments(events, [g]).map(e => e.sourceId), ["old", "f3"]);
 });
 
 test("removing an item keeps the group; removing down to one dissolves it", () => {

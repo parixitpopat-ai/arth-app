@@ -22,17 +22,18 @@ export function groupedKeys(groups, exceptGroupId = null) {
   return set;
 }
 
-/** Upcoming (not overdue), unpaid, real instalments that aren't already in a group, soonest first. */
-export function listPayableInstalments(events, groups, today) {
+/** Unpaid, real instalments (overdue ones included, so arrears can be cleared with later fees) that aren't already in a group, soonest first. */
+export function listPayableInstalments(events, groups) {
   const taken = groupedKeys(groups);
   return (events || [])
-    .filter(e => isOpen(e) && e.date >= today && !taken.has(itemKey(e)))
+    .filter(e => isOpen(e) && !taken.has(itemKey(e)))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
 /** @returns {{ok:true, group:Object}|{ok:false, reason:string}} */
-export function createGroup({ events, keys, date, genId }) {
+export function createGroup({ events, keys, date, genId, today = null }) {
   if (!date) return { ok: false, reason: "Choose a payment date." };
+  if (today && date < today) return { ok: false, reason: "Choose today or a later payment date." };
   const byKey = new Map((events || []).map(e => [itemKey(e), e]));
   const items = [...new Set(keys || [])].filter(k => isOpen(byKey.get(k))).map(k => {
     const e = byKey.get(k);
@@ -57,4 +58,24 @@ export function liveItems(group, events) {
 /** The group's total cash (sum of its live instalments). */
 export function groupTotal(group, events) {
   return Math.round(liveItems(group, events).reduce((s, e) => s + Number(e.amount), 0) * 100) / 100;
+}
+
+/**
+ * The Future Money lists as CASH is planned: each live grouped instalment moves to its group's payment date,
+ * so the group's total enters a period once, on that date, and not again on the instalments' own due dates.
+ * Amounts are untouched (a partly paid instalment carries only what is left; a paid one is not an event at all),
+ * and nothing is stored or paid. Same shape in, same shape out - feed it to the one Money Required calculation
+ * (Home, Outlook). Budget months are NOT affected: Readiness keeps reading the unmodified events.
+ */
+export function applyGroupDates(futureMoney, groups) {
+  if (!futureMoney || !(groups || []).length) return futureMoney;
+  const dateOf = new Map();
+  for (const g of groups) for (const it of g.items || []) if (!dateOf.has(itemKey(it))) dateOf.set(itemKey(it), g.date);
+  const move = e => {
+    const d = e && isOpen(e) ? dateOf.get(itemKey(e)) : null;
+    return d ? { ...e, date: d, originalDate: e.date } : e;
+  };
+  const out = { ...futureMoney };
+  for (const k of ["committedSpending", "committedSaving", "debtService"]) if (futureMoney[k]) out[k] = futureMoney[k].map(move);
+  return out;
 }
