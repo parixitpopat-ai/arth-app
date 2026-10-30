@@ -103,7 +103,7 @@ export async function readSummaryFromImage(file, { baseUrl, makeWorker = createL
   }
 }
 
-async function imageSize(file) {
+export async function imageSize(file) {
   const bmp = await createImageBitmap(file);
   const size = { width: bmp.width, height: bmp.height };
   bmp.close();

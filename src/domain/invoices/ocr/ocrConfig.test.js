@@ -45,7 +45,7 @@ test("the dependency is pinned exactly and the data package is dev-only", () => 
 
 test("only the OCR folder imports the engine, and it is only ever imported on demand", () => {
   const walk = d => readdirSync(d).flatMap(n => { const p = join(d, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
-  const offenders = walk(join(ROOT, "src")).filter(f => /\.(js|jsx)$/.test(f) && !f.includes("/ocr/") && /ocrEngine|tesseract\.js/.test(readFileSync(f, "utf8")));
+  const offenders = walk(join(ROOT, "src")).filter(f => /\.(js|jsx)$/.test(f) && !/\.test\.js$/.test(f) && !f.includes("/ocr/") && !f.endsWith("/domain/receipts/ocrReceipt.js") && /ocrEngine|tesseract\.js/.test(readFileSync(f, "utf8")));   // the receipt reader is the one other user of the engine
   assert.deepEqual(offenders.map(f => f.replace(ROOT, "")).filter(f => !/testInventory/.test(f)), []);
   const engine = read("src/domain/invoices/ocr/ocrEngine.js");
   assert.equal(/^import .*tesseract/m.test(engine), false);

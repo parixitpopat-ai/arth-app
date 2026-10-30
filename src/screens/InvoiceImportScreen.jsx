@@ -7,11 +7,12 @@ import { planConfirm, suggestLineCats, resolveItemNames } from "../domain/invoic
 import { summariseOrders, batchCounts } from "../domain/invoices/amazonBatch.js";
 import AmazonOrderPreview from "./AmazonOrderPreview.jsx";
 import OrderSummaryPanel from "./OrderSummaryPanel.jsx";
+import ReceiptPhotoReview from "./ReceiptPhotoReview.jsx";
 import { rematch, chooseOrder, orderGate, attachmentConflicts } from "../domain/invoices/orderSummary.js";
 
 const money = (n, sym = "₹") => (n == null ? "—" : `${sym}${Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 3 }).replace(/(\.\d\d)0$/, "$1")}`);
 
-export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [], itemCatalog = [], invoiceImports = [], genId, onConfirmInvoice, onUndoInvoice, T, sym = "₹", onBack, onAddByHand }) {
+export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [], itemCatalog = [], invoiceImports = [], genId, onConfirmInvoice, onUndoInvoice, T, sym = "₹", onBack, onAddByHand, onAddReceipt }) {
   const fileRef = useRef(null);
   const [state, setState] = useState({ phase: "idle" });
   const [payDates, setPayDates] = useState({});
@@ -274,6 +275,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
         </label>
         <div style={{ color: T.sub, fontSize: 11, marginTop: 8 }}>Use the tax invoice PDF from Blinkit or Amazon.in: one invoice per page; several files can be chosen together, up to 10 MB. Screenshots and photos are not read. Arth reads the file on this device; it is not uploaded or stored.</div>
       </div>
+      <ReceiptPhotoReview T={T} sym={sym} card={card} label={label} onUse={prefill => onAddReceipt && onAddReceipt(prefill)} />
       {state.phase === "amazon" && (() => {
         const orders = summariseOrders(amazon.parsed);
         const live = summaries.map(x => ({ ...x, match: rematch(x.match, x.orderNumber, orders) }));            // unresolved matches are re-evaluated as invoices are added

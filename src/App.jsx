@@ -4342,7 +4342,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [tagPersonAmount, setTagPersonAmount] = useState(isEditing && sourceTxn?.tagPersonAmount ? String(sourceTxn.tagPersonAmount) : "");
     const [tagGroupAmount, setTagGroupAmount] = useState(isEditing && sourceTxn?.tagGroupAmount ? String(sourceTxn.tagGroupAmount) : "");
     const [tagItems, setTagItems] = useState(isEditing && sourceTxn?.tagItems?.length ? sourceTxn.tagItems.map(item=>({...item,amount:String(item.amount)})) : [{id:genId(),targetType:"person",targetId:"",amount:""}]);
-    const [useItemizedLines, setUseItemizedLines] = useState(isEditing ? Boolean(sourceTxn?.lineItems?.length) : false);
+    const [useItemizedLines, setUseItemizedLines] = useState(isEditing ? Boolean(sourceTxn?.lineItems?.length) : Boolean(safePrefill.lineItems?.length));
     const [showItemSheet, setShowItemSheet] = useState(false);
     const [editingItemId, setEditingItemId] = useState(null);
     const [lineItems, setLineItems] = useState(
@@ -4366,11 +4366,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 }))
               : [],
           }))
+        : (!isEditing && Array.isArray(safePrefill.lineItems) && safePrefill.lineItems.length
+          // A receipt photo the person has checked (ReceiptPhotoReview): its rows arrive as the first lines of a NEW expense; category and account are still theirs to pick.
+          ? safePrefill.lineItems.map(item=>({ id:genId(), label:String(item.label||""), qty:String(item.qty ?? "1"), unit:"nos", unitPrice:String(item.unitPrice ?? ""), catId:"", subId:"", splits:[] }))
         // FIX: previously seeded one blank item by default for every new transaction,
         // unconditionally — not draft recovery, not addLineItem (confirmed dead code, never
         // called) — this literal default value. Now starts empty; "+ Add item" (ItemSheetModal,
         // which gates its own Save button on a non-empty name) is the only real way to add one.
-        : []
+        : [])
     );
     const [billInvoiceNo, setBillInvoiceNo] = useState(isEditing ? (sourceTxn?.billInvoiceNo || "") : "");
     const [settlementKind, setSettlementKind] = useState(initialSettlementKind);
@@ -20332,7 +20335,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="outlook"&&<OutlookPage/>}
         {!showSettings&&tab==="insights"&&<InsightsPage/>}
         {/* The invoice screen is rendered HERE, not inside Settings: Settings is re-created on every AppContent render, which would reset this screen (its review state, the success message, Undo) the moment the import saves. */}
-        {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} itemCatalog={itemCatalog} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>{ setSettingsSection(null); setShowSettings(false); }} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }}/>}
+        {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} itemCatalog={itemCatalog} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>{ setSettingsSection(null); setShowSettings(false); }} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }} onAddReceipt={prefill=>{ setAddPrefill(prefill); setShowAdd(true); }}/>}
         {showSettings&&settingsSection!=="importinvoice"&&<Settings/>}
 
       {/* Universal Search Overlay */}
