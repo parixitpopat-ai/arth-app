@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { classifyAuthCheck } from "./domain/identity/offlineResume";
+import { checkWithRecovery, appendAuthNote } from "./domain/identity/sessionRecheck";
 
 import { resolveCloudConfig } from "./cloudConfig";
 
@@ -18,14 +19,26 @@ export const supabase = isCloudSyncConfigured ? createClient(SUPABASE_URL, SUPAB
 
 // Like getCurrentCloudUser, but reports WHY there is no user: the server confirmed one ("verified"), the server could not
 // be reached ("unreachable": says nothing about the saved session), or there is no valid session ("signed-out").
-export const checkCloudUser = async () => {
-  if (!supabase) return { status: "signed-out", user: null };
+const checkCloudUserOnce = async () => {
   try {
     const { data, error } = await supabase.auth.getUser();
-    return { status: classifyAuthCheck({ user: data?.user ?? null, error }), user: data?.user ?? null };
+    return { status: classifyAuthCheck({ user: data?.user ?? null, error }), user: data?.user ?? null, error };
   } catch (error) {
-    return { status: classifyAuthCheck({ error }), user: null };
+    return { status: classifyAuthCheck({ error }), user: null, error };
   }
+};
+
+// A "signed-out" answer is double-checked: the session is renewed once and the account asked again (see domain/identity/sessionRecheck.js).
+// Why it happened is kept as a small note on this device (names and numbers only) so a repeat can be explained.
+const AUTH_NOTES_KEY = "arth_auth_notes";
+export const getAuthNotes = () => { try { const v = JSON.parse(localStorage.getItem(AUTH_NOTES_KEY) || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
+const saveAuthNote = note => { try { localStorage.setItem(AUTH_NOTES_KEY, JSON.stringify(appendAuthNote(getAuthNotes(), note))); } catch { /* storage may be unavailable */ } };
+
+export const checkCloudUser = async () => {
+  if (!supabase) return { status: "signed-out", user: null };
+  const { result, note } = await checkWithRecovery({ checkOnce: checkCloudUserOnce, refreshOnce: () => supabase.auth.refreshSession() });
+  if (note) saveAuthNote(note);
+  return { status: result.status, user: result.user };
 };
 
 export const getCurrentCloudUser = async () => {

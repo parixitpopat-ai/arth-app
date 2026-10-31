@@ -15,7 +15,7 @@
 // successful verifyOtp() call — doesn't thread a session callback back.
 
 import { useState } from "react";
-import { requestEmailOtp, verifyEmailOtp } from "../cloudSync";
+import { requestEmailOtp, verifyEmailOtp, getAuthNotes } from "../cloudSync";
 
 const COPY = {
   signup: {
@@ -38,6 +38,8 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
   const [error, setError] = useState("");
 
   const copy = COPY[mode] || COPY.signin;
+  const lastNote = (() => { const n = getAuthNotes(); return n.length ? n[n.length - 1] : null; })();       // why the last session check failed (names and numbers only)
+  const noteTime = lastNote ? new Date(lastNote.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
   const inputStyle = {
     width: "100%", background: T.input, border: `1px solid ${T.border}`, borderRadius: 12,
@@ -128,6 +130,11 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
               Use a different email
             </button>
           </>
+        )}
+        {lastNote && (
+          <div data-testid="auth-last-note" style={{ marginTop: 28, fontSize: 11, color: T.sub, textAlign: "center", lineHeight: 1.5 }}>
+            Last session check: {noteTime}. {lastNote.recovered ? "The session was renewed automatically." : `Not signed in (${[lastNote.second.name, lastNote.second.http, lastNote.second.code].filter(Boolean).join(" · ") || "no detail"}).`}
+          </div>
         )}
       </div>
     </div>

@@ -99,7 +99,7 @@ test("DATA_KEYS is exactly the persisted synced data: every other persisted key 
     arth_item_basis: "UI preference for the item form", arth_budget: "constant default; no setter exists", arth_school_relationships: "legacy key; now derived from membership relationships",
     arth_sync_state: "sync history", arth_sync_safety_backups: "sync safety backups", arth_tab_lease: "tab ownership lease", arth_data: "test-only simulation key",
     arth_pin_locked_until: "session-only lock timer", arth_txn_draft: "unsaved Add-transaction draft; device-only by design", arth_nl_card_note_seen: "typed-entry card note shown-count; a per-device UI counter", arth_data_owner: "which account the data on THIS device belongs to (account-isolation guard); must never sync",
-    arth_snapshots: "NOT a storage key: the cloud table name", arth_higher: "NOT a storage key: a comparison constant in card reconciliation",
+    arth_auth_notes: "why the last session checks failed (names and numbers only); device-only diagnostic, never synced", arth_snapshots: "NOT a storage key: the cloud table name", arth_higher: "NOT a storage key: a comparison constant in card reconciliation",
   };
   const unknown = [...keys].filter(k => !DATA_KEYS.includes(k) && !(k in DEVICE_ONLY));
   assert.deepEqual(unknown, [], `new persisted key(s) need a decision (synced data -> DATA_KEYS, otherwise DEVICE_ONLY): ${unknown.join(", ")}`);
