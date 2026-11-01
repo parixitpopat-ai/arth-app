@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { classifyAuthCheck } from "./domain/identity/offlineResume";
-import { checkWithRecovery, appendAuthNote } from "./domain/identity/sessionRecheck";
+import { checkWithRecovery, appendAuthNote, shouldRenewFirst } from "./domain/identity/sessionRecheck";
 
 import { resolveCloudConfig } from "./cloudConfig";
 
@@ -30,13 +30,19 @@ const checkCloudUserOnce = async () => {
 
 // A "signed-out" answer is double-checked: the session is renewed once and the account asked again (see domain/identity/sessionRecheck.js).
 // Why it happened is kept as a small note on this device (names and numbers only) so a repeat can be explained.
+const authStorageKey = () => { try { return `sb-${new URL(SUPABASE_URL).hostname.split(".")[0]}-auth-token`; } catch { return ""; } };
 const AUTH_NOTES_KEY = "arth_auth_notes";
 export const getAuthNotes = () => { try { const v = JSON.parse(localStorage.getItem(AUTH_NOTES_KEY) || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
 const saveAuthNote = note => { try { localStorage.setItem(AUTH_NOTES_KEY, JSON.stringify(appendAuthNote(getAuthNotes(), note))); } catch { /* storage may be unavailable */ } };
 
 export const checkCloudUser = async () => {
   if (!supabase) return { status: "signed-out", user: null };
-  const { result, note } = await checkWithRecovery({ checkOnce: checkCloudUserOnce, refreshOnce: () => supabase.auth.refreshSession() });
+  const { result, note } = await checkWithRecovery({
+    checkOnce: checkCloudUserOnce,
+    refreshOnce: () => supabase.auth.refreshSession(),
+    // An access token that is expired (or about to be) is renewed BEFORE it is sent: the token's own expiry decides, not the stored one.
+    prepare: async () => { if (shouldRenewFirst(localStorage.getItem(authStorageKey()), Date.now())) await supabase.auth.refreshSession(); },
+  });
   if (note) saveAuthNote(note);
   return { status: result.status, user: result.user };
 };

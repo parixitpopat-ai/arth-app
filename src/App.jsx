@@ -9972,7 +9972,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setOfflineResume(true);
       setCloudUser(null);
       setCloudHydrated(true);
-      setCloudStatus("Offline: changes are saved on this device and will sync after Arth can confirm your account.");
+      setCloudStatus("Can't confirm your account right now: changes are saved on this device and will sync as soon as Arth can.");
     };
     offlineReenterRef.current = () => { enterOfflineResume(); };
     const handle = res => {
@@ -20281,7 +20281,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
         {offlineResume&&(
           <div data-testid="offline-resume-banner" style={{ background:T.warn+"22",borderBottom:`1px solid ${T.warn}44`,color:T.text,fontSize:12,fontWeight:700,padding:"8px 14px",display:"flex",alignItems:"center",gap:10 }}>
-            <span style={{ flex:1 }}>📡 Offline. Changes are saved on this device and will sync after Arth can confirm your account.</span>
+            <span style={{ flex:1 }}>📡 Can't confirm your account right now. Changes are saved on this device and will sync as soon as Arth can.</span>
             <button data-testid="offline-resume-retry" onClick={()=>offlineRetryRef.current?.()} style={{ background:"none",border:`1px solid ${T.warn}`,color:T.text,borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Try again</button>
           </div>
         )}
