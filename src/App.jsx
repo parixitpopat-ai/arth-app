@@ -14,6 +14,7 @@ import MasterUserProfileScreen from "./screens/MasterUserProfileScreen";
 import CloudConflictScreen from "./screens/CloudConflictScreen";
 import DeviceOwnershipScreen from "./screens/DeviceOwnershipScreen";
 import SignOutWarningSheet from "./components/SignOutWarningSheet";
+import SlowLoadEscape from "./components/SlowLoadEscape";
 import SyncConflictSheet from "./components/SyncConflictSheet";
 import SyncBackupFileSheet from "./components/SyncBackupFileSheet";
 import TabGate from "./components/TabGate";
@@ -20238,7 +20239,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       }
       if(firstAuthState!=="ready"){
         // 'checking' or null — brief moment while runFirstAuthMigration runs.
-        return <>{fileBackupSheet}<div style={{ background:T.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:T.sub,fontSize:13,fontFamily:"Nunito,sans-serif" }}>Checking your account…</div></>;
+        return <>{fileBackupSheet}<SlowLoadEscape T={T} label="Checking your account…" onOpenLocal={()=>offlineReenterRef.current?.()}/></>;
       }
     } else {
       // Returning/session-restored device — existing offline-capable
@@ -20247,7 +20248,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       // one existing live account, whose Master User record predates this
       // flag entirely).
       if(!cloudHydrated){
-        return <div style={{ background:T.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:T.sub,fontSize:13,fontFamily:"Nunito,sans-serif" }}>Loading your data…</div>;
+        return <>{fileBackupSheet}<SlowLoadEscape T={T} label="Loading your data…" onOpenLocal={()=>offlineReenterRef.current?.()}/></>;
       }
       if(!masterUserSetupComplete){
         return <MasterUserProfileScreen T={T} isFirstRun mePerson={people.find(p=>p.isMe)} accountEmail={cloudUser.email} onSave={completeMasterUserSetup}/>;
