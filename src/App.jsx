@@ -226,7 +226,11 @@ import {
 // instead, logging to console for debugging. Does not attempt to free space or retry.
 const safeSetLocalStorage = (key, value) => {
   try { localStorage.setItem(key, value); }
-  catch(e) { console.error(`localStorage save failed for "${key}":`, e); }
+  catch(e) {
+    console.error(`localStorage save failed for "${key}":`, e);
+    // A full browser storage must never be silent: tell the storage guard (components/StorageFullGuard) so it can explain and offer to free backup copies.
+    if(/quota/i.test(`${e?.name} ${e?.message}`)) { try { window.dispatchEvent(new Event("arth:storage-full")); } catch { /* no window */ } }
+  }
 };
 const extractTxnReference = txt => {
   const s = String(txt ?? "");

@@ -71,6 +71,7 @@ export function createMemoryStorage(initial = {}) {
       m.set(k, String(v));
     },
     removeItem: k => { m.delete(k); },
+    get length() { return m.size; }, key: i => [...m.keys()][i] ?? null,
     limit, failKeys, raw: m,
   };
 }

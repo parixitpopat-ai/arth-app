@@ -30,15 +30,36 @@ export async function createSafetyBackup(storage, { reason, snapshot, now = () =
     const counts = Object.fromEntries(Object.entries(listSummary(snapshot)).map(([k, v]) => [k, v.count]));
     // Recoverability: what would the restore path itself drop from this data (e.g. duplicate settlements removed by normalisation)?
     const restoreDrops = normalizers ? restoreRehearsal(snapshot, normalizers).dropped.map(d => ({ key: d.key, count: d.ids ? d.ids.length : d.sourceCount - d.resultCount })) : [];
-    const entry = { id, reason, at, digest, txnCount, counts, restoreDrops, snapshot, ...(pinned ? { pinned: true, conflictId } : {}) };
+    const entry = { id, reason, at, digest, txnCount, counts, restoreDrops, snapshot, ...(pinned ? { pinned: true, conflictId, conflictIds: conflictId ? [conflictId] : [] } : {}) };
+    // The same data taken for the same reason is stored ONCE. A repeat of an identical copy (for example a sign-out with no new changes) reuses the existing entry;
+    // a pinned request pins it and records one more reason to keep it. This stops identical full copies filling browser storage.
+    const current = readList(storage);
+    const dup = current.find(b => b.digest === digest && b.reason === reason);
+    let all;
+    if (dup) {
+      entry.id = dup.id;
+      const ids = [...new Set([...(dup.conflictIds || (dup.conflictId ? [dup.conflictId] : [])), ...(pinned && conflictId ? [conflictId] : [])])];
+      const merged = { ...dup, ...(dup.pinned || pinned ? { pinned: true, conflictId: dup.conflictId || conflictId, conflictIds: ids } : {}) };
+      all = current.map(b => (b.id === dup.id ? merged : b));
+    } else {
+      all = [...current, entry];
+    }
     // Newest MAX_KEPT ordinary backups are kept; PINNED backups (a recorded conflict's two copies) are never pruned until released.
-    const all = [...readList(storage), entry];
     const others = all.filter(b => !b.pinned).slice(-MAX_KEPT);
-    const next = all.filter(b => b.pinned || others.includes(b));
-    storage.setItem(SAFETY_BACKUPS_KEY, JSON.stringify(next));
+    let next = all.filter(b => b.pinned || others.includes(b));
+    // Browser storage full: drop the OLDEST ordinary copies (never pinned ones, never this one) until it fits. Ordinary copies are
+    // rotation copies of data that also lives on the device, so this never removes the only copy of anything.
+    for (;;) {
+      try { storage.setItem(SAFETY_BACKUPS_KEY, JSON.stringify(next)); break; }
+      catch (e) {
+        const victim = next.find(b => !b.pinned && b.id !== entry.id);
+        if (!victim) throw e;
+        next = next.filter(b => b.id !== victim.id);
+      }
+    }
     // Read back from storage and verify what we will rely on: same digest, same records in every list (not just transactions),
     // and that restoring it would drop nothing the original restore would not also drop.
-    const back = readList(storage).find(b => b.id === id);
+    const back = readList(storage).find(b => b.id === entry.id);
     if (!back) return { ok: false, error: "backup not found after writing" };
     const backDigest = await digestSnapshot(back.snapshot);
     if (backDigest !== digest || txnIdsOf(back.snapshot).length !== txnCount) return { ok: false, error: "backup read-back did not match" };
@@ -48,7 +69,7 @@ export async function createSafetyBackup(storage, { reason, snapshot, now = () =
       const rehearsal = rehearsalNoWorse(back.snapshot, snapshot, normalizers);
       if (!rehearsal.ok) return { ok: false, error: `restoring this backup would lose records (${describeMissing(rehearsal.dropped)})` };
     }
-    return { ok: true, id, digest, txnCount, at, counts, restoreDrops };
+    return { ok: true, id: entry.id, digest, txnCount, at, counts, restoreDrops };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -71,7 +92,13 @@ export function getSafetyBackup(storage, id) {
 
 /** A recorded conflict is resolved (or abandoned): its pinned backups return to the ordinary rotation. */
 export function releasePinned(storage, conflictId) {
-  const list = readList(storage).map(b => (b.pinned && b.conflictId === conflictId ? { ...b, pinned: false } : b));
+  const list = readList(storage).map(b => {
+    if (!b.pinned) return b;
+    const held = b.conflictIds && b.conflictIds.length ? b.conflictIds : [b.conflictId ?? null];
+    if (!held.includes(conflictId)) return b;     // held for a different conflict: stays pinned
+    const rest = held.filter(c => c !== conflictId);
+    return rest.length ? { ...b, conflictIds: rest, conflictId: rest[0] } : { ...b, pinned: false, conflictIds: [] };
+  });
   storage.setItem(SAFETY_BACKUPS_KEY, JSON.stringify(list));
 }
 
