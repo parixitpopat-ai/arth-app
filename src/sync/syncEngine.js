@@ -46,6 +46,7 @@ export function createSyncEngine({
     read: (...a) => (halted0 ? Promise.reject(Object.assign(new Error("sync engine stopped"), { halted: true })) : cloudIn.read(...a)),
     insert: (...a) => (halted0 ? Promise.reject(Object.assign(new Error("sync engine stopped"), { halted: true })) : cloudIn.insert(...a)),
     swap: (...a) => (halted0 ? Promise.reject(Object.assign(new Error("sync engine stopped"), { halted: true })) : cloudIn.swap(...a)),
+    peek: (...a) => (halted0 ? Promise.reject(Object.assign(new Error("sync engine stopped"), { halted: true })) : (typeof cloudIn.peek === "function" ? cloudIn.peek(...a) : Promise.resolve(undefined))),
   };
   let running = null, rerun = false, attempt = 0, retryTimer = null, debounceTimer = null, status = { kind: "idle" };
   let lastFullVerifyAt = 0, halted = false;
@@ -454,8 +455,25 @@ export function createSyncEngine({
     return { ok: true };
   }
 
+  /**
+   * Has another device saved since this one last agreed with the cloud? Asks only for the cloud copy's version stamp (a few bytes).
+   * Only when it differs does a normal sync cycle run, and that cycle makes every decision as always: a clean device takes the newer
+   * copy after a verified backup; a device with its own unsynced changes gets the conflict screen. Nothing here replaces anything.
+   */
+  async function pollRemote() {
+    if (halted || running || !isOnline()) return { outcome: "skipped" };
+    let st;
+    try { st = load(); } catch { return { outcome: "skipped" }; }
+    if (!st.baseToken || st.pendingWrite || st.paused || st.conflict) return { outcome: "skipped" };
+    let token;
+    try { token = await cloud.peek(userId); } catch { return { outcome: "skipped" }; }   // a failed look is not a failed sync: try again next time
+    if (token === undefined || token === null || token === st.baseToken) return { outcome: "unchanged" };
+    return syncOnce("remote");
+  }
+
   return {
     prepareRestore,
+    pollRemote,
     boot: opts => syncOnce("boot", opts),
     resolveOwnership, prepareSignOut, recordOwnerForSignOut, getOwnership: () => pendingOwnership,
     syncNow: () => syncOnce("manual"),

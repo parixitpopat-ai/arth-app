@@ -296,7 +296,7 @@ const fireVisible = page => page.evaluate(() => document.dispatchEvent(new Event
   await B.page.reload({ waitUntil: "networkidle" }); await L.pin(B.page, false);
   const conflict = await L.waitFor(async () => (await L.syncState(B.page))?.conflict, { timeout: 20000 });
   const other = await B.page.getByTestId("sync-conflict-other").innerText().catch(() => "");
-  const pins = (await B.page.evaluate(() => JSON.parse(localStorage.getItem("arth_sync_safety_backups") || "[]").filter(b => b.pinned).map(b => b.reason).sort()));
+  const pins = (await B.page.evaluate(async () => (await (await import("/src/sync/packedList.js")).unpackList(localStorage.getItem("arth_sync_safety_backups"))).filter(b => b.pinned).map(b => b.reason).sort()));
   record("BN3", "Plan Ahead: a nudge-only conflict is described and both copies are held", Boolean(conflict) && /Plan Ahead choices/.test(other) && pins.length === 2 && cloudSnap()?.planNudges?.[NEXT]?.dismissedAtUsed != null,
     { conflictRecorded: Boolean(conflict), sheetNamesPlanAhead: /Plan Ahead choices/.test(other), sheetNamesBudgetChange: /monthly budget changes/.test(other), bothCopiesHeld: pins.join("|") === "conflict-cloud-copy|conflict-device-copy", cloudKeptDismissal: cloudSnap()?.planNudges?.[NEXT]?.dismissedAtUsed != null });
 }

@@ -23,7 +23,7 @@ export function startFakeSupabase({ port = 54399, users = {} } = {}) {
   const rows = new Map();       // user_id -> { snapshot, micros }
   const writeLog = [];          // append-only
   const requestLog = []; const authLog = [];
-  const faults = { latencyMs: 0, rejectWrites: 0, dropResponseWrites: 0, offline: false, corruptNext: false, precisionMs: 0 };
+  const faults = { latencyMs: 0, restLatencyMs: 0, rejectWrites: 0, dropResponseWrites: 0, offline: false, corruptNext: false, precisionMs: 0 };
   const stats = { unconditionalWrites: 0 };
   let seq = 0;
 
@@ -57,6 +57,7 @@ export function startFakeSupabase({ port = 54399, users = {} } = {}) {
       return send(res, 404, { error: "unknown control" });
     }
     if (faults.latencyMs) await new Promise(r => setTimeout(r, faults.latencyMs));
+    if (faults.restLatencyMs && url.pathname.startsWith("/rest/")) await new Promise(r => setTimeout(r, faults.restLatencyMs));   // slow data calls only; the account check stays fast
     if (faults.offline) { req.socket.destroy(); return; }
 
     if (url.pathname === "/auth/v1/otp" && req.method === "POST") {

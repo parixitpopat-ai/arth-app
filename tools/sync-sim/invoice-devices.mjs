@@ -66,7 +66,7 @@ const everywhere = async (devs) => {            // every invoice record key and 
   const keys = new Set(cloudRecs().map(r => r.key)), ids = new Set(cloudIds());
   for (const d of devs) {
     (await ls(d.page, "arth_invoice_imports")).forEach(r => keys.add(r.key)); (await L.localTxnIds(d.page)).forEach(i => ids.add(i));
-    const backups = await d.page.evaluate(() => { try { return JSON.parse(localStorage.getItem("arth_sync_safety_backups") || "[]"); } catch { return []; } });
+    const backups = await d.page.evaluate(async () => { try { return (await (await import("/src/sync/packedList.js")).unpackList(localStorage.getItem("arth_sync_safety_backups"))); } catch { return []; } });
     backups.forEach(b => { (b.snapshot?.txns || []).forEach(t => ids.add(String(t.id))); (b.snapshot?.invoiceImports || []).forEach(r => keys.add(r.key)); });
   }
   return { keys: [...keys], ids: [...ids] };
@@ -158,7 +158,7 @@ if (want('I7')) {
   await reload(B);
   const all = await everywhere([A, B]);
   const bTxns = await L.localTxns(B.page), cTx = (cloudSnap().txns || []);
-  const editSurvives = bTxns.some(t => t.desc === "EDITED-ON-B") || cTx.some(t => t.desc === "EDITED-ON-B") || (await B.page.evaluate(() => (localStorage.getItem("arth_sync_safety_backups") || "").includes("EDITED-ON-B")));
+  const editSurvives = bTxns.some(t => t.desc === "EDITED-ON-B") || cTx.some(t => t.desc === "EDITED-ON-B") || (await B.page.evaluate(async () => JSON.stringify((await (await import("/src/sync/packedList.js")).unpackList(localStorage.getItem("arth_sync_safety_backups")))).includes("EDITED-ON-B")));
   rec("I7 B's edit of an existing expense and A's import both survive (cloud, device or pinned backup); the invoice record survives", editSurvives && all.ids.includes(String(ta.id)) && all.keys.some(k => /C00000T000000002/.test(k)), { editSurvives, importKept: all.ids.includes(String(ta.id)), recordKept: all.keys.length });
   await A.ctx.close(); await B.ctx.close();
 }

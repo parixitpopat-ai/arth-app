@@ -50,6 +50,7 @@ export function createFakeCloud({ clock, serverAssignsToken = false, tokenPrecis
   }
   const api = who => ({
     async read(userId) { pre(who); const r = rows.get(userId); return r ? { token: r.token, snapshot: clone(r.snapshot) } : null; },
+    async peek(userId) { pre(who); const r = rows.get(userId); return r ? r.token : null; },
     async insert(userId, snapshot, token) { if (rows.has(userId)) { pre(who); return { conflict: true }; } return write(userId, snapshot, token, "insert", who); },
     async swap(userId, expected, snapshot, token) { pre(who); const r = rows.get(userId); if (!r || r.token !== expected) return { conflict: true }; return write(userId, snapshot, token, "swap", who); },
     async upsert(userId, snapshot) { return write(userId, snapshot, new Date(clock.now()).toISOString(), "upsert", who); },   // the OLD unconditional write, used only by the legacy reference model
@@ -125,6 +126,7 @@ export function createDevice({ name, userId = "synthetic-user-0001", userEmail =
   };
   dev.nudgeRecord = monthKey => (data.planNudges || {})[monthKey];
   dev.ids = () => txnIdsOf(snapshot());
+  dev.poll = () => engine.pollRemote();
   dev.status = () => engine.getStatus();
   dev.state = () => engine.getState();
   dev.data = () => data;

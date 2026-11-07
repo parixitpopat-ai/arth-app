@@ -1,4 +1,5 @@
 // SYNC-SAFETY-004: Plan Ahead nudge state (planNudges + the monthOverrides it can raise) across two devices.
+import { unpackList } from "./packedList.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as S from "./scenarios.js";
@@ -11,7 +12,7 @@ const NOV = "2026-11";
 const plan = { budgetUsed: 80000, monthBudget: 50000, over: 30000 };
 const kindOn = (dev, month = NOV) => { const rec = dev.nudgeRecord(month); const ctx = { ...plan, monthBudget: dev.data().monthOverrides?.[month] ?? plan.monthBudget }; return planNudge({ ...ctx, over: Math.max(0, plan.budgetUsed - ctx.monthBudget), record: rec })?.kind ?? null; };
 const cloudSnap = kit => kit.cloud.rows.get(S.USER)?.snapshot;
-const stored = d => JSON.parse(d.storage.getItem(SAFETY_BACKUPS_KEY) || "[]");
+const stored = d => unpackList(d.storage.getItem(SAFETY_BACKUPS_KEY));
 
 async function pair() {
   const kit = S.makeKit("new"); kit.seed(0);

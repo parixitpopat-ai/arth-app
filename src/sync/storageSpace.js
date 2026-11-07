@@ -4,6 +4,8 @@
 // When it is full, writes fail. This module (1) recognises that, (2) says what is using the space, and (3) frees ONLY backup copies,
 // never the data Arth is working with, and only after the person has saved those copies to a file.
 
+import { packList, unpackList } from "./packedList.js";
+
 export const SAFETY_KEY = "arth_sync_safety_backups";
 export const AUTO_KEY = "arth_auto_backups";
 export const PROBE_KEY = "arth_space_probe";
@@ -43,7 +45,7 @@ export function storageReport(storage) {
 }
 
 function parseList(storage, key) {
-  try { const v = JSON.parse(storage.getItem(key) || "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
+  return unpackList(storage.getItem(key));
 }
 
 /** Every backup copy held in browser storage, as one file the person can keep. Restorable one by one. */
@@ -66,7 +68,7 @@ export function freeBackupSpace(storage) {
   const before = storageReport(storage).total;
   const safety = parseList(storage, SAFETY_KEY);
   const keep = safety.length ? [safety.reduce((n, b) => (String(b.at || "") >= String(n.at || "") ? b : n))] : [];
-  if (safety.length > keep.length) storage.setItem(SAFETY_KEY, JSON.stringify(keep.map(b => ({ ...b, pinned: false, conflictIds: [] }))));
+  if (safety.length > keep.length) storage.setItem(SAFETY_KEY, packList(keep.map(b => ({ ...b, pinned: false, conflictIds: [] }))));
   storage.removeItem(AUTO_KEY);
   const after = storageReport(storage).total;
   return { freedChars: Math.max(0, before - after), keptSafety: keep.length };

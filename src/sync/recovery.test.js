@@ -1,4 +1,5 @@
 // SYNC-SAFETY-004: backup recovery, "Decide later" preserving both copies, whole-snapshot reconciliation, file fallback.
+import { unpackList } from "./packedList.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as S from "./scenarios.js";
@@ -8,7 +9,7 @@ import { buildRecoverableExport, verifyRecoverableExport } from "./recoverableEx
 import { digestSnapshot } from "./digest.js";
 
 const cloudIds = kit => (kit.cloud.rows.get(S.USER)?.snapshot.txns || []).map(t => t.id);
-const stored = d => JSON.parse(d.storage.getItem(SAFETY_BACKUPS_KEY) || "[]");
+const stored = d => unpackList(d.storage.getItem(SAFETY_BACKUPS_KEY));
 
 test("'Decide later' keeps BOTH copies (pinned, verified) even after both devices keep changing, and nothing is lost", async () => {
   const kit = S.makeKit("new"); const r = await S.decideLaterWhileBothMove(kit);

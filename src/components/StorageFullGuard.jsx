@@ -39,6 +39,8 @@ export default function StorageFullGuard({ storage = typeof window !== "undefine
   }, [storage]);
 
   useEffect(() => {
+    // Ask the browser not to clear Arth's storage when the phone runs low on space. It may refuse; nothing depends on the answer.
+    try { const r = navigator.storage && navigator.storage.persist && navigator.storage.persist(); if (r && r.catch) r.catch(() => {}); } catch { /* not available */ }
     check();
     const t = setInterval(check, checkEveryMs);
     const onFull = () => { setHidden(false); check(); };

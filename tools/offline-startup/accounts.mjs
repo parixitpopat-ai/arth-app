@@ -20,7 +20,7 @@ const body = async p => (await p.evaluate(() => document.body.innerText)).replac
 const wait = async (fn, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn().catch(() => false)) return true; await new Promise(r => setTimeout(r, 250)); } return false; };
 const cloudIds = u => L.cloudTxnIds(fake, u.id);
 const ownerOf = p => p.evaluate(() => { try { return JSON.parse(localStorage.getItem("arth_data_owner") || "null"); } catch { return null; } });
-const backupsHave = (p, prefix) => p.evaluate(px => (JSON.parse(localStorage.getItem("arth_sync_safety_backups") || "[]")).filter(b => (b.snapshot?.txns || []).some(t => String(t.id).startsWith(px))).map(b => b.reason), prefix);
+const backupsHave = (p, prefix) => p.evaluate(async px => ((await (await import("/src/sync/packedList.js")).unpackList(localStorage.getItem("arth_sync_safety_backups")))).filter(b => (b.snapshot?.txns || []).some(t => String(t.id).startsWith(px))).map(b => b.reason), prefix);
 
 async function login(p, email, { first = true } = {}) {
   await p.goto(URL_, { waitUntil: "networkidle" }); await p.waitForTimeout(600);
@@ -51,7 +51,7 @@ async function addTest(page, label) {
 }
 const hasLabel = (p, label) => L.localTxns(p).then(a => a.some(t => t.merchant === label));
 const cloudHas = (u, label) => ((fake.rows.get(u.id)?.snapshot?.txns) || []).some(t => t.merchant === label);
-const inBackups = (p, label) => p.evaluate(l => (JSON.parse(localStorage.getItem("arth_sync_safety_backups") || "[]")).some(b => (b.snapshot?.txns || []).some(t => t.merchant === l)), label);
+const inBackups = (p, label) => p.evaluate(async l => ((await (await import("/src/sync/packedList.js")).unpackList(localStorage.getItem("arth_sync_safety_backups")))).some(b => (b.snapshot?.txns || []).some(t => t.merchant === l)), label);
 const onOwnership = p => body(p).then(t => /has account-a@example\.invalid's data|Nothing has been sent to the cloud or deleted/.test(t));
 
 // AS1: B's cloud EMPTY.

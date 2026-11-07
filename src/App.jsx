@@ -15,6 +15,7 @@ import CloudConflictScreen from "./screens/CloudConflictScreen";
 import DeviceOwnershipScreen from "./screens/DeviceOwnershipScreen";
 import SignOutWarningSheet from "./components/SignOutWarningSheet";
 import SlowLoadEscape from "./components/SlowLoadEscape";
+import { packList, unpackList } from "./sync/packedList";
 import SyncConflictSheet from "./components/SyncConflictSheet";
 import SyncBackupFileSheet from "./components/SyncBackupFileSheet";
 import TabGate from "./components/TabGate";
@@ -9416,6 +9417,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   cloudActiveRef.current = Boolean(cloudUser?.id && isCloudSyncConfigured);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudHydrated, setCloudHydrated] = useState(!isCloudSyncConfigured);
+  // The returning device's first sync runs in the background when the app can already open from this phone's data.
+  const [firstSyncDone, setFirstSyncDone] = useState(false);
+  // Bumped when the saved session has been confirmed by the server. The account check and the auth listener race; when the listener
+  // wins, the first-sync effect below already ran (and stopped, the session not yet confirmed) before the confirmation. It must run again.
+  const [sessionConfirmedTick, setSessionConfirmedTick] = useState(0);
   const [lastSyncedAt, setLastSyncedAt] = useState("");
   const [cloudStatus, setCloudStatus] = useState(
     isCloudSyncConfigured
@@ -9425,7 +9431,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [backupStatus, setBackupStatus] = useState("");
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(()=>JSON.parse(localStorage.getItem("arth_auto_backup_enabled") ?? "true"));
   const [autoBackupFrequency, setAutoBackupFrequency] = useState(()=>localStorage.getItem("arth_auto_backup_frequency") || "daily");
-  const [autoBackups, setAutoBackups] = useState(()=>JSON.parse(localStorage.getItem("arth_auto_backups") || "[]"));
+  const [autoBackups, setAutoBackups] = useState(()=>unpackList(localStorage.getItem("arth_auto_backups")));
   const backupFileInputRef = useRef(null);
   const applyingCloudSnapshotRef = useRef(false);
   const cloudSnapshotRef = useRef(null);
@@ -9481,7 +9487,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   }, [autoBackupFrequency]);
   useEffect(() => {
     try{
-      safeSetLocalStorage("arth_auto_backups", JSON.stringify((Array.isArray(autoBackups) ? autoBackups : []).slice(0, 3)));
+      safeSetLocalStorage("arth_auto_backups", packList((Array.isArray(autoBackups) ? autoBackups : []).slice(0, 3)));
     }catch(err){
       console.warn("Unable to persist auto backups", err);
       if(autoBackupEnabled) setBackupStatus("Auto backups are limited by device storage. Please download a manual backup too.");
@@ -9834,7 +9840,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         setOwnershipError(out.error || "That could not be completed, so nothing was changed. Please try again.");
         return;
       }
-      if(sessionRestoredOnBootRef.current){ setCloudHydrated(false); await syncKit.engine.boot({ continuedSession:true }); setCloudHydrated(true); }
+      if(sessionRestoredOnBootRef.current){ setCloudHydrated(false); setFirstSyncDone(false); await syncKit.engine.boot({ continuedSession:true }); setCloudHydrated(true); setFirstSyncDone(true); }
       else { firstAuthRanRef.current = false; setConflictData(null); setFirstAuthState(null); }   // the first-sign-in check runs again, now that ownership is settled
     }finally{ setOwnershipBusy(false); }
   }, [syncKit]);
@@ -9938,6 +9944,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // second "verified" would arrive after offline resume has ended and be mistaken for a plain returning device.
     let settled = false;
     // Server confirmed the saved session.
+    const canOpenFromDevice = () => JSON.parse(localStorage.getItem("arth_master_user_setup_complete") ?? "false") === true
+      && hasMeaningfulData(cloudSnapshotRef.current || {});
     const applyVerified = user => {
       // A session found here was restored from the SDK's own persisted
       // token — it existed before this code ran. That's the "returning
@@ -9954,7 +9962,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       offlineResumeRef.current = false;
       setOfflineResume(false);
       setCloudUser(user);
-      setCloudHydrated(false);
+      if(!fromOffline) setSessionConfirmedTick(t => t + 1);
+      // A returning device with data and a finished profile opens at once from this phone's data; its first sync runs in the background.
+      // (An offline resume keeps the previous behaviour: its first-sign-in check settles it.)
+      setCloudHydrated(!fromOffline && canOpenFromDevice());
+      setCloudStatus("");
       if(user?.email) setSyncEmail(user.email);
     };
     // No valid session (server said so, or this device may not resume offline): the previous behaviour exactly.
@@ -10059,10 +10071,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(!cloudUser?.id || !isCloudSyncConfigured || !syncKit) return;
     // P1: a first-auth-on-this-device session is handled by runFirstAuthMigration below instead (it uses the same engine).
     if(!sessionRestoredOnBootRef.current) return;
-    setCloudHydrated(false);
+    setFirstSyncDone(false);
     // Returning device: one sync cycle (never replaces unsynced local data; offline is fine, the app opens from local data).
-    syncKit.engine.boot({ continuedSession:true }).finally(()=>setCloudHydrated(true));   // a session the server already knew: it continues, so this device's data is this account's
-  }, [cloudUser?.id, syncKit]);
+    // With data on this phone and a finished profile the app is already open (applyVerified); the cycle then runs behind it.
+    // With nothing on the phone it still waits for the cloud copy, as before.
+    const openNow = JSON.parse(localStorage.getItem("arth_master_user_setup_complete") ?? "false") === true && hasMeaningfulData(cloudSnapshotRef.current || {});
+    setCloudHydrated(openNow);
+    syncKit.engine.boot({ continuedSession:true }).finally(()=>{ setCloudHydrated(true); setFirstSyncDone(true); });   // a session the server already knew: it continues, so this device's data is this account's
+  }, [cloudUser?.id, syncKit, sessionConfirmedTick]);
 
   // P1 — first-auth-on-this-device path only (see sessionRestoredOnBootRef).
   useEffect(() => {
@@ -10119,11 +10135,21 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
   // Every change to the synced data: local data is already saved (per-key effects); this schedules the cloud write.
   // Not before this device's first sync cycle has finished (returning: cloudHydrated, first sign-in: firstAuthState ready).
-  const syncReady = sessionRestoredOnBootRef.current ? cloudHydrated : firstAuthState==="ready";
+  const syncReady = sessionRestoredOnBootRef.current ? (cloudHydrated && firstSyncDone) : firstAuthState==="ready";
   useEffect(() => {
     if(!syncEngine || !syncReady) return;
     syncEngine.notifyChange();
   }, [syncEngine, syncReady, cloudSnapshot]);
+
+  // Live receiving: while Arth is open and visible, look every 20 s whether another device has saved (a few bytes: the cloud copy's
+  // version stamp). Only a difference starts a normal sync, which decides as always (a clean device takes the newer copy after a verified
+  // backup; a device with its own unsynced changes gets the conflict screen). Nothing is replaced by the look itself.
+  useEffect(() => {
+    if(!syncEngine || !syncReady) return undefined;
+    const look = () => { if(document.visibilityState==="visible") syncEngine.pollRemote?.(); };
+    const id = setInterval(look, 20000);
+    return () => clearInterval(id);
+  }, [syncEngine, syncReady]);
 
   const moveCard = (cardId, dir) => {
     // Was: moveCard(idx, dir), using a position from the FILTERED displayCards
@@ -20284,6 +20310,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       `}</style>
       <div style={{ maxWidth:430,margin:"0 auto",minHeight:"100vh",position:"relative",paddingBottom:80,fontFamily:"Nunito,sans-serif" }}>
 
+        {cloudUser && sessionRestoredOnBootRef.current && !firstSyncDone && cloudHydrated && (
+          <div data-testid="first-sync-banner" style={{ background:T.card,borderBottom:`1px solid ${T.border}`,color:T.sub,fontSize:12,fontWeight:700,padding:"6px 14px" }}>
+            🔄 Syncing with your account… you can keep using Arth.
+          </div>
+        )}
         {offlineResume&&(
           <div data-testid="offline-resume-banner" style={{ background:T.warn+"22",borderBottom:`1px solid ${T.warn}44`,color:T.text,fontSize:12,fontWeight:700,padding:"8px 14px",display:"flex",alignItems:"center",gap:10 }}>
             <span style={{ flex:1 }}>📡 Can't confirm your account right now. Changes are saved on this device and will sync as soon as Arth can.</span>
@@ -21638,7 +21669,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         )}
         {fileBackupSheet}
         {signOutPrompt&&<SignOutWarningSheet T={T} info={signOutPrompt} accountEmail={cloudUser?.email} busy={cloudBusy} onStay={()=>setSignOutPrompt(null)} onSignOut={()=>{ setSignOutPrompt(null); handleCloudSignOut(); }}/>}
-        {syncEngine && syncStatus.kind==="conflict" && syncConflictOpen && firstAuthState!=="conflict" && (
+        {syncEngine && syncStatus.kind==="conflict" && syncConflictOpen && (firstAuthState!=="conflict" || sessionRestoredOnBootRef.current) && (
           <SyncConflictSheet
             T={T}
             diff={syncEngine.getState().conflict?.diff}

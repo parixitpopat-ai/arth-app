@@ -25,6 +25,12 @@ export function createSupabaseCasClient(supabase, table = "arth_snapshots") {
       if (error) fail(error);
       return data ? { token: data.updated_at, snapshot: data.snapshot } : null;
     },
+    /** Only the version stamp of the cloud copy (a few bytes), to learn cheaply whether another device has saved since. */
+    async peek(userId) {
+      const { data, error } = await supabase.from(table).select("updated_at").eq("user_id", userId).maybeSingle();
+      if (error) fail(error);
+      return data ? data.updated_at : null;
+    },
     async insert(userId, snapshot, token) {
       const { data, error } = await supabase.from(table).insert({ user_id: userId, snapshot, updated_at: token }).select("updated_at");
       if (error) {

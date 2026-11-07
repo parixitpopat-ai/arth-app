@@ -75,7 +75,7 @@ export async function addExpense(page, desc, amount) {
   await page.getByRole("button", { name: /Save Expense/ }).click(); await page.waitForTimeout(150);
 }
 export const localTxns = page => page.evaluate(() => JSON.parse(localStorage.getItem("arth_txns") || "[]"));
-export const localBackups = page => page.evaluate(() => JSON.parse(localStorage.getItem("arth_auto_backups") || "[]").map(b => ({ type: b.backupType, at: b.exportedAt, ids: (b.snapshot?.txns || []).map(t => String(t.id)) })));
+export const localBackups = page => page.evaluate(async () => (await (await import("/src/sync/packedList.js")).unpackList(localStorage.getItem("arth_auto_backups"))).map(b => ({ type: b.backupType, at: b.exportedAt, ids: (b.snapshot?.txns || []).map(t => String(t.id)) })));
 export const setFaults = (f) => fetch(FAKE + "/__ctl/faults", { method: "POST", body: JSON.stringify(f) }).then(r => r.json());
 export async function bodyText(page) { return page.evaluate(() => document.body.innerText); }
 export const diff = (expected, actual) => ({ missing: expected.filter(x => !actual.includes(x)), unexpected: actual.filter(x => !expected.includes(x)) });
@@ -99,8 +99,8 @@ export async function waitFor(fn, { timeout = 20000, step = 150, what = "conditi
   }
 }
 export const syncState = page => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("arth_sync_state") || "null"); } catch { return null; } });
-export const safetyBackupIds = page => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("arth_sync_safety_backups") || "[]").flatMap(b => (b.snapshot?.txns || []).map(t => String(t.id))); } catch { return []; } });
-export const safetyBackups = page => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("arth_sync_safety_backups") || "[]").map(b => ({ reason: b.reason, txnCount: b.txnCount })); } catch { return []; } });
+export const safetyBackupIds = page => page.evaluate(async () => { try { return (await (await import("/src/sync/packedList.js")).unpackList(localStorage.getItem("arth_sync_safety_backups"))).flatMap(b => (b.snapshot?.txns || []).map(t => String(t.id))); } catch { return []; } });
+export const safetyBackups = page => page.evaluate(async () => { try { return (await (await import("/src/sync/packedList.js")).unpackList(localStorage.getItem("arth_sync_safety_backups"))).map(b => ({ reason: b.reason, txnCount: b.txnCount })); } catch { return []; } });
 export async function goHome(page) {
   for (let i = 0; i < 3; i++) { if (await page.getByText("+", { exact: true }).first().isVisible().catch(() => false) && !(await page.getByTestId("sync-status-headline").count())) return; await page.getByText("←", { exact: true }).first().dispatchEvent("click").catch(() => {}); await page.waitForTimeout(300); }
 }

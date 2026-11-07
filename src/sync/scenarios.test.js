@@ -139,7 +139,9 @@ test("if the backup cannot be written, nothing is replaced and the status says s
 test("a backup that does not read back identically is not accepted", async () => {
   const { createSafetyBackup } = await import("./safetyBackup.js");
   const store = new Map();
-  const corrupting = { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, v.replace(/"txns":\[[^\]]*\]/, '"txns":[]')) };
+  const { packList, unpackList } = await import("./packedList.js");
+  // the stored copy loses its transactions on the way to storage (the list is stored compressed, so damage it inside)
+  const corrupting = { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, packList(unpackList(v).map(b => ({ ...b, snapshot: { ...b.snapshot, txns: [] } })))) };
   const snap = { txns: [{ id: 1 }, { id: 2 }], accounts: [] };
   const res = await createSafetyBackup(corrupting, { reason: "t", snapshot: snap, genId: () => "x" });
   assert.equal(res.ok, false);

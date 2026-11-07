@@ -6,6 +6,7 @@
 // (for example browser storage is full) the caller must NOT replace anything.
 
 import { digestSnapshot, txnIdsOf } from "./digest.js";
+import { packList, unpackList } from "./packedList.js";
 import { sameRecords, rehearsalNoWorse, restoreRehearsal, describeMissing, listSummary } from "./snapshotIntegrity.js";
 
 export const SAFETY_BACKUPS_KEY = "arth_sync_safety_backups";
@@ -13,8 +14,7 @@ export const MAX_KEPT = 10;
 
 function readList(storage) {
   try {
-    const parsed = JSON.parse(storage.getItem(SAFETY_BACKUPS_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
+    return unpackList(storage.getItem(SAFETY_BACKUPS_KEY));
   } catch {
     return [];
   }
@@ -50,7 +50,7 @@ export async function createSafetyBackup(storage, { reason, snapshot, now = () =
     // Browser storage full: drop the OLDEST ordinary copies (never pinned ones, never this one) until it fits. Ordinary copies are
     // rotation copies of data that also lives on the device, so this never removes the only copy of anything.
     for (;;) {
-      try { storage.setItem(SAFETY_BACKUPS_KEY, JSON.stringify(next)); break; }
+      try { storage.setItem(SAFETY_BACKUPS_KEY, packList(next)); break; }
       catch (e) {
         const victim = next.find(b => !b.pinned && b.id !== entry.id);
         if (!victim) throw e;
@@ -99,7 +99,7 @@ export function releasePinned(storage, conflictId) {
     const rest = held.filter(c => c !== conflictId);
     return rest.length ? { ...b, conflictIds: rest, conflictId: rest[0] } : { ...b, pinned: false, conflictIds: [] };
   });
-  storage.setItem(SAFETY_BACKUPS_KEY, JSON.stringify(list));
+  storage.setItem(SAFETY_BACKUPS_KEY, packList(list));
 }
 
 export function listPinned(storage) {
