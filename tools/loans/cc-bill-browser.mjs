@@ -72,6 +72,42 @@ try {
     await home();
     rec("R5 Home 'Spent' is back to Rs 5,000 (the payment is no longer spending)", (await spent()) === "5,000", await spent());
   }
+  // ── 2b: the reported screenshot: an expense "Icici CC 8004 Bill Payment" marked Bill payment, linked to a bill THE EXPENSE MADE FOR ITSELF ──
+  {
+    const own = { id: "own1", name: "Icici CC 8004 Bill Payment", merchant: "Icici CC 8004 Bill Payment", amount: 7000, dueDate: "2026-11-03", status: "paid", paidDate: "2026-11-03", paidByTxnId: "x2", catId: null, catIds: [] };
+    const tx = { id: "x2", type: "expense", amount: 7000, date: "2026-11-03", desc: "Icici CC 8004 Bill Payment", merchant: "Icici CC 8004 Bill Payment", note: "Bill payment", transactionRef: "PAYMENT OF RS 7000 HAS BEEN RECEIVED ON YOUR ICICI BANK CREDIT CARD XX8004 THROUGH BHARAT BILL PAYMENT SYSTEM ON 03-NOV-26.", accId: "bank1", catId: null, catIds: [], isBillPayment: true, paidBillId: "own1", paidBillName: "Icici CC 8004 Bill Payment" };
+    const cards = [accounts[0], { ...accounts[1], name: "Test ICICI CC", outstanding: 7000 }, { id: "cc2", name: "Other Card", type: "cc", limit: 50000, outstanding: 0, last4: "1111" }];
+    const { page, unlock, ls, home, spent, T } = await newPage({ arth_accounts: cards, arth_txns: [tx], arth_bills: [own] });
+    await home();
+    rec("S0 (the screenshot) the payment is counted as spending: Rs 7,000", (await spent()) === "7,000", await spent());
+    await page.getByText("Icici CC 8004 Bill Payment", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(800);
+    await page.getByRole("button", { name: /Edit/ }).first().dispatchEvent("click"); await page.waitForTimeout(900);
+    const shown = (await T("cc-payment-hint").count()) === 1;
+    rec("S1 editing it shows the hint, recognised from the description (card ending 8004 -> 'Test ICICI CC')", shown && /looks like a payment of a credit card bill/.test(await T("cc-payment-hint").innerText()) && /Test ICICI CC/.test(await T("cc-payment-switch").innerText()), shown ? await T("cc-payment-switch").innerText() : null);
+    await T("cc-payment-switch").dispatchEvent("click"); await page.waitForTimeout(500);
+    await page.getByRole("button", { name: /Save|Update/ }).last().click(); await page.waitForTimeout(1000);
+    const txns = await ls("arth_txns"), accs = await ls("arth_accounts"), bills = await ls("arth_bills");
+    const conv = txns.find(x => x.id === "x2");
+    rec("S2 converted: a card payment from savings to the ICICI card (not the other card), keeping its description", conv?.type === "cc_payment" && conv.fromAccId === "bank1" && conv.toAccId === "cc1" && conv.desc === "Icici CC 8004 Bill Payment", conv && { type: conv.type, to: conv.toAccId, desc: conv.desc });
+    rec("S3 the bill this expense had made for itself is gone, and the entry no longer points at it", bills.length === 0 && !conv.paidBillId, { bills: bills.length, paidBillId: conv?.paidBillId });
+    rec("S4 the ICICI card's balance went down; the other card is untouched", accs.find(a => a.id === "cc1").outstanding === 0 && accs.find(a => a.id === "cc2").outstanding === 0, accs.map(a => a.outstanding));
+    await home();
+    rec("S5 'Spent' no longer includes it (Rs 0)", (await spent()) === "0", await spent());
+  }
+  // ── 2c: controls for the description hint ──
+  {
+    const { page, home, T } = await newPage({ arth_accounts: accounts, arth_txns: [], arth_bills: [] });
+    await home();
+    const open = async () => { await page.getByRole("button", { name: "+", exact: true }).first().click(); await page.waitForTimeout(600); await page.getByText("More options →").click(); await page.waitForTimeout(600); };
+    await open();
+    await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("300");
+    await page.getByPlaceholder("Vendor / Person / Place *").fill("Coffee shop"); await page.waitForTimeout(400);
+    rec("H1 (control) an ordinary expense shows no card hint", (await T("cc-payment-hint").count()) === 0, {});
+    await page.getByPlaceholder("Vendor / Person / Place *").fill("Credit card annual fee payment"); await page.waitForTimeout(500);
+    rec("H2 words like 'credit card ... payment' show the hint", (await T("cc-payment-hint").count()) === 1, {});
+    await T("cc-payment-dismiss").dispatchEvent("click"); await page.waitForTimeout(300);
+    rec("H3 'No, it is an expense' hides it and the form stays an expense", (await T("cc-payment-hint").count()) === 0 && !/\bFROM\b[\s\S]*\bTO\b/.test(await page.evaluate(() => document.body.innerText)), {});
+  }
   // ── 3: control: an ordinary bill still links to an expense exactly as before ──
   {
     const bill = { id: "b1", name: "Test Electricity", amount: 1200, dueDate: "2026-11-10", billDate: "2026-11-01", status: "unpaid", catId: "utilities", catIds: ["utilities"], subId: "u1" };

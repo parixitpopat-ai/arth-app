@@ -4781,11 +4781,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const byAmount = n>0 ? bills.find(b=>b.isCcStatement && b.status==="unpaid" && Math.abs(Number(b.amount||0)-n)<0.01) : null;
       if(byAmount) return { card: accounts.find(a=>String(a.id)===String(byAmount.accId)) || null, why:"amount" };
       if((subIds||[]).includes("fi6")) return { card:null, why:"category" };
+      // (d) the description says so: "Icici CC 8004 Bill Payment", an SMS "payment received on your credit card XX8004", ...
+      const hay = [who, note, transactionRef, smsRaw, sourceTxn?.desc, sourceTxn?.merchant, sourceTxn?.note, sourceTxn?.transactionRef, sourceTxn?.smsRaw].filter(Boolean).join(" ");
+      if(/credit\s*card|\bcc\b/i.test(hay) && /\b(?:bill|payment|paid|dues?|statement)\b/i.test(hay)){
+        const cards = accounts.filter(a=>a.type==="cc");
+        const byLast4 = cards.find(a=>a.last4 && new RegExp(`(?:^|[^0-9])${String(a.last4).replace(/\D/g,"")}(?:[^0-9]|$)`).test(hay));
+        return { card: byLast4 || (cards.length===1 ? cards[0] : null), why:"text" };
+      }
       return null;
-    },[txnType, isEditing, sourceTxn?.paidBillId, bills, accounts, amt, subIds]);
+    },[txnType, isEditing, sourceTxn, bills, accounts, amt, subIds, who, note, transactionRef, smsRaw]);
+    const [ccHintDismissed, setCcHintDismissed] = useState(false);
     const switchToCardPayment = ()=>{
       const card = ccPaymentHint?.card || ccAccs[0] || null;
-      setTxnType("cc_payment"); setUserSetTxnType(true); setIsBillPayment(false); setBillMatchChoice(""); setWho("");
+      setTxnType("cc_payment"); setUserSetTxnType(true); setIsBillPayment(false); setBillMatchChoice("");
       setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId("");
       if(card) setToAccId(card.id);
       const from = accounts.find(a=>String(a.id)===String(accId) && a.type!=="cc");
@@ -5948,7 +5956,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           groupId:transferTagPersonId?null:(transferTagGroupId||null),
         });
       } else if(txnType==="cc_payment"){
-        upsertTxn({ ...base, amount:amt, fromAccId, toAccId, accId:null, catId:null, catIds:[], subId:null, subIds:[], isBillPayment:false, reimbursable:false, ...(isEditing && sourceTxn?.paidBillId ? { paidBillId:sourceTxn.paidBillId, paidBillName:sourceTxn.paidBillName } : {}) });
+        // The "Bill payment" switch on an expense makes a bill of its own when nothing matched ("Icici CC 8004 Bill Payment", paid by this very entry).
+        // Turned into a card payment that bill has no purpose: remove it (only when it is exactly that: paid by this entry, no biller, no other payment on it).
+        const linkedBill = isEditing && sourceTxn?.paidBillId ? bills.find(b=>String(b.id)===String(sourceTxn.paidBillId)) : null;
+        const ownBill = linkedBill && !linkedBill.isCcStatement && !linkedBill.billerAccountId && String(linkedBill.paidByTxnId)===String(sourceTxn.id)
+          && !contributions.some(c=>c?.obligationType==="bill" && String(c.obligationId)===String(linkedBill.id) && String(c.txnId)!==String(sourceTxn.id)) ? linkedBill : null;
+        const keepLink = isEditing && sourceTxn?.paidBillId && !ownBill;
+        upsertTxn({ ...base, amount:amt, fromAccId, toAccId, accId:null, catId:null, catIds:[], subId:null, subIds:[], isBillPayment:false, reimbursable:false, ...(keepLink ? { paidBillId:sourceTxn.paidBillId, paidBillName:sourceTxn.paidBillName } : { paidBillId:null, paidBillName:null }) });
+        if(ownBill){
+          setBills(prev=>prev.filter(b=>String(b.id)!==String(ownBill.id)));
+          setContributions(prev=>withoutBillContributionsForTxn(prev, sourceTxn.id));
+        }
         // A new card payment lowers the card's balance and settles EMI instalments. An expense turned into a card payment is new to the card too.
         if(!isEditing || sourceTxn?.type!=="cc_payment"){
           setAccounts(prev=>prev.map(a=>a.id===toAccId?{...a,outstanding:Math.max(0,(a.outstanding||0)-amt)}:a));
@@ -7775,16 +7793,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
               );
             })()}
-            {txnType==="expense"&&ccPaymentHint&&(
+            {txnType==="expense"&&ccPaymentHint&&!ccHintDismissed&&(
               <div data-testid="cc-payment-hint" style={{ background:T.warn+"16",border:`1px solid ${T.warn}44`,borderRadius:12,padding:"12px 14px",marginBottom:10 }}>
                 <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>💳 Paying a credit card bill?</div>
                 <div style={{ color:T.sub,fontSize:12,marginBottom:10 }}>
-                  {ccPaymentHint.why==="linked" ? "This expense is linked to a card statement, so it is counted as spending a second time and the card's balance has not gone down. " : "Saved as an expense it is counted as spending a second time, and the card's balance does not go down. "}
+                  {ccPaymentHint.why==="linked" ? "This expense is linked to a card statement, so it is counted as spending a second time and the card's balance has not gone down. " : ccPaymentHint.why==="text" ? "This looks like a payment of a credit card bill. Saved as an expense it is counted as spending, and the card's balance does not go down. " : "Saved as an expense it is counted as spending a second time, and the card's balance does not go down. "}
                   Record it as a card payment (from your bank to the card) instead.
                 </div>
-                <button data-testid="cc-payment-switch" onClick={switchToCardPayment} style={{ background:T.accent,border:"none",color:T.accentInk||"#fff",borderRadius:10,padding:"9px 14px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
-                  Record as card payment{ccPaymentHint.card?` · ${ccPaymentHint.card.name}`:""}
-                </button>
+                <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
+                  <button data-testid="cc-payment-switch" onClick={switchToCardPayment} style={{ background:T.accent,border:"none",color:T.accentInk||"#fff",borderRadius:10,padding:"9px 14px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                    Record as card payment{ccPaymentHint.card?` · ${ccPaymentHint.card.name}`:""}
+                  </button>
+                  <button data-testid="cc-payment-dismiss" onClick={()=>setCcHintDismissed(true)} style={{ background:"none",border:`1px solid ${T.border}`,color:T.sub,borderRadius:10,padding:"9px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>No, it is an expense</button>
+                </div>
               </div>
             )}
             {txnType==="expense"&&(
