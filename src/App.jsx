@@ -4721,7 +4721,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const billMatchCandidates = useMemo(() => {
       if(!isBillPayment || !catId || !amt) return [];
       return bills
-        .filter(b=>b.status==="unpaid" && b.catId===catId && b.amount>0 && b.amount===amt)
+        .filter(b=>!b.isCcStatement && b.status==="unpaid" && b.catId===catId && b.amount>0 && b.amount===amt)   // a card statement is settled by a CARD PAYMENT, never by an expense (it would count as spending)
         .map(b=>{
           const bd = toDateOnly(b.dueDate||b.billDate);
           const td = toDateOnly(date);
@@ -4749,7 +4749,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // What each linked item would apply, in item order: an item cannot apply more than its own amount, and a bill cannot take more than it still owes,
     // counting the items of this same payment that came before it (several items may pay the same bill).
     const itemBillPlan = useMemo(()=>planItemBillLinks({ items:lineItems.map(it=>({ id:it.id, amount:(parseFloat(it.qty)||0)*(parseFloat(it.unitPrice)||0) })), links:itemBillLinks, bills, contributions:contributionsWithoutThisTxn }),[lineItems,itemBillLinks,bills,contributionsWithoutThisTxn]);
-    const itemBillChoices = useMemo(()=>bills.filter(b=>isOpenPayableBill(b) && getBillBalance(b, contributionsWithoutThisTxn).remaining>0.005)
+    const itemBillChoices = useMemo(()=>bills.filter(b=>!b.isCcStatement && isOpenPayableBill(b) && getBillBalance(b, contributionsWithoutThisTxn).remaining>0.005)
       .sort((x,y)=>String(x.dueDate||"9999").localeCompare(String(y.dueDate||"9999"))).slice(0,8),[bills,contributionsWithoutThisTxn]);
     const billMatchCandidateIdsKey = billMatchCandidates.map(b=>b.id).join(",");
     const lastBillMatchKeyRef = useRef(null);
@@ -4770,6 +4770,27 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // M2 / ADR-038: a payment is compared with what is still owed on the Bill, not its full amount,
     // so the remaining balance of a partially paid Bill can be paid from here.
     const renderMatchedBalance = renderMatchedBill ? getBillBalance(renderMatchedBill, contributions.filter(c=>!(isEditing && String(c.txnId)===String(sourceTxn?.id)))) : null;
+
+    // A credit card bill paid as an EXPENSE counts as spending a second time and leaves the card's balance untouched; it belongs in a CARD PAYMENT
+    // (bank -> card). Shown while an expense (a) is already linked to a card statement, (b) has the amount of an unpaid card statement, or (c) sits in "Credit Card Bills".
+    const ccPaymentHint = useMemo(()=>{
+      if(txnType!=="expense") return null;
+      const linked = isEditing && sourceTxn?.paidBillId ? bills.find(b=>String(b.id)===String(sourceTxn.paidBillId) && b.isCcStatement) : null;
+      if(linked) return { card: accounts.find(a=>String(a.id)===String(linked.accId)) || null, why:"linked" };
+      const n = Number(amt)||0;
+      const byAmount = n>0 ? bills.find(b=>b.isCcStatement && b.status==="unpaid" && Math.abs(Number(b.amount||0)-n)<0.01) : null;
+      if(byAmount) return { card: accounts.find(a=>String(a.id)===String(byAmount.accId)) || null, why:"amount" };
+      if((subIds||[]).includes("fi6")) return { card:null, why:"category" };
+      return null;
+    },[txnType, isEditing, sourceTxn?.paidBillId, bills, accounts, amt, subIds]);
+    const switchToCardPayment = ()=>{
+      const card = ccPaymentHint?.card || ccAccs[0] || null;
+      setTxnType("cc_payment"); setUserSetTxnType(true); setIsBillPayment(false); setBillMatchChoice(""); setWho("");
+      setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId("");
+      if(card) setToAccId(card.id);
+      const from = accounts.find(a=>String(a.id)===String(accId) && a.type!=="cc");
+      if(from) setFromAccId(from.id);
+    };
     const billLinkMismatch = isBillPayment ? getBillLinkAmountMismatch(renderMatchedBill && renderMatchedBalance && !renderMatchedBalance.historical ? { ...renderMatchedBill, amount:renderMatchedBalance.remaining } : renderMatchedBill, amt) : null;
 
     // HOTFIX (TDZ): this effect was originally placed BEFORE renderMatchedBill/selectedPids were
@@ -5927,8 +5948,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           groupId:transferTagPersonId?null:(transferTagGroupId||null),
         });
       } else if(txnType==="cc_payment"){
-        upsertTxn({ ...base, amount:amt, fromAccId, toAccId, catId:null, catIds:[], subId:null, subIds:[] });
-        if(!isEditing){
+        upsertTxn({ ...base, amount:amt, fromAccId, toAccId, accId:null, catId:null, catIds:[], subId:null, subIds:[], isBillPayment:false, reimbursable:false, ...(isEditing && sourceTxn?.paidBillId ? { paidBillId:sourceTxn.paidBillId, paidBillName:sourceTxn.paidBillName } : {}) });
+        // A new card payment lowers the card's balance and settles EMI instalments. An expense turned into a card payment is new to the card too.
+        if(!isEditing || sourceTxn?.type!=="cc_payment"){
           setAccounts(prev=>prev.map(a=>a.id===toAccId?{...a,outstanding:Math.max(0,(a.outstanding||0)-amt)}:a));
           // CC EMI settlement fix: allocates only the actual payment amount
           // across pending installments, oldest-first — never marks more
@@ -7753,6 +7775,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
               );
             })()}
+            {txnType==="expense"&&ccPaymentHint&&(
+              <div data-testid="cc-payment-hint" style={{ background:T.warn+"16",border:`1px solid ${T.warn}44`,borderRadius:12,padding:"12px 14px",marginBottom:10 }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>💳 Paying a credit card bill?</div>
+                <div style={{ color:T.sub,fontSize:12,marginBottom:10 }}>
+                  {ccPaymentHint.why==="linked" ? "This expense is linked to a card statement, so it is counted as spending a second time and the card's balance has not gone down. " : "Saved as an expense it is counted as spending a second time, and the card's balance does not go down. "}
+                  Record it as a card payment (from your bank to the card) instead.
+                </div>
+                <button data-testid="cc-payment-switch" onClick={switchToCardPayment} style={{ background:T.accent,border:"none",color:T.accentInk||"#fff",borderRadius:10,padding:"9px 14px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                  Record as card payment{ccPaymentHint.card?` · ${ccPaymentHint.card.name}`:""}
+                </button>
+              </div>
+            )}
             {txnType==="expense"&&(
               <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
                 <div style={{ display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:isBillPayment?10:0 }}>
