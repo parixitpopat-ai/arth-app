@@ -64,6 +64,16 @@ try {
   rec("S11 (control) it does not claim success when nothing could be freed", /still tight/.test(await T("storage-result").innerText()) && (await T("storage-full-guard").count()) === 1, await T("storage-result").innerText());
   await T("storage-not-now").click(); await page.waitForTimeout(300);
   rec("S12 'Not now' hides it", (await T("storage-full-guard").count()) === 0, {});
+  // early warning: some room (about 100 KB) but not a comfortable amount
+  await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith("zz_fill_")) localStorage.removeItem(k); });
+  await page.evaluate(() => { let n = 0; try { for (;;) localStorage.setItem("zz_sq_" + (n++), "x".repeat(50000)); } catch {} let removed = 0; for (const k of Object.keys(localStorage)) if (k.startsWith("zz_sq_") && removed < 2) { localStorage.removeItem(k); removed++; } });
+  await reload();
+  rec("S14 with only ~100 KB of room left, a small early warning shows instead of the full-screen guard", (await T("storage-low-strip").count()) === 1 && (await T("storage-full-guard").count()) === 0, {});
+  await T("storage-low-dismiss").click(); await page.waitForTimeout(300);
+  rec("S15 the early warning can be dismissed", (await T("storage-low-strip").count()) === 0, {});
+  await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith("zz_sq_")) localStorage.removeItem(k); });
+  await reload();
+  rec("S16 (control) with plenty of room neither shows", (await T("storage-low-strip").count()) === 0 && (await T("storage-full-guard").count()) === 0, {});
   rec("S13 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 300)); }
 finally { await browser.close(); try { process.kill(-server.pid); } catch {} }

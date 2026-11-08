@@ -7,6 +7,7 @@
 
 import { digestSnapshot, txnIdsOf } from "./digest.js";
 import { packList, unpackList } from "./packedList.js";
+import { stripSurvivingPhotos } from "./backupPhotos.js";
 import { sameRecords, rehearsalNoWorse, restoreRehearsal, describeMissing, listSummary } from "./snapshotIntegrity.js";
 
 export const SAFETY_BACKUPS_KEY = "arth_sync_safety_backups";
@@ -21,8 +22,12 @@ function readList(storage) {
 }
 
 /** @returns {Promise<{ok:true,id:string,digest:string,txnCount:number,at:string}|{ok:false,error:string}>} */
-export async function createSafetyBackup(storage, { reason, snapshot, now = () => Date.now(), genId, normalizers, pinned = false, conflictId = null }) {
+export async function createSafetyBackup(storage, { reason, snapshot, now = () => Date.now(), genId, normalizers, pinned = false, conflictId = null, survivor = null }) {
   try {
+    // Photos that also exist in the data that REPLACES this data (`survivor`) are not lost by the replacement, so the copy leaves them out.
+    // Never for pinned copies (a held side of a conflict, a sign-out or hand-over copy), which are the only copy of what they hold.
+    let omitted = [];
+    if (survivor && !pinned) { const r = stripSurvivingPhotos(snapshot, survivor); snapshot = r.snapshot; omitted = r.omitted; }
     const digest = await digestSnapshot(snapshot);
     const txnCount = txnIdsOf(snapshot).length;
     const at = new Date(now()).toISOString();
@@ -30,7 +35,7 @@ export async function createSafetyBackup(storage, { reason, snapshot, now = () =
     const counts = Object.fromEntries(Object.entries(listSummary(snapshot)).map(([k, v]) => [k, v.count]));
     // Recoverability: what would the restore path itself drop from this data (e.g. duplicate settlements removed by normalisation)?
     const restoreDrops = normalizers ? restoreRehearsal(snapshot, normalizers).dropped.map(d => ({ key: d.key, count: d.ids ? d.ids.length : d.sourceCount - d.resultCount })) : [];
-    const entry = { id, reason, at, digest, txnCount, counts, restoreDrops, snapshot, ...(pinned ? { pinned: true, conflictId, conflictIds: conflictId ? [conflictId] : [] } : {}) };
+    const entry = { id, reason, at, digest, txnCount, counts, restoreDrops, snapshot, ...(omitted.length ? { omitted } : {}), ...(pinned ? { pinned: true, conflictId, conflictIds: conflictId ? [conflictId] : [] } : {}) };
     // The same data taken for the same reason is stored ONCE. A repeat of an identical copy (for example a sign-out with no new changes) reuses the existing entry;
     // a pinned request pins it and records one more reason to keep it. This stops identical full copies filling browser storage.
     const current = readList(storage);
@@ -117,4 +122,5 @@ export const REASON_LABELS = {
   "conflict-device-copy": "This device's copy held while you decide",
   "before-restore": "This device, before restoring a backup",
   "cloud-before-restore": "Cloud copy, before a restore replaces it",
+  "before-photo-optimize": "Before shrinking photos",
 };

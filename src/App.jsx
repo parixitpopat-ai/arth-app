@@ -15,7 +15,12 @@ import CloudConflictScreen from "./screens/CloudConflictScreen";
 import DeviceOwnershipScreen from "./screens/DeviceOwnershipScreen";
 import SignOutWarningSheet from "./components/SignOutWarningSheet";
 import SlowLoadEscape from "./components/SlowLoadEscape";
+import PhotoOptimizeCard from "./components/PhotoOptimizeCard";
+import LoanGivenSheet from "./components/LoanGivenSheet";
+import LoanEntryNotice from "./components/LoanEntryNotice";
+import { stripSurvivingPhotos, fillOmittedPhotos } from "./sync/backupPhotos";
 import { packList, unpackList } from "./sync/packedList";
+import { readImageFile, shrinkDataUrl, shrinkAllPhotos, listPhotos } from "./domain/images/shrinkImage";
 import SyncConflictSheet from "./components/SyncConflictSheet";
 import SyncBackupFileSheet from "./components/SyncBackupFileSheet";
 import TabGate from "./components/TabGate";
@@ -1565,6 +1570,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [showAddLiability, setShowAddLiability] = useState(false);
   const [showAddAsset, setShowAddAsset] = useState(false);
   const [showAddLoan, setShowAddLoan] = useState(false);
+  const [loanGivenDraft, setLoanGivenDraft] = useState(null);   // { amount, date, personId } while the "Loan given" sheet is open
   const [showAccDetail, setShowAccDetail] = useState(null);
   const [showWealthBreakdown, setShowWealthBreakdown] = useState(null);
   const [selectedInvestmentDetail, setSelectedInvestmentDetail] = useState(null);
@@ -6141,8 +6147,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
             : <div>
                 <div style={{ display:"flex",gap:8,marginBottom:10,flexWrap:"wrap" }}>
-                  {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["transfer","🔄","Transfer",T.info],["settlement_in","💼","Settlement",T.info],["investment","💹","Invest",T.info]].map(([v,ic,lb,col])=>(
-                    <button key={v} onClick={()=>{ setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); if(v!=="transfer"){ setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId(""); } }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
+                  {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["transfer","🔄","Transfer",T.info],["loan_given","🤝","Loan given",T.warn],["settlement_in","💼","Settlement",T.info],["investment","💹","Invest",T.info]].map(([v,ic,lb,col])=>(
+                    <button key={v} onClick={()=>{ if(v==="loan_given"){ setLoanGivenDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); if(v!=="transfer"){ setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId(""); } }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
                       <span style={{ fontSize:16 }}>{ic}</span>{lb}
                     </button>
                   ))}
@@ -7826,11 +7832,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end" }}>
                   <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>
                     {imageBase64 ? (isBillPayment ? "Change bill" : "Change receipt") : (isBillPayment ? "Add bill" : "Add receipt")}
-                    <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setImageBase64(ev.target.result); r.readAsDataURL(f); }}/>
+                    <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; readImageFile(f).then(setImageBase64).catch(()=>{}); }}/>
                   </label>
                   {isBillPayment&&<label style={{ background:T.success+"18",border:`1px solid ${T.success}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif" }}>
                     {paymentImageBase64?"Change proof":"Add proof"}
-                    <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setPaymentImageBase64(ev.target.result); r.readAsDataURL(f); }}/>
+                    <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; readImageFile(f).then(setPaymentImageBase64).catch(()=>{}); }}/>
                   </label>}
                   {imageBase64&&<button onClick={()=>setImageBase64(null)} style={{ background:"none",border:`1px solid ${T.danger}33`,borderRadius:8,color:T.danger,cursor:"pointer",fontSize:11,fontWeight:700,padding:"5px 10px",fontFamily:"Nunito,sans-serif" }}>Clear bill</button>}
                   {isBillPayment&&paymentImageBase64&&<button onClick={()=>setPaymentImageBase64(null)} style={{ background:"none",border:`1px solid ${T.danger}33`,borderRadius:8,color:T.danger,cursor:"pointer",fontSize:11,fontWeight:700,padding:"5px 10px",fontFamily:"Nunito,sans-serif" }}>Clear proof</button>}
@@ -8425,7 +8431,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <span style={lbl}>Payment proof (optional)</span>
             <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"8px 14px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",display:"inline-block" }}>
               📷 {receiptImg?"Change photo":"Attach screenshot"}
-              <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setReceiptImg(ev.target.result); r.readAsDataURL(f); }}/>
+              <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; readImageFile(f).then(setReceiptImg).catch(()=>{}); }}/>
             </label>
             {receiptImg&&<img src={receiptImg} alt="proof" style={{ width:"100%",borderRadius:8,maxHeight:120,objectFit:"cover",marginTop:8 }} onError={e=>e.target.style.display="none"}/>}
           </div>
@@ -8439,6 +8445,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // ── EDIT MODAL ─────────────────────────────────────────────────────────────
   const EditModal = ({ t, onClose }) => {
     if(!t) return null;
+    if(t.isLoanDisbursal){
+      const loan = loans.find(l=>String(l.id)===String(t.linkedLoanId||""));
+      return <LoanEntryNotice T={T} entry={t} loan={loan} onClose={onClose} onEditLoan={()=>{ onClose(); setEditingLoan(loan); }}/>;
+    }
     if(t.type==="investment"){
       const linkedInvestment = investments.find(inv=>String(inv.id)===String(t.linkedInvestmentId||"") || String(inv.linkedTxnId||"")===String(t.id||"")) || {
         id:t.linkedInvestmentId || `txn_${t.id}`,
@@ -9052,7 +9062,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       } else {
         if(t.type==="income" && t.accId===a.id){ signed += Number(t.amount||0); secondary = t.incomeType ? `Income · ${formatIncomeTypeLabel(t.incomeType)}` : "Income"; }
         else if(t.type==="settlement_in" && t.accId===a.id){ signed += Number(t.amount||0); secondary = t.fromPersonId ? `Settlement from ${getPerson(t.fromPersonId)?.name||"contact"}` : (t.isRefund ? "Merchant refund" : "Refund / settlement"); }
-        else if(t.type==="transfer" && (t.fromAccId===a.id || (a.type==="bank" && linkedDebitIds.includes(t.fromAccId)))){ signed -= Number(t.amount||0); secondary = `Transfer to ${getAcc(t.toAccId)?.name||"account"}${a.type==="bank" && linkedDebitIds.includes(t.fromAccId)?` via ${getAcc(t.fromAccId)?.name||"debit"}`:""}`; }
+        else if(t.type==="transfer" && (t.fromAccId===a.id || (a.type==="bank" && linkedDebitIds.includes(t.fromAccId)))){ signed -= Number(t.amount||0); secondary = t.isLoanDisbursal ? `Loan given${t.merchant ? ` · ${t.merchant}` : ""}` : `Transfer to ${getAcc(t.toAccId)?.name||"account"}${a.type==="bank" && linkedDebitIds.includes(t.fromAccId)?` via ${getAcc(t.fromAccId)?.name||"debit"}`:""}`; }
         else if(t.type==="transfer" && (t.toAccId===a.id || (a.type==="bank" && linkedDebitIds.includes(t.toAccId)))){ signed += Number(t.amount||0); secondary = `Transfer from ${getAcc(t.fromAccId)?.name||"account"}${a.type==="bank" && linkedDebitIds.includes(t.toAccId)?` via ${getAcc(t.toAccId)?.name||"debit"}`:""}`; }
         else if(t.type==="cc_payment" && (t.fromAccId===a.id || (a.type==="bank" && linkedDebitIds.includes(t.fromAccId)))){ signed -= Number(t.amount||0); secondary = `CC payment to ${getAcc(t.toAccId)?.name||"card"}${a.type==="bank" && linkedDebitIds.includes(t.fromAccId)?` via ${getAcc(t.fromAccId)?.name||"debit"}`:""}`; }
         else if((t.type==="expense"||t.type==="investment") && t.accId===a.id){ signed -= Number(t.amount||0); secondary = t.type==="investment" ? "Investment outflow" : (t.note || "Expense"); }
@@ -9487,7 +9497,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   }, [autoBackupFrequency]);
   useEffect(() => {
     try{
-      safeSetLocalStorage("arth_auto_backups", packList((Array.isArray(autoBackups) ? autoBackups : []).slice(0, 3)));
+      // A rolling copy leaves out photos that the live data also holds (they are put back from the live data when a copy is restored or downloaded).
+      const liveNow = cloudSnapshotRef.current || {};
+      const lean = (Array.isArray(autoBackups) ? autoBackups : []).slice(0, 3).map(item => {
+        const r = stripSurvivingPhotos(item.snapshot, liveNow);
+        return r.omitted.length ? { ...item, snapshot: r.snapshot, omitted: [...(item.omitted || []), ...r.omitted] } : item;
+      });
+      safeSetLocalStorage("arth_auto_backups", packList(lean));
     }catch(err){
       console.warn("Unable to persist auto backups", err);
       if(autoBackupEnabled) setBackupStatus("Auto backups are limited by device storage. Please download a manual backup too.");
@@ -9661,7 +9677,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, []);
 
-  const restoreBackupSnapshot = useCallback(async (snapshot, label = "selected backup") => {
+  const restoreBackupSnapshot = useCallback(async (snapshot, label = "selected backup", omittedPhotos = null) => {
     const looksValid = snapshot && typeof snapshot === "object" && (
       Array.isArray(snapshot.txns) ||
       Array.isArray(snapshot.accounts) ||
@@ -9681,9 +9697,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const prep = await engine.prepareRestore();
       if(!prep.ok){ setBackupStatus(`Restore stopped, nothing was replaced: ${prep.error}`); return false; }
     }
+    // Photos a backup left out (because the live data held them) are put back from the data as it is now, by record.
+    const withPhotos = fillOmittedPhotos(snapshot, omittedPhotos, cloudSnapshotRef.current);
+    snapshot = withPhotos.snapshot;
     applyCloudSnapshot(snapshot);
     if(cloudUser?.id && isCloudSyncConfigured) setCloudStatus("Backup restored on this device. It will be sent to the cloud; both the old device data and the old cloud copy were backed up first.");
-    setBackupStatus(`Backup restored${stamp ? ` · ${stamp}` : ""}`);
+    setBackupStatus(`Backup restored${stamp ? ` · ${stamp}` : ""}${withPhotos.missing ? ` · ${withPhotos.missing} photo${withPhotos.missing===1?"":"s"} could not be put back (that backup did not keep them and they are no longer in your data)` : ""}`);
     return true;
   }, [applyCloudSnapshot, cloudUser?.id, formatBackupStamp]);
 
@@ -15445,6 +15464,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
           {backupStatus&&<div style={{ background:T.input,border:`1px solid ${backupStatus.toLowerCase().includes("failed") ? T.danger+"33" : T.border}`,borderRadius:10,padding:"10px 12px",marginTop:12,color:backupStatus.toLowerCase().includes("failed") ? T.danger : T.success,fontSize:11,fontWeight:700 }}>{backupStatus}</div>}
         </div>
+        <PhotoOptimizeCard T={T} card={card} txns={txns} bills={bills} billerAccounts={billerAccounts} setTxns={setTxns} setBills={setBills} setBillerAccounts={setBillerAccounts} snapshotRef={cloudSnapshotRef} genId={genId} onDownloadBackup={downloadBackupFile}/>
         <div style={{ ...card,marginBottom:12 }}>
           <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:8 }}>
             <div>
@@ -15470,8 +15490,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div style={{ color:T.sub,fontSize:10 }}>{Array.isArray(item.snapshot?.txns) ? item.snapshot.txns.length : 0} txns · {Array.isArray(item.snapshot?.accounts) ? item.snapshot.accounts.length : 0} accounts</div>
                   </div>
                   <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                    <button onClick={async ()=>{ try{ await restoreBackupSnapshot(item.snapshot, `auto backup from ${formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "") || "recent backup"}`); } catch(err){ setBackupStatus(`Restore failed: ${err.message}`); } }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Restore</button>
-                    <button onClick={()=>{ try{ downloadBackupPayload(buildBackupPayload(item.snapshot, "auto", item.exportedAt || item.snapshot?.savedAt || new Date().toISOString()), "arth-auto-backup"); setBackupStatus(`Backup downloaded · ${formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "")}`); } catch(err){ setBackupStatus(`Backup failed: ${err.message}`); } }} style={{ background:"none",border:`1px solid ${T.border}`,color:T.sub,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Download</button>
+                    <button onClick={async ()=>{ try{ await restoreBackupSnapshot(item.snapshot, `auto backup from ${formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "") || "recent backup"}`, item.omitted); } catch(err){ setBackupStatus(`Restore failed: ${err.message}`); } }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Restore</button>
+                    <button onClick={()=>{ try{ downloadBackupPayload(buildBackupPayload(fillOmittedPhotos(item.snapshot, item.omitted, cloudSnapshotRef.current).snapshot, "auto", item.exportedAt || item.snapshot?.savedAt || new Date().toISOString()), "arth-auto-backup"); setBackupStatus(`Backup downloaded · ${formatBackupStamp(item.exportedAt || item.snapshot?.savedAt || "")}`); } catch(err){ setBackupStatus(`Backup failed: ${err.message}`); } }} style={{ background:"none",border:`1px solid ${T.border}`,color:T.sub,borderRadius:8,padding:"5px 10px",cursor:"pointer",fontSize:10,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Download</button>
                   </div>
                 </div>)}
               </div>
@@ -15495,8 +15515,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         <div style={{ color:T.sub,fontSize:10 }}>{formatBackupStamp(b.at)} · {b.txnCount} txns · {Array.isArray(b.snapshot?.accounts)?b.snapshot.accounts.length:0} accounts</div>
                       </div>
                       <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                        <button onClick={async ()=>{ try{ await restoreBackupSnapshot(b.snapshot, `${REASON_LABELS[b.reason]||"safety backup"} (${formatBackupStamp(b.at)})`); } catch(err){ setBackupStatus(`Restore failed: ${err.message}`); } }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:8,padding:"6px 10px",fontSize:10,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Restore</button>
-                        <button onClick={()=>{ try{ downloadBackupPayload(buildBackupPayload(b.snapshot, "sync-safety", b.at), "arth-sync-safety-backup"); setBackupStatus(`Backup downloaded · ${formatBackupStamp(b.at)}`); } catch(err){ setBackupStatus(`Download failed: ${err.message}`); } }} style={{ background:T.card,border:`1px solid ${T.border}`,color:T.text,borderRadius:8,padding:"6px 10px",fontSize:10,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Download</button>
+                        <button onClick={async ()=>{ try{ await restoreBackupSnapshot(b.snapshot, `${REASON_LABELS[b.reason]||"safety backup"} (${formatBackupStamp(b.at)})`, b.omitted); } catch(err){ setBackupStatus(`Restore failed: ${err.message}`); } }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:8,padding:"6px 10px",fontSize:10,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Restore</button>
+                        <button onClick={()=>{ try{ downloadBackupPayload(buildBackupPayload(fillOmittedPhotos(b.snapshot, b.omitted, cloudSnapshotRef.current).snapshot, "sync-safety", b.at), "arth-sync-safety-backup"); setBackupStatus(`Backup downloaded · ${formatBackupStamp(b.at)}`); } catch(err){ setBackupStatus(`Download failed: ${err.message}`); } }} style={{ background:T.card,border:`1px solid ${T.border}`,color:T.text,borderRadius:8,padding:"6px 10px",fontSize:10,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Download</button>
                       </div>
                     </div>
                   ))}
@@ -17047,7 +17067,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1 }}>{isRecharge?"Receipt (optional)":"Bill Photo (optional)"}</span>
               <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>
                 {editPhoto?"Change":"Upload"}
-                <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setEditPhoto(ev.target.result); r.readAsDataURL(f); }}/>
+                <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; readImageFile(f).then(setEditPhoto).catch(()=>{}); }}/>
               </label>
               {editPhoto&&<button onClick={()=>setEditPhoto(null)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:16 }}>✕</button>}
             </div>
@@ -17628,8 +17648,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const addDocFile = e => {
       const f = e.target.files?.[0]; if (!f) return;
       const r = new FileReader();
-      r.onload = ev => {
-        setBillerAccounts(prev => prev.map(x => x.id === ba.id ? { ...x, documents: [...(x.documents || []), { id: genId(), name: f.name || "Document", dataUrl: ev.target.result, addedAt: todayStr() }] } : x));
+      r.onload = async ev => {
+        const dataUrl = (await shrinkDataUrl(ev.target.result)).dataUrl;   // a photo is scaled down; a PDF or anything else is kept exactly
+        setBillerAccounts(prev => prev.map(x => x.id === ba.id ? { ...x, documents: [...(x.documents || []), { id: genId(), name: f.name || "Document", dataUrl, addedAt: todayStr() }] } : x));
         setAddingDoc(false);
       };
       r.readAsDataURL(f);
@@ -19997,7 +20018,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1 }}>{isRecharge?"Attach Receipt (optional)":"Attach Bill Photo (optional)"}</span>
                   <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>
                     {billPhoto?"Change":"Upload"}
-                    <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setBillPhoto(ev.target.result); r.readAsDataURL(f); }}/>
+                    <input type="file" accept="image/*" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; readImageFile(f).then(setBillPhoto).catch(()=>{}); }}/>
                   </label>
                   {billPhoto&&<button onClick={()=>setBillPhoto(null)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:16 }}>✕</button>}
                 </div>
@@ -21983,7 +22004,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
           </div>
         )}
-        {(showAddLoan||editingLoan)&&<LoanModal item={editingLoan} onClose={()=>{ setShowAddLoan(false); setEditingLoan(null); }}/>}        
+        {(showAddLoan||editingLoan)&&<LoanModal item={editingLoan} onClose={()=>{ setShowAddLoan(false); setEditingLoan(null); }}/>}
+        {loanGivenDraft&&<LoanGivenSheet T={T} sym={sym} fmt={fmt} people={people.filter(p=>!p.isMe && !isPersonArchived(p))}
+          accounts={accounts.filter(a=>a.type!=="cc" && !isInvestmentAccount(a))} defaults={{ ...loanGivenDraft, fromAccId:"" }} genId={genId}
+          onClose={()=>setLoanGivenDraft(null)}
+          onSave={({ loan, txn })=>{
+            setLoans(prev=>[loan,...prev]);
+            if(txn) setTxns(prev=>[txn,...prev]);
+            setLoanGivenDraft(null);
+            setToast({ message: txn ? `${sym}${fmt(loan.principal)} lent to ${loan.name} and taken out of ${accounts.find(a=>a.id===txn.fromAccId)?.name||"the account"}` : `${sym}${fmt(loan.principal)} lent to ${loan.name}`, icon:"✓" });
+          }}/>}        
         {repaymentLoan&&<LoanRepaymentModal item={repaymentLoan} onClose={()=>setRepaymentLoan(null)}/>}
         {/* Transaction Detail */}
         {viewingVendor&&<VendorDetailModal merchant={viewingVendor} onClose={()=>setViewingVendor(null)}/>}
@@ -22027,11 +22057,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div>
                     {/* Surfaces getVendorAggregate -- tappable only when there's a real merchant to look up. */}
                     <div onClick={t.merchant?(e)=>{ e.stopPropagation(); setViewingVendor(t.merchant); }:undefined} style={{ color:T.text,fontSize:18,fontWeight:900,cursor:t.merchant?"pointer":"default",textDecoration:t.merchant?"underline":"none",textDecorationColor:t.merchant?T.border:"transparent",textUnderlineOffset:3 }}>{t.merchant||t.who||t.desc||"Transaction"}</div>
-                    <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>{formatShortDate(t.date)||t.date} · {acc?.name||(t.paidByPersonId?`Paid by ${getPerson(t.paidByPersonId)?.name||"someone"}`:"Account")}</div>
+                    <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>{formatShortDate(t.date)||t.date} · {acc?.name||(t.isLoanDisbursal?accounts.find(a=>String(a.id)===String(t.fromAccId))?.name:null)||(t.paidByPersonId?`Paid by ${getPerson(t.paidByPersonId)?.name||"someone"}`:"Account")}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ color,fontSize:22,fontWeight:900 }}>{t.type==="income"?"+":t.type==="expense"?"-":""}{sym}{fmt(t.amount)}</div>
-                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{t.type?.toUpperCase()}</div>
+                    <div style={{ color,fontSize:22,fontWeight:900 }}>{t.type==="income"?"+":(t.type==="expense"||t.isLoanDisbursal)?"-":""}{sym}{fmt(t.amount)}</div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{t.isLoanDisbursal?"LOAN GIVEN":t.type?.toUpperCase()}</div>
                   </div>
                 </div>
                 <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
@@ -22066,7 +22096,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <button data-testid="txn-spread" onClick={()=>openSpreadFor({ key:`txn:${t.id}`, label:t.merchant||t.desc||"Payment", amount:t.amount, cashDate:t.date })} style={{ width:"100%",minHeight:44,marginTop:12,background:"none",border:`1px solid ${T.border}`,borderRadius:12,color:T.text,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit" }}>{spreadButtonLabel(`txn:${t.id}`)}</button>
                 )}
                 <div style={{ display:"flex",gap:8,marginTop:16 }}>
-                  <button onClick={()=>{ setTxnDetailId(null); setEditTxn(t); setShowAdd(true); }} style={{ flex:1,background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+                  <button onClick={()=>{ setTxnDetailId(null); if(t.isLoanDisbursal){ setEditingTxn(t); return; } setEditTxn(t); setShowAdd(true); }} style={{ flex:1,background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
                   <button onClick={()=>askConfirm("Delete this transaction?",()=>{ removeTxnAndLinkedInvestment(t); setTxnDetailId(null); })} style={{ background:T.danger+"18",border:`1px solid ${T.danger}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
                   <button onClick={()=>setTxnDetailId(null)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
                 </div>

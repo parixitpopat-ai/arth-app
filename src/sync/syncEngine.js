@@ -169,7 +169,7 @@ export function createSyncEngine({
 
   /** Replace this device's data with the cloud copy, after a verified backup of what is replaced. */
   async function takeCloud(st, local, rec, cloudDigest, reason, opts = {}) {
-    const bk = await backupOrBlock(local, reason, opts.backup || {});
+    const bk = await backupOrBlock(local, reason, { survivor: rec.snapshot, ...(opts.backup || {}) });     // photos that survive in the copy taken are not needed here
     if (!bk.ok) return { st, result: { outcome: "blocked-backup", error: bk.error } };
     st = withBackup(st, bk, reason);
     if (halted) throw HALTED();
@@ -411,7 +411,7 @@ export function createSyncEngine({
     try { localDigest = await digestSnapshot(local); rec = await cloud.read(userId); } catch (e) { return failed(e, true); }
     if (choice === "keep-local") {
       let base = { ...st, conflict: null };
-      if (rec) { const bk = await backupOrBlock(rec.snapshot, "before-keep-local"); if (!bk.ok) return { outcome: "blocked-backup", error: bk.error }; base = withBackup(base, bk, "before-keep-local"); }
+      if (rec) { const bk = await backupOrBlock(rec.snapshot, "before-keep-local", { survivor: local }); if (!bk.ok) return { outcome: "blocked-backup", error: bk.error }; base = withBackup(base, bk, "before-keep-local"); }
       const r = await pushLocal(base, local, localDigest, rec ? rec.token : null, "resolve");
       if (r.result.outcome === "pushed") { save({ ...r.st, conflict: null }); releasePinned(storage, st.conflict.conflictId); return { outcome: "resolved-keep-local" }; }
       if (r.result.outcome === "conflict-retry") {         // the cloud moved again while deciding: record the new situation, ask again

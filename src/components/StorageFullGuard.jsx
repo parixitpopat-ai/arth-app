@@ -5,6 +5,7 @@ import { hasRoom, storageReport, buildAllBackupsExport, freeBackupSpace, SAFETY_
 // "can't reach your account", and new entries can silently fail to save. It frees BACKUP COPIES only, after they are saved to a file.
 // (The event name "arth:storage-full" is fired by App.jsx's safeSetLocalStorage when a save is refused for lack of space.)
 
+const LOW_ROOM_CHARS = 300 * 1024;   // below roughly this much room, warn before saves start failing
 const kb = chars => `${Math.max(1, Math.round(chars / 1024)).toLocaleString("en-IN")} KB`;
 
 function download(obj, name) {
@@ -25,6 +26,8 @@ function rawCopy(storage) {
 
 export default function StorageFullGuard({ storage = typeof window !== "undefined" ? window.localStorage : null, checkEveryMs = 20000 }) {
   const [full, setFull] = useState(false);
+  const [low, setLow] = useState(false);              // room for small saves, but not for a typical day's growth plus a backup copy
+  const [lowHidden, setLowHidden] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [saved, setSaved] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -35,6 +38,7 @@ export default function StorageFullGuard({ storage = typeof window !== "undefine
     if (!storage) return;
     const ok = hasRoom(storage);
     setFull(!ok);
+    setLow(ok && !hasRoom(storage, LOW_ROOM_CHARS));
     if (!ok) setReport(storageReport(storage));
   }, [storage]);
 
@@ -48,7 +52,17 @@ export default function StorageFullGuard({ storage = typeof window !== "undefine
     return () => { clearInterval(t); window.removeEventListener("arth:storage-full", onFull); };
   }, [check, checkEveryMs]);
 
-  if (!full || hidden || !storage) return null;
+  if (!storage) return null;
+  if (!full && low && !lowHidden) {
+    let darkLow = false; try { darkLow = JSON.parse(storage.getItem("arth_dark") || "false") === true; } catch { /* light */ }
+    return (
+      <div data-testid="storage-low-strip" role="status" style={{ position: "fixed", left: 12, right: 12, bottom: 84, zIndex: 99000, background: darkLow ? "#2a2410" : "#fff6dd", color: darkLow ? "#f5e6b3" : "#4a3b00", border: `1px solid ${darkLow ? "#5c4d1c" : "#e6cf86"}`, borderRadius: 12, padding: "10px 12px", fontSize: 12, fontWeight: 700, display: "flex", gap: 10, alignItems: "center", fontFamily: "Nunito, system-ui, sans-serif" }}>
+        <span style={{ flex: 1 }}>Storage for Arth on this phone is nearly full. Open Settings → Backup & Restore to shrink photos before saves start failing.</span>
+        <button data-testid="storage-low-dismiss" onClick={() => setLowHidden(true)} style={{ background: "none", border: `1px solid currentColor`, color: "inherit", borderRadius: 8, padding: "4px 10px", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>OK</button>
+      </div>
+    );
+  }
+  if (!full || hidden) return null;
   let dark = false; try { dark = JSON.parse(storage.getItem("arth_dark") || "false") === true; } catch { /* default light */ }
   const c = dark ? { bg: "#0b0d12", card: "#161a22", text: "#f2f4f8", sub: "#a8b0bf", line: "#2a3040", accent: "#22c55e", ink: "#04210f", danger: "#f87171" }
     : { bg: "#f4f2ee", card: "#ffffff", text: "#1a1a2e", sub: "#5b5b73", line: "#dcd8d0", accent: "#16813f", ink: "#ffffff", danger: "#c62828" };
