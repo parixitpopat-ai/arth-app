@@ -18,6 +18,7 @@ import SlowLoadEscape from "./components/SlowLoadEscape";
 import PhotoOptimizeCard from "./components/PhotoOptimizeCard";
 import LoanGivenSheet from "./components/LoanGivenSheet";
 import LoanEntryNotice from "./components/LoanEntryNotice";
+import { extractDMonYDate, extractUpiMerchant } from "./domain/sms/smsFields";
 import { stripSurvivingPhotos, fillOmittedPhotos } from "./sync/backupPhotos";
 import { packList, unpackList } from "./sync/packedList";
 import { readImageFile, shrinkDataUrl, shrinkAllPhotos, listPhotos } from "./domain/images/shrinkImage";
@@ -442,6 +443,9 @@ const normalizeToIsoDate = value => {
   return "";
 };
 const extractDateFromText = text => {
+  // Bank SMS spell the date 04-Nov-26 (day, month name, year): none of the patterns below read it.
+  const dMonY = extractDMonYDate(text);
+  if(dMonY) return dMonY;
   const patterns = [
     /\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b/,
     /\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/,
@@ -5033,7 +5037,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         safe.match(/UPI\/[A-Z0-9]+\/[0-9]+\/([a-zA-Z][a-zA-Z0-9._-]{1,}?)@[a-zA-Z0-9.-]+/i) ||
         safe.match(/\bto\s+([a-zA-Z][a-zA-Z0-9._-]{2,}?)@[a-zA-Z]{3,}\b/i);
       let merchant = "";
-      if(vpaMatch){
+      // 0. A UPI description ("for UPI--PAX INNO.", "UPI/P2M/<ref>/PAX INNO") names the merchant better than its handle does.
+      const upiName = extractUpiMerchant(safe);
+      if(upiName) merchant = upiName;
+      if(!merchant && vpaMatch){
         const handle = vpaMatch[1].replace(/\d+$/,"").replace(/[._-]/g," ").replace(/\s+/g," ").trim();
         if(handle.length>=3 && !/^\d+$/.test(handle) && !skip.some(w=>handle.toLowerCase()===w))
           merchant = handle.charAt(0).toUpperCase()+handle.slice(1).toLowerCase();
@@ -5042,7 +5049,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(!merchant){
         const mercM = clean.match(/(?:at|to|for|towards)\s+([A-Za-z0-9][A-Za-z0-9 ]{2,25}?)(?:\s+on|\s+via|\s+ref|\.|,|$)/i);
         const m = mercM?.[1]?.trim();
-        if(m && !skip.some(w=>m.toLowerCase().includes(w))) merchant = m;
+        // "debited for INR 670.01" is an amount, not a merchant
+        if(m && !skip.some(w=>m.toLowerCase().includes(w)) && !/^(?:inr|rs\.?|\u20b9)\s*\d/i.test(m) && !/^[\d\s]+$/.test(m)) merchant = m;
       }
       if(merchant) setWho(merchant);
 
