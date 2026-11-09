@@ -84,3 +84,12 @@ test("end date limits the balance (balance-checkpoint use)", () => {
 test("credit-card accounts have no cash balance", () => {
   assert.equal(bal("cc1", [exp(1, 999, "cc1")]), 0);
 });
+
+test("petty cash given to a person (a transfer from my account with NO destination) takes the money out of that account once; the purchases made from it are 'Paid by' her and touch no account", () => {
+  const pettyCash = { id: 10, type: "transfer", isPettyCash: true, pettyCashPersonId: "sp", amount: 3000, date: "2026-10-03", fromAccId: "b1", toAccId: null, accId: null };
+  const boughtByHer = { id: 11, type: "expense", amount: 1200, date: "2026-10-04", paidByPersonId: "sp", accId: null };
+  assert.equal(bal("b1", [pettyCash]), 7000, "10,000 - 3,000");
+  assert.equal(bal("b1", [pettyCash, boughtByHer]), 7000, "her purchase does not debit my account a second time");
+  assert.equal(total([pettyCash, boughtByHer]), 7000 + 2000, "net worth from accounts falls by the petty cash; nothing is added back as an asset");
+  assert.equal(bal("b1", [{ ...pettyCash, fromAccId: null }]), 10000, "cash in hand (no source account): no account moves");
+});

@@ -121,6 +121,7 @@ test("describing entries that are not spending or income", () => {
   assert.equal(describeOtherKind({ type: "settlement_in", fromPersonId: "p1" }, "Rohan"), "Repayment from Rohan");
   assert.equal(describeOtherKind({ type: "settlement_in", fromPersonId: "p1" }), "Repayment from a friend");
   assert.equal(describeOtherKind({ type: "transfer", isLoanDisbursal: true }), "Loan given");
+  assert.equal(describeOtherKind({ type: "transfer", isPettyCash: true, pettyCashPersonId: "p1" }), "Petty cash given");
   assert.equal(describeOtherKind({ type: "transfer" }), "Transfer between your accounts");
   assert.equal(describeOtherKind({ type: "investment" }), "Investment");
   assert.equal(describeOtherKind({ type: "cc_payment" }), "Credit card payment");

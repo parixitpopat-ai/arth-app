@@ -19,6 +19,9 @@ import PhotoOptimizeCard from "./components/PhotoOptimizeCard";
 import LoanGivenSheet from "./components/LoanGivenSheet";
 import LoanEntryNotice from "./components/LoanEntryNotice";
 import NeedsDetailsSheet from "./components/NeedsDetailsSheet";
+import PettyCashSheet from "./components/PettyCashSheet";
+import { mergeVendors, undoVendorMerge } from "./domain/vendors/vendorMerge";
+import { isPettyCash, getPettyCashTotalsByPerson, applyPettyCash } from "./domain/person/pettyCash";
 import { expenseGaps, summarizeGaps, GAP_LABELS } from "./domain/transactions/completeness";
 import { extractDMonYDate, extractUpiMerchant } from "./domain/sms/smsFields";
 import { stripSurvivingPhotos, fillOmittedPhotos } from "./sync/backupPhotos";
@@ -1576,7 +1579,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [showAddLiability, setShowAddLiability] = useState(false);
   const [showAddAsset, setShowAddAsset] = useState(false);
   const [showAddLoan, setShowAddLoan] = useState(false);
-  const [loanGivenDraft, setLoanGivenDraft] = useState(null);   // { amount, date, personId } while the "Loan given" sheet is open
+  const [loanGivenDraft, setLoanGivenDraft] = useState(null);
+  // Vendors the person said are NOT the same (signatures of the spellings asked about). Device-only: the question may be asked again on another device.
+  const [vendorNotSame, setVendorNotSame] = useState(()=>{ try{ const v=JSON.parse(localStorage.getItem("arth_vendor_not_same")||"[]"); return Array.isArray(v)?v:[]; }catch{ return []; } });
+  useEffect(()=>safeSetLocalStorage("arth_vendor_not_same", JSON.stringify(vendorNotSame)),[vendorNotSame]);
+  const [lastVendorMerge, setLastVendorMerge] = useState(null);   // { to, count, undo } until undone or the next merge
+  const [pettyCashDraft, setPettyCashDraft] = useState(null);   // { amount, date, personId } or { existing } while the "Petty cash" sheet is open   // { amount, date, personId } while the "Loan given" sheet is open
   const [showAccDetail, setShowAccDetail] = useState(null);
   const [showWealthBreakdown, setShowWealthBreakdown] = useState(null);
   const [selectedInvestmentDetail, setSelectedInvestmentDetail] = useState(null);
@@ -2364,11 +2372,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Paybacks (domain/person/payback.js): what I have paid back lowers "I owe"; anything beyond what I owed becomes
     // what they owe me.
     const paidBack = getPaybackTotalsByPerson(txns);
-    const ids = new Set([...Object.keys(receivables), ...Object.keys(payables), ...Object.keys(paidBack)]);
+    // Petty cash (domain/person/pettyCash.js): cash handed to a person to spend for me. What I owe them is paid from it first; whatever is left
+    // is "with them" (withHer) and is neither a receivable nor part of net worth.
+    const pettyGivenBy = getPettyCashTotalsByPerson(txns);
+    const ids = new Set([...Object.keys(receivables), ...Object.keys(payables), ...Object.keys(paidBack), ...Object.keys(pettyGivenBy)]);
     const map = {};
     ids.forEach(pid=>{
-      const settled = applyPaybacks({ owesMe:Number(receivables[pid]||0), iOwe:Math.max(0, Number(payables[pid]||0)) }, paidBack[pid]||0);
-      map[pid] = { owesMe:settled.owesMe, iOwe:settled.iOwe };
+      const afterPetty = applyPettyCash(Math.max(0, Number(payables[pid]||0)), pettyGivenBy[pid]||0);
+      const settled = applyPaybacks({ owesMe:Number(receivables[pid]||0), iOwe:afterPetty.iOwe }, paidBack[pid]||0);
+      map[pid] = { owesMe:settled.owesMe, iOwe:settled.iOwe, pettyHeld:afterPetty.withHer, pettyGiven:pettyGivenBy[pid]||0, pettyUsed:afterPetty.used };
     });
 
     return map;
@@ -6208,8 +6220,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
             : <div>
                 <div style={{ display:"flex",gap:8,marginBottom:10,flexWrap:"wrap" }}>
-                  {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["transfer","🔄","Transfer",T.info],["loan_given","🤝","Loan given",T.warn],["settlement_in","💼","Settlement",T.info],["investment","💹","Invest",T.info]].map(([v,ic,lb,col])=>(
-                    <button key={v} onClick={()=>{ if(v==="loan_given"){ setLoanGivenDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); if(v!=="transfer"){ setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId(""); } }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
+                  {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["transfer","🔄","Transfer",T.info],["loan_given","🤝","Loan given",T.warn],["petty_cash","💼","Petty cash",T.warn],["settlement_in","💼","Settlement",T.info],["investment","💹","Invest",T.info]].map(([v,ic,lb,col])=>(
+                    <button key={v} onClick={()=>{ if(v==="petty_cash"){ setPettyCashDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } if(v==="loan_given"){ setLoanGivenDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); if(v!=="transfer"){ setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId(""); } }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
                       <span style={{ fontSize:16 }}>{ic}</span>{lb}
                     </button>
                   ))}
@@ -9152,7 +9164,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       } else {
         if(t.type==="income" && t.accId===a.id){ signed += Number(t.amount||0); secondary = t.incomeType ? `Income · ${formatIncomeTypeLabel(t.incomeType)}` : "Income"; }
         else if(t.type==="settlement_in" && t.accId===a.id){ signed += Number(t.amount||0); secondary = t.fromPersonId ? `Settlement from ${getPerson(t.fromPersonId)?.name||"contact"}` : (t.isRefund ? "Merchant refund" : "Refund / settlement"); }
-        else if(t.type==="transfer" && (t.fromAccId===a.id || (a.type==="bank" && linkedDebitIds.includes(t.fromAccId)))){ signed -= Number(t.amount||0); secondary = t.isLoanDisbursal ? `Loan given${t.merchant ? ` · ${t.merchant}` : ""}` : `Transfer to ${getAcc(t.toAccId)?.name||"account"}${a.type==="bank" && linkedDebitIds.includes(t.fromAccId)?` via ${getAcc(t.fromAccId)?.name||"debit"}`:""}`; }
+        else if(t.type==="transfer" && (t.fromAccId===a.id || (a.type==="bank" && linkedDebitIds.includes(t.fromAccId)))){ signed -= Number(t.amount||0); secondary = t.isPettyCash ? `Petty cash${t.merchant ? ` · ${t.merchant}` : ""}` : t.isLoanDisbursal ? `Loan given${t.merchant ? ` · ${t.merchant}` : ""}` : `Transfer to ${getAcc(t.toAccId)?.name||"account"}${a.type==="bank" && linkedDebitIds.includes(t.fromAccId)?` via ${getAcc(t.fromAccId)?.name||"debit"}`:""}`; }
         else if(t.type==="transfer" && (t.toAccId===a.id || (a.type==="bank" && linkedDebitIds.includes(t.toAccId)))){ signed += Number(t.amount||0); secondary = `Transfer from ${getAcc(t.fromAccId)?.name||"account"}${a.type==="bank" && linkedDebitIds.includes(t.toAccId)?` via ${getAcc(t.toAccId)?.name||"debit"}`:""}`; }
         else if(t.type==="cc_payment" && (t.fromAccId===a.id || (a.type==="bank" && linkedDebitIds.includes(t.fromAccId)))){ signed -= Number(t.amount||0); secondary = `CC payment to ${getAcc(t.toAccId)?.name||"card"}${a.type==="bank" && linkedDebitIds.includes(t.fromAccId)?` via ${getAcc(t.fromAccId)?.name||"debit"}`:""}`; }
         else if((t.type==="expense"||t.type==="investment") && t.accId===a.id){ signed -= Number(t.amount||0); secondary = t.type==="investment" ? "Investment outflow" : (t.note || "Expense"); }
@@ -12092,6 +12104,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </button>
             )}
 
+          {!p.isMe&&(s.pettyHeld>0||s.pettyUsed>0)&&(
+            <div data-testid="petty-cash-banner" style={{ background:T.accent+"12",border:`1px solid ${T.accent}33`,borderRadius:12,padding:"12px 14px",marginBottom:12 }}>
+              <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>💼 {sym}{fmt(s.pettyHeld)} petty cash with {p.name}</div>
+              <div style={{ color:T.sub,fontSize:11,marginTop:3 }}>
+                Petty cash given {sym}{fmt(s.pettyGiven)}; {sym}{fmt(s.pettyUsed)} used on what {p.name} paid for you{s.iOwe>0?`; you still owe ${sym}${fmt(s.iOwe)} beyond it`:""}. It is kept apart from what is owed to you and is not part of your net worth.
+              </div>
+            </div>
+          )}
+
           {/* Quick Actions — one row, not giant buttons. Module-gated: Gift only shows if the
               gifts module is enabled for this person. */}
           <div style={{ display:"flex",gap:6,marginBottom:16,overflowX:"auto",paddingBottom:2 }}>
@@ -12105,6 +12126,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 sharePaymentRequest(p.name,s.owesMe,"pending expenses");
               }} style={{ flex:"1 0 auto",display:"flex",flexDirection:"column",alignItems:"center",gap:4,background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
                 <span style={{ fontSize:16 }}>📤</span><span style={{ color:T.text,fontSize:10,fontWeight:700 }}>Request</span>
+              </button>
+            )}
+            {!p.isMe&&(
+              <button data-testid="person-petty-cash" onClick={()=>setPettyCashDraft({ amount:"", date:todayStr(), personId:p.id })} style={{ flex:"1 0 auto",display:"flex",flexDirection:"column",alignItems:"center",gap:4,background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>
+                <span style={{ fontSize:16 }}>💼</span><span style={{ color:T.text,fontSize:10,fontWeight:700 }}>Petty cash</span>
               </button>
             )}
             {!p.isMe&&(
@@ -20531,6 +20557,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="wealth"&&wealthUnlocked&&(reportsOpen&&!cashFlowMonth
           ? <ReportsScreen T={T} sym={sym} fmt={fmt} txns={txns} cats={cats} people={people} todayMonthKey={todayStr().slice(0,7)}
               getIncomeLabel={formatIncomeTypeLabel} getPersonAttributedAmount={getPersonAttributedAmount} getPersonPlanningAllocation={getPersonPlanningAllocation}
+              vendors={{
+                dismissed:vendorNotSame, lastMerge:lastVendorMerge,
+                onOpenVendor:name=>setViewingVendor(name),
+                onDismiss:sig=>setVendorNotSame(prev=>prev.includes(sig)?prev:[...prev,sig]),
+                onMerge:({ from, to })=>{
+                  const r = mergeVendors({ txns, bills }, { from, to });
+                  if(!r.changedTxns && !r.changedBills) return;
+                  setTxns(r.txns); setBills(r.bills);
+                  setLastVendorMerge({ to, count:r.changedTxns+r.changedBills, undo:r.undo });
+                },
+                onUndo:()=>{
+                  if(!lastVendorMerge) return;
+                  const back = undoVendorMerge({ txns, bills }, lastVendorMerge.undo, { to:lastVendorMerge.to });
+                  setTxns(back.txns); setBills(back.bills); setLastVendorMerge(null);
+                },
+              }}
               onBack={()=>setReportsOpen(false)} onOpenMonth={mk=>setCashFlowMonth(mk)}/>
           : cashFlowMonth
           ? <CashFlowScreen T={T} sym={sym} fmt={fmt} txns={txns} cats={cats} todayMonthKey={todayStr().slice(0,7)}
@@ -22117,6 +22159,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
         )}
         {(showAddLoan||editingLoan)&&<LoanModal item={editingLoan} onClose={()=>{ setShowAddLoan(false); setEditingLoan(null); }}/>}
+        {pettyCashDraft&&<PettyCashSheet T={T} sym={sym} fmt={fmt} people={people.filter(p=>!p.isMe && !isPersonArchived(p))}
+          accounts={accounts.filter(a=>a.type!=="cc" && !isInvestmentAccount(a))} defaults={pettyCashDraft.existing?{}:pettyCashDraft} existing={pettyCashDraft.existing||null} genId={genId}
+          onClose={()=>setPettyCashDraft(null)}
+          onSave={({ txn, existing })=>{
+            if(existing) setTxns(prev=>prev.map(x=>String(x.id)===String(txn.id)?txn:x)); else setTxns(prev=>[txn,...prev]);
+            setPettyCashDraft(null);
+            const who = people.find(p=>p.id===txn.pettyCashPersonId)?.name || "them";
+            setToast({ message: existing ? `Petty cash for ${who} updated` : (txn.fromAccId ? `${sym}${fmt(txn.amount)} given to ${who} and taken out of ${accounts.find(a=>a.id===txn.fromAccId)?.name||"the account"}` : `${sym}${fmt(txn.amount)} given to ${who}`), icon:"✓" });
+          }}/>}
         {loanGivenDraft&&<LoanGivenSheet T={T} sym={sym} fmt={fmt} people={people.filter(p=>!p.isMe && !isPersonArchived(p))}
           accounts={accounts.filter(a=>a.type!=="cc" && !isInvestmentAccount(a))} defaults={{ ...loanGivenDraft, fromAccId:"" }} genId={genId}
           onClose={()=>setLoanGivenDraft(null)}
@@ -22169,11 +22220,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div>
                     {/* Surfaces getVendorAggregate -- tappable only when there's a real merchant to look up. */}
                     <div onClick={t.merchant?(e)=>{ e.stopPropagation(); setViewingVendor(t.merchant); }:undefined} style={{ color:T.text,fontSize:18,fontWeight:900,cursor:t.merchant?"pointer":"default",textDecoration:t.merchant?"underline":"none",textDecorationColor:t.merchant?T.border:"transparent",textUnderlineOffset:3 }}>{t.merchant||t.who||t.desc||"Transaction"}</div>
-                    <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>{formatShortDate(t.date)||t.date} · {acc?.name||(t.isLoanDisbursal?accounts.find(a=>String(a.id)===String(t.fromAccId))?.name:null)||(t.paidByPersonId?`Paid by ${getPerson(t.paidByPersonId)?.name||"someone"}`:"Account")}</div>
+                    <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>{formatShortDate(t.date)||t.date} · {acc?.name||((t.isLoanDisbursal||t.isPettyCash)?accounts.find(a=>String(a.id)===String(t.fromAccId))?.name:null)||(t.isPettyCash?"Cash":null)||(t.paidByPersonId?`Paid by ${getPerson(t.paidByPersonId)?.name||"someone"}`:"Account")}</div>
                   </div>
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ color,fontSize:22,fontWeight:900 }}>{t.type==="income"?"+":(t.type==="expense"||t.isLoanDisbursal)?"-":""}{sym}{fmt(t.amount)}</div>
-                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{t.isLoanDisbursal?"LOAN GIVEN":t.type?.toUpperCase()}</div>
+                    <div style={{ color,fontSize:22,fontWeight:900 }}>{t.type==="income"?"+":(t.type==="expense"||t.isLoanDisbursal||t.isPettyCash)?"-":""}{sym}{fmt(t.amount)}</div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{t.isLoanDisbursal?"LOAN GIVEN":t.isPettyCash?"PETTY CASH":t.type?.toUpperCase()}</div>
                   </div>
                 </div>
                 <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
@@ -22208,7 +22259,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <button data-testid="txn-spread" onClick={()=>openSpreadFor({ key:`txn:${t.id}`, label:t.merchant||t.desc||"Payment", amount:t.amount, cashDate:t.date })} style={{ width:"100%",minHeight:44,marginTop:12,background:"none",border:`1px solid ${T.border}`,borderRadius:12,color:T.text,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit" }}>{spreadButtonLabel(`txn:${t.id}`)}</button>
                 )}
                 <div style={{ display:"flex",gap:8,marginTop:16 }}>
-                  <button onClick={()=>{ setTxnDetailId(null); if(t.isLoanDisbursal){ setEditingTxn(t); return; } setEditTxn(t); setShowAdd(true); }} style={{ flex:1,background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+                  <button onClick={()=>{ setTxnDetailId(null); if(t.isLoanDisbursal){ setEditingTxn(t); return; } if(t.isPettyCash){ setPettyCashDraft({ existing:t }); return; } setEditTxn(t); setShowAdd(true); }} style={{ flex:1,background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
                   <button onClick={()=>askConfirm("Delete this transaction?",()=>{ removeTxnAndLinkedInvestment(t); setTxnDetailId(null); })} style={{ background:T.danger+"18",border:`1px solid ${T.danger}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
                   <button onClick={()=>setTxnDetailId(null)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Close</button>
                 </div>

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { getHouseholdFiscalYearSummary, getPersonFiscalYearReport } from "../../domain/reports/fiscalYear.js";
 import { fyStartYearOf } from "../../domain/cashflow/monthlyCashFlow.js";
+import VendorsReport from "./VendorsReport.jsx";
 
 // Money → Reports (Web v1): the household financial-year summary and the per-person financial-year report.
 // Presentation only: every figure comes from domain/reports/fiscalYear.js, which sums the same monthly cash-flow
@@ -25,14 +26,14 @@ export function ReportsCard({ T, onOpen, fy }) {
   );
 }
 
-export default function ReportsScreen({ T, sym, fmt, txns, cats, people, todayMonthKey, getIncomeLabel, getPersonAttributedAmount, getPersonPlanningAllocation, onBack, onOpenMonth }) {
+export default function ReportsScreen({ T, sym, fmt, txns, cats, people, todayMonthKey, getIncomeLabel, getPersonAttributedAmount, getPersonPlanningAllocation, onBack, onOpenMonth, vendors }) {
   const currentFy = fyStartYearOf(todayMonthKey);
   const firstFy = useMemo(() => {
     const dates = (txns || []).map(t => String(t?.date || "").slice(0, 7)).filter(d => /^\d{4}-\d{2}$/.test(d)).sort();
     return dates.length ? Math.min(fyStartYearOf(dates[0]), currentFy) : currentFy;
   }, [txns, currentFy]);
   const [fy, setFy] = useState(currentFy);
-  const [tab, setTab] = useState("year"); // year | people
+  const [tab, setTab] = useState("year"); // year | people | vendors
   const [openPerson, setOpenPerson] = useState(null);
 
   const house = useMemo(() => getHouseholdFiscalYearSummary({ txns, cats, fyStartYear: fy }), [txns, cats, fy]);
@@ -163,13 +164,13 @@ export default function ReportsScreen({ T, sym, fmt, txns, cats, people, todayMo
         <div data-testid="rp-fy" style={{ flex: 1, textAlign: "center", color: T.text, fontSize: 17, fontWeight: 800 }}>{fyLabel(fy)}{fy === currentFy ? <span style={{ display: "block", color: T.sub, fontSize: 12, fontWeight: 600 }}>to date</span> : null}</div>
         <button type="button" aria-label="Next financial year" data-testid="rp-fy-next" disabled={fy >= currentFy} onClick={() => { setFy(fy + 1); setOpenPerson(null); }} style={{ ...iconBtn, opacity: fy >= currentFy ? 0.4 : 1 }}>›</button>
       </div>
-      <div role="tablist" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 14 }}>
-        {[["year", "Year summary"], ["people", "By person"]].map(([id, label]) => (
+      <div role="tablist" style={{ display: "grid", gridTemplateColumns: vendors ? "1fr 1fr 1fr" : "1fr 1fr", gap: 6, marginBottom: 14 }}>
+        {[["year", "Year summary"], ["people", "By person"], ...(vendors ? [["vendors", "Vendors"]] : [])].map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} data-testid={`rp-tab-${id}`} onClick={() => setTab(id)}
             style={{ minHeight: 44, borderRadius: 12, border: `1px solid ${tab === id ? T.accent : T.border}`, background: tab === id ? T.accentSoft : T.pill, color: T.text, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>
         ))}
       </div>
-      {tab === "year" ? Year() : People()}
+      {tab === "year" ? Year() : tab === "vendors" && vendors ? <VendorsReport T={T} sym={sym} fmt={fmt} txns={txns} fy={fy} fyLabel={fyLabel(fy)} {...vendors} /> : People()}
     </div>
   );
 }
