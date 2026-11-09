@@ -9,10 +9,10 @@ const ALIASES = {
   date: ["transaction date", "transaction date & time", "transaction date and time", "txn date", "tran date", "date", "posting date"],
   valueDate: ["value date", "value dt"],
   desc: ["particulars", "narration", "description", "transaction remarks", "remarks", "details", "transaction details"],
-  ref: ["cheque no", "cheque no.", "cheque number", "chq number", "cheque/ref number", "chq no", "chq/ref no", "cheque/ref no", "ref no", "reference no", "reference", "utr", "transaction id"],
+  ref: ["serno", "serno.", "ser no", "ser no.", "cheque no", "cheque no.", "cheque number", "chq number", "cheque/ref number", "chq no", "chq/ref no", "cheque/ref no", "ref no", "reference no", "reference", "utr", "transaction id"],
   debit: ["debit", "withdrawal", "withdrawals", "withdrawal amt", "withdrawal amount", "debit amount", "dr"],
   credit: ["credit", "deposit", "deposits", "deposit amt", "deposit amount", "credit amount", "cr"],
-  amount: ["amount"],
+  amount: ["amount", "amount in", "transaction amount"],
   balance: ["balance", "closing balance", "running balance"],
 };
 const norm = s => String(s == null ? "" : s).toLowerCase().replace(/[()₹]/g, "").replace(/\s+/g, " ").replace(/\b(inr|rs)\b\.?/g, "").trim();
@@ -70,7 +70,7 @@ function findHeader(rows) {
  * @returns {{ ok:boolean, reason?:string, rows:Array, skipped:Array, balance:{checked:number, mismatches:number[], order:string}, period:{from:string,to:string}|null }}
  * row: { line, date, valueDate, desc, ref, amountPaise (credit +, debit −), balancePaise|null }
  */
-export function parseStatementRows(rawRows) {
+export function parseStatementRows(rawRows, opts = {}) {
   const empty = { rows: [], skipped: [], balance: { checked: 0, mismatches: [], order: "unknown" }, period: null };
   const h = findHeader(rawRows || []);
   if (!h) return { ok: false, reason: "Could not find the column headings (a date column, a description column and debit/credit or amount columns). This file does not look like a bank statement Arth can read yet.", ...empty };
@@ -81,7 +81,12 @@ export function parseStatementRows(rawRows) {
     const text = norm(r.join(" "));
     if (!date) { if (text && !/^(opening|closing|total|statement|page|generated|account|customer|branch|ifsc|\*)/.test(text)) skipped.push({ line, why: "no readable date", text: r.join(" ").slice(0, 80) }); continue; }
     let paise = null;
-    if (col.amount !== undefined && col.debit === undefined) { const a = parseAmountPaise(get("amount")); paise = a && typeof a === "object" ? (a.dr !== undefined ? -a.dr : a.cr) : a; }
+    if (col.amount !== undefined && col.debit === undefined) {
+      const a = parseAmountPaise(get("amount"));
+      // Credit-card statements print a plain amount for a CHARGE and mark a payment/refund "CR" (or show it negative): the opposite of a bank column.
+      if (opts.kind === "card") paise = a && typeof a === "object" ? (a.cr !== undefined ? a.cr : -a.dr) : (a === null ? null : -a);
+      else paise = a && typeof a === "object" ? (a.dr !== undefined ? -a.dr : a.cr) : a;
+    }
     else {
       const d = plainPaise(get("debit")), c = plainPaise(get("credit"));
       if (d && c) { skipped.push({ line, why: "both debit and credit filled", text: r.join(" ").slice(0, 80) }); continue; }

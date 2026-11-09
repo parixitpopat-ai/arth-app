@@ -22,6 +22,18 @@ const pdf = join(dir, "stmt.pdf");
 writeFileSync(pdf, makePdf([{ texts: [t("Transaction Date", 30, 780), t("Particulars", 110, 780), t("Debit", 300, 780), t("Credit", 360, 780), t("Balance", 430, 780),
   t("05-04-2026", 30, 760), t("IFT/9/SHOP TWO", 110, 760), t("200.00", 370, 760), t("56509.99", 465, 760),
   t("06-04-2026", 30, 740), t("IFT/9/SHOP THREE", 110, 740), t("50.00", 370, 740), t("56459.99", 465, 740)] }]));
+
+// synthetic credit-card statement PDF (side panel + summary strip + table), invented figures
+const ct = (str, x, y, size = 7) => ({ str, x, y, size });
+const cright = (s, y) => ct(s, 590 - s.length * 3.6, y);
+const cardPdf = join(dir, "card.pdf");
+writeFileSync(cardPdf, makePdf([{ texts: [
+  ct("STATEMENT DATE", 90, 700), ct("October 16, 2026", 88, 682), ct("PAYMENT DUE DATE", 82, 650), ct("November 3, 2026", 88, 632), ct("Total Amount due", 90, 580), ct("\u20B9575.10", 105, 562), ct("Minimum Amount due", 84, 520), ct("\u20B9100.00", 105, 502), ct("Dining-100%", 40, 390),
+  ct("Previous Balance", 340, 560, 6), ct("\u20B91,000.00", 346, 545, 6), ct("Purchases / Charges", 395, 560, 6), ct("\u20B9575.10", 412, 545, 6), ct("Cash Advances", 468, 560, 6), ct("\u20B90.00", 480, 545, 6), ct("Payments / Credits", 523, 560, 6), ct("\u20B91,000.00", 532, 545, 6),
+  ct("Date", 342, 420), ct("SerNo.", 385, 420), ct("Transaction Details", 430, 420), ct("Reward", 505, 420), ct("Points", 507, 411), ct("Amount (in\u20B9)", 545, 420),
+  ct("06/10/2026", 342, 380), ct("14308206086", 385, 380), ct("ZOMATO CYBS DELHI", 430, 380), ct("7", 505, 380), cright("375.10", 380),
+  ct("08/10/2026", 342, 365), ct("14308206999", 385, 365), ct("AMAZON PAY MUMBAI", 430, 365), cright("200.00", 365),
+  ct("09/10/2026", 342, 350), ct("14308207000", 385, 350), ct("PAYMENT RECEIVED", 430, 350), cright("1,000.00 CR", 350)] }]));
 const bad = join(dir, "x.csv"); writeFileSync(bad, "hello,world\n1,2\n");
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: "Asia/Kolkata" });
@@ -84,6 +96,26 @@ try {
   await T("stmt-undo-batch").click(); await page.waitForTimeout(600);
   const after = await ls("arth_txns");
   rec("S13 Undo removes the 3 created entries and un-links the merged one: my entry is back exactly as it was", after.length === 1 && after[0].id === "m1" && !after[0].importKey && !after[0].importMerged && after[0].amount === 120, after);
+
+  // ── a credit card's own page: import its statement (PDF) ──
+  await page.evaluate(() => { const t = JSON.parse(localStorage.getItem("arth_txns") || "[]"); t.push({ id: "pay1", type: "cc_payment", desc: "Icici card bill", amount: 1000, date: "2026-10-08", fromAccId: "bank1", toAccId: "cc1", accId: null, catIds: [] }); localStorage.setItem("arth_txns", JSON.stringify(t)); });
+  await page.reload(); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(400);
+  const before = (await ls("arth_txns")).length;
+  await page.getByText(/^money$/i).last().dispatchEvent("click"); await page.waitForTimeout(900); await unlock(); await page.waitForTimeout(700);
+  rec("C1 the card's tile on Money has 'Import statement'", (await T("card-import-statement").count()) === 1, {});
+  await T("card-import-statement").dispatchEvent("click"); await page.waitForTimeout(500);
+  rec("C2 the screen opens with the card fixed", (await T("stmt-fixed-account").innerText()) === "Test ICICI Card", {});
+  await T("stmt-file").setInputFiles(cardPdf); await page.waitForTimeout(2200);
+  body = await text();
+  const cst = await page.locator('[data-testid="stmt-row"]').evaluateAll(els => els.map(e => e.dataset.status));
+  rec("C3 3 rows read; the statement summary is shown (total due, due date) and it adds up", cst.length === 3 && /Total due ₹575\.10/.test(body) && /due 03-11-2026/.test(body) && (await T("stmt-card-ok").count()) === 1 && (await T("stmt-card-ok2").count()) === 1, { cst, body: body.slice(0, 300) });
+  rec("C4 the CR row matches my bank-side card payment (probable match) and can be merged", cst.join() === "new,new,probable-match" && (await T("stmt-merge").count()) === 1, cst);
+  rec("C5 charges are ticked, the payment row is not (cards add charges only): Import 2 rows", /Import 2 rows/.test(await T("stmt-import").innerText()), await T("stmt-import").innerText());
+  await T("stmt-merge").click(); await page.waitForTimeout(300);
+  await T("stmt-import").click(); await page.waitForTimeout(700);
+  const ct2 = await ls("arth_txns"), made = ct2.filter(x => x.importKey && !x.importMerged && x.accId === "cc1"), pay = ct2.find(x => x.id === "pay1");
+  rec("C6 two expenses were added ON THE CARD (375.10 and 200.00), uncategorised, vendor from the description", made.length === 2 && made.every(x => x.type === "expense" && x.catIds.length === 0) && made.some(x => x.amount === 375.1 && x.merchant === "Zomato Cybs Delhi") && made.some(x => x.amount === 200), made.map(x => [x.amount, x.merchant]));
+  rec("C7 my bank-side card payment was linked, not duplicated or changed; no payment entry was created", ct2.length === before + 2 && pay.importMerged === true && pay.amount === 1000 && pay.type === "cc_payment", { before, after: ct2.length });
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 600)); }
 await browser.close(); try { process.kill(-server.pid); } catch {}

@@ -56,3 +56,10 @@ test("merge: an entry already linked is never linked again; undo removes created
   const back = undoImportBatch(m, "B3");
   assert.deepEqual(back, [keep]);
 });
+
+test("build: card mode keeps the description as the vendor and never turns a charge into a card payment", () => {
+  const out = buildImportTxns([{ row: { date: "2026-10-06", desc: "ZOMATO CYBS DELHI", ref: "1", amountPaise: -37510, importKey: "c1" } }, { row: { date: "2026-10-07", desc: "CREDIT CARD PAYMENT BILL", ref: "", amountPaise: -1000, importKey: "c2" } }],
+    { accountId: "cc1", batchId: "B", cards: [{ id: "cc1", last4: "1" }], newId, plainExpenses: true });
+  assert.equal(out[0].type, "expense"); assert.equal(out[0].accId, "cc1"); assert.equal(out[0].merchant, "Zomato Cybs Delhi");
+  assert.equal(out[1].type, "expense");
+});

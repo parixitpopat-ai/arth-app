@@ -14,6 +14,9 @@ export function findCardByText(text, cards) {
   return hit || ((cards || []).length === 1 ? cards[0] : null);
 }
 
+// a card statement prints the merchant as the description ("ZOMATO CYBS DELHI"): keep it as the vendor, in readable case (merge vendors later if needed)
+const titleCase = s => String(s || "").toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase()).replace(/\s+/g, " ").trim();
+
 export function cleanMerchant(desc) {
   const upi = extractUpiMerchant(desc);
   if (upi) return upi;
@@ -22,16 +25,16 @@ export function cleanMerchant(desc) {
 
 /** @param {{row:object,status:string,matchId?:string}[]} chosen rows to import (each row has importKey)
  *  @param {{accountId:string, batchId:string, cards:Array, newId:()=>string}} ctx */
-export function buildImportTxns(chosen, { accountId, batchId, cards, newId }) {
+export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plainExpenses = false }) {
   return chosen.map(({ row }) => {
     const abs = Math.abs(row.amountPaise) / 100, base = { id: newId(), date: row.date, amount: abs, desc: row.desc || "", importKey: row.importKey, importBatchId: batchId, importSource: "bank-statement", transactionRef: row.ref || null, catId: null, catIds: [], subId: null, subIds: [], people: {} };
     if (row.amountPaise > 0) return { ...base, type: "income", accId: accountId, merchant: "" };
-    if (looksLikeCardBill(row.desc)) {
+    if (!plainExpenses && looksLikeCardBill(row.desc)) {
       const card = findCardByText(row.desc, cards);
       if (card) return { ...base, type: "cc_payment", fromAccId: accountId, toAccId: card.id, accId: null, note: "Statement payment", merchant: "" };
       return { ...base, type: "expense", accId: accountId, merchant: "", cardBillUnmatched: true };
     }
-    return { ...base, type: "expense", accId: accountId, merchant: cleanMerchant(row.desc) };
+    return { ...base, type: "expense", accId: accountId, merchant: plainExpenses ? titleCase(row.desc) : cleanMerchant(row.desc) };
   });
 }
 

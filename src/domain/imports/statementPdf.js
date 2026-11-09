@@ -70,7 +70,7 @@ export function pdfPagesToRows(pages) {
   const no = reason => ({ ok: false, reason, rows: [] });
   const chars = (pages || []).reduce((s, p) => s + (p.textChars || 0), 0);
   if (!chars) return no("This PDF has no text in it (it looks scanned or photographed). Download the statement from your bank's app or net banking as Excel/CSV or the original PDF.");
-  let head = null, headTexts = null, numeric = [], rows = null;
+  let head = null, headTexts = null, numeric = [], textCols = [], rows = null;
   const out = [];
   for (const pg of pages) {
     const lines = groupLines(pg.items || []);
@@ -81,16 +81,30 @@ export function pdfPagesToRows(pages) {
       const found = headingAt(lines, li);
       if (found) {
         const hc = found.cells; skip = found.span - 1;
-        if (!head) { head = hc; headTexts = hc.map(c => c.str); numeric = head.map((c, i) => [i, c]).filter(([, c]) => /(debit|withdraw|credit|deposit|amount|balance)/i.test(c.str)); out.push(headTexts); }
+        if (!head) { head = hc; headTexts = hc.map(c => c.str); numeric = head.map((c, i) => [i, c]).filter(([, c]) => /(debit|withdraw|credit|deposit|amount|balance)/i.test(c.str)); textCols = head.map((_, i) => i).filter(i => !numeric.some(([j]) => j === i)); out.push(headTexts); }
         prevY = null; prevRow = null; continue;
       }
       if (!head) continue;
       const row = head.map(() => "");
+      // only what sits inside the table: a page with a side panel (offers, spend charts) must not leak into the rows
+      const left = head[0].x - 6, right = head[head.length - 1].x + head[head.length - 1].w + 12;
       for (const it of ln.cells) {
-        let col;
-        if (MONEY_RE.test(it.str) && numeric.length) col = numeric.reduce((b, [i, c]) => (dist(it, c) < dist(it, head[b]) ? i : b), numeric[0][0]);
-        else { col = 0; head.forEach((c, i) => { if (it.x >= c.x - 4) col = i; }); }
-        row[col] = row[col] ? row[col] + " " + it.str : it.str;
+        if (it.x < left || it.x > right) continue;
+        // Amounts (and a "CR"/"DR" beside one) are right-aligned under a money heading: nearest heading wins.
+        if ((MONEY_RE.test(it.str) || /^(?:cr|dr)\.?$/i.test(it.str)) && numeric.length) {
+          const col = numeric.reduce((b, [i, c]) => (dist(it, c) < dist(it, head[b]) ? i : b), numeric[0][0]);
+          row[col] = row[col] ? row[col] + " " + it.str : it.str;
+          continue;
+        }
+        // Words: pdf.js sometimes joins neighbouring cells of one line into one run ("14308206086 ZOMATO CYBS DELHI"), so each word is placed by
+        // where it starts. A heading is often centred over left-aligned text, so a word may start left of its own heading: allow a slack of most
+        // of the heading's width. Money headings are excluded: words never belong under them.
+        for (const tok of it.str.matchAll(/\S+/g)) {
+          const tx = it.x + (it.w || 0) * tok.index / Math.max(1, it.str.length);
+          let c2 = textCols[0];
+          for (const i of textCols) { const slack = i === textCols[0] ? 1e9 : Math.max(4, 0.7 * head[i].w - 4); if (tx >= head[i].x - slack) c2 = i; }
+          row[c2] = row[c2] ? row[c2] + " " + tok[0] : tok[0];
+        }
       }
       const dateCol = head.findIndex(c => /date/i.test(c.str));
       const dated = DATE_RE.test((row[dateCol] || "").trim());

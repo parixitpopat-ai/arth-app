@@ -9333,7 +9333,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>Transactions</div>
             <div style={{ display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end" }}>
               <button onClick={()=>{ setShowAccDetail(null); setEditingAccount(a); }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>✏️ Edit account</button>
-              {a.type==="bank" && <button data-testid="acc-import-statement" onClick={()=>{ setShowAccDetail(null); setStatementAccId(String(a.id)); setShowSettings(true); setSettingsSection("importstatement"); }} style={{ background:T.pill,border:`1px solid ${T.border}`,color:T.text,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>🏦 Import statement</button>}
+              {(a.type==="bank"||a.type==="cc") && <button data-testid="acc-import-statement" onClick={()=>{ setShowAccDetail(null); setStatementAccId(String(a.id)); setShowSettings(true); setSettingsSection("importstatement"); }} style={{ background:T.pill,border:`1px solid ${T.border}`,color:T.text,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>🏦 Import statement</button>}
               {!(isInvestmentAccount(a) && a.type!=="cc") && <button onClick={()=>{ setShowAccDetail(null); setAddPrefill(a.type==="cc" ? { toAccId:a.id } : { accId:a.id }); setDefaultAddType(a.type==="cc"?"cc_payment":"expense"); setShowAdd(true); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>+ Add</button>}
             </div>
           </div>
@@ -14600,6 +14600,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div><span style={{ color:T.sub }}>Utilisation: </span><span style={{ color:hasLimit?(utilPct>80?T.danger:utilPct>50?T.warn:T.success):T.sub,fontWeight:hasLimit?800:400 }}>{hasLimit?`${utilPct}%`:"—"}</span></div>
                     <div><span style={{ color:T.sub }}>Unbilled: </span><span style={{ color:rowUsage.unbilled>0?T.warn:T.success,fontWeight:800 }}>{sym}{fmt(rowUsage.unbilled)}</span></div>
                   </div>
+                  <div data-testid="card-import-statement" onClick={()=>{ setStatementAccId(String(a.id)); setShowSettings(true); setSettingsSection("importstatement"); }} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>🏦 Import statement</div>
                   {relevantBill&&<div onClick={()=>setViewingCcStatementId(relevantBill.id)} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>View statement in Payments ›</div>}
                 </div>
               );

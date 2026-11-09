@@ -21,6 +21,9 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const [merged, setMerged] = useState({});                       // importKey -> bool (link to the entry it looks like; adds nothing)
   const [sb, setSb] = useState(null);                         // what the last file says the balance was at its start and end
   const [balUndo, setBalUndo] = useState(null);                // set after "Match", used by its Undo
+  const acctNow = accounts.find(a => String(a.id) === String(fixedAccountId || accountId));
+  const isCard = Boolean(acctNow && acctNow.type === "cc");     // a credit card: a plain amount is a charge; payments/refunds are matched, not created
+  const canAdd = r => r.status !== "already-imported" && !(isCard && r.row.amountPaise > 0);
   const keys = useMemo(() => importedKeysOf(txns), [txns]);
 
   const card = { background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: 14, marginBottom: 12 };
@@ -31,7 +34,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const analyse = (parsed, accId) => {
     const keyed = withImportKeys(parsed.rows, accId);
     const m = matchStatement(keyed, { transactions: txns, accountId: accId, importedKeys: keys, linkedIds: getLinkedMethodIds(accId, accounts) });
-    const start = {}; m.results.forEach(r => { start[r.row.importKey] = r.status === "new"; });
+    const start = {}; m.results.forEach(r => { start[r.row.importKey] = r.status === "new" && !(isCard && r.row.amountPaise > 0); });
     setTicked(start); setMerged({});
     return m;
   };
@@ -43,7 +46,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
     setState({ phase: "reading", fileName: file.name });
     try {
       const [{ readStatementFile }, { default: workerSrc }] = await Promise.all([import("../domain/imports/readStatementFile.js"), import("../domain/invoices/pdfWorkerUrl.js")]);
-      const parsed = await readStatementFile(new Uint8Array(await file.arrayBuffer()), { name: file.name, workerSrc });
+      const parsed = await readStatementFile(new Uint8Array(await file.arrayBuffer()), { name: file.name, workerSrc, accountKind: isCard ? "card" : undefined });
       if (!parsed.ok) { setState({ phase: "idle", error: parsed.reason, fileName: file.name }); return; }
       setSb(statementBalances(parsed)); setBalUndo(null);
       setState({ phase: "result", fileName: file.name, parsed, match: analyse(parsed, accountId), accountId });
@@ -56,7 +59,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const merges = state.phase === "result" ? state.match.results.filter(r => r.status === "probable-match" && merged[r.row.importKey] && !ticked[r.row.importKey] && txnById(r.matchId) && !txnById(r.matchId).importKey).map(r => ({ txnId: r.matchId, row: r.row })) : [];
   const doImport = () => {
     const batchId = genId();
-    const made = buildImportTxns(chosen, { accountId: state.accountId, batchId, cards, newId: genId });
+    const made = buildImportTxns(chosen, { accountId: state.accountId, batchId, cards, newId: genId, plainExpenses: isCard });
     onImport(made, { batchId, fileName: state.fileName, merges });
     setState({ phase: "done", count: made.length, mergedCount: merges.length, batchId, cardBills: made.filter(t => t.type === "cc_payment").length, unmatched: made.filter(t => t.cardBillUnmatched).length });
   };
@@ -90,18 +93,37 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
     );
   };
 
+  const cardSummaryBlock = parsed => {
+    const sm = parsed.summary, chk = parsed.summaryCheck;
+    const m = v => `${sym}${(v / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const has = k => typeof sm[k] === "number", fd = d => (d ? niceDate(d) : "");
+    const f = id => chk && chk.findings.find(x => x.id === id);
+    return (
+      <div data-testid="stmt-card-summary" style={{ marginTop: 8, fontSize: 12, color: T.sub, lineHeight: 1.5 }}>
+        {(sm.statementDate || sm.dueDate) && <div>{sm.statementDate ? `Statement ${fd(sm.statementDate)}` : ""}{sm.dueDate ? ` · due ${fd(sm.dueDate)}` : ""}</div>}
+        {has("totalDuePaise") && <div>Total due <b style={{ color: T.text }}>{m(sm.totalDuePaise)}</b>{has("minDuePaise") ? ` · minimum ${m(sm.minDuePaise)}` : ""}</div>}
+        {has("previousBalancePaise") && has("purchasesPaise") && has("paymentsPaise") && <div>Previous {m(sm.previousBalancePaise)} + purchases {m(sm.purchasesPaise)}{has("cashAdvancesPaise") && sm.cashAdvancesPaise ? ` + cash ${m(sm.cashAdvancesPaise)}` : ""} − payments {m(sm.paymentsPaise)}</div>}
+        {f("equation") && (f("equation").ok ? <div data-testid="stmt-card-ok">✓ The statement's own figures add up.</div> : <div data-testid="stmt-card-warn" style={{ color: T.warn }}>The statement's printed figures do not add up (fees or interest may be included in the total). Check before importing.</div>)}
+        {f("charges") && (f("charges").ok ? <div data-testid="stmt-card-ok2">✓ The charges read from the file match the statement's purchases ({m(f("charges").rows)}).</div> : <div data-testid="stmt-card-warn2" style={{ color: T.warn }}>Charges read from the file are {m(f("charges").rows)}, but the statement says {m(f("charges").stated)}. A row may be missing or misread.</div>)}
+        {f("credits") && !f("credits").ok && <div style={{ color: T.warn }}>Payments/credits read from the file are {m(f("credits").rows)}, but the statement says {m(f("credits").stated)}.</div>}
+        {!chk || chk.findings.length === 0 ? <div>No totals could be read from this file, so the rows could not be cross-checked.</div> : null}
+        {parsed.rows.some(r => r.amountPaise > 0) && <div>Payments and refunds are not added from a card statement. A payment is added from your bank (import the bank statement: it becomes a card payment), and a row that matches one you already have can be merged below.</div>}
+      </div>
+    );
+  };
+
   const p = state.parsed, bal = p && p.balance;
   return (
     <div style={{ padding: "14px 16px 24px" }} data-testid="statement-import">
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
         <button onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", color: T.accent, cursor: "pointer", fontSize: 22, padding: 0 }}>←</button>
-        <div style={{ color: T.text, fontSize: 18, fontWeight: 900, flex: 1 }}>Import bank statement</div>
+        <div style={{ color: T.text, fontSize: 18, fontWeight: 900, flex: 1 }}>{isCard ? "Import card statement" : "Import bank statement"}</div>
       </div>
       {note("mute", <><b>Review first. Nothing is added until you press Import.</b> The file is read on this device and is not stored or uploaded. Rows already in Arth are skipped, and existing entries are never changed.</>, "stmt-banner")}
 
       {state.phase !== "done" && <div style={card}>
-        <div style={label}>Bank account</div>
-        {fixedAccountId ? <div data-testid="stmt-fixed-account" style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>{(banks.find(a => String(a.id) === String(fixedAccountId)) || {}).name || "This account"}</div>
+        <div style={label}>{isCard ? "Credit card" : "Bank account"}</div>
+        {fixedAccountId ? <div data-testid="stmt-fixed-account" style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>{(accounts.find(a => String(a.id) === String(fixedAccountId)) || {}).name || "This account"}</div>
           : banks.length === 0 ? <div style={{ color: T.warn, fontSize: 13, fontWeight: 700 }}>Add a bank account first (Settings → Accounts).</div>
           : <select data-testid="stmt-account" value={accountId} onChange={e => { setAccountId(e.target.value); setState({ phase: "idle" }); }} style={{ width: "100%", minHeight: 44, borderRadius: 10, border: `1px solid ${T.border}`, background: T.input, color: T.text, padding: "0 10px", fontSize: 14 }}>
             <option value="">Choose the account this statement is for</option>
@@ -119,29 +141,30 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
           <div style={{ color: T.text, fontSize: 15, fontWeight: 800 }}>{state.fileName}</div>
           <div style={{ color: T.sub, fontSize: 13, marginTop: 4 }}>{p.rows.length} rows · {niceDate(p.period.from)} to {niceDate(p.period.to)}</div>
           <div style={{ color: T.sub, fontSize: 13, marginTop: 4 }}>New {state.match.summary.new} · Looks already in Arth {state.match.summary.probableMatch} · Imported before {state.match.summary.alreadyImported}{p.skipped.length ? ` · Could not read ${p.skipped.length}` : ""}</div>
-          {bal.checked > 0 && bal.mismatches.length === 0 && <div data-testid="stmt-balance-ok" style={{ color: T.sub, fontSize: 12, marginTop: 6 }}>✓ The statement's running balance adds up across all {bal.checked + 1} rows.</div>}
-          {bal.checked > 0 && bal.mismatches.length > 0 && note("amb", <><b>The running balance does not add up on {bal.mismatches.length} row(s).</b> A row may be missing or misread (lines {bal.mismatches.slice(0, 6).join(", ")}). Check the amounts before importing.</>, "stmt-balance-bad")}
-          {bal.signsReversed && <div data-testid="stmt-reversed" style={{ color: T.sub, fontSize: 12, marginTop: 6 }}>The column headings said Debit/Credit the other way round; Arth followed the running balance (money out reduces it).</div>}
-          {bal.checked === 0 && <div style={{ color: T.sub, fontSize: 12, marginTop: 6 }}>No running-balance column, so amounts could not be cross-checked. Look through the rows before importing.</div>}
+          {!isCard && bal.checked > 0 && bal.mismatches.length === 0 && <div data-testid="stmt-balance-ok" style={{ color: T.sub, fontSize: 12, marginTop: 6 }}>✓ The statement's running balance adds up across all {bal.checked + 1} rows.</div>}
+          {!isCard && bal.checked > 0 && bal.mismatches.length > 0 && note("amb", <><b>The running balance does not add up on {bal.mismatches.length} row(s).</b> A row may be missing or misread (lines {bal.mismatches.slice(0, 6).join(", ")}). Check the amounts before importing.</>, "stmt-balance-bad")}
+          {!isCard && bal.signsReversed && <div data-testid="stmt-reversed" style={{ color: T.sub, fontSize: 12, marginTop: 6 }}>The column headings said Debit/Credit the other way round; Arth followed the running balance (money out reduces it).</div>}
+          {isCard && p.summary && cardSummaryBlock(p)}
+          {!isCard && bal.checked === 0 && <div style={{ color: T.sub, fontSize: 12, marginTop: 6 }}>No running-balance column, so amounts could not be cross-checked. Look through the rows before importing.</div>}
         </div>
 
         {balanceCard()}
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-          <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, r.status === "new"]))); }}>Only new</button>
-          <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, r.status !== "already-imported"]))); }}>All</button>
+          <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, r.status === "new" && canAdd(r)]))); }}>Only new</button>
+          <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, canAdd(r)]))); }}>All</button>
           <button style={btn(false)} onClick={() => { setMerged({}); setTicked({}); }}>None</button>
         </div>
 
         <div data-testid="stmt-rows">
           {state.match.results.map(({ row, status, matchId }) => {
-            const out = row.amountPaise < 0, bill = out && looksLikeCardBill(row.desc), cardHit = bill ? findCardByText(row.desc, cards) : null;
+            const out = row.amountPaise < 0, bill = !isCard && out && looksLikeCardBill(row.desc), cardHit = bill ? findCardByText(row.desc, cards) : null;
             return (
               <label key={row.importKey} data-testid="stmt-row" data-status={status} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 4px", borderBottom: `1px solid ${T.border}`, opacity: status === "already-imported" ? 0.5 : 1 }}>
-                <input type="checkbox" checked={Boolean(ticked[row.importKey]) && status !== "already-imported"} disabled={status === "already-imported"} onChange={e => { setTicked(t => ({ ...t, [row.importKey]: e.target.checked })); if (e.target.checked) setMerged(m => ({ ...m, [row.importKey]: false })); }} style={{ marginTop: 3, width: 20, height: 20 }} />
+                <input type="checkbox" checked={Boolean(ticked[row.importKey]) && canAdd({ row, status })} disabled={!canAdd({ row, status })} onChange={e => { setTicked(t => ({ ...t, [row.importKey]: e.target.checked })); if (e.target.checked) setMerged(m => ({ ...m, [row.importKey]: false })); }} style={{ marginTop: 3, width: 20, height: 20 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: T.text, fontSize: 13, fontWeight: 700, wordBreak: "break-word" }}>{row.desc || "(no description)"}</div>
                   <div style={{ color: T.sub, fontSize: 11, marginTop: 2 }}>{niceDate(row.date)}
-                    {status === "probable-match" && " · looks like an entry already in Arth"}{status === "already-imported" && " · imported before"}
+                    {status === "probable-match" && " · looks like an entry already in Arth"}{isCard && !out && status === "new" && " · payment or refund: not added here (see below)"}{status === "already-imported" && " · imported before"}
                     {bill && (cardHit ? ` · card bill payment → ${cardHit.name}` : " · looks like a card bill payment, but no card matched: it will be an expense")}</div>
                   {status === "probable-match" && (() => {
                     const mine = txnById(matchId); if (!mine) return null;
@@ -165,7 +188,9 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
         {p.skipped.length > 0 && <div style={{ color: T.sub, fontSize: 12, marginTop: 10 }}>Rows not read ({p.skipped.length}): {p.skipped.slice(0, 5).map(s => `line ${s.line} (${s.why})`).join("; ")}{p.skipped.length > 5 ? "…" : ""}</div>}
 
         <div style={{ position: "sticky", bottom: 0, background: T.bg, paddingTop: 12 }}>
-          {chosen.length > 0 && <div data-testid="stmt-effect" style={{ color: T.sub, fontSize: 12, marginBottom: 8, lineHeight: 1.45 }}>These rows will change this account's balance in Arth by {net < 0 ? "−" : "+"}{fmt(net, sym)}. If the account's starting balance in Arth already includes these dates, adjust it afterwards. Imported expenses have no category yet; they will appear under "Needs details".</div>}
+          {chosen.length > 0 && (isCard
+            ? <div data-testid="stmt-effect" style={{ color: T.sub, fontSize: 12, marginBottom: 8, lineHeight: 1.45 }}>These charges ({fmt(net, sym)}) will be added to this card on their dates and count in its bill. Imported expenses have no category yet; they will appear under "Needs details".</div>
+            : <div data-testid="stmt-effect" style={{ color: T.sub, fontSize: 12, marginBottom: 8, lineHeight: 1.45 }}>These rows will change this account's balance in Arth by {net < 0 ? "−" : "+"}{fmt(net, sym)}. If the account's starting balance in Arth already includes these dates, adjust it afterwards. Imported expenses have no category yet; they will appear under "Needs details".</div>)}
           <button data-testid="stmt-import" style={{ ...btn(true, chosen.length + merges.length === 0), width: "100%" }} disabled={chosen.length + merges.length === 0} onClick={doImport}>Import {chosen.length} row{chosen.length === 1 ? "" : "s"}{merges.length > 0 ? ` · merge ${merges.length}` : ""}</button>
         </div>
       </>}
