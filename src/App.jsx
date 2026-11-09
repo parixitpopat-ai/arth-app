@@ -18,6 +18,8 @@ import SlowLoadEscape from "./components/SlowLoadEscape";
 import PhotoOptimizeCard from "./components/PhotoOptimizeCard";
 import LoanGivenSheet from "./components/LoanGivenSheet";
 import LoanEntryNotice from "./components/LoanEntryNotice";
+import NeedsDetailsSheet from "./components/NeedsDetailsSheet";
+import { expenseGaps, summarizeGaps, GAP_LABELS } from "./domain/transactions/completeness";
 import { extractDMonYDate, extractUpiMerchant } from "./domain/sms/smsFields";
 import { stripSurvivingPhotos, fillOmittedPhotos } from "./sync/backupPhotos";
 import { packList, unpackList } from "./sync/packedList";
@@ -1665,6 +1667,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [editingLoan, setEditingLoan] = useState(null);
   const [repaymentLoan, setRepaymentLoan] = useState(null);
   const [showReceivablesList, setShowReceivablesList] = useState(false);
+  const [showNeedsDetails, setShowNeedsDetails] = useState(false);
   const [editingCategoryId, setEditingCategoryId] = useState(null);
   const [editingCategoryName, setEditingCategoryName] = useState("");
 
@@ -1994,6 +1997,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const cm = viewMonth;
   const thisMonthTxns = useMemo(()=>txns.filter(t=>t.date&&t.date.startsWith(cm)),[txns,cm]);
   const expenses = useMemo(()=>thisMonthTxns.filter(t=>t.type==="expense"),[thisMonthTxns]);
+  // Expenses missing a category, a sub-category, or a person/group (domain/transactions/completeness.js). Shown, never blocking.
+  const mePersonId = useMemo(()=>people.find(p=>p.isMe)?.id||"",[people]);
+  const gapSummary = useMemo(()=>summarizeGaps(txns, cats, { mePersonId }),[txns,cats,mePersonId]);
   const refundTotalsByBill = useMemo(()=>computeRefundTotalsByBill(txns), [txns]);
   // One refund rule for spending: domain/allocations/adapter.js (refunds only; person/group repayments excluded).
   const refundTotalsByExpense = useMemo(()=>buildRefundTotalsByExpense(txns),[txns]);
@@ -2280,6 +2286,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     },0),
     color:c.color,id:c.id,icon:c.icon,budget:c.budget
   })).filter(c=>c.value>0),[expenses,cats,getMyExpenseAmount]);
+
+  // The category wheel also shows what has NO category, so that spending is never silently missing from it.
+  const byCatShown = useMemo(()=>{
+    const uncategorised = expenses.filter(e=>getTxnCategoryIds(e).length===0).reduce((sum,e)=>sum+getMyExpenseAmount(e),0);
+    return uncategorised>0 ? [...byCat,{ name:"Uncategorised", value:uncategorised, color:"#9ca3af", id:"__none__", icon:"❓", budget:0 }] : byCat;
+  },[byCat,expenses,getMyExpenseAmount]);
 
   const settlements = useMemo(()=>{
     const receivables = {};
@@ -3327,6 +3339,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               {t.type==="cc_emi"&&t.ccEmiPlanId&&<span style={{ background:T.purple+"18",color:T.purple,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💳 EMI {t.installmentNo}/{t.ccEmiTenure||"?"}</span>}
               {t.vehicleId&&(()=>{ const v=vehicles.find(x=>x.id===t.vehicleId); if(!v) return null; const vIcon=v.type==="bike"?"🏍️":v.type==="truck"?"🚛":v.type==="auto"?"🛺":"🚗"; const last4=(v.number||"").replace(/\s/g,"").slice(-4)||v.number||""; return <span style={{ background:"#3b82f618",color:"#3b82f6",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{vIcon} {last4}</span>; })()}
               {t.imageBase64&&<span style={{ fontSize:10 }}>📷</span>}
+              {t.type==="expense"&&(()=>{ const g=expenseGaps(t,cats,{ mePersonId:people.find(p=>p.isMe)?.id||"" }); if(!g.length) return null; return <span data-testid="row-needs-details" title={g.map(x=>GAP_LABELS[x]).join(", ")} style={{ background:T.warn+"22",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>❓ {g.includes("category")?"Uncategorised":g.includes("subcategory")?"No sub-category":"No person/group"}</span>; })()}
             </div>
           </div>
           <div style={{ textAlign:"right", flexShrink:0 }}>
@@ -7922,6 +7935,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {refDupWarning&&(
               <div style={{ background:T.warn+"18",border:`1px solid ${T.warn}44`,borderRadius:10,padding:"8px 12px",color:T.warn,fontSize:11,fontWeight:700 }}>{refDupWarning}</div>
             )}
+            {txnType==="expense"&&(()=>{
+              // Not a block: it only says what is still missing, and that the entry will wait under "Needs details".
+              // Who it is for can sit in four places in this form: tagged person/group, split people, allocation rows (unified is the default), or a one-time name.
+              const tagsPerson = splitMode==="tag" && (tagMode==="person"||tagMode==="both"||tagMode==="attribute") && tagPerson;
+              const allocating = splitMode==="allocate" || splitMode==="unified";
+              const allocPeople = allocating ? (allocRows||[]).filter(r=>r.targetId && r.targetType==="person").map(r=>[r.targetId,{}]) : [];
+              const allocGroups = allocating ? (allocRows||[]).filter(r=>r.targetId && r.targetType!=="person") : [];
+              const tagsGroup = (splitMode==="split" && splitGroup) || (splitMode==="tag" && (tagMode==="group"||tagMode==="both"||tagMode==="attribute") && tagGroup) || splitGroup || allocGroups.length>0;
+              const splitWith = Object.entries(splitPeople||{}).filter(([k,v])=>v);
+              const missing = expenseGaps({ type:"expense", catIds:validCatIds.length?validCatIds:(catId?[catId]:[]), subIds:validSubIds, lineItems:useItemizedLines?lineItems:undefined,
+                people:{ ...(tagsPerson?{ [tagPerson]:{} }:{}), ...Object.fromEntries(allocPeople), ...Object.fromEntries(splitWith) }, groupId:tagsGroup?"x":"", vehicleId:vehicleId||"", guestPerson:guestPersonName, paidByPersonId }, cats, { mePersonId:people.find(p=>p.isMe)?.id||"" });
+              if(!missing.length) return null;
+              return <div data-testid="form-needs-details" style={{ background:T.warn+"14",border:`1px solid ${T.warn}33`,borderRadius:10,padding:"8px 12px",color:T.sub,fontSize:11,fontWeight:700 }}>❓ Still missing: {missing.map(g=>GAP_LABELS[g].replace("No ","").toLowerCase()).join(", ")}. You can save now; it will wait under Needs details.</div>;
+            })()}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={closeModal} style={btnG}>Cancel</button>
               <button onClick={()=>submit()} style={{ ...btnP,opacity:canSubmit?1:0.5 }}>{itemsBlock?`Save · lines must equal ${sym}${fmt(amt)}`:eduMode&&eduShowErrors&&eduErrorCount>0?`Fix ${eduErrorCount} item${eduErrorCount===1?"":"s"}`:canSubmit?(isEditing?"Save Changes ✓":"Add ✓"):txnType==="investment"?"Fill name & amount":"Fill vendor & amount"}</button>
@@ -9466,7 +9493,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // stripped both cards out via the filter step below, for every user, not just
   // fresh ones. The aiInsight-repositioning logic further down could never
   // actually fire as a result. Fixed by including every real card key here.
-  const KNOWN_CARD_KEYS = new Set([...DEFAULT_CARD_ORDER, "goalsHome", "eventsHome", "stats", "categories", "cc"]);
+  const KNOWN_CARD_KEYS = new Set([...DEFAULT_CARD_ORDER, "goalsHome", "eventsHome", "stats", "categories", "cc", "needsDetails"]);
+  // Cards every Home should hold. Arrange can only hide/show/move cards that are in the list, so a card that is missing from a saved list could never come back.
+  const ALWAYS_PRESENT_CARDS = ["needsDetails","categories","stats"];
   // Unordered pairs that render as a 2-column grid when adjacent in cardOrder
   // (in either order), rather than each full-width. If a user's own reordering
   // separates a pair, both fall back to full-width automatically — see the
@@ -9478,7 +9507,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // (goalsHome/eventsHome/stats/categories/cc) keeps its relative order,
     // appended after the frozen set.
     const extras = filtered.filter(k=>!DEFAULT_CARD_ORDER.includes(k));
-    return [...DEFAULT_CARD_ORDER, ...extras];
+    const missing = ALWAYS_PRESENT_CARDS.filter(k=>!DEFAULT_CARD_ORDER.includes(k) && !extras.includes(k));
+    return [...DEFAULT_CARD_ORDER, ...extras, ...missing];
   };
   const [cardOrder, setCardOrder] = useState(()=>backfillCardOrder(JSON.parse(localStorage.getItem("arth_card_order")||"null")));
   const [editingCards, setEditingCards] = useState(false);
@@ -10619,20 +10649,37 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       ),
 
 
-      categories: byCat.length>0 ? (
+      needsDetails: gapSummary.total>0 ? (
+        <div key="needsDetails" data-testid="needs-details-card" onClick={()=>setShowNeedsDetails(true)} style={{ ...card,padding:"14px",cursor:"pointer",border:`1px solid ${T.warn}55` }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10 }}>
+            <div>
+              <div style={{ color:T.text,fontSize:15,fontWeight:800 }}>❓ Needs details</div>
+              <div style={{ color:T.sub,fontSize:12,marginTop:2 }}>{gapSummary.total} expense{gapSummary.total===1?"":"s"} · {M(`${sym}${fmt(gapSummary.amount)}`)}</div>
+            </div>
+            <span style={{ color:T.warn,fontSize:13,fontWeight:800 }}>Review ›</span>
+          </div>
+          <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:8 }}>
+            {gapSummary.byGap.category>0&&<span style={{ background:T.warn+"22",color:T.warn,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:800 }}>{gapSummary.byGap.category} no category</span>}
+            {gapSummary.byGap.subcategory>0&&<span style={{ background:T.warn+"22",color:T.warn,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:800 }}>{gapSummary.byGap.subcategory} no sub-category</span>}
+            {gapSummary.byGap.owner>0&&<span style={{ background:T.warn+"22",color:T.warn,borderRadius:20,padding:"2px 9px",fontSize:10,fontWeight:800 }}>{gapSummary.byGap.owner} no person or group</span>}
+          </div>
+        </div>
+      ) : null,
+
+      categories: byCatShown.length>0 ? (
         <div key="categories" style={{ ...card,padding:"16px 14px" }}>
           <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:14 }}>Spend by Category</div>
           <div style={{ display:"flex",alignItems:"center",gap:8 }}>
             <ResponsiveContainer width={140} height={140}>
               <PieChart>
-                <Pie data={byCat} cx="50%" cy="50%" innerRadius={38} outerRadius={68} dataKey="value" stroke="none">
-                  {byCat.map((c,i)=><Cell key={i} fill={c.color} opacity={0.9}/>)}
+                <Pie data={byCatShown} cx="50%" cy="50%" innerRadius={38} outerRadius={68} dataKey="value" stroke="none">
+                  {byCatShown.map((c,i)=><Cell key={i} fill={c.color} opacity={0.9}/>)}
                 </Pie>
                 <Tooltip content={({active,payload})=>active&&payload?.length?<div style={ttStyle}><b style={{color:payload[0].payload.color}}>{payload[0].payload.icon} {payload[0].name}</b><br/>{sym}{fmt(payload[0].value)}</div>:null}/>
               </PieChart>
             </ResponsiveContainer>
             <div style={{ flex:1 }}>
-              {[...byCat].sort((a,b)=>b.value-a.value).slice(0,6).map((c,i)=>{
+              {[...byCatShown].sort((a,b)=>b.value-a.value).slice(0,6).map((c,i)=>{
                 return (
                   <div key={i} style={{ marginBottom:7 }}>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2 }}>
@@ -21766,6 +21813,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             onDownloadCloud={async()=>{ try{ const rec = await syncKit.cloud.read(cloudUser.id); syncDownload(rec?.snapshot, "arth-cloud-copy"); }catch(e){ setSyncError(`Couldn't download the cloud copy: ${e.message}`); } }}
           />
         )}
+        {showNeedsDetails&&<NeedsDetailsSheet T={T} sym={sym} fmt={fmt} summary={gapSummary} onClose={()=>setShowNeedsDetails(false)}
+          onOpen={t=>{ setShowNeedsDetails(false); setEditTxn(t); setShowAdd(true); }}/>}
         {billMatchSuggestion&&(
           <div style={{ position:"fixed",bottom:90,left:"50%",transform:"translateX(-50%)",width:"calc(100% - 32px)",maxWidth:398,background:T.card,border:`1px solid ${T.success}66`,borderRadius:16,padding:"14px 16px",zIndex:300,boxShadow:`0 4px 24px ${T.sh}` }}>
             <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:6 }}>🎯 Bill matched!</div>
