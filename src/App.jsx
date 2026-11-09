@@ -6222,7 +6222,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
             : <div>
                 <div style={{ display:"flex",gap:8,marginBottom:10,flexWrap:"wrap" }}>
-                  {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["transfer","🔄","Transfer",T.info],["loan_given","🤝","Loan given",T.warn],["petty_cash","💼","Petty cash",T.warn],["settlement_in","💼","Settlement",T.info],["investment","💹","Invest",T.info]].map(([v,ic,lb,col])=>(
+                  {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["transfer","🔄","Transfer",T.info],["loan_given","🤝","Loan given",T.warn],["settlement_in","💼","Settlement",T.info],["investment","💹","Invest",T.info]].map(([v,ic,lb,col])=>(
                     <button key={v} onClick={()=>{ if(v==="petty_cash"){ setPettyCashDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } if(v==="loan_given"){ setLoanGivenDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); if(v!=="transfer"){ setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId(""); } }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
                       <span style={{ fontSize:16 }}>{ic}</span>{lb}
                     </button>
@@ -6356,7 +6356,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
             )}
             {txnType==="expense"&&paidByPersonId&&(
-              <div data-testid="paid-by-note" style={{ color:T.sub,fontSize:11 }}>{getPerson(paidByPersonId)?.name||"They"} paid for this from their own pocket. None of your accounts is used. You will owe {getPerson(paidByPersonId)?.name||"them"} {sym}{fmt(parseFloat(amount)||0)} until you pay back from their profile.</div>
+              <div data-testid="paid-by-note" style={{ color:T.sub,fontSize:11 }}>{getPerson(paidByPersonId)?.name||"They"} paid for this from their own pocket. None of your accounts is used. You will owe {getPerson(paidByPersonId)?.name||"them"} {sym}{fmt(parseFloat(amount)||0)} until you pay back from their profile. If you gave them petty cash, that is used up first and only the rest is owed.</div>
             )}
             {txnType==="expense"&&!paidByPersonId&&(
               <div style={{ display:"flex",gap:4,justifyContent:"flex-end" }}>
@@ -7612,11 +7612,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           <div key={row.id} style={{ display:"flex",flexDirection:"column",gap:6,background:T.card,borderRadius:10,padding:"8px 10px" }}>
                             <div style={{ display:"flex",alignItems:"center",gap:6 }}>
                               <span style={{ flex:1,color:T.text,fontSize:13,fontWeight:700 }}>{row.targetType==="group"?(target.icon||"👥"):(target.emoji||"👤")} {target.name}</span>
-                              {row.targetType==="person"&&!row.mode&&<span style={{ color:T.warn,fontSize:10,fontWeight:800 }}>Choose one</span>}
+                              {row.targetType==="person"&&!row.mode&&paidByPersonId!==row.targetId&&<span style={{ color:T.warn,fontSize:10,fontWeight:800 }}>Choose one</span>}
                               <div style={{ display:"flex",gap:4 }}>
                                 {[["spent_on","A"],["i_owe","O"],["owes","C"]].map(([m,label])=>(
                                   <button key={m} title={label==="A"?"Attribute":label==="O"?"Own":"Collect"} onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,mode:m}:r))} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:800,color:row.mode===m?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{label}</button>
                                 ))}
+                                {row.targetType==="person"&&txnType==="expense"&&(
+                                  <button data-testid="alloc-petty" title="Paid from their petty cash" onClick={()=>{ if(paidByPersonId===row.targetId){ setPaidByPersonId(""); } else { setPaidByPersonId(row.targetId); setExpensePaymentMode("full"); } }} style={{ background:paidByPersonId===row.targetId?T.warn+"22":"none",border:`1px solid ${paidByPersonId===row.targetId?T.warn:T.border}`,color:paidByPersonId===row.targetId?T.warn:T.sub,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"Nunito,sans-serif" }}>P</button>
+                                )}
                               </div>
                             </div>
                             <div style={{ display:"flex",gap:6,alignItems:"center" }}>

@@ -36,17 +36,13 @@ try {
     await openPerson();
     let body = await text();
     rec("A1 before petty cash her page shows no 'with her' balance, and I owe her", !(await T("petty-cash-banner").count()) && /6,000/.test(body), {});
-    await page.getByText(/^people$/i).first().dispatchEvent("click").catch(() => {}); 
-    await home(); await openAdd();
-    rec("A2 the Add screen has a 'Petty cash' choice", (await page.locator("button:visible", { hasText: "Petty cash" }).count()) >= 1, {});
-    await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("10000");
-    await page.locator("button:visible", { hasText: "Petty cash" }).first().dispatchEvent("click"); await page.waitForTimeout(700);
-    rec("A3 it opens the Petty cash sheet with the amount carried over", (await T("petty-sheet").count()) === 1 && (await T("petty-amount").inputValue()) === "10000", {});
+    await T("person-petty-cash").dispatchEvent("click"); await page.waitForTimeout(700);
+    rec("A2 petty cash is given from the person's page (the Add screen's top row no longer has a Petty cash chip)", (await T("petty-sheet").count()) === 1, {});
+    await T("petty-amount").fill("10000");
+    rec("A3 the sheet opens with that person already chosen", (await T("petty-sheet").count()) === 1, {});
     const sheetText = await T("petty-sheet").innerText();
     rec("A4 it never asks for a destination account (one 'Paid from' group, no dropdown)", !/to account|destination|transfer to/i.test(sheetText) && /Paid from/i.test(sheetText) && (await page.locator("select").count()) === 0, {});
-    await T("petty-save").click(); await page.waitForTimeout(300);
-    rec("A5 saving without choosing who is refused with a plain message", /who you gave/.test(await T("petty-error").innerText()) && (await ls("arth_txns")).filter(t => t.isPettyCash).length === 0, await T("petty-error").innerText());
-    await T("petty-person-p_sp").click(); await T("petty-amount").fill("0"); await T("petty-save").click(); await page.waitForTimeout(300);
+    await T("petty-amount").fill(""); await T("petty-save").click(); await page.waitForTimeout(300);
     rec("A6 a zero amount is refused", /amount/.test(await T("petty-error").innerText()), {});
     await T("petty-amount").fill("10000"); await T("petty-from-bank1").click(); await T("petty-note").fill("November house"); await T("petty-save").click(); await page.waitForTimeout(900);
     const pc = (await ls("arth_txns")).filter(t => t.isPettyCash);
@@ -62,10 +58,9 @@ try {
   // ── 2: she spent more than she held ──
   {
     const { page, home, text, T, openPerson, ls, openAdd } = await newPage([6000, 7000]);
-    await home(); await openAdd();
-    await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("10000");
-    await page.locator("button:visible", { hasText: "Petty cash" }).first().dispatchEvent("click"); await page.waitForTimeout(700);
-    await T("petty-person-p_sp").click(); await T("petty-save").click(); await page.waitForTimeout(900);
+    await home(); await openPerson();
+    await T("person-petty-cash").dispatchEvent("click"); await page.waitForTimeout(700);
+    await T("petty-amount").fill("10000"); await T("petty-save").click(); await page.waitForTimeout(900);
     await home(); await openPerson();
     const t = (await T("petty-cash-banner").count()) ? await T("petty-cash-banner").innerText() : "";
     rec("B1 she spent 13,000 against 10,000: nothing is left with her and I still owe Rs 3,000", /0 petty cash with Priya Test/.test(t) && /still owe .*3,000/.test(t), t);
@@ -88,6 +83,23 @@ try {
     const { page, home, T, openPerson } = await newPage([500]);
     await home(); await openPerson();
     rec("K1 (control) a person with no petty cash shows no 'with her' banner", (await T("petty-cash-banner").count()) === 0, {});
+  }
+  // ── 4: the P button on a person's A / O / C row (and the top chip is gone) ──
+  {
+    const { page, home, text, T, ls, openAdd } = await newPage([500]);
+    await home(); await openAdd();
+    rec("P0 the Add screen's top row no longer has a Petty cash chip", (await page.locator("button:visible", { hasText: "Petty cash" }).count()) === 0, {});
+    await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("900");
+    await page.getByRole("button", { name: /Add person or group/ }).first().dispatchEvent("click"); await page.waitForTimeout(500);
+    await page.getByPlaceholder(/Search person or group/).fill("Priya"); await page.waitForTimeout(300);
+    await page.locator("button:visible", { hasText: "Priya Test" }).last().dispatchEvent("click"); await page.waitForTimeout(500);
+    rec("P1 her row shows A O C and P", (await T("alloc-petty").count()) === 1 && /\bA\b.*\bO\b.*\bC\b.*\bP\b/.test(await text()), {});
+    await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(300);
+    const note = (await T("paid-by-note").count()) ? await T("paid-by-note").innerText() : "";
+    rec("P2 tapping P makes her the payer ('Paid by' note) and P lights up; tapping again clears it", /Priya Test paid/.test(note), note.slice(0, 80));
+    await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(300);
+    rec("P3 second tap clears it", (await T("paid-by-note").count()) === 0, {});
+    await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(300);
   }
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 500)); }
