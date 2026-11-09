@@ -14600,6 +14600,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div><span style={{ color:T.sub }}>Utilisation: </span><span style={{ color:hasLimit?(utilPct>80?T.danger:utilPct>50?T.warn:T.success):T.sub,fontWeight:hasLimit?800:400 }}>{hasLimit?`${utilPct}%`:"—"}</span></div>
                     <div><span style={{ color:T.sub }}>Unbilled: </span><span style={{ color:rowUsage.unbilled>0?T.warn:T.success,fontWeight:800 }}>{sym}{fmt(rowUsage.unbilled)}</span></div>
                   </div>
+                  <div data-testid="card-view-txns" onClick={()=>setShowAccDetail(a)} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>📄 View transactions</div>
                   <div data-testid="card-import-statement" onClick={()=>{ setStatementAccId(String(a.id)); setShowSettings(true); setSettingsSection("importstatement"); }} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>🏦 Import statement</div>
                   {relevantBill&&<div onClick={()=>setViewingCcStatementId(relevantBill.id)} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>View statement in Payments ›</div>}
                 </div>

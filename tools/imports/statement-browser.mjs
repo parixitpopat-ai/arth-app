@@ -116,6 +116,11 @@ try {
   const ct2 = await ls("arth_txns"), made = ct2.filter(x => x.importKey && !x.importMerged && x.accId === "cc1"), pay = ct2.find(x => x.id === "pay1");
   rec("C6 two expenses were added ON THE CARD (375.10 and 200.00), uncategorised, vendor from the description", made.length === 2 && made.every(x => x.type === "expense" && x.catIds.length === 0) && made.some(x => x.amount === 375.1 && x.merchant === "Zomato Cybs Delhi") && made.some(x => x.amount === 200), made.map(x => [x.amount, x.merchant]));
   rec("C7 my bank-side card payment was linked, not duplicated or changed; no payment entry was created", ct2.length === before + 2 && pay.importMerged === true && pay.amount === 1000 && pay.type === "cc_payment", { before, after: ct2.length });
+  await page.reload(); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(400);
+  await page.getByText(/^money$/i).last().dispatchEvent("click"); await page.waitForTimeout(900); await unlock(); await page.waitForTimeout(700);
+  await T("card-view-txns").dispatchEvent("click"); await page.waitForTimeout(700);
+  const detail = await text();
+  rec("C8 'View transactions' on the card's Money tile opens its transactions, including the imported charges", /Zomato Cybs Delhi/i.test(detail) && /Amazon Pay Mumbai/i.test(detail), detail.slice(0, 200));
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 600)); }
 await browser.close(); try { process.kill(-server.pid); } catch {}
