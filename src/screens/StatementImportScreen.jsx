@@ -4,18 +4,21 @@
 import { useMemo, useRef, useState } from "react";
 import { withImportKeys } from "../domain/imports/statement.js";
 import { matchStatement } from "../domain/imports/matchStatement.js";
+import { statementBalances, planBalanceMatch } from "../domain/imports/statementBalances.js";
 import { buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
 
 const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const niceDate = iso => { const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
 
-export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "" }) {
+export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance }) {
   const fileRef = useRef(null);
   const banks = accounts.filter(a => a.type === "bank");
   const cards = accounts.filter(a => a.type === "cc");
   const [accountId, setAccountId] = useState(fixedAccountId || (banks.length === 1 ? String(banks[0].id) : ""));
   const [state, setState] = useState({ phase: "idle" });          // idle | reading | result | done
   const [ticked, setTicked] = useState({});                       // importKey -> bool
+  const [sb, setSb] = useState(null);                         // what the last file says the balance was at its start and end
+  const [balUndo, setBalUndo] = useState(null);                // set after "Match", used by its Undo
   const keys = useMemo(() => importedKeysOf(txns), [txns]);
 
   const card = { background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: 14, marginBottom: 12 };
@@ -40,6 +43,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
       const [{ readStatementFile }, { default: workerSrc }] = await Promise.all([import("../domain/imports/readStatementFile.js"), import("../domain/invoices/pdfWorkerUrl.js")]);
       const parsed = await readStatementFile(new Uint8Array(await file.arrayBuffer()), { name: file.name, workerSrc });
       if (!parsed.ok) { setState({ phase: "idle", error: parsed.reason, fileName: file.name }); return; }
+      setSb(statementBalances(parsed)); setBalUndo(null);
       setState({ phase: "result", fileName: file.name, parsed, match: analyse(parsed, accountId), accountId });
     } catch { setState({ phase: "idle", error: "This file could not be read." }); }
   };
@@ -59,6 +63,28 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
     for (const t of txns) if (t.importBatchId && (!fixedAccountId || String(t.accId || t.fromAccId) === String(fixedAccountId))) { const b = m.get(t.importBatchId) || { id: t.importBatchId, n: 0, from: t.date, to: t.date, accId: t.accId || t.fromAccId }; b.n++; if (t.date < b.from) b.from = t.date; if (t.date > b.to) b.to = t.date; m.set(t.importBatchId, b); }
     return [...m.values()];
   }, [txns, fixedAccountId]);
+
+  const balanceCard = () => {
+    const acc = accounts.find(a => String(a.id) === String(state.accountId || accountId));
+    if (!sb || !acc || !onMatchBalance) return null;
+    const plan = planBalanceMatch(acc, checkpoints[acc.id] || null, sb, txns, acc.id);
+    const m = v => `${sym}${Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const same = plan.opening.to === plan.opening.from && plan.opening.toDate === plan.opening.fromDate && plan.current.from === plan.current.to && plan.current.fromDate === plan.current.toDate;
+    return (
+      <div style={card} data-testid="stmt-balance-card">
+        <div style={label}>Match Arth's balance to this statement</div>
+        <div style={{ color: T.text, fontSize: 13, lineHeight: 1.5 }}>
+          <div>Opening balance: {plan.opening.from === 0 && !plan.opening.fromDate ? "not set" : `${m(plan.opening.from)} (${plan.opening.fromDate ? niceDate(plan.opening.fromDate) : "no date"})`} → <b>{m(plan.opening.to)}</b> on {niceDate(plan.opening.toDate)}</div>
+          <div>Current balance: {plan.current.from === null ? "worked out from entries" : `${m(plan.current.from)} (${niceDate(plan.current.fromDate)})`} → <b>{m(plan.current.to)}</b> as of {niceDate(plan.current.toDate)}</div>
+        </div>
+        {plan.entriesBeforeOpening > 0 && <div data-testid="stmt-balance-warn" style={{ color: T.warn, fontSize: 12, marginTop: 8, lineHeight: 1.45 }}>{plan.entriesBeforeOpening} entr{plan.entriesBeforeOpening === 1 ? "y" : "ies"} in this account dated before {niceDate(plan.opening.toDate)} will stop counting toward its balance (they stay in your records).</div>}
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          {!balUndo && <button data-testid="stmt-balance-match" style={btn(true, same)} disabled={same} onClick={() => setBalUndo(onMatchBalance(acc.id, plan))}>{same ? "Already matches" : "Set these balances"}</button>}
+          {balUndo && <><div data-testid="stmt-balance-done" style={{ color: T.sub, fontSize: 13, alignSelf: "center", flex: 1 }}>Balances set.</div><button data-testid="stmt-balance-undo" style={btn(false)} onClick={() => { onUndoBalance(acc.id, balUndo); setBalUndo(null); }}>Undo</button></>}
+        </div>
+      </div>
+    );
+  };
 
   const p = state.parsed, bal = p && p.balance;
   return (
@@ -95,6 +121,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
           {bal.checked === 0 && <div style={{ color: T.sub, fontSize: 12, marginTop: 6 }}>No running-balance column, so amounts could not be cross-checked. Look through the rows before importing.</div>}
         </div>
 
+        {balanceCard()}
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <button style={btn(false)} onClick={() => setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, r.status === "new"])))}>Only new</button>
           <button style={btn(false)} onClick={() => setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, r.status !== "already-imported"])))}>All</button>
@@ -135,6 +162,8 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
           <button style={btn(true)} onClick={onBack}>Done</button>
         </div>
       </div>}
+
+      {state.phase === "done" && balanceCard()}
 
       {batches.length > 0 && state.phase !== "done" && <div style={{ ...card, marginTop: 16 }} data-testid="stmt-batches">
         <div style={label}>Earlier imports</div>

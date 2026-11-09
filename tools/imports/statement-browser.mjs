@@ -49,6 +49,15 @@ try {
   rec("S3 the chai row is a probable match to the manual entry (3 new, 1 probable)", st.join() === "new,new,new,probable-match", st);
   rec("S4 the card-bill row says it goes to the card; nothing is imported yet", /card bill payment → Test ICICI Card/.test(body) && (await ls("arth_txns")).length === 1, {});
   rec("S5 button says Import 3 rows", /Import 3 rows/.test(await T("stmt-import").innerText()), {});
+  // balances: set opening to the statement's first balance, current to its last; undo restores
+  const acc0 = async () => (await ls("arth_accounts")).find(a => a.id === "bank1");
+  rec("S5a the balance card offers opening 10,000.00 -> 10,000.00 on 01-04-2026 and current -> 56,709.99 as of 04-04-2026", /56,709\.99/.test(await T("stmt-balance-card").innerText()) && /01-04-2026/.test(await T("stmt-balance-card").innerText()), (await T("stmt-balance-card").innerText()).slice(0, 200));
+  await T("stmt-balance-match").click(); await page.waitForTimeout(500);
+  const a1 = await acc0(), cp1 = (await page.evaluate(() => JSON.parse(localStorage.getItem("arth_checkpoints") || "{}"))).bank1;
+  rec("S5b 'Set these balances' stores opening 10000 dated 2026-04-01 and the current-balance note 56709.99 as of 2026-04-04", a1.openingBalance === 10000 && a1.openingBalanceDate === "2026-04-01" && cp1 && cp1.amount === 56709.99 && cp1.date === "2026-04-04", { a1: [a1.openingBalance, a1.openingBalanceDate], cp1 });
+  await T("stmt-balance-undo").click(); await page.waitForTimeout(500);
+  const a2 = await acc0(), cp2 = (await page.evaluate(() => JSON.parse(localStorage.getItem("arth_checkpoints") || "{}"))).bank1;
+  rec("S5c Undo puts the opening balance, its date and the (absent) current-balance note back exactly", a2.openingBalance === 10000 && a2.openingBalanceDate === "2026-01-01" && !cp2, { a2: [a2.openingBalance, a2.openingBalanceDate], cp2 });
   await T("stmt-import").click(); await page.waitForTimeout(700);
   const tx = await ls("arth_txns"), imp = tx.filter(x => x.importKey);
   rec("S6 3 transactions added, existing one untouched", imp.length === 3 && tx.length === 4 && tx.find(x => x.id === "m1").merchant === "Chai Point", imp.map(x => x.type));

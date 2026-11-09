@@ -207,6 +207,7 @@ import CreditCardsListScreen from "./components/CreditCardsListScreen";
 import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import InvoiceImportScreen from "./screens/InvoiceImportScreen";
 import StatementImportScreen from "./screens/StatementImportScreen";
+import { applyBalanceMatch, undoBalanceMatch } from "./domain/imports/statementBalances";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import { validateFill, normalizeFill } from "./domain/vehicles/fuelFills";
 import { planUndo as planInvoiceUndo } from "./domain/invoices/invoiceImport";
@@ -20594,7 +20595,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="insights"&&<InsightsPage/>}
         {/* The invoice screen is rendered HERE, not inside Settings: Settings is re-created on every AppContent render, which would reset this screen (its review state, the success message, Undo) the moment the import saves. */}
         {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} itemCatalog={itemCatalog} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>{ setSettingsSection(null); setShowSettings(false); }} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }} onAddReceipt={prefill=>{ setAddPrefill(prefill); setShowAdd(true); }}/>}
-        {showSettings&&settingsSection==="importstatement"&&<StatementImportScreen accounts={accounts} txns={txns} genId={genId} T={T} sym={sym} fixedAccountId={statementAccId}
+        {showSettings&&settingsSection==="importstatement"&&<StatementImportScreen accounts={accounts} txns={txns} genId={genId} T={T} sym={sym} fixedAccountId={statementAccId} checkpoints={balanceCheckpoints}
+          onMatchBalance={(accId,plan)=>{ const acc=accounts.find(a=>String(a.id)===String(accId)); if(!acc) return null; const out=applyBalanceMatch(acc,balanceCheckpoints[accId]||null,plan); setAccounts(prev=>prev.map(a=>String(a.id)===String(accId)?out.account:a)); setBalanceCheckpoints(p=>({...p,[accId]:out.checkpoint})); setToast({ message:"Balances set to match the statement" }); return out.undo; }}
+          onUndoBalance={(accId,undo)=>{ const acc=accounts.find(a=>String(a.id)===String(accId)); if(!acc) return; const back=undoBalanceMatch(acc,undo); setAccounts(prev=>prev.map(a=>String(a.id)===String(accId)?back.account:a)); setBalanceCheckpoints(p=>{ const n={...p}; if(back.checkpoint) n[accId]=back.checkpoint; else delete n[accId]; return n; }); setToast({ message:"Balances put back" }); }}
           onBack={()=>{ setSettingsSection(null); setShowSettings(false); setStatementAccId(""); }}
           onImport={(made,{fileName})=>{ setTxns(prev=>[...made,...prev]); setToast({ message:`${made.length} transaction${made.length===1?"":"s"} imported from ${fileName}` }); }}
           onUndoBatch={batchId=>{ setTxns(prev=>prev.filter(t=>t.importBatchId!==batchId)); setToast({ message:"Import undone" }); }}/>}
