@@ -154,3 +154,15 @@ test("statement: heading 'Transaction Date & Time' (as printed on the IDFC state
   assert.deepEqual(p.rows.map(r => r.amountPaise), [-5000, 7500000]);
   assert.deepEqual(p.balance.mismatches, []);
 });
+
+test("statement: debit/credit labels reversed relative to the running balance are corrected by the balance column (and flagged)", () => {
+  // synthetic numbers shaped like a statement whose "Debit" column raises the balance
+  const p = parseStatementRows([["Transaction Date", "Value Date", "Particulars", "Cheque No.", "Debit", "Credit", "Balance"],
+    ["21-05-2021", "21-05-2021", "IFT/1/SHOP A", "", "", "100.00", "900.00"],
+    ["22-05-2021", "22-05-2021", "IMPS/2/", "", "50.00", "", "950.00"],
+    ["23-05-2021", "23-05-2021", "IFT/3/SHOP A", "", "", "30.50", "919.50"]]);
+  assert.equal(p.ok, true);
+  assert.equal(p.balance.signsReversed, true);
+  assert.deepEqual(p.rows.map(r => r.amountPaise), [-10000, 5000, -3050]);
+  assert.equal(p.balance.mismatches.length, 0);
+});

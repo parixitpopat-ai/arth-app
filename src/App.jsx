@@ -206,6 +206,7 @@ import ChangeBillingModal from "./components/ChangeBillingModal";
 import CreditCardsListScreen from "./components/CreditCardsListScreen";
 import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import InvoiceImportScreen from "./screens/InvoiceImportScreen";
+import StatementImportScreen from "./screens/StatementImportScreen";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import { validateFill, normalizeFill } from "./domain/vehicles/fuelFills";
 import { planUndo as planInvoiceUndo } from "./domain/invoices/invoiceImport";
@@ -15916,6 +15917,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               (per the Screen Inventory). Export exists via CSV, listed below under Backup. */}
           <Row icon="🙂" title="My Profile" subtitle={(people.find(p=>p.isMe)?.name)||"Set up your identity in Arth"} onClick={()=>setSettingsSection("myprofile")}/>
           <Row icon="🔑" title="Cloud Sync & Account" subtitle={cloudUser?.email ? `Signed in as ${cloudUser.email}${lastSyncedAt ? " · synced" : ""}` : "Sign in to sync across devices"} onClick={()=>setSettingsSection("cloudsync")}/>
+          <Row icon="🏦" title="Import bank statement" subtitle="CSV, Excel or PDF · review before anything is added" onClick={()=>setSettingsSection("importstatement")}/>
           <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
         </div>
 
@@ -20588,7 +20590,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="insights"&&<InsightsPage/>}
         {/* The invoice screen is rendered HERE, not inside Settings: Settings is re-created on every AppContent render, which would reset this screen (its review state, the success message, Undo) the moment the import saves. */}
         {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} itemCatalog={itemCatalog} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>{ setSettingsSection(null); setShowSettings(false); }} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }} onAddReceipt={prefill=>{ setAddPrefill(prefill); setShowAdd(true); }}/>}
-        {showSettings&&settingsSection!=="importinvoice"&&<Settings/>}
+        {showSettings&&settingsSection==="importstatement"&&<StatementImportScreen accounts={accounts} txns={txns} genId={genId} T={T} sym={sym}
+          onBack={()=>{ setSettingsSection(null); setShowSettings(false); }}
+          onImport={(made,{fileName})=>{ setTxns(prev=>[...made,...prev]); setToast({ message:`${made.length} transaction${made.length===1?"":"s"} imported from ${fileName}` }); }}
+          onUndoBatch={batchId=>{ setTxns(prev=>prev.filter(t=>t.importBatchId!==batchId)); setToast({ message:"Import undone" }); }}/>}
+        {showSettings&&settingsSection!=="importinvoice"&&settingsSection!=="importstatement"&&<Settings/>}
 
       {/* Universal Search Overlay */}
       {showSearch&&(

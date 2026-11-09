@@ -93,7 +93,13 @@ export function parseStatementRows(rawRows) {
       balancePaise: bal && typeof bal === "object" ? (bal.cr !== undefined ? bal.cr : -bal.dr) : bal });
   }
   if (!rows.length) return { ok: false, reason: "The headings were found but no transaction rows could be read.", ...empty, skipped };
-  const balance = checkBalances(rows);
+  let balance = checkBalances(rows);
+  // Some statements label the columns from the bank's side, so the amount under "Debit" RAISES the running balance. The balance column is the
+  // arbiter: if reversing every sign makes the running balance add up and the stated signs do not, reverse them and say so.
+  if (balance.checked && balance.mismatches.length > balance.checked / 2) {
+    const flipped = rows.map(r => ({ ...r, amountPaise: -r.amountPaise })), fb = checkBalances(flipped);
+    if (fb.mismatches.length === 0) { rows.forEach(r => { r.amountPaise = -r.amountPaise; }); balance = { ...fb, signsReversed: true }; }
+  }
   const dates = rows.map(r => r.date).sort();
   return { ok: true, rows, skipped, balance, period: { from: dates[0], to: dates[dates.length - 1] } };
 }

@@ -26,7 +26,7 @@ test("invoiceImports is persisted, in the cloud snapshot, in its dependency list
 
 test("the invoice screen is rendered outside Settings, so its review state and Undo survive the save (Settings is re-created on every data change)", () => {
   assert.match(app, /showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen/);
-  assert.match(app, /showSettings&&settingsSection!=="importinvoice"&&<Settings\/>/);
+  assert.match(app, /showSettings&&settingsSection!=="importinvoice"&&(?:settingsSection!=="importstatement"&&)?<Settings\/>/);   // the bank-statement screen is rendered outside Settings the same way
   assert.doesNotMatch(app, /if\(settingsSection==="importinvoice"\) return/);
 });
 
