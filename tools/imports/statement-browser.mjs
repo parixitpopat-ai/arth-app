@@ -35,13 +35,13 @@ const text = () => page.evaluate(() => document.body.innerText.replace(/\s+/g, "
 const ls = k => page.evaluate(k => JSON.parse(localStorage.getItem(k) || "[]"), k);
 const unlock = async () => { for (let i = 0; i < 3; i++) { if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await page.getByRole("button", { name: "1", exact: true }).click(); await page.waitForTimeout(100); } await page.waitForTimeout(500); } } };
 const open = async () => { await page.goto(APP); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(400);
-  await page.getByText("☰", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(400);
-  await page.getByText("⚙️", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(400);
-  await page.getByText("Import bank statement", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(500); };
-const load = async f => { await T("stmt-account").selectOption("bank1"); await T("stmt-file").setInputFiles(f); await page.waitForTimeout(1500); };
+  await page.getByText(/^money$/i).last().dispatchEvent("click"); await page.waitForTimeout(900); await unlock(); await page.waitForTimeout(700);
+  await page.getByText("Test Savings").first().dispatchEvent("click"); await page.waitForTimeout(600);
+  await T("acc-import-statement").dispatchEvent("click"); await page.waitForTimeout(500); };
+const load = async f => { await T("stmt-file").setInputFiles(f); await page.waitForTimeout(1500); };
 try {
   await open();
-  rec("S1 Settings has 'Import bank statement' and it opens the screen", (await T("statement-import").count()) === 1, {});
+  rec("S1 the bank account's own page has 'Import statement'; it opens the screen with that account fixed (no account picker)", (await T("statement-import").count()) === 1 && (await T("stmt-fixed-account").innerText()) === "Test Savings" && (await T("stmt-account").count()) === 0, {});
   await load(csv);
   let body = await text();
   rec("S2 preview shows 4 rows, period, balance check passes", (await T("stmt-row").count()) === 4 && /01-04-2026 to 04-04-2026/.test(body) && (await T("stmt-balance-ok").count()) === 1, body.slice(0, 200));

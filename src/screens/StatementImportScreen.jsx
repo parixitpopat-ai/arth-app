@@ -9,11 +9,11 @@ import { buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } fr
 const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const niceDate = iso => { const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
 
-export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack }) {
+export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "" }) {
   const fileRef = useRef(null);
   const banks = accounts.filter(a => a.type === "bank");
   const cards = accounts.filter(a => a.type === "cc");
-  const [accountId, setAccountId] = useState(banks.length === 1 ? String(banks[0].id) : "");
+  const [accountId, setAccountId] = useState(fixedAccountId || (banks.length === 1 ? String(banks[0].id) : ""));
   const [state, setState] = useState({ phase: "idle" });          // idle | reading | result | done
   const [ticked, setTicked] = useState({});                       // importKey -> bool
   const keys = useMemo(() => importedKeysOf(txns), [txns]);
@@ -54,10 +54,11 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   };
 
   const batches = useMemo(() => {
+    // when opened from one account, show only that account's earlier imports
     const m = new Map();
-    for (const t of txns) if (t.importBatchId) { const b = m.get(t.importBatchId) || { id: t.importBatchId, n: 0, from: t.date, to: t.date, accId: t.accId || t.fromAccId }; b.n++; if (t.date < b.from) b.from = t.date; if (t.date > b.to) b.to = t.date; m.set(t.importBatchId, b); }
+    for (const t of txns) if (t.importBatchId && (!fixedAccountId || String(t.accId || t.fromAccId) === String(fixedAccountId))) { const b = m.get(t.importBatchId) || { id: t.importBatchId, n: 0, from: t.date, to: t.date, accId: t.accId || t.fromAccId }; b.n++; if (t.date < b.from) b.from = t.date; if (t.date > b.to) b.to = t.date; m.set(t.importBatchId, b); }
     return [...m.values()];
-  }, [txns]);
+  }, [txns, fixedAccountId]);
 
   const p = state.parsed, bal = p && p.balance;
   return (
@@ -70,7 +71,8 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
 
       {state.phase !== "done" && <div style={card}>
         <div style={label}>Bank account</div>
-        {banks.length === 0 ? <div style={{ color: T.warn, fontSize: 13, fontWeight: 700 }}>Add a bank account first (Settings → Accounts).</div>
+        {fixedAccountId ? <div data-testid="stmt-fixed-account" style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>{(banks.find(a => String(a.id) === String(fixedAccountId)) || {}).name || "This account"}</div>
+          : banks.length === 0 ? <div style={{ color: T.warn, fontSize: 13, fontWeight: 700 }}>Add a bank account first (Settings → Accounts).</div>
           : <select data-testid="stmt-account" value={accountId} onChange={e => { setAccountId(e.target.value); setState({ phase: "idle" }); }} style={{ width: "100%", minHeight: 44, borderRadius: 10, border: `1px solid ${T.border}`, background: T.input, color: T.text, padding: "0 10px", fontSize: 14 }}>
             <option value="">Choose the account this statement is for</option>
             {banks.map(a => <option key={a.id} value={String(a.id)}>{a.name}{a.last4 ? ` ····${a.last4}` : ""}</option>)}

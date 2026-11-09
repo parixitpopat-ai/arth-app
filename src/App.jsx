@@ -1587,6 +1587,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [lastVendorMerge, setLastVendorMerge] = useState(null);   // { to, count, undo } until undone or the next merge
   const [pettyCashDraft, setPettyCashDraft] = useState(null);   // { amount, date, personId } or { existing } while the "Petty cash" sheet is open   // { amount, date, personId } while the "Loan given" sheet is open
   const [showAccDetail, setShowAccDetail] = useState(null);
+  const [statementAccId, setStatementAccId] = useState("");   // set when Import statement is opened from a bank account's own page
   const [showWealthBreakdown, setShowWealthBreakdown] = useState(null);
   const [selectedInvestmentDetail, setSelectedInvestmentDetail] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -9325,6 +9326,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>Transactions</div>
             <div style={{ display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end" }}>
               <button onClick={()=>{ setShowAccDetail(null); setEditingAccount(a); }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>✏️ Edit account</button>
+              {a.type==="bank" && <button data-testid="acc-import-statement" onClick={()=>{ setShowAccDetail(null); setStatementAccId(String(a.id)); setShowSettings(true); setSettingsSection("importstatement"); }} style={{ background:T.pill,border:`1px solid ${T.border}`,color:T.text,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>🏦 Import statement</button>}
               {!(isInvestmentAccount(a) && a.type!=="cc") && <button onClick={()=>{ setShowAccDetail(null); setAddPrefill(a.type==="cc" ? { toAccId:a.id } : { accId:a.id }); setDefaultAddType(a.type==="cc"?"cc_payment":"expense"); setShowAdd(true); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>+ Add</button>}
             </div>
           </div>
@@ -15917,7 +15919,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               (per the Screen Inventory). Export exists via CSV, listed below under Backup. */}
           <Row icon="🙂" title="My Profile" subtitle={(people.find(p=>p.isMe)?.name)||"Set up your identity in Arth"} onClick={()=>setSettingsSection("myprofile")}/>
           <Row icon="🔑" title="Cloud Sync & Account" subtitle={cloudUser?.email ? `Signed in as ${cloudUser.email}${lastSyncedAt ? " · synced" : ""}` : "Sign in to sync across devices"} onClick={()=>setSettingsSection("cloudsync")}/>
-          <Row icon="🏦" title="Import bank statement" subtitle="CSV, Excel or PDF · review before anything is added" onClick={()=>setSettingsSection("importstatement")}/>
           <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
         </div>
 
@@ -20590,8 +20591,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="insights"&&<InsightsPage/>}
         {/* The invoice screen is rendered HERE, not inside Settings: Settings is re-created on every AppContent render, which would reset this screen (its review state, the success message, Undo) the moment the import saves. */}
         {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} itemCatalog={itemCatalog} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>{ setSettingsSection(null); setShowSettings(false); }} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }} onAddReceipt={prefill=>{ setAddPrefill(prefill); setShowAdd(true); }}/>}
-        {showSettings&&settingsSection==="importstatement"&&<StatementImportScreen accounts={accounts} txns={txns} genId={genId} T={T} sym={sym}
-          onBack={()=>{ setSettingsSection(null); setShowSettings(false); }}
+        {showSettings&&settingsSection==="importstatement"&&<StatementImportScreen accounts={accounts} txns={txns} genId={genId} T={T} sym={sym} fixedAccountId={statementAccId}
+          onBack={()=>{ setSettingsSection(null); setShowSettings(false); setStatementAccId(""); }}
           onImport={(made,{fileName})=>{ setTxns(prev=>[...made,...prev]); setToast({ message:`${made.length} transaction${made.length===1?"":"s"} imported from ${fileName}` }); }}
           onUndoBatch={batchId=>{ setTxns(prev=>prev.filter(t=>t.importBatchId!==batchId)); setToast({ message:"Import undone" }); }}/>}
         {showSettings&&settingsSection!=="importinvoice"&&settingsSection!=="importstatement"&&<Settings/>}

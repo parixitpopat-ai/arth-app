@@ -89,7 +89,7 @@ Request: "ABC Textile" / "ABC Textiles" are one company but two vendors (example
 
 ## 13. Bank statement import (CSV, Excel, text PDF)
 
-Settings → Import bank statement. Pick the bank account, pick a file, review, press Import. Reading creates nothing; the file is read on the device and never stored or uploaded.
+Open a bank account (Money → the account) → Import statement. The account is fixed; pick a file, review, press Import. Reading creates nothing; the file is read on the device and never stored or uploaded.
 
 - **Readers:** `domain/imports/csv.js`, `xlsx.js`, `statementPdf.js` (text layer only, via the existing pdf.js reader; scanned PDFs are refused with a reason), one entry point `readStatementFile.js` that detects the kind from the file's bytes.
 - **Direction comes from the balance column when it disagrees with the headings.** The sample layout shown (an IDFC First PDF found on the internet, not the owner's data) has amounts under "Credit" that LOWER the running balance. If reversing every sign makes the balance add up and the stated signs do not, the parser reverses them and says so (`balance.signsReversed`). Not verified against a real export; the preview always shows the balance check result.
