@@ -58,16 +58,20 @@ try {
   await T("stmt-balance-undo").click(); await page.waitForTimeout(500);
   const a2 = await acc0(), cp2 = (await page.evaluate(() => JSON.parse(localStorage.getItem("arth_checkpoints") || "{}"))).bank1;
   rec("S5c Undo puts the opening balance, its date and the (absent) current-balance note back exactly", a2.openingBalance === 10000 && a2.openingBalanceDate === "2026-01-01" && !cp2, { a2: [a2.openingBalance, a2.openingBalanceDate], cp2 });
+  rec("S5d the chai row shows my entry and a Merge button", (await T("stmt-match").count()) === 1 && /Chai Point/.test(await T("stmt-match").innerText()), {});
+  await T("stmt-merge").click(); await page.waitForTimeout(300);
+  rec("S5e after tapping Merge the button says Import 3 rows · merge 1", /Import 3 rows · merge 1/.test(await T("stmt-import").innerText()), await T("stmt-import").innerText());
   await T("stmt-import").click(); await page.waitForTimeout(700);
-  const tx = await ls("arth_txns"), imp = tx.filter(x => x.importKey);
-  rec("S6 3 transactions added, existing one untouched", imp.length === 3 && tx.length === 4 && tx.find(x => x.id === "m1").merchant === "Chai Point", imp.map(x => x.type));
+  const tx = await ls("arth_txns"), imp = tx.filter(x => x.importKey && !x.importMerged);
+  const m1 = tx.find(x => x.id === "m1");
+  rec("S6 3 transactions added; my chai entry was linked, not duplicated or changed (amount, merchant, category kept)", imp.length === 3 && tx.length === 4 && m1.importMerged === true && !!m1.importKey && m1.amount === 120 && m1.merchant === "Chai Point" && m1.catIds[0] === "food", imp.map(x => x.type));
   const exp = imp.find(x => x.type === "expense"), inc = imp.find(x => x.type === "income"), cc = imp.find(x => x.type === "cc_payment");
   rec("S7 expense 670.01 'Pax Inno' uncategorised; income 50000; card payment 2500 bank1->cc1", exp && exp.amount === 670.01 && exp.merchant === "Pax Inno" && exp.catIds.length === 0 && inc && inc.amount === 50000 && cc && cc.amount === 2500 && cc.fromAccId === "bank1" && cc.toAccId === "cc1", imp);
   rec("S8 done card shown with Undo", (await T("stmt-done").count()) === 1, {});
   // re-import the same file: nothing new
   await page.reload(); await page.waitForTimeout(1200); await open(); await load(csv);
   const st2 = await page.locator('[data-testid="stmt-row"]').evaluateAll(els => els.map(e => e.dataset.status));
-  rec("S9 importing the same file again: the 3 are 'imported before', Import is disabled", st2.filter(s => s === "already-imported").length === 3 && (await T("stmt-import").isDisabled()), st2);
+  rec("S9 importing the same file again: all 4 rows (3 created + 1 merged) are 'imported before', Import is disabled", st2.filter(s => s === "already-imported").length === 4 && (await T("stmt-import").isDisabled()), st2);
   // PDF with reversed-looking? (credit col holds a debit-looking amount) -> balance column decides
   await T("stmt-file").setInputFiles(pdf); await page.waitForTimeout(1800);
   body = await text();
@@ -79,7 +83,7 @@ try {
   page.once("dialog", d => d.accept());
   await T("stmt-undo-batch").click(); await page.waitForTimeout(600);
   const after = await ls("arth_txns");
-  rec("S13 Undo removes exactly the imported 3 and leaves the manual entry", after.length === 1 && after[0].id === "m1", after.length);
+  rec("S13 Undo removes the 3 created entries and un-links the merged one: my entry is back exactly as it was", after.length === 1 && after[0].id === "m1" && !after[0].importKey && !after[0].importMerged && after[0].amount === 120, after);
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 600)); }
 await browser.close(); try { process.kill(-server.pid); } catch {}

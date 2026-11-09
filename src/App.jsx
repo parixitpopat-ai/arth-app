@@ -208,6 +208,7 @@ import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import InvoiceImportScreen from "./screens/InvoiceImportScreen";
 import StatementImportScreen from "./screens/StatementImportScreen";
 import { applyBalanceMatch, undoBalanceMatch } from "./domain/imports/statementBalances";
+import { applyMerges, undoImportBatch } from "./domain/imports/buildImport";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import { validateFill, normalizeFill } from "./domain/vehicles/fuelFills";
 import { planUndo as planInvoiceUndo } from "./domain/invoices/invoiceImport";
@@ -20599,8 +20600,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           onMatchBalance={(accId,plan)=>{ const acc=accounts.find(a=>String(a.id)===String(accId)); if(!acc) return null; const out=applyBalanceMatch(acc,balanceCheckpoints[accId]||null,plan); setAccounts(prev=>prev.map(a=>String(a.id)===String(accId)?out.account:a)); setBalanceCheckpoints(p=>({...p,[accId]:out.checkpoint})); setToast({ message:"Balances set to match the statement" }); return out.undo; }}
           onUndoBalance={(accId,undo)=>{ const acc=accounts.find(a=>String(a.id)===String(accId)); if(!acc) return; const back=undoBalanceMatch(acc,undo); setAccounts(prev=>prev.map(a=>String(a.id)===String(accId)?back.account:a)); setBalanceCheckpoints(p=>{ const n={...p}; if(back.checkpoint) n[accId]=back.checkpoint; else delete n[accId]; return n; }); setToast({ message:"Balances put back" }); }}
           onBack={()=>{ setSettingsSection(null); setShowSettings(false); setStatementAccId(""); }}
-          onImport={(made,{fileName})=>{ setTxns(prev=>[...made,...prev]); setToast({ message:`${made.length} transaction${made.length===1?"":"s"} imported from ${fileName}` }); }}
-          onUndoBatch={batchId=>{ setTxns(prev=>prev.filter(t=>t.importBatchId!==batchId)); setToast({ message:"Import undone" }); }}/>}
+          onImport={(made,{fileName,batchId,merges})=>{ setTxns(prev=>[...made,...applyMerges(prev,merges||[],{batchId})]); setToast({ message:`${made.length} transaction${made.length===1?"":"s"} imported from ${fileName}${(merges||[]).length?`, ${(merges||[]).length} merged`:""}` }); }}
+          onUndoBatch={batchId=>{ setTxns(prev=>undoImportBatch(prev,batchId)); setToast({ message:"Import undone" }); }}/>}
         {showSettings&&settingsSection!=="importinvoice"&&settingsSection!=="importstatement"&&<Settings/>}
 
       {/* Universal Search Overlay */}

@@ -16,7 +16,8 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const cards = accounts.filter(a => a.type === "cc");
   const [accountId, setAccountId] = useState(fixedAccountId || (banks.length === 1 ? String(banks[0].id) : ""));
   const [state, setState] = useState({ phase: "idle" });          // idle | reading | result | done
-  const [ticked, setTicked] = useState({});                       // importKey -> bool
+  const [ticked, setTicked] = useState({});                       // importKey -> bool (add as a new transaction)
+  const [merged, setMerged] = useState({});                       // importKey -> bool (link to the entry it looks like; adds nothing)
   const [sb, setSb] = useState(null);                         // what the last file says the balance was at its start and end
   const [balUndo, setBalUndo] = useState(null);                // set after "Match", used by its Undo
   const keys = useMemo(() => importedKeysOf(txns), [txns]);
@@ -30,7 +31,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
     const keyed = withImportKeys(parsed.rows, accId);
     const m = matchStatement(keyed, { transactions: txns, accountId: accId, importedKeys: keys });
     const start = {}; m.results.forEach(r => { start[r.row.importKey] = r.status === "new"; });
-    setTicked(start);
+    setTicked(start); setMerged({});
     return m;
   };
 
@@ -50,11 +51,13 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
 
   const chosen = state.phase === "result" ? state.match.results.filter(r => ticked[r.row.importKey] && r.status !== "already-imported") : [];
   const net = chosen.reduce((s, r) => s + r.row.amountPaise, 0);
+  const txnById = id => txns.find(t => String(t.id) === String(id));
+  const merges = state.phase === "result" ? state.match.results.filter(r => r.status === "probable-match" && merged[r.row.importKey] && !ticked[r.row.importKey] && txnById(r.matchId) && !txnById(r.matchId).importKey).map(r => ({ txnId: r.matchId, row: r.row })) : [];
   const doImport = () => {
     const batchId = genId();
     const made = buildImportTxns(chosen, { accountId: state.accountId, batchId, cards, newId: genId });
-    onImport(made, { batchId, fileName: state.fileName });
-    setState({ phase: "done", count: made.length, batchId, cardBills: made.filter(t => t.type === "cc_payment").length, unmatched: made.filter(t => t.cardBillUnmatched).length });
+    onImport(made, { batchId, fileName: state.fileName, merges });
+    setState({ phase: "done", count: made.length, mergedCount: merges.length, batchId, cardBills: made.filter(t => t.type === "cc_payment").length, unmatched: made.filter(t => t.cardBillUnmatched).length });
   };
 
   const batches = useMemo(() => {
@@ -123,22 +126,35 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
 
         {balanceCard()}
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-          <button style={btn(false)} onClick={() => setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, r.status === "new"])))}>Only new</button>
-          <button style={btn(false)} onClick={() => setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, r.status !== "already-imported"])))}>All</button>
-          <button style={btn(false)} onClick={() => setTicked({})}>None</button>
+          <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, r.status === "new"]))); }}>Only new</button>
+          <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, r.status !== "already-imported"]))); }}>All</button>
+          <button style={btn(false)} onClick={() => { setMerged({}); setTicked({}); }}>None</button>
         </div>
 
         <div data-testid="stmt-rows">
-          {state.match.results.map(({ row, status }) => {
+          {state.match.results.map(({ row, status, matchId }) => {
             const out = row.amountPaise < 0, bill = out && looksLikeCardBill(row.desc), cardHit = bill ? findCardByText(row.desc, cards) : null;
             return (
               <label key={row.importKey} data-testid="stmt-row" data-status={status} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 4px", borderBottom: `1px solid ${T.border}`, opacity: status === "already-imported" ? 0.5 : 1 }}>
-                <input type="checkbox" checked={Boolean(ticked[row.importKey]) && status !== "already-imported"} disabled={status === "already-imported"} onChange={e => setTicked(t => ({ ...t, [row.importKey]: e.target.checked }))} style={{ marginTop: 3, width: 20, height: 20 }} />
+                <input type="checkbox" checked={Boolean(ticked[row.importKey]) && status !== "already-imported"} disabled={status === "already-imported"} onChange={e => { setTicked(t => ({ ...t, [row.importKey]: e.target.checked })); if (e.target.checked) setMerged(m => ({ ...m, [row.importKey]: false })); }} style={{ marginTop: 3, width: 20, height: 20 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: T.text, fontSize: 13, fontWeight: 700, wordBreak: "break-word" }}>{row.desc || "(no description)"}</div>
                   <div style={{ color: T.sub, fontSize: 11, marginTop: 2 }}>{niceDate(row.date)}
                     {status === "probable-match" && " · looks like an entry already in Arth"}{status === "already-imported" && " · imported before"}
                     {bill && (cardHit ? ` · card bill payment → ${cardHit.name}` : " · looks like a card bill payment, but no card matched: it will be an expense")}</div>
+                  {status === "probable-match" && (() => {
+                    const mine = txnById(matchId); if (!mine) return null;
+                    const linked = Boolean(mine.importKey);
+                    return (
+                      <div data-testid="stmt-match" style={{ marginTop: 6, background: T.pill, borderRadius: 10, padding: "6px 8px", fontSize: 11, color: T.sub }}>
+                        <div>Your entry: <b style={{ color: T.text }}>{mine.desc || mine.merchant || mine.type}</b> · {niceDate(mine.date)} · {sym}{Number(mine.amount).toLocaleString("en-IN")}</div>
+                        {linked ? <div>Already linked to a statement row.</div>
+                          : <button type="button" data-testid="stmt-merge" onClick={e => { e.preventDefault(); const on = !merged[row.importKey]; setMerged(m => ({ ...m, [row.importKey]: on })); if (on) setTicked(t => ({ ...t, [row.importKey]: false })); }}
+                              style={{ marginTop: 6, border: `1px solid ${merged[row.importKey] ? T.accent : T.border}`, background: merged[row.importKey] ? T.accent + "22" : "none", color: merged[row.importKey] ? T.accent : T.text, borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>
+                              {merged[row.importKey] ? "✓ Will merge into my entry" : "Merge into my entry"}</button>}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div style={{ color: out ? T.text : T.accent, fontSize: 14, fontWeight: 800, whiteSpace: "nowrap" }}>{out ? "−" : "+"}{fmt(row.amountPaise, sym)}</div>
               </label>
@@ -149,12 +165,12 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
 
         <div style={{ position: "sticky", bottom: 0, background: T.bg, paddingTop: 12 }}>
           {chosen.length > 0 && <div data-testid="stmt-effect" style={{ color: T.sub, fontSize: 12, marginBottom: 8, lineHeight: 1.45 }}>These rows will change this account's balance in Arth by {net < 0 ? "−" : "+"}{fmt(net, sym)}. If the account's starting balance in Arth already includes these dates, adjust it afterwards. Imported expenses have no category yet; they will appear under "Needs details".</div>}
-          <button data-testid="stmt-import" style={{ ...btn(true, chosen.length === 0), width: "100%" }} disabled={chosen.length === 0} onClick={doImport}>Import {chosen.length} row{chosen.length === 1 ? "" : "s"}</button>
+          <button data-testid="stmt-import" style={{ ...btn(true, chosen.length + merges.length === 0), width: "100%" }} disabled={chosen.length + merges.length === 0} onClick={doImport}>Import {chosen.length} row{chosen.length === 1 ? "" : "s"}{merges.length > 0 ? ` · merge ${merges.length}` : ""}</button>
         </div>
       </>}
 
       {state.phase === "done" && <div style={card} data-testid="stmt-done">
-        <div style={{ color: T.text, fontSize: 16, fontWeight: 900 }}>Imported {state.count} transaction{state.count === 1 ? "" : "s"}</div>
+        <div style={{ color: T.text, fontSize: 16, fontWeight: 900 }}>Imported {state.count} transaction{state.count === 1 ? "" : "s"}{state.mergedCount > 0 ? ` · merged ${state.mergedCount} into entries you already had` : ""}</div>
         {state.cardBills > 0 && <div style={{ color: T.sub, fontSize: 13, marginTop: 6 }}>{state.cardBills} card bill payment{state.cardBills === 1 ? " was" : "s were"} added as card payments, not spending.</div>}
         {state.unmatched > 0 && <div style={{ color: T.warn, fontSize: 13, marginTop: 6 }}>{state.unmatched} looked like card bill payments but no card matched; they were added as expenses. Open them and choose "Card bill payment" if so.</div>}
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
@@ -169,7 +185,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
         <div style={label}>Earlier imports</div>
         {batches.map(b => <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
           <div style={{ flex: 1, color: T.text, fontSize: 13 }}>{b.n} transaction{b.n === 1 ? "" : "s"} · {niceDate(b.from)} to {niceDate(b.to)}</div>
-          <button data-testid="stmt-undo-batch" style={{ ...btn(false), padding: "6px 10px", fontSize: 12 }} onClick={() => { if (window.confirm(`Remove these ${b.n} imported transactions? Entries you added by hand are not touched.`)) onUndoBatch(b.id); }}>Undo</button>
+          <button data-testid="stmt-undo-batch" style={{ ...btn(false), padding: "6px 10px", fontSize: 12 }} onClick={() => { if (window.confirm(`Undo this import? Entries it created are removed; entries it was merged into go back exactly as they were. Anything else you added by hand is not touched.`)) onUndoBatch(b.id); }}>Undo</button>
         </div>)}
       </div>}
     </div>
