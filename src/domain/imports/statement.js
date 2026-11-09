@@ -9,7 +9,7 @@ const ALIASES = {
   date: ["transaction date", "transaction date & time", "transaction date and time", "txn date", "tran date", "date", "posting date"],
   valueDate: ["value date", "value dt"],
   desc: ["particulars", "narration", "description", "transaction remarks", "remarks", "details", "transaction details"],
-  ref: ["cheque no", "cheque no.", "chq no", "chq/ref no", "cheque/ref no", "ref no", "reference no", "reference", "utr", "transaction id"],
+  ref: ["cheque no", "cheque no.", "cheque number", "chq number", "cheque/ref number", "chq no", "chq/ref no", "cheque/ref no", "ref no", "reference no", "reference", "utr", "transaction id"],
   debit: ["debit", "withdrawal", "withdrawals", "withdrawal amt", "withdrawal amount", "debit amount", "dr"],
   credit: ["credit", "deposit", "deposits", "deposit amt", "deposit amount", "credit amount", "cr"],
   amount: ["amount"],

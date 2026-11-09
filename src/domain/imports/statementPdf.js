@@ -37,9 +37,33 @@ function mergeHeading(cells) {
   return out;
 }
 const isHeading = cells => {
-  const k = mergeHeading(cells).map(c => lc(c.str)).join("|");
+  if (cells.length < 4) return false;
+  const k = cells.map(c => lc(c.str)).join("|");
   return /date/.test(k) && /(debit|withdraw|amount)/.test(k) && /(credit|deposit|balance|amount)/.test(k);
 };
+
+/** Headings printed over two or three lines ("Transaction" above "Date", "Withdrawal" above "Amount (INR)"): join items that sit above one another. */
+function clusterHeading(lineGroup) {
+  const items = lineGroup.flatMap(l => l.cells.flatMap(splitRun)).sort((a, b) => b.y - a.y);
+  const cl = [];
+  for (const it of items) {
+    const hit = cl.find(c => !c.members.some(m => Math.abs(m.y - it.y) <= Y_TOL) && Math.abs(cx(it) - c.cx) <= Math.max(it.w || 0, c.w) / 2 + 2);
+    if (hit) { hit.members.push(it); hit.str += " " + it.str; const x2 = Math.max(hit.x + hit.w, it.x + (it.w || 0)); hit.x = Math.min(hit.x, it.x); hit.w = x2 - hit.x; hit.cx = hit.x + hit.w / 2; }
+    else cl.push({ members: [it], str: it.str, x: it.x, w: it.w || 0, cx: cx(it), _split: Boolean(it._split) });
+  }
+  return cl.sort((a, b) => a.x - b.x).map(({ str, x, w, _split }) => ({ str, x, w, _split }));
+}
+const HEADWORD = /date|debit|withdraw|credit|deposit|balance|particulars|narration/i;
+/** Does a heading start at lines[i]? Tries it alone, then joined with the next one or two lines (each at most CONT_GAP below the last). */
+function headingAt(lines, i) {
+  if (!HEADWORD.test(lines[i].cells.map(c => c.str).join(" "))) return null;
+  for (let k = 0; k < 3 && i + k < lines.length; k++) {
+    if (k > 0 && lines[i + k - 1].y - lines[i + k].y > CONT_GAP) break;
+    const cells = k === 0 ? mergeHeading(lines[i].cells) : clusterHeading(lines.slice(i, i + k + 1));
+    if (isHeading(cells)) return { cells, span: k + 1 };
+  }
+  return null;
+}
 
 /** @param {Array<{number:number, items:Array<{str,x,y,w}>}>} pages @returns {{ok:boolean, reason?:string, rows:Array<Array<string>>}} */
 export function pdfPagesToRows(pages) {
@@ -50,10 +74,13 @@ export function pdfPagesToRows(pages) {
   const out = [];
   for (const pg of pages) {
     const lines = groupLines(pg.items || []);
-    let prevY = null, prevRow = null;
-    for (const ln of lines) {
-      if (isHeading(ln.cells)) {
-        const hc = mergeHeading(ln.cells);
+    let prevY = null, prevRow = null, skip = 0;
+    for (let li = 0; li < lines.length; li++) {
+      const ln = lines[li];
+      if (skip > 0) { skip--; continue; }
+      const found = headingAt(lines, li);
+      if (found) {
+        const hc = found.cells; skip = found.span - 1;
         if (!head) { head = hc; headTexts = hc.map(c => c.str); numeric = head.map((c, i) => [i, c]).filter(([, c]) => /(debit|withdraw|credit|deposit|amount|balance)/i.test(c.str)); out.push(headTexts); }
         prevY = null; prevRow = null; continue;
       }

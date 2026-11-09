@@ -40,3 +40,31 @@ test("pdf statement: a PDF with no text and one with no table are refused with r
   const r = pdfPagesToRows(lay.pages);
   assert.equal(r.ok, false); assert.match(r.reason, /headings/);
 });
+
+// Layout shaped like a common savings-account PDF: a serial-number column, headings printed over two lines, dotted dates, remarks over several lines.
+test("pdf statement: two-line headings, S No. column, dotted dates, multi-line remarks", async () => {
+  const hx = { sno: 30, date: 70, chq: 140, rem: 215, wd: 400, dep: 460, bal: 520 };
+  const c = (str, x, y, w) => ({ str, x, y, size: 8, _w: w });
+  const head = [c("S No.", hx.sno, 780), c("Transaction", hx.date, 790), c("Date", hx.date + 13, 778), c("Cheque Number", hx.chq, 780), c("Transaction Remarks", hx.rem + 40, 780),
+    c("Withdrawal", hx.wd, 790), c("Amount (INR)", hx.wd - 3, 778), c("Deposit", hx.dep + 3, 790), c("Amount (INR)", hx.dep - 3, 778), c("Balance", hx.bal + 8, 790), c("(INR)", hx.bal + 12, 778)];
+  const num = (str, rightX, y) => ({ str, x: rightX - str.length * 4.4, y, size: 8 });
+  const r1 = [{ str: "1", x: hx.sno + 4, y: 750, size: 8 }, { str: "02.04.2026", x: hx.date, y: 750, size: 8 }, { str: "UPI/SHOP ONE/412345678901/", x: hx.rem, y: 750, size: 8 },
+    { str: "Payment from Ph", x: hx.rem, y: 740, size: 8 }, { str: "INV 77", x: hx.rem, y: 730, size: 8 }, num("100.00", hx.wd + 40, 750), num("900.00", hx.bal + 50, 750)];
+  const r2 = [{ str: "2", x: hx.sno + 4, y: 710, size: 8 }, { str: "03.04.2026", x: hx.date, y: 710, size: 8 }, { str: "NEFT-SALARY", x: hx.rem, y: 710, size: 8 }, num("500.00", hx.dep + 40, 710), num("1,400.00", hx.bal + 50, 710)];
+  const lay = await readPdfLayout(makePdf([{ texts: [...head, ...r1, ...r2] }]));
+  const t = pdfPagesToRows(lay.pages);
+  assert.equal(t.ok, true, t.reason);
+  assert.equal(t.rows.length, 3);
+  assert.match(t.rows[1].join(" "), /UPI\/SHOP ONE\/412345678901\/ Payment from Ph INV 77/);
+  const s = parseStatementRows(t.rows);
+  assert.equal(s.ok, true);
+  assert.deepEqual(s.rows.map(r => [r.date, r.amountPaise, r.balancePaise]), [["2026-04-02", -10000, 90000], ["2026-04-03", 50000, 140000]]);
+  assert.equal(s.balance.mismatches.length, 0);
+});
+
+test("csv/excel headings as printed on such statements are recognised (Withdrawal Amount (INR), Deposit Amount (INR), Balance (INR), Cheque Number, Transaction Remarks)", () => {
+  const s = parseStatementRows([["S No.", "Value Date", "Transaction Date", "Cheque Number", "Transaction Remarks", "Withdrawal Amount (INR)", "Deposit Amount (INR)", "Balance (INR)"],
+    ["1", "02.04.2026", "02.04.2026", "", "UPI/X", "100.00", "", "900.00"], ["2", "03.04.2026", "03.04.2026", "123456", "NEFT", "", "500.00", "1400.00"]]);
+  assert.equal(s.ok, true);
+  assert.deepEqual(s.rows.map(r => [r.amountPaise, r.ref]), [[-10000, ""], [50000, "123456"]]);
+});
