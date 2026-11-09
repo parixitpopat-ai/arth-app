@@ -26,8 +26,8 @@ const bad = join(dir, "x.csv"); writeFileSync(bad, "hello,world\n1,2\n");
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: "Asia/Kolkata" });
 await ctx.addInitScript(() => { if (localStorage.getItem("__init")) return; localStorage.setItem("__init", "1"); const set = (k, v) => localStorage.setItem(k, JSON.stringify(v));
-  set("arth_accounts", [{ id: "bank1", name: "Test Savings", type: "bank", openingBalance: 10000, openingBalanceDate: "2026-01-01", last4: "9001" }, { id: "cc1", name: "Test ICICI Card", type: "cc", last4: "8004", creditLimit: 100000 }]);
-  set("arth_txns", [{ id: "m1", type: "expense", merchant: "Chai Point", desc: "Chai Point", amount: 120, date: "2026-04-03", accId: "bank1", catId: "food", catIds: ["food"] }]);
+  set("arth_accounts", [{ id: "bank1", name: "Test Savings", type: "bank", openingBalance: 10000, openingBalanceDate: "2026-01-01", last4: "9001" }, { id: "cc1", name: "Test ICICI Card", type: "cc", last4: "8004", creditLimit: 100000 }, { id: "upi1", name: "Test UPI", type: "upi", handle: "test@upi", linkedAccount: "bank1" }]);
+  set("arth_txns", [{ id: "m1", type: "expense", merchant: "Chai Point", desc: "Chai Point", amount: 120, date: "2026-04-03", accId: "upi1", catId: "food", catIds: ["food"] }]);
   localStorage.setItem("arth_master_user_setup_complete", "true"); });
 const page = await ctx.newPage(); const errors = []; page.on("pageerror", e => errors.push(String(e)));
 const T = id => page.getByTestId(id);
@@ -46,7 +46,7 @@ try {
   let body = await text();
   rec("S2 preview shows 4 rows, period, balance check passes", (await T("stmt-row").count()) === 4 && /01-04-2026 to 04-04-2026/.test(body) && (await T("stmt-balance-ok").count()) === 1, body.slice(0, 200));
   const st = await page.locator('[data-testid="stmt-row"]').evaluateAll(els => els.map(e => e.dataset.status));
-  rec("S3 the chai row is a probable match to the manual entry (3 new, 1 probable)", st.join() === "new,new,new,probable-match", st);
+  rec("S3 the chai row is a probable match to the manual entry that was paid through the linked UPI handle (3 new, 1 probable)", st.join() === "new,new,new,probable-match", st);
   rec("S4 the card-bill row says it goes to the card; nothing is imported yet", /card bill payment → Test ICICI Card/.test(body) && (await ls("arth_txns")).length === 1, {});
   rec("S5 button says Import 3 rows", /Import 3 rows/.test(await T("stmt-import").innerText()), {});
   // balances: set opening to the statement's first balance, current to its last; undo restores

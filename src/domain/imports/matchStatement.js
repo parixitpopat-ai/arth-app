@@ -10,24 +10,31 @@ const dayNum = iso => Math.round(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1
 const paise = n => Math.round(Number(n) * 100);
 
 /** Existing transactions that touch accountId, as { id, date, amountPaise (credit +, debit −), ref } for comparison. */
-export function accountMovements(transactions, accountId) {
+export function accountMovements(transactions, accountId, linkedIds = []) {
+  // A UPI handle or debit card linked to this bank is only a rail: spending through it moves this account's money, so entries recorded against the
+  // rail count as this account's. A part-paid expense (paymentLines) counts only the slice paid from this account.
+  const mine = id => id != null && (String(id) === String(accountId) || (linkedIds || []).some(l => String(l) === String(id)));
   const out = [];
   for (const t of Array.isArray(transactions) ? transactions : []) {
     if (!t || !t.date || !Number.isFinite(Number(t.amount))) continue;
-    const a = paise(t.amount);
-    if (t.type === "expense" && String(t.accId) === String(accountId)) out.push({ id: t.id, date: t.date, amountPaise: -a, ref: t.transactionRef || "" });
-    else if (t.type === "income" && String(t.accId) === String(accountId)) out.push({ id: t.id, date: t.date, amountPaise: a, ref: t.transactionRef || "" });
+    let a = paise(t.amount);
+    if (t.type === "expense" && Array.isArray(t.paymentLines) && t.paymentLines.length > 1) {
+      const slice = t.paymentLines.filter(l => mine(l && l.accId)).reduce((sum, l) => sum + paise(l.amount), 0);
+      if (slice > 0 && slice < a) { out.push({ id: t.id, date: t.date, amountPaise: -slice, ref: t.transactionRef || "" }); continue; }
+    }
+    if (t.type === "expense" && mine(t.accId)) out.push({ id: t.id, date: t.date, amountPaise: -a, ref: t.transactionRef || "" });
+    else if (t.type === "income" && mine(t.accId)) out.push({ id: t.id, date: t.date, amountPaise: a, ref: t.transactionRef || "" });
     else if (t.type === "transfer" || t.type === "cc_payment") {
-      if (String(t.fromAccId) === String(accountId)) out.push({ id: t.id, date: t.date, amountPaise: -a, ref: t.transactionRef || "" });
-      if (String(t.toAccId) === String(accountId)) out.push({ id: t.id, date: t.date, amountPaise: a, ref: t.transactionRef || "" });
+      if (mine(t.fromAccId)) out.push({ id: t.id, date: t.date, amountPaise: -a, ref: t.transactionRef || "" });
+      if (mine(t.toAccId)) out.push({ id: t.id, date: t.date, amountPaise: a, ref: t.transactionRef || "" });
     }
   }
   return out;
 }
 
 /** @param keyedRows rows from withImportKeys @param {{transactions:Array, accountId:string, importedKeys:Iterable<string>}} ctx */
-export function matchStatement(keyedRows, { transactions, accountId, importedKeys }) {
-  const imported = new Set(importedKeys || []), claimed = new Set(), moves = accountMovements(transactions, accountId);
+export function matchStatement(keyedRows, { transactions, accountId, importedKeys, linkedIds }) {
+  const imported = new Set(importedKeys || []), claimed = new Set(), moves = accountMovements(transactions, accountId, linkedIds);
   const results = keyedRows.map(row => {
     if (imported.has(row.importKey)) return { row, status: "already-imported" };
     const cands = moves.filter(m => !claimed.has(m.id + "|" + m.amountPaise) && m.amountPaise === row.amountPaise && Math.abs(dayNum(m.date) - dayNum(row.date)) <= DAY_WINDOW)

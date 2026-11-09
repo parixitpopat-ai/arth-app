@@ -100,6 +100,11 @@ try {
     await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(300);
     rec("P3 second tap clears it", (await T("paid-by-note").count()) === 0, {});
     await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(300);
+    await page.getByPlaceholder(/Vendor \/ Person/).fill("Vegetable seller"); await page.waitForTimeout(300);
+    await page.locator("button:visible", { hasText: /Save|Add|Record/ }).last().click();
+    await page.waitForTimeout(900);
+    const allT = await ls("arth_txns"); const saved = allT.find(t => t.amount === 900);
+    rec("P4 P alone (no A, O or C chosen) saves: paid by her, none of my accounts used, no owe/attribution recorded for her row", saved && saved.paidByPersonId === "p_sp" && !saved.accId && !Object.keys(saved.people || {}).some(k => k === "p_sp" && saved.people[k] && saved.people[k].mode), saved ? { paidBy: saved.paidByPersonId, accId: saved.accId, people: saved.people } : "not saved");
   }
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 500)); }

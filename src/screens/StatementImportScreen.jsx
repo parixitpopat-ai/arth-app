@@ -4,6 +4,7 @@
 import { useMemo, useRef, useState } from "react";
 import { withImportKeys } from "../domain/imports/statement.js";
 import { matchStatement } from "../domain/imports/matchStatement.js";
+import { getLinkedMethodIds } from "../domain/accounts/accountBalance.js";
 import { statementBalances, planBalanceMatch } from "../domain/imports/statementBalances.js";
 import { buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
 
@@ -29,7 +30,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
 
   const analyse = (parsed, accId) => {
     const keyed = withImportKeys(parsed.rows, accId);
-    const m = matchStatement(keyed, { transactions: txns, accountId: accId, importedKeys: keys });
+    const m = matchStatement(keyed, { transactions: txns, accountId: accId, importedKeys: keys, linkedIds: getLinkedMethodIds(accId, accounts) });
     const start = {}; m.results.forEach(r => { start[r.row.importKey] = r.status === "new"; });
     setTicked(start); setMerged({});
     return m;

@@ -166,3 +166,16 @@ test("statement: debit/credit labels reversed relative to the running balance ar
   assert.deepEqual(p.rows.map(r => r.amountPaise), [-10000, 5000, -3050]);
   assert.equal(p.balance.mismatches.length, 0);
 });
+
+test("match: entries recorded against a UPI handle / debit card linked to the bank count as the bank's; a part-paid expense counts only its slice", () => {
+  const rows = withImportKeys([{ date: "2026-04-02", desc: "UPI/SHOP", ref: "", amountPaise: -12000 }, { date: "2026-04-03", desc: "FEES", ref: "", amountPaise: -50000 }, { date: "2026-04-04", desc: "OTHER", ref: "", amountPaise: -7700 }], "bank1");
+  const txns = [
+    { id: "u1", type: "expense", amount: 120, date: "2026-04-02", accId: "upi1" },                                   // paid through the linked UPI handle
+    { id: "p1", type: "expense", amount: 800, date: "2026-04-03", accId: "cc1", paymentLines: [{ accId: "bank1", amount: 500 }, { accId: "cc1", amount: 300 }] },
+    { id: "x1", type: "expense", amount: 77, date: "2026-04-04", accId: "upi-other" },                               // a UPI handle linked to another bank
+  ];
+  const without = matchStatement(rows, { transactions: txns, accountId: "bank1", importedKeys: [] });
+  assert.deepEqual(without.results.map(r => r.status), ["new", "probable-match", "new"]);        // only the part-paid slice matches without the link list
+  const withRail = matchStatement(rows, { transactions: txns, accountId: "bank1", importedKeys: [], linkedIds: ["upi1"] });
+  assert.deepEqual(withRail.results.map(r => [r.status, r.matchId]), [["probable-match", "u1"], ["probable-match", "p1"], ["new", undefined]]);
+});

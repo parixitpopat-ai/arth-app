@@ -5337,7 +5337,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       // UI-2C D-4: a person whose default is "Ask each time" joins a split row with no mode
       // chosen. Ask before saving instead of picking one silently.
       if(txnType==="expense" && (splitMode==="allocate" || splitMode==="unified")){
-        const unchosen = getRowsNeedingSplitChoice(allocRows);
+        // a person marked P (paid from their petty cash) is the payer, not someone the spend is split with: no A / O / C is needed for them
+        const unchosen = getRowsNeedingSplitChoice(allocRows.filter(r=>!(paidByPersonId && r.targetType==="person" && String(r.targetId)===String(paidByPersonId) && !r.mode)));
         if(unchosen.length){ setRefDupWarning(`Choose A (I pay), O (I owe) or C (they owe) for ${unchosen.map(r=>getPerson(r.targetId).name).join(", ")}.`); return; }
       }
       if(txnType==="expense" && billLinkMismatch){ setRefDupWarning(`This payment is ${sym}${fmt(billLinkMismatch.paymentAmount)} but the bill's balance is ${sym}${fmt(billLinkMismatch.billAmount)}. Change the amount or the bill before saving.`); return; }
@@ -5573,6 +5574,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         if(splitMode==="allocate" || splitMode==="unified"){
           allocRows.forEach(row=>{
             if(!row.targetId) return;
+            if(paidByPersonId && row.targetType==="person" && String(row.targetId)===String(paidByPersonId) && !row.mode) return;   // the P payer with no A/O/C: nothing to split
             const rowAmt = row.items?.length
               ? (chargeShares.rows[row.id]?.totalPaise||0)/100
               : parseFloat(row.amount)||0;
