@@ -33,10 +33,16 @@ try {
   const st = await page.locator('[data-testid="stmt-row"]').evaluateAll(els => els.map(e => e.dataset.status));
   rec("U1 the Swiggy row (same UPI reference, 19 days apart) is a match; the other two are new", st.join() === "probable-match,new,new", st);
   rec("U2 it says 'same UPI reference as an entry already in Arth'", /same UPI reference as an entry already in Arth/.test(await text()), {});
+  rec("U1b 'Merge all matches in one go' is offered (1 match), and pressing it turns on the merge and shows it in the Import button", /Merge all 1 match in one go/.test(await T("stmt-merge-all").innerText()), await T("stmt-merge-all").innerText());
+  await T("stmt-merge-all").click(); await page.waitForTimeout(300);
+  rec("U1c after it: 'All 1 matches will merge', the button reads Import 2 rows · merge 1, tapping again clears it", /All 1 matches will merge/.test(await T("stmt-merge-all").innerText()) && /Import 2 rows · merge 1/.test(await T("stmt-import").innerText()), await T("stmt-import").innerText());
+  await T("stmt-merge-all").click(); await page.waitForTimeout(300);
+  rec("U1d tapping it again clears the merge (Import 2 rows, no merge)", /^Import 2 rows$/.test((await T("stmt-import").innerText()).trim()), await T("stmt-import").innerText());
+  await T("stmt-merge-all").click(); await page.waitForTimeout(300);
   await T("stmt-import").click(); await page.waitForTimeout(700);
   const tx = await ls("arth_txns"), other = tx.find(t => t.importKey && /OTHER/.test(t.bankNarration || "")), cash = tx.find(t => t.importKey && /BHIMCASHBACK/.test(t.bankNarration || ""));
   rec("U3 imported: the other shop's UTR is stored as its reference with vendor 'Other Shop'; the cashback credit is income 12.00, reference 104354172499, readable description", other && other.transactionRef === "999999999999" && other.paymentMethod === "UPI" && other.merchant === "Other Shop" && cash && cash.type === "income" && cash.amount === 12 && cash.transactionRef === "104354172499" && cash.desc === "NPCI BHI · BHIMCASHBACK", { other: other && [other.transactionRef, other.merchant], cash: cash && [cash.type, cash.transactionRef, cash.desc] });
-  rec("U4 the existing Swiggy entry was not duplicated (3 entries: it + 2 imported)", tx.length === 3, tx.length);
+  rec("U4 the existing Swiggy entry was not duplicated (3 entries: it + 2 imported) and it was linked (merged)", tx.length === 3 && tx.find(t => t.id === "m1").importMerged === true, tx.length);
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 500)); }
 await browser.close(); try { process.kill(-server.pid); } catch {}

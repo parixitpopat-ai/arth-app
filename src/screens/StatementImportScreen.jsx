@@ -230,6 +230,21 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
           <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, canAdd(r)]))); }}>Everything (even matches)</button>
           <button style={btn(false)} onClick={() => { setMerged({}); setTicked({}); }}>None</button>
         </div>
+        {(() => {
+          const mergeable = state.match.results.filter(r => r.status === "probable-match" && txnById(r.matchId) && canTakeAnotherLink(txnById(r.matchId)));
+          if (!mergeable.length) return null;
+          const all = mergeable.every(r => merged[r.row.importKey]);
+          return (
+            <div style={{ marginBottom: 10 }}>
+              <button data-testid="stmt-merge-all" style={{ ...btn(!all), width: "100%" }} onClick={() => {
+                if (all) { setMerged({}); return; }
+                setMerged(Object.fromEntries(mergeable.map(r => [r.row.importKey, true])));
+                setTicked(t => ({ ...t, ...Object.fromEntries(mergeable.map(r => [r.row.importKey, false])) }));
+              }}>{all ? `✓ All ${mergeable.length} matches will merge (tap to clear)` : `Merge all ${mergeable.length} match${mergeable.length === 1 ? "" : "es"} in one go`}</button>
+              <div style={{ color: T.sub, fontSize: 11, marginTop: 4, lineHeight: 1.4 }}>Merging adds nothing new: each of your entries is only linked to its statement row and stays as it is. Look through the matches first; tap a row's button to leave one out.</div>
+            </div>
+          );
+        })()}
 
         <div data-testid="stmt-rows">
           {state.match.results.map(({ row, status, matchId, byUtr, otherAccount }) => {
