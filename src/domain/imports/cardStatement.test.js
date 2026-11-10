@@ -66,3 +66,16 @@ test("extractCardSummary: nothing found -> empty object (no guesses)", () => {
   assert.deepEqual(extractCardSummary([{ items: [t("hello", 10, 10)] }]), {});
   assert.deepEqual(extractCardSummary([]), {});
 });
+
+// Reproduces the real failure: the SerNo values are wider than their heading and centred under it, so they START left of the heading. A word is placed
+// under the heading it overlaps most (not by where it starts), so the date column must not swallow the serial number.
+test("card statement pdf: data wider than its heading and centred under it still lands in the right column", async () => {
+  const head = [t("Date", 342, 420), t("SerNo.", 405, 420), t("Transaction Details", 450, 420), t("Reward", 520, 420), t("Points", 522, 411), t("Amount (in\u20B9)", 548, 420)];
+  const rows = [t("06/10/2026", 342, 380), t("14308206086", 392, 380), t("ZOMATO CYBS DELHI", 450, 380), t("7", 528, 380), right2("375.10", 380),
+    t("09/10/2026", 342, 365), t("14308207000", 392, 365), t("PAYMENT RECEIVED", 450, 365), right2("1,000.00 CR", 365)];
+  function right2(str, y) { return t(str, 590 - str.length * 3.6, y); }
+  const r = await readStatementFile(makePdf([{ texts: [...head, ...rows] }]), { accountKind: "card" });
+  assert.equal(r.ok, true, r.reason);
+  assert.deepEqual(r.rows.map(x => [x.date, x.amountPaise, x.ref]), [["2026-10-06", -37510, "14308206086"], ["2026-10-09", 100000, "14308207000"]]);
+  assert.equal(r.rows[0].desc, "ZOMATO CYBS DELHI");
+});

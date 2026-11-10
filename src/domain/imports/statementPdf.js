@@ -71,6 +71,7 @@ export function pdfPagesToRows(pages) {
   const chars = (pages || []).reduce((s, p) => s + (p.textChars || 0), 0);
   if (!chars) return no("This PDF has no text in it (it looks scanned or photographed). Download the statement from your bank's app or net banking as Excel/CSV or the original PDF.");
   let head = null, headTexts = null, numeric = [], textCols = [], rows = null;
+  const colLeft = new Map();                     // text column -> left x of runs already placed there by overlap
   const out = [];
   for (const pg of pages) {
     const lines = groupLines(pg.items || []);
@@ -96,14 +97,24 @@ export function pdfPagesToRows(pages) {
           row[col] = row[col] ? row[col] + " " + it.str : it.str;
           continue;
         }
-        // Words: pdf.js sometimes joins neighbouring cells of one line into one run ("14308206086 ZOMATO CYBS DELHI"), so each word is placed by
-        // where it starts. A heading is often centred over left-aligned text, so a word may start left of its own heading: allow a slack of most
-        // of the heading's width. Money headings are excluded: words never belong under them.
+        // Text. A run goes under the one text heading it overlaps (data is often wider than its heading and centred under it, so it can start well left of
+        // the heading). A run that overlaps nothing — a short wrapped line at the left edge of a wide column — goes where earlier runs starting at that
+        // same x went, else to the nearest heading. pdf.js sometimes joins neighbouring cells of one line into one run ("14308206086 ZOMATO CYBS DELHI");
+        // a run overlapping two or more text headings is split into words, each placed on its own estimated span. Money headings are excluded.
+        const spanOf = (a2, b2) => textCols.map(i => { const h = head[i]; return { i, ov: Math.max(0, Math.min(b2, h.x + h.w) - Math.max(a2, h.x)), gap: Math.max(0, h.x - b2, a2 - (h.x + h.w)) }; });
+        const nearest = list => list.reduce((best, c) => (c.ov > best.ov || (c.ov === best.ov && c.ov === 0 && c.gap < best.gap) ? c : best), list[0]);
+        const put = (c2, str) => { row[c2] = row[c2] ? row[c2] + " " + str : str; };
+        const runSpans = spanOf(it.x, it.x + (it.w || 0)), overlapping = runSpans.filter(c => c.ov > 0);
+        if (overlapping.length <= 1) {
+          let c2;
+          if (overlapping.length === 1) { c2 = overlapping[0].i; (colLeft.get(c2) || colLeft.set(c2, []).get(c2)).push(it.x); }
+          else { const learned = textCols.find(i => (colLeft.get(i) || []).some(x0 => Math.abs(x0 - it.x) <= 4)); c2 = learned !== undefined ? learned : nearest(runSpans).i; }
+          put(c2, it.str);
+          continue;
+        }
         for (const tok of it.str.matchAll(/\S+/g)) {
-          const tx = it.x + (it.w || 0) * tok.index / Math.max(1, it.str.length);
-          let c2 = textCols[0];
-          for (const i of textCols) { const slack = i === textCols[0] ? 1e9 : Math.max(4, 0.7 * head[i].w - 4); if (tx >= head[i].x - slack) c2 = i; }
-          row[c2] = row[c2] ? row[c2] + " " + tok[0] : tok[0];
+          const L = Math.max(1, it.str.length), w = it.w || 0;
+          put(nearest(spanOf(it.x + w * tok.index / L, it.x + w * (tok.index + tok[0].length) / L)).i, tok[0]);
         }
       }
       const dateCol = head.findIndex(c => /date/i.test(c.str));
@@ -116,6 +127,18 @@ export function pdfPagesToRows(pages) {
     }
   }
   if (!head) return no("Could not find the transaction table headings in this PDF (a date column and debit/credit/amount columns).");
-  if (out.length < 2) return no("The table headings were found but no transaction rows could be read from this PDF.");
+  if (out.length < 2) return { ...no("The table headings were found but no transaction rows could be read from this PDF."), info: shapeInfo(pages, head) };
   return { ok: true, rows: out };
+}
+
+/** Geometry for diagnosing a layout, with every letter and digit masked (a -> letters, 9 -> digits): column headings with x/width, and up to three lines that contain a date. */
+export function shapeInfo(pages, head) {
+  const mask = str => String(str).replace(/[A-Za-z]/g, "a").replace(/\d/g, "9").slice(0, 28);
+  const heads = (head || []).map(c => `${String(c.str).slice(0, 22)}@${Math.round(c.x)}+${Math.round(c.w)}`).join(" | ");
+  const lines = [];
+  for (const pg of pages || []) for (const ln of groupLines(pg.items || [])) {
+    if (lines.length >= 3) break;
+    if (ln.cells.some(c => /\b\d{1,2}[-/. ]\d{1,2}[-/. ]\d{2,4}\b/.test(c.str))) lines.push(ln.cells.slice(0, 10).map(c => `${mask(c.str)}@${Math.round(c.x)}+${Math.round(c.w)}`).join(" "));
+  }
+  return `headings: ${heads}; sample dated lines (masked): ${lines.length ? lines.join(" // ") : "none"}`;
 }

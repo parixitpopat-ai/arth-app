@@ -35,7 +35,7 @@ export async function readStatementFile(bytes, opts = {}) {
       if (lay.status !== "ok") return { kind, ...fail(lay.reason), detail: `PDF reader: ${lay.status}` };
       stage = "find the table";
       const t = pdfPagesToRows(lay.pages);
-      if (!t.ok) return { kind, ...fail(t.reason), detail: pdfShape(lay.pages) };
+      if (!t.ok) return { kind, ...fail(t.reason), detail: `${pdfShape(lay.pages)}${t.info ? "; " + t.info : ""}` };
       stage = "read the rows";
       const parsed = parseStatementRows(t.rows, { kind: opts.accountKind });
       if (!parsed.ok) return { kind, ...parsed, detail: `${pdfShape(lay.pages)}; table rows found: ${t.rows.length - 1}` };

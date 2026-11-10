@@ -49,3 +49,13 @@ test("read: a statement PDF may have up to 40 pages (the invoice reader still st
   const { readPdfLayout } = await import("../invoices/pdfText.js");
   assert.equal((await readPdfLayout(many(11))).status, "too-many-pages");
 });
+
+test("read: when no rows are found the detail has the heading positions and masked sample lines, never the real text", async () => {
+  const t = (str, x, y) => ({ str, x, y, size: 8 });
+  const r = await readStatementFile(makePdf([{ texts: [t("Date", 30, 780), t("Narration", 100, 780), t("Debit", 300, 780), t("Credit", 360, 780), t("Balance", 430, 780),
+    t("Some words 06/10/2026 John Smith 1,234.00", 30, 760)] }]));
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /headings: Date@30\+\d+ \| Narration@100/);
+  assert.match(r.detail, /sample dated lines \(masked\): aaaa aaaaa 99\/99\/9999 aaaa a@30/);
+  assert.doesNotMatch(r.detail, /John|Smith|1,234|06\/10/);
+});
