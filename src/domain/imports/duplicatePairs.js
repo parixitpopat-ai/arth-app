@@ -7,6 +7,7 @@
 
 import { DAY_WINDOW } from "./matchStatement.js";
 import { canTakeAnotherLink } from "./buildImport.js";
+import { extractUtr } from "./utr.js";
 
 const dayNum = iso => Math.round(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000);
 const paiseOf = t => Math.round(Number(t.amount) * 100);
@@ -49,9 +50,10 @@ export function applyDuplicateMerge(txns, pairs) {
     const imp = byManual.get(String(t.id));
     if (!imp) { next.push(t); continue; }
     before.push(t);
-    const setRef = !t.transactionRef && Boolean(imp.transactionRef);
+    const refToSet = extractUtr({ desc: imp.bankNarration || imp.desc, ref: "" }) || imp.transactionRef || "";
+    const setRef = !t.transactionRef && Boolean(refToSet);
     const keys = [...new Set([...(t.importKeys || (t.importKey ? [t.importKey] : [])), imp.importKey])];
-    const merged = { ...t, importKey: t.importKey || imp.importKey, importKeys: keys, importBatchId: imp.importBatchId, importSource: "bank-statement", importMerged: true, ...(setRef ? { transactionRef: imp.transactionRef, importSetRef: true } : {}) };
+    const merged = { ...t, importKey: t.importKey || imp.importKey, importKeys: keys, importBatchId: imp.importBatchId, importSource: "bank-statement", importMerged: true, ...(setRef ? { transactionRef: refToSet, importSetRef: true } : {}) };
     if ((t.type === "expense" || t.type === "income") && !hasCat(t) && hasCat(imp)) { merged.catId = imp.catId; merged.catIds = imp.catIds; merged.subId = imp.subId; merged.subIds = imp.subIds; }
     next.push(merged);
   }

@@ -80,3 +80,30 @@ test("repairs: entries named Dr/Cr or 'Upi-<ref>-…' by an earlier version get 
   ];
   assert.deepEqual(planNameRepairs(list), [{ id: 1, from: "Dr", to: "Swiggy" }, { id: 2, from: "Upi-171831146733-Mcdonald S In", to: "Mcdonald S" }]);
 });
+
+import { planRefRepairs } from "./buildImport.js";
+test("merge: a UPI payment's reference is its UTR (not a card statement's SerNo); only copied when the entry has none", () => {
+  const card = { id: "m1", type: "expense", amount: 559, date: "2026-09-17", transactionRef: null };
+  const row = { importKey: "k1", desc: "UPI-221718689935-SNACK BA RR IN", ref: "14308206086" };               // ref is the card statement's SerNo
+  const out = applyMerges([card, { id: "m2", type: "expense", amount: 1, date: "2026-09-17", transactionRef: "MINE" }], [{ txnId: "m1", row }, { txnId: "m2", row: { ...row, importKey: "k2" } }], { batchId: "B" });
+  assert.equal(out[0].transactionRef, "221718689935"); assert.equal(out[0].importSetRef, true);
+  assert.equal(out[1].transactionRef, "MINE");
+  const noUpi = applyMerges([{ ...card }], [{ txnId: "m1", row: { importKey: "k3", desc: "ZOMATO", ref: "14308206999" } }], { batchId: "B" });
+  assert.equal(noUpi[0].transactionRef, "14308206999");                                                             // no UTR: the file's own reference, as before
+});
+test("import: a bank debit paid by UPI is marked Payment Method UPI; a card charge, a bank credit and a non-UPI debit are not", () => {
+  const rows = [{ date: "2026-10-06", desc: "UPI/DR/412345678901/SWIGGY/HDFC/s@ic/x", ref: "", amountPaise: -100, importKey: "a" }, { date: "2026-10-06", desc: "NEFT-X", ref: "", amountPaise: -100, importKey: "b" }, { date: "2026-10-06", desc: "UPI/CR/412345678902/X/HDFC/x@ic/y", ref: "", amountPaise: 100, importKey: "c" }].map(row => ({ row }));
+  const bank = buildImportTxns(rows, { accountId: "a1", batchId: "B", cards: [], newId, accountType: "bank" });
+  assert.deepEqual(bank.map(t => t.paymentMethod), ["UPI", undefined, undefined]);
+  const card = buildImportTxns([rows[0]], { accountId: "c1", batchId: "B", cards: [], newId, plainExpenses: true, accountType: "cc" });
+  assert.equal(card[0].paymentMethod, undefined);
+});
+test("repairs: entries an earlier merge gave a SerNo get the UTR from their import key; correct ones are left alone", () => {
+  const list = [
+    { id: 1, importMerged: true, importSetRef: true, transactionRef: "14308206086", importKey: "cc1|2026-09-17|-55900|14308206086|upi 221718689935 snack ba rr in|0" },
+    { id: 2, importMerged: true, importSetRef: true, transactionRef: "221718689935", importKey: "cc1|2026-09-17|-55900||upi 221718689935 x|0" },
+    { id: 3, importMerged: true, importSetRef: true, transactionRef: "14308206999", importKey: "cc1|2026-09-17|-100|14308206999|zomato cybs|0" },
+    { id: 4, importMerged: true, transactionRef: "MINE", importKey: "x|upi 221718689935" },
+  ];
+  assert.deepEqual(planRefRepairs(list), [{ id: 1, field: "transactionRef", from: "14308206086", to: "221718689935" }]);
+});

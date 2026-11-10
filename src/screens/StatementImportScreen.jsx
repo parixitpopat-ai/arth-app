@@ -6,7 +6,7 @@ import { withImportKeys } from "../domain/imports/statement.js";
 import { matchStatement } from "../domain/imports/matchStatement.js";
 import { getLinkedMethodIds } from "../domain/accounts/accountBalance.js";
 import { statementBalances, planBalanceMatch } from "../domain/imports/statementBalances.js";
-import { planNameRepairs } from "../domain/imports/buildImport.js";
+import { planNameRepairs, planRefRepairs } from "../domain/imports/buildImport.js";
 import { findImportedDuplicates } from "../domain/imports/duplicatePairs.js";
 import { canTakeAnotherLink, buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
 
@@ -23,7 +23,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const [ticked, setTicked] = useState({});                       // importKey -> bool (add as a new transaction)
   const [merged, setMerged] = useState({});                       // importKey -> bool (link to the entry it looks like; adds nothing)
   const [sb, setSb] = useState(null);                         // what the last file says the balance was at its start and end
-  const repairs = useMemo(() => planNameRepairs(txns), [txns]);
+  const repairs = useMemo(() => [...planNameRepairs(txns).map(c => ({ ...c, field: "merchant" })), ...planRefRepairs(txns)], [txns]);
   const [tidyUndo, setTidyUndo] = useState(null);
   const repeatAccId = fixedAccountId || accountId;
   const repeats = useMemo(() => (repeatAccId ? findImportedDuplicates({ txns, accountId: repeatAccId, linkedIds: getLinkedMethodIds(repeatAccId, accounts) }) : []), [txns, repeatAccId, accounts]);
@@ -78,7 +78,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const merges = state.phase === "result" ? state.match.results.filter(r => r.status === "probable-match" && merged[r.row.importKey] && !ticked[r.row.importKey] && txnById(r.matchId) && canTakeAnotherLink(txnById(r.matchId))).map(r => ({ txnId: r.matchId, row: r.row })) : [];
   const doImport = () => {
     const batchId = genId();
-    const made = buildImportTxns(chosen, { accountId: state.accountId, batchId, cards, newId: genId, plainExpenses: isCard });
+    const made = buildImportTxns(chosen, { accountId: state.accountId, batchId, cards, newId: genId, plainExpenses: isCard, accountType: acctNow ? acctNow.type : "" });
     onImport(made, { batchId, fileName: state.fileName, merges });
     setState({ phase: "done", count: made.length, mergedCount: merges.length, batchId, cardBills: made.filter(t => t.type === "cc_payment").length, unmatched: made.filter(t => t.cardBillUnmatched).length });
   };
@@ -186,10 +186,10 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
       )}
       {(repairs.length > 0 || tidyUndo) && state.phase !== "done" && (
         <div style={card} data-testid="stmt-tidy">
-          <div style={label}>Tidy imported names</div>
-          {repairs.length > 0 && <div style={{ color: T.text, fontSize: 13, lineHeight: 1.45 }}>{repairs.length} imported entr{repairs.length === 1 ? "y has" : "ies have"} an untidy vendor name such as "{repairs[0].from}" (e.g. "{repairs[0].to}"). Only the vendor name changes.</div>}
+          <div style={label}>Tidy imported entries</div>
+          {repairs.length > 0 && <div style={{ color: T.text, fontSize: 13, lineHeight: 1.45 }}>{repairs.filter(c => c.field === "merchant").length > 0 && <div>{repairs.filter(c => c.field === "merchant").length} imported entr{repairs.filter(c => c.field === "merchant").length === 1 ? "y has" : "ies have"} an untidy vendor name such as "{repairs.find(c => c.field === "merchant").from}" (e.g. "{repairs.find(c => c.field === "merchant").to}").</div>}{repairs.filter(c => c.field === "transactionRef").length > 0 && <div data-testid="stmt-tidy-refs">{repairs.filter(c => c.field === "transactionRef").length} merged entr{repairs.filter(c => c.field === "transactionRef").length === 1 ? "y has" : "ies have"} a statement serial number where the UPI reference belongs; the UPI reference will be put in its place.</div>}<div style={{ color: T.sub, fontSize: 12 }}>Only the vendor name or reference changes.</div></div>}
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
-            {!tidyUndo ? <button data-testid="stmt-tidy-fix" style={btn(true)} onClick={() => setTidyUndo(onTidyNames(repairs))}>Fix {repairs.length} name{repairs.length === 1 ? "" : "s"}</button>
+            {!tidyUndo ? <button data-testid="stmt-tidy-fix" style={btn(true)} onClick={() => setTidyUndo(onTidyNames(repairs))}>Fix {repairs.length} entr{repairs.length === 1 ? "y" : "ies"}</button>
               : <><div data-testid="stmt-tidy-done" style={{ color: T.sub, fontSize: 13, flex: 1 }}>Names fixed.</div><button data-testid="stmt-tidy-undo" style={btn(false)} onClick={() => { onUndoTidy(tidyUndo); setTidyUndo(null); }}>Undo</button></>}
           </div>
         </div>

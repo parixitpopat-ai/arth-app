@@ -39,6 +39,18 @@ export function planNameRepairs(txns) {
   return out;
 }
 
+/** Entries a merge gave a reference that is not the UPI reference (a card statement's SerNo): the UTR is still in the import key's text. Read-only plan. */
+export function planRefRepairs(txns) {
+  const out = [];
+  for (const t of txns || []) {
+    if (!t || !t.importMerged || !t.importSetRef || !t.transactionRef) continue;
+    const text = String(t.importKey || "");
+    const m = /\b(?:upi|imps)\b[^|]*?(?<!\d)(\d{12})(?!\d)/i.exec(text);
+    if (m && String(t.transactionRef) !== m[1] && !/^\d{12}$/.test(String(t.transactionRef))) out.push({ id: t.id, field: "transactionRef", from: t.transactionRef, to: m[1] });
+  }
+  return out;
+}
+
 export function cleanMerchant(desc) {
   const upi = extractUpiMerchant(desc);
   if (upi) return upi;
@@ -47,7 +59,7 @@ export function cleanMerchant(desc) {
 
 /** @param {{row:object,status:string,matchId?:string}[]} chosen rows to import (each row has importKey)
  *  @param {{accountId:string, batchId:string, cards:Array, newId:()=>string}} ctx */
-export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plainExpenses = false }) {
+export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plainExpenses = false, accountType = "" }) {
   return chosen.map(({ row }) => {
     // A UPI narration carries the 12-digit UPI reference and the other party: use them (a reference the file already has is kept).
     const upi = parseUpiNarration(row.desc);
@@ -58,7 +70,9 @@ export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plai
       if (card) return { ...base, type: "cc_payment", fromAccId: accountId, toAccId: card.id, accId: null, note: "Statement payment", merchant: "" };
       return { ...base, type: "expense", accId: accountId, merchant: "", cardBillUnmatched: true };
     }
-    return { ...base, type: "expense", accId: accountId, merchant: plainExpenses ? titleCase(cleanCardMerchant(row.desc)) : cleanMerchant(row.desc) };
+    // A bank debit whose narration carries a UPI reference was paid by UPI: say so in the entry's Payment Method (the same field the Add form fills for a bank account).
+    const byUpi = accountType === "bank" && !plainExpenses && Boolean(extractUtr(row));
+    return { ...base, type: "expense", accId: accountId, merchant: plainExpenses ? titleCase(cleanCardMerchant(row.desc)) : cleanMerchant(row.desc), ...(byUpi ? { paymentMethod: "UPI" } : {}) };
   });
 }
 
@@ -80,9 +94,10 @@ export function applyMerges(txns, merges, { batchId }) {
   return (txns || []).map(t => {
     const row = byId.get(String(t.id));
     if (!row || !canTakeAnotherLink(t)) return t;
-    const setRef = !t.transactionRef && Boolean(row.ref);
+    const refToSet = extractUtr(row) || row.ref || "";               // a UPI payment's reference is its UTR; a card statement's SerNo is not a UPI reference
+    const setRef = !t.transactionRef && Boolean(refToSet);
     const keys = [...new Set([...(t.importKeys || (t.importKey ? [t.importKey] : [])), row.importKey])];
-    return { ...t, importKey: t.importKey || row.importKey, importKeys: keys, importBatchId: batchId, importSource: "bank-statement", importMerged: true, ...(setRef ? { transactionRef: row.ref, importSetRef: true } : {}) };
+    return { ...t, importKey: t.importKey || row.importKey, importKeys: keys, importBatchId: batchId, importSource: "bank-statement", importMerged: true, ...(setRef ? { transactionRef: refToSet, importSetRef: true } : {}) };
   });
 }
 

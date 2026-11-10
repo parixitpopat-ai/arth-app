@@ -35,7 +35,7 @@ try {
   rec("U2 it says 'same UPI reference as an entry already in Arth'", /same UPI reference as an entry already in Arth/.test(await text()), {});
   await T("stmt-import").click(); await page.waitForTimeout(700);
   const tx = await ls("arth_txns"), other = tx.find(t => t.importKey && /OTHER/.test(t.bankNarration || "")), cash = tx.find(t => t.importKey && /BHIMCASHBACK/.test(t.bankNarration || ""));
-  rec("U3 imported: the other shop's UTR is stored as its reference with vendor 'Other Shop'; the cashback credit is income 12.00, reference 104354172499, readable description", other && other.transactionRef === "999999999999" && other.merchant === "Other Shop" && cash && cash.type === "income" && cash.amount === 12 && cash.transactionRef === "104354172499" && cash.desc === "NPCI BHI · BHIMCASHBACK", { other: other && [other.transactionRef, other.merchant], cash: cash && [cash.type, cash.transactionRef, cash.desc] });
+  rec("U3 imported: the other shop's UTR is stored as its reference with vendor 'Other Shop'; the cashback credit is income 12.00, reference 104354172499, readable description", other && other.transactionRef === "999999999999" && other.paymentMethod === "UPI" && other.merchant === "Other Shop" && cash && cash.type === "income" && cash.amount === 12 && cash.transactionRef === "104354172499" && cash.desc === "NPCI BHI · BHIMCASHBACK", { other: other && [other.transactionRef, other.merchant], cash: cash && [cash.type, cash.transactionRef, cash.desc] });
   rec("U4 the existing Swiggy entry was not duplicated (3 entries: it + 2 imported)", tx.length === 3, tx.length);
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 500)); }
