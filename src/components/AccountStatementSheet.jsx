@@ -1,8 +1,9 @@
 // Monthly statement for one bank/cash account or credit card: pick a month (or custom dates), see opening balance, money in/out, closing balance and the
 // rows with a running balance — laid out like a bank's statement so it can be compared line by line. A card shows charges and credits (no balance).
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import BottomSheet from "./BottomSheet";
 import { buildStatement, monthBounds, shiftMonth, dayBefore, statementCsv } from "../domain/accounts/accountStatement";
+import { compareStatements } from "../domain/accounts/compareStatement";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const dmy = d => `${d.slice(8, 10)}-${d.slice(5, 7)}-${d.slice(0, 4)}`;
@@ -21,6 +22,21 @@ export default function AccountStatementSheet({ T, sym, fmt, account, rows, bala
   const opening = !isCard && balanceAt && valid ? balanceAt(dayBefore(from)) : null;
   const st = useMemo(() => (valid ? buildStatement({ rows, from, to, openingBalance: opening, ignoreBefore: isCard ? "" : ignoreBefore }) : null), [rows, from, to, opening, ignoreBefore, isCard, valid]);
   const arthClosing = !isCard && balanceAt && valid ? balanceAt(to) : null;
+  // Compare with the bank's own statement file (read on this device, never stored): same amounts within 2 days are matched; the rest is listed on each side.
+  const fileRef = useRef(null);
+  const [cmpState, setCmpState] = useState({ phase: "idle" });
+  const cmp = useMemo(() => (cmpState.parsed && st ? compareStatements({ parsed: cmpState.parsed, arthLines: st.lines, from, to }) : null), [cmpState.parsed, st, from, to]);
+  const onCompareFile = async e => {
+    const file = e.target.files && e.target.files[0]; e.target.value = "";
+    if (!file) return;
+    setCmpState({ phase: "reading", fileName: file.name });
+    try {
+      const [{ readStatementFile }, { default: workerSrc }] = await Promise.all([import("../domain/imports/readStatementFile.js"), import("../domain/invoices/pdfWorkerUrl.js")]);
+      const parsed = await readStatementFile(new Uint8Array(await file.arrayBuffer()), { name: file.name, workerSrc, accountKind: isCard ? "card" : undefined });
+      if (!parsed.ok) { setCmpState({ phase: "error", fileName: file.name, error: parsed.reason, detail: parsed.detail }); return; }
+      setCmpState({ phase: "done", fileName: file.name, parsed });
+    } catch { setCmpState({ phase: "error", fileName: file.name, error: "This file could not be read." }); }
+  };
   const m = p => `${sym}${(Math.abs(p) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;      // always two decimals, like a bank statement
   const mm = p => (p < 0 ? "−" : "") + m(p);
   const lbl = { color: T.sub, fontSize: 10, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" };
@@ -79,6 +95,38 @@ export default function AccountStatementSheet({ T, sym, fmt, account, rows, bala
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+          <input ref={fileRef} data-testid="stmt-compare-file" type="file" accept=".csv,.tsv,.txt,.xlsx,.pdf" onChange={onCompareFile} style={{ display: "none" }} />
+          <button data-testid="stmt-compare" onClick={() => fileRef.current && fileRef.current.click()} style={{ width: "100%", boxSizing: "border-box", minHeight: 48, marginTop: 14, background: T.accentSoft, border: `1px solid ${T.accent}55`, borderRadius: 12, color: T.accent, fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>🔍 Compare with {isCard ? "my card" : "my bank"}'s statement file</button>
+          {cmpState.phase === "reading" && <div style={{ color: T.sub, fontSize: 12, marginTop: 8 }}>Reading {cmpState.fileName}…</div>}
+          {cmpState.phase === "error" && <div data-testid="stmt-compare-error" style={{ color: T.warn, fontSize: 12, marginTop: 8, lineHeight: 1.45 }}>{cmpState.error}{cmpState.detail ? <div style={{ color: T.sub, fontSize: 10, marginTop: 4, wordBreak: "break-word" }}>Detail (no statement content): {cmpState.detail}</div> : null}</div>}
+          {cmp && (
+            <div data-testid="stmt-compare-result" style={{ marginTop: 12, background: T.input, borderRadius: 14, padding: "12px 14px" }}>
+              <div style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>Compared with {cmpState.fileName}</div>
+              <div style={{ color: T.sub, fontSize: 11, marginTop: 2 }}>{cmp.bankCount} row{cmp.bankCount === 1 ? "" : "s"} in the file for this period · {cmp.arthCount} in Arth · {cmp.matched.length} match</div>
+              {cmp.bankCount === 0 && <div style={{ color: T.warn, fontSize: 12, marginTop: 8 }}>The file has no rows between {dmy(from)} and {dmy(to)}. Pick the month the file covers.</div>}
+              {(() => {
+                const row = (label, bankP, arthP) => { const same = bankP === arthP; return (<div key={label} style={{ display: "flex", gap: 8, padding: "6px 0", borderTop: `1px solid ${T.border}`, fontSize: 12 }}><div style={{ flex: 1, color: T.sub }}>{label}</div><div style={{ width: 92, textAlign: "right", color: T.text }}>{mm(bankP)}</div><div style={{ width: 92, textAlign: "right", color: same ? T.success : T.warn, fontWeight: 700 }}>{mm(arthP)}</div></div>); };
+                return (<div data-testid="stmt-compare-table" style={{ marginTop: 8 }}>
+                  <div style={{ display: "flex", gap: 8, fontSize: 10, color: T.sub, fontWeight: 700 }}><div style={{ flex: 1 }} /><div style={{ width: 92, textAlign: "right" }}>BANK FILE</div><div style={{ width: 92, textAlign: "right" }}>ARTH</div></div>
+                  {cmp.bankBalances && st.hasBalance && row("Opening", cmp.bankBalances.openingPaise, st.openingPaise)}
+                  {row(isCard ? "Payments & credits" : "Money in", cmp.bankIn, cmp.arthIn)}
+                  {row(isCard ? "Charges" : "Money out", cmp.bankOut, cmp.arthOut)}
+                  {cmp.bankBalances && st.hasBalance && row("Closing", cmp.bankBalances.closingPaise, st.closingPaise)}
+                </div>);
+              })()}
+              {cmp.bankCount > 0 && cmp.onlyInBank.length === 0 && cmp.onlyInArth.length === 0 && <div data-testid="stmt-compare-same" style={{ color: T.success, fontSize: 12, fontWeight: 700, marginTop: 10 }}>✓ Every row matches.</div>}
+              {cmp.onlyInBank.length > 0 && (<div data-testid="stmt-only-bank" style={{ marginTop: 12 }}>
+                <div style={{ color: T.warn, fontSize: 12, fontWeight: 800 }}>In the bank's file but not in Arth ({cmp.onlyInBank.length})</div>
+                {cmp.onlyInBank.slice(0, 40).map((b, i) => <div key={i} data-testid="stmt-only-bank-row" style={{ display: "flex", gap: 8, padding: "5px 0", fontSize: 12, color: T.text }}><span style={{ width: 46, color: T.sub, flexShrink: 0 }}>{b.date.slice(8, 10)}-{b.date.slice(5, 7)}</span><span style={{ flex: 1, minWidth: 0, wordBreak: "break-word" }}>{b.desc}</span><span style={{ fontWeight: 700, flexShrink: 0 }}>{b.amountPaise < 0 ? "−" : "+"}{m(b.amountPaise)}</span></div>)}
+                <div style={{ color: T.sub, fontSize: 11, marginTop: 4 }}>Add them from the account page → Import statement.</div>
+              </div>)}
+              {cmp.onlyInArth.length > 0 && (<div data-testid="stmt-only-arth" style={{ marginTop: 12 }}>
+                <div style={{ color: T.warn, fontSize: 12, fontWeight: 800 }}>In Arth but not in the bank's file ({cmp.onlyInArth.length})</div>
+                {cmp.onlyInArth.slice(0, 40).map(a => <div key={a.id} data-testid="stmt-only-arth-row" onClick={() => onOpenTxn && onOpenTxn(a.t)} style={{ display: "flex", gap: 8, padding: "5px 0", fontSize: 12, color: T.text, cursor: onOpenTxn ? "pointer" : "default" }}><span style={{ width: 46, color: T.sub, flexShrink: 0 }}>{a.date.slice(8, 10)}-{a.date.slice(5, 7)}</span><span style={{ flex: 1, minWidth: 0, wordBreak: "break-word" }}>{a.description}</span><span style={{ fontWeight: 700, flexShrink: 0 }}>{a.signedPaise < 0 ? "−" : "+"}{m(a.signedPaise)}</span></div>)}
+                <div style={{ color: T.sub, fontSize: 11, marginTop: 4 }}>These may not have cleared yet, may be dated differently, or may be entered twice.</div>
+              </div>)}
             </div>
           )}
           <button data-testid="stmt-download" onClick={download} style={{ width: "100%", boxSizing: "border-box", minHeight: 48, marginTop: 14, background: "none", border: `1px solid ${T.border}`, borderRadius: 12, color: T.text, fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>⬇ Download as CSV</button>

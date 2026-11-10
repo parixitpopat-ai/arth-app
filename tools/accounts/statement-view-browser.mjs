@@ -1,7 +1,9 @@
 // Account page -> Statement: monthly bank-style view with opening/closing balance, running balance and CSV. Chromium, local Vite dev server, SYNTHETIC data.
 import { chromium } from "/opt/node22/lib/node_modules/playwright/index.mjs";
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 const PORT = 4209, APP = `http://localhost:${PORT}/`;
 const server = spawn("node", ["node_modules/vite/bin/vite.js", "--port", String(PORT), "--strictPort"], { stdio: "ignore", detached: true });
 for (let i = 0; i < 60; i++) { try { if ((await fetch(APP)).ok) break; } catch {} await new Promise(r => setTimeout(r, 300)); }
@@ -35,6 +37,17 @@ try {
   await T("stmt-download").click(); const d = await dl; const path = await d.path();
   const csv = readFileSync(path, "utf8");
   rec("V6 CSV download: bank-style dates, opening and closing lines", /Date,Description,Debit,Credit,Balance/.test(csv) && /01-10-2026,Opening balance,,,9500\.00/.test(csv) && /31-10-2026,Closing balance,,,14350\.00/.test(csv) && /02-10-2026,Salary/.test(csv), csv.split("\n").slice(0, 3));
+  // compare with the bank's own file (October): the bank has an extra 40.00 row Arth lacks; Arth has a 49.90 cafe row the bank file lacks
+  const dir = mkdtempSync(join(tmpdir(), "cmp-")), f = join(dir, "bank.csv");
+  writeFileSync(f, ["Date,Narration,Debit,Credit,Balance", "02/10/2026,SALARY,,5000.00,14500.00", "05/10/2026,SHOP,100.10,,14399.90", "07/10/2026,ONLY BANK,40.00,,14359.90"].join("\n"));
+  await T("stmt-compare-file").setInputFiles(f); await page.waitForTimeout(1500);
+  const ct = (await T("stmt-compare-table").innerText()).replace(/\n/g, " ");
+  rec("C1 the comparison table: bank file closing 14,359.90 vs Arth 14,350.00, money out 140.10 vs 150.00, money in equal", /14,359\.90/.test(ct) && /14,350\.00/.test(ct) && /140\.10/.test(ct) && /150\.00/.test(ct), ct);
+  rec("C2 one row only in the bank's file (ONLY BANK 40.00) and one only in Arth (Oct cafe 49.90)", (await T("stmt-only-bank-row").count()) === 1 && /ONLY BANK/.test(await T("stmt-only-bank-row").innerText()) && (await T("stmt-only-arth-row").count()) === 1 && /Oct cafe/.test(await T("stmt-only-arth-row").innerText()), {});
+  rec("C3 two rows match (Salary, Oct shop)", /2 match/.test(await T("stmt-compare-result").innerText()), {});
+  await T("stmt-prev").click(); await page.waitForTimeout(400);
+  rec("C4 changing the month recomputes against the same file: September has no rows in the file, and says so", /no rows between 01-09-2026 and 30-09-2026/.test(await T("stmt-compare-result").innerText()), {});
+  await T("stmt-next").click(); await page.waitForTimeout(300);
   await T("stmt-prev").click(); await page.waitForTimeout(300);
   rec("V7 September: opening 10,000.00, out 500.00, closing 9,500.00 (closing = last month's opening)", /OPENING\s*₹10,000\.00/i.test((await T("stmt-summary").innerText()).replace(/\n/g, " ")) && /CLOSING\s*₹9,500\.00/i.test((await T("stmt-summary").innerText()).replace(/\n/g, " ")), {});
   await T("stmt-custom").click(); await page.waitForTimeout(300);
