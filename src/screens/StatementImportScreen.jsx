@@ -20,6 +20,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const cards = accounts.filter(a => a.type === "cc");
   const [accountId, setAccountId] = useState(fixedAccountId || (banks.length === 1 ? String(banks[0].id) : ""));
   const [state, setState] = useState({ phase: "idle" });          // idle | reading | result | done
+  const [pasteOpen, setPasteOpen] = useState(false), [pasteText, setPasteText] = useState("");
   const [ticked, setTicked] = useState({});                       // importKey -> bool (add as a new transaction)
   const [merged, setMerged] = useState({});                       // importKey -> bool (link to the entry it looks like; adds nothing)
   const [sb, setSb] = useState(null);                         // what the last file says the balance was at its start and end
@@ -47,6 +48,22 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
     const start = {}; m.results.forEach(r => { start[r.row.importKey] = r.status === "new" && !(isCard && r.row.amountPaise > 0); });
     setTicked(start); setMerged({});
     return m;
+  };
+
+  // Card app text ("Here are your transactions: 1. Amount: -₹222.14 …"): same matching as a file, so only missing entries are added.
+  const onPasted = async () => {
+    if (!accountId) { setState({ phase: "idle", error: "Choose the card first." }); return; }
+    try {
+      const [{ pastedTextToRows }, { parseStatementRows }] = await Promise.all([import("../domain/imports/pastedText.js"), import("../domain/imports/statement.js")]);
+      const t = pastedTextToRows(pasteText);
+      if (!t.ok) { setState({ phase: "idle", error: t.reason }); return; }
+      const parsed = parseStatementRows(t.rows, { kind: "card" });
+      if (!parsed.ok) { setState({ phase: "idle", error: parsed.reason || "The pasted text could not be read." }); return; }
+      const extra = t.unreadable.map(u => ({ line: u.n, why: u.text }));
+      const withSkips = { ...parsed, skipped: [...(parsed.skipped || []), ...extra] };
+      setSb(null); setBalUndo(null); setLastSummary(null); setBillUndo(null);
+      setState({ phase: "result", fileName: "Pasted text", parsed: withSkips, match: analyse(withSkips, accountId), accountId });
+    } catch (err) { setState({ phase: "idle", error: "The pasted text could not be read.", detail: `${(err && err.name) || "error"}${err && err.message ? " — " + String(err.message).slice(0, 140) : ""}` }); }
   };
 
   const onFile = async e => {
@@ -205,6 +222,14 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
         <div style={{ ...label, marginTop: 14 }}>Statement file</div>
         <input ref={fileRef} data-testid="stmt-file" type="file" accept=".csv,.tsv,.txt,.xlsx,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={onFile} style={{ display: "none" }} />
         <button data-testid="stmt-pick" style={btn(true, !banks.length)} disabled={!banks.length} onClick={() => fileRef.current && fileRef.current.click()}>Choose CSV, Excel or PDF</button>
+        {isCard && <>
+          <button data-testid="stmt-paste-toggle" style={{ ...btn(false, !banks.length), marginTop: 8 }} disabled={!banks.length} onClick={() => setPasteOpen(o => !o)}>{pasteOpen ? "Hide pasted text" : "Or paste text from the bank app"}</button>
+          {pasteOpen && <div style={{ marginTop: 8 }}>
+            <textarea data-testid="stmt-paste-text" value={pasteText} onChange={e => setPasteText(e.target.value)} placeholder={"Paste the whole message, e.g.\nHere are your transactions:\n1. Amount: -₹222.14\nDate: 10 November 2026\nDescription: …"} rows={7} style={{ width: "100%", boxSizing: "border-box", borderRadius: 10, border: `1px solid ${T.border}`, background: T.input, color: T.text, padding: 10, fontSize: 13 }} />
+            <div style={{ color: T.sub, fontSize: 11, margin: "4px 0 8px", lineHeight: 1.4 }}>A minus amount is read as a charge on the card; a plus amount as money back. Entries you already have are matched, not added twice.</div>
+            <button data-testid="stmt-paste-read" style={btn(true, !pasteText.trim())} disabled={!pasteText.trim()} onClick={onPasted}>Read pasted text</button>
+          </div>}
+        </>}
         {state.phase === "reading" && <div style={{ color: T.sub, fontSize: 13, marginTop: 10 }}>Reading {state.fileName}…</div>}
         {state.error && <div data-testid="stmt-error" style={{ color: T.warn, fontSize: 13, fontWeight: 700, marginTop: 10, lineHeight: 1.45 }}>{state.error}</div>}
         {state.error && state.detail && <div data-testid="stmt-error-detail" style={{ color: T.sub, fontSize: 11, marginTop: 6, lineHeight: 1.4, wordBreak: "break-word" }}>Detail (no statement content, safe to share): {state.detail}</div>}

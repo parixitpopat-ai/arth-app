@@ -131,6 +131,20 @@ try {
   await T("card-view-txns").dispatchEvent("click"); await page.waitForTimeout(700);
   const detail = await text();
   rec("C8 'View transactions' on the card's Money tile opens its transactions, including the imported charges", /Zomato Cybs Delhi/i.test(detail) && /Amazon Pay Mumbai/i.test(detail), detail.slice(0, 200));
+  // ── pasted text from the bank app, on the same card ──
+  const zt = (await ls("arth_txns")).find(t => /zomato/i.test(t.merchant || t.desc || "") && t.importSource === "bank-statement");
+  const [zy, zm, zd] = zt.date.split("-"); const mon = ["January","February","March","April","May","June","July","August","September","October","November","December"][+zm - 1];
+  const pasted = `Here are your transactions:\n\n1. Amount: -₹${Number(zt.amount).toFixed(2)}\nDate: ${+zd} ${mon} ${zy}\nDescription: UPI-xx -yy -ZOMATO L\n\n2. Amount: -₹321.45\nDate: ${+zd} ${mon} ${zy}\nDescription: SWIGGY INSTAMART BLR\n`;
+  await page.getByText(/^money$/i).last().dispatchEvent("click"); await page.waitForTimeout(700);
+  await T("card-import-statement").dispatchEvent("click"); await page.waitForTimeout(500);
+  const before2 = (await ls("arth_txns")).length;
+  await T("stmt-paste-toggle").dispatchEvent("click"); await T("stmt-paste-text").fill(pasted); await T("stmt-paste-read").dispatchEvent("click"); await page.waitForTimeout(900);
+  const pst = await page.$$eval('[data-testid="stmt-row"]', els => els.map(e => e.getAttribute("data-status")));
+  rec("P1 pasted text: 2 items read; the one I already have is a match, not new, the Swiggy one is new", pst.length === 2 && pst.filter(x => x === "new").length === 1, pst);
+  rec("P2 the Import button offers 1 row (only the missing one)", /Import 1 row\b/.test(await T("stmt-import").innerText()), await T("stmt-import").innerText());
+  await T("stmt-import").dispatchEvent("click"); await page.waitForTimeout(700);
+  const after2 = await ls("arth_txns"); const sw = after2.find(t => /swiggy instamart/i.test(t.merchant || t.desc || ""));
+  rec("P3 only the missing charge was added: 321.45 expense on the card", after2.length === before2 + 1 && sw && sw.amount === 321.45 && sw.type === "expense", { before2, after: after2.length, sw });
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 600)); }
 await browser.close(); try { process.kill(-server.pid); } catch {}
