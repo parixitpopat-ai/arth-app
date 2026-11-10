@@ -8,7 +8,7 @@ import { getLinkedMethodIds } from "../domain/accounts/accountBalance.js";
 import { statementBalances, planBalanceMatch } from "../domain/imports/statementBalances.js";
 import { planNameRepairs } from "../domain/imports/buildImport.js";
 import { findImportedDuplicates } from "../domain/imports/duplicatePairs.js";
-import { buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
+import { canTakeAnotherLink, buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
 
 const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const addDay = iso => { const t = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10) + 1)); return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`; };
@@ -75,7 +75,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const chosen = state.phase === "result" ? state.match.results.filter(r => ticked[r.row.importKey] && r.status !== "already-imported") : [];
   const net = chosen.reduce((s, r) => s + r.row.amountPaise, 0);
   const txnById = id => txns.find(t => String(t.id) === String(id));
-  const merges = state.phase === "result" ? state.match.results.filter(r => r.status === "probable-match" && merged[r.row.importKey] && !ticked[r.row.importKey] && txnById(r.matchId) && !txnById(r.matchId).importKey).map(r => ({ txnId: r.matchId, row: r.row })) : [];
+  const merges = state.phase === "result" ? state.match.results.filter(r => r.status === "probable-match" && merged[r.row.importKey] && !ticked[r.row.importKey] && txnById(r.matchId) && canTakeAnotherLink(txnById(r.matchId))).map(r => ({ txnId: r.matchId, row: r.row })) : [];
   const doImport = () => {
     const batchId = genId();
     const made = buildImportTxns(chosen, { accountId: state.accountId, batchId, cards, newId: genId, plainExpenses: isCard });
@@ -244,7 +244,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
                     {bill && (cardHit ? ` · card bill payment → ${cardHit.name}` : " · looks like a card bill payment, but no card matched: it will be an expense")}</div>
                   {status === "probable-match" && (() => {
                     const mine = txnById(matchId); if (!mine) return null;
-                    const linked = Boolean(mine.importKey);
+                    const linked = !canTakeAnotherLink(mine);
                     return (
                       <div data-testid="stmt-match" style={{ marginTop: 6, background: T.pill, borderRadius: 10, padding: "6px 8px", fontSize: 11, color: T.sub }}>
                         <div>Your entry: <b style={{ color: T.text }}>{mine.merchant || mine.desc || mine.type}</b> · {niceDate(mine.date)} · {sym}{Number(mine.amount).toLocaleString("en-IN")}{(() => { const ac = accounts.find(a => String(a.id) === String(mine.accId)); return ac ? ` · ${ac.name}` : ""; })()}</div>

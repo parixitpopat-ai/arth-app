@@ -29,6 +29,8 @@ export function accountMovements(transactions, accountId, linkedIds = []) {
     }
     if (t.type === "expense" && mine(t.accId)) out.push({ id: t.id, date: t.date, amountPaise: -a, ref: t.transactionRef || "" });
     else if (t.type === "income" && mine(t.accId)) out.push({ id: t.id, date: t.date, amountPaise: a, ref: t.transactionRef || "" });
+    else if (t.type === "settlement_in" && mine(t.accId)) out.push({ id: t.id, date: t.date, amountPaise: a, ref: t.transactionRef || "" });        // someone paid me: a credit
+    else if (t.type === "investment" && mine(t.accId)) out.push({ id: t.id, date: t.date, amountPaise: -a, ref: t.transactionRef || "" });      // a purchase/SIP paid from this account: a debit
     else if (t.type === "transfer" || t.type === "cc_payment") {
       if (mine(t.fromAccId)) out.push({ id: t.id, date: t.date, amountPaise: -a, ref: t.transactionRef || "" });
       if (mine(t.toAccId)) out.push({ id: t.id, date: t.date, amountPaise: a, ref: t.transactionRef || "" });
@@ -41,8 +43,8 @@ export function accountMovements(transactions, accountId, linkedIds = []) {
 export function matchStatement(keyedRows, { transactions, accountId, importedKeys, linkedIds, importedUtrs }) {
   const imported = new Set(importedKeys || []), claimed = new Set(), moves = accountMovements(transactions, accountId, linkedIds);
   const onThis = id => id != null && (String(id) === String(accountId) || (linkedIds || []).some(l => String(l) === String(id)));
-  const others = (transactions || []).filter(t => t && !t.importKey && t.date && Number.isFinite(Number(t.amount)) && (t.type === "expense" || t.type === "income") && !onThis(t.accId) && !onThis(t.fromAccId) && !onThis(t.toAccId))
-    .map(t => ({ id: t.id, date: t.date, amountPaise: t.type === "expense" ? -paise(t.amount) : paise(t.amount) }));
+  const others = (transactions || []).filter(t => t && !t.importKey && t.date && Number.isFinite(Number(t.amount)) && (t.type === "expense" || t.type === "income" || t.type === "settlement_in" || t.type === "investment") && !onThis(t.accId) && !onThis(t.fromAccId) && !onThis(t.toAccId))
+    .map(t => ({ id: t.id, date: t.date, amountPaise: (t.type === "expense" || t.type === "investment") ? -paise(t.amount) : paise(t.amount) }));
   const seenUtrs = new Set((importedUtrs || []).map(refDigits).filter(u => u.length >= 12));
   const results = keyedRows.map(row => {
     if (imported.has(row.importKey)) return { row, status: "already-imported" };

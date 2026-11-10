@@ -220,3 +220,12 @@ test("match: the same amount near the same date on ANOTHER account is offered as
   assert.equal(matchStatement(rows, { transactions: mk({ amount: 365.7 }), accountId: "cc1", importedKeys: [] }).results[0].status, "new");
   assert.equal(matchStatement(rows, { transactions: mk({ date: "2026-10-20" }), accountId: "cc1", importedKeys: [] }).results[0].status, "new");
 });
+
+test("match: a settlement received (settlement_in) and a purchase paid from the account (investment) are recognised; a transfer matches on both accounts", () => {
+  const rows = withImportKeys([{ date: "2026-10-06", desc: "IMPS FROM RAJ", ref: "", amountPaise: 250000 }, { date: "2026-10-07", desc: "SIP", ref: "", amountPaise: -100000 }, { date: "2026-10-08", desc: "IFT TO ICICI", ref: "", amountPaise: -800000 }], "idfc");
+  const txns = [{ id: "s1", type: "settlement_in", amount: 2500, date: "2026-10-05", accId: "idfc" }, { id: "v1", type: "investment", amount: 1000, date: "2026-10-07", accId: "idfc" }, { id: "t1", type: "transfer", amount: 8000, date: "2026-10-08", fromAccId: "idfc", toAccId: "icici" }];
+  const r = matchStatement(rows, { transactions: txns, accountId: "idfc", importedKeys: [] });
+  assert.deepEqual(r.results.map(x => [x.status, x.matchId]), [["probable-match", "s1"], ["probable-match", "v1"], ["probable-match", "t1"]]);
+  const icici = withImportKeys([{ date: "2026-10-08", desc: "IFT FROM IDFC", ref: "", amountPaise: 800000 }], "icici");
+  assert.deepEqual(matchStatement(icici, { transactions: txns, accountId: "icici", importedKeys: [] }).results.map(x => [x.status, x.matchId]), [["probable-match", "t1"]]);
+});

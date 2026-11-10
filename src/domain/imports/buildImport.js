@@ -64,22 +64,25 @@ export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plai
 
 /** Ids of everything a given batch created, so it can be undone as a unit. */
 export const batchTxnIds = (txns, batchId) => (txns || []).filter(t => t.importBatchId === batchId).map(t => t.id);
-export const importedKeysOf = txns => (txns || []).map(t => t.importKey).filter(Boolean);
+// A transfer between two of my accounts is ONE entry that two statements each show a leg of, so it can carry two import keys (importKeys).
+export const importedKeysOf = txns => [...new Set((txns || []).flatMap(t => [t.importKey, ...(Array.isArray(t.importKeys) ? t.importKeys : [])]).filter(Boolean))];
+export const canTakeAnotherLink = t => !t.importKey || ((t.type === "transfer" || t.type === "cc_payment") && (t.importKeys || [t.importKey]).filter(Boolean).length < 2);
 
 // ── merging a statement row into an entry the person already has ──────────────────────────────────────────────────────────────────
 // "Merge" keeps the existing entry exactly as it is (category, people, notes, amount, date) and only adds the link fields below, so the same
 // statement row is recognised next time (importKey) and the whole import can be undone. The statement's reference is copied only when the entry
 // has none. An entry can be linked once: it is never merged into a second time.
-const LINK_FIELDS = ["importKey", "importBatchId", "importSource", "importMerged", "importSetRef"];
+const LINK_FIELDS = ["importKey", "importKeys", "importBatchId", "importSource", "importMerged", "importSetRef"];
 
 /** @param {Array} txns @param {{txnId:string,row:{importKey:string,ref?:string}}[]} merges @returns {Array} new list; entries not merged are the same objects */
 export function applyMerges(txns, merges, { batchId }) {
   const byId = new Map((merges || []).map(m => [String(m.txnId), m.row]));
   return (txns || []).map(t => {
     const row = byId.get(String(t.id));
-    if (!row || t.importKey) return t;
+    if (!row || !canTakeAnotherLink(t)) return t;
     const setRef = !t.transactionRef && Boolean(row.ref);
-    return { ...t, importKey: row.importKey, importBatchId: batchId, importSource: "bank-statement", importMerged: true, ...(setRef ? { transactionRef: row.ref, importSetRef: true } : {}) };
+    const keys = [...new Set([...(t.importKeys || (t.importKey ? [t.importKey] : [])), row.importKey])];
+    return { ...t, importKey: t.importKey || row.importKey, importKeys: keys, importBatchId: batchId, importSource: "bank-statement", importMerged: true, ...(setRef ? { transactionRef: row.ref, importSetRef: true } : {}) };
   });
 }
 
