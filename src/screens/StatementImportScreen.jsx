@@ -7,13 +7,14 @@ import { matchStatement } from "../domain/imports/matchStatement.js";
 import { getLinkedMethodIds } from "../domain/accounts/accountBalance.js";
 import { statementBalances, planBalanceMatch } from "../domain/imports/statementBalances.js";
 import { planNameRepairs } from "../domain/imports/buildImport.js";
+import { findImportedDuplicates } from "../domain/imports/duplicatePairs.js";
 import { buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
 
 const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const addDay = iso => { const t = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10) + 1)); return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`; };
 const niceDate = iso => { const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
 
-export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy }) {
+export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy, onMergeRepeats, onUndoRepeats }) {
   const fileRef = useRef(null);
   const banks = accounts.filter(a => a.type === "bank");
   const cards = accounts.filter(a => a.type === "cc");
@@ -24,6 +25,9 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const [sb, setSb] = useState(null);                         // what the last file says the balance was at its start and end
   const repairs = useMemo(() => planNameRepairs(txns), [txns]);
   const [tidyUndo, setTidyUndo] = useState(null);
+  const repeatAccId = fixedAccountId || accountId;
+  const repeats = useMemo(() => (repeatAccId ? findImportedDuplicates({ txns, accountId: repeatAccId, linkedIds: getLinkedMethodIds(repeatAccId, accounts) }) : []), [txns, repeatAccId, accounts]);
+  const [repeatUndo, setRepeatUndo] = useState(null);
   const [lastSummary, setLastSummary] = useState(null);       // the card statement figures read from the last PDF
   const [billUndo, setBillUndo] = useState(null);               // set after "Set the statement bill", used by its Undo
   const [balUndo, setBalUndo] = useState(null);                // set after "Match", used by its Undo
@@ -160,6 +164,26 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
       </div>
       {note("mute", <><b>Review first. Nothing is added until you press Import.</b> The file is read on this device and is not stored or uploaded. Rows already in Arth are skipped, and existing entries are never changed.</>, "stmt-banner")}
 
+      {(repeats.length > 0 || repeatUndo) && state.phase !== "done" && (
+        <div style={card} data-testid="stmt-repeats">
+          <div style={label}>Repeats already in your books</div>
+          {repeats.length > 0 && <>
+            <div style={{ color: T.text, fontSize: 13, lineHeight: 1.45 }}>{repeats.length} payment{repeats.length === 1 ? " is" : "s are"} in twice: an entry you made, and a copy a statement import added (same amount, same account, within 2 days). Merging keeps <b>your</b> entry and removes the import's copy.</div>
+            <div style={{ marginTop: 8 }}>
+              {repeats.slice(0, 8).map(({ manual, imported }) => (
+                <div key={manual.id} data-testid="stmt-repeat" style={{ fontSize: 12, color: T.sub, padding: "4px 0", borderTop: `1px solid ${T.border}`, wordBreak: "break-word" }}>
+                  <span style={{ color: T.text, fontWeight: 700 }}>{manual.merchant || manual.desc || "Entry"}</span> · {niceDate(manual.date)} · {sym}{Number(manual.amount).toLocaleString("en-IN")} — import's copy: {imported.merchant || imported.desc}
+                </div>
+              ))}
+              {repeats.length > 8 && <div style={{ color: T.sub, fontSize: 11, marginTop: 4 }}>and {repeats.length - 8} more</div>}
+            </div>
+          </>}
+          <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
+            {!repeatUndo ? <button data-testid="stmt-repeats-merge" style={btn(true)} onClick={() => setRepeatUndo(onMergeRepeats(repeats))}>Merge {repeats.length} repeat{repeats.length === 1 ? "" : "s"} (keep mine)</button>
+              : <><div data-testid="stmt-repeats-done" style={{ color: T.sub, fontSize: 13, flex: 1 }}>Merged.</div><button data-testid="stmt-repeats-undo" style={btn(false)} onClick={() => { onUndoRepeats(repeatUndo); setRepeatUndo(null); }}>Undo</button></>}
+          </div>
+        </div>
+      )}
       {(repairs.length > 0 || tidyUndo) && state.phase !== "done" && (
         <div style={card} data-testid="stmt-tidy">
           <div style={label}>Tidy imported names</div>
@@ -203,7 +227,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
         {statementBillCard()}
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, r.status === "new" && canAdd(r)]))); }}>Only new</button>
-          <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, canAdd(r)]))); }}>All</button>
+          <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, canAdd(r)]))); }}>Everything (even matches)</button>
           <button style={btn(false)} onClick={() => { setMerged({}); setTicked({}); }}>None</button>
         </div>
 

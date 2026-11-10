@@ -211,6 +211,7 @@ import InvoiceImportScreen from "./screens/InvoiceImportScreen";
 import StatementImportScreen from "./screens/StatementImportScreen";
 import AccountStatementSheet from "./components/AccountStatementSheet";
 import { planStatementBillFromPdf } from "./domain/cards/statementFromPdf";
+import { applyDuplicateMerge, undoDuplicateMerge } from "./domain/imports/duplicatePairs";
 import { applyBalanceMatch, undoBalanceMatch } from "./domain/imports/statementBalances";
 import { applyMerges, undoImportBatch } from "./domain/imports/buildImport";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
@@ -20689,6 +20690,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {showSettings&&settingsSection==="importstatement"&&<StatementImportScreen accounts={accounts} txns={txns} genId={genId} T={T} sym={sym} fixedAccountId={statementAccId} checkpoints={balanceCheckpoints}
           statementBillPlan={(accId,summary)=>planStatementBillFromPdf({ card:accounts.find(a=>String(a.id)===String(accId)), accounts, txns:expandPaymentLines(txns), bills, summary, toDateOnly, genId, today:todayStr() })}
           onSetStatementBill={plan=>{ setBills(prev=>plan.action==="create" ? [plan.bill,...prev] : prev.map(b=>b.id===plan.bill.id?plan.bill:b)); setToast({ message:plan.bill.verification==="matched" ? "Statement bill set and matched" : "Statement bill set; the difference is recorded" }); return { createdId:plan.action==="create"?plan.bill.id:null, prev:plan.prev }; }}
+          onMergeRepeats={pairs=>{ const res=applyDuplicateMerge(txns,pairs); setTxns(res.txns); setToast({ message:`${pairs.length} repeat${pairs.length===1?"":"s"} merged` }); return res.undo; }}
+          onUndoRepeats={undo=>{ setTxns(prev=>undoDuplicateMerge(prev,undo)); setToast({ message:"Repeats put back" }); }}
           onTidyNames={changes=>{ const byId=new Map(changes.map(c=>[String(c.id),c])); setTxns(prev=>prev.map(t=>byId.has(String(t.id))?{...t,merchant:byId.get(String(t.id)).to}:t)); setToast({ message:`${changes.length} name${changes.length===1?"":"s"} fixed` }); return changes; }}
           onUndoTidy={changes=>{ const byId=new Map(changes.map(c=>[String(c.id),c])); setTxns(prev=>prev.map(t=>byId.has(String(t.id))?{...t,merchant:byId.get(String(t.id)).from}:t)); setToast({ message:"Names put back" }); }}
           onUndoStatementBill={undo=>{ setBills(prev=>undo.createdId ? prev.filter(b=>b.id!==undo.createdId) : prev.map(b=>undo.prev&&b.id===undo.prev.id?undo.prev:b)); setToast({ message:"Statement bill put back" }); }}
