@@ -116,6 +116,16 @@ try {
   const ct2 = await ls("arth_txns"), made = ct2.filter(x => x.importKey && !x.importMerged && x.accId === "cc1"), pay = ct2.find(x => x.id === "pay1");
   rec("C6 two expenses were added ON THE CARD (375.10 and 200.00), uncategorised, vendor from the description", made.length === 2 && made.every(x => x.type === "expense" && x.catIds.length === 0) && made.some(x => x.amount === 375.1 && x.merchant === "Zomato Cybs Delhi") && made.some(x => x.amount === 200), made.map(x => [x.amount, x.merchant]));
   rec("C7 my bank-side card payment was linked, not duplicated or changed; no payment entry was created", ct2.length === before + 2 && pay.importMerged === true && pay.amount === 1000 && pay.type === "cc_payment", { before, after: ct2.length });
+  // the statement bill, set from the PDF's printed total / due date
+  const bc = (await T("stmt-bill-card").innerText()).replace(/\n/g, " ");
+  rec("B1 after the import the screen compares the PDF total with Arth's charges for the cycle: ₹575.10 vs ₹575.10, matches; a note says the card's statement day in Arth (15) is not the printed 16", /Statement total ₹575\.10/.test(bc) && /Arth has ₹575\.10/.test(bc) && /matches/.test(bc) && /statement day in Arth is 15/.test(await T("stmt-bill-note").innerText()), bc);
+  await T("stmt-bill-set").click(); await page.waitForTimeout(500);
+  let bills = await ls("arth_bills"), sb = bills.find(b => b.isCcStatement);
+  rec("B2 'Set the statement bill' creates the card's statement bill: period to 16-10, due 03-11-2026, Arth 575.10 = bank 575.10, matched, nothing else changed", sb && sb.accId === "cc1" && sb.periodTo === "2026-10-16" && sb.dueDate === "2026-11-03" && sb.arthAmount === 575.1 && sb.bankAmount === 575.1 && sb.verification === "matched" && (await ls("arth_txns")).length === ct2.length, sb && { periodFrom: sb.periodFrom, periodTo: sb.periodTo, v: sb.verification });
+  rec("B3 pressing it again is not offered; the screen says it already matches only after a fresh load (here: shows Done with Undo)", (await T("stmt-bill-undo").count()) === 1, {});
+  await T("stmt-bill-undo").click(); await page.waitForTimeout(400);
+  const billAfter = (await ls("arth_bills")).find(b => b.id === sb.id);
+  rec("B4 Undo puts things back: the bill it created is gone, or (when the app had already made its own bill for that cycle and this updated it in place) that bill is back as it was, with no bank amount", !billAfter || billAfter.bankAmount == null, billAfter ? { periodTo: billAfter.periodTo, bankAmount: billAfter.bankAmount } : "removed");
   await page.reload(); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(400);
   await page.getByText(/^money$/i).last().dispatchEvent("click"); await page.waitForTimeout(900); await unlock(); await page.waitForTimeout(700);
   await T("card-view-txns").dispatchEvent("click"); await page.waitForTimeout(700);

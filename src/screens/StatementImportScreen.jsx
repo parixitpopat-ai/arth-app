@@ -9,9 +9,10 @@ import { statementBalances, planBalanceMatch } from "../domain/imports/statement
 import { buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
 
 const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const addDay = iso => { const t = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10) + 1)); return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`; };
 const niceDate = iso => { const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
 
-export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance }) {
+export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill }) {
   const fileRef = useRef(null);
   const banks = accounts.filter(a => a.type === "bank");
   const cards = accounts.filter(a => a.type === "cc");
@@ -20,6 +21,8 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const [ticked, setTicked] = useState({});                       // importKey -> bool (add as a new transaction)
   const [merged, setMerged] = useState({});                       // importKey -> bool (link to the entry it looks like; adds nothing)
   const [sb, setSb] = useState(null);                         // what the last file says the balance was at its start and end
+  const [lastSummary, setLastSummary] = useState(null);       // the card statement figures read from the last PDF
+  const [billUndo, setBillUndo] = useState(null);               // set after "Set the statement bill", used by its Undo
   const [balUndo, setBalUndo] = useState(null);                // set after "Match", used by its Undo
   const acctNow = accounts.find(a => String(a.id) === String(fixedAccountId || accountId));
   const isCard = Boolean(acctNow && acctNow.type === "cc");     // a credit card: a plain amount is a charge; payments/refunds are matched, not created
@@ -54,7 +57,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
       const parsed = await readStatementFile(bytes, { name: file.name, workerSrc, accountKind: isCard ? "card" : undefined });
       if (!parsed.ok) { setState({ phase: "idle", error: parsed.reason, detail: parsed.detail, fileName: file.name }); return; }
       stage = "compare with your entries";
-      setSb(statementBalances(parsed)); setBalUndo(null);
+      setSb(statementBalances(parsed)); setBalUndo(null); setLastSummary(parsed.summary && typeof parsed.summary.totalDuePaise === "number" ? parsed.summary : null); setBillUndo(null);
       setState({ phase: "result", fileName: file.name, parsed, match: analyse(parsed, accountId), accountId });
     } catch (err) {
       // The detail names the step and the error only (no file content), so it is safe to send to whoever is fixing this.
@@ -121,6 +124,30 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
     );
   };
 
+  const statementBillCard = () => {
+    if (!isCard || !lastSummary || !statementBillPlan || !onSetStatementBill) return null;
+    const plan = statementBillPlan(state.accountId || accountId, lastSummary);
+    if (!plan.ok) return null;
+    const m = v => `${sym}${Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const pending = state.phase === "result" && chosen.length > 0;
+    return (
+      <div style={card} data-testid="stmt-bill-card">
+        <div style={label}>Statement bill for this PDF</div>
+        <div style={{ color: T.text, fontSize: 13, lineHeight: 1.5 }}>
+          <div>Statement total <b>{m(plan.bankAmount)}</b>{lastSummary.dueDate ? ` · due ${niceDate(lastSummary.dueDate)}` : ""}</div>
+          <div>Arth has <b>{m(plan.arthAmount)}</b> on this card for {niceDate(addDay(plan.periodFrom))} to {niceDate(plan.periodTo)}{plan.difference !== 0 ? <span style={{ color: T.warn }}> · {m(Math.abs(plan.difference))} {plan.difference > 0 ? "short" : "more than the statement"}</span> : <span style={{ color: T.success }}> · matches</span>}</div>
+        </div>
+        {pending && <div style={{ color: T.sub, fontSize: 11, marginTop: 6 }}>These figures do not include the rows you are about to import. Import first, then set the bill.</div>}
+        {plan.notes.map((n, i) => <div key={i} data-testid="stmt-bill-note" style={{ color: T.warn, fontSize: 12, marginTop: 6, lineHeight: 1.4 }}>{n}</div>)}
+        <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
+          {!billUndo && plan.action !== "unchanged" && <button data-testid="stmt-bill-set" style={btn(true)} onClick={() => setBillUndo(onSetStatementBill(plan))}>{plan.action === "create" ? "Set the statement bill from this PDF" : "Update the statement bill from this PDF"}</button>}
+          {!billUndo && plan.action === "unchanged" && <div data-testid="stmt-bill-same" style={{ color: T.success, fontSize: 13, fontWeight: 700 }}>✓ The statement bill already matches this PDF.</div>}
+          {billUndo && <><div data-testid="stmt-bill-done" style={{ color: T.sub, fontSize: 13, flex: 1 }}>Statement bill set{plan.bill.verification === "matched" ? ": matched." : ": the difference is recorded for you to review."}</div><button data-testid="stmt-bill-undo" style={btn(false)} onClick={() => { onUndoStatementBill(billUndo); setBillUndo(null); }}>Undo</button></>}
+        </div>
+      </div>
+    );
+  };
+
   const p = state.parsed, bal = p && p.balance;
   return (
     <div style={{ padding: "14px 16px 24px" }} data-testid="statement-import">
@@ -160,6 +187,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
         </div>
 
         {balanceCard()}
+        {statementBillCard()}
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, r.status === "new" && canAdd(r)]))); }}>Only new</button>
           <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, canAdd(r)]))); }}>All</button>
@@ -217,6 +245,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
       </div>}
 
       {state.phase === "done" && balanceCard()}
+      {state.phase === "done" && statementBillCard()}
 
       {batches.length > 0 && state.phase !== "done" && <div style={{ ...card, marginTop: 16 }} data-testid="stmt-batches">
         <div style={label}>Earlier imports</div>

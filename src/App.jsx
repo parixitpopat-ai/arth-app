@@ -210,6 +210,7 @@ import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import InvoiceImportScreen from "./screens/InvoiceImportScreen";
 import StatementImportScreen from "./screens/StatementImportScreen";
 import AccountStatementSheet from "./components/AccountStatementSheet";
+import { planStatementBillFromPdf } from "./domain/cards/statementFromPdf";
 import { applyBalanceMatch, undoBalanceMatch } from "./domain/imports/statementBalances";
 import { applyMerges, undoImportBatch } from "./domain/imports/buildImport";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
@@ -20686,6 +20687,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {/* The invoice screen is rendered HERE, not inside Settings: Settings is re-created on every AppContent render, which would reset this screen (its review state, the success message, Undo) the moment the import saves. */}
         {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} itemCatalog={itemCatalog} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>{ setSettingsSection(null); setShowSettings(false); }} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }} onAddReceipt={prefill=>{ setAddPrefill(prefill); setShowAdd(true); }}/>}
         {showSettings&&settingsSection==="importstatement"&&<StatementImportScreen accounts={accounts} txns={txns} genId={genId} T={T} sym={sym} fixedAccountId={statementAccId} checkpoints={balanceCheckpoints}
+          statementBillPlan={(accId,summary)=>planStatementBillFromPdf({ card:accounts.find(a=>String(a.id)===String(accId)), accounts, txns:expandPaymentLines(txns), bills, summary, toDateOnly, genId, today:todayStr() })}
+          onSetStatementBill={plan=>{ setBills(prev=>plan.action==="create" ? [plan.bill,...prev] : prev.map(b=>b.id===plan.bill.id?plan.bill:b)); setToast({ message:plan.bill.verification==="matched" ? "Statement bill set and matched" : "Statement bill set; the difference is recorded" }); return { createdId:plan.action==="create"?plan.bill.id:null, prev:plan.prev }; }}
+          onUndoStatementBill={undo=>{ setBills(prev=>undo.createdId ? prev.filter(b=>b.id!==undo.createdId) : prev.map(b=>undo.prev&&b.id===undo.prev.id?undo.prev:b)); setToast({ message:"Statement bill put back" }); }}
           onMatchBalance={(accId,plan)=>{ const acc=accounts.find(a=>String(a.id)===String(accId)); if(!acc) return null; const out=applyBalanceMatch(acc,balanceCheckpoints[accId]||null,plan); setAccounts(prev=>prev.map(a=>String(a.id)===String(accId)?out.account:a)); setBalanceCheckpoints(p=>({...p,[accId]:out.checkpoint})); setToast({ message:"Balances set to match the statement" }); return out.undo; }}
           onUndoBalance={(accId,undo)=>{ const acc=accounts.find(a=>String(a.id)===String(accId)); if(!acc) return; const back=undoBalanceMatch(acc,undo); setAccounts(prev=>prev.map(a=>String(a.id)===String(accId)?back.account:a)); setBalanceCheckpoints(p=>{ const n={...p}; if(back.checkpoint) n[accId]=back.checkpoint; else delete n[accId]; return n; }); setToast({ message:"Balances put back" }); }}
           onBack={()=>{ setSettingsSection(null); setShowSettings(false); setStatementAccId(""); }}
