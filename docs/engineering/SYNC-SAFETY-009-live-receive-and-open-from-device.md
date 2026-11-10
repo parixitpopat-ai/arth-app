@@ -123,3 +123,10 @@ Money → the card's tile → "Import statement" (also on the card's account pag
 - **Not built:** real phone notifications (no Capacitor notification plugin is installed; alerts are in-app only).
 - **Bug fixed on the way:** tapping Confirm on Pause/End with no reason crashed to "Something went wrong" (the thrown error happens inside a state update where the panel's try/catch cannot see it). The panel now asks for a reason first.
 - Tests: `domain/bills/prepaidAlerts.test.js`; Chromium `tools/bills/prepaid-alerts-browser.mjs` (synthetic data).
+
+## 16. Family plan: several people on one provider account
+
+- **Add / Edit Provider Account → Attributed to → Person(s):** a checklist (check marks) replaces the one-choice dropdown (School Fees keeps the dropdown). The first person ticked is the **main** one: the account's legacy `attributedTo` is that person, so bills show "For" them exactly as before (the oldest person dominates; nothing in `billFor.js` changed). Every other person gets their own active Financial Relationship (`createRelationship`) with this provider; when there are extras the main person's relationship is created in the same save so it is the oldest. The existing attribution effect never duplicates a pair.
+- **Edit:** people already on the plan are shown ticked and cannot be unticked in the form; ending or pausing one is done on the connection screen, which now shows a status panel (Pause / Resume / End) for each person on the connection (active or paused ones, plus the newest if ended) instead of only the newest. A connection counts as live for alerts while any one person's relationship is active.
+- **Not changed:** House / Group / Vehicle stay single choices; the A rows on a payment remain how cost is attributed to family members.
+- Tests: Chromium `tools/bills/family-plan-browser.mjs` (synthetic people; F1–F7 create, E0–E3 edit).

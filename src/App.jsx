@@ -18024,12 +18024,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </>
         )}
 
-        {rel && (
-          <RelationshipStatusPanel T={T} relationship={rel} targetLabel={getRelationshipTargetLabel(rel)}
-            onPause={(reason, effectiveDate) => setMembershipRelationships(prev => prev.map(x => x.id === rel.id ? pauseRelationship(x, reason, effectiveDate) : x))}
-            onResume={effectiveDate => setMembershipRelationships(prev => prev.map(x => x.id === rel.id ? resumeRelationship(x, effectiveDate) : x))}
-            onEnd={(reason, effectiveDate) => setMembershipRelationships(prev => prev.map(x => x.id === rel.id ? endRelationship(x, reason, effectiveDate) : x))}/>
-        )}
+        {/* One status panel per person on this connection (a family plan has several): every active or paused one, plus the newest if it has ended. */}
+        {membershipRelationships
+          .filter(r => String(r.billerAccountId) === String(ba.id) && (r.status !== "ended" || (rel && r.id === rel.id)))
+          .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+          .map(r => (
+          <RelationshipStatusPanel key={r.id} T={T} relationship={r} targetLabel={getRelationshipTargetLabel(r)}
+            onPause={(reason, effectiveDate) => setMembershipRelationships(prev => prev.map(x => x.id === r.id ? pauseRelationship(x, reason, effectiveDate) : x))}
+            onResume={effectiveDate => setMembershipRelationships(prev => prev.map(x => x.id === r.id ? resumeRelationship(x, effectiveDate) : x))}
+            onEnd={(reason, effectiveDate) => setMembershipRelationships(prev => prev.map(x => x.id === r.id ? endRelationship(x, reason, effectiveDate) : x))}/>
+        ))}
         <button onClick={() => {
           const blockers = getBillerAccountDeleteBlockers(ba.id, { bills, memberships, feePayments, txns });
           if (blockers.total > 0) { askConfirm(`Cannot delete: ${ba.name} is still linked to ${describeBillerAccountDeleteBlockers(blockers)}. Remove or relink those first.`, null); return; }
@@ -19248,6 +19252,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const providerIsLocked = !existing && !!preselectedBillerProvider;
     const [baAttributedTo, setBaAttributedTo] = useState(existing?.attributedTo||(!existing&&preselectedAttribution?.id)||"");
     const [baAttributeType, setBaAttributeType] = useState(existing?.attributeType||(!existing&&preselectedAttribution?.type)||"house");
+    // More people on the same provider (a family plan): the FIRST person is the primary (bills show "For" them, as before); the rest get their own Financial Relationship.
+    // Persons who already have an active relationship with this provider (edit) are listed ticked and cannot be unticked here — ending one is done from the connection screen.
+    const alreadyOnPlanIds = existing ? membershipRelationships.filter(r=>r.status==="active" && String(r.billerAccountId)===String(existing.id) && getRelationshipTarget(r).targetType==="person").map(r=>String(getRelationshipTarget(r).targetId)) : [];
+    const [baExtraPersons, setBaExtraPersons] = useState(()=>alreadyOnPlanIds.filter(id=>id!==String(existing?.attributedTo||"")));
+    const [personListOpen, setPersonListOpen] = useState(false);
     const [baNote, setBaNote] = useState(existing?.note||"");
     const canSave = baName.trim() && baType;
     const [duplicateError, setDuplicateError] = useState("");
@@ -19314,6 +19323,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         }
       }
       setDuplicateError("");
+      // A family plan: every extra person gets their own Financial Relationship with this provider (the primary's is created by the existing attribution effect;
+      // when there are extras it is created here too so it is the oldest).
+      const extraIds = baAttributeType==="person" && baType!=="School Fees" ? baExtraPersons.map(String).filter(id=>id && id!==String(baAttributedTo)) : [];
+      if(extraIds.length){
+        const have = membershipRelationships.filter(r=>String(r.billerAccountId)===String(record.id) && r.status==="active");
+        const hasPerson = id => have.some(r=>{ const t=getRelationshipTarget(r); return t.targetType==="person" && String(t.targetId)===String(id); });
+        const adds = [];
+        if(baAttributedTo && !hasPerson(baAttributedTo)) adds.push(createRelationship({ billerAccountId:record.id, targetType:"person", targetId:baAttributedTo, startDate:todayStr(), genId }));
+        extraIds.forEach(id=>{ if(!hasPerson(id)) adds.push(createRelationship({ billerAccountId:record.id, targetType:"person", targetId:id, startDate:todayStr(), genId })); });
+        if(adds.length) setMembershipRelationships(prev=>[...prev,...adds]);
+      }
       setBillerAccounts(prev=>isEdit?prev.map(x=>x.id===existing.id?record:x):[...prev,record]);
       onClose();
     };
@@ -19368,10 +19388,49 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <span style={lbl}>Attributed To</span>
               <div style={{ display:"flex",gap:6,marginBottom:8,flexWrap:"wrap" }}>
                 {[["house","House"],["person","Person"],["group","Group"],...(vehicles.length>0?[["vehicle","Vehicle"]]:[])].map(([v,l])=>(
-                  <button key={v} onClick={()=>{ setBaAttributeType(v); setBaAttributedTo(""); }} style={{ flex:1,minWidth:70,background:baAttributeType===v?T.accent+"22":"none",border:`1px solid ${baAttributeType===v?T.accent:T.border}`,borderRadius:10,padding:"6px 4px",cursor:"pointer",fontSize:11,fontWeight:700,color:baAttributeType===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
+                  <button key={v} onClick={()=>{ setBaAttributeType(v); setBaAttributedTo(""); setBaExtraPersons([]); }} style={{ flex:1,minWidth:70,background:baAttributeType===v?T.accent+"22":"none",border:`1px solid ${baAttributeType===v?T.accent:T.border}`,borderRadius:10,padding:"6px 4px",cursor:"pointer",fontSize:11,fontWeight:700,color:baAttributeType===v?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{l}</button>
                 ))}
               </div>
-              {baAttributeType==="person"&&(
+              {baAttributeType==="person"&&baType!=="School Fees"&&(()=>{
+                const peopleOpts = getActivePeople(people);
+                const picked = [String(baAttributedTo||""), ...baExtraPersons.map(String)].filter(Boolean);
+                const nameOf = id => people.find(x=>String(x.id)===String(id))?.name || "?";
+                const toggle = id => {
+                  const sid = String(id);
+                  if(picked.includes(sid)){
+                    if(alreadyOnPlanIds.includes(sid)) return;                         // already on this plan: end it from the connection screen
+                    if(sid===String(baAttributedTo)){ const [next,...rest]=baExtraPersons; setBaAttributedTo(next||""); setBaExtraPersons(rest); }
+                    else setBaExtraPersons(prev=>prev.filter(x=>String(x)!==sid));
+                  } else if(!baAttributedTo){
+                    setBaAttributedTo(sid);
+                    if(!baName.trim()){ const p=people.find(x=>String(x.id)===sid); if(p) setBaName(p.name); }
+                  } else setBaExtraPersons(prev=>[...prev,sid]);
+                };
+                return (
+                  <div>
+                    <button data-testid="ba-persons-toggle" type="button" onClick={()=>setPersonListOpen(o=>!o)} style={{ ...inp,textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",fontFamily:"inherit" }}>
+                      <span style={{ color:picked.length?T.text:T.sub,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{picked.length?picked.map(nameOf).join(", "):"Select person(s)"}</span><span>{personListOpen?"▴":"▾"}</span>
+                    </button>
+                    {personListOpen&&(
+                      <div data-testid="ba-persons-list" style={{ marginTop:6,background:T.input,borderRadius:12,padding:"4px 0",maxHeight:240,overflowY:"auto" }}>
+                        {peopleOpts.map(p=>{
+                          const on = picked.includes(String(p.id)), locked = alreadyOnPlanIds.includes(String(p.id));
+                          return (
+                            <button key={p.id} type="button" data-testid={`ba-person-${p.id}`} aria-pressed={on} onClick={()=>toggle(p.id)} style={{ width:"100%",display:"flex",alignItems:"center",gap:10,minHeight:44,background:"none",border:"none",padding:"6px 14px",cursor:locked?"default":"pointer",textAlign:"left",fontFamily:"inherit",color:T.text,fontSize:14 }}>
+                              <span style={{ width:20,height:20,borderRadius:5,border:`2px solid ${on?T.accent:T.border}`,background:on?T.accent:"none",color:"#fff",fontSize:13,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{on?"✓":""}</span>
+                              <span style={{ flex:1 }}>{p.emoji} {p.name}</span>
+                              {locked&&<span style={{ color:T.sub,fontSize:11 }}>on this plan</span>}
+                              {!locked&&on&&String(baAttributedTo)===String(p.id)&&picked.length>1&&<span style={{ color:T.sub,fontSize:11 }}>main</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {picked.length>1&&<div data-testid="ba-persons-note" style={{ color:T.sub,fontSize:11,marginTop:6,lineHeight:1.45 }}>Bills show as "For" {nameOf(baAttributedTo)} (the first one). The others are also on this plan, and each has their own relationship to end or pause.</div>}
+                  </div>
+                );
+              })()}
+              {baAttributeType==="person"&&baType==="School Fees"&&(
                 <select style={inp} value={baAttributedTo} onChange={e=>{
                   const pid=e.target.value;
                   setBaAttributedTo(pid);
