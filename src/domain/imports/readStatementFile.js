@@ -7,6 +7,8 @@ import { parseStatementRows } from "./statement.js";
 import { pdfPagesToRows } from "./statementPdf.js";
 import { extractCardSummary, checkCardSummary } from "./cardSummary.js";
 
+// A card statement is often 10+ pages of offers around one table; read up to this many, and skip counting pictures (only invoices need that).
+export const STATEMENT_MAX_PAGES = 40;
 const MAX_TEXT_BYTES = 8 * 1024 * 1024;
 const fail = reason => ({ ok: false, reason, rows: [], skipped: [], balance: { checked: 0, mismatches: [], order: "unknown" }, period: null });
 
@@ -29,7 +31,7 @@ export async function readStatementFile(bytes, opts = {}) {
       stage = "load the PDF reader";
       const { readPdfLayout } = await import("../invoices/pdfText.js");
       stage = "open the PDF";
-      const lay = await readPdfLayout(bytes, { workerSrc: opts.workerSrc });
+      const lay = await readPdfLayout(bytes, { workerSrc: opts.workerSrc, maxPages: STATEMENT_MAX_PAGES, skipImageOps: true });
       if (lay.status !== "ok") return { kind, ...fail(lay.reason), detail: `PDF reader: ${lay.status}` };
       stage = "find the table";
       const t = pdfPagesToRows(lay.pages);

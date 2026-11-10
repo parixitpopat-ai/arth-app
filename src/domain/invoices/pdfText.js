@@ -8,7 +8,7 @@ export const PDF_LIMITS = Object.freeze({ maxBytes: 10 * 1024 * 1024, maxPages: 
 
 const fail = (status, reason) => ({ status, reason, pages: [] });
 
-/** @param {Uint8Array|ArrayBuffer} input @param {{pdfjs?:object, workerSrc?:string}} [opts] */
+/** @param {Uint8Array|ArrayBuffer} input @param {{pdfjs?:object, workerSrc?:string, maxPages?:number, skipImageOps?:boolean}} [opts]  maxPages raises the page cap (default PDF_LIMITS.maxPages); skipImageOps skips counting pictures (only invoices need it) */
 export async function readPdfLayout(input, opts = {}) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input || 0);
   if (!bytes.length) return fail("unreadable", "The file is empty.");
@@ -28,11 +28,12 @@ export async function readPdfLayout(input, opts = {}) {
     return fail("unreadable", "This PDF could not be read.");
   }
   try {
-    if (doc.numPages > PDF_LIMITS.maxPages) return fail("too-many-pages", `This PDF has ${doc.numPages} pages; up to ${PDF_LIMITS.maxPages} are read at a time.`);
+    const maxPages = opts.maxPages || PDF_LIMITS.maxPages;
+    if (doc.numPages > maxPages) return fail("too-many-pages", `This PDF has ${doc.numPages} pages; up to ${maxPages} are read at a time.`);
     const imageOpIds = ["paintImageXObject", "paintInlineImageXObject", "paintImageMaskXObject", "paintJpegXObject"].map(k => pdfjs.OPS && pdfjs.OPS[k]).filter(v => v !== undefined);
     const pages = [];
     for (let n = 1; n <= doc.numPages; n++) {
-      const page = await doc.getPage(n), tc = await page.getTextContent(), ops = await page.getOperatorList();
+      const page = await doc.getPage(n), tc = await page.getTextContent(), ops = opts.skipImageOps ? { fnArray: [] } : await page.getOperatorList();
       const items = tc.items.filter(i => typeof i.str === "string" && i.str.trim()).map(i => ({ str: i.str.trim(), x: i.transform[4], y: i.transform[5], w: i.width, h: i.height }));
       pages.push({ number: n, items, textChars: items.reduce((s, i) => s + i.str.replace(/\s+/g, "").length, 0), imageOps: ops.fnArray.filter(f => imageOpIds.includes(f)).length });
     }
