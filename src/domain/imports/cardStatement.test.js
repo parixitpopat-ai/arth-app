@@ -89,3 +89,19 @@ test("card statement pdf: an amount 5 points off its row's baseline still belong
   assert.equal(r.ok, true, r.reason + " " + r.detail);
   assert.deepEqual(r.rows.map(x => [x.date, x.amountPaise]), [["2026-10-06", -37510], ["2026-10-09", -2000]]);
 });
+
+// The reported partial read: only the first page's rows were imported (14 rows, a few days) while the statement's printed purchases were far larger.
+// Later pages repeat the heading at OTHER positions (no side panel, wider table, no side-panel word), and a further page has no heading at all.
+test("card statement pdf: rows on later pages are read — repeated heading at other positions, and a page with no heading shifted sideways", async () => {
+  const p1 = [t("SPENDS OVERVIEW", 90, 421, 6), t("Date", 207, 420, 6), t("SerNo.", 262, 420, 6), t("Transaction Details", 305, 420, 6), t("Amount (in\u20B9)", 522, 420, 6),
+    t("06/10/2026", 207, 380, 6), t("14308206086", 252, 380, 6), t("SHOP ONE", 305, 380, 6), t("100.00", 560 - 6 * 3, 380, 6)];
+  const p2 = [t("Date", 40, 760, 6), t("SerNo.", 95, 760, 6), t("Transaction Details", 140, 760, 6), t("Amount (in\u20B9)", 520, 760, 6),
+    t("07/10/2026", 40, 740, 6), t("14308206999", 85, 740, 6), t("SHOP TWO", 140, 740, 6), t("200.00", 560 - 6 * 3, 740, 6),
+    t("08/10/2026", 40, 725, 6), t("14308207000", 85, 725, 6), t("SHOP THREE", 140, 725, 6), t("300.00", 560 - 6 * 3, 725, 6)];
+  const p3 = [t("09/10/2026", 60, 740, 6), t("14308207111", 105, 740, 6), t("SHOP FOUR", 160, 740, 6), t("400.00", 560 - 6 * 3 + 20, 740, 6)];   // no heading; everything 20 pt to the right
+  const r = await readStatementFile(makePdf([{ texts: p1 }, { texts: p2 }, { texts: p3 }]), { accountKind: "card" });
+  assert.equal(r.ok, true, r.reason + " " + r.detail);
+  assert.deepEqual(r.rows.map(x => [x.date, x.amountPaise, x.ref]), [["2026-10-06", -10000, "14308206086"], ["2026-10-07", -20000, "14308206999"], ["2026-10-08", -30000, "14308207000"], ["2026-10-09", -40000, "14308207111"]]);
+  assert.deepEqual(r.rowsPerPage, [1, 2, 1]);
+  assert.deepEqual(r.rows.map(x => x.desc), ["SHOP ONE", "SHOP TWO", "SHOP THREE", "SHOP FOUR"]);
+});

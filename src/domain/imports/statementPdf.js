@@ -65,16 +65,33 @@ function headingAt(lines, i) {
   return null;
 }
 
-/** @param {Array<{number:number, items:Array<{str,x,y,w}>}>} pages @returns {{ok:boolean, reason?:string, rows:Array<Array<string>>}} */
+/** Column geometry for one heading: which headings are money, which are text, the table's horizontal extent, and how its cells map onto the FIRST heading's columns. */
+function geometryOf(cells, base) {
+  const numeric = cells.map((c, i) => [i, c]).filter(([, c]) => /(debit|withdraw|credit|deposit|amount|balance)/i.test(c.str));
+  const textCols = cells.map((_, i) => i).filter(i => !numeric.some(([j]) => j === i));
+  // A later page may repeat the heading at other positions (no side panel, wider table) and with or without extra cells: map each cell to the
+  // first heading's column of the same text so every page fills the same row layout. A cell with no counterpart is dropped.
+  let map;
+  if (cells === base) map = cells.map((_, i) => i);
+  else { const used = new Set(); map = cells.map(c => { const j = base.findIndex((b, k) => !used.has(k) && lc(b.str) === lc(c.str)); if (j >= 0) used.add(j); return j; }); }
+  return { cells, numeric, textCols, map, left: cells[0].x - 6, right: cells[cells.length - 1].x + cells[cells.length - 1].w + 12, colLeft: new Map() };
+}
+
+/** @param {Array<{number:number, items:Array<{str,x,y,w}>}>} pages @returns {{ok:boolean, reason?:string, rows:Array<Array<string>>, rowsPerPage?:number[]}} */
 export function pdfPagesToRows(pages) {
   const no = reason => ({ ok: false, reason, rows: [] });
   const chars = (pages || []).reduce((s, p) => s + (p.textChars || 0), 0);
   if (!chars) return no("This PDF has no text in it (it looks scanned or photographed). Download the statement from your bank's app or net banking as Excel/CSV or the original PDF.");
-  let head = null, headTexts = null, numeric = [], textCols = [], rows = null;
-  const colLeft = new Map();                     // text column -> left x of runs already placed there by overlap
-  const out = [];
+  let base = null, cur = null;
+  const out = [], rowsPerPage = [];
   for (const pg of pages) {
-    const lines = groupLines(pg.items || []);
+    let lines = groupLines(pg.items || []);
+    let pageRows = 0;
+    // A continuation page with no heading of its own: the table may sit at other positions. Shift the page so its first date lines up with the Date heading.
+    if (cur && !lines.some((_, i) => headingAt(lines, i))) {
+      const di = cur.cells.findIndex(c => /date/i.test(c.str)), first = lines.flatMap(l => l.cells).filter(c => DATE_RE.test(c.str.trim())).sort((x, y) => x.x - y.x)[0];
+      if (di >= 0 && first && Math.abs(first.x - cur.cells[di].x) > 6) { const dx = first.x - cur.cells[di].x; lines = lines.map(l => ({ ...l, cells: l.cells.map(c => ({ ...c, x: c.x - dx })) })); }
+    }
     let prevY = null, prevRow = null, skip = 0;
     for (let li = 0; li < lines.length; li++) {
       const ln = lines[li];
@@ -82,19 +99,19 @@ export function pdfPagesToRows(pages) {
       const found = headingAt(lines, li);
       if (found) {
         const hc = found.cells; skip = found.span - 1;
-        if (!head) { head = hc; headTexts = hc.map(c => c.str); numeric = head.map((c, i) => [i, c]).filter(([, c]) => /(debit|withdraw|credit|deposit|amount|balance)/i.test(c.str)); textCols = head.map((_, i) => i).filter(i => !numeric.some(([j]) => j === i)); out.push(headTexts); }
+        if (!base) { base = hc; out.push(hc.map(c => c.str)); cur = geometryOf(hc, hc); } else cur = geometryOf(hc, base);
         prevY = null; prevRow = null; continue;
       }
-      if (!head) continue;
-      const row = head.map(() => "");
+      if (!cur) continue;
+      const { cells: head, numeric, textCols, map, left, right, colLeft } = cur;
+      const row = base.map(() => "");
+      const add = (c, str) => { const k = map[c]; if (k >= 0) row[k] = row[k] ? row[k] + " " + str : str; };
       // only what sits inside the table: a page with a side panel (offers, spend charts) must not leak into the rows
-      const left = head[0].x - 6, right = head[head.length - 1].x + head[head.length - 1].w + 12;
       for (const it of ln.cells) {
         if (it.x < left || it.x > right) continue;
         // Amounts (and a "CR"/"DR" beside one) are right-aligned under a money heading: nearest heading wins.
         if ((MONEY_RE.test(it.str) || /^(?:cr|dr)\.?$/i.test(it.str)) && numeric.length) {
-          const col = numeric.reduce((b, [i, c]) => (dist(it, c) < dist(it, head[b]) ? i : b), numeric[0][0]);
-          row[col] = row[col] ? row[col] + " " + it.str : it.str;
+          add(numeric.reduce((b, [i, c]) => (dist(it, c) < dist(it, head[b]) ? i : b), numeric[0][0]), it.str);
           continue;
         }
         // Text. A run goes under the one text heading it overlaps (data is often wider than its heading and centred under it, so it can start well left of
@@ -103,40 +120,40 @@ export function pdfPagesToRows(pages) {
         // a run overlapping two or more text headings is split into words, each placed on its own estimated span. Money headings are excluded.
         const spanOf = (a2, b2) => textCols.map(i => { const h = head[i]; return { i, ov: Math.max(0, Math.min(b2, h.x + h.w) - Math.max(a2, h.x)), gap: Math.max(0, h.x - b2, a2 - (h.x + h.w)) }; });
         const nearest = list => list.reduce((best, c) => (c.ov > best.ov || (c.ov === best.ov && c.ov === 0 && c.gap < best.gap) ? c : best), list[0]);
-        const put = (c2, str) => { row[c2] = row[c2] ? row[c2] + " " + str : str; };
         const runSpans = spanOf(it.x, it.x + (it.w || 0)), overlapping = runSpans.filter(c => c.ov > 0);
         if (overlapping.length <= 1) {
           let c2;
           if (overlapping.length === 1) { c2 = overlapping[0].i; (colLeft.get(c2) || colLeft.set(c2, []).get(c2)).push(it.x); }
           else { const learned = textCols.find(i => (colLeft.get(i) || []).some(x0 => Math.abs(x0 - it.x) <= 4)); c2 = learned !== undefined ? learned : nearest(runSpans).i; }
-          put(c2, it.str);
+          add(c2, it.str);
           continue;
         }
         for (const tok of it.str.matchAll(/\S+/g)) {
           const L = Math.max(1, it.str.length), w = it.w || 0;
-          put(nearest(spanOf(it.x + w * tok.index / L, it.x + w * (tok.index + tok[0].length) / L)).i, tok[0]);
+          add(nearest(spanOf(it.x + w * tok.index / L, it.x + w * (tok.index + tok[0].length) / L)).i, tok[0]);
         }
       }
-      const dateCol = head.findIndex(c => /date/i.test(c.str));
+      const dateCol = base.findIndex(c => /date/i.test(c.str));
       const dated = DATE_RE.test((row[dateCol] || "").trim());
-      if (dated) { out.push(row); prevRow = row; prevY = ln.y; }
+      if (dated) { out.push(row); pageRows++; prevRow = row; prevY = ln.y; }
       else if (prevRow && prevY !== null && prevY - ln.y <= CONT_GAP) {
-        const isNum = i => numeric.some(([j]) => j === i);
+        const isNumBase = k => numeric.some(([j]) => map[j] === k);
         // An amount that sits a few points off its row's baseline arrives as its own line: it fills the row's EMPTY amount cell. Any other
         // line under a row (wrapped narration) is appended to the text cells; a stray number under a filled amount cell is not added to anything.
         let used = false;
-        row.forEach((v, i) => {
+        row.forEach((v, k) => {
           if (!v) return;
-          if (isNum(i)) { if (!prevRow[i] && NUM_RE.test(v)) { prevRow[i] = v; used = true; } }
-          else { prevRow[i] = prevRow[i] ? prevRow[i] + " " + v : v; used = true; }
+          if (isNumBase(k)) { if (!prevRow[k] && NUM_RE.test(v)) { prevRow[k] = v; used = true; } }
+          else { prevRow[k] = prevRow[k] ? prevRow[k] + " " + v : v; used = true; }
         });
         if (used) prevY = ln.y;
       }
     }
+    rowsPerPage.push(pageRows);
   }
-  if (!head) return no("Could not find the transaction table headings in this PDF (a date column and debit/credit/amount columns).");
-  if (out.length < 2) return { ...no("The table headings were found but no transaction rows could be read from this PDF."), info: shapeInfo(pages, head) };
-  return { ok: true, rows: out };
+  if (!base) return no("Could not find the transaction table headings in this PDF (a date column and debit/credit/amount columns).");
+  if (out.length < 2) return { ...no("The table headings were found but no transaction rows could be read from this PDF."), info: shapeInfo(pages, base), rowsPerPage };
+  return { ok: true, rows: out, rowsPerPage };
 }
 
 /** Geometry for diagnosing a layout, with every letter and digit masked (a -> letters, 9 -> digits): column headings with x/width, and up to three lines that contain a date. */

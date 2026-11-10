@@ -48,9 +48,9 @@ export async function readStatementFile(bytes, opts = {}) {
         stage = "read the printed summary";
         let summary = {}, summaryCheck = { ok: false, findings: [] };
         try { summary = extractCardSummary(lay.pages); summaryCheck = checkCardSummary(summary, parsed.rows); } catch { /* rows only */ }
-        return { kind, ...parsed, summary, summaryCheck };
+        return { kind, ...parsed, summary, summaryCheck, rowsPerPage: t.rowsPerPage };
       }
-      return { kind, ...parsed };
+      return { kind, ...parsed, rowsPerPage: t.rowsPerPage };
     }
     stage = "read the file";
     if (kind === "xlsx") return { kind, ...parseStatementRows(await readXlsx(bytes), { kind: opts.accountKind }) };
