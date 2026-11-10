@@ -43,6 +43,9 @@ export default function RelationshipStatusPanel({ T, relationship, targetLabel, 
   const openAction = kind => { setPendingAction(kind); setReason(""); setEffectiveDate(today); setError(""); };
   const cancel = () => { setPendingAction(null); setError(""); };
   const commit = () => {
+    // The pause/end handlers run inside a state update, where a thrown "a reason is required" is NOT caught by the try below and shows the
+    // "Something went wrong" screen. Ask for the reason here instead.
+    if ((pendingAction === "pause" || pendingAction === "end") && !String(reason).trim()) { setError("Add a short reason to continue."); return; }
     try {
       if (pendingAction === "pause") onPause(reason, effectiveDate);
       else if (pendingAction === "resume") onResume(effectiveDate);

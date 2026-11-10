@@ -138,6 +138,7 @@ import { getRechargeWords } from "./domain/bills/rechargeWords";
 import { getPaidFromAccounts } from "./domain/accounts/paymentSources";
 import { withMembershipPaymentSynced } from "./domain/membership/paymentSync";
 import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
+import { getPrepaidAlerts, prepaidAlertText, connectionInactiveState } from "./domain/bills/prepaidAlerts";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
 import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getEffectiveMonthlyBudget, getCarryForwardPrevSpend, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope, buildRefundTotalsByExpense } from "../domain/allocations/adapter";
@@ -2568,6 +2569,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     return getCardAlerts(accounts.filter(a=>a.type==="cc"), card=>getCardSummary(card, accounts, ex, toDateOnly), dismissedAlerts);
   },[accounts,txns,dismissedAlerts]);
 
+  // Prepaid plan ending / ended (domain/bills/prepaidAlerts.js): three alerts per plan; none for a connection the person ended or paused.
+  const activePrepaidAlerts = useMemo(()=>getPrepaidAlerts({ billerAccounts, bills, relationships:membershipRelationships, today:new Date(), dismissed:dismissedAlerts }),[billerAccounts,bills,membershipRelationships,dismissedAlerts]);
   const directOwedToMe = useMemo(()=>Object.values(settlements).reduce((s,p)=>s+(p.owesMe||0),0),[settlements]);
   const receivablePeopleList = useMemo(()=>Object.entries(settlements)
     .filter(([,info])=>Number(info?.owesMe||0)>0)
@@ -18652,7 +18655,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ padding:"10px 8px",display:"flex",flexDirection:"column",gap:2 }}>
             {[
               { icon:"👤", label:"User Profile", onClick:()=>{ setShowSettings(true); setSettingsSection("myprofile"); onClose(); } },
-              { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length+activeCardAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
+              { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"🧾", label:"Payments", onClick:()=>goToTab("bills") },
               { icon:"👥", label:"People & Groups", onClick:()=>goToTab("people") },
               { icon:"🚗", label:"Vehicles", onClick:()=>{ setShowSettings(true); setSettingsSection("vehicles"); onClose(); } },
@@ -18682,9 +18685,21 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🔔 Notifications</div>
             <button onClick={onClose} style={{ background:"none",border:"none",color:T.sub,fontSize:18,cursor:"pointer" }}>✕</button>
           </div>
-          {activeBudgetAlerts.length===0&&activeCardAlerts.length===0&&(
+          {activeBudgetAlerts.length===0&&activeCardAlerts.length===0&&activePrepaidAlerts.length===0&&(
             <div style={{ textAlign:"center",padding:"40px 20px",color:T.sub,fontSize:13 }}>You're all caught up.</div>
           )}
+          {activePrepaidAlerts.map(a=>(
+            <div key={a.id} data-testid="prepaid-alert" data-stage={a.stage} style={{ background:(a.stage==="post"?T.danger:T.warn)+"16",border:`1px solid ${(a.stage==="post"?T.danger:T.warn)}33`,borderRadius:14,padding:"12px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
+              <div style={{ flex:1,minWidth:0 }}>
+                <div style={{ color:a.stage==="post"?T.danger:T.warn,fontSize:12,fontWeight:800 }}>📱 {prepaidAlertText(a)}</div>
+                <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{a.stage==="post"?"Coverage ended":"Coverage ends"} {formatShortDate(a.validUntil)||a.validUntil}</div>
+              </div>
+              <div style={{ display:"flex",gap:6,flexShrink:0 }}>
+                <button data-testid="prepaid-alert-recharge" onClick={()=>{ setDefaultBillerAccountId(a.billerAccountId); setShowAddBill(true); onClose(); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Recharge</button>
+                <button data-testid="prepaid-alert-dismiss" onClick={()=>archive(a.id)} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Dismiss</button>
+              </div>
+            </div>
+          ))}
           {activeCardAlerts.map(a=>(
             <div key={a.id} data-testid="card-alert" style={{ background:T.danger+"16",border:`1px solid ${T.danger}33`,borderRadius:14,padding:"12px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10 }}>
               <div onClick={()=>{ const c=accounts.find(x=>x.id===a.cardId); onClose(); if(c) setShowAccDetail(c); }} style={{ flex:1,cursor:"pointer" }}>
@@ -20509,9 +20524,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ width:"100%" }}>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
                     <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
-                    {/* Plain bell, no badge count — no real notification data exists yet to back one;
-                        adding a fabricated number would look real but mean nothing. */}
-                    <button style={{ background:"none",border:"none",cursor:"pointer",fontSize:18,color:T.text,padding:4 }} title="Notifications">🔔</button>
+                    {/* The bell opens Notifications; its count is the real number of open alerts (budget, card limit, prepaid plan ending). */}
+                    <button data-testid="home-bell" onClick={()=>setShowNotifications(true)} style={{ position:"relative",background:"none",border:"none",cursor:"pointer",fontSize:18,color:T.text,padding:4 }} title="Notifications">🔔{(activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length)>0&&<span data-testid="home-bell-badge" style={{ position:"absolute",top:-2,right:-4,minWidth:16,height:16,borderRadius:8,background:T.danger,color:"#fff",fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px" }}>{activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length}</span>}</button>
                   </div>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8 }}>
                     <div>
@@ -21338,23 +21352,25 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   }
                   // Verified against the implementation: getPrepaidCoverage already flags "expiring_soon"
                   // (<= 7 days remaining), so amber is used for exactly that state and nowhere else.
-                  const color = coverage.status==="expired"?T.danger:coverage.status==="expiring_soon"?T.warn:T.text;
-                  const barColor = coverage.status==="expired"?T.danger:coverage.status==="expiring_soon"?T.warn:T.sub;
+                  // A connection the person ENDED or PAUSED is not "expired": no red warning, no big Recharge button (that told people to recharge something they had ended).
+                  const inactive = connectionInactiveState(ba.id, membershipRelationships);
+                  const color = inactive?T.sub:coverage.status==="expired"?T.danger:coverage.status==="expiring_soon"?T.warn:T.text;
+                  const barColor = inactive?T.sub:coverage.status==="expired"?T.danger:coverage.status==="expiring_soon"?T.warn:T.sub;
                   const latest = history[0];
                   const rem = Math.max(0,coverage.daysRemaining);
                   const used = coverage.totalDays!=null ? Math.max(0,coverage.totalDays-rem) : null;
                   return (
                     <>
-                      <div data-testid="prepaid-coverage-card" data-status={coverage.status} style={{ background:T.card,border:`1px solid ${coverage.status==="expiring_soon"?T.warn:T.border}`,borderRadius:16,padding:16,marginBottom:12 }}>
+                      <div data-testid="prepaid-coverage-card" data-status={coverage.status} style={{ background:T.card,border:`1px solid ${!inactive&&coverage.status==="expiring_soon"?T.warn:T.border}`,borderRadius:16,padding:16,marginBottom:12 }}>
                         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
                           <div style={kicker}>{rw.coverage}</div>
-                          {coverage.status==="expiring_soon"&&<span data-testid="prepaid-expiring-badge" style={{ border:`1px solid ${T.warn}`,color:T.warn,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap" }}>Expiring soon</span>}
+                          {!inactive&&coverage.status==="expiring_soon"&&<span data-testid="prepaid-expiring-badge" style={{ border:`1px solid ${T.warn}`,color:T.warn,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap" }}>Expiring soon</span>}
                         </div>
                         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,margin:"8px 0 6px",minWidth:0 }}>
                           <span style={{ color:T.text,fontSize:14,fontWeight:800,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{sym}{fmt(latest.amount)} plan{coverage.totalDays?` · ${coverage.totalDays} days`:""}</span>
                           <span style={{ color:T.sub,fontSize:12,flexShrink:0 }}>{coverage.status==="expired"?"Ended":"Ends"} {formatShortDate(coverage.validUntil)||coverage.validUntil}</span>
                         </div>
-                        <div data-testid="prepaid-days-left" style={{ color,fontSize:26,fontWeight:800,marginBottom:8 }}>{coverage.daysRemaining>=0?`${coverage.daysRemaining} day${coverage.daysRemaining===1?"":"s"} left`:`Expired ${Math.abs(coverage.daysRemaining)} day${Math.abs(coverage.daysRemaining)===1?"":"s"} ago`}</div>
+                        <div data-testid="prepaid-days-left" style={{ color,fontSize:26,fontWeight:800,marginBottom:8 }}>{inactive?`Connection ${inactive}`:coverage.daysRemaining>=0?`${coverage.daysRemaining} day${coverage.daysRemaining===1?"":"s"} left`:`Expired ${Math.abs(coverage.daysRemaining)} day${Math.abs(coverage.daysRemaining)===1?"":"s"} ago`}</div>
                         {coverage.percentUsed!=null&&(
                           <>
                             <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:6 }}>
@@ -21366,7 +21382,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                             </div>
                           </>
                         )}
-                        {rechargeBtn}
+                        {inactive
+                          ? <button data-testid="prepaid-recharge-quiet" onClick={doRecharge} style={{ background:"none",border:"none",color:T.sub,fontSize:12,fontWeight:700,textDecoration:"underline",cursor:"pointer",padding:"10px 0 0",fontFamily:"inherit" }}>Record a recharge anyway</button>
+                          : rechargeBtn}
                       </div>
                       {rechargesList}
                     </>

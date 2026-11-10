@@ -114,3 +114,12 @@ Money → the card's tile → "Import statement" (also on the card's account pag
 - **Import:** charges become expenses on the card (`accId` = card) with the description as the vendor (title-cased) and no category. Payments/refunds are NOT created from a card statement: a payment belongs to the bank side (importing the bank statement turns it into a `cc_payment` to the card). A credit row that matches an existing payment can be merged (link only). The card account's legacy `outstanding` field is not bumped (the card's bill/utilisation figures are computed from entries).
 - **Not built:** creating/verifying the statement Bill from the printed total and due date; refunds as `settlement_in`; matching the printed card number to the chosen card (the screenshot's masked number did not match the user's card last four, so it is not used).
 - Tests: `domain/imports/cardStatement.test.js`; Chromium C1–C7 in `tools/imports/statement-browser.mjs` (synthetic PDF).
+
+## 15. Prepaid plan alerts, and an Ended connection is not "expired"
+
+- **Alerts** (`domain/bills/prepaidAlerts.js`): three notifications per plan, each its own id (`prepaid_<connection>_<validUntil>_<stage>`) so dismissing one never hides the next — `pre` (ends in 1–3 days), `day` (ends today), `post` (ended; shown up to 30 days or until a newer recharge exists). They appear in 🔔 Notifications with Recharge / Dismiss, count in the menu badge, and the Home bell now opens Notifications and shows the real count. Dismissals use the existing synced `dismissedAlerts`.
+- **No alert for a connection the person ended or paused** (every Financial Relationship of it is ended/paused). A connection with no relationship at all counts as live.
+- **The connection screen** for an Ended/Paused prepaid connection says "Connection ended/paused" in neutral colour and offers only a quiet "Record a recharge anyway"; it no longer shows a red "Expired N days ago" with a big Recharge button.
+- **Not built:** real phone notifications (no Capacitor notification plugin is installed; alerts are in-app only).
+- **Bug fixed on the way:** tapping Confirm on Pause/End with no reason crashed to "Something went wrong" (the thrown error happens inside a state update where the panel's try/catch cannot see it). The panel now asks for a reason first.
+- Tests: `domain/bills/prepaidAlerts.test.js`; Chromium `tools/bills/prepaid-alerts-browser.mjs` (synthetic data).
