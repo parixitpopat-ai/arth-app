@@ -144,9 +144,12 @@ export function pdfPagesToRows(pages) {
         const isNumBase = k => numeric.some(([j]) => map[j] === k);
         // An amount that sits a few points off its row's baseline arrives as its own line: it fills the row's EMPTY amount cell. Any other
         // line under a row (wrapped narration) is appended to the text cells; a stray number under a filled amount cell is not added to anything.
+        // A footnote under the last row ("# International Spends") starts at the table's left edge, i.e. in the Date column: lines starting with # or *
+        // are footnotes, and nothing is ever appended to the Date cell (a date with text after it no longer reads as a date).
         let used = false;
+        if (/^[#*]/.test(row.find(v => v) || "")) { prevRow = null; continue; }
         row.forEach((v, k) => {
-          if (!v) return;
+          if (!v || k === dateCol) return;
           if (isNumBase(k)) { if (!prevRow[k] && NUM_RE.test(v)) { prevRow[k] = v; used = true; } }
           else { prevRow[k] = prevRow[k] ? prevRow[k] + " " + v : v; used = true; }
         });

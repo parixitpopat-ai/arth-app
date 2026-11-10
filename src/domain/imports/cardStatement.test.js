@@ -114,3 +114,17 @@ test("card statement pdf: an international spend (foreign amount under Intl. AND
   assert.equal(r.ok, true, r.reason + " " + r.detail);
   assert.deepEqual(r.rows.map(x => x.amountPaise), [-65000, -12050]);
 });
+
+// Reported: the last row of a page was skipped ("no readable date: 16/10/2026 # International Spends …") because the footnote printed right under it
+// started at the table's left edge and was appended to that row's Date cell.
+test("card statement pdf: a footnote under the last row ('# International Spends') is not glued onto that row's date", async () => {
+  const head = [t("Date", 207, 420, 6), t("SerNo.", 262, 420, 6), t("Transaction Details", 305, 420, 6), t("Amount (in\u20B9)", 522, 420, 6)];
+  const rows = [t("15/10/2026", 207, 380, 6), t("14376807000", 252, 380, 6), t("FIRST SHOP", 305, 380, 6), t("100.00", 560 - 6 * 3, 380, 6),
+    t("16/10/2026", 207, 366, 6), t("14376807059", 252, 366, 6), t("UPI-211737389994-VIPULACH", 305, 366, 6), t("AL ENTE", 305, 358, 6), t("650.00", 560 - 6 * 3, 366, 6),
+    t("# International Spends", 207, 346, 6)];
+  const r = await readStatementFile(makePdf([{ texts: [...head, ...rows] }]), { accountKind: "card" });
+  assert.equal(r.ok, true, r.reason + " " + r.detail);
+  assert.deepEqual(r.skipped, []);
+  assert.deepEqual(r.rows.map(x => [x.date, x.amountPaise]), [["2026-10-15", -10000], ["2026-10-16", -65000]]);
+  assert.equal(r.rows[1].desc, "UPI-211737389994-VIPULACH AL ENTE");
+});
