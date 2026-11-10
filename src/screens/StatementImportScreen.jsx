@@ -44,13 +44,22 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
     if (!file) return;
     if (!accountId) { setState({ phase: "idle", error: "Choose the bank account first." }); return; }
     setState({ phase: "reading", fileName: file.name });
+    let stage = "start";
     try {
+      stage = "load the readers";
       const [{ readStatementFile }, { default: workerSrc }] = await Promise.all([import("../domain/imports/readStatementFile.js"), import("../domain/invoices/pdfWorkerUrl.js")]);
-      const parsed = await readStatementFile(new Uint8Array(await file.arrayBuffer()), { name: file.name, workerSrc, accountKind: isCard ? "card" : undefined });
-      if (!parsed.ok) { setState({ phase: "idle", error: parsed.reason, fileName: file.name }); return; }
+      stage = "open the file from the phone";
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      stage = "read the statement";
+      const parsed = await readStatementFile(bytes, { name: file.name, workerSrc, accountKind: isCard ? "card" : undefined });
+      if (!parsed.ok) { setState({ phase: "idle", error: parsed.reason, detail: parsed.detail, fileName: file.name }); return; }
+      stage = "compare with your entries";
       setSb(statementBalances(parsed)); setBalUndo(null);
       setState({ phase: "result", fileName: file.name, parsed, match: analyse(parsed, accountId), accountId });
-    } catch { setState({ phase: "idle", error: "This file could not be read." }); }
+    } catch (err) {
+      // The detail names the step and the error only (no file content), so it is safe to send to whoever is fixing this.
+      setState({ phase: "idle", error: "This file could not be read.", detail: `failed while trying to ${stage}: ${(err && err.name) || "error"}${err && err.message ? " — " + String(err.message).slice(0, 140) : " (no message)"}` });
+    }
   };
 
   const chosen = state.phase === "result" ? state.match.results.filter(r => ticked[r.row.importKey] && r.status !== "already-imported") : [];
@@ -134,6 +143,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
         <button data-testid="stmt-pick" style={btn(true, !banks.length)} disabled={!banks.length} onClick={() => fileRef.current && fileRef.current.click()}>Choose CSV, Excel or PDF</button>
         {state.phase === "reading" && <div style={{ color: T.sub, fontSize: 13, marginTop: 10 }}>Reading {state.fileName}…</div>}
         {state.error && <div data-testid="stmt-error" style={{ color: T.warn, fontSize: 13, fontWeight: 700, marginTop: 10, lineHeight: 1.45 }}>{state.error}</div>}
+        {state.error && state.detail && <div data-testid="stmt-error-detail" style={{ color: T.sub, fontSize: 11, marginTop: 6, lineHeight: 1.4, wordBreak: "break-word" }}>Detail (no statement content, safe to share): {state.detail}</div>}
       </div>}
 
       {state.phase === "result" && <>

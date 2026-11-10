@@ -23,23 +23,45 @@ export function sniffKind(bytes) {
 export async function readStatementFile(bytes, opts = {}) {
   if (!bytes || !bytes.length) return { kind: "unknown", ...fail("The file is empty.") };
   const kind = sniffKind(bytes);
+  let stage = "start";
   try {
     if (kind === "pdf") {
+      stage = "load the PDF reader";
       const { readPdfLayout } = await import("../invoices/pdfText.js");
+      stage = "open the PDF";
       const lay = await readPdfLayout(bytes, { workerSrc: opts.workerSrc });
-      if (lay.status !== "ok") return { kind, ...fail(lay.reason) };
+      if (lay.status !== "ok") return { kind, ...fail(lay.reason), detail: `PDF reader: ${lay.status}` };
+      stage = "find the table";
       const t = pdfPagesToRows(lay.pages);
-      if (!t.ok) return { kind, ...fail(t.reason) };
+      if (!t.ok) return { kind, ...fail(t.reason), detail: pdfShape(lay.pages) };
+      stage = "read the rows";
       const parsed = parseStatementRows(t.rows, { kind: opts.accountKind });
-      if (opts.accountKind === "card" && parsed.ok) { const summary = extractCardSummary(lay.pages); return { kind, ...parsed, summary, summaryCheck: checkCardSummary(summary, parsed.rows) }; }
+      if (!parsed.ok) return { kind, ...parsed, detail: `${pdfShape(lay.pages)}; table rows found: ${t.rows.length - 1}` };
+      if (opts.accountKind === "card") {
+        // The printed summary is a bonus: if reading it fails the rows still import, just without the cross-check.
+        stage = "read the printed summary";
+        let summary = {}, summaryCheck = { ok: false, findings: [] };
+        try { summary = extractCardSummary(lay.pages); summaryCheck = checkCardSummary(summary, parsed.rows); } catch { /* rows only */ }
+        return { kind, ...parsed, summary, summaryCheck };
+      }
       return { kind, ...parsed };
     }
+    stage = "read the file";
     if (kind === "xlsx") return { kind, ...parseStatementRows(await readXlsx(bytes), { kind: opts.accountKind }) };
     if (kind === "xls") return { kind, ...fail("This is an old-format .xls file. Save it as .xlsx or CSV and try again.") };
     if (bytes.length > MAX_TEXT_BYTES) return { kind, ...fail("This file is too large to import here. Export a shorter date range.") };
     if (bytes.subarray(0, 4096).includes(0)) return { kind, ...fail("This file is not a CSV, Excel or PDF statement.") };
     return { kind, ...parseStatementRows(parseCsv(new TextDecoder("utf-8").decode(bytes)), { kind: opts.accountKind }) };
   } catch (e) {
-    return { kind, ...fail(e && e.message ? e.message : "This file could not be read.") };
+    const name = (e && e.name) || typeof e, msg = e && e.message ? String(e.message).slice(0, 140) : "";
+    return { kind, ...fail(msg || "This file could not be read."), detail: `failed while trying to ${stage}: ${name}${msg ? " — " + msg : " (no message)"}` };
   }
+}
+
+/** What the PDF looked like, without any of its content: page count, text items, and the heading-like words found (column names only). */
+export function pdfShape(pages) {
+  const items = (pages || []).reduce((n, p) => n + ((p.items || []).length), 0);
+  const words = new Set();
+  for (const p of pages || []) for (const i of p.items || []) { const w = String(i.str || "").trim(); if (/^(date|serno\.?|sr\.? ?no\.?|transaction details?|particulars|narration|description|amount.*|debit|credit|balance|reward points?|intl\..*)$/i.test(w) && words.size < 12) words.add(w.slice(0, 30)); }
+  return `PDF: ${(pages || []).length} page(s), ${items} text pieces; heading words seen: ${words.size ? [...words].join(" | ") : "none"}`;
 }

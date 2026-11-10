@@ -26,3 +26,13 @@ test("read: a PDF goes through the PDF table reader", async () => {
   const r = await readStatementFile(pdf);
   assert.equal(r.kind, "pdf"); assert.equal(r.ok, true); assert.equal(r.rows[0].amountPaise, -5000);
 });
+
+test("read: failures say which step failed, with the PDF's shape but none of its content", async () => {
+  const bad = await readStatementFile(new TextEncoder().encode("%PDF-1.4 this is not really a pdf"));
+  assert.equal(bad.ok, false); assert.match(bad.detail, /PDF reader: unreadable/);
+  const t = (str, x, y) => ({ str, x, y, size: 8 });
+  const noTable = await readStatementFile(makePdf([{ texts: [t("Date", 30, 780), t("Some private sentence about John Smith", 30, 760), t("Balance", 300, 780)] }]));
+  assert.equal(noTable.ok, false);
+  assert.match(noTable.detail, /PDF: 1 page\(s\), 3 text pieces; heading words seen: Date \| Balance/);
+  assert.doesNotMatch(noTable.detail, /John Smith/);
+});
