@@ -69,7 +69,7 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
 
   const handleVerifyCode = async () => {
     const trimmed = code.trim();
-    if (!trimmed) { setError("Enter the code from your email."); return; }
+    if (trimmed.length < 6) { setError("Enter the whole code from your email (6 to 8 digits)."); return; }
     setBusy(true); setError("");
     try {
       await verifyEmailOtp(email.trim(), trimmed);
@@ -108,11 +108,11 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
         ) : (
           <>
             <div style={{ fontSize: 12, color: T.sub, textAlign: "center", marginBottom: 14 }}>
-              We sent a 6-digit code to <strong style={{ color: T.text }}>{email}</strong>
+              We sent a code to <strong style={{ color: T.text }}>{email}</strong>
             </div>
             <input
               style={{ ...inputStyle, fontSize: 22, letterSpacing: 6, fontWeight: 800 }} value={code}
-              inputMode="numeric" maxLength={6} autoFocus placeholder="······"
+              inputMode="numeric" maxLength={8} autoFocus placeholder="········"
               onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
               onKeyDown={e => e.key === "Enter" && handleVerifyCode()}
             />
