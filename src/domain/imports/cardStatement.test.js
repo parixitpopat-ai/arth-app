@@ -105,3 +105,12 @@ test("card statement pdf: rows on later pages are read — repeated heading at o
   assert.deepEqual(r.rowsPerPage, [1, 2, 1]);
   assert.deepEqual(r.rows.map(x => x.desc), ["SHOP ONE", "SHOP TWO", "SHOP THREE", "SHOP FOUR"]);
 });
+
+test("card statement pdf: an international spend (foreign amount under Intl. AND the rupee amount) reads the rupee amount", async () => {
+  const head = [t("Date", 207, 420, 6), t("SerNo.", 262, 420, 6), t("Transaction Details", 305, 420, 6), t("Reward", 400, 420, 6), t("Points", 402, 413, 6), t("Intl. #", 450, 420, 6), t("Amount (in\u20B9)", 515, 420, 6)];
+  const rows = [t("06/10/2026", 207, 380, 6), t("14308206086", 252, 380, 6), t("OVERSEAS SHOP", 305, 380, 6), t("13", 405, 380, 6), t("7.99", 450, 380, 6), t("650.00", 560 - 6 * 3, 380, 6),
+    t("07/10/2026", 207, 365, 6), t("14308206999", 252, 365, 6), t("LOCAL SHOP", 305, 365, 6), t("120.50", 560 - 6 * 3, 365, 6)];
+  const r = await readStatementFile(makePdf([{ texts: [...head, ...rows] }]), { accountKind: "card" });
+  assert.equal(r.ok, true, r.reason + " " + r.detail);
+  assert.deepEqual(r.rows.map(x => x.amountPaise), [-65000, -12050]);
+});

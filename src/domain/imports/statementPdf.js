@@ -111,7 +111,11 @@ export function pdfPagesToRows(pages) {
         if (it.x < left || it.x > right) continue;
         // Amounts (and a "CR"/"DR" beside one) are right-aligned under a money heading: nearest heading wins.
         if ((MONEY_RE.test(it.str) || /^(?:cr|dr)\.?$/i.test(it.str)) && numeric.length) {
-          add(numeric.reduce((b, [i, c]) => (dist(it, c) < dist(it, head[b]) ? i : b), numeric[0][0]), it.str);
+          const nc = numeric.reduce((b, [i, c]) => (dist(it, c) < dist(it, head[b]) ? i : b), numeric[0][0]);
+          // Two amounts in one cell: an international spend prints its foreign amount (under "Intl.") AND the rupee amount. The rupee amount is the
+          // right-most column, so the later (right-most) amount replaces the earlier one. A "CR"/"DR" beside an amount is appended as before.
+          const k = map[nc];
+          if (k >= 0 && row[k] && !/^(?:cr|dr)\.?$/i.test(it.str) && MONEY_RE.test(row[k].split(/\s+/)[0])) row[k] = it.str; else add(nc, it.str);
           continue;
         }
         // Text. A run goes under the one text heading it overlaps (data is often wider than its heading and centred under it, so it can start well left of

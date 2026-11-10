@@ -195,7 +195,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
             );
           })}
         </div>
-        {p.skipped.length > 0 && <div style={{ color: T.sub, fontSize: 12, marginTop: 10 }}>Rows not read ({p.skipped.length}): {p.skipped.slice(0, 5).map(s => `line ${s.line} (${s.why})`).join("; ")}{p.skipped.length > 5 ? "…" : ""}</div>}
+        {p.skipped.length > 0 && <div style={{ color: T.sub, fontSize: 12, marginTop: 10 }}>Rows not read ({p.skipped.length}): {p.skipped.slice(0, 5).map(s => `line ${s.line} (${s.why}${s.text ? `: ${s.text}` : ""})`).join("; ")}{p.skipped.length > 5 ? "…" : ""}</div>}
 
         <div style={{ position: "sticky", bottom: 0, background: T.bg, paddingTop: 12 }}>
           {chosen.length > 0 && (isCard
