@@ -155,6 +155,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
           {!isCard && bal.checked > 0 && bal.mismatches.length > 0 && note("amb", <><b>The running balance does not add up on {bal.mismatches.length} row(s).</b> A row may be missing or misread (lines {bal.mismatches.slice(0, 6).join(", ")}). Check the amounts before importing.</>, "stmt-balance-bad")}
           {!isCard && bal.signsReversed && <div data-testid="stmt-reversed" style={{ color: T.sub, fontSize: 12, marginTop: 6 }}>The column headings said Debit/Credit the other way round; Arth followed the running balance (money out reduces it).</div>}
           {isCard && p.summary && cardSummaryBlock(p)}
+          {p.skipped.length > 0 && <div data-testid="stmt-skipped-top" style={{ color: T.warn, fontSize: 12, marginTop: 8, lineHeight: 1.45, wordBreak: "break-word" }}><b>{p.skipped.length} row{p.skipped.length === 1 ? "" : "s"} could not be read</b> (not added): {p.skipped.slice(0, 5).map(s => `line ${s.line} — ${s.why}${s.text ? `: ${s.text}` : ""}`).join("; ")}{p.skipped.length > 5 ? "…" : ""}</div>}
           {!isCard && bal.checked === 0 && <div style={{ color: T.sub, fontSize: 12, marginTop: 6 }}>No running-balance column, so amounts could not be cross-checked. Look through the rows before importing.</div>}
         </div>
 
