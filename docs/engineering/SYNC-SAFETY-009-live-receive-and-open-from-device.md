@@ -154,3 +154,7 @@ A real card PDF gave only "This file could not be read." (the screen's catch-all
 
 ## 19. Sign-in code length
 The email code box accepted exactly 6 digits (Supabase's default per its docs) but this project's emails carry an 8-digit code. The box now accepts up to 8 digits, the text no longer says "6-digit", and verifying asks for at least 6. Not tested against a real email (needs a live Supabase send).
+
+## 20. Monthly Statement view (bank, cash, credit card)
+
+Money → an account (or a card's "View transactions") → **📄 Statement**. A calendar-month picker (opens on the latest month that has entries) or custom dates (e.g. a card's billing cycle). Bank/cash: opening balance (Arth's balance at the end of the day before), money in, money out, closing, and the rows oldest-first with a running balance, 2 decimals, laid out to compare with the bank's own statement; entries before the account's opening-balance date are left out (they are not in its balance). Card: charges, payments & credits and net (a card ledger has no balance). Tap a row to open the entry. **Download as CSV** (DD-MM-YYYY dates, opening/closing lines). A warning shows if the statement's closing differs from Arth's own balance on that day. Pure logic `domain/accounts/accountStatement.js` (paise arithmetic); the sheet reuses the account page's own ledger rows so it cannot disagree with the list above it. Chromium `tools/accounts/statement-view-browser.mjs`. CSV download not tested in the Android app (WebView downloads may differ).

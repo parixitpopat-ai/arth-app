@@ -209,6 +209,7 @@ import CreditCardsListScreen from "./components/CreditCardsListScreen";
 import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import InvoiceImportScreen from "./screens/InvoiceImportScreen";
 import StatementImportScreen from "./screens/StatementImportScreen";
+import AccountStatementSheet from "./components/AccountStatementSheet";
 import { applyBalanceMatch, undoBalanceMatch } from "./domain/imports/statementBalances";
 import { applyMerges, undoImportBatch } from "./domain/imports/buildImport";
 import VehicleProfileScreen from "./screens/VehicleProfileScreen";
@@ -1591,6 +1592,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [lastVendorMerge, setLastVendorMerge] = useState(null);   // { to, count, undo } until undone or the next merge
   const [pettyCashDraft, setPettyCashDraft] = useState(null);   // { amount, date, personId } or { existing } while the "Petty cash" sheet is open   // { amount, date, personId } while the "Loan given" sheet is open
   const [showAccDetail, setShowAccDetail] = useState(null);
+  const [showAccStatement, setShowAccStatement] = useState(false);   // the monthly Statement view opened from an account / card page
+  useEffect(()=>{ if(!showAccDetail) setShowAccStatement(false); },[showAccDetail]);
   const [statementAccId, setStatementAccId] = useState("");   // set when Import statement is opened from a bank account's own page
   const [showWealthBreakdown, setShowWealthBreakdown] = useState(null);
   const [selectedInvestmentDetail, setSelectedInvestmentDetail] = useState(null);
@@ -9337,6 +9340,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>Transactions</div>
             <div style={{ display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end" }}>
               <button onClick={()=>{ setShowAccDetail(null); setEditingAccount(a); }} style={{ background:T.info+"18",border:`1px solid ${T.info}33`,color:T.info,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>✏️ Edit account</button>
+              {(a.type==="bank"||a.type==="cc"||a.type==="cash") && <button data-testid="acc-statement" onClick={()=>setShowAccStatement(true)} style={{ background:T.pill,border:`1px solid ${T.border}`,color:T.text,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>📄 Statement</button>}
               {(a.type==="bank"||a.type==="cc") && <button data-testid="acc-import-statement" onClick={()=>{ setShowAccDetail(null); setStatementAccId(String(a.id)); setShowSettings(true); setSettingsSection("importstatement"); }} style={{ background:T.pill,border:`1px solid ${T.border}`,color:T.text,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>🏦 Import statement</button>}
               {!(isInvestmentAccount(a) && a.type!=="cc") && <button onClick={()=>{ setShowAccDetail(null); setAddPrefill(a.type==="cc" ? { toAccId:a.id } : { accId:a.id }); setDefaultAddType(a.type==="cc"?"cc_payment":"expense"); setShowAdd(true); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,color:T.accent,borderRadius:10,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>+ Add</button>}
             </div>
@@ -9352,6 +9356,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
           )}
         </div>
+        {showAccStatement&&<AccountStatementSheet T={T} sym={sym} fmt={fmt} account={a} rows={ledgerRows}
+          balanceAt={a.type==="cc" ? null : (d=>accountBalance(a.id, d))} ignoreBefore={a.type==="cc" ? "" : (a.openingBalanceDate||"")}
+          onClose={()=>setShowAccStatement(false)} onOpenTxn={txn=>{ setShowAccStatement(false); setShowAccDetail(null); setEditingTxn(txn); }}/>}
       </div>
     );
   };
