@@ -130,3 +130,11 @@ Money → the card's tile → "Import statement" (also on the card's account pag
 - **Edit:** people already on the plan are shown ticked and cannot be unticked in the form; ending or pausing one is done on the connection screen, which now shows a status panel (Pause / Resume / End) for each person on the connection (active or paused ones, plus the newest if ended) instead of only the newest. A connection counts as live for alerts while any one person's relationship is active.
 - **Not changed:** House / Group / Vehicle stay single choices; the A rows on a payment remain how cost is attributed to family members.
 - Tests: Chromium `tools/bills/family-plan-browser.mjs` (synthetic people; F1–F7 create, E0–E3 edit).
+
+## 17. Bill from a connection: category, and the "this expense looks like the payment" suggestion
+
+Reported: a bill's payment showed Housing although Utilities had been chosen, and "mark as paid" asked for nothing.
+- **Cause found:** adding a bill ("Bill matched! … mark as paid?") offered ANY unlinked expense with the same amount (any date; any category when the bill had none) and on Yes made it the bill's proof of payment, so an unrelated Housing expense could become the payment. Separately, a bill made from a connection carried no expense category at all (the form showed the provider type as "Category · from connection").
+- **Fix (`domain/bills/billExpenseMatch.js`):** the expense must have the same amount, not be linked to a bill, agree on category when both have one, and be dated within 45 days of the bill's due date or of today (closest wins). The suggestion now shows the expense (vendor, amount, date, account, reference, category) and offers **Yes, this is it**, **Not this · record payment** (opens the Record payment sheet: account, date, reference) and **Skip**. A bill from a Mobile Postpaid/Prepaid, Broadband, Electricity, Water or Gas connection now starts with Utilities and its sub-category (other provider types: nothing guessed), so paying it creates a categorised expense.
+- **Not built:** pasting a payment SMS into Record payment (the Add expense form has Bank SMS import).
+- Tests: `domain/bills/billExpenseMatch.test.js`; Chromium `tools/bills/bill-category-browser.mjs` (B1–B3, H1–H2, M1–M3).

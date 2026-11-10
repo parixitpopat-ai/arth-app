@@ -138,6 +138,7 @@ import { getRechargeWords } from "./domain/bills/rechargeWords";
 import { getPaidFromAccounts } from "./domain/accounts/paymentSources";
 import { withMembershipPaymentSynced } from "./domain/membership/paymentSync";
 import { getPrepaidCoverage, getPrepaidHistory } from "./domain/bills/prepaidUtilisation";
+import { defaultCategoryForBillerType, findMatchingExpenseForBill } from "./domain/bills/billExpenseMatch";
 import { getPrepaidAlerts, prepaidAlertText, connectionInactiveState } from "./domain/bills/prepaidAlerts";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
@@ -19841,8 +19842,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // carry no category of their own), so this must stay empty rather than defaulting to
     // cats[0] (the first category in the list, picked only because it happened to be first —
     // confirmed bug). Leaving it empty forces an explicit choice; nothing here invents one.
-    const [billCatIds,setBillCatIds]=useState([]);
-    const [subId,setSubId]=useState("");
+    // A bill made from a connection starts with that provider type's usual category (Mobile Postpaid -> Utilities / Mobile Bills) instead of none, so
+    // paying it gives a categorised expense. Only for clear types, and only if that category still exists.
+    const _defCat = (()=>{ const d = _preBA0 ? defaultCategoryForBillerType(_preBA0.type) : null; return d && cats.some(c=>c.id===d.catId) ? d : null; })();
+    const [billCatIds,setBillCatIds]=useState(_defCat ? [_defCat.catId] : []);
+    const [subId,setSubId]=useState(_defCat && cats.find(c=>c.id===_defCat.catId)?.subs?.some(x=>x.id===_defCat.subId) ? _defCat.subId : "");
     const [recurring,setRecurring]=useState(false);
     const [frequency,setFrequency]=useState("monthly");
     const [merchant,setMerchant]=useState(_preBA?.provider||_preBA?.name||"");
@@ -19941,7 +19945,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const newBill={id:genId(),name:name.trim(),merchant:merchant.trim()||name.trim(),invoiceNo:isRecharge?"":invoiceNo.trim(),amount:amt,dueDate:effDueDate,catId:billCatIds[0]||null,catIds:billCatIds,subId:subId||null,recurring:isRecharge?false:recurring,frequency,status:"unpaid",paidDate:null,billDate:isRecharge?validFrom2:(billDate||todayStr()),createdDate:todayStr(),createdAt:Date.now(),splitPeople:peopleSplit,groupId:billGroup||null,groupCollectiveAmount,myShare,imageBase64:billPhoto,billerAccountId:billerAccountId||null,billerCategory:billerCategory||null,consumerNumber:consumerNumber.trim()||null,lastPaidAmount:lastPaidAmount?parseFloat(lastPaidAmount):null,autoGenerate,isPaused:false,pausedDate:null,resumeDate:null,pauseReason:null,pausedDays:0,validityDays:validityDays?Number(validityDays):null,planType:planType||null,planDesc:planDesc.trim()||null,validFrom:validFrom2||null,validUntil:validUntilCalc||null,billPeriodFrom:isRecharge?null:(billPeriodFrom||null),billPeriodTo:isRecharge?null:(billPeriodTo||null),unitsConsumed:unitsConsumed?Number(unitsConsumed):null,meterReading:meterReading?Number(meterReading):null,forType:billForType==="unassigned"?"unassigned":billForType,forId:billForType==="unassigned"||billForType==="house"?null:billForId};
       setBills(p=>[newBill,...p]);
 
-      const matchingTxn = isRecharge ? null : txns.find(t=>t.type==="expense" && !t.isBillPayment && !t.paidBillId && Number(t.amount)===amt && (billCatIds[0]? t.catId===billCatIds[0] : true));
+      // Same amount, not already a bill payment, same category when both have one, and dated near the due date or today (billExpenseMatch.js).
+      const matchingTxn = isRecharge ? null : findMatchingExpenseForBill({ bill:newBill, txns, today:todayStr() });
       if(matchingTxn){
         setBillMatchSuggestion({bill:newBill,txn:matchingTxn});
       }
@@ -21955,9 +21960,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {billMatchSuggestion&&(
           <div style={{ position:"fixed",bottom:90,left:"50%",transform:"translateX(-50%)",width:"calc(100% - 32px)",maxWidth:398,background:T.card,border:`1px solid ${T.success}66`,borderRadius:16,padding:"14px 16px",zIndex:300,boxShadow:`0 4px 24px ${T.sh}` }}>
             <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:6 }}>🎯 Bill matched!</div>
-            <div style={{ color:T.sub,fontSize:12,marginBottom:12 }}>&#34;{billMatchSuggestion.bill.name}&#34; ({sym}{fmt(billMatchSuggestion.bill.amount)}) — mark as paid?</div>
+            <div style={{ color:T.sub,fontSize:12,marginBottom:8 }}>&#34;{billMatchSuggestion.bill.name}&#34; ({sym}{fmt(billMatchSuggestion.bill.amount)}) looks paid by this expense you already have:</div>
+            {(()=>{ const mt=billMatchSuggestion.txn, mc=getCat((mt.catIds&&mt.catIds[0])||mt.catId), ma=accounts.find(a=>String(a.id)===String(mt.accId));
+              return (<div data-testid="bill-match-expense" style={{ background:T.input,borderRadius:10,padding:"8px 10px",marginBottom:10,fontSize:12,color:T.text,lineHeight:1.5 }}>
+                <div style={{ fontWeight:800 }}>{mt.merchant||mt.desc||"Expense"} · {sym}{fmt(mt.amount)}</div>
+                <div style={{ color:T.sub }}>{formatShortDate(mt.date)||mt.date}{ma?` · ${ma.name}`:""}{mt.transactionRef?` · ref ${mt.transactionRef}`:""} · {mc&&mc.name?mc.name:"no category"}</div>
+              </div>); })()}
             <div style={{ display:"flex",gap:8 }}>
-              <button onClick={()=>setBillMatchSuggestion(null)} style={{ ...btnG,flex:1,padding:"8px" }}>Skip</button>
+              <button data-testid="bill-match-skip" onClick={()=>setBillMatchSuggestion(null)} style={{ ...btnG,flex:1,padding:"8px" }}>Skip</button>
+              <button data-testid="bill-match-record" onClick={()=>{ const b=billMatchSuggestion.bill; setBillMatchSuggestion(null); setMarkingBillPaid(b); }} style={{ ...btnG,flex:1.4,padding:"8px" }}>Not this · record payment</button>
               <button onClick={()=>{
                 const b=billMatchSuggestion.bill;
                 // M2 / ADR-038: apply at most the remaining balance; status follows Contributions.
@@ -21976,7 +21987,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     overflow bug computeNextDueDate was already fixed for. Reusing it here instead. */}
                 if(matchBecomesPaid && b.recurring){ setBills(p=>[{...b,id:genId(),status:"unpaid",dueDate:computeNextDueDate(b),paidDate:null,createdDate:todayStr(),createdAt:Date.now()},...p]); }
                 setBillMatchSuggestion(null);
-              }} style={{ ...btnP,flex:2,padding:"8px",background:T.success }}>✅ Yes, mark paid</button>
+              }} style={{ ...btnP,flex:2,padding:"8px",background:T.success }} data-testid="bill-match-yes">✅ Yes, this is it</button>
             </div>
           </div>
         )}
