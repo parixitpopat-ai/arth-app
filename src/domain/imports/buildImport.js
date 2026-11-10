@@ -21,7 +21,7 @@ const titleCase = s => String(s || "").toLowerCase().replace(/\b([a-z])/g, c => 
 
 /** A card statement prints "UPI-211737389994-VIPULACH AL ENTERPRISE IN" or "ZOMATO CYBS NEWDELHI IN": drop the UPI prefix and the trailing country code. */
 export function cleanCardMerchant(desc) {
-  return String(desc || "").replace(/^\s*UPI[-/]\d{9,14}[-/]/i, "").replace(/\s+IN\s*$/i, "").replace(/\s+/g, " ").trim();
+  return String(desc || "").replace(/^.{0,80}?(?<![a-z])UPI[-/_]\d{9,14}[-/_]/i, "").replace(/\s+IN\s*$/i, "").replace(/\s+/g, " ").trim();
 }
 
 /** Entries an earlier version named "Dr"/"Cr" (the UPI/DR/… segment taken as the vendor) or with a "Upi-<ref>-…" vendor, with the name they should have. Read-only plan. */
@@ -33,7 +33,7 @@ export function planNameRepairs(txns) {
     const raw = t.bankNarration || t.desc || "";
     let next = null;
     if (/^(dr|cr)$/i.test(m)) { const p = parseUpiNarration(raw); next = p && p.name ? titleCase(p.name) : null; }
-    else if (/^upi[-/]\d{9,14}[-/]/i.test(m)) next = titleCase(cleanCardMerchant(m));
+    else if (/^.{0,80}?(?<![a-z])upi[-/_]\d{9,14}[-/_]/i.test(m)) next = titleCase(cleanCardMerchant(m));
     if (next && next !== m) out.push({ id: t.id, from: m, to: next });
   }
   return out;

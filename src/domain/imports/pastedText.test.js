@@ -33,3 +33,13 @@ test("pasted card text: unreadable items are reported, empty text is refused", (
   assert.equal(r.rows.length, 2); assert.equal(r.unreadable.length, 1);
   assert.equal(pastedTextToRows("hello").ok, false);
 });
+test("pasted card text: 100+ items read, none lost", () => {
+  let t = "Here are your transactions:\n\n";
+  for (let i = 1; i <= 120; i++) t += `${i}. Amount: -₹${(i * 3.17).toFixed(2)}\nDate: ${1 + (i % 28)} October 2026\nDescription: SHOP ${i}\n\n`;
+  const r = pastedTextToRows(t); assert.equal(r.rows.length, 121); assert.equal(r.unreadable.length, 0);
+  assert.equal(parseStatementRows(r.rows, { kind: "card" }).rows.length, 120);
+});
+import { extractUtr } from "./utr.js";
+test("UTR is found in the hash-prefixed bank-app description", () => {
+  assert.equal(extractUtr({ desc: "Hdfc6d8e912e45d4d79bb1d43ada1dcc09e_upi-104449304091-Zomato L" }), "104449304091");
+});

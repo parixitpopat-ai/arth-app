@@ -5,7 +5,7 @@
 
 export function extractUtr(row) {
   const text = String((row && row.desc) || "");
-  if (/\b(?:UPI|IMPS)\b/i.test(text)) {
+  if (/(?<![a-z])(?:UPI|IMPS)(?![a-z])/i.test(text)) {   // not \b: "…hash_upi-104449304091-Zomato L" has an underscore, a word character
     const m = /(?<!\d)(\d{12})(?!\d)/.exec(text);
     if (m) return m[1];
   }

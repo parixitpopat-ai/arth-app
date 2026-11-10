@@ -107,3 +107,10 @@ test("repairs: entries an earlier merge gave a SerNo get the UTR from their impo
   ];
   assert.deepEqual(planRefRepairs(list), [{ id: 1, field: "transactionRef", from: "14308206086", to: "221718689935" }]);
 });
+test("card vendor from a bank-app description with a hash prefix", () => {
+  assert.equal(cleanCardMerchant("Hdfc6d8e912e45d4d79bb1d43ada1dcc09e_upi-104449304091-Zomato L"), "Zomato L");
+  assert.equal(cleanCardMerchant("UPI-211737389994-VIPULACH AL ENTERPRISE IN"), "VIPULACH AL ENTERPRISE");
+  assert.equal(cleanCardMerchant("SWIGGY INSTAMART BLR"), "SWIGGY INSTAMART BLR");
+  const fix = planNameRepairs([{ id: "a", importKey: "k", type: "expense", merchant: "Hdfc6d8e912e45d4d79bb1d43ada1dcc09e_upi-104449304091-Zomato L" }]);
+  assert.equal(fix.length, 1); assert.equal(fix[0].to, "Zomato L");
+});
