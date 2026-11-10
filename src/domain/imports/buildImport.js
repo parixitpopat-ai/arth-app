@@ -3,6 +3,7 @@
 // A debit whose narration says it pays a credit card bill becomes a cc_payment to that card (matched by last four digits) so it is not
 // counted as spending a second time. When no card can be matched it stays an expense and is flagged `cardBillUnmatched` for the preview.
 import { extractUpiMerchant } from "../sms/smsFields.js";
+import { parseUpiNarration, describeUpiNarration } from "./upiNarration.js";
 
 const BILL_WORDS = /\b(?:credit\s*card|cc|card)\b/i, PAY_WORDS = /\b(?:bill|payment|paid|dues?|statement|autopay)\b/i;
 
@@ -27,7 +28,9 @@ export function cleanMerchant(desc) {
  *  @param {{accountId:string, batchId:string, cards:Array, newId:()=>string}} ctx */
 export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plainExpenses = false }) {
   return chosen.map(({ row }) => {
-    const abs = Math.abs(row.amountPaise) / 100, base = { id: newId(), date: row.date, amount: abs, desc: row.desc || "", importKey: row.importKey, importBatchId: batchId, importSource: "bank-statement", transactionRef: row.ref || null, catId: null, catIds: [], subId: null, subIds: [], people: {} };
+    // A UPI narration carries the 12-digit UPI reference and the other party: use them (a reference the file already has is kept).
+    const upi = parseUpiNarration(row.desc);
+    const abs = Math.abs(row.amountPaise) / 100, base = { id: newId(), date: row.date, amount: abs, desc: upi ? describeUpiNarration(upi) : (row.desc || ""), importKey: row.importKey, importBatchId: batchId, importSource: "bank-statement", bankNarration: row.desc || "", transactionRef: row.ref || (upi ? upi.rrn : null) || null, catId: null, catIds: [], subId: null, subIds: [], people: {} };
     if (row.amountPaise > 0) return { ...base, type: "income", accId: accountId, merchant: "" };
     if (!plainExpenses && looksLikeCardBill(row.desc)) {
       const card = findCardByText(row.desc, cards);

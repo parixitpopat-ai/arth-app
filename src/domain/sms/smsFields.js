@@ -18,7 +18,7 @@ export function extractDMonYDate(text) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-const NOT_A_NAME = /^(p2m|p2a|upi|ref|txn|imps|neft|rtgs|info|na|nil|credit|debit)$/i;
+const NOT_A_NAME = /^(p2m|p2a|upi|ref|txn|imps|neft|rtgs|info|na|nil|credit|debit|cr|dr)$/i;
 const titleCase = s => s.toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase());
 
 /**
