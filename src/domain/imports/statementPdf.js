@@ -4,8 +4,8 @@
 // start a new row at each line that has a date, and append date-less lines directly under a row (wrapped narration) to that row's text.
 // Numbers are placed by the nearest heading centre (they are right-aligned); words and dates by the heading they start under.
 
-const Y_TOL = 2.5, GAP_MERGE = 3.5, CONT_GAP = 16, DATE_RE = /^\d{1,2}[-/. ]?(?:\d{1,2}|[A-Za-z]{3,9})[-/. ]?\d{2,4}$/;
-const NUM_RE = /^[\d,]+(?:\.\d{1,2})?(?:\s*(?:cr|dr))?$/i, MONEY_RE = /^[\d,]*\.\d{1,2}(?:\s*(?:cr|dr))?$/i;
+const Y_TOL = 3.5, GAP_MERGE = 3.5, CONT_GAP = 16, DATE_RE = /^\d{1,2}[-/. ]?(?:\d{1,2}|[A-Za-z]{3,9})[-/. ]?\d{2,4}$/;
+const NUM_RE = /^(?:₹|Rs\.?|INR)?\s*[\d,]+(?:\.\d{1,2})?(?:\s*(?:cr|dr))?$/i, MONEY_RE = /^(?:₹|Rs\.?|INR)?\s*[\d,]*\.\d{1,2}(?:\s*(?:cr|dr))?$/i;
 const lc = s => String(s).toLowerCase().replace(/[^a-z]/g, "");
 const cx = i => i.x + (i.w || 0) / 2;
 // a number sits under its heading either centred or right-aligned with it: take the nearer of the two alignments
@@ -120,9 +120,17 @@ export function pdfPagesToRows(pages) {
       const dateCol = head.findIndex(c => /date/i.test(c.str));
       const dated = DATE_RE.test((row[dateCol] || "").trim());
       if (dated) { out.push(row); prevRow = row; prevY = ln.y; }
-      else if (prevRow && prevY !== null && prevY - ln.y <= CONT_GAP && row.every((v, i) => !v || !numeric.some(([j]) => j === i) || !NUM_RE.test(v))) {
-        row.forEach((v, i) => { if (v) prevRow[i] = prevRow[i] ? prevRow[i] + " " + v : v; });
-        prevY = ln.y;
+      else if (prevRow && prevY !== null && prevY - ln.y <= CONT_GAP) {
+        const isNum = i => numeric.some(([j]) => j === i);
+        // An amount that sits a few points off its row's baseline arrives as its own line: it fills the row's EMPTY amount cell. Any other
+        // line under a row (wrapped narration) is appended to the text cells; a stray number under a filled amount cell is not added to anything.
+        let used = false;
+        row.forEach((v, i) => {
+          if (!v) return;
+          if (isNum(i)) { if (!prevRow[i] && NUM_RE.test(v)) { prevRow[i] = v; used = true; } }
+          else { prevRow[i] = prevRow[i] ? prevRow[i] + " " + v : v; used = true; }
+        });
+        if (used) prevY = ln.y;
       }
     }
   }

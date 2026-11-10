@@ -79,3 +79,13 @@ test("card statement pdf: data wider than its heading and centred under it still
   assert.deepEqual(r.rows.map(x => [x.date, x.amountPaise, x.ref]), [["2026-10-06", -37510, "14308206086"], ["2026-10-09", 100000, "14308207000"]]);
   assert.equal(r.rows[0].desc, "ZOMATO CYBS DELHI");
 });
+
+// Another card of the same family: the amount sits a few points off its row's baseline, and a "SPENDS OVERVIEW" side-panel word shares the heading's line.
+test("card statement pdf: an amount 5 points off its row's baseline still belongs to that row; a side-panel word on the heading line is harmless", async () => {
+  const head = [t("SPENDS OVERVIEW", 90, 421, 6), t("Date", 207, 420, 6), t("SerNo.", 262, 420, 6), t("Transaction Details", 305, 420, 6), t("Reward", 435, 420, 6), t("Points", 437, 413, 6), t("Amount (in\u20B9)", 522, 420, 6)];
+  const rows = [t("06/10/2026", 207, 380, 6), t("14308206086", 252, 380, 6), t("ZOMATO CYBS NEWDELHI IN", 305, 380, 6), t("7", 442, 380, 6), t("375.10", 560 - 6 * 3.0, 374.5, 6),
+    t("09/10/2026", 207, 360, 6), t("14308207000", 252, 360, 6), t("SHOP TWO", 305, 360, 6), t("\u20B9 20.00", 560 - 10 * 3.0, 360, 6)];
+  const r = await readStatementFile(makePdf([{ texts: [...head, ...rows] }]), { accountKind: "card" });
+  assert.equal(r.ok, true, r.reason + " " + r.detail);
+  assert.deepEqual(r.rows.map(x => [x.date, x.amountPaise]), [["2026-10-06", -37510], ["2026-10-09", -2000]]);
+});

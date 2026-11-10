@@ -38,7 +38,11 @@ export async function readStatementFile(bytes, opts = {}) {
       if (!t.ok) return { kind, ...fail(t.reason), detail: `${pdfShape(lay.pages)}${t.info ? "; " + t.info : ""}` };
       stage = "read the rows";
       const parsed = parseStatementRows(t.rows, { kind: opts.accountKind });
-      if (!parsed.ok) return { kind, ...parsed, detail: `${pdfShape(lay.pages)}; table rows found: ${t.rows.length - 1}; table headings read: ${(t.rows[0] || []).map(c => String(c).slice(0, 26)).join(" | ")}` };
+      if (!parsed.ok) {
+        const mask = v => String(v).replace(/[A-Za-z]/g, "a").replace(/\d/g, "9").slice(0, 24);
+        const why = [...new Set((parsed.skipped || []).map(x => x.why))].join(", ");
+        return { kind, ...parsed, detail: `${pdfShape(lay.pages)}; table rows found: ${t.rows.length - 1}; table headings read: ${(t.rows[0] || []).map(c => String(c).slice(0, 26)).join(" | ")}${why ? `; rows skipped because: ${why}` : ""}; first row (masked): ${(t.rows[1] || []).map(mask).join(" | ")}` };
+      }
       if (opts.accountKind === "card") {
         // The printed summary is a bonus: if reading it fails the rows still import, just without the cross-check.
         stage = "read the printed summary";
