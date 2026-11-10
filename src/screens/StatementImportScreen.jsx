@@ -6,13 +6,14 @@ import { withImportKeys } from "../domain/imports/statement.js";
 import { matchStatement } from "../domain/imports/matchStatement.js";
 import { getLinkedMethodIds } from "../domain/accounts/accountBalance.js";
 import { statementBalances, planBalanceMatch } from "../domain/imports/statementBalances.js";
+import { planNameRepairs } from "../domain/imports/buildImport.js";
 import { buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
 
 const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const addDay = iso => { const t = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10) + 1)); return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`; };
 const niceDate = iso => { const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
 
-export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill }) {
+export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy }) {
   const fileRef = useRef(null);
   const banks = accounts.filter(a => a.type === "bank");
   const cards = accounts.filter(a => a.type === "cc");
@@ -21,6 +22,8 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const [ticked, setTicked] = useState({});                       // importKey -> bool (add as a new transaction)
   const [merged, setMerged] = useState({});                       // importKey -> bool (link to the entry it looks like; adds nothing)
   const [sb, setSb] = useState(null);                         // what the last file says the balance was at its start and end
+  const repairs = useMemo(() => planNameRepairs(txns), [txns]);
+  const [tidyUndo, setTidyUndo] = useState(null);
   const [lastSummary, setLastSummary] = useState(null);       // the card statement figures read from the last PDF
   const [billUndo, setBillUndo] = useState(null);               // set after "Set the statement bill", used by its Undo
   const [balUndo, setBalUndo] = useState(null);                // set after "Match", used by its Undo
@@ -36,7 +39,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
 
   const analyse = (parsed, accId) => {
     const keyed = withImportKeys(parsed.rows, accId);
-    const m = matchStatement(keyed, { transactions: txns, accountId: accId, importedKeys: keys, linkedIds: getLinkedMethodIds(accId, accounts) });
+    const m = matchStatement(keyed, { transactions: txns, accountId: accId, importedKeys: keys, linkedIds: getLinkedMethodIds(accId, accounts), importedUtrs: txns.filter(t => t.importKey && t.transactionRef).map(t => t.transactionRef) });
     const start = {}; m.results.forEach(r => { start[r.row.importKey] = r.status === "new" && !(isCard && r.row.amountPaise > 0); });
     setTicked(start); setMerged({});
     return m;
@@ -157,6 +160,16 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
       </div>
       {note("mute", <><b>Review first. Nothing is added until you press Import.</b> The file is read on this device and is not stored or uploaded. Rows already in Arth are skipped, and existing entries are never changed.</>, "stmt-banner")}
 
+      {(repairs.length > 0 || tidyUndo) && state.phase !== "done" && (
+        <div style={card} data-testid="stmt-tidy">
+          <div style={label}>Tidy imported names</div>
+          {repairs.length > 0 && <div style={{ color: T.text, fontSize: 13, lineHeight: 1.45 }}>{repairs.length} imported entr{repairs.length === 1 ? "y has" : "ies have"} an untidy vendor name such as "{repairs[0].from}" (e.g. "{repairs[0].to}"). Only the vendor name changes.</div>}
+          <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
+            {!tidyUndo ? <button data-testid="stmt-tidy-fix" style={btn(true)} onClick={() => setTidyUndo(onTidyNames(repairs))}>Fix {repairs.length} name{repairs.length === 1 ? "" : "s"}</button>
+              : <><div data-testid="stmt-tidy-done" style={{ color: T.sub, fontSize: 13, flex: 1 }}>Names fixed.</div><button data-testid="stmt-tidy-undo" style={btn(false)} onClick={() => { onUndoTidy(tidyUndo); setTidyUndo(null); }}>Undo</button></>}
+          </div>
+        </div>
+      )}
       {state.phase !== "done" && <div style={card}>
         <div style={label}>{isCard ? "Credit card" : "Bank account"}</div>
         {fixedAccountId ? <div data-testid="stmt-fixed-account" style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>{(accounts.find(a => String(a.id) === String(fixedAccountId)) || {}).name || "This account"}</div>
@@ -195,7 +208,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
         </div>
 
         <div data-testid="stmt-rows">
-          {state.match.results.map(({ row, status, matchId }) => {
+          {state.match.results.map(({ row, status, matchId, byUtr, otherAccount }) => {
             const out = row.amountPaise < 0, bill = !isCard && out && looksLikeCardBill(row.desc), cardHit = bill ? findCardByText(row.desc, cards) : null;
             return (
               <label key={row.importKey} data-testid="stmt-row" data-status={status} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 4px", borderBottom: `1px solid ${T.border}`, opacity: status === "already-imported" ? 0.5 : 1 }}>
@@ -203,14 +216,15 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: T.text, fontSize: 13, fontWeight: 700, wordBreak: "break-word" }}>{row.desc || "(no description)"}</div>
                   <div style={{ color: T.sub, fontSize: 11, marginTop: 2 }}>{niceDate(row.date)}
-                    {status === "probable-match" && " · looks like an entry already in Arth"}{isCard && !out && status === "new" && " · payment or refund: not added here (see below)"}{status === "already-imported" && " · imported before"}
+                    {status === "probable-match" && (byUtr ? " · same UPI reference as an entry already in Arth" : otherAccount ? " · same amount and date as an entry on another account" : " · looks like an entry already in Arth")}{isCard && !out && status === "new" && " · payment or refund: not added here (see below)"}{status === "already-imported" && " · imported before"}
                     {bill && (cardHit ? ` · card bill payment → ${cardHit.name}` : " · looks like a card bill payment, but no card matched: it will be an expense")}</div>
                   {status === "probable-match" && (() => {
                     const mine = txnById(matchId); if (!mine) return null;
                     const linked = Boolean(mine.importKey);
                     return (
                       <div data-testid="stmt-match" style={{ marginTop: 6, background: T.pill, borderRadius: 10, padding: "6px 8px", fontSize: 11, color: T.sub }}>
-                        <div>Your entry: <b style={{ color: T.text }}>{mine.desc || mine.merchant || mine.type}</b> · {niceDate(mine.date)} · {sym}{Number(mine.amount).toLocaleString("en-IN")}</div>
+                        <div>Your entry: <b style={{ color: T.text }}>{mine.merchant || mine.desc || mine.type}</b> · {niceDate(mine.date)} · {sym}{Number(mine.amount).toLocaleString("en-IN")}{(() => { const ac = accounts.find(a => String(a.id) === String(mine.accId)); return ac ? ` · ${ac.name}` : ""; })()}</div>
+                        {otherAccount && <div data-testid="stmt-other-account-note">That entry is on a different account from this statement. Merging only links it; it stays where it is.</div>}
                         {linked ? <div>Already linked to a statement row.</div>
                           : <button type="button" data-testid="stmt-merge" onClick={e => { e.preventDefault(); const on = !merged[row.importKey]; setMerged(m => ({ ...m, [row.importKey]: on })); if (on) setTicked(t => ({ ...t, [row.importKey]: false })); }}
                               style={{ marginTop: 6, border: `1px solid ${merged[row.importKey] ? T.accent : T.border}`, background: merged[row.importKey] ? T.accent + "22" : "none", color: merged[row.importKey] ? T.accent : T.text, borderRadius: 8, padding: "5px 10px", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>

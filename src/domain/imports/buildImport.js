@@ -4,6 +4,7 @@
 // counted as spending a second time. When no card can be matched it stays an expense and is flagged `cardBillUnmatched` for the preview.
 import { extractUpiMerchant } from "../sms/smsFields.js";
 import { parseUpiNarration, describeUpiNarration } from "./upiNarration.js";
+import { extractUtr } from "./utr.js";
 
 const BILL_WORDS = /\b(?:credit\s*card|cc|card)\b/i, PAY_WORDS = /\b(?:bill|payment|paid|dues?|statement|autopay)\b/i;
 
@@ -18,6 +19,26 @@ export function findCardByText(text, cards) {
 // a card statement prints the merchant as the description ("ZOMATO CYBS DELHI"): keep it as the vendor, in readable case (merge vendors later if needed)
 const titleCase = s => String(s || "").toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase()).replace(/\s+/g, " ").trim();
 
+/** A card statement prints "UPI-211737389994-VIPULACH AL ENTERPRISE IN" or "ZOMATO CYBS NEWDELHI IN": drop the UPI prefix and the trailing country code. */
+export function cleanCardMerchant(desc) {
+  return String(desc || "").replace(/^\s*UPI[-/]\d{9,14}[-/]/i, "").replace(/\s+IN\s*$/i, "").replace(/\s+/g, " ").trim();
+}
+
+/** Entries an earlier version named "Dr"/"Cr" (the UPI/DR/… segment taken as the vendor) or with a "Upi-<ref>-…" vendor, with the name they should have. Read-only plan. */
+export function planNameRepairs(txns) {
+  const out = [];
+  for (const t of txns || []) {
+    if (!t || !t.importKey || t.type !== "expense") continue;
+    const m = String(t.merchant || "");
+    const raw = t.bankNarration || t.desc || "";
+    let next = null;
+    if (/^(dr|cr)$/i.test(m)) { const p = parseUpiNarration(raw); next = p && p.name ? titleCase(p.name) : null; }
+    else if (/^upi[-/]\d{9,14}[-/]/i.test(m)) next = titleCase(cleanCardMerchant(m));
+    if (next && next !== m) out.push({ id: t.id, from: m, to: next });
+  }
+  return out;
+}
+
 export function cleanMerchant(desc) {
   const upi = extractUpiMerchant(desc);
   if (upi) return upi;
@@ -30,14 +51,14 @@ export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plai
   return chosen.map(({ row }) => {
     // A UPI narration carries the 12-digit UPI reference and the other party: use them (a reference the file already has is kept).
     const upi = parseUpiNarration(row.desc);
-    const abs = Math.abs(row.amountPaise) / 100, base = { id: newId(), date: row.date, amount: abs, desc: upi ? describeUpiNarration(upi) : (row.desc || ""), importKey: row.importKey, importBatchId: batchId, importSource: "bank-statement", bankNarration: row.desc || "", transactionRef: row.ref || (upi ? upi.rrn : null) || null, catId: null, catIds: [], subId: null, subIds: [], people: {} };
+    const abs = Math.abs(row.amountPaise) / 100, base = { id: newId(), date: row.date, amount: abs, desc: upi ? describeUpiNarration(upi) : (row.desc || ""), importKey: row.importKey, importBatchId: batchId, importSource: "bank-statement", bankNarration: row.desc || "", transactionRef: extractUtr(row) || row.ref || null, catId: null, catIds: [], subId: null, subIds: [], people: {} };
     if (row.amountPaise > 0) return { ...base, type: "income", accId: accountId, merchant: "" };
     if (!plainExpenses && looksLikeCardBill(row.desc)) {
       const card = findCardByText(row.desc, cards);
       if (card) return { ...base, type: "cc_payment", fromAccId: accountId, toAccId: card.id, accId: null, note: "Statement payment", merchant: "" };
       return { ...base, type: "expense", accId: accountId, merchant: "", cardBillUnmatched: true };
     }
-    return { ...base, type: "expense", accId: accountId, merchant: plainExpenses ? titleCase(row.desc) : cleanMerchant(row.desc) };
+    return { ...base, type: "expense", accId: accountId, merchant: plainExpenses ? titleCase(cleanCardMerchant(row.desc)) : cleanMerchant(row.desc) };
   });
 }
 

@@ -29,5 +29,5 @@ test("import: the cashback credit gets the UPI reference as its reference and a 
   ], { accountId: "a1", batchId: "B", cards: [], newId });
   assert.equal(out[0].type, "income"); assert.equal(out[0].transactionRef, "104354172499"); assert.equal(out[0].desc, "NPCI BHI · BHIMCASHBACK");
   assert.equal(out[1].type, "expense"); assert.equal(out[1].merchant, "Swiggy"); assert.equal(out[1].transactionRef, "412345678901");
-  assert.equal(out[2].transactionRef, "BANKREF1");                    // a reference the file already carries is kept
+  assert.equal(out[2].transactionRef, "412345678902");                // the UPI reference (UTR) wins over the file's own reference column
 });

@@ -63,3 +63,20 @@ test("build: card mode keeps the description as the vendor and never turns a cha
   assert.equal(out[0].type, "expense"); assert.equal(out[0].accId, "cc1"); assert.equal(out[0].merchant, "Zomato Cybs Delhi");
   assert.equal(out[1].type, "expense");
 });
+
+import { cleanCardMerchant, planNameRepairs } from "./buildImport.js";
+test("card vendors: the UPI prefix and the trailing country code are dropped; the UPI reference becomes the entry's reference", () => {
+  assert.equal(cleanCardMerchant("UPI-211737389994-VIPULACH AL ENTERPRISE IN"), "VIPULACH AL ENTERPRISE");
+  assert.equal(cleanCardMerchant("ZOMATO CYBS NEWDELHI IN"), "ZOMATO CYBS NEWDELHI");
+  const out = buildImportTxns([{ row: { date: "2026-10-16", desc: "UPI-211737389994-VIPULACH AL ENTERPRISE IN", ref: "14376807059", amountPaise: -65000, importKey: "c1" } }], { accountId: "cc1", batchId: "B", cards: [], newId, plainExpenses: true });
+  assert.equal(out[0].merchant, "Vipulach Al Enterprise"); assert.equal(out[0].transactionRef, "211737389994");
+});
+test("repairs: entries named Dr/Cr or 'Upi-<ref>-…' by an earlier version get the right vendor; nothing else is touched", () => {
+  const list = [
+    { id: 1, type: "expense", importKey: "k", merchant: "Dr", desc: "UPI/DR/412345678901/SWIGGY/HDFC/s@ic/x" },
+    { id: 2, type: "expense", importKey: "k", merchant: "Upi-171831146733-Mcdonald S In", desc: "UPI-171831146733-MCDONALD S IN" },
+    { id: 3, type: "expense", importKey: "k", merchant: "Chai Point", desc: "x" },
+    { id: 4, type: "expense", merchant: "Dr", desc: "typed by hand" },
+  ];
+  assert.deepEqual(planNameRepairs(list), [{ id: 1, from: "Dr", to: "Swiggy" }, { id: 2, from: "Upi-171831146733-Mcdonald S In", to: "Mcdonald S" }]);
+});

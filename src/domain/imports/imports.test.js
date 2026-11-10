@@ -92,13 +92,14 @@ const txns = [
   { id: "t3", type: "transfer", fromAccId: "acc1", toAccId: "acc3", amount: 20, date: "2026-04-03" },
 ];
 
-test("match: new / probable / already-imported; each existing record claimed once; other account ignored", () => {
+test("match: new / probable / already-imported; each existing record claimed once; a same-amount entry on another account is offered as a match (otherAccount)", () => {
   const keyed = withImportKeys(parseStatementRows(parseCsv(CSV)).rows, "acc1");
   const m = matchStatement(keyed, { transactions: txns, accountId: "acc1", importedKeys: [keyed[1].importKey] });
-  assert.deepEqual(m.results.map(r => r.status), ["probable-match", "already-imported", "probable-match", "new"]);
+  assert.deepEqual(m.results.map(r => r.status), ["probable-match", "already-imported", "probable-match", "probable-match"]);
+  assert.equal(m.results[3].otherAccount, true);
   assert.equal(m.results[0].matchId, "t1");
   assert.equal(m.results[2].matchId, "t3");           // transfer out of acc1 on 3 Apr, within 2 days
-  assert.deepEqual(m.summary, { total: 4, new: 1, probableMatch: 2, alreadyImported: 1 });
+  assert.deepEqual(m.summary, { total: 4, new: 0, probableMatch: 3, alreadyImported: 1 });
 });
 
 test("match: does not mutate inputs", () => {
@@ -175,9 +176,9 @@ test("match: entries recorded against a UPI handle / debit card linked to the ba
     { id: "x1", type: "expense", amount: 77, date: "2026-04-04", accId: "upi-other" },                               // a UPI handle linked to another bank
   ];
   const without = matchStatement(rows, { transactions: txns, accountId: "bank1", importedKeys: [] });
-  assert.deepEqual(without.results.map(r => r.status), ["new", "probable-match", "new"]);        // only the part-paid slice matches without the link list
+  assert.deepEqual(without.results.map(r => [r.status, r.otherAccount === true]), [["probable-match", true], ["probable-match", false], ["probable-match", true]]);   // without the link list the rail entries are only "on another account"
   const withRail = matchStatement(rows, { transactions: txns, accountId: "bank1", importedKeys: [], linkedIds: ["upi1"] });
-  assert.deepEqual(withRail.results.map(r => [r.status, r.matchId]), [["probable-match", "u1"], ["probable-match", "p1"], ["new", undefined]]);
+  assert.deepEqual(withRail.results.map(r => [r.status, r.matchId, r.otherAccount === true]), [["probable-match", "u1", false], ["probable-match", "p1", false], ["probable-match", "x1", true]]);
 });
 
 test("headings: split, dotted or unit-carrying headings are still recognised (loose reading, only when the exact aliases fail)", () => {
@@ -187,4 +188,35 @@ test("headings: split, dotted or unit-carrying headings are still recognised (lo
   const q = parseStatementRows([["Txn Date", "Value Date", "Remarks", "Withdrawals (Dr.)", "Deposits (Cr.)", "Closing Balance"], ["01/04/2026", "01/04/2026", "X", "5.00", "", "95.00"]]);
   assert.equal(q.ok, true);
   assert.equal(parseStatementRows([["Foo", "Bar", "Baz"], ["1", "2", "3"]]).ok, false);          // still refused when nothing fits
+});
+
+import { extractUtr } from "./utr.js";
+test("utr: read from UPI / IMPS narrations in both layouts; cheque numbers, card serials and NEFT text are not UTRs", () => {
+  assert.equal(extractUtr({ desc: "UPI/CR/104354172499/NPCI BHI/HDFC/bhimcas/BHIMCASHBACK" }), "104354172499");
+  assert.equal(extractUtr({ desc: "UPI-211737389994-VIPULACH AL ENTE" }), "211737389994");
+  assert.equal(extractUtr({ desc: "IMPS-RIB/Fund Trf/906920699478/" }), "906920699478");
+  assert.equal(extractUtr({ desc: "BB/CHQ DEP/092964/SOMEONE", ref: "092964" }), "");
+  assert.equal(extractUtr({ desc: "ZOMATO CYBS NEWDELHI IN", ref: "14308206086" }), "");          // a card statement serial number (11 digits)
+  assert.equal(extractUtr({ desc: "NEFT-HDFCN52026101012345-SALARY" }), "");
+  assert.equal(extractUtr({ desc: "FUND TRF", ref: "906920699478" }), "906920699478");              // a 12-digit reference column
+  assert.equal(extractUtr({ desc: "UPI/DR/1234567890123/X" }), "");                                    // 13 digits: not a UTR
+});
+test("match: the same UPI reference matches the entry whatever the date gap (same amount), and an imported UTR is 'already imported'", () => {
+  const rows = withImportKeys([{ date: "2026-04-20", desc: "UPI/DR/412345678901/SWIGGY/HDFC/s@ic/x", ref: "", amountPaise: -7700 }, { date: "2026-04-20", desc: "UPI/DR/999999999999/OTHER/HDFC/o@ic/x", ref: "", amountPaise: -7700 }], "bank1");
+  const txns = [{ id: "m1", type: "expense", amount: 77, date: "2026-04-01", accId: "bank1", transactionRef: "UTR 412345678901" }];     // 19 days earlier
+  const r = matchStatement(rows, { transactions: txns, accountId: "bank1", importedKeys: [] });
+  assert.deepEqual(r.results.map(x => [x.status, x.matchId, x.byUtr]), [["probable-match", "m1", true], ["new", undefined, undefined]]);
+  const again = matchStatement(rows, { transactions: [], accountId: "bank1", importedKeys: [], importedUtrs: ["412345678901"] });
+  assert.deepEqual(again.results.map(x => [x.status, x.byUtr]), [["already-imported", true], ["new", undefined]]);
+  const diffAmt = matchStatement(rows.slice(0, 1), { transactions: [{ ...txns[0], amount: 78 }], accountId: "bank1", importedKeys: [] });
+  assert.equal(diffAmt.results[0].status, "new");                                                       // same UTR but a different amount is not offered as the same payment
+});
+test("match: the same amount near the same date on ANOTHER account is offered as a match (unticked, linked not moved); a linked or other-amount entry is not", () => {
+  const rows = withImportKeys([{ date: "2026-10-16", desc: "UPI-171831146733-MCDONALD S IN", ref: "", amountPaise: -36571 }], "cc1");
+  const mk = extra => [{ id: "e1", type: "expense", amount: 365.71, date: "2026-10-16", accId: "bank1", ...extra }];
+  const r = matchStatement(rows, { transactions: mk({}), accountId: "cc1", importedKeys: [] });
+  assert.deepEqual([r.results[0].status, r.results[0].matchId, r.results[0].otherAccount], ["probable-match", "e1", true]);
+  assert.equal(matchStatement(rows, { transactions: mk({ importKey: "k" }), accountId: "cc1", importedKeys: [] }).results[0].status, "new");
+  assert.equal(matchStatement(rows, { transactions: mk({ amount: 365.7 }), accountId: "cc1", importedKeys: [] }).results[0].status, "new");
+  assert.equal(matchStatement(rows, { transactions: mk({ date: "2026-10-20" }), accountId: "cc1", importedKeys: [] }).results[0].status, "new");
 });
