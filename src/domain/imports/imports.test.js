@@ -179,3 +179,12 @@ test("match: entries recorded against a UPI handle / debit card linked to the ba
   const withRail = matchStatement(rows, { transactions: txns, accountId: "bank1", importedKeys: [], linkedIds: ["upi1"] });
   assert.deepEqual(withRail.results.map(r => [r.status, r.matchId]), [["probable-match", "u1"], ["probable-match", "p1"], ["new", undefined]]);
 });
+
+test("headings: split, dotted or unit-carrying headings are still recognised (loose reading, only when the exact aliases fail)", () => {
+  const raw = [["Date", "SerNo.", "Transaction", "Details", "Reward Points", "Intl. amount", "Amount", "(in \u20B9)"], ["06/10/2026", "1", "SHOP", "", "7", "", "375.10", ""]];
+  const p = parseStatementRows(raw, { kind: "card" });
+  assert.equal(p.ok, true, p.reason); assert.equal(p.rows[0].amountPaise, -37510); assert.equal(p.rows[0].ref, "1");
+  const q = parseStatementRows([["Txn Date", "Value Date", "Remarks", "Withdrawals (Dr.)", "Deposits (Cr.)", "Closing Balance"], ["01/04/2026", "01/04/2026", "X", "5.00", "", "95.00"]]);
+  assert.equal(q.ok, true);
+  assert.equal(parseStatementRows([["Foo", "Bar", "Baz"], ["1", "2", "3"]]).ok, false);          // still refused when nothing fits
+});

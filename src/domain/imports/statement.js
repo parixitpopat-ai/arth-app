@@ -65,6 +65,24 @@ function findHeader(rows) {
   return null;
 }
 
+// Looser reading of a heading row, used only when the exact aliases above find nothing (printed headings are often split, dotted or carry units:
+// "Transaction" "Details", "Amount (in ₹)", "SerNo."). A column is recognised by a key word in its heading; never a guess about data.
+function findHeaderLoose(rows) {
+  const plain = s => String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  for (let i = 0; i < Math.min(rows.length, 60); i++) {
+    const cells = rows[i].map(plain), col = {};
+    const pick = (key, re, avoid) => { const j = cells.findIndex((c, k) => c && re.test(c) && !(avoid && avoid.test(c)) && !Object.values(col).includes(k)); if (j >= 0) col[key] = j; };
+    pick("date", /\bdate\b/, /value|due|statement/);
+    pick("desc", /(details?|particulars|narration|description|remarks)/);
+    pick("debit", /(debit|withdraw)/); pick("credit", /(credit|deposit)/, /limit|available/);
+    pick("balance", /balance/, /previous|opening/);
+    pick("ref", /(ser ?no|serial|\bref\b|reference|cheque|chq|utr)/);
+    pick("amount", /^amount/, /intl|international|reward/); if (col.amount === undefined) pick("amount", /amount/, /intl|international|reward/);
+    if (col.date !== undefined && ((col.debit !== undefined && col.credit !== undefined) || col.amount !== undefined) && col.desc !== undefined) return { index: i, col };
+  }
+  return null;
+}
+
 /**
  * @param {Array<Array<string|number>>} rawRows
  * @returns {{ ok:boolean, reason?:string, rows:Array, skipped:Array, balance:{checked:number, mismatches:number[], order:string}, period:{from:string,to:string}|null }}
@@ -72,7 +90,7 @@ function findHeader(rows) {
  */
 export function parseStatementRows(rawRows, opts = {}) {
   const empty = { rows: [], skipped: [], balance: { checked: 0, mismatches: [], order: "unknown" }, period: null };
-  const h = findHeader(rawRows || []);
+  const h = findHeader(rawRows || []) || findHeaderLoose(rawRows || []);
   if (!h) return { ok: false, reason: "Could not find the column headings (a date column, a description column and debit/credit or amount columns). This file does not look like a bank statement Arth can read yet.", ...empty };
   const { col } = h, rows = [], skipped = [];
   for (let i = h.index + 1; i < rawRows.length; i++) {
