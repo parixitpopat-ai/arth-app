@@ -1,0 +1,6 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head><body style="margin:0"><div id="root"></div>
+<script type="module">
+import React from "react"; import { createRoot } from "react-dom/client";
+import AuthGateScreen from "/src/screens/AuthGateScreen.jsx"; import { DARK } from "/src/constants/theme.js";
+createRoot(document.getElementById("root")).render(React.createElement(AuthGateScreen, { mode: "signin", onBack: () => {}, T: DARK }));
+</script></body></html>

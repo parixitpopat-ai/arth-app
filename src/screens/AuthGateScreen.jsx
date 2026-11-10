@@ -42,7 +42,7 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
   const noteTime = lastNote ? new Date(lastNote.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
   const inputStyle = {
-    width: "100%", background: T.input, border: `1px solid ${T.border}`, borderRadius: 12,
+    width: "100%", boxSizing: "border-box", minHeight: 52, background: T.input, border: `1px solid ${T.border}`, borderRadius: 12,
     padding: "14px", fontSize: 16, color: T.text, fontFamily: "Nunito,sans-serif", textAlign: "center",
   };
 
@@ -82,17 +82,17 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
   };
 
   return (
-    <div style={{ background: T.bg, minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-      <div style={{ maxWidth: 400, margin: "0 auto", width: "100%", padding: "24px 24px" }}>
+    <div style={{ background: T.bg, minHeight: "100dvh", display: "flex", flexDirection: "column", justifyContent: "center", boxSizing: "border-box", width: "100%", overflowX: "hidden", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+      <div style={{ maxWidth: 400, margin: "0 auto", width: "100%", boxSizing: "border-box", padding: "24px 20px" }}>
         {onBack && (
-          <button onClick={onBack} style={{ background: "none", border: "none", color: T.accent, fontSize: 22, cursor: "pointer", padding: 0, marginBottom: 16 }}>←</button>
+          <button onClick={onBack} aria-label="Back" style={{ background: "none", border: "none", color: T.accent, fontSize: 24, cursor: "pointer", padding: "4px 8px 4px 0", marginBottom: 12, minHeight: 44 }}>←</button>
         )}
         <div style={{ fontSize: 20, fontWeight: 900, color: T.text, textAlign: "center", marginBottom: 32 }}>{copy.heading}</div>
 
         {stage === "email" ? (
           <>
             <input
-              style={inputStyle} value={email} type="email" autoFocus
+              style={inputStyle} value={email} type="email" inputMode="email" autoComplete="email" autoCapitalize="none" autoFocus
               placeholder="Email address"
               onChange={e => setEmail(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleSendCode()}
@@ -100,7 +100,7 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
             {error && <div style={{ color: T.danger, fontSize: 12, fontWeight: 700, marginTop: 10, textAlign: "center" }}>{error}</div>}
             <button
               onClick={handleSendCode} disabled={busy}
-              style={{ width: "100%", marginTop: 16, padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Nunito,sans-serif" }}
+              style={{ width: "100%", boxSizing: "border-box", minHeight: 52, marginTop: 16, padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Nunito,sans-serif" }}
             >
               {busy ? "Sending..." : copy.button}
             </button>
@@ -112,20 +112,26 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
             </div>
             <input
               style={{ ...inputStyle, fontSize: 22, letterSpacing: 6, fontWeight: 800 }} value={code}
-              inputMode="numeric" maxLength={8} autoFocus placeholder="········"
+              inputMode="numeric" autoComplete="one-time-code" maxLength={8} autoFocus placeholder="········"
               onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
               onKeyDown={e => e.key === "Enter" && handleVerifyCode()}
             />
             {error && <div style={{ color: T.danger, fontSize: 12, fontWeight: 700, marginTop: 10, textAlign: "center" }}>{error}</div>}
             <button
               onClick={handleVerifyCode} disabled={busy}
-              style={{ width: "100%", marginTop: 16, padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Nunito,sans-serif" }}
+              style={{ width: "100%", boxSizing: "border-box", minHeight: 52, marginTop: 16, padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Nunito,sans-serif" }}
             >
               {busy ? "Verifying..." : "Verify & continue"}
             </button>
             <button
+              data-testid="auth-resend" onClick={() => { setCode(""); handleSendCode(); }} disabled={busy}
+              style={{ width: "100%", boxSizing: "border-box", minHeight: 44, marginTop: 6, padding: 10, borderRadius: 14, border: "none", background: "none", cursor: "pointer", color: T.accent, fontSize: 13, fontWeight: 700, fontFamily: "Nunito,sans-serif" }}
+            >
+              Send the code again
+            </button>
+            <button
               onClick={() => { setStage("email"); setCode(""); setError(""); }}
-              style={{ width: "100%", marginTop: 10, padding: 10, borderRadius: 14, border: "none", background: "none", cursor: "pointer", color: T.sub, fontSize: 12, fontWeight: 700, fontFamily: "Nunito,sans-serif" }}
+              style={{ width: "100%", boxSizing: "border-box", minHeight: 44, marginTop: 10, padding: 10, borderRadius: 14, border: "none", background: "none", cursor: "pointer", color: T.sub, fontSize: 12, fontWeight: 700, fontFamily: "Nunito,sans-serif" }}
             >
               Use a different email
             </button>
