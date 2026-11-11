@@ -65,14 +65,14 @@ public class ArthSmsPlugin extends Plugin {
             return;
         }
         long since = call.getLong("sinceMs", 0L);
-        int limit = call.getInt("limit", 500);
+        int limit = call.getInt("limit", 3000);
         JSArray out = new JSArray();
         String[] cols = { "_id", "address", "body", "date" };
         try (Cursor c = getContext().getContentResolver().query(Uri.parse("content://sms/inbox"), cols, "date > ?", new String[] { String.valueOf(since) }, "date DESC")) {
             if (c != null) {
                 int iId = c.getColumnIndex("_id"), iAd = c.getColumnIndex("address"), iBody = c.getColumnIndex("body"), iDate = c.getColumnIndex("date");
                 int kept = 0, looked = 0;
-                while (c.moveToNext() && kept < limit && looked < 5000) {
+                while (c.moveToNext() && kept < limit && looked < 30000) {
                     looked++;
                     String body = c.getString(iBody);
                     if (body == null || !AMOUNT.matcher(body).find()) continue;

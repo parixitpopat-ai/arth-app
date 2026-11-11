@@ -20,7 +20,7 @@ export async function smsRequest() {
   try { return { granted: Boolean((await native().requestAccess()).granted) }; } catch { return { granted: false }; }
 }
 /** Money-looking messages received after `sinceMs` (newest first, at most `limit`). @returns {Promise<{ok:boolean, messages:{id:string,address:string,body:string,date:number}[], error?:string}>} */
-export async function smsReadInbox(sinceMs, limit = 500) {
+export async function smsReadInbox(sinceMs, limit = 3000) {
   if (fake()) return { ok: true, messages: (fake().messages || []).filter(m => m.date >= sinceMs).slice(0, limit) };
   try {
     const r = await native().readInbox({ sinceMs, limit });

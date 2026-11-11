@@ -1,7 +1,8 @@
 // Bank statement import. Pick the account, pick a statement file (CSV, Excel or a text PDF), review every row, tick what to add, press Import.
 // Reading creates nothing. Imported rows are plain transactions (no category: they show under "Needs details"); each carries a key and a
 // batch id, so the same file can be imported again safely and a whole import can be undone. Existing entries are never changed.
-import { smsAvailable } from "../native/smsBridge.js";
+import * as smsBridge from "../native/smsBridge.js";
+import * as statementMod from "../domain/imports/statement.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { withImportKeys } from "../domain/imports/statement.js";
 import { matchStatement } from "../domain/imports/matchStatement.js";
@@ -21,7 +22,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const cards = accounts.filter(a => a.type === "cc");
   const [accountId, setAccountId] = useState(fixedAccountId || (banks.length === 1 ? String(banks[0].id) : ""));
   const [state, setState] = useState({ phase: "idle" });          // idle | reading | result | done
-  const smsOn = smsAvailable();
+  const smsOn = smsBridge.smsAvailable();
   const [smsDays, setSmsDays] = useState(30), [smsWaiting, setSmsWaiting] = useState(null);   // smsWaiting: new messages found by the quiet check
   const [pasteOpen, setPasteOpen] = useState(false), [pasteText, setPasteText] = useState("");
   const [ticked, setTicked] = useState({});                       // importKey -> bool (add as a new transaction)
@@ -57,7 +58,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const onPasted = async () => {
     if (!accountId) { setState({ phase: "idle", error: "Choose the card first." }); return; }
     try {
-      const [{ pastedTextToRows }, { parseStatementRows }] = await Promise.all([import("../domain/imports/pastedText.js"), import("../domain/imports/statement.js")]);
+      const [{ pastedTextToRows }, { parseStatementRows }] = await Promise.all([import("../domain/imports/pastedText.js"), Promise.resolve(statementMod)]);
       const t = pastedTextToRows(pasteText);
       if (!t.ok) { setState({ phase: "idle", error: t.reason }); return; }
       const parsed = parseStatementRows(t.rows, { kind: "card" });
@@ -74,7 +75,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
     const acc = accounts.find(a => String(a.id) === String(accId));
     if (!acc) return { error: "Choose the account first." };
     if (!acc.last4) return { error: "This account has no last 4 digits saved, so its messages cannot be told apart. Add them in the account's settings." };
-    const [br, mod, st] = await Promise.all([import("../native/smsBridge.js"), import("../domain/sms/smsInbox.js"), import("../domain/imports/statement.js")]);
+    const [br, mod, st] = await Promise.all([Promise.resolve(smsBridge), import("../domain/sms/smsInbox.js"), Promise.resolve(statementMod)]);
     let g = await br.smsStatus();
     if (!g.granted && ask) g = await br.smsRequest();
     if (!g.granted) return { error: ask ? "SMS access was not allowed. You can allow it in the phone's settings for Arth." : "", denied: true };
@@ -83,7 +84,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
     const sorted = mod.sortSmsToAccounts(r.messages, accounts);
     const mine = sorted.byAccount.get(String(acc.id)) || [];
     const other = sorted.noAccount.length;
-    if (!mine.length) return { error: `No money messages for ····${acc.last4} in the last ${days} days.${other ? ` (${other} other money message${other === 1 ? "" : "s"} did not name this account's last 4 digits and were left out.)` : ""}` };
+    if (!mine.length) return { error: `No money messages for ····${acc.last4} ${days >= 3650 ? "on this phone" : `in the last ${days} days`}.${other ? ` (${other} other money message${other === 1 ? "" : "s"} did not name this account's last 4 digits and were left out.)` : ""}` };
     const rows = mod.smsRows(mine);
     return { parsed: { ok: true, rows, skipped: sorted.unreadable.map((u, i) => ({ line: i + 1, why: u.why, text: u.text })), balance: { checked: 0, mismatches: [], order: "unknown" }, period: { from: rows[0].date, to: rows[rows.length - 1].date } }, other, st };
   };
@@ -93,7 +94,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const onScanAll = async () => {
     setSmsAll({ busy: true });
     try {
-      const [br, mod] = await Promise.all([import("../native/smsBridge.js"), import("../domain/sms/smsInbox.js")]);
+      const [br, mod] = await Promise.all([Promise.resolve(smsBridge), import("../domain/sms/smsInbox.js")]);
       let g = await br.smsStatus(); if (!g.granted) g = await br.smsRequest();
       if (!g.granted) { setSmsAll({ error: "SMS access was not allowed. You can allow it in the phone's settings for Arth." }); return; }
       const r = await br.smsReadInbox(Date.now() - smsDays * 86400000);
@@ -303,7 +304,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
           <button data-testid="stmt-sms-read" style={btn(false, !banks.length && !fixedAccountId)} onClick={onReadSms}>Read SMS from phone{smsWaiting ? ` · ${smsWaiting} new` : ""}</button>
           <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
             <span style={{ color: T.sub, fontSize: 11 }}>Look back</span>
-            {[7, 30, 90].map(d => <button key={d} data-testid={`stmt-sms-days-${d}`} style={{ ...btn(smsDays === d), padding: "5px 10px", fontSize: 12 }} onClick={() => setSmsDays(d)}>{d} days</button>)}
+            {[7, 30, 90, 180, 365, 3650].map(d => <button key={d} data-testid={`stmt-sms-days-${d}`} style={{ ...btn(smsDays === d), padding: "5px 10px", fontSize: 12 }} onClick={() => setSmsDays(d)}>{d === 3650 ? "All" : d === 365 ? "1 year" : `${d} days`}</button>)}
           </div>
           <div data-testid="stmt-sms-note" style={{ color: T.sub, fontSize: 11, marginTop: 4, lineHeight: 1.4 }}>Reads only messages that mention an amount and this account's last 4 digits, on this phone. Nothing is uploaded, and nothing is added until you press Import. Tap again any time to catch up on missed ones.</div>
         </div>}
@@ -311,7 +312,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
           <button data-testid="stmt-sms-all" style={btn(true)} onClick={onScanAll}>Scan all accounts for new SMS</button>
           {smsAll && smsAll.busy && <div style={{ color: T.sub, fontSize: 13, marginTop: 8 }}>Reading messages…</div>}
           {smsAll && smsAll.error && <div data-testid="stmt-sms-all-error" style={{ color: T.warn, fontSize: 13, fontWeight: 700, marginTop: 8 }}>{smsAll.error}</div>}
-          {smsAll && smsAll.nothing && <div data-testid="stmt-sms-all-none" style={{ color: T.sub, fontSize: 13, marginTop: 8 }}>No money messages found for your accounts in the last {smsDays} days.{smsAll.noAccount ? ` ${smsAll.noAccount} message${smsAll.noAccount === 1 ? "" : "s"} did not name any account's last 4 digits.` : ""}</div>}
+          {smsAll && smsAll.nothing && <div data-testid="stmt-sms-all-none" style={{ color: T.sub, fontSize: 13, marginTop: 8 }}>No money messages found for your accounts {smsDays >= 3650 ? "on this phone" : `in the last ${smsDays} days`}.{smsAll.noAccount ? ` ${smsAll.noAccount} message${smsAll.noAccount === 1 ? "" : "s"} did not name any account's last 4 digits.` : ""}</div>}
           {smsAll && smsAll.groups && !smsAll.nothing && <div data-testid="stmt-sms-all-list" style={{ marginTop: 8 }}>
             {smsAll.groups.map(grp => <div key={grp.acc.id} data-testid={`stmt-sms-group-${grp.acc.id}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
               <div style={{ flex: 1, color: T.text, fontSize: 13 }}><b>{grp.acc.name}{grp.acc.last4 ? ` ····${grp.acc.last4}` : ""}</b><div style={{ color: T.sub, fontSize: 12 }}>{grp.addable.length} new{grp.nMatch ? ` · ${grp.nMatch} look already in Arth` : ""}</div></div>
