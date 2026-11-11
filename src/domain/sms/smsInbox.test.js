@@ -42,3 +42,18 @@ test("SMS rows match an entry I already have (same amount, UTR) instead of dupli
   const m = matchStatement(rows, { transactions: mine, accountId: "bank", importedKeys: [], linkedIds: [], importedUtrs: [] });
   assert.equal(m.results[0].status, "probable-match");
 });
+test("'; NAME credited' after our own debit is a debit to that name, not a transfer", () => {
+  const p = parseMoneySms({ id: 11, body: "Your A/c XX5748 debited by Rs. 180.00 on 09/11/26; ICECREAM credited. UPI Ref 610512345678. Not you? Call 1800", date: 1 });
+  assert.equal(p.ok, true); assert.equal(p.row.amountPaise, -18000); assert.equal(p.row.date, "2026-11-09"); assert.deepEqual(p.last4s, ["5748"]);
+  assert.equal(p.row.ref, "610512345678"); assert.match(p.row.desc, /ICECREAM/);
+  const big = parseMoneySms({ id: 12, body: "Your A/c XX5748 debited by Rs. 15,000.00 on 04/11/26; RAJ PI credited. UPI:610512345679", date: 1 });
+  assert.equal(big.row.amountPaise, -1500000); assert.match(big.row.desc, /RAJ PI/);
+});
+test("our own credit with '; NAME debited' is money in", () => {
+  const p = parseMoneySms({ id: 13, body: "Your A/c XX5748 credited by Rs. 2,000.00 on 05/11/26; NIDHI Y debited. UPI Ref 610512345680", date: 1 });
+  assert.equal(p.ok, true); assert.equal(p.row.amountPaise, 200000); assert.match(p.row.desc, /NIDHI Y/);
+});
+test("a real own-account transfer is still reported, not guessed", () => {
+  assert.equal(parseMoneySms({ id: 14, body: "Rs 500 debited from A/c XX1234 and credited to A/c XX5678 on 04-Nov-26", date: 1 }).ok, false);
+  assert.equal(parseMoneySms({ id: 15, body: "Your A/c XX1234 debited by Rs 500.00 on 04/11/26 and credited to A/c XX5678", date: 1 }).ok, false);
+});

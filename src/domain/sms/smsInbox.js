@@ -10,6 +10,11 @@ const AMOUNT = /(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)/i;
 const DEBIT = /\b(debited|spent|paid|purchase|withdrawn|sent|dr)\b/i;
 const CREDIT = /\b(credited|received|deposited|refund(?:ed)?|reversal|cashback)\b/i;
 const OTP = /\b(otp|one[- ]time|verification code|cvv)\b/i;
+// "Your A/c XX5748 debited by Rs. 180.00 on 09/11/26; ICECREAM credited": the verb right after OUR account number is the direction; the second verb
+// describes the other party. A message with a second leg that names another account ("… and credited to A/c XX1234") is a transfer and is not guessed.
+const OWN_VERB = /\b(?:a\/c|acct|account|card)\s*(?:no\.?)?\s*[x*]*\d{3,}\s+(debited|credited)\b/i;
+const SECOND_LEG_TO_ACCOUNT = /\b(?:debited|credited)\b[^.;]{0,30}\b(?:a\/c|acct|account)\s*(?:no\.?)?\s*[x*]*\d{3,}/i;
+const ownVerbOf = t => { const m = OWN_VERB.exec(t); return m ? m[1].toLowerCase() : ""; };
 const pad = n => String(n).padStart(2, "0");
 
 /** True for a message that looks like a money movement: an amount with ₹/Rs/INR and a debit/credit word, and not an OTP or promotion. */
@@ -35,6 +40,8 @@ const dateOf = (t, receivedMs) => {
   return receivedMs ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` : "";
 };
 const merchantOf = t => {
+  const semi = /;\s*([A-Za-z0-9][A-Za-z0-9 &'._-]{1,38}?)\s+(?:credited|debited)\b/i.exec(t);
+  if (semi) return semi[1].trim();
   const upi = extractUpiMerchant(t);
   if (upi) return upi;
   let m = /\b(?:at|to|towards|info:?)\s+([A-Za-z0-9][A-Za-z0-9 &'._-]{1,38}?)(?=\s+on\s+\d|\s+via\b|\s+ref\b|\s+avl\b|\s+bal\b|\.\s|,|$)/i.exec(t.replace(/\s+/g, " "));
@@ -52,7 +59,8 @@ export function parseMoneySms(sms) {
   if (!looksLikeMoneySms(body)) return null;
   const a = AMOUNT.exec(body), paise = Math.round(parseFloat(a[1].replace(/,/g, "")) * 100);
   const credit = CREDIT.test(body), debit = DEBIT.test(body);
-  if (/\b(debited|spent)\b/i.test(body) && /\b(credited|received)\b/i.test(body)) return { ok: false, why: "says both debited and credited (a transfer?)" };
+  const own = ownVerbOf(body);
+  if (/\b(debited|spent)\b/i.test(body) && /\b(credited|received)\b/i.test(body) && (!own || SECOND_LEG_TO_ACCOUNT.test(body))) return { ok: false, why: "says both debited and credited (a transfer?)" };
   if (!Number.isFinite(paise) || paise <= 0) return { ok: false, why: "amount not readable" };
   const date = dateOf(body, sms.date);
   if (!date) return { ok: false, why: "no date" };
@@ -61,7 +69,7 @@ export function parseMoneySms(sms) {
   const isUpi = /\bupi\b/i.test(body) || Boolean(utr);
   // same wording the statement reader produces, so the vendor, UTR and UPI matching rules apply unchanged
   const desc = isUpi ? `UPI-${utr || "0"}-${who || "UPI payment"}`.replace(/-0-/, "-") : (who || body.slice(0, 60));
-  const isCredit = credit && !/\b(debited|spent)\b/i.test(body);
+  const isCredit = own ? own === "credited" : credit && !/\b(debited|spent)\b/i.test(body);
   return { ok: true, smsId: String(sms.id != null ? sms.id : `${sms.date}|${body.slice(0, 40)}`), last4s: last4Of(body),
     row: { line: 0, date, valueDate: null, desc, ref: utr, amountPaise: isCredit ? paise : -paise, balancePaise: null } };
 }
