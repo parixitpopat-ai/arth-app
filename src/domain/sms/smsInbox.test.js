@@ -57,3 +57,14 @@ test("a real own-account transfer is still reported, not guessed", () => {
   assert.equal(parseMoneySms({ id: 14, body: "Rs 500 debited from A/c XX1234 and credited to A/c XX5678 on 04-Nov-26", date: 1 }).ok, false);
   assert.equal(parseMoneySms({ id: 15, body: "Your A/c XX1234 debited by Rs 500.00 on 04/11/26 and credited to A/c XX5678", date: 1 }).ok, false);
 });
+test("notices that are not a money movement are skipped (will-be-debited, statement sent, due reminders)", () => {
+  for (const body of [
+    "Payment of INR 1752.75 towards Merchant Amazon to be debited from your ICICI Bank Credit Card XX1017 on 14-Nov-26",
+    "ICICI Bank Credit Card XX1017 Statement is sent to Pa*******. Total Amount due Rs 22,316.40, Minimum Amount due Rs 1,116.00 due by 03-Dec-26",
+    "Your credit card bill of Rs 5,000 is due on 20-Nov-26. Pay now to avoid charges",
+    "Reminder: Rs 500 will be debited from your A/c XX1234 on 15-Nov-26 for your mandate",
+  ]) { assert.equal(looksLikeMoneySms(body), false, body.slice(0, 50)); assert.equal(parseMoneySms({ id: 1, body, date: 1 }), null); }
+  // real charges still read
+  assert.equal(looksLikeMoneySms("Rs.222.14 spent on HDFC Bank Card x1234 at ZOMATO on 10-11-26. Avl limit Rs.50,000"), true);
+  assert.equal(looksLikeMoneySms("Your A/c XX5748 debited by Rs. 180.00 on 09/11/26; ICECREAM credited. UPI Ref 610512345678"), true);
+});

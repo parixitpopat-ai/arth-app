@@ -15,12 +15,23 @@ const OTP = /\b(otp|one[- ]time|verification code|cvv)\b/i;
 const OWN_VERB = /\b(?:a\/c|acct|account|card)\s*(?:no\.?)?\s*[x*]*\d{3,}\s+(debited|credited)\b/i;
 const SECOND_LEG_TO_ACCOUNT = /\b(?:debited|credited)\b[^.;]{0,30}\b(?:a\/c|acct|account)\s*(?:no\.?)?\s*[x*]*\d{3,}/i;
 const ownVerbOf = t => { const m = OWN_VERB.exec(t); return m ? m[1].toLowerCase() : ""; };
+// Messages that mention an amount and "debited" but are NOT a money movement: a payment that WILL be taken, a statement/bill notice, a due-date reminder.
+const NOT_A_MOVEMENT = [
+  /\b(?:to be|will be|shall be|is going to be|going to be)\s+(?:debited|charged|deducted|auto-?debited)\b/i,
+  /\b(?:upcoming|scheduled)\b[^.]{0,40}\b(?:debit|payment|mandate)\b/i,
+  /\bstatement\b[^.]{0,60}\b(?:sent|generated|ready|available|due)\b/i,
+  /\b(?:total|minimum|min\.?)\s+(?:amount\s+)?due\b/i,
+  /\bdue\s+(?:date|on|by)\b/i,
+  /\bpayment\s+(?:reminder|due)\b/i,
+  /\bbill\b[^.]{0,30}\b(?:generated|due)\b/i,
+];
 const pad = n => String(n).padStart(2, "0");
 
 /** True for a message that looks like a money movement: an amount with ₹/Rs/INR and a debit/credit word, and not an OTP or promotion. */
 export function looksLikeMoneySms(body) {
   const t = String(body || "");
   if (!AMOUNT.test(t) || OTP.test(t)) return false;
+  if (NOT_A_MOVEMENT.some(rx => rx.test(t))) return false;
   if (/\b(offer|apply now|pre-?approved|eligible|win|click|t&c|loan up to)\b/i.test(t) && !/\b(debited|credited|spent)\b/i.test(t)) return false;
   return DEBIT.test(t) || CREDIT.test(t);
 }
