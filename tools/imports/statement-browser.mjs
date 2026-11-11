@@ -178,6 +178,20 @@ try {
   await T("stmt-sms-all-done").locator("button").first().dispatchEvent("click"); await page.waitForTimeout(600);
   const after5 = await ls("arth_txns");
   rec("M6 Undo on one account's batch removes just that account's entry", after5.length === after4.length - 1, after5.length - after4.length);
+  // ── old imported bank notices (not real transactions): found, removed in one tap, undo puts them back ──
+  await page.evaluate(() => { const t = JSON.parse(localStorage.getItem("arth_txns") || "[]"); t.push(
+    { id: "junk1", type: "expense", amount: 1752.75, date: "2026-11-12", accId: "cc1", merchant: "Payment Of Inr 1752.75 Towards Merchant Amazon To Be Debited", desc: "Payment of INR 1752.75 towards Merchant Amazon to be debited", importKey: "cc1|2026-11-12|-175275||x|0", importSource: "bank-statement", catIds: [] },
+    { id: "junk2", type: "expense", amount: 22316.4, date: "2026-11-03", accId: "cc1", merchant: "Icici Bank Credit Card Xx1017 Statement Is Sent To Pa********", desc: "", importKey: "cc1|2026-11-03|-2231640||y|0", importSource: "bank-statement", catIds: [] }); localStorage.setItem("arth_txns", JSON.stringify(t)); });
+  await page.reload(); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(400);
+  await page.getByText(/^money$/i).last().dispatchEvent("click"); await page.waitForTimeout(900); await unlock(); await page.waitForTimeout(700);
+  await T("card-import-statement").dispatchEvent("click"); await page.waitForTimeout(700);
+  rec("N1 the 'Not real transactions' box lists the 2 old notices", (await T("stmt-junk").count()) === 1 && /2 imported entries are bank notices/.test(await T("stmt-junk").innerText()), (await T("stmt-junk").innerText()).slice(0, 160));
+  const nBefore = (await ls("arth_txns")).length;
+  await T("stmt-junk-remove").dispatchEvent("click"); await page.waitForTimeout(600);
+  const nAfter = await ls("arth_txns");
+  rec("N2 'Remove 2 entries' removes exactly those two, nothing else", nAfter.length === nBefore - 2 && !nAfter.some(t => /^junk/.test(t.id)), { nBefore, after: nAfter.length });
+  await T("stmt-junk-undo").dispatchEvent("click"); await page.waitForTimeout(600);
+  rec("N3 Undo puts both back", (await ls("arth_txns")).length === nBefore, (await ls("arth_txns")).length);
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 600)); }
 await browser.close(); try { process.kill(-server.pid); } catch {}

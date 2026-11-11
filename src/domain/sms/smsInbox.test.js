@@ -68,3 +68,15 @@ test("notices that are not a money movement are skipped (will-be-debited, statem
   assert.equal(looksLikeMoneySms("Rs.222.14 spent on HDFC Bank Card x1234 at ZOMATO on 10-11-26. Avl limit Rs.50,000"), true);
   assert.equal(looksLikeMoneySms("Your A/c XX5748 debited by Rs. 180.00 on 09/11/26; ICECREAM credited. UPI Ref 610512345678"), true);
 });
+import { findNoticeEntries } from "./smsInbox.js";
+test("old imported notices are found; my own entries and real charges are not", () => {
+  const txns = [
+    { id: 1, type: "expense", importKey: "k1", merchant: "Payment Of Inr 1752.75 Towards Merchant Amazon To Be Debited", desc: "Payment of INR 1752.75 towards Merchant Amazon to be debited" },
+    { id: 2, type: "expense", importKey: "k2", merchant: "Icici Bank Credit Card Xx1017 Statement Is Sent To Pa********", desc: "" },
+    { id: 3, type: "expense", importKey: "k3", merchant: "Zomato", desc: "UPI-123-ZOMATO" },
+    { id: 4, type: "expense", merchant: "Amazon to be debited note", desc: "mine", catIds: [] },                       // typed by me, never imported
+    { id: 5, type: "expense", importKey: "k5", importMerged: true, merchant: "Statement is sent", desc: "" },            // my entry linked to a row
+    { id: 6, type: "expense", importKey: "k6", merchant: "Payment to be debited", catIds: ["c1"] },                        // already categorised
+  ];
+  assert.deepEqual(findNoticeEntries(txns).map(t => t.id), [1, 2]);
+});

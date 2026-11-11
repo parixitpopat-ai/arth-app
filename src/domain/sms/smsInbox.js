@@ -27,6 +27,19 @@ const NOT_A_MOVEMENT = [
 ];
 const pad = n => String(n).padStart(2, "0");
 
+/** True when the text is a notice (will-be-debited, statement sent, due reminder), not a money movement. */
+export const isNotAMovement = text => NOT_A_MOVEMENT.some(rx => rx.test(String(text || "")));
+
+/**
+ * Entries an earlier version imported from such notices (they are not real transactions). Only entries the IMPORT created: never one the person
+ * entered themselves and merely linked to a statement/SMS row (importMerged), and never one already given a category.
+ * @returns {object[]} the entries (read-only plan; nothing is changed here)
+ */
+export function findNoticeEntries(txns) {
+  return (txns || []).filter(t => t && t.importKey && !t.importMerged && (t.type === "expense" || t.type === "income")
+    && !(t.catIds && t.catIds.length) && isNotAMovement([t.merchant, t.desc, t.bankNarration].filter(Boolean).join(" ")));
+}
+
 /** True for a message that looks like a money movement: an amount with ₹/Rs/INR and a debit/credit word, and not an OTP or promotion. */
 export function looksLikeMoneySms(body) {
   const t = String(body || "");

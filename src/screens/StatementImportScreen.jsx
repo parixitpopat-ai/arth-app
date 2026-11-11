@@ -2,6 +2,7 @@
 // Reading creates nothing. Imported rows are plain transactions (no category: they show under "Needs details"); each carries a key and a
 // batch id, so the same file can be imported again safely and a whole import can be undone. Existing entries are never changed.
 import * as smsBridge from "../native/smsBridge.js";
+import { findNoticeEntries } from "../domain/sms/smsInbox.js";
 import * as statementMod from "../domain/imports/statement.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { withImportKeys } from "../domain/imports/statement.js";
@@ -16,7 +17,7 @@ const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-
 const addDay = iso => { const t = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10) + 1)); return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`; };
 const niceDate = iso => { const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
 
-export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy, onMergeRepeats, onUndoRepeats }) {
+export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy, onMergeRepeats, onUndoRepeats, onRemoveNotices, onUndoNotices }) {
   const fileRef = useRef(null);
   const banks = accounts.filter(a => a.type === "bank");
   const cards = accounts.filter(a => a.type === "cc");
@@ -30,6 +31,8 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const [sb, setSb] = useState(null);                         // what the last file says the balance was at its start and end
   const repairs = useMemo(() => [...planNameRepairs(txns).map(c => ({ ...c, field: "merchant" })), ...planRefRepairs(txns)], [txns]);
   const [tidyUndo, setTidyUndo] = useState(null);
+  const notices = useMemo(() => findNoticeEntries(txns), [txns]);
+  const [noticeUndo, setNoticeUndo] = useState(null);
   const repeatAccId = fixedAccountId || accountId;
   const repeats = useMemo(() => (repeatAccId ? findImportedDuplicates({ txns, accountId: repeatAccId, linkedIds: getLinkedMethodIds(repeatAccId, accounts) }) : []), [txns, repeatAccId, accounts]);
   const [repeatUndo, setRepeatUndo] = useState(null);
@@ -276,6 +279,19 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
             {!repeatUndo ? <button data-testid="stmt-repeats-merge" style={btn(true)} onClick={() => setRepeatUndo(onMergeRepeats(repeats))}>Merge {repeats.length} repeat{repeats.length === 1 ? "" : "s"} (keep mine)</button>
               : <><div data-testid="stmt-repeats-done" style={{ color: T.sub, fontSize: 13, flex: 1 }}>Merged.</div><button data-testid="stmt-repeats-undo" style={btn(false)} onClick={() => { onUndoRepeats(repeatUndo); setRepeatUndo(null); }}>Undo</button></>}
+          </div>
+        </div>
+      )}
+      {(notices.length > 0 || noticeUndo) && state.phase !== "done" && onRemoveNotices && (
+        <div style={card} data-testid="stmt-junk">
+          <div style={label}>Not real transactions</div>
+          {notices.length > 0 && <div style={{ color: T.text, fontSize: 13, lineHeight: 1.45 }}>
+            {notices.length} imported entr{notices.length === 1 ? "y is" : "ies are"} bank notices, not money spent (a payment that will be debited, a statement-sent message). They were added by an earlier version.
+            <div style={{ marginTop: 6 }}>{notices.slice(0, 6).map(t => <div key={t.id} style={{ color: T.sub, fontSize: 12 }}>{niceDate(t.date)} · {sym}{Number(t.amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · {String(t.merchant || t.desc || "").slice(0, 44)}</div>)}{notices.length > 6 && <div style={{ color: T.sub, fontSize: 12 }}>…and {notices.length - 6} more</div>}</div>
+          </div>}
+          <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
+            {!noticeUndo ? <button data-testid="stmt-junk-remove" style={btn(true)} onClick={() => setNoticeUndo(onRemoveNotices(notices))}>Remove {notices.length} entr{notices.length === 1 ? "y" : "ies"}</button>
+              : <><div data-testid="stmt-junk-done" style={{ color: T.sub, fontSize: 13, flex: 1 }}>Removed.</div><button data-testid="stmt-junk-undo" style={btn(false)} onClick={() => { onUndoNotices(noticeUndo); setNoticeUndo(null); }}>Undo</button></>}
           </div>
         </div>
       )}
