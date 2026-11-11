@@ -162,7 +162,22 @@ try {
   await T("stmt-import").dispatchEvent("click"); await page.waitForTimeout(700);
   const after3 = await ls("arth_txns"); const bl = after3.find(t => /blinkit/i.test(t.merchant || t.desc || ""));
   rec("M3 import adds the two charges to the card (Blinkit 640.00 on 2026-10-06 as an expense)", after3.length === before3 + 2 && bl && bl.amount === 640 && bl.date === "2026-10-06" && bl.type === "expense" && bl.accId === "cc1", bl);
-  await T("stmt-sms-read").count().then(async c => { if (c) { await T("stmt-sms-read").dispatchEvent("click"); await page.waitForTimeout(700); } });
+  // all accounts at once: a new bank message (savings ····9001), the card's two already-imported ones, and a new card one
+  await page.evaluate(() => { window.__ARTH_SMS_TEST__.messages.push(
+    { id: "s5", address: "ICICIB", date: Date.now() - 4 * 86400000, body: "Rs 250.00 debited from A/c XX9001 on 03-10-26 to VPA tea@ybl (UPI Ref No 555666777888). Not you? Call bank" },
+    { id: "s6", address: "ICICIB", date: Date.now() - 5 * 86400000, body: "Rs.99.00 spent on ICICI Bank Card XX8004 at NETFLIX on 02-10-26." }); });
+  await page.getByText(/^money$/i).last().dispatchEvent("click"); await page.waitForTimeout(700);
+  await T("card-import-statement").dispatchEvent("click"); await page.waitForTimeout(900);
+  await T("stmt-sms-all").dispatchEvent("click"); await page.waitForTimeout(900);
+  const listTxt = await T("stmt-sms-all-list").innerText();
+  rec("M4 scan all: savings ····9001 has 1 new, the card has 1 new (the two earlier imports are not offered again)", /Test Savings ····9001\s*1 new/.test(listTxt) && /Test ICICI Card ····8004\s*1 new/.test(listTxt) && (await T("stmt-sms-add-all").innerText()) === "Add all 2 new", listTxt);
+  const before4 = (await ls("arth_txns")).length;
+  await T("stmt-sms-add-all").dispatchEvent("click"); await page.waitForTimeout(800);
+  const after4 = await ls("arth_txns"); const tea = after4.find(t => t.transactionRef === "555666777888"), nf = after4.find(t => /netflix/i.test(t.merchant || t.desc || ""));
+  rec("M5 'Add all' added one entry to each account: savings UPI 250.00 with its reference, card Netflix 99.00", after4.length === before4 + 2 && tea && tea.accId === "bank1" && tea.amount === 250 && nf && nf.accId === "cc1" && nf.amount === 99, { n: after4.length - before4, tea: tea && tea.accId, nf: nf && nf.accId });
+  await T("stmt-sms-all-done").locator("button").first().dispatchEvent("click"); await page.waitForTimeout(600);
+  const after5 = await ls("arth_txns");
+  rec("M6 Undo on one account's batch removes just that account's entry", after5.length === after4.length - 1, after5.length - after4.length);
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 600)); }
 await browser.close(); try { process.kill(-server.pid); } catch {}

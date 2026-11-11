@@ -45,9 +45,9 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const btn = (primary, disabled) => ({ border: primary ? "0" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? "#fff" : T.text, borderRadius: 12, padding: "11px 14px", fontWeight: 800, fontSize: 14, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1, fontFamily: "inherit" });
   const note = (tone, children, tid) => <div data-testid={tid} style={{ background: tone === "amb" ? "rgba(240,165,0,0.16)" : T.accentSoft, color: T.text, borderRadius: 12, padding: "10px 12px", fontSize: 13, marginBottom: 12, lineHeight: 1.45 }}>{children}</div>;
 
+  const matchOnly = (parsed, accId) => matchStatement(withImportKeys(parsed.rows, accId), { transactions: txns, accountId: accId, importedKeys: keys, linkedIds: getLinkedMethodIds(accId, accounts), importedUtrs: txns.filter(t => t.importKey && t.transactionRef).map(t => t.transactionRef) });
   const analyse = (parsed, accId) => {
-    const keyed = withImportKeys(parsed.rows, accId);
-    const m = matchStatement(keyed, { transactions: txns, accountId: accId, importedKeys: keys, linkedIds: getLinkedMethodIds(accId, accounts), importedUtrs: txns.filter(t => t.importKey && t.transactionRef).map(t => t.transactionRef) });
+    const m = matchOnly(parsed, accId);
     const start = {}; m.results.forEach(r => { start[r.row.importKey] = r.status === "new" && !(isCard && r.row.amountPaise > 0); });
     setTicked(start); setMerged({});
     return m;
@@ -87,6 +87,41 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
     const rows = mod.smsRows(mine);
     return { parsed: { ok: true, rows, skipped: sorted.unreadable.map((u, i) => ({ line: i + 1, why: u.why, text: u.text })), balance: { checked: 0, mismatches: [], order: "unknown" }, period: { from: rows[0].date, to: rows[rows.length - 1].date } }, other, st };
   };
+  // One scan for every account: messages are sorted to accounts by their last 4 digits; "Add all new" adds only rows that are new (matches stay for review).
+  const [smsAll, setSmsAll] = useState(null);
+  const isCardAcc = a => a.type === "cc";
+  const onScanAll = async () => {
+    setSmsAll({ busy: true });
+    try {
+      const [br, mod] = await Promise.all([import("../native/smsBridge.js"), import("../domain/sms/smsInbox.js")]);
+      let g = await br.smsStatus(); if (!g.granted) g = await br.smsRequest();
+      if (!g.granted) { setSmsAll({ error: "SMS access was not allowed. You can allow it in the phone's settings for Arth." }); return; }
+      const r = await br.smsReadInbox(Date.now() - smsDays * 86400000);
+      if (!r.ok) { setSmsAll({ error: r.error }); return; }
+      const scan = accounts.filter(a => a.type === "bank" || a.type === "cc");
+      const sorted = mod.sortSmsToAccounts(r.messages, scan);
+      const groups = [...sorted.byAccount.entries()].map(([id, list]) => {
+        const acc = scan.find(a => String(a.id) === id), rows = mod.smsRows(list);
+        const parsed = { ok: true, rows, skipped: [], balance: { checked: 0, mismatches: [], order: "unknown" }, period: { from: rows[0].date, to: rows[rows.length - 1].date } };
+        const m = matchOnly(parsed, id);
+        const addable = m.results.filter(x => x.status === "new" && !(isCardAcc(acc) && x.row.amountPaise > 0));
+        return { acc, parsed, addable, nMatch: m.results.filter(x => x.status === "probable-match").length };
+      }).filter(x => x.addable.length || x.nMatch);
+      setSmsAll({ groups, noAccount: sorted.noAccount.length, unreadable: sorted.unreadable.length, nothing: !groups.length });
+    } catch (err) { setSmsAll({ error: "The messages could not be read.", detail: `${(err && err.name) || "error"}${err && err.message ? " — " + String(err.message).slice(0, 140) : ""}` }); }
+  };
+  const reviewGroup = grp => { const id = String(grp.acc.id); setAccountId(id); setSb(null); setBalUndo(null); setLastSummary(null); setBillUndo(null); setState({ phase: "result", fileName: "SMS from phone", parsed: grp.parsed, match: analyse(grp.parsed, id), accountId: id }); setSmsAll(null); };
+  const addAllNew = () => {
+    const added = [];
+    for (const grp of smsAll.groups) {
+      if (!grp.addable.length) continue;
+      const batchId = genId();
+      const made = buildImportTxns(grp.addable, { accountId: String(grp.acc.id), batchId, cards, newId: genId, plainExpenses: isCardAcc(grp.acc), accountType: grp.acc.type });
+      onImport(made, { batchId, fileName: "SMS from phone", merges: [] });
+      added.push({ name: grp.acc.name, last4: grp.acc.last4, n: made.length, batchId, undone: false });
+    }
+    setSmsAll({ added });
+  };
   const onReadSms = async () => {
     const accId = fixedAccountId || accountId;
     if (!accId) { setState({ phase: "idle", error: "Choose the account first." }); return; }
@@ -103,7 +138,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   useEffect(() => {
     if (!smsOn || !smsAcc) { setSmsWaiting(null); return; }
     let live = true;
-    smsRowsFor(smsAcc, smsDays, { ask: false }).then(r => { if (live) setSmsWaiting(r.parsed ? analyse(r.parsed, smsAcc).results.filter(x => x.status === "new").length : 0); }).catch(() => { if (live) setSmsWaiting(null); });
+    smsRowsFor(smsAcc, smsDays, { ask: false }).then(r => { if (live) setSmsWaiting(r.parsed ? matchOnly(r.parsed, smsAcc).results.filter(x => x.status === "new").length : 0); }).catch(() => { if (live) setSmsWaiting(null); });
     return () => { live = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [smsOn, smsAcc, smsDays, txns]);
@@ -271,6 +306,27 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
             {[7, 30, 90].map(d => <button key={d} data-testid={`stmt-sms-days-${d}`} style={{ ...btn(smsDays === d), padding: "5px 10px", fontSize: 12 }} onClick={() => setSmsDays(d)}>{d} days</button>)}
           </div>
           <div data-testid="stmt-sms-note" style={{ color: T.sub, fontSize: 11, marginTop: 4, lineHeight: 1.4 }}>Reads only messages that mention an amount and this account's last 4 digits, on this phone. Nothing is uploaded, and nothing is added until you press Import. Tap again any time to catch up on missed ones.</div>
+        </div>}
+        {smsOn && <div style={{ marginTop: 8 }}>
+          <button data-testid="stmt-sms-all" style={btn(true)} onClick={onScanAll}>Scan all accounts for new SMS</button>
+          {smsAll && smsAll.busy && <div style={{ color: T.sub, fontSize: 13, marginTop: 8 }}>Reading messages…</div>}
+          {smsAll && smsAll.error && <div data-testid="stmt-sms-all-error" style={{ color: T.warn, fontSize: 13, fontWeight: 700, marginTop: 8 }}>{smsAll.error}</div>}
+          {smsAll && smsAll.nothing && <div data-testid="stmt-sms-all-none" style={{ color: T.sub, fontSize: 13, marginTop: 8 }}>No money messages found for your accounts in the last {smsDays} days.{smsAll.noAccount ? ` ${smsAll.noAccount} message${smsAll.noAccount === 1 ? "" : "s"} did not name any account's last 4 digits.` : ""}</div>}
+          {smsAll && smsAll.groups && !smsAll.nothing && <div data-testid="stmt-sms-all-list" style={{ marginTop: 8 }}>
+            {smsAll.groups.map(grp => <div key={grp.acc.id} data-testid={`stmt-sms-group-${grp.acc.id}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
+              <div style={{ flex: 1, color: T.text, fontSize: 13 }}><b>{grp.acc.name}{grp.acc.last4 ? ` ····${grp.acc.last4}` : ""}</b><div style={{ color: T.sub, fontSize: 12 }}>{grp.addable.length} new{grp.nMatch ? ` · ${grp.nMatch} look already in Arth` : ""}</div></div>
+              {(!fixedAccountId || String(fixedAccountId) === String(grp.acc.id)) && <button style={{ ...btn(false), padding: "7px 12px", fontSize: 12 }} onClick={() => reviewGroup(grp)}>Review</button>}
+            </div>)}
+            {(smsAll.noAccount > 0 || smsAll.unreadable > 0) && <div style={{ color: T.sub, fontSize: 11, marginTop: 6, lineHeight: 1.4 }}>{smsAll.noAccount > 0 ? `${smsAll.noAccount} money message${smsAll.noAccount === 1 ? "" : "s"} did not name one of your accounts (or two accounts share the digits) and were left out. ` : ""}{smsAll.unreadable > 0 ? `${smsAll.unreadable} could not be read.` : ""}</div>}
+            {smsAll.groups.some(x => x.addable.length) && <button data-testid="stmt-sms-add-all" style={{ ...btn(true), marginTop: 10, width: "100%" }} onClick={addAllNew}>Add all {smsAll.groups.reduce((n, x) => n + x.addable.length, 0)} new</button>}
+            <div style={{ color: T.sub, fontSize: 11, marginTop: 4 }}>"Add all new" adds only rows that are not already in Arth. Rows that look like entries you have stay for you to review.</div>
+          </div>}
+          {smsAll && smsAll.added && <div data-testid="stmt-sms-all-done" style={{ marginTop: 8 }}>
+            {smsAll.added.map(a => <div key={a.batchId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", color: T.text, fontSize: 13 }}>
+              <span style={{ flex: 1 }}>{a.name}{a.last4 ? ` ····${a.last4}` : ""}: {a.undone ? "undone" : `${a.n} added`}</span>
+              {!a.undone && <button style={{ ...btn(false), padding: "6px 10px", fontSize: 12 }} onClick={() => { onUndoBatch(a.batchId); setSmsAll(x => ({ ...x, added: x.added.map(y => y.batchId === a.batchId ? { ...y, undone: true } : y) })); }}>Undo</button>}
+            </div>)}
+          </div>}
         </div>}
         {isCard && <>
           <button data-testid="stmt-paste-toggle" style={{ ...btn(false, !banks.length), marginTop: 8 }} disabled={!banks.length} onClick={() => setPasteOpen(o => !o)}>{pasteOpen ? "Hide pasted text" : "Or paste text from the bank app"}</button>
