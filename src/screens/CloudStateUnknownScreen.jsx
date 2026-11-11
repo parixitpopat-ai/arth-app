@@ -11,7 +11,7 @@
 export default function CloudStateUnknownScreen({ onRetry, busy, error, T, localHasData = false }) {
   return (
     <div style={{ background: T.bg, minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-      <div style={{ maxWidth: 400, margin: "0 auto", width: "100%", padding: "24px 24px", textAlign: "center" }}>
+      <div style={{ maxWidth: 400, margin: "0 auto", width: "100%", boxSizing: "border-box", padding: "24px 24px", textAlign: "center" }}>
         <div style={{ fontSize: 40, marginBottom: 12 }}>📡</div>
         <div style={{ fontSize: 18, fontWeight: 900, color: T.text, marginBottom: 8 }}>Can't reach your Arth account</div>
         <div style={{ fontSize: 13, color: T.sub, marginBottom: 4 }}>

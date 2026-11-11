@@ -9,7 +9,7 @@
 export default function WelcomeScreen({ onChoose, T }) {
   return (
     <div style={{ background: T.bg, minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-      <div style={{ maxWidth: 400, margin: "0 auto", width: "100%", padding: "24px 24px", textAlign: "center" }}>
+      <div style={{ maxWidth: 400, margin: "0 auto", width: "100%", boxSizing: "border-box", padding: "24px 24px", textAlign: "center" }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>💰</div>
         <div style={{ fontSize: 26, fontWeight: 900, color: T.text, marginBottom: 8 }}>Welcome to Arth</div>
         <div style={{ fontSize: 14, color: T.sub, marginBottom: 40 }}>Your money. One place.</div>

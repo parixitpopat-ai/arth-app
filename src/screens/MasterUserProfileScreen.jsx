@@ -50,14 +50,14 @@ export default function MasterUserProfileScreen({
   };
 
   const inputStyle = {
-    width: "100%", background: T.input, border: `1px solid ${T.border}`, borderRadius: 12,
+    width: "100%", boxSizing: "border-box", background: T.input, border: `1px solid ${T.border}`, borderRadius: 12,
     padding: "12px 14px", fontSize: 14, color: T.text, fontFamily: "Nunito,sans-serif",
   };
   const labelStyle = { fontSize: 12, fontWeight: 800, color: T.sub, marginBottom: 6, display: "block" };
 
   return (
     <div style={{ background: T.bg, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <div style={{ maxWidth: 430, margin: "0 auto", width: "100%", padding: "24px 20px", flex: 1, display: "flex", flexDirection: "column" }}>
+      <div style={{ maxWidth: 430, margin: "0 auto", width: "100%", boxSizing: "border-box", padding: "24px 20px", flex: 1, display: "flex", flexDirection: "column" }}>
         {!isFirstRun && (
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.accent, fontSize: 22, alignSelf: "flex-start", cursor: "pointer", padding: 0, marginBottom: 12 }}>←</button>
         )}

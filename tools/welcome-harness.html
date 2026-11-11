@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head><body style="margin:0"><div id="root"></div>
+<script type="module">
+import React from "react"; import { createRoot } from "react-dom/client";
+import WelcomeScreen from "/src/screens/WelcomeScreen.jsx"; import CloudStateUnknownScreen from "/src/screens/CloudStateUnknownScreen.jsx"; import MasterUserProfileScreen from "/src/screens/MasterUserProfileScreen.jsx"; import { DARK } from "/src/constants/theme.js";
+const which = new URLSearchParams(location.search).get("s");
+const el = which === "unknown" ? React.createElement(CloudStateUnknownScreen, { T: DARK, onRetry: () => {}, onSignOut: () => {}, busy: false })
+  : which === "profile" ? React.createElement(MasterUserProfileScreen, { T: DARK, isFirstRun: true, onSave: () => {} })
+  : React.createElement(WelcomeScreen, { T: DARK, onChoose: () => {} });
+createRoot(document.getElementById("root")).render(el);
+</script></body></html>
