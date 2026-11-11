@@ -145,6 +145,24 @@ try {
   await T("stmt-import").dispatchEvent("click"); await page.waitForTimeout(700);
   const after2 = await ls("arth_txns"); const sw = after2.find(t => /swiggy instamart/i.test(t.merchant || t.desc || ""));
   rec("P3 only the missing charge was added: 321.45 expense on the card", after2.length === before2 + 1 && sw && sw.amount === 321.45 && sw.type === "expense", { before2, after: after2.length, sw });
+  // ── SMS read from the phone (fake messages through the test hook; the real Android plugin cannot run here) ──
+  await page.evaluate(() => { window.__ARTH_SMS_TEST__ = { granted: true, messages: [
+    { id: "s1", address: "HDFCBK", date: Date.now() - 86400000, body: "Rs.640.00 spent on ICICI Bank Card XX8004 at BLINKIT on 06-10-26. Avl limit Rs.50,000. Not you? Call 1800" },
+    { id: "s2", address: "ICICIB", date: Date.now() - 2 * 86400000, body: "Rs 75.00 spent on ICICI Bank Card XX8004 at CHAI POINT on 05-10-26." },
+    { id: "s3", address: "AXISBK", date: Date.now() - 3 * 86400000, body: "Rs 900.00 spent on card XX7777 at SOMEWHERE on 04-10-26." },
+    { id: "s4", address: "VM-OTP", date: Date.now() - 3600000, body: "Your OTP is 482913 for Rs 640.00 payment. Do not share." } ] }; });
+  await page.getByText(/^money$/i).last().dispatchEvent("click"); await page.waitForTimeout(700);
+  await T("card-import-statement").dispatchEvent("click"); await page.waitForTimeout(900);
+  const smsBtn = await T("stmt-sms-read").innerText();
+  rec("M1 'Read SMS from phone' is offered with the quiet count of new messages (2 for this card; the OTP and the other card's message are left out)", /Read SMS from phone · 2 new/.test(smsBtn), smsBtn);
+  const before3 = (await ls("arth_txns")).length;
+  await T("stmt-sms-read").dispatchEvent("click"); await page.waitForTimeout(900);
+  const smst = await page.$$eval('[data-testid="stmt-row"]', els => els.map(e => e.getAttribute("data-status")));
+  rec("M2 two messages shown as rows, both new; nothing is added yet", smst.length === 2 && smst.every(x => x === "new") && (await ls("arth_txns")).length === before3, smst);
+  await T("stmt-import").dispatchEvent("click"); await page.waitForTimeout(700);
+  const after3 = await ls("arth_txns"); const bl = after3.find(t => /blinkit/i.test(t.merchant || t.desc || ""));
+  rec("M3 import adds the two charges to the card (Blinkit 640.00 on 2026-10-06 as an expense)", after3.length === before3 + 2 && bl && bl.amount === 640 && bl.date === "2026-10-06" && bl.type === "expense" && bl.accId === "cc1", bl);
+  await T("stmt-sms-read").count().then(async c => { if (c) { await T("stmt-sms-read").dispatchEvent("click"); await page.waitForTimeout(700); } });
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 600)); }
 await browser.close(); try { process.kill(-server.pid); } catch {}

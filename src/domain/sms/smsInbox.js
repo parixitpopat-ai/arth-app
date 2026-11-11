@@ -1,0 +1,90 @@
+// src/domain/sms/smsInbox.js — turns bank/card SMS read from the phone's inbox into statement-style rows, so they go through the same matching,
+// merge and undo as a statement file. Pure: no phone access here. A message that is not clearly a money message is left out; one that looks like
+// money but cannot be read is returned in `unreadable` (never dropped silently).
+// Formats are the common Indian bank wording ("Rs.222.14 spent on card XX1234 at ZOMATO on 10-11-26", "debited from A/c XX1234 … UPI Ref 104449304091");
+// they are NOT verified against every bank, which is why a message that does not fit is reported instead of guessed.
+import { extractDMonYDate, extractUpiMerchant } from "./smsFields.js";
+import { parseStatementDate } from "../imports/statement.js";
+
+const AMOUNT = /(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)/i;
+const DEBIT = /\b(debited|spent|paid|purchase|withdrawn|sent|dr)\b/i;
+const CREDIT = /\b(credited|received|deposited|refund(?:ed)?|reversal|cashback)\b/i;
+const OTP = /\b(otp|one[- ]time|verification code|cvv)\b/i;
+const pad = n => String(n).padStart(2, "0");
+
+/** True for a message that looks like a money movement: an amount with ₹/Rs/INR and a debit/credit word, and not an OTP or promotion. */
+export function looksLikeMoneySms(body) {
+  const t = String(body || "");
+  if (!AMOUNT.test(t) || OTP.test(t)) return false;
+  if (/\b(offer|apply now|pre-?approved|eligible|win|click|t&c|loan up to)\b/i.test(t) && !/\b(debited|credited|spent)\b/i.test(t)) return false;
+  return DEBIT.test(t) || CREDIT.test(t);
+}
+
+const last4Of = t => {
+  const out = [];
+  for (const rx of [/(?:a\/c|acct|account|card|ending(?:\s+with)?|last\s*4)[^\d]{0,12}(\d{4})\b/ig, /(?:xx|x{2,}|\*{2,})\s*(\d{4})\b/ig]) for (const m of t.matchAll(rx)) out.push(m[1]);
+  return [...new Set(out)];
+};
+const dateOf = (t, receivedMs) => {
+  const named = extractDMonYDate(t);
+  if (named) return named;
+  const m = /\b(\d{1,2}[-/.]\d{1,2}[-/.](?:\d{4}|\d{2}))\b/.exec(t);
+  const num = m && parseStatementDate(m[1]);
+  if (num) return num;
+  const d = new Date(Number(receivedMs) || 0);
+  return receivedMs ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` : "";
+};
+const merchantOf = t => {
+  const upi = extractUpiMerchant(t);
+  if (upi) return upi;
+  let m = /\b(?:at|to|towards|info:?)\s+([A-Za-z0-9][A-Za-z0-9 &'._-]{1,38}?)(?=\s+on\s+\d|\s+via\b|\s+ref\b|\s+avl\b|\s+bal\b|\.\s|,|$)/i.exec(t.replace(/\s+/g, " "));
+  if (m && !/^(a\/c|acct|account|vpa|card)\b/i.test(m[1]) && !m[1].includes("@")) return m[1].trim();
+  m = /\bto\s+(?:vpa\s+)?([a-z0-9._-]+@[a-z]{2,})/i.exec(t);
+  return m ? m[1] : "";
+};
+
+/**
+ * @param {{id?:any, address?:string, body:string, date?:number}} sms
+ * @returns {{ok:true,row:object,last4s:string[],smsId:string}|{ok:false,why:string}|null} null = not a money message.
+ */
+export function parseMoneySms(sms) {
+  const body = String((sms && sms.body) || "").replace(/\s+/g, " ").trim();
+  if (!looksLikeMoneySms(body)) return null;
+  const a = AMOUNT.exec(body), paise = Math.round(parseFloat(a[1].replace(/,/g, "")) * 100);
+  const credit = CREDIT.test(body), debit = DEBIT.test(body);
+  if (/\b(debited|spent)\b/i.test(body) && /\b(credited|received)\b/i.test(body)) return { ok: false, why: "says both debited and credited (a transfer?)" };
+  if (!Number.isFinite(paise) || paise <= 0) return { ok: false, why: "amount not readable" };
+  const date = dateOf(body, sms.date);
+  if (!date) return { ok: false, why: "no date" };
+  const utr = (/(?:ref(?:erence)?(?:\s*(?:no|number))?\.?|rrn|utr)[^\d]{0,10}(\d{12})\b/i.exec(body) || /(?<!\d)(\d{12})(?!\d)/.exec(body) || [])[1] || "";
+  const who = merchantOf(body);
+  const isUpi = /\bupi\b/i.test(body) || Boolean(utr);
+  // same wording the statement reader produces, so the vendor, UTR and UPI matching rules apply unchanged
+  const desc = isUpi ? `UPI-${utr || "0"}-${who || "UPI payment"}`.replace(/-0-/, "-") : (who || body.slice(0, 60));
+  const isCredit = credit && !/\b(debited|spent)\b/i.test(body);
+  return { ok: true, smsId: String(sms.id != null ? sms.id : `${sms.date}|${body.slice(0, 40)}`), last4s: last4Of(body),
+    row: { line: 0, date, valueDate: null, desc, ref: utr, amountPaise: isCredit ? paise : -paise, balancePaise: null } };
+}
+
+/**
+ * Group messages by the account whose last 4 digits they mention.
+ * @param {Array} messages @param {Array<{id:any,last4?:string,name?:string}>} accounts
+ * @returns {{byAccount:Map<string,object[]>, noAccount:object[], unreadable:{why:string,text:string}[], skippedSeen:number}}
+ */
+export function sortSmsToAccounts(messages, accounts, { seenIds = [] } = {}) {
+  const seen = new Set(seenIds.map(String));
+  const byAccount = new Map(), noAccount = [], unreadable = []; let skippedSeen = 0;
+  for (const sms of messages || []) {
+    const p = parseMoneySms(sms);
+    if (!p) continue;
+    if (!p.ok) { unreadable.push({ why: p.why, text: String(sms.body || "").slice(0, 60) }); continue; }
+    if (seen.has(p.smsId)) { skippedSeen++; continue; }
+    const hits = (accounts || []).filter(a => a && a.last4 && p.last4s.includes(String(a.last4)));
+    if (hits.length !== 1) { noAccount.push(p); continue; }            // none or ambiguous: the person decides, never guessed
+    const k = String(hits[0].id); byAccount.set(k, [...(byAccount.get(k) || []), p]);
+  }
+  return { byAccount, noAccount, unreadable, skippedSeen };
+}
+
+/** Rows (oldest first, numbered) ready for withImportKeys/matchStatement. */
+export const smsRows = list => [...list].sort((x, y) => x.row.date.localeCompare(y.row.date)).map((p, i) => ({ ...p.row, line: i + 1, smsId: p.smsId }));

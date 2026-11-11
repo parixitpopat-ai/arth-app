@@ -38,4 +38,6 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Read bank/card text messages, only when the person taps "Read SMS from phone" in Arth. -->
+    <uses-permission android:name="android.permission.READ_SMS" />
 </manifest>

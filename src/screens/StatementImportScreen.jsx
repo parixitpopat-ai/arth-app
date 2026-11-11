@@ -1,7 +1,8 @@
 // Bank statement import. Pick the account, pick a statement file (CSV, Excel or a text PDF), review every row, tick what to add, press Import.
 // Reading creates nothing. Imported rows are plain transactions (no category: they show under "Needs details"); each carries a key and a
 // batch id, so the same file can be imported again safely and a whole import can be undone. Existing entries are never changed.
-import { useMemo, useRef, useState } from "react";
+import { smsAvailable } from "../native/smsBridge.js";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { withImportKeys } from "../domain/imports/statement.js";
 import { matchStatement } from "../domain/imports/matchStatement.js";
 import { getLinkedMethodIds } from "../domain/accounts/accountBalance.js";
@@ -20,6 +21,8 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const cards = accounts.filter(a => a.type === "cc");
   const [accountId, setAccountId] = useState(fixedAccountId || (banks.length === 1 ? String(banks[0].id) : ""));
   const [state, setState] = useState({ phase: "idle" });          // idle | reading | result | done
+  const smsOn = smsAvailable();
+  const [smsDays, setSmsDays] = useState(30), [smsWaiting, setSmsWaiting] = useState(null);   // smsWaiting: new messages found by the quiet check
   const [pasteOpen, setPasteOpen] = useState(false), [pasteText, setPasteText] = useState("");
   const [ticked, setTicked] = useState({});                       // importKey -> bool (add as a new transaction)
   const [merged, setMerged] = useState({});                       // importKey -> bool (link to the entry it looks like; adds nothing)
@@ -65,6 +68,45 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
       setState({ phase: "result", fileName: "Pasted text", parsed: withSkips, match: analyse(withSkips, accountId), accountId });
     } catch (err) { setState({ phase: "idle", error: "The pasted text could not be read.", detail: `${(err && err.name) || "error"}${err && err.message ? " — " + String(err.message).slice(0, 140) : ""}` }); }
   };
+
+  // Text messages from the phone (Android app only): read on request, sorted to this account by the last 4 digits they mention, then the same review as a file.
+  const smsRowsFor = async (accId, days, { ask }) => {
+    const acc = accounts.find(a => String(a.id) === String(accId));
+    if (!acc) return { error: "Choose the account first." };
+    if (!acc.last4) return { error: "This account has no last 4 digits saved, so its messages cannot be told apart. Add them in the account's settings." };
+    const [br, mod, st] = await Promise.all([import("../native/smsBridge.js"), import("../domain/sms/smsInbox.js"), import("../domain/imports/statement.js")]);
+    let g = await br.smsStatus();
+    if (!g.granted && ask) g = await br.smsRequest();
+    if (!g.granted) return { error: ask ? "SMS access was not allowed. You can allow it in the phone's settings for Arth." : "", denied: true };
+    const r = await br.smsReadInbox(Date.now() - days * 86400000);
+    if (!r.ok) return { error: r.error };
+    const sorted = mod.sortSmsToAccounts(r.messages, accounts);
+    const mine = sorted.byAccount.get(String(acc.id)) || [];
+    const other = sorted.noAccount.length;
+    if (!mine.length) return { error: `No money messages for ····${acc.last4} in the last ${days} days.${other ? ` (${other} other money message${other === 1 ? "" : "s"} did not name this account's last 4 digits and were left out.)` : ""}` };
+    const rows = mod.smsRows(mine);
+    return { parsed: { ok: true, rows, skipped: sorted.unreadable.map((u, i) => ({ line: i + 1, why: u.why, text: u.text })), balance: { checked: 0, mismatches: [], order: "unknown" }, period: { from: rows[0].date, to: rows[rows.length - 1].date } }, other, st };
+  };
+  const onReadSms = async () => {
+    const accId = fixedAccountId || accountId;
+    if (!accId) { setState({ phase: "idle", error: "Choose the account first." }); return; }
+    setState({ phase: "reading", fileName: "SMS from phone" });
+    try {
+      const r = await smsRowsFor(accId, smsDays, { ask: true });
+      if (r.error) { setState({ phase: "idle", error: r.error }); return; }
+      setSb(null); setBalUndo(null); setLastSummary(null); setBillUndo(null);
+      setState({ phase: "result", fileName: "SMS from phone", parsed: r.parsed, match: analyse(r.parsed, accId), accountId: accId });
+    } catch (err) { setState({ phase: "idle", error: "The messages could not be read.", detail: `${(err && err.name) || "error"}${err && err.message ? " — " + String(err.message).slice(0, 140) : ""}` }); }
+  };
+  // quiet check when the screen opens: only counts, shows nothing and asks nothing
+  const smsAcc = fixedAccountId || accountId;
+  useEffect(() => {
+    if (!smsOn || !smsAcc) { setSmsWaiting(null); return; }
+    let live = true;
+    smsRowsFor(smsAcc, smsDays, { ask: false }).then(r => { if (live) setSmsWaiting(r.parsed ? analyse(r.parsed, smsAcc).results.filter(x => x.status === "new").length : 0); }).catch(() => { if (live) setSmsWaiting(null); });
+    return () => { live = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [smsOn, smsAcc, smsDays, txns]);
 
   const onFile = async e => {
     const file = e.target.files && e.target.files[0]; e.target.value = "";
@@ -222,6 +264,14 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
         <div style={{ ...label, marginTop: 14 }}>Statement file</div>
         <input ref={fileRef} data-testid="stmt-file" type="file" accept=".csv,.tsv,.txt,.xlsx,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={onFile} style={{ display: "none" }} />
         <button data-testid="stmt-pick" style={btn(true, !banks.length)} disabled={!banks.length} onClick={() => fileRef.current && fileRef.current.click()}>Choose CSV, Excel or PDF</button>
+        {smsOn && <div style={{ marginTop: 8 }}>
+          <button data-testid="stmt-sms-read" style={btn(false, !banks.length && !fixedAccountId)} onClick={onReadSms}>Read SMS from phone{smsWaiting ? ` · ${smsWaiting} new` : ""}</button>
+          <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
+            <span style={{ color: T.sub, fontSize: 11 }}>Look back</span>
+            {[7, 30, 90].map(d => <button key={d} data-testid={`stmt-sms-days-${d}`} style={{ ...btn(smsDays === d), padding: "5px 10px", fontSize: 12 }} onClick={() => setSmsDays(d)}>{d} days</button>)}
+          </div>
+          <div data-testid="stmt-sms-note" style={{ color: T.sub, fontSize: 11, marginTop: 4, lineHeight: 1.4 }}>Reads only messages that mention an amount and this account's last 4 digits, on this phone. Nothing is uploaded, and nothing is added until you press Import. Tap again any time to catch up on missed ones.</div>
+        </div>}
         {isCard && <>
           <button data-testid="stmt-paste-toggle" style={{ ...btn(false, !banks.length), marginTop: 8 }} disabled={!banks.length} onClick={() => setPasteOpen(o => !o)}>{pasteOpen ? "Hide pasted text" : "Or paste text from the bank app"}</button>
           {pasteOpen && <div style={{ marginTop: 8 }}>
