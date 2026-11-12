@@ -21,6 +21,7 @@ import LoanEntryNotice from "./components/LoanEntryNotice";
 import NeedsDetailsSheet from "./components/NeedsDetailsSheet";
 import PettyCashSheet from "./components/PettyCashSheet";
 import { mergeVendors, undoVendorMerge } from "./domain/vendors/vendorMerge";
+import { addAlias as addVendorAlias, removeAlias as removeVendorAlias } from "./domain/vendors/payees";
 import { isPettyCash, getPettyCashTotalsByPerson, applyPettyCash } from "./domain/person/pettyCash";
 import { expenseGaps, summarizeGaps, GAP_LABELS } from "./domain/transactions/completeness";
 import { extractDMonYDate, extractUpiMerchant } from "./domain/sms/smsFields";
@@ -20679,6 +20680,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               vendors={{
                 dismissed:vendorNotSame, lastMerge:lastVendorMerge,
                 onOpenVendor:name=>setViewingVendor(name),
+                people,
+                onLinkPerson:(name,personId)=>setPeople(prev=>addVendorAlias(prev,personId,name)),
+                onUnlinkPerson:(names,personId)=>setPeople(prev=>(Array.isArray(names)?names:[names]).reduce((acc,n)=>removeVendorAlias(acc,personId,n),prev)),
                 onDismiss:sig=>setVendorNotSame(prev=>prev.includes(sig)?prev:[...prev,sig]),
                 onMerge:({ from, to })=>{
                   const r = mergeVendors({ txns, bills }, { from, to });

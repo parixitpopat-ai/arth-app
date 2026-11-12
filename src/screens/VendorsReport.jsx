@@ -1,15 +1,22 @@
 import React, { useMemo, useState } from "react";
 import { vendorSpend, findVendorDuplicates } from "../domain/vendors/vendorMerge";
+import { splitVendorsAndPeople, suggestPeople } from "../domain/vendors/payees";
 
 // Money -> Reports -> Vendors: spend by vendor for the selected financial year (or all time), and "same vendor?" questions.
 // Nothing is merged until the person taps Merge on a suggestion; "Not the same" is remembered; the last merge can be undone.
 // Presentation only: every figure and every suggestion comes from domain/vendors/vendorMerge.js.
-export default function VendorsReport({ T, sym, fmt, txns, fy, fyLabel, dismissed, lastMerge, onOpenVendor, onMerge, onDismiss, onUndo }) {
+export default function VendorsReport({ T, sym, fmt, txns, fy, fyLabel, dismissed, lastMerge, onOpenVendor, onMerge, onDismiss, onUndo, people = [], onLinkPerson, onUnlinkPerson }) {
   const [range, setRange] = useState("fy");              // fy | all
   const [query, setQuery] = useState("");
-  const [pick, setPick] = useState({});                  // signature -> the spelling to keep
+  const [pick, setPick] = useState({});
+  const [linking, setLinking] = useState("");             // the vendor name whose person is being chosen                  // signature -> the spelling to keep
   const period = range === "fy" ? { from: `${fy}-04-01`, to: `${fy + 1}-03-31` } : {};
-  const rows = useMemo(() => vendorSpend(txns, period), [txns, range, fy]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const allRows = useMemo(() => vendorSpend(txns, period), [txns, range, fy]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // people you paid (matched by their name or a saved alias) are kept out of the vendor list and totals; shown separately below
+  const split = useMemo(() => splitVendorsAndPeople(allRows, people), [allRows, people]);
+  const rows = split.vendors;
+  const peopleHints = useMemo(() => (onLinkPerson ? suggestPeople(rows, people) : []), [rows, people, onLinkPerson]);
+  const pickable = people.filter(p => p.id !== "__me__");
   const groups = useMemo(() => findVendorDuplicates(txns, { dismissed }), [txns, dismissed]);
   const shown = rows.filter(r => !query.trim() || r.name.toLowerCase().includes(query.trim().toLowerCase()));
   const total = rows.reduce((s, r) => s + r.amount, 0), top = rows[0]?.amount || 0;
@@ -48,6 +55,18 @@ export default function VendorsReport({ T, sym, fmt, txns, fy, fyLabel, dismisse
           })}
         </div>
       )}
+      {peopleHints.length > 0 && (
+        <div data-testid="vendor-people-hints" style={{ background: T.accentSoft || T.accent + "18", border: `1px solid ${T.border}`, borderRadius: 14, padding: 12, marginBottom: 14 }}>
+          <div style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>👤 {peopleHints.length === 1 ? "This looks like a person" : "These look like people"}</div>
+          <div style={{ color: T.sub, fontSize: 11, margin: "3px 0 8px" }}>Banks cut names short. Confirm and it moves out of Vendors; you can undo it below.</div>
+          {peopleHints.map(h => (
+            <div key={h.name} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
+              <span style={{ flex: 1, color: T.text, fontSize: 13 }}><b>{h.name}</b> → {h.person.name}</span>
+              <button type="button" data-testid={`vendor-link-${h.name}`} onClick={() => onLinkPerson(h.name, h.person.id)} style={btn(true)}>Yes, link</button>
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
         <button type="button" data-testid="vendor-range-fy" onClick={() => setRange("fy")} style={chip(range === "fy")}>{fyLabel}</button>
         <button type="button" data-testid="vendor-range-all" onClick={() => setRange("all")} style={chip(range === "all")}>All time</button>
@@ -67,6 +86,32 @@ export default function VendorsReport({ T, sym, fmt, txns, fy, fyLabel, dismisse
           </button>
         ))}
       </div>
+      {onLinkPerson && pickable.length > 0 && shown.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <select data-testid="vendor-person-pick" value={linking} onChange={e => setLinking(e.target.value)} style={{ width: "100%", boxSizing: "border-box", minHeight: 40, borderRadius: 10, border: `1px solid ${T.border}`, background: T.input || T.card, color: T.text, padding: "0 10px", fontSize: 13 }}>
+            <option value="">A vendor here is really a person…</option>
+            {shown.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
+          </select>
+          {linking && (
+            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ color: T.sub, fontSize: 12 }}>“{linking}” is</span>
+              {pickable.map(p => <button key={p.id} type="button" data-testid={`vendor-person-${p.id}`} onClick={() => { onLinkPerson(linking, p.id); setLinking(""); }} style={btn(false)}>{p.name}</button>)}
+            </div>
+          )}
+        </div>
+      )}
+      {split.people.length > 0 && (
+        <div data-testid="vendor-paid-people" style={{ marginTop: 16 }}>
+          <div style={{ color: T.sub, fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 6 }}>Paid to people (not vendors)</div>
+          {split.people.map(({ row, person }) => (
+            <div key={row.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: `1px solid ${T.border}` }}>
+              <span style={{ flex: 1, color: T.text, fontSize: 13 }}>👤 <b>{person.name}</b><span style={{ color: T.sub }}> · written “{row.name}” · {row.entries} {row.entries === 1 ? "entry" : "entries"}</span></span>
+              <span style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{sym}{fmt(row.amount)}</span>
+              {onUnlinkPerson && <button type="button" data-testid={`vendor-unlink-${row.id}`} onClick={() => onUnlinkPerson(row.variants, person.id)} style={btn(false)}>Not a person</button>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
