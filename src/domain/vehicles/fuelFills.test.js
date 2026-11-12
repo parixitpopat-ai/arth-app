@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeFill, validateFill, buildFuelHistory, fuelSummary, fillsForVehicle } from "./fuelFills.js";
+import { normalizeFill, validateFill, buildFuelHistory, fuelSummary, fillsForVehicle, estimateEfficiency } from "./fuelFills.js";
 
 const F = (id, date, odometer, litres, amount, full = true, vehicleId = "v1") => ({ id, vehicleId, date, odometer, litres, amount, full });
 const TODAY = "2026-10-23";
@@ -140,4 +140,26 @@ test("the fuel expense form: odometer fields only for a Fuel sub-category with a
   assert.match(app, /Expense saved\. Refuel not added:/);                                          // a bad reading never blocks the expense
   assert.match(app, /setFuelFills\(prev=>prev\.some\(f=>f\.txnId!=null && String\(f\.txnId\)===String\(txn\.id\)\)/);   // deleting the expense removes its refuel
   assert.match(app, /existingFill \? prev\.map\(f=>String\(f\.id\)===String\(existingFill\.id\)/);   // editing updates the same refuel
+});
+
+const P = (date, odometer, litres, amount = null) => ({ id: `${date}-${odometer}`, vehicleId: "v1", date, odometer, litres, amount, full: false });
+test("never-full estimate: distance first→last divided by the litres put in AFTER the first fill", () => {
+  // a bike doing exactly 40 km/L, always topped up to the same level: 4 fills, 25 litres after the first, 1000 km
+  const fills = [P("2026-01-01", 1000, 5, 500), P("2026-01-10", 1200, 5, 500), P("2026-01-20", 1500, 7.5, 750), P("2026-02-01", 2000, 12.5, 1250)];
+  const e = estimateEfficiency(fills);
+  assert.equal(e.distance, 1000); assert.equal(e.litres, 25); assert.equal(e.kmpl, 40); assert.equal(e.fills, 4);
+  assert.equal(e.costPerKm, 2.5);                                    // (500+750+1250)/1000
+  assert.equal(estimateEfficiency([...fills].reverse()).kmpl, 40);    // order of entry does not matter
+});
+test("not enough to say: too few fills, too little fuel, no distance, or unknown litres", () => {
+  const f = [P("2026-01-01", 1000, 5), P("2026-01-10", 1200, 5), P("2026-01-20", 1500, 7.5)];
+  assert.equal(estimateEfficiency(f), null);                                              // 3 fills
+  assert.equal(estimateEfficiency([...f, P("2026-02-01", 1600, 2)]), null);               // only 14.5 L after the first
+  assert.equal(estimateEfficiency([P("a", 1000, 9), P("b", 1000, 9), P("c", 1000, 9), P("d", 1000, 9)]), null);   // no distance
+  assert.equal(estimateEfficiency([]), null);
+});
+test("cost per km is shown only when every fill after the first has an amount; an odd result is flagged", () => {
+  const e = estimateEfficiency([P("2026-01-01", 0, 5, 500), P("2026-01-10", 300, 10, null), P("2026-01-20", 600, 10, 900), P("2026-02-01", 900, 10, 900)]);
+  assert.equal(e.costPerKm, null); assert.equal(e.suspect, false);
+  assert.equal(estimateEfficiency([P("a", 0, 5), P("b", 5000, 10), P("c", 10000, 10), P("d", 15000, 10)]).suspect, true);   // 500 km/L: check the readings
 });

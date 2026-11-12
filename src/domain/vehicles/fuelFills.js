@@ -129,3 +129,23 @@ export function fuelSummary(fills) {
     needsFullFills: tanks.length === 0,
   };
 }
+
+/**
+ * For someone who never fills to full: an ESTIMATE of km/L from the same formula (distance / fuel consumed) over the whole stretch from the FIRST fill to the LAST.
+ *   distance = odometer(last) - odometer(first)
+ *   fuel     = litres of every fill AFTER the first (the first fill's litres were already in the tank when the stretch starts)
+ * That is exact when the tank holds the same amount just after the last fill as just after the first. Otherwise the error is that difference in tank level
+ * divided by the fuel used, so it shrinks the longer the stretch: hence a minimum of fills and litres before any figure is shown. Never used when full-tank
+ * intervals exist (those are exact). Returns null when there is not enough to say.
+ * @returns {{ kmpl:number, distance:number, litres:number, fills:number, from:string, to:string, costPerKm:number|null, suspect:boolean }|null}
+ */
+export function estimateEfficiency(fills, { minFills = 4, minLitres = 20 } = {}) {
+  const rows = (Array.isArray(fills) ? fills : []).filter(f => f && Number.isFinite(Number(f.odometer)) && Number(f.litres) > 0).slice().sort(keyCompare);
+  if (rows.length < minFills) return null;
+  const first = rows[0], last = rows[rows.length - 1], rest = rows.slice(1);
+  const distance = last.odometer - first.odometer, litres = rest.reduce((s, f) => s + Number(f.litres), 0);
+  if (!(distance > 0) || litres < minLitres) return null;
+  const costKnown = rest.every(f => f.amount != null && Number.isFinite(Number(f.amount)));
+  const kmpl = distance / litres;
+  return { kmpl: round(kmpl, 2), distance, litres: round(litres, 2), fills: rows.length, from: first.date, to: last.date, costPerKm: costKnown ? round(rest.reduce((s, f) => s + Number(f.amount), 0) / distance, 2) : null, suspect: kmpl < 1 || kmpl > 100 };
+}

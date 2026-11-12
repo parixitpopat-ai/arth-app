@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY } from "../constants/theme";
 import EmptyState from "../components/EmptyState";
 import FuelFillSheet from "../components/FuelFillSheet";
-import { fillsForVehicle, buildFuelHistory, fuelSummary } from "../domain/vehicles/fuelFills";
+import { fillsForVehicle, buildFuelHistory, fuelSummary, estimateEfficiency } from "../domain/vehicles/fuelFills";
 import {
   getVehicleRunningCostBuckets, getVehicleTCO, getVehicleStatusTiles, getVehicleRecentTxns,
   getVehicleTxnsByMonth, getVehicleFuelSummary, getVehicleMaintenanceSummary,
@@ -227,6 +227,7 @@ export default function VehicleProfileScreen({
       {tab === "fuel" && (() => {
         const fs = getVehicleFuelSummary(vehicle, txns);
         const myFills = fillsForVehicle(fuelFills, vehicle.id), ms = fuelSummary(myFills), history = buildFuelHistory(myFills).reverse();
+        const est = ms.needsFullFills ? estimateEfficiency(myFills) : null;      // no full-to-full interval: an estimate over the whole stretch, labelled as one
         const km = n => Number(n).toLocaleString("en-IN");
         const tile = (label, value, testid) => <div style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: RADIUS.md, padding: 12, display: "flex", flexDirection: "column", gap: 4 }}><span style={{ color: T.sub, fontSize: 12 }}>{label}</span><span data-testid={testid} style={{ ...MONEY.row, color: T.text }}>{value}</span></div>;
         return (
@@ -241,10 +242,11 @@ export default function VehicleProfileScreen({
               ) : (<>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                   {tile("Odometer", `${km(ms.latestOdometer)} km`, "mileage-odometer")}
-                  {tile("Avg km/L", ms.avgKmpl != null ? ms.avgKmpl.toFixed(1) : "—", "mileage-avg")}
-                  {tile("Fuel per km", ms.fuelCostPerKm != null ? `${sym}${ms.fuelCostPerKm.toFixed(2)}` : "—", "mileage-costkm")}
+                  {tile(est ? "Avg km/L (est.)" : "Avg km/L", ms.avgKmpl != null ? ms.avgKmpl.toFixed(1) : est ? `≈ ${est.kmpl.toFixed(1)}` : "—", "mileage-avg")}
+                  {tile("Fuel per km", ms.fuelCostPerKm != null ? `${sym}${ms.fuelCostPerKm.toFixed(2)}` : est && est.costPerKm != null ? `≈ ${sym}${est.costPerKm.toFixed(2)}` : "—", "mileage-costkm")}
                 </div>
-                {ms.needsFullFills && <div style={{ color: T.sub, fontSize: 13, lineHeight: 1.45 }}>Mileage needs two full-tank refuels. Tick "Filled the tank to full" when you fill up.</div>}
+                {ms.needsFullFills && est && <div data-testid="mileage-estimate-note" style={{ color: T.sub, fontSize: 13, lineHeight: 1.45 }}>Estimate from {est.fills} refuels ({km(est.distance)} km, {est.litres} L after the first), none of them a full tank. It gets closer the more you log; log every refuel. Tick "Filled the tank to full" on one fill for an exact figure.</div>}
+                {ms.needsFullFills && !est && <div data-testid="mileage-need-note" style={{ color: T.sub, fontSize: 13, lineHeight: 1.45 }}>For an exact figure, mileage needs two full-tank refuels (tick "Filled the tank to full"). If you never fill to full, log every refuel: after 4 refuels and about 20 L Arth shows an estimate.</div>}
                 <div style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: RADIUS.lg, padding: "0 14px" }}>
                   {history.map(r => (
                     <div key={r.id} data-testid="refuel-row" onClick={() => setFillSheet(myFills.find(f => String(f.id) === String(r.id)))} style={{ minHeight: 60, padding: "8px 0", display: "flex", alignItems: "center", gap: 12, borderBottom: `1px solid ${T.border}`, cursor: "pointer" }}>
