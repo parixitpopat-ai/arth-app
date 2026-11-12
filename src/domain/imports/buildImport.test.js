@@ -114,3 +114,12 @@ test("card vendor from a bank-app description with a hash prefix", () => {
   const fix = planNameRepairs([{ id: "a", importKey: "k", type: "expense", merchant: "Hdfc6d8e912e45d4d79bb1d43ada1dcc09e_upi-104449304091-Zomato L" }]);
   assert.equal(fix.length, 1); assert.equal(fix[0].to, "Zomato L");
 });
+import { findImportedDuplicates } from "./duplicatePairs.js";
+test("an imported UPI entry with no vendor gets its name from the UPI text; my Uber entry with the same reference is its repeat (kept, not the copy)", () => {
+  const imported = { id: "i1", type: "expense", accId: "idfc", amount: 200, date: "2026-11-01", merchant: "", desc: "UPI-232038797430-HARIKESH", transactionRef: "232038797430", importKey: "idfc|2026-11-01|-20000|232038797430|x|0", importSource: "bank-statement", catIds: [] };
+  const mine = { id: "u1", type: "expense", accId: "idfc", amount: 200, date: "2026-11-01", merchant: "Uber", transactionRef: "232038797430", catIds: ["transport"] };
+  const fix = planNameRepairs([imported, mine]);
+  assert.equal(fix.length, 1); assert.equal(fix[0].id, "i1"); assert.equal(fix[0].from, ""); assert.equal(fix[0].to, "Harikesh");
+  const pairs = findImportedDuplicates({ txns: [imported, mine], accountId: "idfc", linkedIds: [] });
+  assert.equal(pairs.length, 1); assert.equal(pairs[0].manual.id, "u1"); assert.equal(pairs[0].imported.id, "i1");
+});

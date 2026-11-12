@@ -34,6 +34,8 @@ export function planNameRepairs(txns) {
     let next = null;
     if (/^(dr|cr)$/i.test(m)) { const p = parseUpiNarration(raw); next = p && p.name ? titleCase(p.name) : null; }
     else if (/^.{0,80}?(?<![a-z])upi[-/_]\d{9,14}[-/_]/i.test(m)) next = titleCase(cleanCardMerchant(m));
+    // no vendor at all, only the raw "UPI-<ref>-NAME" text (the screen then shows that text as the title): take the name from it
+    else if (!m.trim() && /^.{0,80}?(?<![a-z])upi[-/_]\d{9,14}[-/_]/i.test(raw)) { const n = extractUpiMerchant(raw) || titleCase(cleanCardMerchant(raw)); if (n && !/^upi\b/i.test(n)) next = n; }
     if (next && next !== m) out.push({ id: t.id, from: m, to: next });
   }
   return out;
