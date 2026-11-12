@@ -3,6 +3,7 @@
 // batch id, so the same file can be imported again safely and a whole import can be undone. Existing entries are never changed.
 import * as smsBridge from "../native/smsBridge.js";
 import { findNoticeEntries } from "../domain/sms/smsInbox.js";
+import { payeeNamesByUpiId } from "../domain/imports/upiId.js";
 import * as statementMod from "../domain/imports/statement.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { withImportKeys } from "../domain/imports/statement.js";
@@ -17,7 +18,7 @@ const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-
 const addDay = iso => { const t = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10) + 1)); return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`; };
 const niceDate = iso => { const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
 
-export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy, onMergeRepeats, onUndoRepeats, onRemoveNotices, onUndoNotices }) {
+export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy, onMergeRepeats, onUndoRepeats, onRemoveNotices, onUndoNotices, people = [] }) {
   const fileRef = useRef(null);
   const banks = accounts.filter(a => a.type === "bank");
   const cards = accounts.filter(a => a.type === "cc");
@@ -31,6 +32,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const [sb, setSb] = useState(null);                         // what the last file says the balance was at its start and end
   const repairs = useMemo(() => [...planNameRepairs(txns).map(c => ({ ...c, field: "merchant" })), ...planRefRepairs(txns)], [txns]);
   const [tidyUndo, setTidyUndo] = useState(null);
+  const payeeByUpiId = useMemo(() => payeeNamesByUpiId(txns, people), [txns, people]);   // a UPI id already named by the person (or saved on a person) names new entries
   const notices = useMemo(() => findNoticeEntries(txns), [txns]);
   const [noticeUndo, setNoticeUndo] = useState(null);
   const repeatAccId = fixedAccountId || accountId;
@@ -120,7 +122,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
     for (const grp of smsAll.groups) {
       if (!grp.addable.length) continue;
       const batchId = genId();
-      const made = buildImportTxns(grp.addable, { accountId: String(grp.acc.id), batchId, cards, newId: genId, plainExpenses: isCardAcc(grp.acc), accountType: grp.acc.type });
+      const made = buildImportTxns(grp.addable, { accountId: String(grp.acc.id), batchId, cards, newId: genId, plainExpenses: isCardAcc(grp.acc), accountType: grp.acc.type, payeeByUpiId });
       onImport(made, { batchId, fileName: "SMS from phone", merges: [] });
       added.push({ name: grp.acc.name, last4: grp.acc.last4, n: made.length, batchId, undone: false });
     }
@@ -176,7 +178,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
   const merges = state.phase === "result" ? state.match.results.filter(r => r.status === "probable-match" && merged[r.row.importKey] && !ticked[r.row.importKey] && txnById(r.matchId) && canTakeAnotherLink(txnById(r.matchId))).map(r => ({ txnId: r.matchId, row: r.row })) : [];
   const doImport = () => {
     const batchId = genId();
-    const made = buildImportTxns(chosen, { accountId: state.accountId, batchId, cards, newId: genId, plainExpenses: isCard, accountType: acctNow ? acctNow.type : "" });
+    const made = buildImportTxns(chosen, { accountId: state.accountId, batchId, cards, newId: genId, plainExpenses: isCard, accountType: acctNow ? acctNow.type : "", payeeByUpiId });
     onImport(made, { batchId, fileName: state.fileName, merges });
     setState({ phase: "done", count: made.length, mergedCount: merges.length, batchId, cardBills: made.filter(t => t.type === "cc_payment").length, unmatched: made.filter(t => t.cardBillUnmatched).length });
   };

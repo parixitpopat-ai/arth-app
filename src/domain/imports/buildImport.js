@@ -5,6 +5,7 @@
 import { extractUpiMerchant } from "../sms/smsFields.js";
 import { parseUpiNarration, describeUpiNarration } from "./upiNarration.js";
 import { extractUtr } from "./utr.js";
+import { extractUpiId } from "./upiId.js";
 
 const BILL_WORDS = /\b(?:credit\s*card|cc|card)\b/i, PAY_WORDS = /\b(?:bill|payment|paid|dues?|statement|autopay)\b/i;
 
@@ -73,12 +74,14 @@ export function cleanMerchant(desc) {
 
 /** @param {{row:object,status:string,matchId?:string}[]} chosen rows to import (each row has importKey)
  *  @param {{accountId:string, batchId:string, cards:Array, newId:()=>string}} ctx */
-export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plainExpenses = false, accountType = "" }) {
+export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plainExpenses = false, accountType = "", payeeByUpiId = null }) {
   return chosen.map(({ row }) => {
+    const upiId = String(row.upiId || extractUpiId(row.desc) || "").toLowerCase();       // the payee's UPI ID, saved quietly when the text carries a full one
+    const knownName = upiId && payeeByUpiId && payeeByUpiId.get ? payeeByUpiId.get(upiId) : "";
     // A UPI narration carries the 12-digit UPI reference and the other party: use them (a reference the file already has is kept).
     const upi = parseUpiNarration(row.desc);
     const abs = Math.abs(row.amountPaise) / 100, base = { id: newId(), date: row.date, amount: abs, desc: upi ? describeUpiNarration(upi) : (row.desc || ""), importKey: row.importKey, importBatchId: batchId, importSource: "bank-statement", bankNarration: row.desc || "", transactionRef: extractUtr(row) || row.ref || null, catId: null, catIds: [], subId: null, subIds: [], people: {} };
-    if (row.amountPaise > 0) return { ...base, type: "income", accId: accountId, merchant: "" };
+    if (row.amountPaise > 0) return { ...base, type: "income", accId: accountId, merchant: "", ...(upiId ? { upiId } : {}) };
     if (!plainExpenses && looksLikeCardBill(row.desc)) {
       const card = findCardByText(row.desc, cards);
       if (card) return { ...base, type: "cc_payment", fromAccId: accountId, toAccId: card.id, accId: null, note: "Statement payment", merchant: "" };
@@ -86,7 +89,7 @@ export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plai
     }
     // A bank debit whose narration carries a UPI reference was paid by UPI: say so in the entry's Payment Method (the same field the Add form fills for a bank account).
     const byUpi = accountType === "bank" && !plainExpenses && Boolean(extractUtr(row));
-    return { ...base, type: "expense", accId: accountId, merchant: plainExpenses ? cardVendor(row.desc) : cleanMerchant(row.desc), ...(byUpi ? { paymentMethod: "UPI" } : {}) };
+    return { ...base, type: "expense", accId: accountId, merchant: knownName || (plainExpenses ? cardVendor(row.desc) : cleanMerchant(row.desc)), ...(upiId ? { upiId } : {}), ...(byUpi ? { paymentMethod: "UPI" } : {}) };
   });
 }
 
@@ -100,7 +103,7 @@ export const canTakeAnotherLink = t => !t.importKey || ((t.type === "transfer" |
 // "Merge" keeps the existing entry exactly as it is (category, people, notes, amount, date) and only adds the link fields below, so the same
 // statement row is recognised next time (importKey) and the whole import can be undone. The statement's reference is copied only when the entry
 // has none. An entry can be linked once: it is never merged into a second time.
-const LINK_FIELDS = ["importKey", "importKeys", "importBatchId", "importSource", "importMerged", "importSetRef"];
+const LINK_FIELDS = ["importKey", "importKeys", "importBatchId", "importSource", "importMerged", "importSetRef", "importSetUpi"];
 
 /** @param {Array} txns @param {{txnId:string,row:{importKey:string,ref?:string}}[]} merges @returns {Array} new list; entries not merged are the same objects */
 export function applyMerges(txns, merges, { batchId }) {
@@ -110,8 +113,9 @@ export function applyMerges(txns, merges, { batchId }) {
     if (!row || !canTakeAnotherLink(t)) return t;
     const refToSet = extractUtr(row) || row.ref || "";               // a UPI payment's reference is its UTR; a card statement's SerNo is not a UPI reference
     const setRef = !t.transactionRef && Boolean(refToSet);
+    const upiToSet = String(row.upiId || extractUpiId(row.desc) || "").toLowerCase(), setUpi = !t.upiId && Boolean(upiToSet);
     const keys = [...new Set([...(t.importKeys || (t.importKey ? [t.importKey] : [])), row.importKey])];
-    return { ...t, importKey: t.importKey || row.importKey, importKeys: keys, importBatchId: batchId, importSource: "bank-statement", importMerged: true, ...(setRef ? { transactionRef: refToSet, importSetRef: true } : {}) };
+    return { ...t, importKey: t.importKey || row.importKey, importKeys: keys, importBatchId: batchId, importSource: "bank-statement", importMerged: true, ...(setRef ? { transactionRef: refToSet, importSetRef: true } : {}), ...(setUpi ? { upiId: upiToSet, importSetUpi: true } : {}) };
   });
 }
 
@@ -123,6 +127,7 @@ export function undoImportBatch(txns, batchId) {
     if (!t.importMerged) continue;
     const u = { ...t };
     if (u.importSetRef) u.transactionRef = null;
+    if (u.importSetUpi) delete u.upiId;
     LINK_FIELDS.forEach(k => { delete u[k]; });
     out.push(u);
   }

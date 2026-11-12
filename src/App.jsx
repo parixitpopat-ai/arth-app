@@ -22,6 +22,7 @@ import NeedsDetailsSheet from "./components/NeedsDetailsSheet";
 import PettyCashSheet from "./components/PettyCashSheet";
 import { mergeVendors, undoVendorMerge } from "./domain/vendors/vendorMerge";
 import { addAlias as addVendorAlias, removeAlias as removeVendorAlias } from "./domain/vendors/payees";
+import { upiIdsForName, addUpiIds as addPersonUpiIds, removeUpiIds as removePersonUpiIds } from "./domain/imports/upiId";
 import { isPettyCash, getPettyCashTotalsByPerson, applyPettyCash } from "./domain/person/pettyCash";
 import { expenseGaps, summarizeGaps, GAP_LABELS } from "./domain/transactions/completeness";
 import { extractDMonYDate, extractUpiMerchant } from "./domain/sms/smsFields";
@@ -20681,8 +20682,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 dismissed:vendorNotSame, lastMerge:lastVendorMerge,
                 onOpenVendor:name=>setViewingVendor(name),
                 people,
-                onLinkPerson:(name,personId)=>setPeople(prev=>addVendorAlias(prev,personId,name)),
-                onUnlinkPerson:(names,personId)=>setPeople(prev=>(Array.isArray(names)?names:[names]).reduce((acc,n)=>removeVendorAlias(acc,personId,n),prev)),
+                onLinkPerson:(name,personId)=>setPeople(prev=>addPersonUpiIds(addVendorAlias(prev,personId,name),personId,upiIdsForName(txns,name))),
+                onUnlinkPerson:(names,personId)=>setPeople(prev=>(Array.isArray(names)?names:[names]).reduce((acc,n)=>removePersonUpiIds(removeVendorAlias(acc,personId,n),personId,upiIdsForName(txns,n)),prev)),
                 onDismiss:sig=>setVendorNotSame(prev=>prev.includes(sig)?prev:[...prev,sig]),
                 onMerge:({ from, to })=>{
                   const r = mergeVendors({ txns, bills }, { from, to });
@@ -20711,7 +20712,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="insights"&&<InsightsPage/>}
         {/* The invoice screen is rendered HERE, not inside Settings: Settings is re-created on every AppContent render, which would reset this screen (its review state, the success message, Undo) the moment the import saves. */}
         {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} itemCatalog={itemCatalog} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>{ setSettingsSection(null); setShowSettings(false); }} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }} onAddReceipt={prefill=>{ setAddPrefill(prefill); setShowAdd(true); }}/>}
-        {showSettings&&settingsSection==="importstatement"&&<StatementImportScreen accounts={accounts} txns={txns} genId={genId} T={T} sym={sym} fixedAccountId={statementAccId} checkpoints={balanceCheckpoints}
+        {showSettings&&settingsSection==="importstatement"&&<StatementImportScreen accounts={accounts} txns={txns} people={people} genId={genId} T={T} sym={sym} fixedAccountId={statementAccId} checkpoints={balanceCheckpoints}
           statementBillPlan={(accId,summary)=>planStatementBillFromPdf({ card:accounts.find(a=>String(a.id)===String(accId)), accounts, txns:expandPaymentLines(txns), bills, summary, toDateOnly, genId, today:todayStr() })}
           onSetStatementBill={plan=>{ setBills(prev=>plan.action==="create" ? [plan.bill,...prev] : prev.map(b=>b.id===plan.bill.id?plan.bill:b)); setToast({ message:plan.bill.verification==="matched" ? "Statement bill set and matched" : "Statement bill set; the difference is recorded" }); return { createdId:plan.action==="create"?plan.bill.id:null, prev:plan.prev }; }}
           onMergeRepeats={pairs=>{ const res=applyDuplicateMerge(txns,pairs); setTxns(res.txns); setToast({ message:`${pairs.length} repeat${pairs.length===1?"":"s"} merged` }); return res.undo; }}

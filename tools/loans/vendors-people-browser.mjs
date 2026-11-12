@@ -13,7 +13,7 @@ await ctx.addInitScript(() => { if (localStorage.getItem("__init")) return; loca
   set("arth_accounts", [{ id: "bank1", name: "Test Savings", type: "bank", openingBalance: 100000, openingBalanceDate: "2026-01-01", last4: "9001" }]);
   const ex = (id, merchant, amount, day, date) => ({ id, type: "expense", merchant, desc: merchant, amount, date: date || `${ym}-${String(day).padStart(2, "0")}`, accId: "bank1", catId: "groceries", catIds: ["groceries"], subId: "g1", subIds: ["g1"], people: { __me__: { amount } } });
   set("arth_people", [{ id: "p1", name: "Raj Adhiya" }, { id: "p2", name: "Nidhi Yadav" }, { id: "p3", name: "Nidhi Sharma" }]);
-  set("arth_txns", [ex("a1", "Zomato", 900, 1), ex("a2", "Nidhi Yadav", 4000, 2), ex("a3", "RAJ AD", 500, 3), ex("a4", "Raj Ad", 250, 4), ex("a5", "Nidhi", 100, 5)]);
+  set("arth_txns", [ex("a1", "Zomato", 900, 1), ex("a2", "Nidhi Yadav", 4000, 2), ex("a3", "RAJ AD", 500, 3), { ...ex("a4", "Raj Ad", 250, 4), upiId: "raj@okaxis" }, ex("a5", "Nidhi", 100, 5)]);
   localStorage.setItem("arth_master_user_setup_complete", "true"); });
 const page = await ctx.newPage(); const errors = []; page.on("pageerror", e => errors.push(String(e)));
 const T = id => page.getByTestId(id);
@@ -34,13 +34,13 @@ try {
   const before = JSON.stringify(await ls("arth_txns"));
   await T("vendor-link-Raj Ad").dispatchEvent("click"); await page.waitForTimeout(500);
   const ppl = await ls("arth_people"); const raj = ppl.find(p => p.id === "p1");
-  rec("P3 'Yes, link' saves the written name as Raj Adhiya's alias and changes no entry", raj && (raj.aliases || []).includes("Raj Ad") && JSON.stringify(await ls("arth_txns")) === before, raj);
+  rec("P3 'Yes, link' saves the written name as Raj Adhiya's alias, remembers the UPI id found on those entries (raj@okaxis), and changes no entry", raj && (raj.aliases || []).includes("Raj Ad") && (raj.upiIds || []).includes("raj@okaxis") && JSON.stringify(await ls("arth_txns")) === before, raj);
   rec("P4 both spellings (RAJ AD, Raj Ad) now sit under 'Paid to people', total 750", /Raj Adhiya/.test(await T("vendor-paid-people").innerText()) && /750/.test(await T("vendor-paid-people").innerText()), (await T("vendor-paid-people").innerText()).slice(0, 200));
   const un = page.locator('[data-testid^="vendor-unlink-"]');
   const n0 = await un.count();
   await un.nth(1).dispatchEvent("click"); await page.waitForTimeout(400);
   const raj2 = (await ls("arth_people")).find(p => p.id === "p1");
-  rec("P5 'Not a person' takes the alias off again", n0 === 2 && !(raj2.aliases || []).length, { n0, raj2 });
+  rec("P5 'Not a person' takes the alias and its UPI id off again", n0 === 2 && !(raj2.aliases || []).length && !(raj2.upiIds || []).length, { n0, raj2 });
   await T("vendor-person-pick").selectOption("Zomato"); await page.waitForTimeout(200);
   await T("vendor-person-p2").dispatchEvent("click"); await page.waitForTimeout(400);
   rec("P6 the manual picker links any vendor to a person: Zomato -> Nidhi Yadav saved as an alias", ((await ls("arth_people")).find(p => p.id === "p2").aliases || []).includes("Zomato"), {});

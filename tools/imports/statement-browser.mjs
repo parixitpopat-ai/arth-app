@@ -174,7 +174,7 @@ try {
   const before4 = (await ls("arth_txns")).length;
   await T("stmt-sms-add-all").dispatchEvent("click"); await page.waitForTimeout(800);
   const after4 = await ls("arth_txns"); const tea = after4.find(t => t.transactionRef === "555666777888"), nf = after4.find(t => /netflix/i.test(t.merchant || t.desc || ""));
-  rec("M5 'Add all' added one entry to each account: savings UPI 250.00 with its reference, card Netflix 99.00", after4.length === before4 + 2 && tea && tea.accId === "bank1" && tea.amount === 250 && nf && nf.accId === "cc1" && nf.amount === 99, { n: after4.length - before4, tea: tea && tea.accId, nf: nf && nf.accId });
+  rec("M5 'Add all' added one entry to each account: savings UPI 250.00 with its reference and the payee's UPI ID saved quietly (tea@ybl), card Netflix 99.00", after4.length === before4 + 2 && tea && tea.accId === "bank1" && tea.amount === 250 && tea.upiId === "tea@ybl" && nf && nf.accId === "cc1" && nf.amount === 99 && !nf.upiId, { n: after4.length - before4, tea: tea && tea.accId, nf: nf && nf.accId });
   await T("stmt-sms-all-done").locator("button").first().dispatchEvent("click"); await page.waitForTimeout(600);
   const after5 = await ls("arth_txns");
   rec("M6 Undo on one account's batch removes just that account's entry", after5.length === after4.length - 1, after5.length - after4.length);

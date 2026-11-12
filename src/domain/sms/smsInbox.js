@@ -5,6 +5,7 @@
 // they are NOT verified against every bank, which is why a message that does not fit is reported instead of guessed.
 import { extractDMonYDate, extractUpiMerchant } from "./smsFields.js";
 import { parseStatementDate } from "../imports/statement.js";
+import { extractUpiId } from "../imports/upiId.js";
 
 const AMOUNT = /(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)/i;
 const DEBIT = /\b(debited|spent|paid|purchase|withdrawn|sent|dr)\b/i;
@@ -97,7 +98,7 @@ export function parseMoneySms(sms) {
   const desc = isUpi ? `UPI-${utr || "0"}-${who || "UPI payment"}`.replace(/-0-/, "-") : (who || body.slice(0, 60));
   const isCredit = own ? own === "credited" : credit && !/\b(debited|spent)\b/i.test(body);
   return { ok: true, smsId: String(sms.id != null ? sms.id : `${sms.date}|${body.slice(0, 40)}`), last4s: last4Of(body), tail3: last4Of(body).length ? "" : tail3Of(body),
-    row: { line: 0, date, valueDate: null, desc, ref: utr, amountPaise: isCredit ? paise : -paise, balancePaise: null } };
+    row: { line: 0, date, valueDate: null, desc, ref: utr, upiId: extractUpiId(body), amountPaise: isCredit ? paise : -paise, balancePaise: null } };
 }
 
 /**
