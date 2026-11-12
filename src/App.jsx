@@ -23,6 +23,7 @@ import PettyCashSheet from "./components/PettyCashSheet";
 import { mergeVendors, undoVendorMerge } from "./domain/vendors/vendorMerge";
 import { addAlias as addVendorAlias, removeAlias as removeVendorAlias } from "./domain/vendors/payees";
 import { upiIdsForName, addUpiIds as addPersonUpiIds, removeUpiIds as removePersonUpiIds } from "./domain/imports/upiId";
+import { useSmsInbox } from "./native/useSmsInbox";
 import { isPettyCash, getPettyCashTotalsByPerson, applyPettyCash } from "./domain/person/pettyCash";
 import { expenseGaps, summarizeGaps, GAP_LABELS } from "./domain/transactions/completeness";
 import { extractDMonYDate, extractUpiMerchant } from "./domain/sms/smsFields";
@@ -2598,6 +2599,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   },[accounts,txns,dismissedAlerts]);
 
   // Prepaid plan ending / ended (domain/bills/prepaidAlerts.js): three alerts per plan; none for a connection the person ended or paused.
+  const smsInbox = useSmsInbox({ accounts, txns, people });   // bank messages caught as they arrive (Android app only); proposals, never entries
   const activePrepaidAlerts = useMemo(()=>getPrepaidAlerts({ billerAccounts, bills, relationships:membershipRelationships, today:new Date(), dismissed:dismissedAlerts }),[billerAccounts,bills,membershipRelationships,dismissedAlerts]);
   const directOwedToMe = useMemo(()=>Object.values(settlements).reduce((s,p)=>s+(p.owesMe||0),0),[settlements]);
   const receivablePeopleList = useMemo(()=>Object.entries(settlements)
@@ -4464,7 +4466,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       isEditing && sourceTxn?.isRefund ? (sourceTxn.againstTxnId||null) : (refundPrefill?.id||null)
     );
     const [refundExpenseSearch, setRefundExpenseSearch] = useState("");
-    const [transactionRef, setTransactionRef] = useState(isEditing ? (sourceTxn?.transactionRef || "") : "");
+    const [transactionRef, setTransactionRef] = useState(isEditing ? (sourceTxn?.transactionRef || "") : (safePrefill.transactionRef || ""));
     const [refDupWarning, setRefDupWarning] = useState("");
     const [repaymentAllocations, setRepaymentAllocations] = useState(()=>Object.fromEntries((sourceTxn?.settlementLinks||[]).map(link=>[`${link.kind}:${link.id}`, String(link.amount||"")])));
     const [repaymentTouched, setRepaymentTouched] = useState(isEditing&&Boolean(sourceTxn?.settlementLinks?.length));
@@ -5398,6 +5400,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       const baseLabel = who.trim() || (eduActive && eduSchoolBA ? eduSchoolBA.name : "") || sourceTxn?.desc || sourceTxn?.merchant || note.trim() || "";
       const base = {
         ...(sourceTxn || {}),
+        ...(isEditing ? {} : (safePrefill.extra || {})),   // e.g. the import key / UPI id of an accepted bank message, so it is recognised later
         id:resolvedTxnId,
         createdAt:sourceTxn?.createdAt || (Number.isFinite(Number(resolvedTxnId)) ? Number(resolvedTxnId) : Date.now()),
         updatedAt:Date.now(),
@@ -18691,7 +18694,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ padding:"10px 8px",display:"flex",flexDirection:"column",gap:2 }}>
             {[
               { icon:"👤", label:"User Profile", onClick:()=>{ setShowSettings(true); setSettingsSection("myprofile"); onClose(); } },
-              { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
+              { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+smsInbox.items.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"🧾", label:"Payments", onClick:()=>goToTab("bills") },
               { icon:"👥", label:"People & Groups", onClick:()=>goToTab("people") },
               { icon:"🚗", label:"Vehicles", onClick:()=>{ setShowSettings(true); setSettingsSection("vehicles"); onClose(); } },
@@ -18721,9 +18724,43 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🔔 Notifications</div>
             <button onClick={onClose} style={{ background:"none",border:"none",color:T.sub,fontSize:18,cursor:"pointer" }}>✕</button>
           </div>
-          {activeBudgetAlerts.length===0&&activeCardAlerts.length===0&&activePrepaidAlerts.length===0&&(
+          {activeBudgetAlerts.length===0&&activeCardAlerts.length===0&&activePrepaidAlerts.length===0&&smsInbox.items.length===0&&(
             <div style={{ textAlign:"center",padding:"40px 20px",color:T.sub,fontSize:13 }}>You're all caught up.</div>
           )}
+          {smsInbox.available&&!smsInbox.perm.receive&&(
+            <div data-testid="sms-enable" style={{ background:T.accent+"14",border:`1px solid ${T.accent}33`,borderRadius:14,padding:"12px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10 }}>
+              <div style={{ flex:1,color:T.text,fontSize:12,lineHeight:1.45 }}><b>Bank-message alerts are off.</b> Turn them on and Arth will notice each bank or card message as it arrives, so you can accept or discard it here. Messages stay on this phone.</div>
+              <button data-testid="sms-enable-btn" onClick={()=>smsInbox.request()} style={{ background:T.accent,border:"none",borderRadius:20,padding:"7px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Turn on</button>
+            </div>
+          )}
+          {smsInbox.items.map(it=>{
+            if(it.unreadable) return (
+              <div key={it.id} data-testid="sms-item-unreadable" style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:14,padding:"12px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10 }}>
+                <div style={{ flex:1,minWidth:0 }}><div style={{ color:T.warn,fontSize:12,fontWeight:800 }}>💬 A bank message could not be read</div><div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{it.why}: {it.text}</div></div>
+                <button data-testid="sms-discard" onClick={()=>smsInbox.discard(it.id)} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>Dismiss</button>
+              </div>
+            );
+            const acc=accounts.find(a=>String(a.id)===String(it.accountId)); const out=it.amountPaise<0; const hit=it.status==="match"?txns.find(t=>String(t.id)===String(it.matchId)):null;
+            const draft=smsInbox.accept(it);
+            const openForm=()=>{ setEditTxn(null); setRefundSourceTxn(null); setDefaultAddType(draft.type); setAddPrefill(draft.prefill); setShowAdd(true); onClose(); };
+            return (
+              <div key={it.id} data-testid="sms-item" data-status={it.status} style={{ background:T.info+"14",border:`1px solid ${T.info}33`,borderRadius:14,padding:"12px 14px",marginBottom:8 }}>
+                <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}>
+                  <div style={{ flex:1,minWidth:0 }}>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>💬 {out?"Money out":"Money in"} · {draft.prefill.who||"Unnamed"}</div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(it.date)||it.date} · {acc?acc.name:"Account not recognised"}</div>
+                  </div>
+                  <div style={{ color:out?T.danger:T.success,fontSize:14,fontWeight:900 }}>{sym}{fmt(Math.abs(it.amountPaise)/100)}</div>
+                </div>
+                {hit&&<div style={{ color:T.warn,fontSize:11,marginTop:6 }}>Looks like your entry “{hit.merchant||hit.desc||"entry"}” ({formatShortDate(hit.date)||hit.date}). Link it instead of adding a copy.</div>}
+                <div style={{ display:"flex",gap:6,marginTop:8,flexWrap:"wrap" }}>
+                  {hit&&<button data-testid="sms-link" onClick={()=>{ setTxns(prev=>applyMerges(prev,[{ txnId:it.matchId,row:it.row }],{ batchId:genId() })); setToast({ message:"Linked to your entry" }); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Link to it</button>}
+                  <button data-testid="sms-accept" onClick={openForm} style={{ background:hit?T.input:T.accent,border:hit?`1px solid ${T.border}`:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:hit?T.text:"#fff",fontFamily:"Nunito,sans-serif" }}>{hit?"Add anyway":"Accept"}</button>
+                  <button data-testid="sms-discard" onClick={()=>smsInbox.discard(it.id)} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Discard</button>
+                </div>
+              </div>
+            );
+          })}
           {activePrepaidAlerts.map(a=>(
             <div key={a.id} data-testid="prepaid-alert" data-stage={a.stage} style={{ background:(a.stage==="post"?T.danger:T.warn)+"16",border:`1px solid ${(a.stage==="post"?T.danger:T.warn)}33`,borderRadius:14,padding:"12px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
               <div style={{ flex:1,minWidth:0 }}>
@@ -20620,7 +20657,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
                     <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
                     {/* The bell opens Notifications; its count is the real number of open alerts (budget, card limit, prepaid plan ending). */}
-                    <button data-testid="home-bell" onClick={()=>setShowNotifications(true)} style={{ position:"relative",background:"none",border:"none",cursor:"pointer",fontSize:18,color:T.text,padding:4 }} title="Notifications">🔔{(activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length)>0&&<span data-testid="home-bell-badge" style={{ position:"absolute",top:-2,right:-4,minWidth:16,height:16,borderRadius:8,background:T.danger,color:"#fff",fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px" }}>{activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length}</span>}</button>
+                    <button data-testid="home-bell" onClick={()=>setShowNotifications(true)} style={{ position:"relative",background:"none",border:"none",cursor:"pointer",fontSize:18,color:T.text,padding:4 }} title="Notifications">🔔{(activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+smsInbox.items.length)>0&&<span data-testid="home-bell-badge" style={{ position:"absolute",top:-2,right:-4,minWidth:16,height:16,borderRadius:8,background:T.danger,color:"#fff",fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px" }}>{activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+smsInbox.items.length}</span>}</button>
                   </div>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8 }}>
                     <div>

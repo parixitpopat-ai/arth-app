@@ -24,6 +24,15 @@
 
         </activity>
 
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -40,4 +49,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Read bank/card text messages, only when the person taps "Read SMS from phone" in Arth. -->
     <uses-permission android:name="android.permission.READ_SMS" />
+    <!-- Notice each incoming bank message and show a notification (only when the person turns on bank-message alerts in Arth). -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

@@ -112,7 +112,7 @@ export function sortSmsToAccounts(messages, accounts, { seenIds = [] } = {}) {
   for (const sms of messages || []) {
     const p = parseMoneySms(sms);
     if (!p) continue;
-    if (!p.ok) { unreadable.push({ why: p.why, text: String(sms.body || "").slice(0, 60) }); continue; }
+    if (!p.ok) { unreadable.push({ why: p.why, text: String(sms.body || "").slice(0, 60), id: String(sms.id != null ? sms.id : `${sms.date}|${String(sms.body || "").slice(0, 40)}`), date: sms.date }); continue; }
     if (seen.has(p.smsId)) { skippedSeen++; continue; }
     let hits = (accounts || []).filter(a => a && a.last4 && p.last4s.includes(String(a.last4)));
     if (!hits.length && p.tail3) hits = (accounts || []).filter(a => a && a.last4 && String(a.last4).endsWith(p.tail3));   // 3 visible digits: only if exactly one account fits
