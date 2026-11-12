@@ -181,7 +181,7 @@ try {
   // ── old imported bank notices (not real transactions): found, removed in one tap, undo puts them back ──
   await page.evaluate(() => { const t = JSON.parse(localStorage.getItem("arth_txns") || "[]"); t.push(
     { id: "junk1", type: "expense", amount: 1752.75, date: "2026-11-12", accId: "cc1", merchant: "Payment Of Inr 1752.75 Towards Merchant Amazon To Be Debited", desc: "Payment of INR 1752.75 towards Merchant Amazon to be debited", importKey: "cc1|2026-11-12|-175275||x|0", importSource: "bank-statement", catIds: [] },
-    { id: "junk2", type: "expense", amount: 22316.4, date: "2026-11-03", accId: "cc1", merchant: "Icici Bank Credit Card Xx1017 Statement Is Sent To Pa********", desc: "", importKey: "cc1|2026-11-03|-2231640||y|0", importSource: "bank-statement", catIds: [] }); localStorage.setItem("arth_txns", JSON.stringify(t)); });
+    { id: "junk2", type: "expense", amount: 22316.4, date: "2026-11-03", accId: "cc1", merchant: "Icici Bank Credit Card Xx1017 Statement Is Sent To Pa********", desc: "", importKey: "cc1|2026-11-03|-2231640||y|0", importSource: "bank-statement", catIds: [] }); t.push({ id: "tidy1", type: "expense", amount: 6287.04, date: "2026-10-30", accId: "cc1", merchant: "Upi-Upi-11104450178", desc: "UPI-UPI-11104450178", bankNarration: "UPI-UPI-11104450178", transactionRef: null, importKey: "cc1|2026-10-30|-628704||upi upi 11104450178|0", importSource: "bank-statement", catIds: [] }); localStorage.setItem("arth_txns", JSON.stringify(t)); });
   await page.reload(); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(400);
   await page.getByText(/^money$/i).last().dispatchEvent("click"); await page.waitForTimeout(900); await unlock(); await page.waitForTimeout(700);
   await T("card-import-statement").dispatchEvent("click"); await page.waitForTimeout(700);
@@ -192,6 +192,13 @@ try {
   rec("N2 'Remove 2 entries' removes exactly those two, nothing else", nAfter.length === nBefore - 2 && !nAfter.some(t => /^junk/.test(t.id)), { nBefore, after: nAfter.length });
   await T("stmt-junk-undo").dispatchEvent("click"); await page.waitForTimeout(600);
   rec("N3 Undo puts both back", (await ls("arth_txns")).length === nBefore, (await ls("arth_txns")).length);
+  rec("N4 the Tidy box offers to fill the empty reference", /imported entr(y has|ies have) an empty UPI \/ bank reference/.test(await T("stmt-tidy").innerText()), (await T("stmt-tidy").innerText()).slice(0, 260));
+  await T("stmt-tidy-fix").dispatchEvent("click"); await page.waitForTimeout(500);
+  const tf = (await ls("arth_txns")).find(t => t.id === "tidy1");
+  rec("N5 after Fix: vendor 'UPI payment', reference 11104450178", tf && tf.merchant === "UPI payment" && tf.transactionRef === "11104450178", tf && { m: tf.merchant, r: tf.transactionRef });
+  await T("stmt-tidy-undo").dispatchEvent("click"); await page.waitForTimeout(400);
+  const tu = (await ls("arth_txns")).find(t => t.id === "tidy1");
+  rec("N6 Undo puts the old vendor and the empty reference back", tu && tu.merchant === "Upi-Upi-11104450178" && !tu.transactionRef, tu && { m: tu.merchant, r: tu.transactionRef });
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 600)); }
 await browser.close(); try { process.kill(-server.pid); } catch {}

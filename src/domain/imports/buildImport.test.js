@@ -133,3 +133,14 @@ test("card row 'UPI-UPI-<ref>' has no shop name: vendor reads 'UPI payment' and 
   const fix = planNameRepairs([{ id: "x", importKey: "k", type: "expense", merchant: "Upi-Upi-11104450178" }]);
   assert.equal(fix.length, 1); assert.equal(fix[0].to, "UPI payment");
 });
+test("imported entries with an empty reference get the number from their statement text; entries that have one, and my own entries, are left alone", () => {
+  const txns = [
+    { id: "a", type: "expense", importKey: "k1", merchant: "Upi-Upi-11104450178", desc: "UPI-UPI-11104450178", bankNarration: "UPI-UPI-11104450178", transactionRef: null },
+    { id: "b", type: "expense", importKey: "k2", merchant: "Swiggy", bankNarration: "UPI/DR/412345678901/SWIGGY/HDFC/swiggy@ic/Order", transactionRef: "" },
+    { id: "c", type: "expense", importKey: "k3", merchant: "Zomato", bankNarration: "UPI-UPI-11104450199", transactionRef: "KEEP" },
+    { id: "d", type: "expense", merchant: "Mine", desc: "UPI-UPI-11104450177" },
+    { id: "e", type: "expense", importKey: "k5", merchant: "Blinkit", bankNarration: "BLINKIT", transactionRef: "" },
+  ];
+  const r = planRefRepairs(txns).filter(c => c.filled);
+  assert.deepEqual(r.map(c => [c.id, c.to]), [["a", "11104450178"], ["b", "412345678901"]]);
+});

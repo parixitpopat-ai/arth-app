@@ -55,6 +55,13 @@ export function planRefRepairs(txns) {
     const m = /\b(?:upi|imps)\b[^|]*?(?<!\d)(\d{12})(?!\d)/i.exec(text);
     if (m && String(t.transactionRef) !== m[1] && !/^\d{12}$/.test(String(t.transactionRef))) out.push({ id: t.id, field: "transactionRef", from: t.transactionRef, to: m[1] });
   }
+  // imported entries whose UPI / bank reference box is EMPTY although the statement or SMS text they came from carries one (e.g. "UPI-UPI-11104450178")
+  const have = new Set(out.map(c => String(c.id)));
+  for (const t of txns || []) {
+    if (!t || !t.importKey || t.transactionRef || have.has(String(t.id))) continue;
+    const ref = extractUtr({ desc: String(t.bankNarration || t.desc || "") });
+    if (ref) out.push({ id: t.id, field: "transactionRef", from: "", to: ref, filled: true });
+  }
   return out;
 }
 
