@@ -38,6 +38,36 @@ import CloudStateUnknownScreen from "./screens/CloudStateUnknownScreen";
 const isNativeSmsAvailable = () => false;
 const readCopiedSms = async () => ({ text: "", error: "Not supported" });
 const readLatestPhoneSms = async () => ({ text: "", error: "Not supported" });
+// Heavy screens are fetched the first time they are opened, not at app start (smaller startup bundle). Each keeps its own name and props; while the
+// piece loads nothing is shown, and if it cannot load (e.g. offline before it was ever fetched) a short message appears instead of a blank screen.
+class LazyScreenGuard extends React.Component {
+  constructor(p){ super(p); this.state={failed:false}; }
+  static getDerivedStateFromError(){ return {failed:true}; }
+  render(){ return this.state.failed ? <div style={{ padding:20, textAlign:"center", fontSize:13 }}>This screen could not load. Check your connection and try again.</div> : this.props.children; }
+}
+const lazyScreen = (loader, name) => {
+  const L = React.lazy(() => loader().then(m => ({ default: name ? m[name] : m.default })));
+  return function LazyScreen(props){ return <LazyScreenGuard><React.Suspense fallback={null}><L {...props}/></React.Suspense></LazyScreenGuard>; };
+};
+const AddInsurancePolicyModal = lazyScreen(() => import("./screens/InsuranceScreen"), "AddInsurancePolicyModal");
+const InsurancePolicyListModal = lazyScreen(() => import("./screens/InsuranceScreen"), "InsurancePolicyListModal");
+const InsurancePolicyDetailModal = lazyScreen(() => import("./screens/InsuranceScreen"), "InsurancePolicyDetailModal");
+const AddInsuranceRenewalNoticeModal = lazyScreen(() => import("./screens/InsuranceScreen"), "AddInsuranceRenewalNoticeModal");
+const SchoolFeeScheduleListModal = lazyScreen(() => import("./screens/SchoolFeesScreen"), "SchoolFeeScheduleListModal");
+const AddSchoolYearModal = lazyScreen(() => import("./screens/SchoolFeesScreen"), "AddSchoolYearModal");
+const SchoolFeeScheduleDetailModal = lazyScreen(() => import("./screens/SchoolFeesScreen"), "SchoolFeeScheduleDetailModal");
+const PayFeesModal = lazyScreen(() => import("./screens/SchoolFeesScreen"), "PayFeesModal");
+const PeriodDetailModal = lazyScreen(() => import("./screens/SchoolFeesScreen"), "PeriodDetailModal");
+const AdjustmentModal = lazyScreen(() => import("./screens/SchoolFeesScreen"), "AdjustmentModal");
+const CreditNoteModal = lazyScreen(() => import("./screens/SchoolFeesScreen"), "CreditNoteModal");
+const PersonProfileScreen = lazyScreen(() => import("./screens/PersonProfileScreen"), "PersonProfileScreen");
+const PayTogetherScreen = lazyScreen(() => import("./screens/PayTogetherScreen"));
+const ReadinessScreen = lazyScreen(() => import("./screens/ReadinessScreen"));
+const TransactionsCalendar = lazyScreen(() => import("./screens/TransactionsCalendar"));
+const InvoiceImportScreen = lazyScreen(() => import("./screens/InvoiceImportScreen"));
+const StatementImportScreen = lazyScreen(() => import("./screens/StatementImportScreen"));
+const AccountStatementSheet = lazyScreen(() => import("./components/AccountStatementSheet"));
+const VehicleProfileScreen = lazyScreen(() => import("./screens/VehicleProfileScreen"));
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
 import { DARK, LIGHT, PALETTE, BUTTON, RADIUS, TOUCH, FONT, TYPE_SCALE, MONEY, STATUS, statusStyle } from "./constants/theme";
@@ -62,8 +92,6 @@ import { rowsToCsvString, downloadCsvFile } from "./reports/csv";
 import { AddGoalModal, GoalsListModal, AddContributionModal } from "./screens/GoalsScreen";
 import { AddEventModal, EventDetailModal, EventsListModal } from "./screens/EventsScreen";
 import { AddExpectedIncomeModal, ExpectedIncomeListModal } from "./screens/ExpectedIncomeScreen";
-import { AddInsurancePolicyModal, InsurancePolicyListModal, InsurancePolicyDetailModal, AddInsuranceRenewalNoticeModal } from "./screens/InsuranceScreen";
-import { SchoolFeeScheduleListModal, AddSchoolYearModal, SchoolFeeScheduleDetailModal, PayFeesModal, PeriodDetailModal, AdjustmentModal, CreditNoteModal } from "./screens/SchoolFeesScreen";
 import { attemptSchoolAttributionChange, pickMostRecentSchedule } from "./screens/SchoolFeesScreen.helpers";
 import { getFeeSchedulesForRelationship } from "./domain/school/feeScheduleLink";
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
@@ -80,9 +108,7 @@ import SpreadSheet from "./screens/SpreadSheet";
 import { getCardUsage } from "./domain/cards/usage";
 import { shouldDebitOnLoanGiven, buildLoanDisbursalTxn } from "./domain/loans/disbursal";
 import { suggestBillPaymentVendors } from "./domain/bills/billVendorSuggestions";
-import PayTogetherScreen from "./screens/PayTogetherScreen";
 import { createSpread } from "./domain/budget/spread";
-import ReadinessScreen from "./screens/ReadinessScreen";
 import { isPendingSync, offlineStripText, offlineSavedText } from "./domain/payments/syncState";
 import { allocateCcPaymentToEmiInstallments, mergeEmiSettlementInto } from "./domain/cards/emiSettlement";
 import { projectLoansToDebtServiceEvents } from "./domain/debt/futureMoney";
@@ -130,7 +156,6 @@ import { getGroupCapabilityTiles } from "./domain/group/capabilityTiles";
 import { getGroupReminders } from "./domain/group/reminders";
 import { getBillsFor } from "./domain/bills/billFor";
 import GroupSettingsEditor from "./components/people/GroupSettingsEditor";
-import { PersonProfileScreen } from "./screens/PersonProfileScreen";
 import { isSchoolRelationshipCurrent, getSchoolRelationships, getCurrentSchoolBillerAccountIds, migrateSchoolRelationshipsIntoCanonicalStore } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
 import { getCommitments, isRechargeBiller } from "./domain/bills/commitments";
@@ -196,7 +221,6 @@ import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
 import { getExpectedSpendByToday, getSpendPaceState } from "./domain/budget/pace";
-import TransactionsCalendar from "./screens/TransactionsCalendar";
 import { buildMonthCalendar, getDayEntries, projectDueItems, describeOtherKind, calendarKind } from "./domain/transactions/calendarSummary";
 import EmptyState from "./components/EmptyState";
 import Toast from "./components/Toast";
@@ -207,14 +231,10 @@ import CreditCardStatementSheet from "./components/CreditCardStatementSheet";
 import ChangeBillingModal from "./components/ChangeBillingModal";
 import CreditCardsListScreen from "./components/CreditCardsListScreen";
 import MarkBillPaidModal from "./components/MarkBillPaidModal";
-import InvoiceImportScreen from "./screens/InvoiceImportScreen";
-import StatementImportScreen from "./screens/StatementImportScreen";
-import AccountStatementSheet from "./components/AccountStatementSheet";
 import { planStatementBillFromPdf } from "./domain/cards/statementFromPdf";
 import { applyDuplicateMerge, undoDuplicateMerge } from "./domain/imports/duplicatePairs";
 import { applyBalanceMatch, undoBalanceMatch } from "./domain/imports/statementBalances";
 import { applyMerges, undoImportBatch } from "./domain/imports/buildImport";
-import VehicleProfileScreen from "./screens/VehicleProfileScreen";
 import { validateFill, normalizeFill } from "./domain/vehicles/fuelFills";
 import { planUndo as planInvoiceUndo } from "./domain/invoices/invoiceImport";
 import Chip from "./components/Chip";
