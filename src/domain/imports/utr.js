@@ -9,6 +9,9 @@ export function extractUtr(row) {
     const m = /(?<!\d)(\d{12})(?!\d)/.exec(text);
     if (m) return m[1];
   }
+  // a card statement's "UPI-UPI-11104450178": the number after it is the payment's reference (not always 12 digits)
+  const bare = /^\s*UPI[-/]UPI[-/](\d{9,14})\s*$/i.exec(text);
+  if (bare) return bare[1];
   const ref = String((row && row.ref) || "").trim();
   return /^\d{12}$/.test(ref) ? ref : "";
 }

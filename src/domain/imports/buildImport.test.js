@@ -123,3 +123,13 @@ test("an imported UPI entry with no vendor gets its name from the UPI text; my U
   const pairs = findImportedDuplicates({ txns: [imported, mine], accountId: "idfc", linkedIds: [] });
   assert.equal(pairs.length, 1); assert.equal(pairs[0].manual.id, "u1"); assert.equal(pairs[0].imported.id, "i1");
 });
+import { extractUtr as extractUtrBare } from "./utr.js";
+test("card row 'UPI-UPI-<ref>' has no shop name: vendor reads 'UPI payment' and the reference is kept", () => {
+  assert.equal(cleanCardMerchant("UPI-UPI-11104450178"), "UPI payment");
+  assert.equal(extractUtrBare({ desc: "UPI-UPI-11104450178" }), "11104450178");
+  assert.equal(cleanCardMerchant("UPI-211737389994-VIPULACH AL ENTERPRISE IN"), "VIPULACH AL ENTERPRISE");   // unchanged
+  const made = buildImportTxns([{ status: "new", row: { importKey: "c|1", date: "2026-10-30", desc: "UPI-UPI-11104450178", ref: "", amountPaise: -628704 } }], { accountId: "cc1", batchId: "b", cards: [], newId: () => "n1", plainExpenses: true, accountType: "cc" });
+  assert.equal(made[0].merchant, "UPI payment"); assert.equal(made[0].transactionRef, "11104450178");
+  const fix = planNameRepairs([{ id: "x", importKey: "k", type: "expense", merchant: "Upi-Upi-11104450178" }]);
+  assert.equal(fix.length, 1); assert.equal(fix[0].to, "UPI payment");
+});

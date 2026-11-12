@@ -20,7 +20,11 @@ export function findCardByText(text, cards) {
 const titleCase = s => String(s || "").toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase()).replace(/\s+/g, " ").trim();
 
 /** A card statement prints "UPI-211737389994-VIPULACH AL ENTERPRISE IN" or "ZOMATO CYBS NEWDELHI IN": drop the UPI prefix and the trailing country code. */
+// A card statement writes a UPI payment made with the card as just "UPI-UPI-<reference>": no shop name at all. Say so instead of showing the raw text.
+const cardVendor = d => { const c = cleanCardMerchant(d); return c === "UPI payment" ? c : titleCase(c); };
+const BARE_UPI = /^\s*UPI[-/]UPI[-/]\d{6,16}\s*$/i;
 export function cleanCardMerchant(desc) {
+  if (BARE_UPI.test(String(desc || ""))) return "UPI payment";
   return String(desc || "").replace(/^.{0,80}?(?<![a-z])UPI[-/_]\d{9,14}[-/_]/i, "").replace(/\s+IN\s*$/i, "").replace(/\s+/g, " ").trim();
 }
 
@@ -32,10 +36,11 @@ export function planNameRepairs(txns) {
     const m = String(t.merchant || "");
     const raw = t.bankNarration || t.desc || "";
     let next = null;
-    if (/^(dr|cr)$/i.test(m)) { const p = parseUpiNarration(raw); next = p && p.name ? titleCase(p.name) : null; }
-    else if (/^.{0,80}?(?<![a-z])upi[-/_]\d{9,14}[-/_]/i.test(m)) next = titleCase(cleanCardMerchant(m));
+    if (BARE_UPI.test(m)) next = "UPI payment";
+    else if (/^(dr|cr)$/i.test(m)) { const p = parseUpiNarration(raw); next = p && p.name ? titleCase(p.name) : null; }
+    else if (/^.{0,80}?(?<![a-z])upi[-/_]\d{9,14}[-/_]/i.test(m)) next = cardVendor(m);
     // no vendor at all, only the raw "UPI-<ref>-NAME" text (the screen then shows that text as the title): take the name from it
-    else if (!m.trim() && /^.{0,80}?(?<![a-z])upi[-/_]\d{9,14}[-/_]/i.test(raw)) { const n = extractUpiMerchant(raw) || titleCase(cleanCardMerchant(raw)); if (n && !/^upi\b/i.test(n)) next = n; }
+    else if (!m.trim() && /^.{0,80}?(?<![a-z])upi[-/_]\d{9,14}[-/_]/i.test(raw)) { const n = extractUpiMerchant(raw) || cardVendor(raw); if (n && !/^upi\b/i.test(n)) next = n; }
     if (next && next !== m) out.push({ id: t.id, from: m, to: next });
   }
   return out;
@@ -74,7 +79,7 @@ export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plai
     }
     // A bank debit whose narration carries a UPI reference was paid by UPI: say so in the entry's Payment Method (the same field the Add form fills for a bank account).
     const byUpi = accountType === "bank" && !plainExpenses && Boolean(extractUtr(row));
-    return { ...base, type: "expense", accId: accountId, merchant: plainExpenses ? titleCase(cleanCardMerchant(row.desc)) : cleanMerchant(row.desc), ...(byUpi ? { paymentMethod: "UPI" } : {}) };
+    return { ...base, type: "expense", accId: accountId, merchant: plainExpenses ? cardVendor(row.desc) : cleanMerchant(row.desc), ...(byUpi ? { paymentMethod: "UPI" } : {}) };
   });
 }
 
