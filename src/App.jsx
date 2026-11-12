@@ -7500,7 +7500,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       <input data-testid="fuel-litres" style={inp} type="text" inputMode="decimal" placeholder="Litres" value={fuelLitres} onChange={e=>setFuelLitres(e.target.value.replace(/[^0-9.]/g,""))}/>
                     </div>
                     <label style={{ display:"flex",alignItems:"center",gap:8,color:T.text,fontSize:12,marginTop:8 }}>
-                      <input data-testid="fuel-full" type="checkbox" checked={fuelFull} onChange={e=>setFuelFull(e.target.checked)}/>Filled the tank to full (untick for a top-up)
+                      <input data-testid="fuel-full" type="checkbox" checked={fuelFull} onChange={e=>setFuelFull(e.target.checked)}/>Filled the tank to full, up to the top (some fuel already left is fine; untick only for a part top-up)
                     </label>
                     {fuelCheck&&!fuelCheck.ok&&<div data-testid="fuel-odometer-error" style={{ color:T.warn,fontSize:11,marginTop:6 }}>{Object.values(fuelCheck.errors)[0]} The expense will still be saved without the refuel.</div>}
                     {fuelCheck&&fuelCheck.ok&&fuelCheck.warnings.map(w=><div key={w} style={{ color:T.warn,fontSize:11,marginTop:6 }}>{w}</div>)}

@@ -36,7 +36,7 @@ export default function FuelFillSheet({ T, vehicle, fills, existing = null, sym 
         </div>
         <label style={{ display: "flex", alignItems: "center", gap: 10, minHeight: TOUCH.min, color: T.text, fontSize: 15, cursor: "pointer" }}>
           <input data-testid="fill-full" type="checkbox" checked={full} onChange={e => setFull(e.target.checked)} style={{ width: 22, height: 22 }} />
-          <span>Filled the tank to full<span style={{ display: "block", color: T.sub, fontSize: 12 }}>Untick for a top-up. Mileage is worked out between full tanks.</span></span>
+          <span>Filled the tank to full<span style={{ display: "block", color: T.sub, fontSize: 12 }}>Tick when you filled up to the top, even if some fuel was already left in the tank. Untick only if you stopped short (a part top-up). Mileage is worked out between fills to the top.</span></span>
         </label>
         <div><label style={lbl}>Note (optional)</label><input data-testid="fill-note" value={note} maxLength={200} onChange={e => setNote(e.target.value)} style={inp} /></div>
         {tried && v.warnings.map((w, i) => <div key={i} data-testid="fill-warning" style={{ color: T.warn, fontSize: 13, fontWeight: 700 }}>⚠️ {w}</div>)}
