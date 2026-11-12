@@ -24,6 +24,7 @@ import { mergeVendors, undoVendorMerge } from "./domain/vendors/vendorMerge";
 import { addAlias as addVendorAlias, removeAlias as removeVendorAlias } from "./domain/vendors/payees";
 import { upiIdsForName, addUpiIds as addPersonUpiIds, removeUpiIds as removePersonUpiIds } from "./domain/imports/upiId";
 import { useSmsInbox } from "./native/useSmsInbox";
+import AddActivateSheet from "./components/billers/AddActivateSheet";
 import { isPettyCash, getPettyCashTotalsByPerson, applyPettyCash } from "./domain/person/pettyCash";
 import { expenseGaps, summarizeGaps, GAP_LABELS } from "./domain/transactions/completeness";
 import { extractDMonYDate, extractUpiMerchant } from "./domain/sms/smsFields";
@@ -18149,64 +18150,20 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             tile's own routing (Insurance/School Fees/Credit Card/generic Add Biller/category
             accounts view) is unchanged from before — only where it's reachable from changed. */}
         {showAddActivateSheet && (
-          <div onClick={e=>{ if(e.target===e.currentTarget) setShowAddActivateSheet(false); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:305,display:"flex",alignItems:"flex-end",justifyContent:"center" }}>
-            <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
-              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-                <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Add / Activate</div>
-                <button onClick={()=>setShowAddActivateSheet(false)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
-              </div>
-              {[
-                { label:"Recharge", types:["Fastag","Mobile Postpaid","Mobile Prepaid","DTH","Broadband","Landline","Cable TV","Metro Recharge","NCMC Recharge","EV Recharge"] },
-                { label:"Utility Bills", types:["Electricity","LPG Gas","Piped Gas","Water"] },
-                { label:"Finances", types:["Credit Card","Recurring Deposit","NPS","Insurance","Forex"] },
-                { label:"Education & Fitness", types:["Education Fees","Gym / Fitness","Club Membership","Hospital"] },
-                { label:"Others", types:["Donation","Municipal Services","Municipal Tax","Society Maintenance","Rental","Prepaid Meter","eChallan","Fleet Card","B2B","Other Subscription","Other"] },
-              ].map(cat=>(
-                <div key={cat.label} style={{ padding:"8px 0 4px" }}>
-                  <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:12 }}>{cat.label}</div>
-                  <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12 }}>
-                    {cat.types.map(type=>{
-                      const billersOfType = billers.filter(b=>b.type===type);
-                      const accsOfType = billerAccounts.filter(ba=>ba.type===type);
-                      const unpaid = accsOfType.reduce((sum,ba)=>sum+bills.filter(b=>String(b.billerAccountId)===String(ba.id)&&isOpenPayableBill(b)).length,0);
-                      return (
-                        <div key={type} onClick={()=>{
-                          setShowAddActivateSheet(false);
-                          // Insurance and School/Education Fees don't participate in the
-                          // billerAccounts hierarchy (neither writes to billerAccountId in
-                          // practice) — routing them into the generic flow would be a dead end.
-                          // Route straight to their real, domain-specific screens instead.
-                          if(type==="Insurance"){ setShowInsuranceList(true); return; }
-                          if(type==="School Fees" || type==="Education Fees"){ setShowSchoolFeesList(true); return; }
-                          // Credit Card WP: a card is an Account first (rule 1) — this category
-                          // must resolve to the real Credit Card Accounts and their statement
-                          // state, never the generic Biller-list flow every recurring-payment type
-                          // below uses, same reasoning as the Insurance/School Fees routes above.
-                          if(type==="Credit Card"){ setShowCreditCardsList(true); return; }
-                          if(billersOfType.length===0){
-                            setAddBillerPresetType(type);
-                            setShowAddBillerModal(true);
-                          } else {
-                            setCategoryAccountsView(type);
-                          }
-                        }} style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:6,cursor:"pointer",position:"relative" }}>
-                          {unpaid>0&&<div style={{ position:"absolute",top:-4,right:4,background:T.danger,color:"#fff",borderRadius:20,padding:"1px 5px",fontSize:8,fontWeight:800 }}>{unpaid}</div>}
-                          <div style={{ width:56,height:56,background:T.input,borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,border:`1px solid ${T.border}` }}>{getBillerIcon(type)}</div>
-                          <div style={{ color:T.sub,fontSize:9,fontWeight:600,textAlign:"center",lineHeight:1.2 }}>{type}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {/* D1 — "Add a one-off bill with no connection": the genuinely connectionless case,
-                distinct from D6's Which-connection step above. Opens the same AddBillModal with no
-                defaultBillerAccountId — no provider prefill, a real category picker shown. */}
-            <div style={{ padding:"14px 0 0",textAlign:"center",borderTop:`1px solid ${T.border}`,marginTop:16 }}>
-              <button onClick={()=>{ setShowAddActivateSheet(false); setDefaultBillerAccountId(""); setShowAddBill(true); }} style={{ background:"none",border:"none",color:T.accent,fontSize:12.5,fontWeight:700,cursor:"pointer",padding:"8px 0" }}>Add a one-off bill with no connection</button>
-            </div>
-          </div>
+          <AddActivateSheet T={T} iconFor={getBillerIcon}
+            statusFor={type=>{ const accs=billerAccounts.filter(ba=>ba.type===type); return { accounts:accs.length, unpaid:accs.reduce((sum,ba)=>sum+bills.filter(b=>String(b.billerAccountId)===String(ba.id)&&isOpenPayableBill(b)).length,0) }; }}
+            onClose={()=>setShowAddActivateSheet(false)}
+            onOneOff={()=>{ setShowAddActivateSheet(false); setDefaultBillerAccountId(""); setShowAddBill(true); }}
+            onPick={type=>{
+              setShowAddActivateSheet(false);
+              // Insurance and School/Education Fees don't participate in the billerAccounts hierarchy: route straight to their own screens.
+              if(type==="Insurance"){ setShowInsuranceList(true); return; }
+              if(type==="School Fees" || type==="Education Fees"){ setShowSchoolFeesList(true); return; }
+              // Credit Card: a card is an Account first — its category resolves to the real Credit Card accounts, never the generic Biller-list flow.
+              if(type==="Credit Card"){ setShowCreditCardsList(true); return; }
+              if(billers.filter(b=>b.type===type).length===0){ setAddBillerPresetType(type); setShowAddBillerModal(true); }
+              else setCategoryAccountsView(type);
+            }}/>
         )}
 
         {/* BILL HISTORY TAB */}
