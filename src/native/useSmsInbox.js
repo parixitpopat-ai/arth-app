@@ -19,11 +19,20 @@ export function useSmsInbox({ accounts, txns, people }) {
   const busy = useRef(false), live = useRef({});
   live.current = { held, handled, accounts };
 
+  // Never change what is on screen while the person is typing: applying new messages re-draws the app and would lose what they typed.
+  // The look simply waits; it runs again a moment after they leave the field (and every 20 s otherwise).
+  const typing = () => {
+    if (typeof document === "undefined") return false;
+    const a = document.activeElement;
+    if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT" || a.isContentEditable)) return true;
+    // also while ANY visible text box already holds something (e.g. a form half filled in, focus moved to a button): it would be lost on re-draw
+    return [...document.querySelectorAll("input, textarea")].some(el => el.offsetParent !== null && !["checkbox", "radio", "button", "submit", "range", "color", "file", "hidden", "date", "time", "datetime-local", "month", "week"].includes(el.type) && String(el.value || "").trim() !== "");
+  };
   const drain = useCallback(async () => {
-    if (!available || busy.current) return;
+    if (!available || busy.current || typing()) return;
     busy.current = true;
     try {
-      const st = await smsStatus(); setPerm(st);
+      const st = await smsStatus(); setPerm(prev => (prev.granted === st.granted && prev.receive === st.receive && prev.notify === st.notify ? prev : st));   // same answer = no state change = no re-render of the whole app
       if (!st.receive) return;
       const q = await smsTakePending();
       if (!q.length) return;
@@ -40,8 +49,11 @@ export function useSmsInbox({ accounts, txns, people }) {
     drain();
     const onVis = () => { if (document.visibilityState === "visible") drain(); };
     document.addEventListener("visibilitychange", onVis);
-    const t = setInterval(() => { if (document.visibilityState === "visible") drain(); }, 20000);
-    return () => { document.removeEventListener("visibilitychange", onVis); clearInterval(t); };
+    let later = null; const onBlur = () => { clearTimeout(later); later = setTimeout(() => drain(), 600); };   // left a field: catch up
+    document.addEventListener("focusout", onBlur);
+    const every = (typeof window !== "undefined" && window.__ARTH_SMS_TEST__ && Number(window.__ARTH_SMS_TEST__.pollMs)) || 20000;   // test hook only
+    const t = setInterval(() => { if (document.visibilityState === "visible") drain(); }, every);
+    return () => { document.removeEventListener("visibilitychange", onVis); document.removeEventListener("focusout", onBlur); clearTimeout(later); clearInterval(t); };
   }, [available, drain]);
 
   const payeeByUpiId = useMemo(() => payeeNamesByUpiId(txns, people), [txns, people]);
@@ -61,7 +73,7 @@ export function useSmsInbox({ accounts, txns, people }) {
     setHandled(prev => { const n = [...new Set([...prev, id])].slice(-500); save(HANDLED, n); return n; });
     setHeld(prev => { const n = prev.filter(i => i.id !== id); save(HELD, n); return n; });
   }, []);
-  const request = useCallback(async () => { const st = await smsRequest(); setPerm(st); if (st.receive) drain(); return st; }, [drain]);
+  const request = useCallback(async () => { const st = await smsRequest(); setPerm(prev => (prev.granted === st.granted && prev.receive === st.receive && prev.notify === st.notify ? prev : st)); if (st.receive) drain(); return st; }, [drain]);
   const accept = useCallback(item => draftFor(item, accounts, payeeByUpiId), [accounts, payeeByUpiId]);
 
   return { available, perm, items, request, accept, discard: finish, done: finish, drain };
