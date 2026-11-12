@@ -12,7 +12,7 @@ const CREDIT = /\b(credited|received|deposited|refund(?:ed)?|reversal|cashback)\
 const OTP = /\b(otp|one[- ]time|verification code|cvv)\b/i;
 // "Your A/c XX5748 debited by Rs. 180.00 on 09/11/26; ICECREAM credited": the verb right after OUR account number is the direction; the second verb
 // describes the other party. A message with a second leg that names another account ("… and credited to A/c XX1234") is a transfer and is not guessed.
-const OWN_VERB = /\b(?:a\/c|acct|account|card)\s*(?:no\.?)?\s*[x*]*\d{3,}\s+(debited|credited)\b/i;
+const OWN_VERB = /\b(?:a\/c|acct|account|card)\b[^;.\d]{0,25}?\d{3,}\s+(?:is\s+|was\s+|has been\s+)?(debited|credited)\b/i;
 const SECOND_LEG_TO_ACCOUNT = /\b(?:debited|credited)\b[^.;]{0,30}\b(?:a\/c|acct|account)\s*(?:no\.?)?\s*[x*]*\d{3,}/i;
 const ownVerbOf = t => { const m = OWN_VERB.exec(t); return m ? m[1].toLowerCase() : ""; };
 // Messages that mention an amount and "debited" but are NOT a money movement: a payment that WILL be taken, a statement/bill notice, a due-date reminder.
@@ -54,6 +54,8 @@ const last4Of = t => {
   for (const rx of [/(?:a\/c|acct|account|card|ending(?:\s+with)?|last\s*4)[^\d]{0,12}(\d{4})\b/ig, /(?:xx|x{2,}|\*{2,})\s*(\d{4})\b/ig]) for (const m of t.matchAll(rx)) out.push(m[1]);
   return [...new Set(out)];
 };
+// "a/c ending XXXXXXXX748": some banks show only 3 digits. Used only when no 4-digit ending is present, and only to pick an account whose last 4 END with them.
+const tail3Of = t => { const m = /[x*]{2,}\s*(\d{3})(?!\d)/i.exec(t); return m ? m[1] : ""; };
 const dateOf = (t, receivedMs) => {
   const named = extractDMonYDate(t);
   if (named) return named;
@@ -94,7 +96,7 @@ export function parseMoneySms(sms) {
   // same wording the statement reader produces, so the vendor, UTR and UPI matching rules apply unchanged
   const desc = isUpi ? `UPI-${utr || "0"}-${who || "UPI payment"}`.replace(/-0-/, "-") : (who || body.slice(0, 60));
   const isCredit = own ? own === "credited" : credit && !/\b(debited|spent)\b/i.test(body);
-  return { ok: true, smsId: String(sms.id != null ? sms.id : `${sms.date}|${body.slice(0, 40)}`), last4s: last4Of(body),
+  return { ok: true, smsId: String(sms.id != null ? sms.id : `${sms.date}|${body.slice(0, 40)}`), last4s: last4Of(body), tail3: last4Of(body).length ? "" : tail3Of(body),
     row: { line: 0, date, valueDate: null, desc, ref: utr, amountPaise: isCredit ? paise : -paise, balancePaise: null } };
 }
 
@@ -111,7 +113,8 @@ export function sortSmsToAccounts(messages, accounts, { seenIds = [] } = {}) {
     if (!p) continue;
     if (!p.ok) { unreadable.push({ why: p.why, text: String(sms.body || "").slice(0, 60) }); continue; }
     if (seen.has(p.smsId)) { skippedSeen++; continue; }
-    const hits = (accounts || []).filter(a => a && a.last4 && p.last4s.includes(String(a.last4)));
+    let hits = (accounts || []).filter(a => a && a.last4 && p.last4s.includes(String(a.last4)));
+    if (!hits.length && p.tail3) hits = (accounts || []).filter(a => a && a.last4 && String(a.last4).endsWith(p.tail3));   // 3 visible digits: only if exactly one account fits
     if (hits.length !== 1) { noAccount.push(p); continue; }            // none or ambiguous: the person decides, never guessed
     const k = String(hits[0].id); byAccount.set(k, [...(byAccount.get(k) || []), p]);
   }

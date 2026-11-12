@@ -80,3 +80,15 @@ test("old imported notices are found; my own entries and real charges are not", 
   ];
   assert.deepEqual(findNoticeEntries(txns).map(t => t.id), [1, 2]);
 });
+test("'a/c ending XXXXXXXX748 is debited by Rs. 10000.00 on 01-11-26; RAJ credited' is a debit, matched by 3 visible digits when only one account fits", () => {
+  const sms = { id: 21, body: "Your a/c ending XXXXXXXX748 is debited by Rs. 10000.00 on 01-11-26; RAJ ADHIYA credited. UPI Ref 610512345681", date: 1 };
+  const p = parseMoneySms(sms);
+  assert.equal(p.ok, true); assert.equal(p.row.amountPaise, -1000000); assert.equal(p.row.date, "2026-11-01"); assert.match(p.row.desc, /RAJ ADHIYA/); assert.equal(p.tail3, "748");
+  const one = sortSmsToAccounts([sms], [{ id: "idfc", last4: "5748" }, { id: "icici", last4: "0170" }]);
+  assert.equal(one.byAccount.get("idfc").length, 1);
+  const two = sortSmsToAccounts([sms], [{ id: "a", last4: "5748" }, { id: "b", last4: "1748" }]);
+  assert.equal(two.byAccount.size, 0); assert.equal(two.noAccount.length, 1);          // two accounts fit: not guessed
+});
+test("'is debited … credited to A/c XXXX' (a second leg naming an account) is still a transfer, not guessed", () => {
+  assert.equal(parseMoneySms({ id: 22, body: "Your a/c ending XXXXXXXX748 is debited by Rs. 500.00 on 01-11-26 and credited to a/c XXXXXX1234", date: 1 }).ok, false);
+});
