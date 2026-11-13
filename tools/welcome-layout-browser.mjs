@@ -13,5 +13,12 @@ for (const w of [320, 360, 390]) for (const s of ["welcome", "unknown", "profile
   const ok = m.scrollW <= m.innerW && m.worst <= m.innerW; if (!ok) bad++;
   console.log(ok ? "FITS    " : "OVERFLOWS", w, s, JSON.stringify(m));
 }
+{ // order and weight: Sign In first, then Sign Up, same style
+  const page = await (await browser.newContext({ viewport: { width: 390, height: 740 } })).newPage();
+  await page.goto(`${APP}tools/welcome-harness.html?s=welcome`); await page.waitForTimeout(1200);
+  const b = await page.evaluate(() => { const i = document.querySelector('[data-testid="welcome-signin"]'), u = document.querySelector('[data-testid="welcome-signup"]'); if (!i || !u) return null; const ci = getComputedStyle(i), cu = getComputedStyle(u); return { signInAbove: i.getBoundingClientRect().top < u.getBoundingClientRect().top, sameBg: ci.backgroundColor === cu.backgroundColor, sameSize: ci.fontSize === cu.fontSize && i.getBoundingClientRect().height === u.getBoundingClientRect().height }; });
+  const ok = b && b.signInAbove && b.sameBg && b.sameSize; if (!ok) bad++;
+  console.log(ok ? "OK      " : "WRONG   ", "welcome order/weight: Sign In above Sign Up, same look", JSON.stringify(b));
+}
 await browser.close(); try { process.kill(-server.pid); } catch {}
 process.exit(bad ? 1 : 0);

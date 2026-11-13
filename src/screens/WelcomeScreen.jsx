@@ -14,17 +14,20 @@ export default function WelcomeScreen({ onChoose, T }) {
         <div style={{ fontSize: 26, fontWeight: 900, color: T.text, marginBottom: 8 }}>Welcome to Arth</div>
         <div style={{ fontSize: 14, color: T.sub, marginBottom: 40 }}>Your money. One place.</div>
 
+        {/* Sign In first, then Sign Up, both the same weight: most people opening a fresh install are returning (reinstall, new phone). */}
         <button
-          onClick={() => onChoose("signup")}
+          data-testid="welcome-signin"
+          onClick={() => onChoose("signin")}
           style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", cursor: "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Nunito,sans-serif", marginBottom: 12 }}
         >
-          Sign Up
+          Sign In
         </button>
         <button
-          onClick={() => onChoose("signin")}
-          style={{ width: "100%", padding: 14, borderRadius: 14, border: `1px solid ${T.border}`, cursor: "pointer", background: "none", color: T.text, fontSize: 15, fontWeight: 800, fontFamily: "Nunito,sans-serif" }}
+          data-testid="welcome-signup"
+          onClick={() => onChoose("signup")}
+          style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", cursor: "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Nunito,sans-serif" }}
         >
-          Sign In
+          Sign Up
         </button>
       </div>
     </div>
