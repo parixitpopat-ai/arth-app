@@ -35,3 +35,18 @@ test("Accept opens the Add form filled in: name (a known UPI id wins), amount, d
   assert.match(d.prefill.who, /harikesh/i);
   assert.equal(nameFor({ ...a, upiId: "hari@ybl" }, accounts, new Map([["hari@ybl", "Hari Chai"]])), "Hari Chai");
 });
+
+test("a message that names nobody keeps its text OUT of the name; a masked 6-digit account number still finds the account", () => {
+  const BODY = "Your A/C Xxxxx525748 Is Credited With Inr 352.00 On 13/11/26";
+  const acc = [{ id: "idfc", type: "bank", name: "IDFC", last4: "5748" }];
+  const { items } = toPendingItems([{ id: "q1", address: "AX-BANK", body: BODY, date: Date.UTC(2026, 10, 13) }], acc);
+  assert.equal(items.length, 1); assert.equal(items[0].accountId, "idfc");
+  assert.equal(items[0].amountPaise, 35200); assert.equal(items[0].date, "2026-11-13");
+  assert.equal(items[0].desc, "Bank credit");
+  const d = draftFor(items[0], acc, new Map());
+  assert.equal(d.type, "income"); assert.equal(d.prefill.who, "");
+  assert.doesNotMatch(JSON.stringify(d), /Xxxxx|Is Credited/);
+  // an unnamed debit says "Bank debit", and a known UPI id still wins for the name
+  const dr = toPendingItems([{ id: "q2", body: "Your A/c XX5748 is debited by Rs. 90.00 on 12/11/26", date: 1 }], acc).items[0];
+  assert.equal(dr.desc, "Bank debit"); assert.equal(draftFor(dr, acc, new Map()).prefill.who, "");
+});

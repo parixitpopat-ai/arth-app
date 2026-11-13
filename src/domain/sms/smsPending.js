@@ -19,7 +19,7 @@ export function toPendingItems(messages, accounts, { haveIds = [] } = {}) {
     if (have.has(p.smsId)) return;
     have.add(p.smsId);
     const keyed = withImportKeys([{ ...p.row, line: 1 }], accId || "sms")[0];
-    items.push({ id: p.smsId, accountId: accId || "", date: p.row.date, amountPaise: p.row.amountPaise, desc: p.row.desc, ref: p.row.ref || "", upiId: p.row.upiId || "", importKey: keyed.importKey, row: keyed });
+    items.push({ id: p.smsId, accountId: accId || "", date: p.row.date, amountPaise: p.row.amountPaise, desc: p.row.desc, ref: p.row.ref || "", upiId: p.row.upiId || "", ...(p.row.noName ? { noName: true } : {}), importKey: keyed.importKey, row: keyed });
   };
   for (const [accId, list] of sorted.byAccount) list.forEach(p => push(p, accId));
   sorted.noAccount.forEach(p => push(p, ""));
@@ -50,6 +50,7 @@ export function itemStatuses(items, { txns, accounts }) {
 export function nameFor(item, accounts, payeeByUpiId) {
   const known = item.upiId && payeeByUpiId && payeeByUpiId.get ? payeeByUpiId.get(item.upiId) : "";
   if (known) return known;
+  if (item.noName) return "";                                          // the message names nobody: leave the box for the person to fill
   const acc = (accounts || []).find(a => String(a.id) === String(item.accountId));
   const n = acc && acc.type === "cc" ? titleCase(cleanCardMerchant(item.desc)) : cleanMerchant(item.desc);
   return n || titleCase(cleanCardMerchant(item.desc));

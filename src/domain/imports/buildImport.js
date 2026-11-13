@@ -6,6 +6,8 @@ import { extractUpiMerchant } from "../sms/smsFields.js";
 import { parseUpiNarration, describeUpiNarration } from "./upiNarration.js";
 import { extractUtr } from "./utr.js";
 import { extractUpiId } from "./upiId.js";
+import { looksLikeMoneySms } from "../sms/smsInbox.js";
+const looksLikeBankMessage = text => looksLikeMoneySms(text);
 
 const BILL_WORDS = /\b(?:credit\s*card|cc|card)\b/i, PAY_WORDS = /\b(?:bill|payment|paid|dues?|statement|autopay)\b/i;
 
@@ -30,13 +32,23 @@ export function cleanCardMerchant(desc) {
 }
 
 /** Entries an earlier version named "Dr"/"Cr" (the UPI/DR/… segment taken as the vendor) or with a "Upi-<ref>-…" vendor, with the name they should have. Read-only plan. */
+// the entry's title falls back to its description: when that too is the whole message, give it a neutral label
+function pushDescRepair(out, t, label) {
+  const d = String(t.desc || "");
+  if (d.length >= 25 && looksLikeBankMessage(d)) out.push({ id: t.id, from: d, to: label, field: "desc" });
+}
 export function planNameRepairs(txns) {
   const out = [];
   for (const t of txns || []) {
-    if (!t || !t.importKey || t.type !== "expense") continue;
+    if (!t || !t.importKey || (t.type !== "expense" && t.type !== "income")) continue;
     const m = String(t.merchant || "");
+    if (t.type === "income") {                         // income entries: only the "vendor is a whole bank message" repair applies
+      if (m.length >= 25 && looksLikeBankMessage(m)) { out.push({ id: t.id, from: m, to: "" }); pushDescRepair(out, t, "Bank credit"); }
+      continue;
+    }
     const raw = t.bankNarration || t.desc || "";
     let next = null;
+    if (m.length >= 25 && looksLikeBankMessage(m)) { out.push({ id: t.id, from: m, to: "" }); pushDescRepair(out, t, "Bank debit"); continue; }          // an earlier version used the message text itself as the vendor
     if (BARE_UPI.test(m)) next = "UPI payment";
     else if (/^(dr|cr)$/i.test(m)) { const p = parseUpiNarration(raw); next = p && p.name ? titleCase(p.name) : null; }
     else if (/^.{0,80}?(?<![a-z])upi[-/_]\d{9,14}[-/_]/i.test(m)) next = cardVendor(m);
@@ -89,7 +101,7 @@ export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plai
     }
     // A bank debit whose narration carries a UPI reference was paid by UPI: say so in the entry's Payment Method (the same field the Add form fills for a bank account).
     const byUpi = accountType === "bank" && !plainExpenses && Boolean(extractUtr(row));
-    return { ...base, type: "expense", accId: accountId, merchant: knownName || (plainExpenses ? cardVendor(row.desc) : cleanMerchant(row.desc)), ...(upiId ? { upiId } : {}), ...(byUpi ? { paymentMethod: "UPI" } : {}) };
+    return { ...base, type: "expense", accId: accountId, merchant: knownName || (row.noName ? "" : (plainExpenses ? cardVendor(row.desc) : cleanMerchant(row.desc))), ...(upiId ? { upiId } : {}), ...(byUpi ? { paymentMethod: "UPI" } : {}) };
   });
 }
 

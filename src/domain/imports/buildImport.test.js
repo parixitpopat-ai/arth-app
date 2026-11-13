@@ -144,3 +144,12 @@ test("imported entries with an empty reference get the number from their stateme
   const r = planRefRepairs(txns).filter(c => c.filled);
   assert.deepEqual(r.map(c => [c.id, c.to]), [["a", "11104450178"], ["b", "412345678901"]]);
 });
+test("an imported entry whose vendor is a whole bank message is repaired to a blank vendor; an unnamed SMS row imports with no vendor", () => {
+  const MSG = "Your A/C Xxxxx525748 Is Credited With Inr 352.00 On 13/11/26";
+  const fix = planNameRepairs([{ id: "i1", type: "income", importKey: "k", merchant: MSG }, { id: "e1", type: "expense", importKey: "k2", merchant: MSG.replace("Credited", "Debited") }, { id: "ok", type: "income", importKey: "k3", merchant: "Salary Acme Pvt Ltd" }]);
+  assert.deepEqual(fix.map(f => [f.id, f.to, f.field || "merchant"]), [["i1", "", "merchant"], ["e1", "", "merchant"]]);     // merchants only here: the descriptions in this case are short
+  const both = planNameRepairs([{ id: "i2", type: "income", importKey: "k", merchant: MSG, desc: MSG }, { id: "e2", type: "expense", importKey: "k", merchant: MSG.replace("Credited", "Debited"), desc: MSG.replace("Credited", "Debited") }]);
+  assert.deepEqual(both.map(f => [f.id, f.to, f.field || "merchant"]), [["i2", "", "merchant"], ["i2", "Bank credit", "desc"], ["e2", "", "merchant"], ["e2", "Bank debit", "desc"]]);
+  const made = buildImportTxns([{ status: "new", row: { importKey: "c|1", date: "2026-11-12", desc: "Bank debit", noName: true, ref: "", amountPaise: -9000 } }], { accountId: "cc1", batchId: "b", cards: [], newId: () => "n1", plainExpenses: true, accountType: "cc" });
+  assert.equal(made[0].merchant, "");
+});

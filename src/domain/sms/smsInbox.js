@@ -53,6 +53,8 @@ export function looksLikeMoneySms(body) {
 const last4Of = t => {
   const out = [];
   for (const rx of [/(?:a\/c|acct|account|card|ending(?:\s+with)?|last\s*4)[^\d]{0,12}(\d{4})\b/ig, /(?:xx|x{2,}|\*{2,})\s*(\d{4})\b/ig]) for (const m of t.matchAll(rx)) out.push(m[1]);
+  // "A/C Xxxxx525748": a masked number longer than four digits; its LAST four are the ones banks mean by "ending"
+  for (const m of t.matchAll(/(?:x{2,}|\*{2,})\s*(\d{5,})\b/ig)) out.push(m[1].slice(-4));
   return [...new Set(out)];
 };
 // "a/c ending XXXXXXXX748": some banks show only 3 digits. Used only when no 4-digit ending is present, and only to pick an account whose last 4 END with them.
@@ -95,10 +97,13 @@ export function parseMoneySms(sms) {
   const who = merchantOf(body);
   const isUpi = /\bupi\b/i.test(body) || Boolean(utr);
   // same wording the statement reader produces, so the vendor, UTR and UPI matching rules apply unchanged
-  const desc = isUpi ? `UPI-${utr || "0"}-${who || "UPI payment"}`.replace(/-0-/, "-") : (who || body.slice(0, 60));
+  const isCreditDir = own ? own === "credited" : credit && !/\b(debited|spent)\b/i.test(body);
+  // A message that names nobody ("A/C … is credited with INR 352.00") must NOT become its own vendor name: use a neutral label and say there is no name.
+  const desc = isUpi ? `UPI-${utr || "0"}-${who || "UPI payment"}`.replace(/-0-/, "-") : (who || (isCreditDir ? "Bank credit" : "Bank debit"));
+  const noName = !isUpi && !who;
   const isCredit = own ? own === "credited" : credit && !/\b(debited|spent)\b/i.test(body);
   return { ok: true, smsId: String(sms.id != null ? sms.id : `${sms.date}|${body.slice(0, 40)}`), last4s: last4Of(body), tail3: last4Of(body).length ? "" : tail3Of(body),
-    row: { line: 0, date, valueDate: null, desc, ref: utr, upiId: extractUpiId(body), amountPaise: isCredit ? paise : -paise, balancePaise: null } };
+    row: { line: 0, date, valueDate: null, desc, ...(noName ? { noName: true } : {}), ref: utr, upiId: extractUpiId(body), amountPaise: isCredit ? paise : -paise, balancePaise: null } };
 }
 
 /**
