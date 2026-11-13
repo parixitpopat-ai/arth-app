@@ -15,8 +15,8 @@ export default function AddActivateSheet({ T, iconFor, statusFor, onPick, onOneO
   const [entered, setEntered] = useState(false);
   const [closing, setClosing] = useState(false);
   useEffect(() => { const id = requestAnimationFrame(() => setEntered(true)); return () => cancelAnimationFrame(id); }, []);
-  useEffect(() => { const onKey = e => { if (e.key === "Escape") close(); }; document.addEventListener("keydown", onKey); return () => document.removeEventListener("keydown", onKey); }); // eslint-disable-line react-hooks/exhaustive-deps
   const close = () => { setClosing(true); setTimeout(onClose, 200); };
+  useEffect(() => { const onKey = e => { if (e.key === "Escape") close(); }; document.addEventListener("keydown", onKey); return () => document.removeEventListener("keydown", onKey); }); // eslint-disable-line react-hooks/exhaustive-deps
   const pick = type => { onPick(type); };            // the caller closes the sheet and routes; no animation delay so the next screen opens at once
 
   const shown = useMemo(() => filterGroups(groups, query), [groups, query]);
