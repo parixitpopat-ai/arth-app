@@ -220,7 +220,7 @@ import { getGroupDefaultIntent } from "./domain/group/defaultIntent";
 import { planItemBillLinks, withItemBillContributions, getDroppedItemBills } from "./domain/obligations/itemBillLinks";
 import { withBillContributionForTxn, withoutBillContributionsForTxn, withoutBillContributionsForTxns, reopenBillsPaidByDeletedTxns } from "./domain/obligations/billContributionSync";
 import { nextBillMatchChoice, getBillChoicesToShow, getBillLinkAmountMismatch, mergePaymentIntoExistingBill } from "./domain/bills/billPaymentLink";
-import { getLinkablePayments, planLinkExistingPayment } from "./domain/bills/linkExistingPayment";
+import { findUsableExpenses, planCover, applyAllocations } from "./domain/bills/billAllocation";
 import StatCard from "./components/StatCard";
 import Segmented from "./components/Segmented";
 import PeriodSelector from "./components/PeriodSelector";
@@ -1871,20 +1871,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     setMarkingBillPaid(null);
   }, [billerAccounts, contributions, membershipRelationships, loans, txns, accounts]);
 
-  // "I already paid this": links an EARLIER expense to a recharge/renewal instead of recording a second payment.
-  // Same writes the "Bill matched" suggestion makes (Contribution, bill paid, the expense points back at the bill), and it
-  // changes no account: the expense already moved the money. At most what is still owed is applied (ADR-038).
-  const linkExistingPaymentToBill = useCallback((bill, txn)=>{
-    const plan = planLinkExistingPayment(bill, txn, contributions);
-    if(!(plan.applied>0)) return;
-    setBills(p=>p.map(x=>x.id===bill.id?{...x,
-      ...(plan.becomesPaid?{status:"paid",paidDate:txn.date||todayStr()}:{}),
-      ...(plan.isFirst?{paidByTxnId:txn.id}:{}),
-      lastPaidAmount:Number(txn.amount||0),lastPaidDate:txn.date||todayStr(),lastPaidAt:txn.id}:x));
-    setContributions(prev=>withBillContributionForTxn(prev, { billId:bill.id, txnId:txn.id, amount:plan.applied, txnAmount:Number(txn.amount||0) }, genId));
-    setTxns(p=>p.map(x=>String(x.id)===String(txn.id)?{...x,isBillPayment:true,billInvoiceNo:bill.invoiceNo||"",paidBillId:bill.id,paidBillName:bill.name}:x));
+  // "I already paid this": uses an EARLIER expense (money you already spent) for one or several bills of a connection instead of recording a second
+  // payment. Same writes the "Bill matched" suggestion makes, spread over the bills (domain/bills/billAllocation.js): a Contribution per bill, each bill's
+  // balance/status follows, the expense becomes a bill payment. It changes no account (the expense already moved the money) and rounds nothing.
+  const useExistingPaymentForBills = useCallback((txn, allocations)=>{
+    const r = applyAllocations({ txn, allocations, bills, contributions, genId });
+    if(!(r.applied>0)) return;
+    setBills(r.bills);
+    setContributions(r.contributions);
+    setTxns(p=>p.map(x=>String(x.id)===String(txn.id)?{...x,...r.txnPatch}:x));
+    setToast({ message:`Used ${sym}${fmt(r.applied)} of this payment for ${allocations.length} bill${allocations.length===1?"":"s"}` });
     setMarkingBillPaid(null);
-  }, [contributions]);
+  }, [bills, contributions, sym]);
 
   // ADR-039 §6 — "Confirm amount": `bill.fromSchedule`. Creates one real, normal Bill from an
   // Expected item, through the same path every other Bill uses — this is the only writer;
@@ -2248,12 +2246,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // question, distinct from the settlementLinks branch above (which only fires for
     // settlement_in deletions). Also not handled: transaction EDIT reconciliation for
     // bill-linked transactions — no existing precedent decides this (OBL-001 Section 10, OPEN).
-    if(txn.paidBillId){
-      setBills(prev=>prev.map(bl=>String(bl.id)===String(txn.paidBillId) && String(bl.paidByTxnId)===String(txn.id)
-        ? {...bl, status:"unpaid", paidDate:null, paidByTxnId:null}
-        : bl
-      ));
-    }
+    // (One payment can have paid SEVERAL bills; each points back at it, so every one of them is reopened.)
+    setBills(prev=>reopenBillsPaidByDeletedTxns(prev, [txn]));
     // QW-2: a deleted transaction no longer pays anything — drop its bill Contributions too.
     setContributions(prev=>withoutBillContributionsForTxn(prev, txn.id));
     setTxns(prev=>prev.filter(x=>String(x.id)!==String(txn.id)));
@@ -5943,11 +5937,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // QW-2: "Bill payment" was switched off on an edit. The transaction stops paying its
           // bill: reopen that bill only if it points back at this transaction (same guard as
           // delete, WP-BILLS-2C) and drop the Contribution, instead of leaving both orphaned.
-          const unlinkedBillId = sourceTxn.paidBillId;
-          setBills(prev=>prev.map(bl=>String(bl.id)===String(unlinkedBillId) && String(bl.paidByTxnId)===String(resolvedTxnId)
-            ? {...bl, status:"unpaid", paidDate:null, paidByTxnId:null}
-            : bl
-          ));
+          setBills(prev=>reopenBillsPaidByDeletedTxns(prev, [{ id:resolvedTxnId }]));     // every bill this payment paid (there can be several)
           setContributions(prev=>withoutBillContributionsForTxn(prev, resolvedTxnId));
         } else if(matchedBill && !isEditing){
           setBillMatchSuggestion({bill:matchedBill,txn:newTxn});
@@ -21972,9 +21962,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             formatShortDate={formatShortDate}
             onClose={()=>setMarkingBillPaid(null)}
             onConfirm={(accId,transactionRef,payment)=>confirmMarkBillPaid(markingBillPaid,accId,transactionRef,payment)}
-            linkablePayments={isRechargeBiller(markingBillPaid.billerCategory) ? getLinkablePayments(txns, markingBillPaid) : []}
+            existingPayments={markingBillPaid.isCcStatement ? [] : findUsableExpenses(txns, contributions, markingBillPaid).map(u=>({ txn:u.txn, ...planCover(u.txn, markingBillPaid, bills, contributions) }))}
             getAccountName={id=>getAcc(id).name}
-            onLinkPayment={txn=>linkExistingPaymentToBill(markingBillPaid, txn)}
+            billName={id=>bills.find(b=>String(b.id)===String(id))?.name||"Bill"}
+            onUseExisting={useExistingPaymentForBills}
           />
         )}
         {fileBackupSheet}

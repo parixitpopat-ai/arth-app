@@ -11,7 +11,7 @@ import { PAYMENT_METHODS, paidWithDifference, isPaidWithBalanced } from "../doma
 // Credit-card statements keep their own payment rules, so their amount stays the statement amount.
 //
 // `balance` is the Bill's remaining balance (billBalance.js); `forLabel` is the Bill's own For.
-export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, defaultAccId, today, T, sym, fmt, formatShortDate, onClose, onConfirm, linkablePayments = [], getAccountName, onLinkPayment }) {
+export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, defaultAccId, today, T, sym, fmt, formatShortDate, onClose, onConfirm, existingPayments = [], getAccountName, onUseExisting, billName }) {
   const remaining = Number(balance ?? bill.amount ?? 0);
   const isCard = Boolean(bill.isCcStatement);
   const [accId, setAccId] = useState(defaultAccId || "");
@@ -135,25 +135,42 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
         </label>
       </div>
 
-      {linkablePayments.length > 0 && onLinkPayment && (
+      {existingPayments.length > 0 && onUseExisting && (
         <div style={{ marginTop: 14, borderTop: `1px solid ${T.border}`, paddingTop: 6 }}>
           <button type="button" data-testid="record-payment-link-toggle" onClick={() => setShowLink(v => !v)} style={{ minHeight: 44, padding: "0 4px", background: "none", border: "none", color: T.accent, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
-            {showLink ? "Hide earlier payments" : "Already paid? Link an earlier payment"}
+            {showLink ? "Hide earlier payments" : "Already paid? Use an earlier payment"}
           </button>
           {showLink && (
-            <div data-testid="record-payment-link-list" style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
-              <div style={{ color: T.sub, fontSize: 12 }}>Uses a payment you already recorded, so nothing is counted twice. Your accounts do not change.</div>
-              {linkablePayments.map(t => (
-                <button key={t.id} type="button" data-testid="record-payment-link-item" onClick={() => onLinkPayment(t)} style={{ textAlign: "left", minHeight: 44, padding: "8px 12px", background: T.pill, border: `1px solid ${T.border}`, borderRadius: RADIUS.md, color: T.text, cursor: "pointer", fontFamily: "inherit" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 14, fontWeight: 700 }}>
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.desc || t.merchant || "Expense"}</span>
-                    <span style={{ fontFamily: FONT.mono }}>{sym}{fmt(t.amount)}</span>
+            <div data-testid="record-payment-link-list" style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+              <div style={{ color: T.sub, fontSize: 12 }}>Uses money you already spent, so nothing is counted twice. Your accounts do not change, and nothing is rounded.</div>
+              {existingPayments.map(({ txn: t, available, thisOnly, cover }) => {
+                const line = a => `${billName ? billName(a.billId) : "Bill"} ${sym}${fmt(a.applied)}${a.remainingAfter > 0.005 ? ` (${sym}${fmt(a.remainingAfter)} still due)` : ""}`;
+                const btn = primary => ({ textAlign: "left", minHeight: 44, padding: "8px 12px", background: primary ? T.accent : T.pill, border: primary ? "none" : `1px solid ${T.border}`, borderRadius: RADIUS.md, color: primary ? (T.accentInk || "#fff") : T.text, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700 });
+                return (
+                  <div key={t.id} data-testid="record-payment-existing-item" style={{ padding: 10, background: T.input, border: `1px solid ${T.border}`, borderRadius: RADIUS.md }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 14, fontWeight: 700, color: T.text }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.desc || t.merchant || "Expense"}</span>
+                      <span style={{ fontFamily: FONT.mono }}>{sym}{fmt(t.amount)}</span>
+                    </div>
+                    <div style={{ color: T.sub, fontSize: 12, margin: "2px 0 8px" }}>
+                      {formatShortDate(t.date) || t.date}{getAccountName && t.accId ? ` · ${getAccountName(t.accId)}` : ""}{Math.abs(available - Number(t.amount)) > 0.005 ? ` · ${sym}${fmt(available)} still available` : ""}
+                    </div>
+                    {cover && (
+                      <button type="button" data-testid="existing-cover" onClick={() => onUseExisting(t, cover.allocations)} style={{ ...btn(true), width: "100%", marginBottom: 6 }}>
+                        Use for {cover.allocations.length} bills, oldest first
+                        <div style={{ fontWeight: 500, fontSize: 12, marginTop: 2 }}>{cover.allocations.map(line).join(" · ")}{cover.unallocatedAfter > 0.005 ? ` · ${sym}${fmt(cover.unallocatedAfter)} left over` : ""}</div>
+                      </button>
+                    )}
+                    {thisOnly.allocations.length > 0 && (
+                      <button type="button" data-testid="existing-this-only" onClick={() => onUseExisting(t, thisOnly.allocations)} style={{ ...btn(!cover), width: "100%" }}>
+                        {cover ? "This bill only" : "Use for this bill"} · {sym}{fmt(thisOnly.allocations[0].applied)}
+                        {thisOnly.unallocatedAfter > 0.005 && <div style={{ fontWeight: 500, fontSize: 12, marginTop: 2 }}>{sym}{fmt(thisOnly.unallocatedAfter)} stays available for other bills</div>}
+                        {thisOnly.allocations[0].remainingAfter > 0.005 && <div style={{ fontWeight: 500, fontSize: 12, marginTop: 2 }}>{sym}{fmt(thisOnly.allocations[0].remainingAfter)} will still be due on this bill</div>}
+                      </button>
+                    )}
                   </div>
-                  <div style={{ color: T.sub, fontSize: 12, marginTop: 2 }}>
-                    {formatShortDate(t.date) || t.date}{getAccountName && t.accId ? ` · ${getAccountName(t.accId)}` : ""}{Math.abs(Number(t.amount) - remaining) > 0.005 ? ` · recharge is ${sym}${fmt(remaining)}` : ""}
-                  </div>
-                </button>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

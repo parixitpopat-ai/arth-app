@@ -64,9 +64,15 @@ export function withoutBillContributionsForTxns(prevContributions, txnIds) {
  * status "unpaid" with paidDate / paidByTxnId cleared. Nothing else on the bill changes.
  */
 export function reopenBillsPaidByDeletedTxns(bills, deletedTxns) {
-  const pairs = (deletedTxns || []).filter(t => t?.paidBillId != null).map(t => [String(t.paidBillId), String(t.id)]);
-  if (!pairs.length) return bills;
-  return (bills || []).map(bl => pairs.some(([billId, txnId]) => String(bl.id) === billId && String(bl.paidByTxnId) === txnId)
-    ? { ...bl, status: "unpaid", paidDate: null, paidByTxnId: null }
-    : bl);
+  // Every bill that points back at a deleted payment (bill.paidByTxnId) is reopened. One payment can have paid SEVERAL bills (it points back from each of
+  // them), so this no longer looks only at the payment's own `paidBillId`.
+  const ids = new Set((deletedTxns || []).filter(t => t && t.id != null).map(t => String(t.id)));
+  if (!ids.size) return bills;
+  let changed = false;
+  const next = (bills || []).map(bl => {
+    if (!(bl && bl.paidByTxnId != null && ids.has(String(bl.paidByTxnId)))) return bl;
+    changed = true;
+    return { ...bl, status: "unpaid", paidDate: null, paidByTxnId: null };
+  });
+  return changed ? next : bills;
 }
