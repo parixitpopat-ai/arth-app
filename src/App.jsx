@@ -15832,7 +15832,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           // whichever category happened to be in `catId`).
           const catSpendTotals = {};
           expenses.forEach(e=>{
-            const amt = getNetExpenseAmount(e);
+            const amt = getMyExpenseAmount(e);
             if(amt<=0) return;
             const tCats = (e.catIds||[e.catId]).filter(Boolean);
             tCats.forEach(cid=>{ catSpendTotals[cid] = (catSpendTotals[cid]||0) + amt/tCats.length; });
@@ -16231,7 +16231,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     };
     const months = Array.from({length:12},(_,i)=>{ const d=new Date(fy,3+i,1); return { key:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`, label:d.toLocaleString("en-IN",{month:"short",year:"2-digit"}) }; });
     const monthlySlice = Math.round(activeAnnualBudget/12);
-    const fySpend = months.reduce((s,m)=>s+txns.filter(t=>t.type==="expense"&&t.date?.startsWith(m.key)).reduce((a,t)=>a+getNetExpenseAmount(t),0),0);
+    const fySpend = months.reduce((s,m)=>s+txns.filter(t=>t.type==="expense"&&t.date?.startsWith(m.key)).reduce((a,t)=>a+getMyExpenseAmount(t),0),0);
     const monthsElapsed = isCurrentFY ? Math.max(1, Math.min(12, ((now.getFullYear()-fy) * 12) + (now.getMonth()-3) + 1)) : 12;
     const monthsRemaining = isCurrentFY ? Math.max(1, 12 - monthsElapsed) : 0;
     const safeToSpend = activeAnnualBudget - fySpend;
@@ -16665,7 +16665,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
         <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:10 }}>Month by Month</div>
         {months.map(m=>{
-          const mSpend = txns.filter(t=>t.type==="expense"&&t.date?.startsWith(m.key)).reduce((s,t)=>s+getNetExpenseAmount(t),0);
+          const mSpend = txns.filter(t=>t.type==="expense"&&t.date?.startsWith(m.key)).reduce((s,t)=>s+getMyExpenseAmount(t),0);
           const mBudget = monthOverrides[m.key]??monthlySlice;
           const diff = mBudget - mSpend;
           const isOver = diff < 0;
