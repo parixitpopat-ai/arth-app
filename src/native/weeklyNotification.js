@@ -5,7 +5,7 @@
 import { Capacitor } from "@capacitor/core";
 import { buildWeeklyNotification, nextFireAt, tomorrowAt } from "../../domain/insights/weeklyNotification.js";
 
-export const WEEKLY_ID = 7101, CHANNEL = "arth_weekly", ACTION_TYPE = "arth_weekly";
+export const WEEKLY_ID = 7101, CHANNEL = "weekly-summary", ACTION_TYPE = "weekly-summary";
 const fake = () => (typeof window !== "undefined" ? window.__ARTH_WEEKLY_TEST__ : null);
 let lib = null;
 const LN = async () => (lib || (lib = (await import("@capacitor/local-notifications")).LocalNotifications));

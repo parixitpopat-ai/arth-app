@@ -39,7 +39,7 @@ try {
   const ist = (d) => { const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", weekday: "short", hour: "2-digit", hourCycle: "h23", day: "2-digit" }).formatToParts(d).map(x => [x.type, x.value])); return { wd: p.weekday, h: Number(p.hour), day: Number(p.day) }; };
   const at = sch && new Date(sch.at);
   rec("N4 it is set for a Sunday at 7 pm local, in the future", at && ist(at).wd === "Sun" && ist(at).h === 19 && at > new Date(), at && at.toString());
-  rec("N5 it is inexact (no exact-alarm permission) and has Review/Later buttons wired", sch && sch.isExactNotification === false && sch.actionTypeId === "arth_weekly" && sch.extra?.route === "insights", sch && { exact: sch.isExactNotification, type: sch.actionTypeId });
+  rec("N5 it is inexact (no exact-alarm permission) and has Review/Later buttons wired", sch && sch.isExactNotification === false && sch.actionTypeId === "weekly-summary" && sch.extra?.route === "insights", sch && { exact: sch.isExactNotification, type: sch.actionTypeId });
   rec("N6 the choice is remembered on this phone", (await page.evaluate(() => localStorage.getItem("arth_weekly_notif"))) === "1", {});
   const before = (await page.evaluate(() => window.__ARTH_WEEKLY_TEST__.calls)).filter(c => c.op === "schedule").length;
   await page.evaluate(() => window.__ARTH_WEEKLY_TEST__.onAction("later")); await page.waitForTimeout(800);
