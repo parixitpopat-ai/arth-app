@@ -172,6 +172,7 @@ import { defaultCategoryForBillerType, findMatchingExpenseForBill } from "./doma
 import { getPrepaidAlerts, prepaidAlertText, connectionInactiveState } from "./domain/bills/prepaidAlerts";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
+import { weeklySummary } from "../domain/insights/weeklySummary";
 import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getEffectiveMonthlyBudget, getCarryForwardPrevSpend, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope, buildRefundTotalsByExpense } from "../domain/allocations/adapter";
 // WP8 — the central Insights read model. Every Insights card on InsightsPage (and
 // BudgetInsights, which imports the spending/budgetPerformance pair directly) is required to
@@ -10853,7 +10854,29 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(!cat) return null;
       return { text:`${cat.name} spending is ${Math.abs(best.pctChange)}% ${best.pctChange<0?"lower":"higher"} than last month.`, ok:best.pctChange<0 };
     })();
-    if(insightCandidate){
+    // Weekly summary (replaces the plain "x% lower than last month" line when there is anything to say this week).
+    // Same numbers as the weekly phone notification: domain/insights/weeklySummary.js, "my spend" rule, Monday to today
+    // against the same stretch of last week. "Later" hides it until next week.
+    const weekly = weeklySummary({ txns, today:todayStr(), myAmount:getMyExpenseAmount, catIdsOf:getTxnCategoryIds, catName:id=>cats.find(c=>String(c.id)===String(id))?.name||"Other" });
+    const weeklyLaterId = `weekly_${weekly.weekKey}`;
+    if((weekly.thisWeek>0 || weekly.lastWeek>0) && !dismissedAlerts.includes(weeklyLaterId)){
+      CARDS.aiInsight = (
+        <div key="aiInsight" data-testid="weekly-summary" style={{ ...card,background:`linear-gradient(135deg,${T.accent}0c,${T.card})` }}>
+          <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:4 }}>This week</div>
+          <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{weekly.headline}</div>
+          <div style={{ display:"flex",alignItems:"baseline",gap:10,marginTop:6,flexWrap:"wrap" }}>
+            <span style={{ color:weekly.direction==="up"?T.warn:T.accent,fontSize:26,fontWeight:900,fontFamily:FONT.mono }}>{sym}{fmt(weekly.thisWeek)}</span>
+            <span style={{ color:T.sub,fontSize:12 }}>This month: {sym}{fmt(weekly.monthTotal)}</span>
+          </div>
+          {weekly.lastWeek>0&&<div style={{ color:T.sub,fontSize:11,marginTop:2 }}>Same days last week: {sym}{fmt(weekly.lastWeek)}</div>}
+          {weekly.topMover&&<div style={{ color:T.text,fontSize:12,fontWeight:600,marginTop:6 }}>{weekly.topMover.name} is {sym}{fmt(Math.abs(weekly.topMover.diff))} {weekly.topMover.diff<0?"lower":"higher"} than the same days last week.</div>}
+          <div style={{ display:"flex",gap:10,marginTop:10 }}>
+            <button onClick={()=>setTab("insights")} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:8,padding:"7px 14px",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Review</button>
+            <button onClick={()=>setDismissedAlerts(prev=>prev.includes(weeklyLaterId)?prev:[...prev,weeklyLaterId])} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"7px 14px",color:T.sub,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Later</button>
+          </div>
+        </div>
+      );
+    } else if(insightCandidate){
       CARDS.aiInsight = (
         <div key="aiInsight" style={{ ...card,background:`linear-gradient(135deg,${T.accent}0c,${T.card})` }}>
           <div style={{ display:"flex",gap:10,alignItems:"flex-start" }}>
