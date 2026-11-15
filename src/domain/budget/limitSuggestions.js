@@ -3,7 +3,8 @@
 // (b) where the freed money could go: the limits that keep being exceeded.
 // Pure. No rounding of money except the suggested new limits, which are rounded UP to `step` for readability.
 //
-// item: { id, kind: "person"|"group"|"category", name, limit, spentByMonth: { "YYYY-MM": amount } }
+// item: { id, kind: "person"|"group"|"category", name, limit, floor?, spentByMonth: { "YYYY-MM": amount } }
+// floor = the minimum commitment inside this limit (e.g. the fixed 10,000 for home). A limit is never suggested below it.
 // months: the completed months to look at, newest first, e.g. ["2026-10","2026-09","2026-08"]. The month in progress is never used.
 const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
 const ceilTo = (n, step) => (step > 0 ? Math.ceil(n / step) * step : n);
@@ -14,6 +15,7 @@ export const DEFAULTS = { minMonths: 2, underUseRatio: 0.6, headroom: 1.1, step:
 export function assessLimit(item, months, opts = {}) {
   const o = { ...DEFAULTS, ...opts };
   const limit = Number(item?.limit) || 0;
+  const floor = Math.max(0, Number(item?.floor) || 0);
   const spends = (months || []).map(m => Number(item?.spentByMonth?.[m]) || 0);
   if (!(limit > 0) || spends.length < o.minMonths) return { verdict: "fine", reason: "not enough history" };
   const peak = Math.max(...spends);
@@ -23,8 +25,8 @@ export function assessLimit(item, months, opts = {}) {
     return { verdict: "exceeded", overMonths, months: spends.length, peak: worst, suggestedLimit: ceilTo(worst, o.step), needs: Math.max(0, ceilTo(worst, o.step) - limit) };
   }
   if (peak < limit * o.underUseRatio) {
-    const suggestedLimit = Math.min(limit, ceilTo(peak * o.headroom, o.step));
-    return { verdict: "unused", months: spends.length, peak: r2(peak), suggestedLimit, frees: r2(limit - suggestedLimit) };
+    const suggestedLimit = Math.min(limit, Math.max(floor, ceilTo(peak * o.headroom, o.step)));
+    return { verdict: "unused", months: spends.length, peak: r2(peak), suggestedLimit, floor, frees: r2(limit - suggestedLimit) };
   }
   return { verdict: "fine" };
 }

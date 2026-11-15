@@ -47,3 +47,16 @@ test("does not mutate its input", () => {
   const items = [item("c1", "E", 5000, [2000, 1800, 1500])]; const before = JSON.stringify(items);
   suggestLimitChanges(items, M); assert.equal(JSON.stringify(items), before);
 });
+test("a limit is never lowered below its minimum commitment, even when almost nothing is spent", () => {
+  const home = { ...item("g1", "Home", 12000, [500, 800, 600]), kind: "group", floor: 10000 };
+  const a = assessLimit(home, M);
+  assert.equal(a.verdict, "unused");
+  assert.equal(a.suggestedLimit, 10000);
+  assert.equal(a.frees, 2000);
+  const s = suggestLimitChanges([home], M);
+  assert.equal(s[0].to, 10000);
+});
+test("a limit already at its floor frees nothing, so no suggestion", () => {
+  const home = { ...item("g1", "Home", 10000, [500, 800, 600]), kind: "group", floor: 10000 };
+  assert.deepEqual(suggestLimitChanges([home], M), []);
+});
