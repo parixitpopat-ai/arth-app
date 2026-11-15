@@ -153,6 +153,7 @@ import MergeBillerAccountSheet from "./components/people/MergeBillerAccountSheet
 import { mergeBillerAccounts } from "./domain/billers/merge";
 import RelationshipStatusPanel from "./components/people/RelationshipStatusPanel";
 import ExpectedSchedulePanel from "./components/people/ExpectedSchedulePanel";
+import { suggestLimitChanges } from "./domain/budget/limitSuggestions";
 import { getAttributedRelationships, getOpenBillBadge, summarizeRelationships } from "./domain/relationships/attributedAccounts";
 import { relationshipSummaryText } from "./components/people/relationshipText";
 import { getPersonCapabilityTiles } from "./domain/person/capabilityTiles";
@@ -15074,7 +15075,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [newCatName,setNewCatName]=useState("");
     const [newCatIcon,setNewCatIcon]=useState("🍽️");
     const [newCatColor,setNewCatColor]=useState(PALETTE[0]);
-    const [newCatBudget,setNewCatBudget]=useState("");
     const [showIconPk,setShowIconPk]=useState(false);
     const [iconSearch,setIconSearch]=useState("");
     const [newIncomeTypeInput,setNewIncomeTypeInput]=useState("");
@@ -15824,6 +15824,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
           <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>Categories</div>
         </div>
+        <div style={{ color:T.sub,fontSize:11,marginBottom:10,lineHeight:1.4 }}>Category limits now live in Budget, under "Category guides". Here you only name, colour and organise categories.</div>
         {(()=>{
           // Split each expense's amount evenly across every category it's tagged with — a
           // transaction tagged to 2 categories should show half its amount under each, not its
@@ -15839,7 +15840,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           });
           return cats.map(cat=>{
           const spent=catSpendTotals[cat.id]||0;
-          const pct=cat.budget?Math.min(100,Math.round(spent/cat.budget*100)):0;
           return (
             <div key={cat.id} style={card}>
               <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:8 }}>
@@ -15861,7 +15861,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   )}
                   <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
                     <span style={{ color:T.sub,fontSize:11 }}>{cat.subs?.length||0} subs</span>
-                    <button onClick={()=>{ const el=document.getElementById("catbudget_"+cat.id); if(el) el.style.display=el.style.display==="none"?"flex":"none"; }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:10,color:T.accent,fontFamily:"Nunito,sans-serif" }}>₹ {cat.budget>0?fmt(cat.budget):"Set budget"}</button>
                     <button onClick={()=>setCats(p=>p.map(c=>c.id===cat.id?{...c,fixed:!c.fixed}:c))} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:10,color:T.sub,fontFamily:"Nunito,sans-serif" }}>{cat.fixed?"Fixed":"Flexible"}</button>
                     {editingCategoryId===cat.id ? (
                       <button onClick={()=>{ setEditingCategoryId(null); setEditingCategoryName(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:10,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
@@ -15869,20 +15868,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       <button onClick={()=>startCategoryRename(cat)} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:6,padding:"2px 8px",cursor:"pointer",fontSize:10,color:T.sub,fontFamily:"Nunito,sans-serif" }}>✏️ Name</button>
                     )}
                   </div>
-                  {cat.budget>0 && spent>cat.budget && <div style={{ color:T.danger,fontSize:11,fontWeight:700,marginTop:4 }}>⚠️ Over budget by {sym}{fmt(spent-cat.budget)}</div>}
-                  <div id={"catbudget_"+cat.id} style={{ display:"none",gap:6,marginTop:4,alignItems:"center" }}>
-                    <input type="number" defaultValue={cat.budget||0} onBlur={e=>setCats(p=>p.map(c=>c.id===cat.id?{...c,budget:parseFloat(e.target.value)||0}:c))} style={{ ...inpSm,width:110 }} placeholder="Monthly budget"/>
-                    <span style={{ color:T.sub,fontSize:11 }}>/ month</span>
-                  </div>
                 </div>
                 <div style={{ textAlign:"right",marginRight:8 }}>
                   <div style={{ color:cat.color,fontSize:13,fontWeight:800 }}>{sym}{fmt(spent)}</div>
                 </div>
                 <button onClick={()=>setConfirmDeleteCat(cat.id)} style={{ background:"none",border:`1px solid ${T.border}`,color:T.danger,borderRadius:8,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>Del</button>
               </div>
-              {cat.budget>0&&<div style={{ height:3,background:T.border,borderRadius:2,marginBottom:8 }}>
-                <div style={{ height:"100%",width:`${pct}%`,background:pct>90?T.danger:cat.color,borderRadius:2 }}/>
-              </div>}
               <div style={{ display:"flex",gap:5,flexWrap:"wrap",marginBottom:8 }}>
                 {cat.subs?.map(s=>(
                   <span key={s.id} style={{ background:cat.color+"18",color:cat.color,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700,display:"inline-flex",alignItems:"center",gap:4 }}>
@@ -15923,8 +15914,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:12 }}>
             {PALETTE.map(c=><div key={c} onClick={()=>setNewCatColor(c)} style={{ width:26,height:26,borderRadius:7,background:c,cursor:"pointer",border:newCatColor===c?"3px solid #fff":"3px solid transparent" }}/>)}
           </div>
-          <input style={{ ...inp,marginBottom:12 }} type="number" placeholder={`Monthly budget (${sym}) — optional`} value={newCatBudget} onChange={e=>setNewCatBudget(e.target.value)}/>
-          <button onClick={()=>{ if(!newCatName.trim()) return; setCats(p=>[...p,{id:genId(),name:newCatName.trim(),icon:newCatIcon,color:newCatColor,budget:parseFloat(newCatBudget)||0,subs:[]}]); setNewCatName(""); setNewCatBudget(""); }} style={btnP}>Create Category</button>
+          <button onClick={()=>{ if(!newCatName.trim()) return; setCats(p=>[...p,{id:genId(),name:newCatName.trim(),icon:newCatIcon,color:newCatColor,budget:0,subs:[]}]); setNewCatName(""); }} style={btnP}>Create Category</button>
         </div>
       </div>
     );
@@ -16201,14 +16191,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const commitPersonBudget = (p) => {
       if(!(p.id in personBudgetDrafts)) return;
       const val = parseMoney(personBudgetDrafts[p.id]||"")||0;
-      if (wouldExceedDiscretionaryPool(liveDiscretionaryPool, personAllocationExcept(p.id), val)) return;
       setPeople(prev=>prev.map(x=>x.id===p.id?{...x,spendBudgetOverrides:{...(x.spendBudgetOverrides||{}),[viewMonth]:val}}:x));
       setPersonBudgetDrafts(prev=>{ const n={...prev}; delete n[p.id]; return n; });
     };
     const commitGroupBudget = (g) => {
       if(!(g.id in groupBudgetDrafts)) return;
       const val = parseMoney(groupBudgetDrafts[g.id]||"")||0;
-      if (wouldExceedDiscretionaryPool(liveDiscretionaryPool, groupAllocationExcept(g.id), val)) return;
       setGroups(prev=>prev.map(x=>x.id===g.id?{...x,manualLimitOverrides:{...(x.manualLimitOverrides||{}),[viewMonth]:val}}:x));
       setGroupBudgetDrafts(prev=>{ const n={...prev}; delete n[g.id]; return n; });
     };
@@ -16473,7 +16461,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         <div style={{ display:"flex",alignItems:"center",gap:6 }} onClick={e=>e.stopPropagation()}>
                           <span style={{ color:T.sub,fontSize:11 }}>{sym}</span>
                           <input
-                            style={{ background:T.input,border:`1px solid ${personDraftInvalid?T.danger:T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:80,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
+                            style={{ background:T.input,border:`1px solid ${personDraftInvalid?T.warn:T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:80,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
                             type="text" inputMode="decimal" placeholder="0"
                             value={p.id in personBudgetDrafts ? personBudgetDrafts[p.id] : (personMonthBudget?String(personMonthBudget):"")}
                             onChange={e=>{ const val=cleanMoneyInput(e.target.value); setPersonBudgetDrafts(prev=>({...prev,[p.id]:val})); }}
@@ -16483,7 +16471,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         </div>
                       </div>
                       {personDraftInvalid&&(
-                        <div style={{ color:T.danger,fontSize:10.5,fontWeight:700,marginTop:4,textAlign:"right" }}>⚠️ Exceeds Discretionary Pool by {sym}{fmt(personDraftInvalid.overBy)} — reduce this to save.</div>
+                        <div style={{ color:T.warn,fontSize:10.5,fontWeight:700,marginTop:4,textAlign:"right" }}>Limits now add up to {sym}{fmt(personDraftInvalid.overBy)} more than what is left. Saved anyway: limits are a guide.</div>
                       )}
                       {personMonthBudget>0&&(
                         <div style={{ color:personIsOver?T.danger:T.sub,fontSize:10.5,marginTop:2 }}>{sym}{fmt(personMonthSpend)} spent · {personIsOver?`${sym}${fmt(personMonthSpend-personMonthBudget)} over`:`${sym}${fmt(personMonthBudget-personMonthSpend)} left`}</div>
@@ -16519,7 +16507,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         <div style={{ display:"flex",alignItems:"center",gap:6 }} onClick={e=>e.stopPropagation()}>
                           <span style={{ color:T.sub,fontSize:11 }}>{sym}</span>
                           <input
-                            style={{ background:T.input,border:`1px solid ${groupDraftInvalid?T.danger:T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:80,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
+                            style={{ background:T.input,border:`1px solid ${groupDraftInvalid?T.warn:T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:13,fontWeight:800,width:80,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}
                             type="text" inputMode="decimal" placeholder="0"
                             value={g.id in groupBudgetDrafts ? groupBudgetDrafts[g.id] : (groupMonthBudget?String(groupMonthBudget):"")}
                             onChange={e=>{ const val=cleanMoneyInput(e.target.value); setGroupBudgetDrafts(prev=>({...prev,[g.id]:val})); }}
@@ -16529,7 +16517,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         </div>
                       </div>
                       {groupDraftInvalid&&(
-                        <div style={{ color:T.danger,fontSize:10.5,fontWeight:700,marginTop:4,textAlign:"right" }}>⚠️ Exceeds Discretionary Pool by {sym}{fmt(groupDraftInvalid.overBy)} — reduce this to save.</div>
+                        <div style={{ color:T.warn,fontSize:10.5,fontWeight:700,marginTop:4,textAlign:"right" }}>Limits now add up to {sym}{fmt(groupDraftInvalid.overBy)} more than what is left. Saved anyway: limits are a guide.</div>
                       )}
                       {groupMonthBudget>0&&(
                         <div style={{ color:groupIsOver?T.danger:T.sub,fontSize:10.5,marginTop:2 }}>{sym}{fmt(groupMonthSpend)} spent · {groupIsOver?`${sym}${fmt(groupMonthSpend-groupMonthBudget)} over`:`${sym}${fmt(groupMonthBudget-groupMonthSpend)} left`}</div>
@@ -16545,13 +16533,93 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <button onClick={()=>{ setTab("people"); setShowSettings(false); }} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 0",marginBottom:10 }}>Manage People/Groups →</button>
 
                 <div style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",borderTop:`1px solid ${T.border}`,paddingTop:8 }}>
-                  <span style={{ color:T.sub,fontSize:12,fontWeight:700 }}>Unallocated</span>
+                  <span style={{ color:T.sub,fontSize:12,fontWeight:700 }}>Free to spend</span>
                   <span style={{ color:unallocatedDiscretionary<0?T.danger:T.success,fontSize:12,fontWeight:700,fontFamily:FONT.mono }}>{sym}{fmt(unallocatedDiscretionary)}</span>
                 </div>
                 {liveHierarchyWarning&&(
-                  <div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",color:T.danger,fontSize:11,fontWeight:700,marginTop:10 }}>⚠️ Person/Group allocations exceed the Discretionary Pool by {sym}{fmt(liveHierarchyWarning.overBy)}.</div>
+                  <div style={{ background:T.warn+"18",border:`1px solid ${T.warn}44`,borderRadius:10,padding:"8px 12px",color:T.warn,fontSize:11,fontWeight:700,marginTop:10 }}>Limits add up to {sym}{fmt(liveHierarchyWarning.overBy)} more than what is left. That is allowed: limits are a guide, nothing is blocked.</div>
                 )}
               </div>
+
+              {/* Limit suggestions + Category guides. Limits are indicators, never caps; nothing here reduces what is left.
+                  Rules: domain/budget/limitSuggestions.js. A limit is never suggested below its minimum commitment. */}
+              {(()=>{
+                const [vy,vm]=viewMonth.split("-").map(Number);
+                const keyBefore=n=>{ let mm=vm-n, yy=vy; while(mm<1){ mm+=12; yy-=1; } return `${yy}-${String(mm).padStart(2,"0")}`; };
+                const nowKey=todayStr().slice(0,7);
+                const hist=[1,2,3].map(keyBefore).filter(k=>k<nowKey);
+                const nextKey=(()=>{ let mm=vm+1, yy=vy; if(mm>12){ mm=1; yy+=1; } return `${yy}-${String(mm).padStart(2,"0")}`; })();
+                const nextLabel=new Date(`${nextKey}-01T00:00:00`).toLocaleString("en-IN",{ month:"long" });
+                const tx=k=>txns.filter(t=>t.type==="expense"&&(t.date||"").startsWith(k));
+                const floorOf=(scopeType,scopeId)=>getMandatoryCommitmentsTotal(getCommitmentsForScope(mandatoryCommitments,scopeType,scopeId).filter(c=>!(c.skippedMonths||[]).includes(viewMonth)));
+                const catSpend=(k,cid)=>tx(k).reduce((sum,t)=>{ const ids=getTxnCategoryIds(t); return ids.includes(cid)?sum+getMyExpenseAmount(t)/(ids.length||1):sum; },0);
+                const grpSpend=(k,g)=>tx(k).reduce((sum,t)=>{
+                  if(t.groupId===g.id||t.tagGroup===g.id||t.taggedGroupId===g.id) return sum+Number(t.amount||0);
+                  const ga=t.groupAllocations?.find(a=>a.groupId===g.id); return ga?sum+Number(ga.amount||0):sum;
+                },0);
+                const mapSpend=fn=>Object.fromEntries(hist.map(k=>[k,fn(k)]));
+                const items=[
+                  ...people.filter(p=>getPersonModules(p).includes("budget")).map(p=>({ id:"p:"+p.id, kind:"person", name:p.name, limit:getPersonPlanningAllocation(p,viewMonth), floor:floorOf("person",p.id), spentByMonth:mapSpend(k=>tx(k).reduce((sum,t)=>sum+getPersonAttributedAmount(t,p.id),0)) })),
+                  ...groups.map(g=>({ id:"g:"+g.id, kind:"group", name:g.name, limit:Number(g.manualLimitOverrides?.[viewMonth] ?? g.manualLimit ?? 0), floor:floorOf("group",g.id), spentByMonth:mapSpend(k=>grpSpend(k,g)) })),
+                  ...cats.filter(c=>Number(c.budget)>0).map(c=>({ id:"c:"+c.id, kind:"category", name:c.name, limit:Number(c.budget), floor:getMandatoryCommitmentsTotal(householdCommitments.filter(m=>String(m.categoryId)===String(c.id))), spentByMonth:mapSpend(k=>catSpend(k,c.id)) })),
+                ];
+                // A person's or group's spend only counts what is attributed to them, so a limit with NO recorded spend in the whole
+                // window may simply be untracked (or a preset the user never chose), not unused: never advise on it.
+                const hasHistory=i=>Object.values(i.spentByMonth).some(v=>v>0);
+                const suggestions=hist.length>=2?suggestLimitChanges(items.filter(hasHistory),hist):[];
+                const setLimit=(id,val)=>{
+                  const [kind,rid]=[id.slice(0,1),id.slice(2)];
+                  if(kind==="p") setPeople(prev=>prev.map(x=>x.id===rid?{...x,spendBudgetOverrides:{...(x.spendBudgetOverrides||{}),[nextKey]:val}}:x));
+                  else if(kind==="g") setGroups(prev=>prev.map(x=>x.id===rid?{...x,manualLimitOverrides:{...(x.manualLimitOverrides||{}),[nextKey]:val}}:x));
+                  else setCats(prev=>prev.map(x=>x.id===rid?{...x,budget:val}:x));
+                };
+                const apply=sg=>{
+                  if(sg.type==="move"){ const from=items.find(i=>i.id===sg.fromId), to=items.find(i=>i.id===sg.toId); setLimit(sg.fromId,from.limit-sg.amount); setLimit(sg.toId,to.limit+sg.amount); }
+                  else setLimit(sg.id,sg.to);
+                  setToast({ message:"Limit updated"+(sg.fromKind==="category"||sg.kind==="category"?"":` for ${nextLabel}`), icon:"✅" });
+                };
+                const sgText=sg=>sg.type==="move"
+                  ? [`Move ${sym}${fmt(sg.amount)} from ${sg.fromName} to ${sg.toName}`, `${sg.fromName} keeps going unused; ${sg.toName} keeps going over its limit.`]
+                  : sg.type==="lower"
+                    ? [`Lower ${sg.name} from ${sym}${fmt(sg.from)} to ${sym}${fmt(sg.to)}`, `Highest of the last ${sg.months} months was ${sym}${fmt(sg.peak)}. This frees ${sym}${fmt(sg.frees)}.`]
+                    : [`Raise ${sg.name} from ${sym}${fmt(sg.from)} to ${sym}${fmt(sg.to)}, or keep it`, `Went over its limit in ${sg.overMonths} of the last ${sg.months} months.`];
+                const guideCats=cats.filter(c=>Number(c.budget)>0||catSpend(viewMonth,c.id)>0);
+                return (<>
+                  {suggestions.length>0&&(
+                    <div style={{ ...card,marginBottom:14 }}>
+                      <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>Ideas for {nextLabel}</div>
+                      <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>From the last {hist.length} full months. Nothing changes until you tap.</div>
+                      {suggestions.map((sg,i)=>{ const [title,why]=sgText(sg); return (
+                        <div key={i} data-testid="limit-suggestion" style={{ border:`1px solid ${T.border}`,borderRadius:12,padding:12,marginBottom:8 }}>
+                          <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{title}</div>
+                          <div style={{ color:T.sub,fontSize:11.5,marginTop:4,lineHeight:1.4 }}>{why}</div>
+                          <button onClick={()=>apply(sg)} style={{ marginTop:8,background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:8,padding:"7px 12px",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Apply</button>
+                        </div>
+                      ); })}
+                    </div>
+                  )}
+                  <div style={{ ...card,marginBottom:14 }} data-testid="category-guides">
+                    <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>Category guides</div>
+                    <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>A guide for each category. It does not take anything out of what is left.</div>
+                    {guideCats.map(c=>{ const sp=catSpend(viewMonth,c.id); const lim=Number(c.budget)||0; const over=lim>0&&sp>lim; return (
+                      <div key={c.id} style={{ marginBottom:10 }}>
+                        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8 }}>
+                          <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{c.icon} {c.name}</span>
+                          <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                            <span style={{ color:over?T.warn:T.sub,fontSize:11 }}>{sym}{fmt(sp)} of</span>
+                            <input key={c.id+":"+lim} type="text" inputMode="decimal" defaultValue={lim?String(lim):""} placeholder="no guide"
+                              onBlur={e=>{ const v=parseMoney(e.target.value)||0; if(v!==lim) setCats(prev=>prev.map(x=>x.id===c.id?{...x,budget:v}:x)); }}
+                              style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 8px",color:T.text,fontSize:12,fontWeight:800,width:78,textAlign:"right",outline:"none",fontFamily:"Nunito,sans-serif" }}/>
+                          </span>
+                        </div>
+                        {lim>0&&<div style={{ height:5,borderRadius:3,background:T.border,marginTop:5 }}><div style={{ height:5,borderRadius:3,width:`${Math.min(100,Math.round(sp/lim*100))}%`,background:over?T.warn:c.color }}/></div>}
+                        {over&&<div style={{ color:T.warn,fontSize:10.5,fontWeight:700,marginTop:3 }}>{sym}{fmt(sp-lim)} over this guide. A heads-up only.</div>}
+                      </div>
+                    ); })}
+                    <div style={{ color:T.sub,fontSize:11,lineHeight:1.4 }}>Guides can add up to more than your budget. That is fine: they only show where spending is heading.</div>
+                  </div>
+                </>);
+              })()}
 
               {/* WP7 — Unplanned Actual: the fourth preserved state. Real spend this month in a
                   category no active Mandatory Commitment covers — money that left the household

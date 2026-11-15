@@ -26,3 +26,14 @@ Home spent, month Budget, category wheel + Uncategorised, Insights (domain/insig
 
 ## Not verified
 Chromium + synthetic data only. Nothing checked on a real device or with the user's real data.
+
+## Budget model change (agreed with the owner)
+- Person / group / category limits are INDICATORS, not caps and not must-spend. Going over a limit, or limits adding up to more than
+  what is left, only warns; nothing is blocked (was: `wouldExceedDiscretionaryPool` refused the write). "Unallocated" is now "Free to spend".
+- Commitments are the fixed, must-pay amounts, reserved first; a limit is never SUGGESTED below its minimum commitment.
+- Category limits moved from Settings → Categories to Budget → "Category guides"; Settings only names/colours/organises. The stored field (`cat.budget`) is unchanged.
+- "Ideas for <next month>" (domain/budget/limitSuggestions.js): lower an unused limit, move freed money to one that keeps being exceeded, raise one with nothing to cover it.
+  Uses the last 3 completed months, needs at least 2. A person/group/category with NO recorded spend in the window gets no advice (spend per person only counts
+  what is attributed to them, and category budgets can be unchosen presets).
+- Not verified: real device, real data; applying a category suggestion changes the flat category guide (no per-month override exists for categories).
+- Not built: trimming limits after a month where TOTAL spend passed the target (waiting on the owner's answer).
