@@ -173,6 +173,7 @@ import { getPrepaidAlerts, prepaidAlertText, connectionInactiveState } from "./d
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
 import { weeklySummary } from "../domain/insights/weeklySummary";
+import { weeklyNotifAvailable, weeklyNotifEnable, weeklyNotifCancel, weeklyNotifSchedule, weeklyNotifSnooze, weeklyNotifOnAction } from "./native/weeklyNotification.js";
 import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getEffectiveMonthlyBudget, getCarryForwardPrevSpend, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope, buildRefundTotalsByExpense } from "../domain/allocations/adapter";
 // WP8 — the central Insights read model. Every Insights card on InsightsPage (and
 // BudgetInsights, which imports the spending/budgetPerformance pair directly) is required to
@@ -2596,6 +2597,34 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   },[accounts,txns,dismissedAlerts]);
 
   // Prepaid plan ending / ended (domain/bills/prepaidAlerts.js): three alerts per plan; none for a connection the person ended or paused.
+  // Weekly spend summary: one calculation for the Home card and the weekly phone notification (domain/insights/weeklySummary.js).
+  const weeklyTodayKey = todayStr();
+  const weeklyNow = useMemo(()=>weeklySummary({ txns, today:weeklyTodayKey, myAmount:getMyExpenseAmount, catIdsOf:getTxnCategoryIds, catName:id=>cats.find(c=>String(c.id)===String(id))?.name||"Other" }),[txns,cats,getMyExpenseAmount,weeklyTodayKey]);
+  const [weeklyNotifOn, setWeeklyNotifOn] = useState(()=>{ try { return localStorage.getItem("arth_weekly_notif")==="1"; } catch { return false; } });
+  useEffect(()=>{ try { localStorage.setItem("arth_weekly_notif", weeklyNotifOn?"1":"0"); } catch { /* storage blocked: the choice is simply not kept */ } },[weeklyNotifOn]);
+  const weeklyNowRef = useRef(weeklyNow); weeklyNowRef.current = weeklyNow;
+  // Phone notification: rebuilt a moment after the numbers change, so it always says what Arth last saw. Off, or not on the phone app: nothing happens.
+  useEffect(()=>{
+    if(!weeklyNotifAvailable()) return undefined;
+    if(!weeklyNotifOn){ weeklyNotifCancel(); return undefined; }
+    const timer = setTimeout(()=>{ weeklyNotifSchedule({ summary:weeklyNow, sym, fmt }); }, 1500);
+    return ()=>clearTimeout(timer);
+  },[weeklyNotifOn, weeklyNow]);
+  useEffect(()=>{
+    if(!weeklyNotifAvailable() || !weeklyNotifOn) return undefined;
+    let remove = ()=>{}; let gone = false;
+    weeklyNotifOnAction(id=>{
+      if(id==="later"){ weeklyNotifSnooze({ summary:weeklyNowRef.current, sym, fmt }); setToast({ message:"OK, I will remind you again tomorrow", icon:"⏰" }); }
+      else { setShowSettings(false); setTab("insights"); }
+    }).then(r=>{ if(gone) r(); else remove = r; });
+    return ()=>{ gone = true; remove(); };
+  },[weeklyNotifOn]);
+  const toggleWeeklyNotif = async()=>{
+    if(weeklyNotifOn){ setWeeklyNotifOn(false); setToast({ message:"Weekly summary notification is off", icon:"🔕" }); return; }
+    const ok = await weeklyNotifEnable();
+    if(!ok){ setToast({ message:"Notifications are blocked for Arth. Allow them in your phone's settings, then try again.", icon:"⚠️" }); return; }
+    setWeeklyNotifOn(true); setToast({ message:"On: a summary every Sunday at 7 pm", icon:"🔔" });
+  };
   const smsInbox = useSmsInbox({ accounts, txns, people });   // bank messages caught as they arrive (Android app only); proposals, never entries
   const activePrepaidAlerts = useMemo(()=>getPrepaidAlerts({ billerAccounts, bills, relationships:membershipRelationships, today:new Date(), dismissed:dismissedAlerts }),[billerAccounts,bills,membershipRelationships,dismissedAlerts]);
   const directOwedToMe = useMemo(()=>Object.values(settlements).reduce((s,p)=>s+(p.owesMe||0),0),[settlements]);
@@ -10857,7 +10886,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Weekly summary (replaces the plain "x% lower than last month" line when there is anything to say this week).
     // Same numbers as the weekly phone notification: domain/insights/weeklySummary.js, "my spend" rule, Monday to today
     // against the same stretch of last week. "Later" hides it until next week.
-    const weekly = weeklySummary({ txns, today:todayStr(), myAmount:getMyExpenseAmount, catIdsOf:getTxnCategoryIds, catName:id=>cats.find(c=>String(c.id)===String(id))?.name||"Other" });
+    const weekly = weeklyNow;
     const weeklyLaterId = `weekly_${weekly.weekKey}`;
     if((weekly.thisWeek>0 || weekly.lastWeek>0) && !dismissedAlerts.includes(weeklyLaterId)){
       CARDS.aiInsight = (
@@ -15952,6 +15981,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Manage</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
           <Row icon="🏦" title="Accounts" subtitle={`${accounts.length} account${accounts.length===1?"":"s"}`} onClick={()=>setSettingsSection("accounts")}/>
+          {weeklyNotifAvailable()&&<Row icon="🔔" title="Weekly summary notification" subtitle={weeklyNotifOn?"On · Sundays at 7 pm":"Off"} onClick={toggleWeeklyNotif}/>}
           <Row icon="🗂️" title="Categories" subtitle={`${cats.length} categories`} onClick={()=>setSettingsSection("categories")}/>
           <Row icon="🏷️" title="Account, Income & Liability Types" subtitle="Add custom types" onClick={()=>setSettingsSection("types")}/>
           {/* People & Groups and Vehicles removed from here per real feedback - both are now
