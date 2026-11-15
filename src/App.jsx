@@ -16559,8 +16559,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 },0);
                 const mapSpend=fn=>Object.fromEntries(hist.map(k=>[k,fn(k)]));
                 const items=[
-                  ...people.filter(p=>getPersonModules(p).includes("budget")).map(p=>({ id:"p:"+p.id, kind:"person", name:p.name, limit:getPersonPlanningAllocation(p,viewMonth), floor:floorOf("person",p.id), spentByMonth:mapSpend(k=>tx(k).reduce((sum,t)=>sum+getPersonAttributedAmount(t,p.id),0)) })),
-                  ...groups.map(g=>({ id:"g:"+g.id, kind:"group", name:g.name, limit:Number(g.manualLimitOverrides?.[viewMonth] ?? g.manualLimit ?? 0), floor:floorOf("group",g.id), spentByMonth:mapSpend(k=>grpSpend(k,g)) })),
+                  ...people.filter(p=>getPersonModules(p).includes("budget")).map(p=>({ id:"p:"+p.id, kind:"person", name:p.name, limit:getPersonPlanningAllocation(p,viewMonth), floor:floorOf("person",p.id), limitByMonth:mapSpend(k=>getPersonPlanningAllocation(p,k)), spentByMonth:mapSpend(k=>tx(k).reduce((sum,t)=>sum+getPersonAttributedAmount(t,p.id),0)) })),
+                  ...groups.map(g=>({ id:"g:"+g.id, kind:"group", name:g.name, limit:Number(g.manualLimitOverrides?.[viewMonth] ?? g.manualLimit ?? 0), floor:floorOf("group",g.id), limitByMonth:mapSpend(k=>Number(g.manualLimitOverrides?.[k] ?? g.manualLimit ?? 0)), spentByMonth:mapSpend(k=>grpSpend(k,g)) })),
                   ...cats.filter(c=>Number(c.budget)>0).map(c=>({ id:"c:"+c.id, kind:"category", name:c.name, limit:Number(c.budget), floor:getMandatoryCommitmentsTotal(householdCommitments.filter(m=>String(m.categoryId)===String(c.id))), spentByMonth:mapSpend(k=>catSpend(k,c.id)) })),
                 ];
                 // A person's or group's spend only counts what is attributed to them, so a limit with NO recorded spend in the whole
@@ -16580,6 +16580,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 };
                 const sgText=sg=>sg.type==="move"
                   ? [`Move ${sym}${fmt(sg.amount)} from ${sg.fromName} to ${sg.toName}`, `${sg.fromName} keeps going unused; ${sg.toName} keeps going over its limit.`]
+                  : sg.type==="trim"
+                    ? [`${sg.name}: ${nextLabel} limit ${sym}${fmt(sg.to)} instead of ${sym}${fmt(sg.from)}`, `Went ${sym}${fmt(sg.over)} over last month, so that comes off next month.`+(sg.notRecovered>0?` The minimum commitment is protected, so ${sym}${fmt(sg.notRecovered)} is not carried forward.`:"")]
                   : sg.type==="lower"
                     ? [`Lower ${sg.name} from ${sym}${fmt(sg.from)} to ${sym}${fmt(sg.to)}`, `Highest of the last ${sg.months} months was ${sym}${fmt(sg.peak)}. This frees ${sym}${fmt(sg.frees)}.`]
                     : [`Raise ${sg.name} from ${sym}${fmt(sg.from)} to ${sym}${fmt(sg.to)}, or keep it`, `Went over its limit in ${sg.overMonths} of the last ${sg.months} months.`];

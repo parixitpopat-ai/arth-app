@@ -60,3 +60,26 @@ test("a limit already at its floor frees nothing, so no suggestion", () => {
   const home = { ...item("g1", "Home", 10000, [500, 800, 600]), kind: "group", floor: 10000 };
   assert.deepEqual(suggestLimitChanges([home], M), []);
 });
+
+const person = (limit, floor, spentLast, over = {}) => ({ id: "p1", name: "Partner", kind: "person", limit, floor, spentByMonth: { "2026-10": spentLast, "2026-09": 0, "2026-08": 0 }, ...over });
+test("pay-back: limit 10,000, commitment 5,000, spent 15,000 -> next month 5,000", () => {
+  const s = suggestLimitChanges([person(10000, 5000, 15000)], M);
+  const t = s.find(x => x.type === "trim");
+  assert.equal(t.over, 5000); assert.equal(t.from, 10000); assert.equal(t.to, 5000); assert.equal(t.notRecovered, 0);
+});
+test("pay-back never goes below the minimum commitment, and what the floor stops is not carried forward", () => {
+  const t = suggestLimitChanges([person(10000, 5000, 18000)], M).find(x => x.type === "trim");
+  assert.equal(t.to, 5000); assert.equal(t.over, 8000); assert.equal(t.notRecovered, 3000); assert.equal(t.floorHit, true);
+});
+test("pay-back with no commitment can take the whole limit down to 0 at most", () => {
+  assert.equal(suggestLimitChanges([person(10000, 0, 25000)], M).find(x => x.type === "trim").to, 0);
+});
+test("no overspend last month, no pay-back; and a person is never offered a raise or moved money", () => {
+  assert.equal(suggestLimitChanges([person(10000, 5000, 9000)], M).filter(x => x.type === "trim").length, 0);
+  const s = suggestLimitChanges([person(10000, 0, 12000, { spentByMonth: { "2026-10": 12000, "2026-09": 12000, "2026-08": 12000 } }), item("c1", "Entertainment", 5000, [2000, 1800, 1500])], M);
+  assert.ok(!s.some(x => x.type === "raise" || (x.type === "move" && x.toId === "p1")));
+});
+test("pay-back uses the limit that month really had", () => {
+  const t = suggestLimitChanges([person(10000, 0, 15000, { limitByMonth: { "2026-10": 12000 } })], M).find(x => x.type === "trim");
+  assert.equal(t.over, 3000); assert.equal(t.to, 7000);
+});

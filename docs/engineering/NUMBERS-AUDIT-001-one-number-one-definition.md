@@ -37,3 +37,8 @@ Chromium + synthetic data only. Nothing checked on a real device or with the use
   what is attributed to them, and category budgets can be unchosen presets).
 - Not verified: real device, real data; applying a category suggestion changes the flat category guide (no per-month override exists for categories).
 - Not built: trimming limits after a month where TOTAL spend passed the target (waiting on the owner's answer).
+- Pay-back (person / group), agreed with the owner: overspend in the last completed month comes off the next month's limit, never below the minimum
+  commitment; what the floor stops is NOT carried forward. Example: limit 10,000, commitment 5,000, spent 15,000 -> next month 5,000.
+  People and groups are never topped up or given moved money (only categories receive moves). Uses the limit that month really had (`limitByMonth`).
+  Open: whether a skipped commitment should lower the floor (today the floor ignores commitments skipped for the VIEWED month only);
+  whether the shortfall the floor stops should carry forward.

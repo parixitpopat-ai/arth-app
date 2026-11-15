@@ -1,9 +1,14 @@
 // Limit suggestions: limits (person / group / category) are INDICATORS, never caps and never must-spend.
 // From what was really spent in recent completed months, suggest (a) lowering a limit that is not being used and
 // (b) where the freed money could go: the limits that keep being exceeded.
+// PAY-BACK (person / group): overspend in the last completed month comes off next month's limit, but never below the minimum
+// commitment. E.g. limit 10,000 with a 5,000 commitment, spent 15,000 (5,000 over) -> next month 5,000. If the floor stops the
+// full pay-back, the rest is NOT carried forward (`notRecovered`). People and groups are never "topped up" by a move; only
+// categories receive moved money.
 // Pure. No rounding of money except the suggested new limits, which are rounded UP to `step` for readability.
 //
-// item: { id, kind: "person"|"group"|"category", name, limit, floor?, spentByMonth: { "YYYY-MM": amount } }
+// item: { id, kind: "person"|"group"|"category", name, limit, floor?, limitByMonth?, spentByMonth: { "YYYY-MM": amount } }
+// limitByMonth: the limit each past month really had (falls back to `limit`).
 // floor = the minimum commitment inside this limit (e.g. the fixed 10,000 for home). A limit is never suggested below it.
 // months: the completed months to look at, newest first, e.g. ["2026-10","2026-09","2026-08"]. The month in progress is never used.
 const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
@@ -36,11 +41,31 @@ export function assessLimit(item, months, opts = {}) {
  * (never more than is free, never more than is needed). Leftover freed money is a plain "lower" suggestion.
  * @returns {Array<{type:"move"|"lower"|"raise", ...}>}
  */
+/** Pay-back for one person/group: null unless the last completed month went over that month's limit and a reduction is possible. */
+export function paybackFor(item, months) {
+  if (!item || item.kind === "category" || !(months || []).length) return null;
+  const last = months[0];
+  const limit = Number(item.limit) || 0;
+  const thenLimit = Number(item.limitByMonth?.[last] ?? item.limit) || 0;
+  const spent = Number(item.spentByMonth?.[last]) || 0;
+  const floor = Math.max(0, Number(item.floor) || 0);
+  const over = r2(spent - thenLimit);
+  if (!(thenLimit > 0) || !(limit > 0) || !(over > 0)) return null;
+  const to = r2(Math.max(floor, limit - over));
+  if (!(to < limit)) return null;
+  return { over, from: limit, to, notRecovered: r2(Math.max(0, over - (limit - to))), floorHit: to === floor && limit - over < floor };
+}
+
 export function suggestLimitChanges(items, months, opts = {}) {
-  const rows = (items || []).map(item => ({ item, a: assessLimit(item, months, opts) }));
+  // People and groups are never topped up (no "raise", never receive moved money); they get a pay-back instead.
+  const rows = (items || []).map(item => { const a = assessLimit(item, months, opts); return { item, a: item.kind !== "category" && a.verdict === "exceeded" ? { verdict: "fine" } : a }; });
   const free = rows.filter(r => r.a.verdict === "unused" && r.a.frees > 0).map(r => ({ ...r, left: r.a.frees })).sort((x, y) => y.left - x.left);
   const need = rows.filter(r => r.a.verdict === "exceeded" && r.a.needs > 0).map(r => ({ ...r, left: r.a.needs })).sort((x, y) => y.left - x.left);
   const out = [];
+  for (const it of items || []) {
+    const pb = paybackFor(it, months);
+    if (pb) out.push({ type: "trim", id: it.id, name: it.name, kind: it.kind, ...pb });
+  }
   for (const n of need) {
     for (const f of free) {
       if (n.left <= 0) break;
