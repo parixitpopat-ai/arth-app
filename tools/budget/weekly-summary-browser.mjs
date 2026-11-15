@@ -32,7 +32,7 @@ try {
   const t = (await card.count()) ? (await card.innerText()).replace(/\s+/g, " ") : "";
   rec("W2 headline compares with the same days last week: 1,000 vs 2,000 = down by 50%", /Spends down by 50% this week/.test(t) && /₹1,000/.test(t) && /₹2,000/.test(t), t);
   rec("W3 money others owe you is not counted (the 5,000 owed-back trip is left out)", !/6,000|5,000 /.test(t.replace("₹2,000", "")) , t);
-  rec("W4 it says which category moved (by the app's own category name): ₹2,000 lower than the same days last week", /\w+ is ₹2,000 lower than the same days last week/.test(t), t);
+  rec("W4 the card does not repeat Insights (no category line)", !/lower than the same days|higher than the same days/.test(t), t);
   await card.getByRole("button", { name: "Later" }).click(); await page.waitForTimeout(600);
   rec("W5 Later hides it", (await page.getByTestId("weekly-summary").count()) === 0, {});
   await page.reload(); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(600);

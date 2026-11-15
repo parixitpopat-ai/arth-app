@@ -2599,7 +2599,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Prepaid plan ending / ended (domain/bills/prepaidAlerts.js): three alerts per plan; none for a connection the person ended or paused.
   // Weekly spend summary: one calculation for the Home card and the weekly phone notification (domain/insights/weeklySummary.js).
   const weeklyTodayKey = todayStr();
-  const weeklyNow = useMemo(()=>weeklySummary({ txns, today:weeklyTodayKey, myAmount:getMyExpenseAmount, catIdsOf:getTxnCategoryIds, catName:id=>cats.find(c=>String(c.id)===String(id))?.name||"Other" }),[txns,cats,getMyExpenseAmount,weeklyTodayKey]);
+  const weeklyNow = useMemo(()=>weeklySummary({ txns, today:weeklyTodayKey, myAmount:getMyExpenseAmount }),[txns,getMyExpenseAmount,weeklyTodayKey]);
   const [weeklyNotifOn, setWeeklyNotifOn] = useState(()=>{ try { return localStorage.getItem("arth_weekly_notif")==="1"; } catch { return false; } });
   useEffect(()=>{ try { localStorage.setItem("arth_weekly_notif", weeklyNotifOn?"1":"0"); } catch { /* storage blocked: the choice is simply not kept */ } },[weeklyNotifOn]);
   const weeklyNowRef = useRef(weeklyNow); weeklyNowRef.current = weeklyNow;
@@ -10898,7 +10898,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <span style={{ color:T.sub,fontSize:12 }}>This month: {sym}{fmt(weekly.monthTotal)}</span>
           </div>
           {weekly.lastWeek>0&&<div style={{ color:T.sub,fontSize:11,marginTop:2 }}>Same days last week: {sym}{fmt(weekly.lastWeek)}</div>}
-          {weekly.topMover&&<div style={{ color:T.text,fontSize:12,fontWeight:600,marginTop:6 }}>{weekly.topMover.name} is {sym}{fmt(Math.abs(weekly.topMover.diff))} {weekly.topMover.diff<0?"lower":"higher"} than the same days last week.</div>}
           <div style={{ display:"flex",gap:10,marginTop:10 }}>
             <button onClick={()=>setTab("insights")} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:8,padding:"7px 14px",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Review</button>
             <button onClick={()=>setDismissedAlerts(prev=>prev.includes(weeklyLaterId)?prev:[...prev,weeklyLaterId])} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"7px 14px",color:T.sub,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Later</button>

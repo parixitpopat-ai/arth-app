@@ -28,7 +28,6 @@ export function buildWeeklyNotification(summary, { sym, fmt, asOf }) {
   const body = `${sym}${fmt(summary.thisWeek)} this week · This month ${sym}${fmt(summary.monthTotal)}`;
   const lines = [body];
   if (summary.lastWeek > 0) lines.push(`Same days last week: ${sym}${fmt(summary.lastWeek)}`);
-  if (summary.topMover) lines.push(`${summary.topMover.name} is ${sym}${fmt(Math.abs(summary.topMover.diff))} ${summary.topMover.diff < 0 ? "lower" : "higher"} than the same days last week.`);
   lines.push(`As of ${DAY_NAMES[asOf.getDay()]} ${asOf.getDate()} ${MONTH[asOf.getMonth()]}, the last time Arth was open.`);
   return { title, body, largeBody: lines.join("\n") };
 }

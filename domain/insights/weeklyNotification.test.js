@@ -17,13 +17,14 @@ test("crosses a month end and a year end", () => {
 test("'Later' is tomorrow at the same time", () => {
   assert.deepEqual(tomorrowAt(L(2026, 11, 15, 20)), L(2026, 11, 16, 19));
 });
-const sum = { headline: "Spends down by 32% this week", thisWeek: 27496, lastWeek: 40435, monthTotal: 67860, topMover: { name: "Shopping", diff: -9000 } };
+const sum = { headline: "Spends down by 32% this week", thisWeek: 27496, lastWeek: 40435, monthTotal: 67860 };
 const o = { sym: "₹", fmt: n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ","), asOf: L(2026, 11, 11, 10) };
-test("text carries the numbers, the mover and when it was last up to date", () => {
+test("text carries the numbers and when it was last up to date, and does not repeat Insights", () => {
   const n = buildWeeklyNotification(sum, o);
   assert.equal(n.title, "Spends down by 32% this week");
   assert.equal(n.body, "₹27,496 this week · This month ₹67,860");
-  assert.match(n.largeBody, /Shopping is ₹9,000 lower than the same days last week\./);
+  assert.match(n.largeBody, /Same days last week: ₹40,435/);
+  assert.doesNotMatch(n.largeBody, /lower than|higher than/);
   assert.match(n.largeBody, /As of Wednesday 11 Nov/);
 });
 test("nothing to say means no notification", () => {

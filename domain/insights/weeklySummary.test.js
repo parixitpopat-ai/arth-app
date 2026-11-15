@@ -4,7 +4,7 @@ import { weeklySummary, mondayOf } from "./weeklySummary.js";
 
 const mine = t => t.amount;
 const e = (date, amount, cat) => ({ type: "expense", date, amount, cat });
-const run = (txns, today) => weeklySummary({ txns, today, myAmount: mine, catIdsOf: t => (t.cat ? [t.cat] : []), catName: id => id.toUpperCase() });
+const run = (txns, today) => weeklySummary({ txns, today, myAmount: mine });
 
 test("Monday of the week, local dates (2026-11-15 is a Sunday)", () => {
   assert.equal(mondayOf("2026-11-15"), "2026-11-09");
@@ -31,15 +31,4 @@ test("month total is the month so far, to today only", () => {
 test("only expenses count, and 'my' amount comes from the shared rule", () => {
   const s = weeklySummary({ txns: [{ type: "income", date: "2026-11-10", amount: 9999 }, e("2026-11-10", 1000)], today: "2026-11-11", myAmount: t => t.amount / 2 });
   assert.equal(s.thisWeek, 500);
-});
-test("top mover is the category that moved most in the direction of the headline", () => {
-  const s = run([e("2026-11-10", 200, "food"), e("2026-11-03", 3000, "shopping"), e("2026-11-03", 400, "food")], "2026-11-11");
-  assert.equal(s.direction, "down");
-  assert.equal(s.topMover.id, "shopping"); assert.equal(s.topMover.name, "SHOPPING"); assert.equal(s.topMover.diff, -3000);
-  const up = run([e("2026-11-10", 5000, "travel"), e("2026-11-03", 1000, "food")], "2026-11-11");
-  assert.equal(up.topMover.id, "travel");
-});
-test("tiny movements are not called out", () => {
-  const s = run([e("2026-11-10", 150, "food"), e("2026-11-03", 100, "food"), e("2026-11-10", 5000, "x"), e("2026-11-03", 5000, "x")], "2026-11-11");
-  assert.equal(s.topMover, null);
 });
