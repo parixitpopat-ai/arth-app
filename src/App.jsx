@@ -20090,6 +20090,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setBillGroup(ba.attributeType==="group" ? (ba.attributedTo||"") : "");
       applyTypeCategory(ba.type);
     };
+    // The bill's own name: with a connection chosen it names itself "<connection> · <month>" (one name to remember, not a second one to type). "Change" lets the person write their own.
+    const [nameEdited,setNameEdited]=useState(false);
+    const [nameOpen,setNameOpen]=useState(false);
+    const _nameBA = selectedBA || _preBA || null;
+    const autoName = (()=>{ if(!_nameBA || isRecharge) return ""; const d=/^(\d{4})-(\d{2})/.exec(billDate||dueDate||todayStr()); const m=d?new Date(Number(d[1]),Number(d[2])-1,1).toLocaleString("en-IN",{ month:"long", year:"numeric" }):""; return `${_nameBA.name}${m?` · ${m}`:""}`; })();
+    useEffect(()=>{ if(autoName && !nameEdited) setName(autoName); },[autoName,nameEdited]);
     const formReady = Boolean(name.trim() && parseFloat(amount) && effDueDate && (!isRecharge || Number(validityDays)>0));
     const submit=()=>{
       if(!formReady||duplicateInvoiceBill) return;
@@ -20246,7 +20252,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             })()}
             {(selectedBillerId && (billers.find(b=>b.id===selectedBillerId)?.type==="Credit Card" || getBillerActionType(billers.find(b=>b.id===selectedBillerId)?.type)==="membership")) ? null : (<>
 
-            <input style={{ ...inp,fontSize:17,fontWeight:700,border:`1px solid ${!name.trim()?T.danger+"66":T.border}` }} placeholder="Bill name * e.g. Common Meter Electric" value={name} onChange={e=>setName(e.target.value)}/>
+            {autoName && !nameEdited && !nameOpen ? (
+              <div data-testid="addbill-name-row" style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:12,padding:"10px 12px" }}>
+                <span style={{ minWidth:0 }}>
+                  <span style={{ display:"block",color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>Bill name</span>
+                  <span style={{ display:"block",color:T.text,fontSize:13,fontWeight:700,marginTop:2 }}>{name}</span>
+                </span>
+                <button onClick={()=>setNameOpen(true)} style={{ background:"none",border:"none",color:T.accent,fontSize:11.5,fontWeight:700,cursor:"pointer" }}>Change</button>
+              </div>
+            ) : (
+              <input data-testid="addbill-name-input" style={{ ...inp,fontSize:17,fontWeight:700,border:`1px solid ${!name.trim()?T.danger+"66":T.border}` }} placeholder="Bill name * e.g. Common Meter Electric" value={name} onChange={e=>{ setName(e.target.value); setNameEdited(true); }}/>
+            )}
 
             {/* D4 — "For · Change": prefilled from the connection, collapsed to one row until
                 "Change" is tapped, which opens the full picker (search is a simple client-side

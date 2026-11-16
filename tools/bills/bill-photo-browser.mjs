@@ -18,6 +18,11 @@ const draw = async (lines, out, size = 26) => {
 };
 await draw(["GOVERNMENT OF SAMPLE", "DEPARTMENT OF DRINKING WATER", "", "CONSUMERID    BILL DATE     DUE DATE", "30071258      16/11/2026    30/11/2026", "", "NAME & ADDRESS    U - SAMPLE-07", "MR SAMPLE OWNER", "12 EXAMPLE ROAD SAMPLE TOWN", "", "BILL NO       INSTALL DT    METER NO", "044500034     21/10/2013    J2002934", "", "CURRENT   PREVIOUS   UNITS   USEDUNIT", "10443     10260      183     183", "", "WATER CHARGES       METER RENT", "5839                65", "", "ARREARS/CREDIT      NET PAYABLE", "0 / 0               5904", "", "AMOUNT IN WORDS", "Rupees Five Nine Zero Four Only"], billPng);
 await draw(["SHOPPING LIST", "", "apples  6", "bread   1", "milk    2"], otherPng);
+// the same bill as a BIG camera-style photo (about 40 megapixels), made by scaling the drawn bill up
+const bigPng = `${dir}/bill-big.jpg`;
+{ const p = await browser.newPage(); const b64 = (await import("node:fs")).readFileSync(billPng).toString("base64");
+  const out = await p.evaluate(async (b64) => { const img = new Image(); img.src = "data:image/png;base64," + b64; await img.decode(); const k = 8, c = document.createElement("canvas"); c.width = img.width * k; c.height = img.height * k; const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height); const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.8)); const buf = new Uint8Array(await blob.arrayBuffer()); let s = ""; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000)); return { w: c.width, h: c.height, b64: btoa(s), bytes: buf.length }; }, b64);
+  writeFileSync(bigPng, Buffer.from(out.b64, "base64")); globalThis.BIG = { w: out.w, h: out.h, bytes: out.bytes }; await p.close(); }
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: "Asia/Kolkata" });
 await ctx.addInitScript(() => { if (localStorage.getItem("__init")) return; localStorage.setItem("__init", "1"); const set = (k, v) => localStorage.setItem(k, JSON.stringify(v));
   set("arth_accounts", [{ id: "bank1", name: "Test Savings", type: "bank", openingBalance: 500000, openingBalanceDate: "2025-01-01", last4: "9001" }]);
@@ -57,6 +62,12 @@ try {
   rec("P9 the Add bill form is filled and linked: connection, amount, dates", /Common Meter Water/.test(form) && /5904|5,904/.test(await page.evaluate(() => [...document.querySelectorAll("input")].map(i => i.value).join(" "))) , form.slice(0, 200));
   const vals = await page.evaluate(() => [...document.querySelectorAll("input")].map(i => i.value));
   rec("P10 the due date 2026-11-30 is in the form (the bill date sits under More details; P11 checks it was saved)", vals.includes("2026-11-30"), vals.filter(Boolean).slice(0, 12));
+  // a big camera-style photo: the shared reader would refuse it (over 16 megapixels); the bill reader shrinks it and reads it
+  await T("billphoto-cancel").click().catch(() => {});
+  await T("billphoto-file").setInputFiles(bigPng); await Promise.race([T("billphoto-use").waitFor({ timeout: 120000 }), T("billphoto-declined").waitFor({ timeout: 120000 })]).catch(() => {});
+  const bigRead = { consumerId: await T("billphoto-consumerId").inputValue().catch(() => null), amount: await T("billphoto-amount").inputValue().catch(() => null) };
+  rec("P13 a big camera-style photo (" + Math.round(globalThis.BIG.w * globalThis.BIG.h / 1e6) + " MP) is read, not refused", globalThis.BIG.w * globalThis.BIG.h > 16000000 && bigRead.consumerId === "30071258" && bigRead.amount === "5904", { ...globalThis.BIG, ...bigRead, declined: (await T("billphoto-declined").innerText().catch(() => "")) });
+  await T("billphoto-cancel").click().catch(() => {}); await T("billphoto-file").setInputFiles(billPng); await T("billphoto-use").waitFor({ timeout: 90000 }).catch(() => {}); await T("billphoto-use").click(); await page.waitForTimeout(900);
   // save the bill, then the same photo again must be flagged as already added
   await T("addbill-submit").click().catch(() => {}); await page.waitForTimeout(1000);
   const bills = JSON.parse(await page.evaluate(() => localStorage.getItem("arth_bills") || "[]"));

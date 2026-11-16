@@ -30,7 +30,7 @@ export default function BillPhotoReview({ T, sym = "₹", billerAccounts = [], b
     setPhase({ name: "reading" });
     const [{ readBillFromImage }, { DECLINE_MESSAGE }] = await Promise.all([import("../domain/invoices/ocr/ocrBill.js"), import("../domain/invoices/ocr/ocrSummary.js")]);
     const r = await readBillFromImage(file, { baseUrl: new URL("./", document.baseURI).href });
-    if (!r.ok) { setPhase({ name: "declined", message: r.reason === "engine" ? "The photo could not be read on this phone. Add the bill by hand instead." : DECLINE_MESSAGE[r.reason] }); return; }
+    if (!r.ok) { setPhase({ name: "declined", detail: r.detail || "", reason: r.reason, message: r.reason === "engine" ? "The photo could not be read on this phone. Add the bill by hand instead." : r.reason === "shrink" ? "This photo is too big to open on this phone. Try a smaller photo, or add the bill by hand." : DECLINE_MESSAGE[r.reason] }); return; }
     if (!r.found) { setPhase({ name: "declined", message: "No bill details were found in this photo. Try a flat, well-lit photo of the whole bill, or add it by hand." }); return; }
     setWords(r.amountInWords);
     setF({ consumerId: r.consumerId || "", billDate: r.billDate || "", dueDate: r.dueDate || "", amount: r.amount != null ? String(r.amount) : "", billNo: r.billNo || "",
@@ -60,7 +60,7 @@ export default function BillPhotoReview({ T, sym = "₹", billerAccounts = [], b
           <input data-testid="billphoto-file" type="file" accept="image/*" onChange={chooseFile} style={{ display: "block", marginTop: 8, maxWidth: "100%", fontSize: 12 }} />
         </label>
         <div style={{ color: T.sub, fontSize: 11, marginTop: 6 }}>Read on this phone only. The photo is not kept, and the name and address on the bill are not read out.</div>
-        {phase.name === "declined" && <div data-testid="billphoto-declined" style={{ color: "#f0a500", fontSize: 12, marginTop: 8 }}>{phase.message}</div>}
+        {phase.name === "declined" && <div data-testid="billphoto-declined" style={{ color: "#f0a500", fontSize: 12, marginTop: 8 }}>{phase.message}{phase.reason ? <span style={{ display: "block", color: T.sub, fontSize: 10, marginTop: 4 }}>Reason: {phase.reason}{phase.detail ? ` (${phase.detail})` : ""}</span> : null}</div>}
       </div>
     );
   }

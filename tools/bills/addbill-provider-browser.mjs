@@ -37,15 +37,19 @@ try {
   rec("A2 no category picker for an electricity bill (the type says Utilities / Electricity)", !/Categories \(select one or more\)/i.test(t), {});
   rec("A3 'for' shows as a one-line row from the connection, not a list of every person", (await T("addbill-for-row").count()) === 1 && !/FOR \(WHO THIS BILL BELONGS TO\)/i.test(t), (await T("addbill-for-row").innerText().catch(() => "")).replace(/\s+/g, " "));
   const nameVal = await page.evaluate(() => [...document.querySelectorAll("input")].map(i => i.value));
-  rec("A4 the bill name is filled in from the connection", nameVal.includes("Common Meter Electricity"), nameVal.filter(Boolean));
+  const nameRow = (await T("addbill-name-row").innerText().catch(() => "")).replace(/\s+/g, " ");
+  rec("A4 the bill names itself '<connection> · <month>' as one line (no second name to type), with Change", /Common Meter Electricity · \w+ \d{4}/.test(nameRow) && (await T("addbill-name-input").count()) === 0, nameRow);
   await page.getByText("More details").first().dispatchEvent("click"); await page.waitForTimeout(400);
   t = await text();
   rec("A5 More details shows the category read-only: Utilities (from connection)", /Utilities.*from connection/i.test(t), (t.match(/Category [^·]*· from \w+/) || [""])[0]);
+  await page.getByText("Change", { exact: true }).first().dispatchEvent("click").catch(() => {}); await page.waitForTimeout(300);
+  rec("N1 Change on the bill name opens a text box with that name; typing keeps the person's own name", (await T("addbill-name-input").count()) === 1, {});
+  await T("addbill-name-input").fill("Electricity Nov"); await page.waitForTimeout(200);
   // save
   const inputs = page.locator('input[type="number"]'); await inputs.first().fill("1234"); const due = page.locator('input[type="date"]').first(); await due.fill("2026-12-10");
   await T("addbill-submit").click(); await page.waitForTimeout(900);
   const bills = JSON.parse(await page.evaluate(() => localStorage.getItem("arth_bills") || "[]"));
-  rec("A6 saved bill: on that connection, category Utilities, for the house", bills.length === 1 && bills[0].billerAccountId === "ba1" && (bills[0].catIds || []).includes("utilities") && bills[0].amount === 1234, bills.map(b => ({ ba: b.billerAccountId, catIds: b.catIds, amount: b.amount, forType: b.forType || b.billForType })));
+  rec("A6 saved bill: on that connection, category Utilities, for the house, with the name the person typed", bills.length === 1 && bills[0].name === "Electricity Nov" && bills[0].billerAccountId === "ba1" && (bills[0].catIds || []).includes("utilities") && bills[0].amount === 1234, bills.map(b => ({ ba: b.billerAccountId, catIds: b.catIds, amount: b.amount, forType: b.forType || b.billForType })));
   // water: two connections -> account must still be chosen; category already known
   await open();
   await providerSelect().selectOption({ label: "Drinking Water Dept" }); await page.waitForTimeout(600);
@@ -53,7 +57,7 @@ try {
   rec("W1 water provider with TWO connections: asks which one, and still no category picker", /Account under/i.test(t) && !/Categories \(select one or more\)/i.test(t), {});
   await page.locator("select").nth(1).selectOption({ label: "Water Tap B" }); await page.waitForTimeout(600);
   t = await text();
-  rec("W2 choosing the connection fills 'for' from it (Partner) and the name", /Partner/.test((await T("addbill-for-row").innerText().catch(() => ""))) && (await page.evaluate(() => [...document.querySelectorAll("input")].map(i => i.value))).includes("Water Tap B"), (await T("addbill-for-row").innerText().catch(() => "")).replace(/\s+/g, " "));
+  rec("W2 choosing the connection fills 'for' from it (Partner) and the name", /Partner/.test((await T("addbill-for-row").innerText().catch(() => ""))) && /Water Tap B · \w+ \d{4}/.test((await T("addbill-name-row").innerText().catch(() => "")).replace(/\s+/g, " ")), (await T("addbill-for-row").innerText().catch(() => "")).replace(/\s+/g, " "));
   // a provider whose type says nothing keeps the picker
   await providerSelect().selectOption({ label: "Some Club" }); await page.waitForTimeout(600);
   t = await text();
