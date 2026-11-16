@@ -20073,6 +20073,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // A prepaid recharge is paid FIRST and used after (recharge, then valid until); a postpaid/other bill is used first and paid by a due date.
     // So a recharge has no "pay by" date, bill number, bill period or recurring flag: its date is the recharge date and it needs a validity.
     const effDueDate = isRecharge ? validFrom2 : dueDate;
+    // A provider or connection with a clear type (electricity, water...) already says the category, and a connection already says who it is for:
+    // do not ask again. The picker comes back only when the type says nothing, or after "Change".
+    const [catOverride,setCatOverride]=useState(false);
+    const _selBiller = selectedBillerId ? billers.find(b=>b.id===selectedBillerId) : null;
+    const _typeCat = (()=>{ const d = defaultCategoryForBillerType(selectedBA?.type || _selBiller?.type || ""); return d && cats.some(c=>c.id===d.catId) ? d : null; })();
+    const connectionLinked = hasConnectionPrefill || !!selectedBA;
+    const catLocked = (hasConnectionPrefill || !!_typeCat) && !catOverride;
+    const applyTypeCategory = (type)=>{ const d = defaultCategoryForBillerType(type||""); const ok = d && cats.some(c=>c.id===d.catId); setBillCatIds(ok?[d.catId]:[]); setSubId(ok && cats.find(c=>c.id===d.catId)?.subs?.some(x=>x.id===d.subId) ? d.subId : ""); setCatOverride(false); };
+    const applyAccount = (ba)=>{
+      setSelectedBillerId(ba.billerId||""); setBillerAccountId(ba.id);
+      setName(prev=>prev.trim()?prev:(ba.name||""));
+      setMerchant(ba.provider||ba.name||""); setBillerCategory(ba.type||"");
+      if(ba.consumerNo) setConsumerNumber(ba.consumerNo);
+      setBillForType(ba.attributeType||"unassigned"); setBillForId(ba.attributeType && ba.attributeType!=="house" ? (ba.attributedTo||"") : "");
+      setBillGroup(ba.attributeType==="group" ? (ba.attributedTo||"") : "");
+      applyTypeCategory(ba.type);
+    };
     const formReady = Boolean(name.trim() && parseFloat(amount) && effDueDate && (!isRecharge || Number(validityDays)>0));
     const submit=()=>{
       if(!formReady||duplicateInvoiceBill) return;
@@ -20129,13 +20146,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               if(r.currentReading) setMeterReading(r.currentReading);
               if(r.consumerId) setConsumerNumber(r.consumerId);
               const ba = r.connection;
-              if(ba){
-                setSelectedBillerId(ba.billerId||""); setBillerAccountId(ba.id);
-                if(!name) setName(ba.name||"");
-                setMerchant(ba.provider||ba.name||""); setBillerCategory(ba.type||"");
-                setBillForType(ba.attributeType||"unassigned"); setBillForId(ba.attributeType && ba.attributeType!=="house" ? (ba.attributedTo||"") : "");
-                setBillGroup(ba.attributeType==="group" ? (ba.attributedTo||"") : "");
-              }
+              if(ba) applyAccount(ba);
               setPhotoMsg({ warn:false, text:ba?`Filled in from the photo and matched to ${ba.name}. Check the split, then save.`:"Filled in from the photo. Pick the provider and split, then save." });
             }}/>}
             {photoMsg&&<div data-testid="billphoto-message" style={{ color:photoMsg.warn?"#f0a500":T.accent,fontSize:12,fontWeight:700 }}>{photoMsg.warn?"⚠ ":"✔ "}{photoMsg.text}</div>}
@@ -20166,6 +20177,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       // a real screenshot. Bill name should stay empty for the user to type
                       // something specific (e.g. "July Electricity"), not blindly echo the biller.
                       setMerchant(prev=>prev.trim()?prev:(biller?.name||""));
+                      setBillerCategory(biller?.type||""); applyTypeCategory(biller?.type);
+                      const only = billerAccounts.filter(ba=>ba.billerId===billerId);
+                      if(only.length===1) applyAccount(only[0]);   // one connection under this provider: no need to ask which
                     }}>
                       <option value="">— Not linked to an existing provider —</option>
                       {billers.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
@@ -20175,9 +20189,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div>
                       <span style={lbl}>Account under {billers.find(b=>b.id===selectedBillerId)?.name}</span>
                       <select style={inp} value={billerAccountId} onChange={e=>{
-                        setBillerAccountId(e.target.value);
-                        // Was also overwriting Bill name with the account's name here - same
-                        // redundancy fix as the biller selection above, removed for the same reason.
+                        const ba = billerAccounts.find(x=>x.id===e.target.value);
+                        if(ba) applyAccount(ba); else setBillerAccountId("");
+                        // The connection supplies the name (only when empty), provider, category, consumer no. and who it is for, as when a bill is added from the connection.
                       }}>
                         <option value="">— Select account —</option>
                         {accountsForSelectedBiller.map(ba=><option key={ba.id} value={ba.id}>{ba.name}</option>)}
@@ -20239,7 +20253,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 filter over the same lists this form already had — people/groups/homes/vehicles —
                 plus the explicit "No one → shows as Unassigned" option). The generic/one-off path
                 (no connection) always shows the full picker directly, same as before. */}
-            {hasConnectionPrefill && !showForChange ? (
+            {connectionLinked && !showForChange ? (
               <button data-testid="addbill-for-row" onClick={()=>setShowForChange(true)} style={{ width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:TOUCH.min,background:T.input,border:"none",borderRadius:12,padding:"10px 14px",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif" }}>
                 <span style={{ minWidth:0 }}>
                   <span style={{ display:"block",color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>For</span>
@@ -20251,9 +20265,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
                   <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>FOR (WHO THIS BILL BELONGS TO)</span>
-                  {hasConnectionPrefill && <button onClick={()=>setShowForChange(false)} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>Done</button>}
+                  {connectionLinked && <button onClick={()=>setShowForChange(false)} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>Done</button>}
                 </div>
-                {hasConnectionPrefill && (
+                {connectionLinked && (
                   <input value={forSearch} onChange={e=>setForSearch(e.target.value)} placeholder="Search people, groups, homes, vehicles" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"8px 11px",fontSize:12.5,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none",marginBottom:8 }}/>
                 )}
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -20346,7 +20360,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {/* D3 — a real category picker only when there's no connection to supply one;
                 when there is, Category reads from the connection and only "More details" shows
                 it, read-only with a Change link (never a grid to work through). */}
-            {!hasConnectionPrefill && (
+            {!catLocked && (
               <div>
                 <span style={lbl}>Categories (select one or more)</span>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -20373,13 +20387,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </button>
             {showMoreDetails && (
               <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
-                {hasConnectionPrefill && (
+                {catLocked && (
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",background:T.input,borderRadius:10,padding:"9px 12px" }}>
                     <span style={{ minWidth:0 }}>
                       <span style={{ display:"block",color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase" }}>Category</span>
-                      <span style={{ display:"block",color:T.text,fontSize:12.5,fontWeight:700,marginTop:1 }}>{billerCategory||"—"} · from connection</span>
+                      <span style={{ display:"block",color:T.text,fontSize:12.5,fontWeight:700,marginTop:1 }}>{(()=>{ const c = billCatIds[0] ? cats.find(x=>x.id===billCatIds[0]) : null; const sub = c?.subs?.find(x=>x.id===subId); return c ? `${c.name}${sub?` / ${sub.name}`:""}` : (billerCategory||"—"); })()} · from {connectionLinked?"connection":"provider"}</span>
                     </span>
-                    <button onClick={()=>setShowPrefillOverrides(true)} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>Change</button>
+                    <button onClick={()=>{ setShowPrefillOverrides(true); setCatOverride(true); }} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>Change</button>
                   </div>
                 )}
                 <input style={inp} placeholder="Provider / issuer (optional) e.g. Goa Electricity Dept" value={merchant} onChange={e=>setMerchant(e.target.value)}/>

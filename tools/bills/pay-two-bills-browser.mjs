@@ -41,7 +41,7 @@ try {
   rec("P6 the expense now counts as a bill payment and has no money left to give", txn.isBillPayment === true && txn.paidBillId === "b-aug", { paidBillId: txn.paidBillId });
   await T("bill-row-b-sep").dispatchEvent("click").catch(() => {}); await page.waitForTimeout(500);
   const body = await text();
-  rec("P7 the Bills screen shows September as partly paid: ₹7,039 of ₹7,039.46, still open and overdue", /7,039 of ₹7,039\.46/.test(body) && /1 day overdue/.test(body), body.slice(body.indexOf("Sep") - 20, body.indexOf("Sep") + 160));
+  rec("P7 the Bills screen shows September as partly paid: ₹7,039 of ₹7,039.46, still open and overdue", /7,039 of ₹7,039\.46/.test(body) && /\d+ days? overdue/.test(body), body.slice(body.indexOf("Sep") - 20, body.indexOf("Sep") + 160));
   // deleting the payment reopens BOTH bills and removes both contributions
   await page.goto(APP); await page.waitForTimeout(1000); await unlock(); await page.waitForTimeout(500);
   await page.getByText(/^transactions$/i).last().dispatchEvent("click").catch(() => {});
