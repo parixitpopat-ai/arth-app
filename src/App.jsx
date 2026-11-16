@@ -172,6 +172,7 @@ import { defaultCategoryForBillerType, findMatchingExpenseForBill } from "./doma
 import { getPrepaidAlerts, prepaidAlertText, connectionInactiveState } from "./domain/bills/prepaidAlerts";
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
+import BillPhotoReview from "./screens/BillPhotoReview.jsx";
 import { weeklySummary } from "../domain/insights/weeklySummary";
 import { weeklyNotifAvailable, weeklyNotifEnable, weeklyNotifCancel, weeklyNotifSchedule, weeklyNotifSnooze, weeklyNotifOnAction } from "./native/weeklyNotification.js";
 import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getEffectiveMonthlyBudget, getCarryForwardPrevSpend, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope, buildRefundTotalsByExpense } from "../domain/allocations/adapter";
@@ -19988,6 +19989,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [frequency,setFrequency]=useState("monthly");
     const [merchant,setMerchant]=useState(_preBA?.provider||_preBA?.name||"");
     const [billPhoto,setBillPhoto]=useState(null);
+    // Message from the bill-photo reader. Kept HERE, not in a toast: a toast re-draws the whole app, and this form (defined inside AppContent) would lose everything just filled in.
+    const [photoMsg,setPhotoMsg]=useState(null);
     const [invoiceNo,setInvoiceNo]=useState("");
     const [billerCategory,setBillerCategory]=useState(_preBA?.type||"");
     const [consumerNumber,setConsumerNumber]=useState(_preBA?.consumerNo||"");
@@ -20113,6 +20116,29 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
           )}
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+
+            {/* A printed bill photographed: read on this phone, shown for checking, then fills this form (screens/BillPhotoReview.jsx). */}
+            {!isRecharge&&<BillPhotoReview T={T} sym={sym} billerAccounts={billerAccounts} bills={bills} onUse={r=>{
+              if(hasConnectionPrefill && _preBA && r.connection && r.connection.id!==_preBA.id){ setPhotoMsg({ warn:true, text:`That bill belongs to ${r.connection.name}, not ${_preBA.name}. Open Add bill from there instead.` }); return; }
+              if(hasConnectionPrefill && _preBA && !r.connection && _preBA.consumerNo && String(_preBA.consumerNo).replace(/\D/g,"")!==r.consumerId){ setPhotoMsg({ warn:true, text:`The consumer ID on that bill is different from ${_preBA.name}'s. Check you chose the right bill.` }); return; }
+              setAmount(r.amount); setBillDate(r.billDate); setDueDate(r.dueDate);
+              if(r.billNo) setInvoiceNo(r.billNo);
+              if(r.periodFrom) setBillPeriodFrom(r.periodFrom);
+              if(r.periodTo) setBillPeriodTo(r.periodTo);
+              if(r.units) setUnitsConsumed(r.units);
+              if(r.currentReading) setMeterReading(r.currentReading);
+              if(r.consumerId) setConsumerNumber(r.consumerId);
+              const ba = r.connection;
+              if(ba){
+                setSelectedBillerId(ba.billerId||""); setBillerAccountId(ba.id);
+                if(!name) setName(ba.name||"");
+                setMerchant(ba.provider||ba.name||""); setBillerCategory(ba.type||"");
+                setBillForType(ba.attributeType||"unassigned"); setBillForId(ba.attributeType && ba.attributeType!=="house" ? (ba.attributedTo||"") : "");
+                setBillGroup(ba.attributeType==="group" ? (ba.attributedTo||"") : "");
+              }
+              setPhotoMsg({ warn:false, text:ba?`Filled in from the photo and matched to ${ba.name}. Check the split, then save.`:"Filled in from the photo. Pick the provider and split, then save." });
+            }}/>}
+            {photoMsg&&<div data-testid="billphoto-message" style={{ color:photoMsg.warn?"#f0a500":T.accent,fontSize:12,fontWeight:700 }}>{photoMsg.warn?"⚠ ":"✔ "}{photoMsg.text}</div>}
 
             {/* Pick an existing biller account — the generic, connectionless path (no
                 defaultBillerAccountId): no provider prefill, this picker and the real category
