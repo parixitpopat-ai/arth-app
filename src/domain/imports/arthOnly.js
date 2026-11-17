@@ -9,12 +9,12 @@ import { extractUtr, refDigits } from "./utr.js";
 const dayNum = iso => Math.round(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000);
 
 /**
- * @param {{results:Array, transactions:Array, accountId:string, linkedIds?:Array, from:string, to:string, lastRowDate?:string}} a
+ * @param {{results:Array, transactions:Array, accountId:string, linkedIds?:Array, from:string, to:string, lastRowDate?:string, claimedIds?:Array}} a
  *   results = matchStatement(...).results; from/to = the period to check (inclusive)
  */
-export function unmatchedInArth({ results, transactions, accountId, linkedIds = [], from, to, lastRowDate = "" }) {
+export function unmatchedInArth({ results, transactions, accountId, linkedIds = [], from, to, lastRowDate = "", claimedIds = [] }) {
   const moves = accountMovements(transactions, accountId, linkedIds).filter(m => m.date >= from && m.date <= to);
-  const claimed = new Set();
+  const claimed = new Set((claimedIds || []).map(String));   // e.g. a refund just recorded from this very preview
   const byImportKey = new Map((transactions || []).filter(t => t && t.importKey).map(t => [t.importKey, t.id]));
   for (const r of results || []) {
     if (r.matchId != null) claimed.add(String(r.matchId));
@@ -58,7 +58,8 @@ export function unmatchedInArth({ results, transactions, accountId, linkedIds = 
  * net of them, but Arth only counts purchases, so they are the usual reason "Arth has more than the statement" while every purchase matches.
  * @returns {{rows:Array, totalPaise:number}} credits among the rows classed "new"
  */
-export function newCredits(results) {
-  const rows = (results || []).filter(r => r.status === "new" && r.row.amountPaise > 0).map(r => r.row);
+export function newCredits(results, skipKeys = []) {
+  const skip = new Set(skipKeys || []);
+  const rows = (results || []).filter(r => r.status === "new" && r.row.amountPaise > 0 && !skip.has(r.row.importKey)).map(r => r.row);
   return { rows, totalPaise: rows.reduce((s, r) => s + r.amountPaise, 0) };
 }

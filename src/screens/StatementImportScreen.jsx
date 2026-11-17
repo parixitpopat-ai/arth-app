@@ -13,13 +13,14 @@ import { statementBalances, planBalanceMatch } from "../domain/imports/statement
 import { planNameRepairs, planRefRepairs } from "../domain/imports/buildImport.js";
 import { findImportedDuplicates } from "../domain/imports/duplicatePairs.js";
 import { unmatchedInArth, newCredits } from "../domain/imports/arthOnly.js";
+import { refundTargets } from "../domain/imports/refundTarget.js";
 import { canTakeAnotherLink, buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
 
 const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const addDay = iso => { const t = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10) + 1)); return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`; };
 const niceDate = iso => { const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
 
-export default function StatementImportScreen({ onOpenTxn, accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy, onMergeRepeats, onUndoRepeats, onRemoveNotices, onUndoNotices, people = [] }) {
+export default function StatementImportScreen({ onRecordRefund, onUndoRefund, onOpenTxn, accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy, onMergeRepeats, onUndoRepeats, onRemoveNotices, onUndoNotices, people = [] }) {
   const fileRef = useRef(null);
   const banks = accounts.filter(a => a.type === "bank");
   const cards = accounts.filter(a => a.type === "cc");
@@ -39,6 +40,7 @@ export default function StatementImportScreen({ onOpenTxn, accounts = [], txns =
   const repeatAccId = fixedAccountId || accountId;
   const repeats = useMemo(() => (repeatAccId ? findImportedDuplicates({ txns, accountId: repeatAccId, linkedIds: getLinkedMethodIds(repeatAccId, accounts) }) : []), [txns, repeatAccId, accounts]);
   const [repeatUndo, setRepeatUndo] = useState(null);
+  const [refunded, setRefunded] = useState({});                 // importKey -> what was recorded from this preview (for Undo)
   const [lastSummary, setLastSummary] = useState(null);       // the card statement figures read from the last PDF
   const [billUndo, setBillUndo] = useState(null);               // set after "Set the statement bill", used by its Undo
   const [balUndo, setBalUndo] = useState(null);                // set after "Match", used by its Undo
@@ -56,7 +58,7 @@ export default function StatementImportScreen({ onOpenTxn, accounts = [], txns =
   const analyse = (parsed, accId) => {
     const m = matchOnly(parsed, accId);
     const start = {}; m.results.forEach(r => { start[r.row.importKey] = r.status === "new" && !(isCard && r.row.amountPaise > 0); });
-    setTicked(start); setMerged({});
+    setTicked(start); setMerged({}); setRefunded({});
     return m;
   };
 
@@ -232,6 +234,34 @@ export default function StatementImportScreen({ onOpenTxn, accounts = [], txns =
     );
   };
 
+  // A card statement CREDIT row = a refund (or a payment). A payment comes from the bank import; a refund can be recorded here, linked to the purchase it returns.
+  const refundBlock = row => {
+    const done = refunded[row.importKey];
+    if (done) return (
+      <div data-testid="stmt-refund-done" style={{ marginTop: 6, background: T.pill, borderRadius: 10, padding: "6px 8px", fontSize: 11, color: T.success }}>
+        ✓ Refund recorded against {done.label}.{" "}
+        <button type="button" data-testid="stmt-refund-undo" onClick={e => { e.preventDefault(); onUndoRefund && onUndoRefund(done); setRefunded(r => { const n = { ...r }; delete n[row.importKey]; return n; }); }} style={{ background: "none", border: "none", color: T.accent, fontWeight: 700, fontSize: 11, cursor: "pointer", padding: 0 }}>Undo</button>
+      </div>
+    );
+    if (!onRecordRefund) return null;
+    const accId = state.accountId || accountId;
+    const ids = [accId, ...getLinkedMethodIds(accId, accounts)];
+    const cands = refundTargets({ row, transactions: txns, accountIds: ids });
+    if (!cands.length) return <div data-testid="stmt-refund-none" style={{ marginTop: 6, fontSize: 11, color: T.sub, lineHeight: 1.4 }}>No purchase on this card matches this credit. If it is a refund, add it by hand: Add, money in, tag it ↩ Refund. A payment comes from your bank statement.</div>;
+    const c = cands[0], t = c.txn;
+    return (
+      <div data-testid="stmt-refund-offer" style={{ marginTop: 6, background: T.pill, borderRadius: 10, padding: "6px 8px", fontSize: 11, color: T.sub }}>
+        <div>Looks like a refund of: <b style={{ color: T.text }}>{t.merchant || t.desc || "purchase"}</b> · {niceDate(t.date)} · {sym}{Number(t.amount).toLocaleString("en-IN")}{c.exact ? "" : " (part of it)"}</div>
+        <button type="button" data-testid="stmt-refund-record" onClick={e => {
+          e.preventDefault();
+          const made = onRecordRefund(row, t, accId);
+          if (made) setRefunded(r => ({ ...r, [row.importKey]: { ...made, label: `${t.merchant || t.desc || "the purchase"} (${sym}${Number(t.amount).toLocaleString("en-IN")})` } }));
+        }} style={{ ...btn(true), marginTop: 6 }}>Record as a refund</button>
+        <div style={{ marginTop: 4 }}>It is linked to that purchase, so the purchase now costs you less. Nothing is added until you tap.</div>
+      </div>
+    );
+  };
+
   // Entries Arth has for this period that NOTHING in the file matched (the file's own extra rows are the "New" ones below). Same matcher as the summary above.
   const arthOnlyCard = () => {
     if (state.phase !== "result" || !state.match || !state.parsed) return null;
@@ -239,9 +269,9 @@ export default function StatementImportScreen({ onOpenTxn, accounts = [], txns =
     if (!accId) return null;
     const plan = isCard && lastSummary && statementBillPlan && onSetStatementBill ? statementBillPlan(accId, lastSummary) : null;
     const from = plan && plan.ok ? addDay(plan.periodFrom) : state.parsed.period.from, to = plan && plan.ok ? plan.periodTo : state.parsed.period.to;
-    const r = unmatchedInArth({ results: state.match.results, transactions: txns, accountId: accId, linkedIds: getLinkedMethodIds(accId, accounts), from, to, lastRowDate: state.parsed.period.to });
+    const r = unmatchedInArth({ results: state.match.results, transactions: txns, accountId: accId, linkedIds: getLinkedMethodIds(accId, accounts), from, to, lastRowDate: state.parsed.period.to, claimedIds: Object.values(refunded).map(v => v.id) });
     const real = r.arthOnly.filter(a => !a.pending), later = r.arthOnly.filter(a => a.pending);
-    const credits = isCard ? newCredits(state.match.results) : { rows: [], totalPaise: 0 };
+    const credits = isCard ? newCredits(state.match.results, Object.keys(refunded)) : { rows: [], totalPaise: 0 };
     // the statement's total due is net of these, Arth's purchases are not: when they add up to exactly the difference, that IS the gap
     const explainsGap = Boolean(plan && plan.ok && credits.rows.length && Math.abs(Math.round(Math.abs(plan.difference) * 100) - credits.totalPaise) <= 1 && plan.difference < 0);
     const rowOfPair = a => { const pr = r.pairs.find(x => String(x.arthId) === String(a.id)); const res = pr && state.match.results.find(x => x.row.importKey === pr.rowKey); return pr && res ? { why: pr.why, row: res.row } : null; };
@@ -462,6 +492,7 @@ export default function StatementImportScreen({ onOpenTxn, accounts = [], txns =
                   <div style={{ color: T.sub, fontSize: 11, marginTop: 2 }}>{niceDate(row.date)}
                     {status === "probable-match" && (byUtr ? " · same UPI reference as an entry already in Arth" : otherAccount ? " · same amount and date as an entry on another account" : " · looks like an entry already in Arth")}{isCard && !out && status === "new" && " · payment or refund: not added here (see below)"}{status === "already-imported" && " · imported before"}
                     {bill && (cardHit ? ` · card bill payment → ${cardHit.name}` : " · looks like a card bill payment, but no card matched: it will be an expense")}</div>
+                  {isCard && !out && status === "new" && refundBlock(row)}
                   {status === "probable-match" && (() => {
                     const mine = txnById(matchId); if (!mine) return null;
                     const linked = !canTakeAnotherLink(mine);

@@ -15606,6 +15606,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Bank messages (Android): read bank SMS, automatic alerts with Accept / Link / Discard, reminders and statements-sent are skipped",
             "Bank and credit card statement import: CSV, Excel, PDF and pasted text, preview, merge repeats, match by UPI reference, undo a whole import, set balances from the statement",
             "Monthly Statement view for bank, cash and card accounts, with compare against the bank's own file",
+            "Card statement import: a refund on the statement can be recorded in one tap (\"Record as a refund\"), linked to the purchase it returns, with Undo; the same file no longer offers it again",
             "Transactions: new \"Account or card\" filter shows everything on one account or card - purchases, payments and refunds - with the card's statement periods as one-tap date ranges; the card tile on Money has \"Filter in Transactions\"; the filter sheet no longer closes after every tap",
             "Statement import: \"Entries that do not match\" lists what Arth has for the period that the statement does not, with a hint when one looks like the same purchase typed differently, and a View button; a card statement now also lists the payments or refunds it has that Arth does not (they explain a gap against the total due)",
             "Card statement bill: a wrongly typed bank amount can now be changed (\"Typed the wrong bank amount? Change it\")",
@@ -20930,7 +20931,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {!showSettings&&tab==="insights"&&<InsightsPage/>}
         {/* The invoice screen is rendered HERE, not inside Settings: Settings is re-created on every AppContent render, which would reset this screen (its review state, the success message, Undo) the moment the import saves. */}
         {showSettings&&settingsSection==="importinvoice"&&<InvoiceImportScreen accounts={accounts} txns={txns} cats={cats} itemCatalog={itemCatalog} invoiceImports={invoiceImports} genId={genId} onConfirmInvoice={confirmInvoiceImport} onUndoInvoice={undoInvoiceImport} T={T} sym={sym} onBack={()=>{ setSettingsSection(null); setShowSettings(false); }} onAddByHand={()=>{ setAddPrefill({}); setShowAdd(true); }} onAddReceipt={prefill=>{ setAddPrefill(prefill); setShowAdd(true); }}/>}
-        {showSettings&&settingsSection==="importstatement"&&<StatementImportScreen onOpenTxn={id=>setTxnDetailId(id)} accounts={accounts} txns={txns} people={people} genId={genId} T={T} sym={sym} fixedAccountId={statementAccId} checkpoints={balanceCheckpoints}
+        {showSettings&&settingsSection==="importstatement"&&<StatementImportScreen onOpenTxn={id=>setTxnDetailId(id)}
+          onRecordRefund={(row,target,accId)=>{
+            const amt = Math.round(row.amountPaise)/100;
+            const refund = { id:genId(), type:"settlement_in", isRefund:true, againstTxnId:target.id, againstBillId:target.paidBillId||null,
+              desc:target.desc||target.merchant||"Refund", merchant:target.merchant||target.desc||"", amount:amt, date:row.date, accId,
+              note:"Refund read from the card statement (you checked it)", transactionRef:row.ref||null, importKey:row.importKey,
+              catId:null, catIds:[], subId:null, subIds:[], createdAt:Date.now(), updatedAt:Date.now() };
+            setTxns(prev=>[refund,...prev]);
+            if(accounts.find(a=>String(a.id)===String(accId))?.type==="cc") setAccounts(prev=>prev.map(a=>String(a.id)===String(accId)?{...a,outstanding:Math.max(0,(a.outstanding||0)-amt)}:a));
+            setToast({ message:`Refund of ${sym}${fmt(amt)} recorded`, icon:"↩" });
+            return { id:refund.id, accId, amount:amt };
+          }}
+          onUndoRefund={u=>{
+            setTxns(prev=>prev.filter(t=>String(t.id)!==String(u.id)));
+            if(accounts.find(a=>String(a.id)===String(u.accId))?.type==="cc") setAccounts(prev=>prev.map(a=>String(a.id)===String(u.accId)?{...a,outstanding:(a.outstanding||0)+Number(u.amount||0)}:a));
+            setToast({ message:"Refund taken back", icon:"↩" });
+          }} accounts={accounts} txns={txns} people={people} genId={genId} T={T} sym={sym} fixedAccountId={statementAccId} checkpoints={balanceCheckpoints}
           statementBillPlan={(accId,summary)=>planStatementBillFromPdf({ card:accounts.find(a=>String(a.id)===String(accId)), accounts, txns:expandPaymentLines(txns), bills, summary, toDateOnly, genId, today:todayStr() })}
           onSetStatementBill={plan=>{ setBills(prev=>plan.action==="create" ? [plan.bill,...prev] : prev.map(b=>b.id===plan.bill.id?plan.bill:b)); setToast({ message:plan.bill.verification==="matched" ? "Statement bill set and matched" : "Statement bill set; the difference is recorded" }); return { createdId:plan.action==="create"?plan.bill.id:null, prev:plan.prev }; }}
           onMergeRepeats={pairs=>{ const res=applyDuplicateMerge(txns,pairs); setTxns(res.txns); setToast({ message:`${pairs.length} repeat${pairs.length===1?"":"s"} merged` }); return res.undo; }}

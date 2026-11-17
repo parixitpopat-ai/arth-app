@@ -52,3 +52,14 @@ test("newCredits: only the payments/refunds of the file that Arth does not have,
   assert.deepEqual(c.rows.map(r => r.desc), ["REFUND"]); assert.equal(c.totalPaise, 175275);
   assert.deepEqual(newCredits([]), { rows: [], totalPaise: 0 });
 });
+
+test("a refund just recorded from the preview is not flagged as 'in Arth, not on the statement', and its row leaves the credits list", () => {
+  const rows = [row("2026-10-22", 175275, "REFUND", "k2")];
+  const txns = [{ id: "rf", type: "settlement_in", isRefund: true, date: "2026-10-22", amount: 1752.75, accId: "cc1" }];
+  const m = matchStatement(rows, { transactions: txns.filter(() => false), accountId: "cc1", importedKeys: [], linkedIds: [] });
+  const before = unmatchedInArth({ results: m.results, transactions: txns, accountId: "cc1", from: "2026-10-17", to: "2026-11-16" });
+  assert.deepEqual(before.arthOnly.map(a => a.id), ["rf"]);
+  const after = unmatchedInArth({ results: m.results, transactions: txns, accountId: "cc1", from: "2026-10-17", to: "2026-11-16", claimedIds: ["rf"] });
+  assert.equal(after.arthOnly.length, 0);
+  assert.equal(newCredits(m.results).rows.length, 1); assert.equal(newCredits(m.results, ["k2"]).rows.length, 0);
+});
