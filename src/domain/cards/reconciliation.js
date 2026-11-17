@@ -42,6 +42,21 @@ export function recordBankAmount(bill, bankAmount, refDate = new Date()) {
   return { ...next, verification: "mismatch", verifiedAt: null };
 }
 
+/**
+ * A statement that has NOT been checked against the bank yet keeps the amount Arth worked out when it was made. If the records for its period change
+ * afterwards (a refund added, an entry fixed), the person can refresh that Arth-calculated amount. Only on their tap; never for a matched / mismatched
+ * statement (those compare against a bank figure). The change is kept in `adjustments`, like the other recalculation.
+ */
+export function refreshArthAmount(bill, newTotal, refDate = new Date()) {
+  if (!bill || bill.verification !== "needs_verification") return bill;
+  return {
+    ...bill,
+    arthAmount: newTotal,
+    amount: newTotal,
+    adjustments: [...(bill.adjustments || []), { at: localDay(refDate), from: bill.arthAmount, to: newTotal }],
+  };
+}
+
 /** Bank > Arth (CC-13) vs Arth > Bank (CC-14) — which side is short. */
 export function getMismatchDirection(bill) {
   if (bill.verification !== "mismatch" || bill.bankAmount == null) return null;

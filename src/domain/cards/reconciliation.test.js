@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates } from "./reconciliation.js";
+import { confirmMatchedWithBank, undoMatch, recordBankAmount, getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates, refreshArthAmount } from "./reconciliation.js";
 
 const toDateOnly = value => {
   if (!value) return null;
@@ -92,4 +92,21 @@ test("verified dates are the local calendar day, not the UTC day (just after mid
   const updated = applyRecalculatedUpdate(recordBankAmount(baseBill, 40000), 40000, justAfterMidnight);
   assert.equal(updated.verifiedAt, "2026-09-26");
   assert.equal(updated.adjustments[0].at, "2026-09-26");
+});
+
+test("refreshArthAmount: an unchecked statement takes the new total, stays unchecked, and keeps the change in its history", () => {
+  const r = refreshArthAmount(baseBill, 33247.25, new Date(2026, 8, 20));
+  assert.equal(r.arthAmount, 33247.25); assert.equal(r.amount, 33247.25);
+  assert.equal(r.verification, "needs_verification"); assert.equal(r.bankAmount, null);
+  assert.deepEqual(r.adjustments, [{ at: "2026-09-20", from: 35000, to: 33247.25 }]);
+  assert.equal(baseBill.arthAmount, 35000);   // the original is untouched
+});
+test("refreshArthAmount does nothing to a statement that is matched or in mismatch (those are compared with a bank figure)", () => {
+  const matched = { ...baseBill, verification: "matched", bankAmount: 35000 }, mis = { ...baseBill, verification: "mismatch", bankAmount: 30000 };
+  assert.equal(refreshArthAmount(matched, 1), matched); assert.equal(refreshArthAmount(mis, 1), mis);
+  assert.equal(refreshArthAmount(null, 1), null);
+});
+test("a refund added after the statement was made lowers the live total of its period", () => {
+  const txns = [{ id: "p", type: "expense", date: "2026-09-01", amount: 35000, accId: "cc1" }, { id: "r", type: "settlement_in", isRefund: true, date: "2026-09-10", amount: 1752.75, accId: "cc1" }];
+  assert.equal(getRecordsNowTotal(baseBill, card, accounts, txns, toDateOnly), 33247.25);
 });

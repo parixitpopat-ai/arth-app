@@ -3,7 +3,7 @@ import BottomSheet from "./BottomSheet";
 import { RADIUS, TOUCH, FONT } from "../constants/theme";
 import {
   confirmMatchedWithBank, undoMatch, recordBankAmount,
-  getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates,
+  getMismatchDirection, getRecordsNowTotal, applyRecalculatedUpdate, getReviewCandidates, refreshArthAmount,
 } from "../domain/cards/reconciliation";
 
 // Credit Card WP, deliverables 7-12 (CC-10 .. CC-15). Every state keeps the Arth amount and the
@@ -14,7 +14,7 @@ import {
 export default function CreditCardStatementSheet({
   bill, card, accounts, txns, T, sym, fmt, formatShortDate, toDateOnly,
   onClose, setBills,
-  onRecordPayment, onAddMissingTxn, onReviewTxn, onViewTransactions,
+  onRecordPayment, onAddMissingTxn, onAddRefund, onReviewTxn, onViewTransactions,
 }) {
   const [enteringBank, setEnteringBank] = useState(false);
   const [bankInput, setBankInput] = useState("");
@@ -30,6 +30,9 @@ export default function CreditCardStatementSheet({
 
   const recordsNowTotal = bill.verification === "mismatch" ? getRecordsNowTotal(bill, card, accounts, txns, toDateOnly) : bill.arthAmount;
   const investigationChanged = bill.verification === "mismatch" && Math.abs(recordsNowTotal - bill.arthAmount) > 0.005;
+  // Records changed after this (unchecked) statement was made, e.g. a refund added: the live total no longer equals the stored Arth-calculated amount.
+  const liveTotal = getRecordsNowTotal(bill, card, accounts, txns, toDateOnly);
+  const staleUnverified = bill.verification === "needs_verification" && Math.abs(liveTotal - bill.arthAmount) > 0.005;
   const direction = getMismatchDirection(bill);
 
   const lbl = { color: T.sub, fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" };
@@ -59,6 +62,14 @@ export default function CreditCardStatementSheet({
         <span style={{ display: "inline-block", marginTop: 8, background: pillStyle.c + "18", color: pillStyle.c, borderRadius: 20, padding: "3px 12px", fontSize: 11, fontWeight: 800 }}>{pillStyle.l}</span>
         <div style={{ color: T.sub, fontSize: 11, marginTop: 8 }}>Due {formatShortDate(bill.dueDate) || bill.dueDate}{card?.name ? ` · pay from ${card.paymentAccName || "linked account"}` : ""}</div>
       </div>
+
+      {staleUnverified && !enteringBank && (
+        <div data-testid="cc-stale-note" style={{ marginBottom: 14, background: T.warn + "10", border: `1px solid ${T.warn}33`, borderRadius: RADIUS.lg, padding: 12 }}>
+          <div style={{ color: T.warn, fontSize: 13, fontWeight: 700 }}>Your records for this period now total {sym}{fmt(liveTotal)}, not {sym}{fmt(bill.arthAmount)}.</div>
+          <div style={{ color: T.sub, fontSize: 11, marginTop: 4, lineHeight: 1.5 }}>Something changed since this statement was made: a refund or credit added, or an entry fixed. Update it to the new total, then check it against your bank statement.</div>
+          <button data-testid="cc-refresh-amount" onClick={() => patch(refreshArthAmount(bill, liveTotal))} style={{ marginTop: 10, minHeight: TOUCH.min, width: "100%", background: T.accent, border: "none", color: T.accentInk, borderRadius: RADIUS.md, fontWeight: 700, cursor: "pointer", fontFamily: FONT.sans }}>Update to {sym}{fmt(liveTotal)}</button>
+        </div>
+      )}
 
       {bill.verification === "needs_verification" && !enteringBank && (
         <div style={{ marginBottom: 14 }}>
@@ -172,6 +183,10 @@ export default function CreditCardStatementSheet({
         <span style={{ color: T.sub, fontSize: 12 }}>Transactions in period · {periodTxnCount}</span>
         <button onClick={onViewTransactions} style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: FONT.sans }}>View</button>
       </div>
+
+      {onAddRefund && (
+        <button data-testid="cc-add-refund" onClick={onAddRefund} style={{ marginTop: 10, minHeight: TOUCH.min, width: "100%", background: "none", border: `1px solid ${T.border}`, color: T.text, borderRadius: RADIUS.md, fontWeight: 700, cursor: "pointer", fontFamily: FONT.sans }}>↩ Add a refund or credit for this period</button>
+      )}
 
       <button onClick={onRecordPayment} style={{ marginTop: 10, minHeight: TOUCH.min, width: "100%", background: T.accentSoft, border: `1px solid ${T.accent}33`, color: T.accent, borderRadius: RADIUS.md, fontWeight: 700, cursor: "pointer", fontFamily: FONT.sans }}>💳 Record payment</button>
     </BottomSheet>
