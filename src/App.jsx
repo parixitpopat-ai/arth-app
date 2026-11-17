@@ -15573,6 +15573,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Bank messages (Android): read bank SMS, automatic alerts with Accept / Link / Discard, reminders and statements-sent are skipped",
             "Bank and credit card statement import: CSV, Excel, PDF and pasted text, preview, merge repeats, match by UPI reference, undo a whole import, set balances from the statement",
             "Monthly Statement view for bank, cash and card accounts, with compare against the bank's own file",
+            "Card statement bill: a wrongly typed bank amount can now be changed (\"Typed the wrong bank amount? Change it\")",
             "Petty cash given to a person (P on the A/O/C row); Vendors report keeps people out of vendors; UPI IDs saved quietly and linked to a person or vendor",
             "A credit card bill paid as an expense no longer counts as spending",
             "Prepaid plan alerts (3 per plan); family plan - tick several people on one connection",

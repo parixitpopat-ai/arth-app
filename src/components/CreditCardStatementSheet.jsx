@@ -104,6 +104,12 @@ export default function CreditCardStatementSheet({
             <div style={{ textAlign: "center" }}><div style={lbl}>Bank</div><div style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>{sym}{fmt(bill.bankAmount)}</div></div>
             <div style={{ textAlign: "center" }}><div style={lbl}>Difference</div><div style={{ color: T.danger, fontSize: 14, fontWeight: 800 }}>{sym}{fmt(Math.abs(bill.bankAmount - bill.arthAmount))}</div></div>
           </div>
+          {!enteringBank && (
+            <button data-testid="cc-change-bank-amount" onClick={() => { setBankInput(bill.bankAmount != null ? String(bill.bankAmount) : ""); setEnteringBank(true); }}
+              style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: FONT.sans, textAlign: "left", padding: 0 }}>
+              Typed the wrong bank amount? Change it
+            </button>
+          )}
 
           {!investigationChanged && direction === "bank_higher" && (
             <div style={{ background: T.warn + "10", border: `1px solid ${T.warn}33`, borderRadius: RADIUS.lg, padding: 12 }}>
