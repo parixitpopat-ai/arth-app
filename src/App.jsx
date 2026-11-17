@@ -15561,6 +15561,33 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>Auto-deployed from GitHub → Vercel</div>
         </div>
         {[
+          { month:"November 2026", items:[
+            "Bills: one payment can pay several bills - Record payment offers money you already spent (oldest bill first, nothing rounded); deleting that payment reopens every bill it paid",
+            "Add bill from a photo - read a printed utility bill on your phone (consumer ID, dates, amount checked against the amount in words); you check it before anything is saved",
+            "Add bill: choosing a provider or connection fills the category and who it is for, and names the bill from the connection and month - no second name to type",
+            "Budget: limits are guides - going over only warns, nothing is blocked; \"Free to spend\" shows what is left after limits",
+            "Budget: Category guides moved here from Settings; \"Ideas for next month\" - lower an unused limit, move money to one that keeps running over, pay back an overspend (never below the minimum commitment)",
+            "Budget: Categories and Year view no longer count money other people owe you as your spend",
+            "Home: weekly spend card (this week against the same days last week) with Review / Later",
+            "Optional weekly summary notification, Sundays 7 pm (Android app, off by default - turn it on in Settings)",
+            "Bank messages (Android): read bank SMS, automatic alerts with Accept / Link / Discard, reminders and statements-sent are skipped",
+            "Bank and credit card statement import: CSV, Excel, PDF and pasted text, preview, merge repeats, match by UPI reference, undo a whole import, set balances from the statement",
+            "Monthly Statement view for bank, cash and card accounts, with compare against the bank's own file",
+            "Petty cash given to a person (P on the A/O/C row); Vendors report keeps people out of vendors; UPI IDs saved quietly and linked to a person or vendor",
+            "A credit card bill paid as an expense no longer counts as spending",
+            "Prepaid plan alerts (3 per plan); family plan - tick several people on one connection",
+            "Add / Activate redesigned; estimated mileage for people who never fill to full; odometer asked on the fuel expense",
+            "Sign-in: Sign In first, 8-digit email codes, fits the phone width",
+            "Safer data: a damaged saved list no longer crashes the app (restored from the newest good backup); storage-full handling; smaller photos and backups; heavy screens load only when opened; the 20-second refresh no longer wipes what you are typing",
+            "Security: Capacitor upgraded for a critical advisory; Android's automatic phone backup is switched off for Arth"
+          ]},
+          { month:"Late October 2026", items:[
+            "Amazon / Blinkit order summaries read from a picture on your phone (optional); shop receipt photo reader (trial, off by default)",
+            "Pay together: grouped instalments count once in the 30-day cash requirement, and one fee belongs to one group",
+            "Closed loans no longer project an EMI; a membership no longer asks to renew when the next period is already recorded",
+            "Sign-in: the session is double-checked before sending you to the sign-in screen; loading screens offer to open the data saved on this phone",
+            "Notes for August to early October are not listed here: they were not kept"
+          ]},
           { month:"July 2026 - Sprint 3", items:[
             "Lock mode (lock button) - tap to lock app, PIN to unlock, 5-attempt lockout",
             "Masking (eye button) - hide all amounts, PIN to reveal for 60 seconds",
