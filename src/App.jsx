@@ -173,6 +173,8 @@ import { getPrepaidAlerts, prepaidAlertText, connectionInactiveState } from "./d
 import { remainingShare } from "./domain/shared/remainingShare";
 import { settlePersonShareOnTransaction } from "./domain/transactions/legacy/applyRepaymentAllocationsAdapter";
 import BillPhotoReview from "./screens/BillPhotoReview.jsx";
+import ConvertBillSheet from "./screens/payments/ConvertBillSheet.jsx";
+import { canConvertBillToTxn, billToExpense } from "./domain/bills/billToTransaction";
 import { weeklySummary } from "../domain/insights/weeklySummary";
 import { weeklyNotifAvailable, weeklyNotifEnable, weeklyNotifCancel, weeklyNotifSchedule, weeklyNotifSnooze, weeklyNotifOnAction } from "./native/weeklyNotification.js";
 import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getEffectiveMonthlyBudget, getCarryForwardPrevSpend, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope, buildRefundTotalsByExpense } from "../domain/allocations/adapter";
@@ -1586,6 +1588,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // UI-2C M2 — Bill detail and the Bills list's filters live here: <BillsPage/> remounts on
   // every app render, so its own state would reset.
   const [viewingBillId, setViewingBillId] = useState(null);
+  const [convertingBill, setConvertingBill] = useState(null);   // a bill being turned into a transaction ("Not a bill? Make it a transaction")
   const [paymentsForFilter, setPaymentsForFilter] = useState("all");
   const [paymentsShowCancelled, setPaymentsShowCancelled] = useState(false);
   const [paymentsShowAllPaid, setPaymentsShowAllPaid] = useState(false); // a `bills` record being confirmed via MarkBillPaidModal
@@ -15574,6 +15577,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Bank and credit card statement import: CSV, Excel, PDF and pasted text, preview, merge repeats, match by UPI reference, undo a whole import, set balances from the statement",
             "Monthly Statement view for bank, cash and card accounts, with compare against the bank's own file",
             "Card statement bill: a wrongly typed bank amount can now be changed (\"Typed the wrong bank amount? Change it\")",
+            "Not a bill? A bill that is really a purchase can be turned into a transaction on the card or account you bought it with (\"Not a bill? Make it a transaction\" on the bill)",
             "Petty cash given to a person (P on the A/O/C row); Vendors report keeps people out of vendors; UPI IDs saved quietly and linked to a person or vendor",
             "A credit card bill paid as an expense no longer counts as spending",
             "Prepaid plan alerts (3 per plan); family plan - tick several people on one connection",
@@ -22131,9 +22135,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             spreadLabel={spreadButtonLabel(`bill:${vb.id}`)}
             onSpread={()=>openSpreadFor({ key:`bill:${vb.id}`, label:vb.name, amount:ledger.amount, cashDate:vb.status==="paid"?(vb.paidDate||vb.lastPaidDate||vb.dueDate):vb.dueDate })}
             onEdit={()=>{ setViewingBillId(null); setEditingBill(vb); }}
+            onConvert={vb.isCcStatement?undefined:()=>setConvertingBill(vb)}
             onOpenProvider={ba?()=>{ setViewingBillId(null); setActiveBillerForAction(ba); }:undefined}
             onShare={shareBill} txns={txns}
             extras={renderBillExtras(vb)}/>;
+        })()}
+        {convertingBill&&(()=>{
+          const cb = bills.find(x=>String(x.id)===String(convertingBill.id)) || convertingBill;
+          const convertNow = (accId, date)=>{
+            const check = canConvertBillToTxn(cb, contributions);
+            if(!check.ok) return;
+            const newTxn = billToExpense({ bill:cb, accId, date, genId });
+            setTxns(prev=>[newTxn,...prev]);
+            setBills(prev=>prev.filter(x=>String(x.id)!==String(cb.id)));
+            setBudgetSpreads(prev=>prev.filter(x=>x.key!==`bill:${cb.id}`));
+            setConvertingBill(null); setViewingBillId(null);
+            setToast({ message:`Moved to your transactions: ${cb.name}`, icon:"✅" });
+          };
+          return <ConvertBillSheet T={T} sym={sym} fmt={fmt} bill={cb} check={canConvertBillToTxn(cb, contributions)}
+            accounts={getPaidFromAccounts(accounts,{ isInvestmentAccount, allowCard:true })} defaultAccId=""
+            onConvert={convertNow} onClose={()=>setConvertingBill(null)}/>;
         })()}
         {spreadSheetFor&&<SpreadSheet T={T} sym={sym} fmt={fmt} title={spreadSheetFor.label} amount={spreadSheetFor.amount}
           cashMonth={String(spreadSheetFor.cashDate||todayStr()).slice(0,7)} initial={spreadSheetFor.existing}

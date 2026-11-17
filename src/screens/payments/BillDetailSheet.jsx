@@ -24,7 +24,7 @@ function Row({ T, k, v }) {
   );
 }
 
-export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, provider, relationship, accountName, sym, fmt, onClose, onRecordPayment, onSpread, spreadLabel, onEdit, onShare, onOpenProvider, extras, txns }) {
+export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, provider, relationship, accountName, sym, fmt, onClose, onRecordPayment, onSpread, spreadLabel, onEdit, onShare, onOpenProvider, onConvert, extras, txns }) {
   const bt = getBadgeText(badge, bill);
   const open = badge.kind !== "paid" && badge.kind !== "cancelled";
   const dueLine = (() => {
@@ -111,6 +111,9 @@ export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, prov
           </button>
         ) : null}
 
+        {open && onConvert ? (
+          <button data-testid="bill-convert" onClick={onConvert} style={{ marginTop: 10, width: "100%", minHeight: 44, background: "none", border: `1px solid ${T.border}`, borderRadius: RADIUS.md, color: T.text, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Not a bill? Make it a transaction</button>
+        ) : null}
         {onSpread ? (
           <button data-testid="bill-spread" onClick={onSpread} style={{ marginTop: 10, width: "100%", minHeight: 44, background: "none", border: `1px solid ${T.border}`, borderRadius: RADIUS.md, color: T.text, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>{spreadLabel || "Spread in budget"}</button>
         ) : null}
