@@ -12,13 +12,14 @@ import { getLinkedMethodIds } from "../domain/accounts/accountBalance.js";
 import { statementBalances, planBalanceMatch } from "../domain/imports/statementBalances.js";
 import { planNameRepairs, planRefRepairs } from "../domain/imports/buildImport.js";
 import { findImportedDuplicates } from "../domain/imports/duplicatePairs.js";
+import { unmatchedInArth } from "../domain/imports/arthOnly.js";
 import { canTakeAnotherLink, buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
 
 const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const addDay = iso => { const t = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10) + 1)); return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`; };
 const niceDate = iso => { const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
 
-export default function StatementImportScreen({ accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy, onMergeRepeats, onUndoRepeats, onRemoveNotices, onUndoNotices, people = [] }) {
+export default function StatementImportScreen({ onOpenTxn, accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy, onMergeRepeats, onUndoRepeats, onRemoveNotices, onUndoNotices, people = [] }) {
   const fileRef = useRef(null);
   const banks = accounts.filter(a => a.type === "bank");
   const cards = accounts.filter(a => a.type === "cc");
@@ -231,6 +232,48 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
     );
   };
 
+  // Entries Arth has for this period that NOTHING in the file matched (the file's own extra rows are the "New" ones below). Same matcher as the summary above.
+  const arthOnlyCard = () => {
+    if (state.phase !== "result" || !state.match || !state.parsed) return null;
+    const accId = state.accountId || accountId;
+    if (!accId) return null;
+    const plan = isCard && lastSummary && statementBillPlan && onSetStatementBill ? statementBillPlan(accId, lastSummary) : null;
+    const from = plan && plan.ok ? addDay(plan.periodFrom) : state.parsed.period.from, to = plan && plan.ok ? plan.periodTo : state.parsed.period.to;
+    const r = unmatchedInArth({ results: state.match.results, transactions: txns, accountId: accId, linkedIds: getLinkedMethodIds(accId, accounts), from, to, lastRowDate: state.parsed.period.to });
+    const real = r.arthOnly.filter(a => !a.pending), later = r.arthOnly.filter(a => a.pending);
+    const rowOfPair = a => { const pr = r.pairs.find(x => String(x.arthId) === String(a.id)); const res = pr && state.match.results.find(x => x.row.importKey === pr.rowKey); return pr && res ? { why: pr.why, row: res.row } : null; };
+    const line = (a, dim) => {
+      const pr = rowOfPair(a);
+      return (
+        <div key={a.id} data-testid="stmt-arth-only-row" style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "6px 0", borderTop: `1px solid ${T.border}`, opacity: dim ? 0.7 : 1 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{niceDate(a.date)} · {a.label}</div>
+            {pr && <div data-testid="stmt-arth-only-pair" style={{ color: T.warn, fontSize: 11, marginTop: 2 }}>Maybe the same as the statement's {niceDate(pr.row.date)} row ({fmt(pr.row.amountPaise, sym)}): {pr.why}</div>}
+            {dim && <div style={{ color: T.sub, fontSize: 11, marginTop: 2 }}>Dated after the file's last row; it may not have posted yet.</div>}
+          </div>
+          <div style={{ textAlign: "right", flexShrink: 0 }}>
+            <div style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{fmt(a.amountPaise, sym)}</div>
+            {onOpenTxn && <button data-testid="stmt-arth-only-open" onClick={() => onOpenTxn(a.id)} style={{ background: "none", border: "none", color: T.accent, fontSize: 11, fontWeight: 700, cursor: "pointer", padding: 0 }}>View</button>}
+          </div>
+        </div>
+      );
+    };
+    return (
+      <div style={card} data-testid="stmt-arth-only">
+        <div style={label}>Entries that do not match</div>
+        {r.arthOnly.length === 0
+          ? <div data-testid="stmt-arth-only-none" style={{ color: T.success, fontSize: 13, fontWeight: 700 }}>✓ Every entry Arth has for {niceDate(from)} to {niceDate(to)} is on this statement.</div>
+          : <>
+            <div style={{ color: T.text, fontSize: 13, lineHeight: 1.5 }}><b>{real.length}</b> in Arth, not on this statement{real.length ? ` · ${fmt(r.totalPaise, sym)}` : ""}. Check each: entered twice, a wrong amount or date, or not billed yet.</div>
+            {real.map(a => line(a, false))}
+            {later.length > 0 && <div style={{ color: T.sub, fontSize: 12, marginTop: 8 }}>{later.length} more dated after the file's last row:</div>}
+            {later.map(a => line(a, true))}
+          </>}
+        {state.match.summary.new > 0 && <div style={{ color: T.sub, fontSize: 12, marginTop: 8 }}>{state.match.summary.new} row{state.match.summary.new === 1 ? "" : "s"} on the statement {state.match.summary.new === 1 ? "is" : "are"} not in Arth (listed below as New).</div>}
+      </div>
+    );
+  };
+
   const statementBillCard = () => {
     if (!isCard || !lastSummary || !statementBillPlan || !onSetStatementBill) return null;
     const plan = statementBillPlan(state.accountId || accountId, lastSummary);
@@ -374,6 +417,7 @@ export default function StatementImportScreen({ accounts = [], txns = [], genId,
         </div>
 
         {balanceCard()}
+        {arthOnlyCard()}
         {statementBillCard()}
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <button style={btn(false)} onClick={() => { setMerged({}); setTicked(Object.fromEntries(state.match.results.map(r => [r.row.importKey, r.status === "new" && canAdd(r)]))); }}>Only new</button>
