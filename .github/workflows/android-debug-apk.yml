@@ -4,7 +4,7 @@
 # Run it: GitHub -> Actions -> "Android debug APK" -> Run workflow (any branch), or push to one of the
 # branches listed below (main builds on every push). Download the APK from the run's "Artifacts" section (arth-debug-apk).
 #
-# Scope: debug build only. No signing key, no release/AAB, no Play Store steps.
+# Scope: debug build only, signed with the fixed debug key in android/app (so builds update in place). No release/AAB, no Play Store steps.
 name: Android debug APK
 
 on:
@@ -77,6 +77,11 @@ jobs:
           BADGING=$("$AAPT2" dump badging "$APK" | head -1)
           echo "::notice title=APK package::$BADGING"
           echo "::notice title=APK size::$(stat -c %s "$APK") bytes"
+          # The signing key must be the SAME on every build, or Android will not install a build over the previous one.
+          # Compare this fingerprint between two runs: identical = updates install in place.
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          CERT=$("$APKSIGNER" verify --print-certs "$APK" | grep -i "SHA-256" | head -1)
+          echo "::notice title=APK signing key::$CERT"
 
       - uses: actions/upload-artifact@v4
         with:

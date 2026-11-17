@@ -7,8 +7,9 @@ android {
         applicationId "com.parixitpopat.arth"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // Every CI build gets a higher versionCode (the run number), so Android always sees it as an UPDATE. A local build keeps 1.
+        versionCode (System.getenv("GITHUB_RUN_NUMBER") ? System.getenv("GITHUB_RUN_NUMBER").toInteger() : 1)
+        versionName ("4." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0"))
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,7 +17,21 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // ONE fixed signing key for the debug build. Without it every GitHub run made a brand-new debug key, and Android refuses to install an
+    // update signed with a different key over an installed app ("package conflicts"), so the app had to be uninstalled first.
+    // This is a debug key for personal sideloading, kept in the (private) repo on purpose. A Play Store release needs its own key, kept secret.
+    signingConfigs {
+        debug {
+            storeFile file('arth-debug.keystore')
+            storePassword 'BH6Bcy5BbHtucFpL4cMa'
+            keyAlias 'arthdebug'
+            keyPassword 'BH6Bcy5BbHtucFpL4cMa'
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

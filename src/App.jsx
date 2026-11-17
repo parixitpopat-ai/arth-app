@@ -15606,6 +15606,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Bank messages (Android): read bank SMS, automatic alerts with Accept / Link / Discard, reminders and statements-sent are skipped",
             "Bank and credit card statement import: CSV, Excel, PDF and pasted text, preview, merge repeats, match by UPI reference, undo a whole import, set balances from the statement",
             "Monthly Statement view for bank, cash and card accounts, with compare against the bank's own file",
+            "Android app updates now install over the old one (one fixed signing key and a rising version number); the first time after this you must uninstall once more",
             "Card statement import: a refund on the statement can be recorded in one tap (\"Record as a refund\"), linked to the purchase it returns, with Undo; the same file no longer offers it again",
             "Transactions: new \"Account or card\" filter shows everything on one account or card - purchases, payments and refunds - with the card's statement periods as one-tap date ranges; the card tile on Money has \"Filter in Transactions\"; the filter sheet no longer closes after every tap",
             "Statement import: \"Entries that do not match\" lists what Arth has for the period that the statement does not, with a hint when one looks like the same purchase typed differently, and a View button; a card statement now also lists the payments or refunds it has that Arth does not (they explain a gap against the total due)",
