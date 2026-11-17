@@ -15576,7 +15576,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Bank messages (Android): read bank SMS, automatic alerts with Accept / Link / Discard, reminders and statements-sent are skipped",
             "Bank and credit card statement import: CSV, Excel, PDF and pasted text, preview, merge repeats, match by UPI reference, undo a whole import, set balances from the statement",
             "Monthly Statement view for bank, cash and card accounts, with compare against the bank's own file",
-            "Statement import: \"Entries that do not match\" lists what Arth has for the period that the statement does not, with a hint when one looks like the same purchase typed differently, and a View button",
+            "Statement import: \"Entries that do not match\" lists what Arth has for the period that the statement does not, with a hint when one looks like the same purchase typed differently, and a View button; a card statement now also lists the payments or refunds it has that Arth does not (they explain a gap against the total due)",
             "Card statement bill: a wrongly typed bank amount can now be changed (\"Typed the wrong bank amount? Change it\")",
             "Not a bill? A bill that is really a purchase can be turned into a transaction on the card or account you bought it with (\"Not a bill? Make it a transaction\" on the bill)",
             "Petty cash given to a person (P on the A/O/C row); Vendors report keeps people out of vendors; UPI IDs saved quietly and linked to a person or vendor",

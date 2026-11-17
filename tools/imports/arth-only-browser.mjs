@@ -10,7 +10,7 @@ const server = spawn("node", ["node_modules/vite/bin/vite.js", "--port", String(
 for (let i = 0; i < 60; i++) { try { if ((await fetch(APP)).ok) break; } catch {} await new Promise(r => setTimeout(r, 300)); }
 const results = []; const rec = (id, pass, d) => { results.push({ id, pass: !!pass }); console.log(`${pass ? "PASS" : "FAIL"}  ${id}  ${JSON.stringify(d)}`); };
 const dir = mkdtempSync(join(tmpdir(), "stmt-")); const csv = join(dir, "card.csv"), csv2 = join(dir, "card2.csv");
-writeFileSync(csv, ["Date,SerNo.,Transaction Details,Amount (in₹)", "20/10/2026,1,COFFEE SHOP,1000.00", "25/10/2026,2,GROCER,500.00", "02/11/2026,3,BIG STORE,4999.00"].join("\n"));
+writeFileSync(csv, ["Date,SerNo.,Transaction Details,Amount (in₹)", "20/10/2026,1,COFFEE SHOP,1000.00", "25/10/2026,2,GROCER,500.00", "02/11/2026,3,BIG STORE,4999.00", "01/11/2026,4,REFUND SHOP,500.00 CR"].join("\n"));
 writeFileSync(csv2, ["Date,SerNo.,Transaction Details,Amount (in₹)", "20/10/2026,1,COFFEE SHOP,1000.00", "25/10/2026,2,GROCER,500.00", "28/10/2026,3,PHARMACY,777.50", "29/10/2026,4,BIG STORE,4999.00"].join("\n"));
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const ctx = await browser.newContext({ viewport: { width: 390, height: 900 }, timezoneId: "Asia/Kolkata" });
@@ -36,7 +36,9 @@ try {
   const pair = await T("stmt-arth-only-pair").allInnerTexts();
   rec("M3 the Arth entry of ₹4,999 is paired with the statement's new 02-11-2026 row of ₹4,999 (same amount, 4 days apart)", pair.length === 1 && /02-11-2026/.test(pair[0]) && /4,999/.test(pair[0]) && /same amount, 4 days apart/.test(pair[0]), pair);
   const body = await text();
-  rec("M4 it says the statement's own extra row is listed below as New", /1 row on the statement is not in Arth/.test(body), {});
+  rec("M4 it says the two rows the statement has and Arth lacks are listed below as New", /2 rows on the statement are not in Arth/.test(body), {});
+  const cr = await T("stmt-credit-row").allInnerTexts();
+  rec("M4a a payment/refund on the statement that Arth lacks is listed with its total (the usual reason for a gap while every purchase matches)", (await T("stmt-credits-gap").count()) === 1 && cr.length === 1 && /REFUND SHOP/.test(cr[0]) && /500\.00/.test(cr[0]), cr);
   await T("stmt-arth-only-open").first().click(); await page.waitForTimeout(700);
   rec("M5 View opens that entry (Pharmacy) so it can be fixed or deleted", /Pharmacy/.test(await text()) && (await page.getByText("Delete", { exact: false }).count()) > 0, {});
   // a file that has everything: nothing flagged

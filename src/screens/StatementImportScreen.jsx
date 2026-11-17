@@ -12,7 +12,7 @@ import { getLinkedMethodIds } from "../domain/accounts/accountBalance.js";
 import { statementBalances, planBalanceMatch } from "../domain/imports/statementBalances.js";
 import { planNameRepairs, planRefRepairs } from "../domain/imports/buildImport.js";
 import { findImportedDuplicates } from "../domain/imports/duplicatePairs.js";
-import { unmatchedInArth } from "../domain/imports/arthOnly.js";
+import { unmatchedInArth, newCredits } from "../domain/imports/arthOnly.js";
 import { canTakeAnotherLink, buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
 
 const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -241,6 +241,9 @@ export default function StatementImportScreen({ onOpenTxn, accounts = [], txns =
     const from = plan && plan.ok ? addDay(plan.periodFrom) : state.parsed.period.from, to = plan && plan.ok ? plan.periodTo : state.parsed.period.to;
     const r = unmatchedInArth({ results: state.match.results, transactions: txns, accountId: accId, linkedIds: getLinkedMethodIds(accId, accounts), from, to, lastRowDate: state.parsed.period.to });
     const real = r.arthOnly.filter(a => !a.pending), later = r.arthOnly.filter(a => a.pending);
+    const credits = isCard ? newCredits(state.match.results) : { rows: [], totalPaise: 0 };
+    // the statement's total due is net of these, Arth's purchases are not: when they add up to exactly the difference, that IS the gap
+    const explainsGap = Boolean(plan && plan.ok && credits.rows.length && Math.abs(Math.round(Math.abs(plan.difference) * 100) - credits.totalPaise) <= 1 && plan.difference < 0);
     const rowOfPair = a => { const pr = r.pairs.find(x => String(x.arthId) === String(a.id)); const res = pr && state.match.results.find(x => x.row.importKey === pr.rowKey); return pr && res ? { why: pr.why, row: res.row } : null; };
     const line = (a, dim) => {
       const pr = rowOfPair(a);
@@ -269,6 +272,14 @@ export default function StatementImportScreen({ onOpenTxn, accounts = [], txns =
             {later.length > 0 && <div style={{ color: T.sub, fontSize: 12, marginTop: 8 }}>{later.length} more dated after the file's last row:</div>}
             {later.map(a => line(a, true))}
           </>}
+        {credits.rows.length > 0 && (
+          <div data-testid="stmt-credits-gap" style={{ marginTop: 10, borderTop: `1px solid ${T.border}`, paddingTop: 8 }}>
+            <div style={{ color: T.text, fontSize: 13, lineHeight: 1.5 }}><b>{credits.rows.length}</b> payment{credits.rows.length === 1 ? "" : "s"} or refund{credits.rows.length === 1 ? "" : "s"} on the statement {credits.rows.length === 1 ? "is" : "are"} not in Arth · {fmt(credits.totalPaise, sym)}. The statement's total due already takes {credits.rows.length === 1 ? "it" : "them"} off; Arth only counts purchases.</div>
+            {credits.rows.map(c => <div key={c.importKey} data-testid="stmt-credit-row" style={{ color: T.sub, fontSize: 12, marginTop: 4 }}>{niceDate(c.date)} · {c.desc} · {fmt(c.amountPaise, sym)}</div>)}
+            {explainsGap && <div data-testid="stmt-gap-explained" style={{ color: T.success, fontSize: 13, fontWeight: 700, marginTop: 6 }}>✓ That is exactly the difference on the statement bill ({fmt(Math.round(Math.abs(plan.difference) * 100), sym)}). No purchase is wrong.</div>}
+            <div style={{ color: T.sub, fontSize: 11, marginTop: 4, lineHeight: 1.45 }}>A payment you made comes in when you import your bank statement. A refund: add it as money coming in on this card and tag it ↩ Refund.</div>
+          </div>
+        )}
         {state.match.summary.new > 0 && <div style={{ color: T.sub, fontSize: 12, marginTop: 8 }}>{state.match.summary.new} row{state.match.summary.new === 1 ? "" : "s"} on the statement {state.match.summary.new === 1 ? "is" : "are"} not in Arth (listed below as New).</div>}
       </div>
     );

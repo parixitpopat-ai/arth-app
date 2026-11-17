@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { matchStatement, DAY_WINDOW } from "./matchStatement.js";
-import { unmatchedInArth } from "./arthOnly.js";
+import { unmatchedInArth, newCredits } from "./arthOnly.js";
 
 const row = (date, amountPaise, desc = "x", k) => ({ date, amountPaise, desc, importKey: k || `${date}|${amountPaise}|${desc}` });
 const tx = (id, date, amount, extra = {}) => ({ id, type: "expense", date, amount, accId: "cc1", merchant: `shop ${id}`, ...extra });
@@ -43,4 +43,12 @@ test("rows imported before are not flagged on the Arth side", () => {
 });
 test("does not change its inputs", () => {
   const txns = [tx("a", "2026-10-20", 1000)]; const copy = JSON.stringify(txns); run([row("2026-10-20", -100000)], txns); assert.equal(JSON.stringify(txns), copy);
+});
+
+test("newCredits: only the payments/refunds of the file that Arth does not have, with their total", () => {
+  const rows = [row("2026-10-20", -100000, "a", "k1"), row("2026-10-22", 175275, "REFUND", "k2"), row("2026-10-23", 50000, "PAYMENT", "k3")];
+  const m = matchStatement(rows, { transactions: [tx("a", "2026-10-20", 1000), { id: "p", type: "cc_payment", date: "2026-10-23", amount: 500, toAccId: "cc1" }], accountId: "cc1", importedKeys: [], linkedIds: [] });
+  const c = newCredits(m.results);
+  assert.deepEqual(c.rows.map(r => r.desc), ["REFUND"]); assert.equal(c.totalPaise, 175275);
+  assert.deepEqual(newCredits([]), { rows: [], totalPaise: 0 });
 });

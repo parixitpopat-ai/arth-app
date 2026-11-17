@@ -52,3 +52,13 @@ export function unmatchedInArth({ results, transactions, accountId, linkedIds = 
   }
   return { arthOnly, pairs, totalPaise: arthOnly.filter(a => !a.pending).reduce((s, a) => s + a.amountPaise, 0) };
 }
+
+/**
+ * The other side of the gap on a CARD statement: payments / refunds (credits) that the file has and Arth does not. A card statement's total due is
+ * net of them, but Arth only counts purchases, so they are the usual reason "Arth has more than the statement" while every purchase matches.
+ * @returns {{rows:Array, totalPaise:number}} credits among the rows classed "new"
+ */
+export function newCredits(results) {
+  const rows = (results || []).filter(r => r.status === "new" && r.row.amountPaise > 0).map(r => r.row);
+  return { rows, totalPaise: rows.reduce((s, r) => s + r.amountPaise, 0) };
+}
