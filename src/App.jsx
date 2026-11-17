@@ -176,6 +176,7 @@ import BillPhotoReview from "./screens/BillPhotoReview.jsx";
 import ConvertBillSheet from "./screens/payments/ConvertBillSheet.jsx";
 import { canConvertBillToTxn, billToExpense } from "./domain/bills/billToTransaction";
 import { weeklySummary } from "../domain/insights/weeklySummary";
+import { txnTouchesAccount, cardStatementPeriods } from "./domain/transactions/accountFilter";
 import { weeklyNotifAvailable, weeklyNotifEnable, weeklyNotifCancel, weeklyNotifSchedule, weeklyNotifSnooze, weeklyNotifOnAction } from "./native/weeklyNotification.js";
 import { getHouseholdPlanningAllocation, getHouseholdAttributedTotal, getEffectiveMonthlyBudget, getCarryForwardPrevSpend, getMyExpenseShare, getCategoryAttributedTotal, getCategoryPlanningAllocation, getBudgetVariance, getPersonPlanningAllocation, getGroupPlanningAllocation, resolveCarryForwardMonthly, getSpentPercentage, getMonthEndForecast, getBudgetHealthStatus, getMandatoryCommitmentsTotal, getMandatoryCommitmentRemaining, getDiscretionaryPool, getDiscretionaryAllocatedTotal, getUnallocatedDiscretionary, getAllocationHierarchyWarning, getMandatoryCommitmentsConfirmationId, isMandatoryCommitmentsConfirmed, getMandatoryCommitmentState, getUnplannedCategoryIds, wouldExceedDiscretionaryPool, isHouseholdScopedCommitment, getCommitmentsForScope, buildRefundTotalsByExpense } from "../domain/allocations/adapter";
 // WP8 — the central Insights read model. Every Insights card on InsightsPage (and
@@ -1704,6 +1705,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [txnAmountTo, setTxnAmountTo] = useState("");
   const [txnCategoryFilter, setTxnCategoryFilter] = useState("all");
   const [txnPersonFilter, setTxnPersonFilter] = useState("all");
+  const [txnAccountFilter, setTxnAccountFilter] = useState("all");   // one account or card: everything that touches it, whatever the type (purchase, payment, refund, transfer)
+  // Held up here, not inside the Transactions page: that page is rebuilt on every state change, which used to close the sheet after each filter tap.
+  const [showTxnFilters, setShowTxnFilters] = useState(false);
   const [expenseSourceFilter, setExpenseSourceFilter] = useState("all");
   const [expenseCardFilter, setExpenseCardFilter] = useState("all");
   const [incomeTypeFilter, setIncomeTypeFilter] = useState("all");
@@ -2724,6 +2728,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     }
 
     if(txnPersonFilter!=="all" && !txnHasPerson(t, txnPersonFilter)) return false;
+    if(txnAccountFilter!=="all" && !txnTouchesAccount(t, txnAccountFilter, accounts)) return false;
 
     if(txnGroupFilter!=="all"){
       const inGroup = t.groupId===txnGroupFilter || (t.groupAllocations||[]).some(ga=>ga.groupId===txnGroupFilter);
@@ -2791,7 +2796,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(recordedB !== recordedA) return recordedB - recordedA;
     if(dateB !== dateA) return dateB - dateA;
     return tieDesc;
-  }),[txns,fType,txnDateFrom,txnDateTo,txnAmountFrom,txnAmountTo,txnCategoryFilter,txnPersonFilter,txnGroupFilter,accounts,expenseSourceFilter,expenseCardFilter,incomeTypeFilter,incomeAccountFilter,investmentTypeFilter,txnSort,txnReimbursableOnly,txnSearch]);
+  }),[txns,fType,txnDateFrom,txnDateTo,txnAmountFrom,txnAmountTo,txnCategoryFilter,txnPersonFilter,txnAccountFilter,txnGroupFilter,accounts,expenseSourceFilter,expenseCardFilter,incomeTypeFilter,incomeAccountFilter,investmentTypeFilter,txnSort,txnReimbursableOnly,txnSearch]);
 
   // Cash balance: domain/accounts/accountBalance.js (a linked UPI/debit is a rail with no balance of its own).
   const accountBalance = useCallback((accId, endDate=null)=>computeAccountBalance({ accId, accounts, txns, endDate, isDateInRange }),[txns,accounts]);
@@ -10836,7 +10841,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div key="recent" style={card}>
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
             <span style={{ color:T.text,fontSize:15,fontWeight:800 }}>Recent</span>
-            <button onClick={()=>{ setFType("All"); applyTxnDatePreset("current_month", viewMonth); setTxnAmountFrom(""); setTxnAmountTo(""); setTxnCategoryFilter("all"); setTxnPersonFilter("all"); setExpenseSourceFilter("all"); setExpenseCardFilter("all"); setIncomeTypeFilter("all"); setIncomeAccountFilter("all"); setInvestmentTypeFilter("all"); setTab("transactions"); }} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer" }}>See all →</button>
+            <button onClick={()=>{ setFType("All"); applyTxnDatePreset("current_month", viewMonth); setTxnAmountFrom(""); setTxnAmountTo(""); setTxnCategoryFilter("all"); setTxnPersonFilter("all"); setTxnAccountFilter("all"); setExpenseSourceFilter("all"); setExpenseCardFilter("all"); setIncomeTypeFilter("all"); setIncomeAccountFilter("all"); setInvestmentTypeFilter("all"); setTab("transactions"); }} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:800,cursor:"pointer" }}>See all →</button>
           </div>
           {[...txns]
             .sort((a,b)=>{
@@ -11133,7 +11138,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   };
 
   const Transactions = () => {
-    const [showTxnFilters, setShowTxnFilters] = useState(false);
     const [showTxnSort, setShowTxnSort] = useState(false);
     const [bulkMode, setBulkMode] = useState(false);
     const [bulkSelected, setBulkSelected] = useState([]);
@@ -11156,6 +11160,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       txnAmountFrom || txnAmountTo,
       txnCategoryFilter !== "all",
       txnPersonFilter !== "all",
+      txnAccountFilter !== "all",
       txnGroupFilter !== "all",
       expenseSourceFilter !== "all" || expenseCardFilter !== "all",
       incomeTypeFilter !== "all" || incomeAccountFilter !== "all",
@@ -11172,7 +11177,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setTxnAmountFrom("");
       setTxnAmountTo("");
       setTxnCategoryFilter("all");
-      setTxnPersonFilter("all");
+      setTxnPersonFilter("all"); setTxnAccountFilter("all");
       setTxnGroupFilter("all");
       setExpenseSourceFilter("all");
       setExpenseCardFilter("all");
@@ -11426,6 +11431,30 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <span style={lbl}>Amount to</span>
                     <input style={inp} type="text" inputMode="decimal" placeholder={`e.g. ${sym}10,000`} value={txnAmountTo||""} onChange={e=>setTxnAmountTo(cleanMoneyInput(e.target.value))}/>
                   </div>
+                </div>
+
+                <div data-testid="txn-account-filter">
+                  <span style={lbl}>Account or card</span>
+                  <select data-testid="txn-account-select" style={inp} value={txnAccountFilter} onChange={e=>setTxnAccountFilter(e.target.value)}>
+                    <option value="all">All accounts and cards</option>
+                    {accounts.filter(a=>a.type!=="upi").map(a=><option key={a.id} value={String(a.id)}>{a.name}{a.type==="cc"?" (credit card)":""}</option>)}
+                  </select>
+                  {(()=>{
+                    const periods = txnAccountFilter!=="all" ? cardStatementPeriods(bills, txnAccountFilter, addDaysToDateStr) : [];
+                    if(!periods.length) return null;
+                    return (
+                      <div style={{ marginTop:8 }}>
+                        <span style={lbl}>Statement period</span>
+                        <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                          {periods.map(pd=>(
+                            <Chip key={pd.id} color={T.accent} active={txnDateFrom===pd.from && txnDateTo===pd.to} onClick={()=>{ setTxnDatePreset("custom"); setTxnDateFrom(pd.from); setTxnDateTo(pd.to); }}>
+                              <span data-testid="txn-statement-chip">{pd.label}</span>
+                            </Chip>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
@@ -14686,6 +14715,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div><span style={{ color:T.sub }}>Unbilled: </span><span style={{ color:rowUsage.unbilled>0?T.warn:T.success,fontWeight:800 }}>{sym}{fmt(rowUsage.unbilled)}</span></div>
                   </div>
                   <div data-testid="card-view-txns" onClick={()=>setShowAccDetail(a)} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>📄 View transactions</div>
+                  <div data-testid="card-filter-txns" onClick={()=>{ setFType("All"); applyTxnDatePreset("all"); setTxnAmountFrom(""); setTxnAmountTo(""); setTxnCategoryFilter("all"); setTxnPersonFilter("all"); setTxnGroupFilter("all"); setExpenseSourceFilter("all"); setExpenseCardFilter("all"); setIncomeTypeFilter("all"); setIncomeAccountFilter("all"); setInvestmentTypeFilter("all"); setTxnReimbursableOnly(false); setTxnSearch(""); setTxnAccountFilter(String(a.id)); setTab("transactions"); }} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>🔎 Filter in Transactions (purchases, payments, refunds)</div>
                   <div data-testid="card-import-statement" onClick={()=>{ setStatementAccId(String(a.id)); setShowSettings(true); setSettingsSection("importstatement"); }} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>🏦 Import statement</div>
                   {relevantBill&&<div onClick={()=>setViewingCcStatementId(relevantBill.id)} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>View statement in Payments ›</div>}
                 </div>
@@ -15576,6 +15606,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Bank messages (Android): read bank SMS, automatic alerts with Accept / Link / Discard, reminders and statements-sent are skipped",
             "Bank and credit card statement import: CSV, Excel, PDF and pasted text, preview, merge repeats, match by UPI reference, undo a whole import, set balances from the statement",
             "Monthly Statement view for bank, cash and card accounts, with compare against the bank's own file",
+            "Transactions: new \"Account or card\" filter shows everything on one account or card - purchases, payments and refunds - with the card's statement periods as one-tap date ranges; the card tile on Money has \"Filter in Transactions\"; the filter sheet no longer closes after every tap",
             "Statement import: \"Entries that do not match\" lists what Arth has for the period that the statement does not, with a hint when one looks like the same purchase typed differently, and a View button; a card statement now also lists the payments or refunds it has that Arth does not (they explain a gap against the total due)",
             "Card statement bill: a wrongly typed bank amount can now be changed (\"Typed the wrong bank amount? Change it\")",
             "Not a bill? A bill that is really a purchase can be turned into a transaction on the card or account you bought it with (\"Not a bill? Make it a transaction\" on the bill)",
@@ -20891,7 +20922,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               initialMonthKey={cashFlowMonth} getIncomeLabel={formatIncomeTypeLabel} getAccountName={id=>getAcc(id)?.name||""}
               onBack={()=>setCashFlowMonth(null)}
               onOpenTxn={t=>{ setCashFlowMonth(null); setTab("transactions"); setTimeout(()=>setExpandedTxn(t.id),80); }}
-              onShowAllTransactions={mk=>{ setFType("All"); applyTxnDatePreset("current_month", mk); setTxnAmountFrom(""); setTxnAmountTo(""); setTxnCategoryFilter("all"); setTxnPersonFilter("all"); setExpenseSourceFilter("all"); setExpenseCardFilter("all"); setIncomeTypeFilter("all"); setIncomeAccountFilter("all"); setInvestmentTypeFilter("all"); setCashFlowMonth(null); setTab("transactions"); }}
+              onShowAllTransactions={mk=>{ setFType("All"); applyTxnDatePreset("current_month", mk); setTxnAmountFrom(""); setTxnAmountTo(""); setTxnCategoryFilter("all"); setTxnPersonFilter("all"); setTxnAccountFilter("all"); setExpenseSourceFilter("all"); setExpenseCardFilter("all"); setIncomeTypeFilter("all"); setIncomeAccountFilter("all"); setInvestmentTypeFilter("all"); setCashFlowMonth(null); setTab("transactions"); }}
               onAddTransaction={()=>setShowAdd(true)}
               forceError={import.meta.env.DEV && new URLSearchParams(window.location.search).get("cfError")==="1"}/>
           : <MoneyPage/>)}
