@@ -18,7 +18,7 @@ const rupees = p => Math.round(p) / 100;
 /**
  * @param {{card:object, accounts:Array, txns:Array, bills:Array, summary:object, toDateOnly:Function, genId:Function, today:string}} a
  *   summary: the card statement summary read from the PDF (statementDate, dueDate, totalDuePaise, periodFrom, periodTo, …)
- * @returns {{ok:false, reason:string} | {ok:true, action:"create"|"update"|"unchanged", bill:object, prev:object|null, arthAmount:number, bankAmount:number, difference:number, periodFrom:string, periodTo:string, notes:string[]}}
+ * @returns {{ok:false, reason:string} | {ok:true, action:"create"|"update"|"unchanged", bill:object, prev:object|null, earlier:{periodTo:string,bankAmount:number,arthAmount:number,difference:number}|null, arthAmount:number, bankAmount:number, difference:number, periodFrom:string, periodTo:string, notes:string[]}}
  */
 export function planStatementBillFromPdf({ card, accounts, txns, bills, summary, toDateOnly, genId, today }) {
   if (!card || card.type !== "cc") return { ok: false, reason: "This is not a credit card." };
@@ -30,6 +30,14 @@ export function planStatementBillFromPdf({ card, accounts, txns, bills, summary,
   const arthAmount = computePeriodAmount(card, accounts, txns, toDateOnly(periodFrom), toDateOnly(periodTo), toDateOnly);
   const bankAmount = rupees(summary.totalDuePaise);
   const existing = (bills || []).find(b => b.isCcStatement && b.accId === card.id && b.periodTo && Math.abs(dayNum(b.periodTo) - dayNum(periodTo)) <= 3) || null;
+  // the card's PREVIOUS statement (it closed on or just after the day this cycle starts): what the bank said then against what Arth had. If Arth was short and
+  // the lower figure was paid, that shortfall comes back as THIS statement's previous balance.
+  const startsOn = dayNum(periodFrom);
+  const earlier = (bills || []).filter(b => b.isCcStatement && b.accId === card.id && b.periodTo && b !== existing && dayNum(b.periodTo) <= startsOn + 3 && dayNum(b.periodTo) >= startsOn - 40)
+    .sort((a, b) => dayNum(b.periodTo) - dayNum(a.periodTo))[0] || null;
+  const earlierFigures = earlier && typeof earlier.bankAmount === "number"
+    ? { periodTo: earlier.periodTo, bankAmount: earlier.bankAmount, arthAmount: Number(earlier.arthAmount ?? earlier.amount ?? 0), difference: Math.round((earlier.bankAmount - Number(earlier.arthAmount ?? earlier.amount ?? 0)) * 100) / 100 }
+    : null;
   const cfg = getEffectiveBillingConfig(card, periodTo);
   const base = existing || {
     id: genId(), isCcStatement: true, accId: card.id, billerCategory: "Credit Card", name: `${card.name || "Card"} Statement`,
@@ -43,5 +51,5 @@ export function planStatementBillFromPdf({ card, accounts, txns, bills, summary,
   const notes = [];
   const printedDay = +periodTo.slice(8, 10);
   if (cfg && cfg.statementDay && cfg.statementDay !== printedDay) notes.push(`This statement closed on day ${printedDay}, but the card's statement day in Arth is ${cfg.statementDay}. Change the card's billing settings so future statements are cut on the right day.`);
-  return { ok: true, action: same ? "unchanged" : existing ? "update" : "create", bill, prev: existing, arthAmount, bankAmount, difference: Math.round((bankAmount - arthAmount) * 100) / 100, periodFrom, periodTo, notes };
+  return { ok: true, action: same ? "unchanged" : existing ? "update" : "create", bill, prev: existing, earlier: earlierFigures, arthAmount, bankAmount, difference: Math.round((bankAmount - arthAmount) * 100) / 100, periodFrom, periodTo, notes };
 }

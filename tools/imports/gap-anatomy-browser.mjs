@@ -27,6 +27,8 @@ await ctx.addInitScript(() => { if (localStorage.getItem("__init")) return; loca
   set("arth_accounts", [{ id: "bank1", name: "Test Savings", type: "bank", openingBalance: 100000, openingBalanceDate: "2026-01-01", last4: "9001" }, { id: "cc1", name: "Test ICICI Card", type: "cc", last4: "8004", creditLimit: 100000, statementDay: 16, dueDay: 3 }]);
   const e = (id, date, amount, m) => ({ id, type: "expense", merchant: m, desc: m, amount, date, accId: "cc1", catId: "food", catIds: ["food"] });
   set("arth_txns", [e("z", "2026-10-06", 375.1, "Zomato"), e("a", "2026-10-08", 200, "Amazon Pay")]);
+  // the PREVIOUS statement: the bank said 5,000.00, Arth had 3,275.00 (1,725.00 short); Arth's lower figure was then paid
+  set("arth_bills", [{ id: "old", isCcStatement: true, accId: "cc1", billerCategory: "Credit Card", name: "Test ICICI Card Statement", periodFrom: "2026-08-16", periodTo: "2026-09-16", arthAmount: 3275, amount: 3275, bankAmount: 5000, verification: "mismatch", verifiedAt: null, dueDate: "2026-10-03", status: "unpaid", adjustments: [], createdAt: "2026-09-17" }]);
   localStorage.setItem("arth_master_user_setup_complete", "true"); });
 const page = await ctx.newPage(); const errors = []; page.on("pageerror", e => errors.push(String(e)));
 const T = id => page.getByTestId(id);
@@ -42,12 +44,15 @@ try {
   const an = (await T("stmt-gap-anatomy").innerText().catch(() => "")).replace(/\s+/g, " ");
   rec("G2 it spells out the statement's own sum: previous balance ₹1,725.00 + purchases ₹575.10 − payments ₹0.00", /1,725\.00/.test(an) && /575\.10/.test(an) && /payments and credits/.test(an), an.slice(0, 220));
   rec("G3 and says the previous balance not paid off IS the difference, nothing missing from Arth", (await T("stmt-gap-exact").count()) === 1 && /previous balance not paid off \(₹1,725\.00\)/.test(await T("stmt-gap-exact").innerText()), {});
+  const last = (await T("stmt-gap-last").innerText().catch(() => "")).replace(/\s+/g, " ");
+  rec("G3a it also shows LAST statement's figures (bank ₹5,000.00, Arth ₹3,275.00, ₹1,725.00 short) and says that is this statement's carried-over ₹1,725.00", /5,000\.00/.test(last) && /3,275\.00/.test(last) && /1,725\.00 short/.test(last) && (await T("stmt-gap-last-match").count()) === 1, last.slice(0, 260));
   await T("stmt-bill-set").click(); await page.waitForTimeout(600);
   await page.reload(); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(400);
   await open(); await T("stmt-file").setInputFiles(carried); await page.waitForTimeout(2300);
   rec("G4 the same PDF again: the green tick is gone; it says the bill holds the PDF's figures and that Arth's records are still ₹1,725.00 short", (await T("stmt-bill-same").count()) === 0 && /does not mean Arth's records agree/.test(await T("stmt-bill-same-diff").innerText().catch(() => "")) && /1,725\.00 short/.test(await T("stmt-bill-same-diff").innerText().catch(() => "")), (await T("stmt-bill-same-diff").innerText().catch(() => "")).replace(/\s+/g, " "));
   await page.reload(); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(400);
   await open(); await T("stmt-file").setInputFiles(other); await page.waitForTimeout(2300);
+  rec("G5a when the carried amount (₹0.00) is NOT last time's difference (₹1,725.00) it does not claim a match, and says what would carry", (await T("stmt-gap-last-match").count()) === 0 && /If you paid the lower figure/.test(await T("stmt-gap-last").innerText().catch(() => "")), {});
   rec("G5 a gap that the previous balance does not explain says so and points at what else it could be", (await T("stmt-gap-partial").count()) === 1 && /could be refunds you already recorded|fee or charge/.test(await T("stmt-gap-partial").innerText()), (await T("stmt-gap-partial").innerText().catch(() => "")).replace(/\s+/g, " ").slice(0, 200));
 } catch (e) { rec("RUN", false, String(e).slice(0, 600)); }
 rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));

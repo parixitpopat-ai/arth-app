@@ -15606,6 +15606,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Bank messages (Android): read bank SMS, automatic alerts with Accept / Link / Discard, reminders and statements-sent are skipped",
             "Bank and credit card statement import: CSV, Excel, PDF and pasted text, preview, merge repeats, match by UPI reference, undo a whole import, set balances from the statement",
             "Monthly Statement view for bank, cash and card accounts, with compare against the bank's own file",
+            "Statement import: a gap is also compared with the card's PREVIOUS statement (what the bank said against what Arth had), because an unpaid shortfall from last time comes back as this statement's previous balance",
             "Statement import: the green tick no longer claims Arth agrees with the statement when it does not, and a gap is explained from the statement's own figures (previous balance carried over, payments and credits)",
             "Card statement sheet (Money and Payments): a refund added after the statement was made now shows (\"your records now total ...\") with one tap to update it, and the sheet has \"Add a refund or credit for this period\"",
             "Arth's own logo on the start-up screen and the browser tab (they showed Capacitor's and Vite's), and on the weekly summary notification (it showed a generic \"i\")",

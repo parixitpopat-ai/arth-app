@@ -40,3 +40,17 @@ test("plan: setting it twice is 'unchanged'; a paid bill keeps its status; refus
   const wrongDay = run({ card: { ...card, statementDate: 15 }, accounts: [{ ...card, statementDate: 15 }], txns: [ex("b", "2026-09-20", 1)] });
   assert.match(wrongDay.notes[0], /closed on day 16.*statement day in Arth is 15/);
 });
+
+test("earlier: the card's PREVIOUS statement figures are returned (what the bank said vs what Arth had), only when a bank figure was recorded", () => {
+  const prevBill = (over = {}) => ({ id: "old", isCcStatement: true, accId: "cc1", periodFrom: "2026-08-16", periodTo: "2026-09-16", arthAmount: 3275, amount: 3275, bankAmount: 5000, verification: "mismatch", ...over });
+  const p = run({ bills: [prevBill()] });
+  assert.deepEqual(p.earlier, { periodTo: "2026-09-16", bankAmount: 5000, arthAmount: 3275, difference: 1725 });
+  assert.equal(run({ bills: [prevBill({ bankAmount: null, verification: "needs_verification" })] }).earlier, null);
+  assert.equal(run({ bills: [prevBill({ accId: "cc9" })] }).earlier, null);
+  assert.equal(run({ bills: [prevBill({ periodTo: "2026-05-16" })] }).earlier, null);   // not the statement before this one
+  assert.equal(run().earlier, null);
+});
+test("earlier: when several earlier statements exist the latest one before this cycle is used", () => {
+  const b = (id, periodTo, bank) => ({ id, isCcStatement: true, accId: "cc1", periodTo, arthAmount: 100, amount: 100, bankAmount: bank, verification: "mismatch" });
+  assert.equal(run({ bills: [b("a", "2026-08-16", 900), b("b", "2026-09-16", 700)] }).earlier.bankAmount, 700);
+});

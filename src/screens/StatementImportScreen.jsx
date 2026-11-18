@@ -335,6 +335,14 @@ export default function StatementImportScreen({ onRecordRefund, onUndoRefund, on
           return (
             <div data-testid="stmt-gap-anatomy" style={{ marginTop: 8, background: T.pill, borderRadius: 10, padding: "8px 10px", fontSize: 12, color: T.sub, lineHeight: 1.5 }}>
               <div>The statement's total is the previous balance <b style={{ color: T.text }}>{m(prev)}</b> + purchases and charges <b style={{ color: T.text }}>{m(buy)}</b> − payments and credits <b style={{ color: T.text }}>{m(pay)}</b>. Arth's figure counts this cycle's purchases less refunds only.</div>
+              {plan.earlier && plan.earlier.difference !== 0 && (
+                <div data-testid="stmt-gap-last" style={{ marginTop: 4 }}>
+                  Last statement (to {niceDate(plan.earlier.periodTo)}): the bank said <b style={{ color: T.text }}>{m(plan.earlier.bankAmount)}</b>, Arth had <b style={{ color: T.text }}>{m(plan.earlier.arthAmount)}</b> ({m(Math.abs(plan.earlier.difference))} {plan.earlier.difference > 0 ? "short" : "more"}).
+                  {Math.abs(plan.earlier.difference - carry) < 0.005
+                    ? <b data-testid="stmt-gap-last-match" style={{ color: T.success }}> ✓ That is this statement's carried-over {m(Math.abs(carry))}: last time's difference.</b>
+                    : " If you paid the lower figure, that shortfall carries into this statement."}
+                </div>
+              )}
               {Math.abs(rest) < 0.005
                 ? <div data-testid="stmt-gap-exact" style={{ color: T.success, fontWeight: 700, marginTop: 4 }}>✓ {carry >= 0 ? `The previous balance not paid off (${m(carry)})` : `The payments and credits beyond the previous balance (${m(Math.abs(carry))})`} is exactly the difference. Nothing is missing from Arth.</div>
                 : <div data-testid="stmt-gap-partial" style={{ marginTop: 4 }}>Previous balance less payments and credits is {m(carry)}; the difference is {m(plan.difference)}. {rest > 0 ? `The other ${m(rest)} could be refunds you already recorded in Arth (the statement counts them inside its payments and credits), or a fee or charge Arth does not have.` : `${m(Math.abs(rest))} is unexplained: check for a charge or fee missing from Arth.`}</div>}
