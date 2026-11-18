@@ -14,6 +14,7 @@ import { planNameRepairs, planRefRepairs } from "../domain/imports/buildImport.j
 import { findImportedDuplicates } from "../domain/imports/duplicatePairs.js";
 import { unmatchedInArth, newCredits } from "../domain/imports/arthOnly.js";
 import { refundTargets } from "../domain/imports/refundTarget.js";
+import { auditStatementGap } from "../domain/imports/gapAudit.js";
 import { canTakeAnotherLink, buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
 
 const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -346,6 +347,32 @@ export default function StatementImportScreen({ onRecordRefund, onUndoRefund, on
               {Math.abs(rest) < 0.005
                 ? <div data-testid="stmt-gap-exact" style={{ color: T.success, fontWeight: 700, marginTop: 4 }}>✓ {carry >= 0 ? `The previous balance not paid off (${m(carry)})` : `The payments and credits beyond the previous balance (${m(Math.abs(carry))})`} is exactly the difference. Nothing is missing from Arth.</div>
                 : <div data-testid="stmt-gap-partial" style={{ marginTop: 4 }}>Previous balance less payments and credits is {m(carry)}; the difference is {m(plan.difference)}. {rest > 0 ? `The other ${m(rest)} could be refunds you already recorded in Arth (the statement counts them inside its payments and credits), or a fee or charge Arth does not have.` : `${m(Math.abs(rest))} is unexplained: check for a charge or fee missing from Arth.`}</div>}
+            </div>
+          );
+        })()}
+        {plan.difference !== 0 && state.match && (() => {
+          // Every rupee of the difference is named below, or reported as "not explained" (domain/imports/gapAudit.js).
+          const accId = state.accountId || accountId;
+          const au = auditStatementGap({ results: state.match.results, transactions: txns, accountId: accId, linkedIds: getLinkedMethodIds(accId, accounts), from: addDay(plan.periodFrom), to: plan.periodTo, summary: lastSummary, bankAmount: plan.bankAmount, arthAmount: plan.arthAmount, accountName: id => (accounts.find(a => String(a.id) === String(id)) || {}).name || "" });
+          const sgn = v => `${v < 0 ? "−" : "+"}${fmt(v, sym)}`;
+          return (
+            <div data-testid="stmt-gap-audit" style={{ marginTop: 10, borderTop: `1px solid ${T.border}`, paddingTop: 8 }}>
+              <div style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>Where the {fmt(au.gapPaise, sym)} comes from</div>
+              {au.lines.map(l => (
+                <div key={l.id} data-testid="stmt-gap-line" data-id={l.id} style={{ marginTop: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, color: T.text, fontWeight: 700 }}><span>{l.label}</span><span style={{ flexShrink: 0 }}>{sgn(l.paise)}</span></div>
+                  {l.items.slice(0, 8).map((it, i) => (
+                    <div key={i} data-testid="stmt-gap-item" style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 11, color: T.sub, marginTop: 2 }}>
+                      <span style={{ minWidth: 0 }}>{niceDate(it.date)} · {it.text}{it.where ? ` · recorded on ${it.where}` : ""}</span>
+                      <span style={{ flexShrink: 0 }}>{fmt(it.paise, sym)}{it.txnId != null && onOpenTxn && <button type="button" data-testid="stmt-gap-open" onClick={() => onOpenTxn(it.txnId)} style={{ background: "none", border: "none", color: T.accent, fontWeight: 700, fontSize: 11, cursor: "pointer", marginLeft: 6, padding: 0 }}>View</button>}</span>
+                    </div>
+                  ))}
+                  {l.items.length > 8 && <div style={{ fontSize: 11, color: T.sub, marginTop: 2 }}>and {l.items.length - 8} more</div>}
+                </div>
+              ))}
+              <div data-testid="stmt-gap-rest" style={{ marginTop: 8, fontSize: 12, fontWeight: 800, color: au.notExplainedPaise === 0 ? T.success : T.warn }}>
+                {au.notExplainedPaise === 0 ? `✓ All of the ${fmt(au.gapPaise, sym)} is accounted for above.` : `${fmt(au.notExplainedPaise, sym)} is not explained by the lines above${au.lines.length ? "" : " (nothing on the card, no statement row or refund accounts for it)"}. It could be a card EMI instalment, an entry whose amount was edited, or a fee not shown as a row.`}
+              </div>
             </div>
           );
         })()}
