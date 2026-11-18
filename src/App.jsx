@@ -242,6 +242,8 @@ import CreditCardStatementSheet from "./components/CreditCardStatementSheet";
 import ChangeBillingModal from "./components/ChangeBillingModal";
 import CreditCardsListScreen from "./components/CreditCardsListScreen";
 import MarkBillPaidModal from "./components/MarkBillPaidModal";
+import PayInParts from "./components/PayInParts";
+import { startParts, partsFromTxn, payPartsStatus, toPaymentLines } from "./domain/payments/payInParts";
 import { planStatementBillFromPdf } from "./domain/cards/statementFromPdf";
 import { applyDuplicateMerge, undoDuplicateMerge } from "./domain/imports/duplicatePairs";
 import { applyBalanceMatch, undoBalanceMatch } from "./domain/imports/statementBalances";
@@ -4267,6 +4269,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Paid by another person (domain/person/paidBy.js): "" = me, as before. Only for an expense.
     const [paidByPersonId, setPaidByPersonId] = useState(isEditing && sourceTxn?.type==="expense" && sourceTxn?.paidByPersonId ? sourceTxn.paidByPersonId : "");
     const [paymentMethod, setPaymentMethod] = useState(isEditing ? (sourceTxn.paymentMethod||"") : "");
+    const [payParts, setPayParts] = useState(isEditing ? partsFromTxn(sourceTxn) : null);   // ₹500 paid as ₹100 + ₹400: null = one account
     const [fromAccId, setFromAccId] = useState(isEditing ? (sourceTxn.fromAccId || defaultFromAccId) : (safePrefill.fromAccId || defaultFromAccId));
     const [toAccId, setToAccId] = useState(isEditing ? (sourceTxn.toAccId || defaultToCardId) : (safePrefill.toAccId || defaultToCardId));
     // WP16 — Transfer tagging ("Tag to (optional)"): lets a Transfer be tagged to a category
@@ -5415,6 +5418,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       // min/max, since a typed date can bypass that.
       if(safePrefill.dateMin && date < safePrefill.dateMin){ setRefDupWarning(`Date must be on or after ${safePrefill.dateMin} — within the statement period.`); return; }
       if(safePrefill.dateMax && date > safePrefill.dateMax){ setRefDupWarning(`Date must be on or before ${safePrefill.dateMax} — within the statement period.`); return; }
+      if(txnType==="expense" && payParts && !paidByPersonId && expensePaymentMode==="full"){
+        const ps = payPartsStatus(payParts, amt);
+        if(!ps.ok){ setRefDupWarning(ps.message.replace(/^(-?[\d.]+) still/, (m,n)=>`${sym}${fmt(Number(n))} still`).replace(/are (-?[\d.]+) more/, (m,n)=>`are ${sym}${fmt(Number(n))} more`)); return; }
+      }
       setRefDupWarning("");
       // Real gap found via a live report: a passive banner (never blocking, by deliberate design
       // to avoid alert()'s WebView reliability issue) was too easy to miss for entries made days
@@ -5802,6 +5809,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         // behavior is completely unchanged.
         const effectiveCatId = itemCategoryRollup ? itemCategoryRollup.catId : catId;
         const effectiveCatIds = itemCategoryRollup ? itemCategoryRollup.catIds : (validCatIds.length ? validCatIds : (catId ? [catId] : []));
+        const partsOn = txnType==="expense" && Boolean(payParts) && !paidByPersonId && expensePaymentMode==="full";
         const newTxn = {
           ...base,
           amount:amt,
@@ -5810,9 +5818,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           subIds:validSubIds,
           subId:validSubIds[0]||null,
           // Paid by another person: none of my accounts was used, so no account is recorded and none is debited.
-          accId: (txnType==="expense" && paidByPersonId) ? null : accId,
+          accId: (txnType==="expense" && paidByPersonId) ? null : (partsOn ? payParts[0].accId : accId),
+          paymentLines: partsOn ? toPaymentLines(payParts) : undefined,   // one purchase, several payments; the slice rule reads these
           paidByPersonId: (txnType==="expense" && paidByPersonId) ? paidByPersonId : null,
-          paymentMethod: (txnType==="expense" && !paidByPersonId && getAcc(accId)?.type==="bank") ? (paymentMethod||null) : null,
+          paymentMethod: (txnType==="expense" && !paidByPersonId && !partsOn && getAcc(accId)?.type==="bank") ? (paymentMethod||null) : null,
           isBillPayment,
           billInvoiceNo:billInvoiceNo.trim()||null,
           paidBillId:linkedBillId,
@@ -6406,7 +6415,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <button onClick={()=>setShowDetailsCard(true)} style={{ ...inp,flex:1,display:"flex",flexDirection:"column",alignItems:"flex-start",justifyContent:"center",cursor:"pointer",textAlign:"left",gap:2 }}>
                   <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Details ▾</span>
                   <span style={{ color:T.text,fontSize:12,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap" }}>
-                    {(() => { if(paidByPersonId) return `👤 Paid by ${getPerson(paidByPersonId)?.name||""}`; const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
+                    {(() => { if(paidByPersonId) return `👤 Paid by ${getPerson(paidByPersonId)?.name||""}`; if(payParts && expensePaymentMode==="full") return `💳 Paid in ${payParts.length} parts`; const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
                     <span style={{ color:T.sub }}>·</span>
                     {formatShortDate(date)||date}
                   </span>
@@ -6438,7 +6447,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                   <button onClick={()=>setShowDetailsCard(false)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"Nunito,sans-serif",padding:0 }}>← Details</button>
                 </div>
-                {!paidByPersonId&&<div>
+                {!paidByPersonId&&payParts&&expensePaymentMode==="full"&&<div>
+                  <PayInParts lines={payParts} onChange={setPayParts} total={parseFloat(amount)||0} accounts={paidViaAccounts} sym={sym} fmt={fmt} T={T} inp={inp} lbl={lbl}/>
+                  <button type="button" data-testid="pay-parts-off" onClick={()=>setPayParts(null)} style={{ background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:12,fontWeight:700,padding:"6px 0 0",fontFamily:"Nunito,sans-serif" }}>Pay from one account instead</button>
+                </div>}
+                {!paidByPersonId&&!(payParts&&expensePaymentMode==="full")&&<div>
                   <span style={lbl}>Paid via</span>
                   <button onClick={()=>setShowAccountSheet(true)} style={{ ...inp,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left" }}>
                     <span style={{ color:T.text }}>
@@ -6455,6 +6468,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       onClose={()=>setShowAccountSheet(false)}
                     />
                   )}
+                  {expensePaymentMode==="full"&&<button type="button" data-testid="pay-parts-on" onClick={()=>setPayParts(startParts(accId))} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:12,fontWeight:700,padding:"6px 0 0",fontFamily:"Nunito,sans-serif" }}>Paid in parts? Use more than one account</button>}
                 </div>}
                 <div>
                   <span style={lbl}>Date</span>
@@ -15616,6 +15630,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Transactions: new \"Account or card\" filter shows everything on one account or card - purchases, payments and refunds - with the card's statement periods as one-tap date ranges; the card tile on Money has \"Filter in Transactions\"; the filter sheet no longer closes after every tap",
             "Statement import: \"Entries that do not match\" lists what Arth has for the period that the statement does not, with a hint when one looks like the same purchase typed differently, and a View button; a card statement now also lists the payments or refunds it has that Arth does not (they explain a gap against the total due)",
             "Card statement bill: a wrongly typed bank amount can now be changed (\"Typed the wrong bank amount? Change it\")",
+            "One purchase paid in parts (for example ₹500 as ₹100 cash plus ₹400 UPI): in Add or Edit Transaction, open Details and choose \"Paid in parts? Use more than one account\". It stays one purchase; each account only loses its own part",
             "Not a bill? A bill that is really a purchase can be turned into a transaction on the card or account you bought it with (\"Not a bill? Make it a transaction\" on the bill)",
             "Petty cash given to a person (P on the A/O/C row); Vendors report keeps people out of vendors; UPI IDs saved quietly and linked to a person or vendor",
             "A credit card bill paid as an expense no longer counts as spending",
