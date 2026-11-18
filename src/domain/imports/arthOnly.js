@@ -5,6 +5,7 @@
 //   pairs:    [{ rowKey, arthId, why }] a new row and an Arth-only entry that look like the SAME purchase typed differently
 import { accountMovements } from "./matchStatement.js";
 import { extractUtr, refDigits } from "./utr.js";
+import { refConflict } from "./matchStatement.js";
 
 const dayNum = iso => Math.round(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000);
 
@@ -34,7 +35,7 @@ export function unmatchedInArth({ results, transactions, accountId, linkedIds = 
   for (const m of moves) {
     if (claimed.has(String(m.id)) || seen.has(String(m.id))) continue;
     seen.add(String(m.id));
-    arthOnly.push({ id: m.id, date: m.date, amountPaise: m.amountPaise, label: label(m.id), pending: Boolean(lastRowDate) && m.date > lastRowDate });
+    arthOnly.push({ id: m.id, ref: m.ref || "", date: m.date, amountPaise: m.amountPaise, label: label(m.id), pending: Boolean(lastRowDate) && m.date > lastRowDate });
   }
   arthOnly.sort((a, b) => a.date.localeCompare(b.date));
 
@@ -43,11 +44,12 @@ export function unmatchedInArth({ results, transactions, accountId, linkedIds = 
   for (const r of results || []) {
     if (r.status !== "new") continue;
     let best = null, why = "";
+    const rutr = extractUtr(r.row);
     for (const a of arthOnly) {
-      if (usedArth.has(String(a.id))) continue;
+      if (usedArth.has(String(a.id)) || refConflict(rutr, a.ref)) continue;
       if (a.amountPaise === r.row.amountPaise) { const gap = Math.abs(dayNum(a.date) - dayNum(r.row.date)); if (!best || gap < best.gap) { best = { a, gap }; why = gap === 0 ? "same amount, same day" : `same amount, ${gap} day${gap === 1 ? "" : "s"} apart`; } }
     }
-    if (!best) for (const a of arthOnly) { if (!usedArth.has(String(a.id)) && a.date === r.row.date) { best = { a, gap: 0 }; why = "same day, a different amount"; break; } }
+    if (!best) for (const a of arthOnly) { if (!usedArth.has(String(a.id)) && !refConflict(rutr, a.ref) && a.date === r.row.date) { best = { a, gap: 0 }; why = "same day, a different amount"; break; } }
     if (best) { usedArth.add(String(best.a.id)); pairs.push({ rowKey: r.row.importKey, arthId: best.a.id, why }); }
   }
   return { arthOnly, pairs, totalPaise: arthOnly.filter(a => !a.pending).reduce((s, a) => s + a.amountPaise, 0) };

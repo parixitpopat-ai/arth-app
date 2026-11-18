@@ -63,3 +63,23 @@ test("a refund just recorded from the preview is not flagged as 'in Arth, not on
   assert.equal(after.arthOnly.length, 0);
   assert.equal(newCredits(m.results).rows.length, 1); assert.equal(newCredits(m.results, ["k2"]).rows.length, 0);
 });
+
+// UPI reference / UTR: same amount and date is not enough when the references differ (invented numbers)
+const upi = (date, amountPaise, utr) => row(date, amountPaise, `UPI/DR/${utr}/SHOP`);
+test("same amount and date but a DIFFERENT UTR is not a match", () => {
+  const m = matchStatement([upi("2026-10-20", -100000, "111111111111")], { transactions: [tx("a", "2026-10-20", 1000, { transactionRef: "222222222222" })], accountId: "cc1", importedKeys: [], linkedIds: [] });
+  assert.equal(m.results[0].status, "new");
+});
+test("the same UTR matches, and an entry with no reference still matches on amount and date", () => {
+  const a = matchStatement([upi("2026-10-20", -100000, "111111111111")], { transactions: [tx("a", "2026-10-20", 1000, { transactionRef: "UTR 111111111111" })], accountId: "cc1", importedKeys: [], linkedIds: [] });
+  assert.equal(a.results[0].status, "probable-match");
+  const b = matchStatement([upi("2026-10-20", -100000, "111111111111")], { transactions: [tx("a", "2026-10-20", 1000)], accountId: "cc1", importedKeys: [], linkedIds: [] });
+  assert.equal(b.results[0].status, "probable-match");
+});
+test("an entry on another account is matched by its UTR, and not when its UTR differs", () => {
+  const other = ref => [tx("o", "2026-10-21", 1000, { accId: "bank1", transactionRef: ref })];
+  const hit = matchStatement([upi("2026-10-20", -100000, "111111111111")], { transactions: other("111111111111"), accountId: "cc1", importedKeys: [], linkedIds: [] });
+  assert.equal(hit.results[0].status, "probable-match"); assert.equal(hit.results[0].otherAccount, true);
+  const miss = matchStatement([upi("2026-10-20", -100000, "111111111111")], { transactions: other("999999999999"), accountId: "cc1", importedKeys: [], linkedIds: [] });
+  assert.equal(miss.results[0].status, "new");
+});

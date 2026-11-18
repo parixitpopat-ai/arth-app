@@ -14,6 +14,12 @@ export const UTR_DAY_WINDOW = 31;          // the same UTR is the same payment, 
 const dayNum = iso => Math.round(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 86400000);
 const paise = n => Math.round(Number(n) * 100);
 
+/** True when the row has a UTR and the entry carries a DIFFERENT full reference: two different payments, however alike the amount and date. An entry with no reference is not in conflict. */
+export function refConflict(rowUtr, entryRef) {
+  const d = refDigits(entryRef);
+  return Boolean(rowUtr) && d.length >= 12 && !d.includes(rowUtr);
+}
+
 /** Existing transactions that touch accountId, as { id, date, amountPaise (credit +, debit −), ref } for comparison. */
 export function accountMovements(transactions, accountId, linkedIds = []) {
   // A UPI handle or debit card linked to this bank is only a rail: spending through it moves this account's money, so entries recorded against the
@@ -44,7 +50,7 @@ export function matchStatement(keyedRows, { transactions, accountId, importedKey
   const imported = new Set(importedKeys || []), claimed = new Set(), moves = accountMovements(transactions, accountId, linkedIds);
   const onThis = id => id != null && (String(id) === String(accountId) || (linkedIds || []).some(l => String(l) === String(id)));
   const others = (transactions || []).filter(t => t && !t.importKey && t.date && Number.isFinite(Number(t.amount)) && (t.type === "expense" || t.type === "income" || t.type === "settlement_in" || t.type === "investment") && !onThis(t.accId) && !onThis(t.fromAccId) && !onThis(t.toAccId))
-    .map(t => ({ id: t.id, date: t.date, amountPaise: (t.type === "expense" || t.type === "investment") ? -paise(t.amount) : paise(t.amount) }));
+    .map(t => ({ id: t.id, date: t.date, ref: t.transactionRef || "", amountPaise: (t.type === "expense" || t.type === "investment") ? -paise(t.amount) : paise(t.amount) }));
   const seenUtrs = new Set((importedUtrs || []).map(refDigits).filter(u => u.length >= 12));
   const results = keyedRows.map(row => {
     if (imported.has(row.importKey)) return { row, status: "already-imported" };
@@ -54,12 +60,14 @@ export function matchStatement(keyedRows, { transactions, accountId, importedKey
       const hit = moves.find(m => !claimed.has(m.id + "|" + m.amountPaise) && m.amountPaise === row.amountPaise && refDigits(m.ref).includes(utr) && Math.abs(dayNum(m.date) - dayNum(row.date)) <= UTR_DAY_WINDOW);
       if (hit) { claimed.add(hit.id + "|" + hit.amountPaise); return { row, status: "probable-match", matchId: hit.id, byUtr: true }; }
     }
-    const cands = moves.filter(m => !claimed.has(m.id + "|" + m.amountPaise) && m.amountPaise === row.amountPaise && Math.abs(dayNum(m.date) - dayNum(row.date)) <= DAY_WINDOW)
+    const cands = moves.filter(m => !claimed.has(m.id + "|" + m.amountPaise) && m.amountPaise === row.amountPaise && !refConflict(utr, m.ref) && Math.abs(dayNum(m.date) - dayNum(row.date)) <= DAY_WINDOW)
       .sort((a, b) => (b.ref && b.ref === row.ref) - (a.ref && a.ref === row.ref) || Math.abs(dayNum(a.date) - dayNum(row.date)) - Math.abs(dayNum(b.date) - dayNum(row.date)));
     if (cands.length) { claimed.add(cands[0].id + "|" + cands[0].amountPaise); return { row, status: "probable-match", matchId: cands[0].id }; }
     // Nothing on this account — but the same amount, near the same date, may be an entry recorded on ANOTHER account (paid by card, entered against the bank, or the
     // reverse). Offered like a match (unticked, can be merged) so the payment is not entered twice; the entry stays on its own account.
-    const other = others.filter(o => !claimed.has("o|" + o.id) && o.amountPaise === row.amountPaise && Math.abs(dayNum(o.date) - dayNum(row.date)) <= DAY_WINDOW)
+    const otherByUtr = utr ? others.find(o => !claimed.has("o|" + o.id) && o.amountPaise === row.amountPaise && refDigits(o.ref).includes(utr) && Math.abs(dayNum(o.date) - dayNum(row.date)) <= UTR_DAY_WINDOW) : null;
+    if (otherByUtr) { claimed.add("o|" + otherByUtr.id); return { row, status: "probable-match", matchId: otherByUtr.id, otherAccount: true, byUtr: true }; }
+    const other = others.filter(o => !claimed.has("o|" + o.id) && o.amountPaise === row.amountPaise && !refConflict(utr, o.ref) && Math.abs(dayNum(o.date) - dayNum(row.date)) <= DAY_WINDOW)
       .sort((a, b) => Math.abs(dayNum(a.date) - dayNum(row.date)) - Math.abs(dayNum(b.date) - dayNum(row.date)))[0];
     if (other) { claimed.add("o|" + other.id); return { row, status: "probable-match", matchId: other.id, otherAccount: true }; }
     return { row, status: "new" };
