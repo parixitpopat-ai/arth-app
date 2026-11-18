@@ -328,11 +328,26 @@ export default function StatementImportScreen({ onRecordRefund, onUndoRefund, on
           <div>Statement total <b>{m(plan.bankAmount)}</b>{lastSummary.dueDate ? ` · due ${niceDate(lastSummary.dueDate)}` : ""}</div>
           <div>Arth has <b>{m(plan.arthAmount)}</b> on this card for {niceDate(addDay(plan.periodFrom))} to {niceDate(plan.periodTo)}{plan.difference !== 0 ? <span style={{ color: T.warn }}> · {m(Math.abs(plan.difference))} {plan.difference > 0 ? "short" : "more than the statement"}</span> : <span style={{ color: T.success }}> · matches</span>}</div>
         </div>
+        {plan.difference !== 0 && typeof lastSummary.previousBalancePaise === "number" && typeof lastSummary.paymentsPaise === "number" && (() => {
+          // The statement's total is NET of what carried over and what was paid; Arth's figure is this cycle's purchases less refunds only.
+          const prev = lastSummary.previousBalancePaise / 100, pay = lastSummary.paymentsPaise / 100, buy = ((lastSummary.purchasesPaise || 0) + (lastSummary.cashAdvancesPaise || 0)) / 100;
+          const carry = Math.round((prev - pay) * 100) / 100, rest = Math.round((plan.difference - carry) * 100) / 100;
+          return (
+            <div data-testid="stmt-gap-anatomy" style={{ marginTop: 8, background: T.pill, borderRadius: 10, padding: "8px 10px", fontSize: 12, color: T.sub, lineHeight: 1.5 }}>
+              <div>The statement's total is the previous balance <b style={{ color: T.text }}>{m(prev)}</b> + purchases and charges <b style={{ color: T.text }}>{m(buy)}</b> − payments and credits <b style={{ color: T.text }}>{m(pay)}</b>. Arth's figure counts this cycle's purchases less refunds only.</div>
+              {Math.abs(rest) < 0.005
+                ? <div data-testid="stmt-gap-exact" style={{ color: T.success, fontWeight: 700, marginTop: 4 }}>✓ {carry >= 0 ? `The previous balance not paid off (${m(carry)})` : `The payments and credits beyond the previous balance (${m(Math.abs(carry))})`} is exactly the difference. Nothing is missing from Arth.</div>
+                : <div data-testid="stmt-gap-partial" style={{ marginTop: 4 }}>Previous balance less payments and credits is {m(carry)}; the difference is {m(plan.difference)}. {rest > 0 ? `The other ${m(rest)} could be refunds you already recorded in Arth (the statement counts them inside its payments and credits), or a fee or charge Arth does not have.` : `${m(Math.abs(rest))} is unexplained: check for a charge or fee missing from Arth.`}</div>}
+            </div>
+          );
+        })()}
         {pending && <div style={{ color: T.sub, fontSize: 11, marginTop: 6 }}>These figures do not include the rows you are about to import. Import first, then set the bill.</div>}
         {plan.notes.map((n, i) => <div key={i} data-testid="stmt-bill-note" style={{ color: T.warn, fontSize: 12, marginTop: 6, lineHeight: 1.4 }}>{n}</div>)}
         <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
           {!billUndo && plan.action !== "unchanged" && <button data-testid="stmt-bill-set" style={btn(true)} onClick={() => setBillUndo(onSetStatementBill(plan))}>{plan.action === "create" ? "Set the statement bill from this PDF" : "Update the statement bill from this PDF"}</button>}
-          {!billUndo && plan.action === "unchanged" && <div data-testid="stmt-bill-same" style={{ color: T.success, fontSize: 13, fontWeight: 700 }}>✓ The statement bill already matches this PDF.</div>}
+          {!billUndo && plan.action === "unchanged" && (plan.difference === 0
+            ? <div data-testid="stmt-bill-same" style={{ color: T.success, fontSize: 13, fontWeight: 700 }}>✓ The statement bill already matches this PDF.</div>
+            : <div data-testid="stmt-bill-same-diff" style={{ color: T.warn, fontSize: 13, fontWeight: 700, lineHeight: 1.4 }}>The statement bill already holds this PDF's figures. That does not mean Arth's records agree with it: they are {m(Math.abs(plan.difference))} {plan.difference > 0 ? "short" : "more"} (see above).</div>)}
           {billUndo && <><div data-testid="stmt-bill-done" style={{ color: T.sub, fontSize: 13, flex: 1 }}>Statement bill set{plan.bill.verification === "matched" ? ": matched." : ": the difference is recorded for you to review."}</div><button data-testid="stmt-bill-undo" style={btn(false)} onClick={() => { onUndoStatementBill(billUndo); setBillUndo(null); }}>Undo</button></>}
         </div>
       </div>
