@@ -43,14 +43,14 @@ test("SMS rows match an entry I already have (same amount, UTR) instead of dupli
   assert.equal(m.results[0].status, "probable-match");
 });
 test("'; NAME credited' after our own debit is a debit to that name, not a transfer", () => {
-  const p = parseMoneySms({ id: 11, body: "Your A/c XX5748 debited by Rs. 180.00 on 09/11/26; ICECREAM credited. UPI Ref 610512345678. Not you? Call 1800", date: 1 });
-  assert.equal(p.ok, true); assert.equal(p.row.amountPaise, -18000); assert.equal(p.row.date, "2026-11-09"); assert.deepEqual(p.last4s, ["5748"]);
+  const p = parseMoneySms({ id: 11, body: "Your A/c XX3456 debited by Rs. 180.00 on 09/11/26; ICECREAM credited. UPI Ref 610512345678. Not you? Call 1800", date: 1 });
+  assert.equal(p.ok, true); assert.equal(p.row.amountPaise, -18000); assert.equal(p.row.date, "2026-11-09"); assert.deepEqual(p.last4s, ["3456"]);
   assert.equal(p.row.ref, "610512345678"); assert.match(p.row.desc, /ICECREAM/);
-  const big = parseMoneySms({ id: 12, body: "Your A/c XX5748 debited by Rs. 15,000.00 on 04/11/26; RAJ PI credited. UPI:610512345679", date: 1 });
+  const big = parseMoneySms({ id: 12, body: "Your A/c XX3456 debited by Rs. 15,000.00 on 04/11/26; RAJ PI credited. UPI:610512345679", date: 1 });
   assert.equal(big.row.amountPaise, -1500000); assert.match(big.row.desc, /RAJ PI/);
 });
 test("our own credit with '; NAME debited' is money in", () => {
-  const p = parseMoneySms({ id: 13, body: "Your A/c XX5748 credited by Rs. 2,000.00 on 05/11/26; NIDHI Y debited. UPI Ref 610512345680", date: 1 });
+  const p = parseMoneySms({ id: 13, body: "Your A/c XX3456 credited by Rs. 2,000.00 on 05/11/26; NIDHI Y debited. UPI Ref 610512345680", date: 1 });
   assert.equal(p.ok, true); assert.equal(p.row.amountPaise, 200000); assert.match(p.row.desc, /NIDHI Y/);
 });
 test("a real own-account transfer is still reported, not guessed", () => {
@@ -66,7 +66,7 @@ test("notices that are not a money movement are skipped (will-be-debited, statem
   ]) { assert.equal(looksLikeMoneySms(body), false, body.slice(0, 50)); assert.equal(parseMoneySms({ id: 1, body, date: 1 }), null); }
   // real charges still read
   assert.equal(looksLikeMoneySms("Rs.222.14 spent on HDFC Bank Card x1234 at ZOMATO on 10-11-26. Avl limit Rs.50,000"), true);
-  assert.equal(looksLikeMoneySms("Your A/c XX5748 debited by Rs. 180.00 on 09/11/26; ICECREAM credited. UPI Ref 610512345678"), true);
+  assert.equal(looksLikeMoneySms("Your A/c XX3456 debited by Rs. 180.00 on 09/11/26; ICECREAM credited. UPI Ref 610512345678"), true);
 });
 import { findNoticeEntries } from "./smsInbox.js";
 test("old imported notices are found; my own entries and real charges are not", () => {
@@ -80,15 +80,15 @@ test("old imported notices are found; my own entries and real charges are not", 
   ];
   assert.deepEqual(findNoticeEntries(txns).map(t => t.id), [1, 2]);
 });
-test("'a/c ending XXXXXXXX748 is debited by Rs. 10000.00 on 01-11-26; RAJ credited' is a debit, matched by 3 visible digits when only one account fits", () => {
-  const sms = { id: 21, body: "Your a/c ending XXXXXXXX748 is debited by Rs. 10000.00 on 01-11-26; RAJ ADHIYA credited. UPI Ref 610512345681", date: 1 };
+test("'a/c ending XXXXXXXX456 is debited by Rs. 10000.00 on 01-11-26; RAJ credited' is a debit, matched by 3 visible digits when only one account fits", () => {
+  const sms = { id: 21, body: "Your a/c ending XXXXXXXX456 is debited by Rs. 10000.00 on 01-11-26; RAJ ADHIYA credited. UPI Ref 610512345681", date: 1 };
   const p = parseMoneySms(sms);
-  assert.equal(p.ok, true); assert.equal(p.row.amountPaise, -1000000); assert.equal(p.row.date, "2026-11-01"); assert.match(p.row.desc, /RAJ ADHIYA/); assert.equal(p.tail3, "748");
-  const one = sortSmsToAccounts([sms], [{ id: "idfc", last4: "5748" }, { id: "icici", last4: "0170" }]);
+  assert.equal(p.ok, true); assert.equal(p.row.amountPaise, -1000000); assert.equal(p.row.date, "2026-11-01"); assert.match(p.row.desc, /RAJ ADHIYA/); assert.equal(p.tail3, "456");
+  const one = sortSmsToAccounts([sms], [{ id: "idfc", last4: "3456" }, { id: "icici", last4: "0170" }]);
   assert.equal(one.byAccount.get("idfc").length, 1);
-  const two = sortSmsToAccounts([sms], [{ id: "a", last4: "5748" }, { id: "b", last4: "1748" }]);
+  const two = sortSmsToAccounts([sms], [{ id: "a", last4: "3456" }, { id: "b", last4: "1456" }]);
   assert.equal(two.byAccount.size, 0); assert.equal(two.noAccount.length, 1);          // two accounts fit: not guessed
 });
 test("'is debited … credited to A/c XXXX' (a second leg naming an account) is still a transfer, not guessed", () => {
-  assert.equal(parseMoneySms({ id: 22, body: "Your a/c ending XXXXXXXX748 is debited by Rs. 500.00 on 01-11-26 and credited to a/c XXXXXX1234", date: 1 }).ok, false);
+  assert.equal(parseMoneySms({ id: 22, body: "Your a/c ending XXXXXXXX456 is debited by Rs. 500.00 on 01-11-26 and credited to a/c XXXXXX1234", date: 1 }).ok, false);
 });

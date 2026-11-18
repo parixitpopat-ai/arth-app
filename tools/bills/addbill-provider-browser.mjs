@@ -15,7 +15,7 @@ await ctx.addInitScript(() => { if (localStorage.getItem("__init")) return; loca
   set("arth_billers", [{ id: "bl1", name: "Goa Electricity", type: "Electricity" }, { id: "bl2", name: "Drinking Water Dept", type: "Water" }, { id: "bl3", name: "Some Club", type: "Other" }]);
   set("arth_biller_accounts", [
     { id: "ba1", name: "Common Meter Electricity", type: "Electricity", provider: "Goa Electricity", billerId: "bl1", consumerNo: "111222333", attributeType: "house" },
-    { id: "ba2", name: "Water Tap A", type: "Water", provider: "Drinking Water Dept", billerId: "bl2", consumerNo: "30071258", attributeType: "group", attributedTo: "g1" },
+    { id: "ba2", name: "Water Tap A", type: "Water", provider: "Drinking Water Dept", billerId: "bl2", consumerNo: "70012345", attributeType: "group", attributedTo: "g1" },
     { id: "ba3", name: "Water Tap B", type: "Water", provider: "Drinking Water Dept", billerId: "bl2", consumerNo: "30071999", attributeType: "person", attributedTo: "p2" }]);
   set("arth_bills", []);
   localStorage.setItem("arth_master_user_setup_complete", "true"); });

@@ -6,14 +6,14 @@ import { parseBillText, wordsToAmount } from "./billPhotoParse.js";
 const OCR = `No aa © rig g
 0 00 AE
 CONSUMERID BILL DATE DUE DATE
-30071258 16/11/2026 30/11/2026
-3 NAME & ADDRESS U - FATORDA-07
+70012345 16/11/2026 30/11/2026
+3 NAME & ADDRESS U - ZONE9-07
 8 MR SAMPLE OWNER
 | 12 EXAMPLE ROAD TOWN
 BDA SAMPLE GOA
-BE CODE + MFKG0300709004
+BE CODE + ABCD0100200300
 BILL NO INSTALL DT METER NO
-044500034 21/10/2013 J2002934 [
+099900012 21/10/2013 X1234567 [
 i REV SUBDIV ZONE CATEGORY DEPOSIT i
 =f AE DATE 0 DATE DAYS To SIZE i
 | 5 a
@@ -29,17 +29,17 @@ AMOUNT IN WORDS
 
 test("the fields the engine really got right are read, and nothing else is invented", () => {
   const p = parseBillText(OCR);
-  assert.equal(p.consumerId, "30071258");
+  assert.equal(p.consumerId, "70012345");
   assert.equal(p.billDate, "2026-11-16"); assert.equal(p.dueDate, "2026-11-30");
   assert.equal(p.amount, 5904); assert.equal(p.amountInWords, 5904);
-  assert.equal(p.billNo, "044500034");
+  assert.equal(p.billNo, "099900012");
   assert.equal(p.currentReading, 10443); assert.equal(p.previousReading, 10260); assert.equal(p.units, 183);
   assert.equal(p.periodFrom, null); assert.equal(p.periodTo, null);   // the engine lost the from/to dates: left empty, not guessed
   assert.deepEqual(p.checks, { amountMatchesWords: true, readingsMatchUnits: true, dueAfterBill: true });
   assert.equal(p.found, true);
 });
 test("the name and address are not part of the result", () => {
-  assert.ok(!JSON.stringify(parseBillText(OCR)).match(/SAMPLE|EXAMPLE|FATORDA/));
+  assert.ok(!JSON.stringify(parseBillText(OCR)).match(/SAMPLE|EXAMPLE|ZONE9/));
 });
 test("amount in words: digit by digit and ordinary words", () => {
   assert.equal(wordsToAmount("Rupees Five Nine Zero Four Only"), 5904);

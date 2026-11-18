@@ -16,7 +16,7 @@ const draw = async (lines, out, size = 26) => {
   await p.setContent(`<body style="margin:0;background:#fff"><pre style="font:700 ${size}px 'Courier New',monospace;color:#111;margin:0;padding:24px;line-height:${size + 12}px">${lines.join("\n")}</pre></body>`);
   writeFileSync(out, await p.screenshot()); await p.close();
 };
-await draw(["GOVERNMENT OF SAMPLE", "DEPARTMENT OF DRINKING WATER", "", "CONSUMERID    BILL DATE     DUE DATE", "30071258      16/11/2026    30/11/2026", "", "NAME & ADDRESS    U - SAMPLE-07", "MR SAMPLE OWNER", "12 EXAMPLE ROAD SAMPLE TOWN", "", "BILL NO       INSTALL DT    METER NO", "044500034     21/10/2013    J2002934", "", "CURRENT   PREVIOUS   UNITS   USEDUNIT", "10443     10260      183     183", "", "WATER CHARGES       METER RENT", "5839                65", "", "ARREARS/CREDIT      NET PAYABLE", "0 / 0               5904", "", "AMOUNT IN WORDS", "Rupees Five Nine Zero Four Only"], billPng);
+await draw(["GOVERNMENT OF SAMPLE", "DEPARTMENT OF DRINKING WATER", "", "CONSUMERID    BILL DATE     DUE DATE", "70012345      16/11/2026    30/11/2026", "", "NAME & ADDRESS    U - SAMPLE-07", "MR SAMPLE OWNER", "12 EXAMPLE ROAD SAMPLE TOWN", "", "BILL NO       INSTALL DT    METER NO", "099900012     21/10/2013    X1234567", "", "CURRENT   PREVIOUS   UNITS   USEDUNIT", "10443     10260      183     183", "", "WATER CHARGES       METER RENT", "5839                65", "", "ARREARS/CREDIT      NET PAYABLE", "0 / 0               5904", "", "AMOUNT IN WORDS", "Rupees Five Nine Zero Four Only"], billPng);
 await draw(["SHOPPING LIST", "", "apples  6", "bread   1", "milk    2"], otherPng);
 // the same bill as a BIG camera-style photo (about 40 megapixels), made by scaling the drawn bill up
 const bigPng = `${dir}/bill-big.jpg`;
@@ -28,7 +28,7 @@ await ctx.addInitScript(() => { if (localStorage.getItem("__init")) return; loca
   set("arth_accounts", [{ id: "bank1", name: "Test Savings", type: "bank", openingBalance: 500000, openingBalanceDate: "2025-01-01", last4: "9001" }]);
   set("arth_people", [{ id: "me", name: "Me", isMe: true }]);
   set("arth_billers", [{ id: "bl1", name: "Drinking Water Dept", type: "Water" }]);
-  set("arth_biller_accounts", [{ id: "ba1", name: "Common Meter Water", type: "Water", provider: "Drinking Water Dept", billerId: "bl1", consumerNo: "30071258", attributeType: "house" }]);
+  set("arth_biller_accounts", [{ id: "ba1", name: "Common Meter Water", type: "Water", provider: "Drinking Water Dept", billerId: "bl1", consumerNo: "70012345", attributeType: "house" }]);
   set("arth_bills", []);
   localStorage.setItem("arth_master_user_setup_complete", "true"); });
 const page = await ctx.newPage(); const errors = []; page.on("pageerror", e => errors.push(String(e)));
@@ -48,7 +48,7 @@ try {
   await T("billphoto-file").setInputFiles(billPng); await T("billphoto-use").waitFor({ timeout: 90000 }).catch(() => {});
   const v = async k => (await T(`billphoto-${k}`).inputValue().catch(() => null));
   const read = { consumerId: await v("consumerId"), billDate: await v("billDate"), dueDate: await v("dueDate"), amount: await v("amount"), billNo: await v("billNo"), previous: await v("previous"), current: await v("current"), units: await v("units") };
-  rec("P3 the REAL engine read the key fields from the synthetic bill image", read.consumerId === "30071258" && read.billDate === "2026-11-16" && read.dueDate === "2026-11-30" && read.amount === "5904", read);
+  rec("P3 the REAL engine read the key fields from the synthetic bill image", read.consumerId === "70012345" && read.billDate === "2026-11-16" && read.dueDate === "2026-11-30" && read.amount === "5904", read);
   rec("P4 the matching connection is found by consumer ID", /Matches your connection: Common Meter Water/.test(await T("billphoto-connection").innerText().catch(() => "")), {});
   rec("P5 the amount is cross-checked against the amount in words", (await T("billphoto-check-words").getAttribute("data-status").catch(() => null)) === "holds", await T("billphoto-check-words").innerText().catch(() => ""));
   const owner = await text();
@@ -66,7 +66,7 @@ try {
   await T("billphoto-cancel").click().catch(() => {});
   await T("billphoto-file").setInputFiles(bigPng); await Promise.race([T("billphoto-use").waitFor({ timeout: 120000 }), T("billphoto-declined").waitFor({ timeout: 120000 })]).catch(() => {});
   const bigRead = { consumerId: await T("billphoto-consumerId").inputValue().catch(() => null), amount: await T("billphoto-amount").inputValue().catch(() => null) };
-  rec("P13 a big camera-style photo (" + Math.round(globalThis.BIG.w * globalThis.BIG.h / 1e6) + " MP) is read, not refused", globalThis.BIG.w * globalThis.BIG.h > 16000000 && bigRead.consumerId === "30071258" && bigRead.amount === "5904", { ...globalThis.BIG, ...bigRead, declined: (await T("billphoto-declined").innerText().catch(() => "")) });
+  rec("P13 a big camera-style photo (" + Math.round(globalThis.BIG.w * globalThis.BIG.h / 1e6) + " MP) is read, not refused", globalThis.BIG.w * globalThis.BIG.h > 16000000 && bigRead.consumerId === "70012345" && bigRead.amount === "5904", { ...globalThis.BIG, ...bigRead, declined: (await T("billphoto-declined").innerText().catch(() => "")) });
   await T("billphoto-cancel").click().catch(() => {}); await T("billphoto-file").setInputFiles(billPng); await T("billphoto-use").waitFor({ timeout: 90000 }).catch(() => {}); await T("billphoto-use").click(); await page.waitForTimeout(900);
   // save the bill, then the same photo again must be flagged as already added
   await T("addbill-submit").click().catch(() => {}); await page.waitForTimeout(1000);

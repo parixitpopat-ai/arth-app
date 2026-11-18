@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readBillFromImage, shrinkForBill } from "./ocrBill.js";
 
 const file = (size = 1000, type = "image/jpeg") => ({ size, type });
-const text = "CONSUMERID BILL DATE DUE DATE\n30071258 16/11/2026 30/11/2026\nNET PAYABLE\n5904\nRupees Five Nine Zero Four Only";
+const text = "CONSUMERID BILL DATE DUE DATE\n70012345 16/11/2026 30/11/2026\nNET PAYABLE\n5904\nRupees Five Nine Zero Four Only";
 const worker = (t = text) => ({ recognize: async () => ({ data: { text: t } }), setParameters: async () => {}, terminate: async () => {} });
 const opts = (over = {}) => ({ baseUrl: "http://x/", makeWorker: async () => worker(), sizeOf: async () => ({ width: 2000, height: 1500 }), shrink: async f => f, ...over });
 

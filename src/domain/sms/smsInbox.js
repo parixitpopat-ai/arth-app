@@ -11,7 +11,7 @@ const AMOUNT = /(?:rs\.?|inr|₹)\s*([\d,]+(?:\.\d{1,2})?)/i;
 const DEBIT = /\b(debited|spent|paid|purchase|withdrawn|sent|dr)\b/i;
 const CREDIT = /\b(credited|received|deposited|refund(?:ed)?|reversal|cashback)\b/i;
 const OTP = /\b(otp|one[- ]time|verification code|cvv)\b/i;
-// "Your A/c XX5748 debited by Rs. 180.00 on 09/11/26; ICECREAM credited": the verb right after OUR account number is the direction; the second verb
+// "Your A/c XX3456 debited by Rs. 180.00 on 09/11/26; ICECREAM credited": the verb right after OUR account number is the direction; the second verb
 // describes the other party. A message with a second leg that names another account ("… and credited to A/c XX1234") is a transfer and is not guessed.
 const OWN_VERB = /\b(?:a\/c|acct|account|card)\b[^;.\d]{0,25}?\d{3,}\s+(?:is\s+|was\s+|has been\s+)?(debited|credited)\b/i;
 const SECOND_LEG_TO_ACCOUNT = /\b(?:debited|credited)\b[^.;]{0,30}\b(?:a\/c|acct|account)\s*(?:no\.?)?\s*[x*]*\d{3,}/i;
@@ -53,11 +53,11 @@ export function looksLikeMoneySms(body) {
 const last4Of = t => {
   const out = [];
   for (const rx of [/(?:a\/c|acct|account|card|ending(?:\s+with)?|last\s*4)[^\d]{0,12}(\d{4})\b/ig, /(?:xx|x{2,}|\*{2,})\s*(\d{4})\b/ig]) for (const m of t.matchAll(rx)) out.push(m[1]);
-  // "A/C Xxxxx525748": a masked number longer than four digits; its LAST four are the ones banks mean by "ending"
+  // "A/C Xxxxx123456": a masked number longer than four digits; its LAST four are the ones banks mean by "ending"
   for (const m of t.matchAll(/(?:x{2,}|\*{2,})\s*(\d{5,})\b/ig)) out.push(m[1].slice(-4));
   return [...new Set(out)];
 };
-// "a/c ending XXXXXXXX748": some banks show only 3 digits. Used only when no 4-digit ending is present, and only to pick an account whose last 4 END with them.
+// "a/c ending XXXXXXXX456": some banks show only 3 digits. Used only when no 4-digit ending is present, and only to pick an account whose last 4 END with them.
 const tail3Of = t => { const m = /[x*]{2,}\s*(\d{3})(?!\d)/i.exec(t); return m ? m[1] : ""; };
 const dateOf = (t, receivedMs) => {
   const named = extractDMonYDate(t);
