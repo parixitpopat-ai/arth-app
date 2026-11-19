@@ -245,6 +245,8 @@ import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import PayInParts from "./components/PayInParts";
 import PersonStatementSheet from "./components/PersonStatementSheet";
 import FamilyStatementSheet from "./components/FamilyStatementSheet";
+import RepaymentCheckCard from "./components/RepaymentCheckCard";
+import { applyRepaymentFix, undoRepaymentFix } from "./domain/person/repaymentCheck";
 import { startParts, partsFromTxn, payPartsStatus, toPaymentLines } from "./domain/payments/payInParts";
 import { planStatementBillFromPdf } from "./domain/cards/statementFromPdf";
 import { applyDuplicateMerge, undoDuplicateMerge } from "./domain/imports/duplicatePairs";
@@ -1717,6 +1719,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [incomeTypeFilter, setIncomeTypeFilter] = useState("all");
   const [incomeAccountFilter, setIncomeAccountFilter] = useState("all");
   const [investmentTypeFilter, setInvestmentTypeFilter] = useState("all");
+  const [lastRepaymentFix, setLastRepaymentFix] = useState(null);   // the last "Repayments not reflected" fix and how to undo it (kept here: the person page redraws when data changes)
   const [statementGroupId, setStatementGroupId] = useState(null);   // a family (group) statement sheet, opened from the group page
   const [statementPersonId, setStatementPersonId] = useState(null);   // a person's statement sheet (Statement on their page)
   const [txnReimbursableOnly, setTxnReimbursableOnly] = useState("");   // work-expense filter: "" off | "all" | "waiting" | "reimbursed"
@@ -12153,6 +12156,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             gifts={gifts}
             giftsSection={giftsSection}
             debtTransferSection={debtTransferSection}
+            repaymentCheckSection={<RepaymentCheckCard T={T} sym={sym} fmt={fmt} person={p} txns={txns} bills={bills} lastFix={lastRepaymentFix}
+              onApply={(fix,text)=>{ const r=applyRepaymentFix({ txns, bills }, fix); if(!r) return; setTxns(r.txns); setBills(r.bills); setLastRepaymentFix({ personId:p.id, text:text.split(" What ")[0], undo:r.undo }); }}
+              onUndo={fx=>{ const r=undoRepaymentFix({ txns, bills }, fx.undo); setTxns(r.txns); setBills(r.bills); setLastRepaymentFix(null); }}/>}
             taggedAccountsSection={taggedAccountsSection}
             recentActivityFeed={recentActivityFeed}
             onSettle={handleSettle}
@@ -15679,6 +15685,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Statement import: \"Entries that do not match\" lists what Arth has for the period that the statement does not, with a hint when one looks like the same purchase typed differently, and a View button; a card statement now also lists the payments or refunds it has that Arth does not (they explain a gap against the total due)",
             "Card statement bill: a wrongly typed bank amount can now be changed (\"Typed the wrong bank amount? Change it\")",
             "A person's statement from one date to another: open their page, Existing capabilities, Statement. It lists their share of each bill (by type, with the bill date, due date and reading period), what is paid and still due, which bill each payment went to, debts moved to someone else, and the balance; then Share a short message with your UPI handle",
+            "Person page, Financial position: new \"Repayments not reflected\" check. It finds money you received from a person that is recorded but is not reducing what they owe (a repayment linked to an item whose balance was never reduced, or a repayment saved without choosing an item). Each fix is previewed, needs your confirm, never changes the repayment itself, and can be undone",
             "Statements are now a simple list by default: one line per item (\"Electricity bill - 3045\"), then \"Total = …\". Tick which items to send (only what is still due is ticked to start), then Share. The full statement is one tap away. Works for a person and for a family",
             "Groups and people are no longer clubbed: a group's \"owes you\" now counts only what is tagged to that group. A member's own expense shares not tagged to a group, and loans to them, stay on their own page. This lowers the group figure where they were included before",
             "Group page made clearer: Individual Spend now lists every member (including those with nothing) and counts shares recorded on the group's bills; the budget card says which month it is for; each figure says its range (FY or month, or all time for what is unpaid); each member tile shows what that person owes you in total (as on their own page) and how much of it is tagged to the group, with a line explaining what Group owes is made of",

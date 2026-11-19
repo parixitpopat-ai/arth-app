@@ -94,6 +94,7 @@ export function PersonProfileScreen({
                             // person has no monthly budget allocated at all).
   giftsSection,          // full existing Gifts block (list, filters, +Gift button), passed through as-is
   debtTransferSection,      // existing rendered content/handler, passed through as-is
+  repaymentCheckSection,    // "Repayments not reflected" card (rendered by the caller), shown under the owes / owed tiles
   taggedAccountsSection,    // existing rendered content/handler, passed through as-is
   recentActivityFeed,       // optional array of pre-built {key, node} items — the existing
                             // Activity Feed's real content, folded into this section instead
@@ -181,6 +182,7 @@ export function PersonProfileScreen({
             <div style={{ color: T.danger, fontSize: 14, fontWeight: 800 }}>{sym}{fmt(positionLabel.iOwe)}</div>
           </div>
         </div>
+        {repaymentCheckSection}
         {breakdown.length > 0 && (() => {
           // Full audit trail, not a preview — every item that contributes to the total above,
           // so the two numbers can actually be checked against each other rather than trusted.
