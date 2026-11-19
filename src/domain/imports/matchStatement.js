@@ -37,6 +37,7 @@ export function accountMovements(transactions, accountId, linkedIds = []) {
     else if (t.type === "income" && mine(t.accId)) out.push({ id: t.id, date: t.date, amountPaise: a, ref: t.transactionRef || "" });
     else if (t.type === "settlement_in" && mine(t.accId)) out.push({ id: t.id, date: t.date, amountPaise: a, ref: t.transactionRef || "" });        // someone paid me: a credit
     else if (t.type === "investment" && mine(t.accId)) out.push({ id: t.id, date: t.date, amountPaise: -a, ref: t.transactionRef || "" });      // a purchase/SIP paid from this account: a debit
+    else if (t.type === "cc_emi" && mine(t.accId)) out.push({ id: t.id, date: t.date, amountPaise: -a, ref: t.transactionRef || "" });          // a card EMI instalment: a charge on the card (it was not matchable before)
     else if (t.type === "transfer" || t.type === "cc_payment") {
       if (mine(t.fromAccId)) out.push({ id: t.id, date: t.date, amountPaise: -a, ref: t.transactionRef || "" });
       if (mine(t.toAccId)) out.push({ id: t.id, date: t.date, amountPaise: a, ref: t.transactionRef || "" });

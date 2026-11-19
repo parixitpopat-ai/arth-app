@@ -105,6 +105,29 @@ export function buildImportTxns(chosen, { accountId, batchId, cards, newId, plai
   });
 }
 
+/**
+ * A recognised EMI group (emiRows.js) recorded as ONE instalment of the card's plan: one cc_emi entry for the group total, with the breakup kept inside it.
+ * It is created exactly like an instalment added by hand (same fields), plus the import keys of all its rows so each row is recognised next time.
+ */
+export function buildEmiInstalmentTxn(group, { plan, installmentNo, accountId, batchId, newId }) {
+  const rupees = paise => Math.round(paise) / 100;
+  return {
+    id: newId(), type: "cc_emi", date: group.date, amount: rupees(group.totalPaise), accId: accountId,
+    merchant: plan.name || "", desc: `${plan.name || "EMI"} · ${installmentNo}/${group.N}`,
+    catId: plan.catId || null, catIds: Array.isArray(plan.catIds) ? plan.catIds : (plan.catId ? [plan.catId] : []), subId: plan.subId || null, subIds: Array.isArray(plan.subIds) ? plan.subIds : [],
+    ccEmiPlanId: plan.id, installmentNo, ccEmiTenure: group.N, trackingMode: "none", people: {},
+    emiBreakup: breakupOf(group),
+    importKey: group.rowKeys[0], importKeys: [...group.rowKeys], importBatchId: batchId, importSource: "bank-statement",
+    createdAt: Date.now(), updatedAt: Date.now(),
+  };
+}
+
+/** The breakup shown inside the entry, in rupees. */
+export function breakupOf(group) {
+  const r = p => Math.round(p) / 100;
+  return { principal: r(group.principalPaise), interest: r(group.interestPaise), gst: r(group.gstPaise), ...(group.gstRate ? { gstRate: group.gstRate } : {}) };
+}
+
 /** Ids of everything a given batch created, so it can be undone as a unit. */
 export const batchTxnIds = (txns, batchId) => (txns || []).filter(t => t.importBatchId === batchId).map(t => t.id);
 // A transfer between two of my accounts is ONE entry that two statements each show a leg of, so it can carry two import keys (importKeys).
@@ -115,13 +138,19 @@ export const canTakeAnotherLink = t => !t.importKey || ((t.type === "transfer" |
 // "Merge" keeps the existing entry exactly as it is (category, people, notes, amount, date) and only adds the link fields below, so the same
 // statement row is recognised next time (importKey) and the whole import can be undone. The statement's reference is copied only when the entry
 // has none. An entry can be linked once: it is never merged into a second time.
-const LINK_FIELDS = ["importKey", "importKeys", "importBatchId", "importSource", "importMerged", "importSetRef", "importSetUpi"];
+const LINK_FIELDS = ["importKey", "importKeys", "importBatchId", "importSource", "importMerged", "importSetRef", "importSetUpi", "importSetBreakup"];
 
 /** @param {Array} txns @param {{txnId:string,row:{importKey:string,ref?:string}}[]} merges @returns {Array} new list; entries not merged are the same objects */
 export function applyMerges(txns, merges, { batchId }) {
-  const byId = new Map((merges || []).map(m => [String(m.txnId), m.row]));
+  const byId = new Map((merges || []).map(m => [String(m.txnId), m.rows ? { group: true, rows: m.rows, breakup: m.breakup || null } : m.row]));
   return (txns || []).map(t => {
     const row = byId.get(String(t.id));
+    if (row && row.group) {                                         // an EMI instalment printed as several rows: link all of them (an entry never linked before), add the breakup only if it has none
+      if (t.importKey) return t;
+      const gKeys = row.rows.map(r => r.importKey).filter(Boolean);
+      const setBreakup = !t.emiBreakup && Boolean(row.breakup);
+      return { ...t, importKey: gKeys[0], importKeys: gKeys, importBatchId: batchId, importSource: "bank-statement", importMerged: true, ...(setBreakup ? { emiBreakup: row.breakup, importSetBreakup: true } : {}) };
+    }
     if (!row || !canTakeAnotherLink(t)) return t;
     const refToSet = extractUtr(row) || row.ref || "";               // a UPI payment's reference is its UTR; a card statement's SerNo is not a UPI reference
     const setRef = !t.transactionRef && Boolean(refToSet);
@@ -140,6 +169,7 @@ export function undoImportBatch(txns, batchId) {
     const u = { ...t };
     if (u.importSetRef) u.transactionRef = null;
     if (u.importSetUpi) delete u.upiId;
+    if (u.importSetBreakup) delete u.emiBreakup;
     LINK_FIELDS.forEach(k => { delete u[k]; });
     out.push(u);
   }

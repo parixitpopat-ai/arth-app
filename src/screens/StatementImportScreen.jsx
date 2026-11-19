@@ -15,13 +15,15 @@ import { findImportedDuplicates } from "../domain/imports/duplicatePairs.js";
 import { unmatchedInArth, newCredits } from "../domain/imports/arthOnly.js";
 import { refundTargets } from "../domain/imports/refundTarget.js";
 import { auditStatementGap } from "../domain/imports/gapAudit.js";
-import { canTakeAnotherLink, buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText } from "../domain/imports/buildImport.js";
+import { canTakeAnotherLink, buildImportTxns, importedKeysOf, looksLikeCardBill, findCardByText, buildEmiInstalmentTxn, breakupOf } from "../domain/imports/buildImport.js";
+import { groupEmiRows } from "../domain/imports/emiRows.js";
+import { matchEmiGroup } from "../domain/imports/emiMatch.js";
 
 const fmt = (paise, sym) => `${sym}${(Math.abs(paise) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const addDay = iso => { const t = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10) + 1)); return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`; };
 const niceDate = iso => { const [y, m, d] = iso.split("-"); return `${d}-${m}-${y}`; };
 
-export default function StatementImportScreen({ onRecordRefund, onUndoRefund, onOpenTxn, accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy, onMergeRepeats, onUndoRepeats, onRemoveNotices, onUndoNotices, people = [] }) {
+export default function StatementImportScreen({ onRecordRefund, onUndoRefund, onOpenTxn, accounts = [], txns = [], genId, T, sym = "₹", onImport, onUndoBatch, onBack, fixedAccountId = "", checkpoints = {}, onMatchBalance, onUndoBalance, statementBillPlan, onSetStatementBill, onUndoStatementBill, onTidyNames, onUndoTidy, onMergeRepeats, onUndoRepeats, onRemoveNotices, onUndoNotices, people = [], emiPlans = [] }) {
   const fileRef = useRef(null);
   const banks = accounts.filter(a => a.type === "bank");
   const cards = accounts.filter(a => a.type === "cc");
@@ -47,7 +49,7 @@ export default function StatementImportScreen({ onRecordRefund, onUndoRefund, on
   const [balUndo, setBalUndo] = useState(null);                // set after "Match", used by its Undo
   const acctNow = accounts.find(a => String(a.id) === String(fixedAccountId || accountId));
   const isCard = Boolean(acctNow && acctNow.type === "cc");     // a credit card: a plain amount is a charge; payments/refunds are matched, not created
-  const canAdd = r => r.status !== "already-imported" && !(isCard && r.row.amountPaise > 0);
+  const canAdd = r => r.status !== "already-imported" && !(isCard && r.row.amountPaise > 0) && !(r.emi && !r.emi.canRecord);   // an EMI group with no plan to record against is shown, never added as separate expenses
   const keys = useMemo(() => importedKeysOf(txns), [txns]);
 
   const card = { background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: 14, marginBottom: 12 };
@@ -56,9 +58,30 @@ export default function StatementImportScreen({ onRecordRefund, onUndoRefund, on
   const note = (tone, children, tid) => <div data-testid={tid} style={{ background: tone === "amb" ? "rgba(240,165,0,0.16)" : T.accentSoft, color: T.text, borderRadius: 12, padding: "10px 12px", fontSize: 13, marginBottom: 12, lineHeight: 1.45 }}>{children}</div>;
 
   const matchOnly = (parsed, accId) => matchStatement(withImportKeys(parsed.rows, accId), { transactions: txns, accountId: accId, importedKeys: keys, linkedIds: getLinkedMethodIds(accId, accounts), importedUtrs: txns.filter(t => t.importKey && t.transactionRef).map(t => t.transactionRef) });
+  // A card EMI instalment printed as several rows (principal, interest, GST) becomes ONE item: it is compared with what Arth holds (emiMatch.js) and
+  // recorded as one instalment of the card's plan, never as separate expenses (principal is not new spending).
+  const addEmiGroups = (m, accId) => {
+    const acc = accounts.find(a => String(a.id) === String(accId));
+    if (!acc || acc.type !== "cc") return m;
+    const { groups, grouped } = groupEmiRows(m.results.map(r => r.row));
+    if (!groups.length) return m;
+    const byKey = new Map(m.results.map(r => [r.row.importKey, r]));
+    const synth = groups.map(g => {
+      const em = matchEmiGroup(g, { transactions: txns, accountId: accId, linkedIds: getLinkedMethodIds(accId, accounts), plans: emiPlans, importedKeys: keys });
+      const base = byKey.get(g.id).row;
+      const status = em.status === "already-imported" || em.status === "recorded" ? "already-imported" : em.status === "match" ? "probable-match" : "new";
+      return { row: { ...base, amountPaise: -g.totalPaise, desc: `EMI instalment ${g.n}/${g.N} · ${g.merchant}` }, status, matchId: em.txnId, emi: { group: g, match: em, rows: g.rowKeys.map(k => byKey.get(k).row), canRecord: em.status === "record" } };
+    });
+    const at = m.results.findIndex(r => grouped.has(r.row.importKey));
+    const rest = m.results.filter(r => !grouped.has(r.row.importKey));
+    const cut = m.results.slice(0, at).filter(r => !grouped.has(r.row.importKey)).length;
+    const results = [...rest.slice(0, cut), ...synth, ...rest.slice(cut)];
+    const count = st => results.filter(r => r.status === st).length;
+    return { ...m, results, summary: { total: results.length, new: count("new"), probableMatch: count("probable-match"), alreadyImported: count("already-imported") } };
+  };
   const analyse = (parsed, accId) => {
-    const m = matchOnly(parsed, accId);
-    const start = {}; m.results.forEach(r => { start[r.row.importKey] = r.status === "new" && !(isCard && r.row.amountPaise > 0); });
+    const m = addEmiGroups(matchOnly(parsed, accId), accId);
+    const start = {}; m.results.forEach(r => { start[r.row.importKey] = r.status === "new" && !(isCard && r.row.amountPaise > 0) && (!r.emi || r.emi.canRecord); });
     setTicked(start); setMerged({}); setRefunded({});
     return m;
   };
@@ -179,10 +202,11 @@ export default function StatementImportScreen({ onRecordRefund, onUndoRefund, on
   const chosen = state.phase === "result" ? state.match.results.filter(r => ticked[r.row.importKey] && r.status !== "already-imported") : [];
   const net = chosen.reduce((s, r) => s + r.row.amountPaise, 0);
   const txnById = id => txns.find(t => String(t.id) === String(id));
-  const merges = state.phase === "result" ? state.match.results.filter(r => r.status === "probable-match" && merged[r.row.importKey] && !ticked[r.row.importKey] && txnById(r.matchId) && canTakeAnotherLink(txnById(r.matchId))).map(r => ({ txnId: r.matchId, row: r.row })) : [];
+  const merges = state.phase === "result" ? state.match.results.filter(r => r.status === "probable-match" && merged[r.row.importKey] && !ticked[r.row.importKey] && txnById(r.matchId) && canTakeAnotherLink(txnById(r.matchId))).map(r => r.emi ? { txnId: r.matchId, rows: r.emi.rows, breakup: breakupOf(r.emi.group) } : { txnId: r.matchId, row: r.row }) : [];
   const doImport = () => {
     const batchId = genId();
-    const made = buildImportTxns(chosen, { accountId: state.accountId, batchId, cards, newId: genId, plainExpenses: isCard, accountType: acctNow ? acctNow.type : "", payeeByUpiId });
+    const made = [...buildImportTxns(chosen.filter(r => !r.emi), { accountId: state.accountId, batchId, cards, newId: genId, plainExpenses: isCard, accountType: acctNow ? acctNow.type : "", payeeByUpiId }),
+      ...chosen.filter(r => r.emi && r.emi.canRecord).map(r => buildEmiInstalmentTxn(r.emi.group, { plan: r.emi.match.plan, installmentNo: r.emi.match.installmentNo, accountId: state.accountId, batchId, newId: genId }))];
     onImport(made, { batchId, fileName: state.fileName, merges });
     setState({ phase: "done", count: made.length, mergedCount: merges.length, batchId, cardBills: made.filter(t => t.type === "cc_payment").length, unmatched: made.filter(t => t.cardBillUnmatched).length });
   };
@@ -270,7 +294,7 @@ export default function StatementImportScreen({ onRecordRefund, onUndoRefund, on
     if (!accId) return null;
     const plan = isCard && lastSummary && statementBillPlan && onSetStatementBill ? statementBillPlan(accId, lastSummary) : null;
     const from = plan && plan.ok ? addDay(plan.periodFrom) : state.parsed.period.from, to = plan && plan.ok ? plan.periodTo : state.parsed.period.to;
-    const r = unmatchedInArth({ results: state.match.results, transactions: txns, accountId: accId, linkedIds: getLinkedMethodIds(accId, accounts), from, to, lastRowDate: state.parsed.period.to, claimedIds: Object.values(refunded).map(v => v.id) });
+    const r = unmatchedInArth({ results: state.match.results, transactions: txns, accountId: accId, linkedIds: getLinkedMethodIds(accId, accounts), from, to, lastRowDate: state.parsed.period.to, claimedIds: [...Object.values(refunded).map(v => v.id), ...state.match.results.filter(r => r.emi && r.emi.match.txnId != null).map(r => r.emi.match.txnId)] });
     const real = r.arthOnly.filter(a => !a.pending), later = r.arthOnly.filter(a => a.pending);
     const credits = isCard ? newCredits(state.match.results, Object.keys(refunded)) : { rows: [], totalPaise: 0 };
     // the statement's total due is net of these, Arth's purchases are not: when they add up to exactly the difference, that IS the gap
@@ -532,16 +556,27 @@ export default function StatementImportScreen({ onRecordRefund, onUndoRefund, on
         })()}
 
         <div data-testid="stmt-rows">
-          {state.match.results.map(({ row, status, matchId, byUtr, otherAccount }) => {
+          {state.match.results.map(({ row, status, matchId, byUtr, otherAccount, emi }) => {
             const out = row.amountPaise < 0, bill = !isCard && out && looksLikeCardBill(row.desc), cardHit = bill ? findCardByText(row.desc, cards) : null;
             return (
               <label key={row.importKey} data-testid="stmt-row" data-status={status} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 4px", borderBottom: `1px solid ${T.border}`, opacity: status === "already-imported" ? 0.5 : 1 }}>
-                <input type="checkbox" checked={Boolean(ticked[row.importKey]) && canAdd({ row, status })} disabled={!canAdd({ row, status })} onChange={e => { setTicked(t => ({ ...t, [row.importKey]: e.target.checked })); if (e.target.checked) setMerged(m => ({ ...m, [row.importKey]: false })); }} style={{ marginTop: 3, width: 20, height: 20 }} />
+                <input type="checkbox" checked={Boolean(ticked[row.importKey]) && canAdd({ row, status, emi })} disabled={!canAdd({ row, status, emi })} onChange={e => { setTicked(t => ({ ...t, [row.importKey]: e.target.checked })); if (e.target.checked) setMerged(m => ({ ...m, [row.importKey]: false })); }} style={{ marginTop: 3, width: 20, height: 20 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: T.text, fontSize: 13, fontWeight: 700, wordBreak: "break-word" }}>{row.desc || "(no description)"}</div>
                   <div style={{ color: T.sub, fontSize: 11, marginTop: 2 }}>{niceDate(row.date)}
                     {status === "probable-match" && (byUtr ? " · same UPI reference as an entry already in Arth" : otherAccount ? " · same amount and date as an entry on another account" : " · looks like an entry already in Arth")}{isCard && !out && status === "new" && " · payment or refund: not added here (see below)"}{status === "already-imported" && " · imported before"}
                     {bill && (cardHit ? ` · card bill payment → ${cardHit.name}` : " · looks like a card bill payment, but no card matched: it will be an expense")}</div>
+                  {emi && <div data-testid="stmt-emi" style={{ marginTop: 6, background: T.pill, borderRadius: 10, padding: "6px 8px", fontSize: 11, color: T.sub, lineHeight: 1.45 }}>
+                    <div data-testid="stmt-emi-breakup">Principal {fmt(emi.group.principalPaise, sym)} · Interest {fmt(emi.group.interestPaise, sym)} · GST {fmt(emi.group.gstPaise, sym)}</div>
+                    <div data-testid="stmt-emi-note">{emi.match.status === "record" ? `Will be recorded as instalment ${emi.match.installmentNo} of "${emi.match.plan.name}": one entry of ${fmt(emi.group.totalPaise, sym)}, with the breakup kept inside. The principal is not new spending.`
+                      : emi.match.status === "match" ? "Looks like an entry you already have for this instalment. Merge links all three rows to it and changes nothing else."
+                      : emi.match.status === "recorded" ? `Already recorded as instalment ${emi.group.n} of your plan.`
+                      : emi.match.status === "recorded-differs" ? "Your plan already has this instalment with a different amount. Nothing is changed."
+                      : emi.match.status === "already-imported" ? "Imported before."
+                      : "No EMI plan on this card to record this against. It is not added as separate expenses; add the EMI plan first."}</div>
+                    {emi.match.warnings.map((w, i) => <div key={i} style={{ color: T.warn }}>⚠ {w}</div>)}
+                    {emi.group.checks.filter(c => !c.ok).map(c => <div key={c.id} style={{ color: T.warn }}>⚠ {c.text}</div>)}
+                  </div>}
                   {isCard && !out && status === "new" && refundBlock(row)}
                   {status === "probable-match" && (() => {
                     const mine = txnById(matchId); if (!mine) return null;
