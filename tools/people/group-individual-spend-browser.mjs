@@ -40,6 +40,12 @@ try {
   const spent = await T("group-spent").innerText();
   rec("G4 the budget card says which month it is for", /Spent in [A-Z][a-z]{2} 20\d\d:/.test(spent), spent);
   rec("G5 each tile names its time range", /FY 2026-27 · expenses only/.test(t) && /FY 2026-27 · after others' shares/.test(t) && (t.match(/all time, unpaid/g) || []).length >= 2, {});
+  const owesTexts = await T("member-owes").allInnerTexts();
+  const flat = owesTexts.join(" | ").replace(/\s+/g, " ");
+  rec("G7 each member tile shows what that person owes you in TOTAL (as on the People tab) and how much of it is tagged to this group: Ravi 4,800 in total, 3,800 tagged (the water share is on a payment entry not tagged to the group)", /Owes you ₹4,800 in total ₹3,800 of it tagged to this group/.test(flat) && /Owes you ₹2,500 in total ₹2,000 of it tagged/.test(flat) && /Owes you ₹1,200 in total ₹1,200 of it tagged/.test(flat), flat);
+  rec("G8 a member who owes nothing says so", /Owes you nothing/.test(flat), flat);
+  const split = await T("group-owes-split").innerText();
+  rec("G9 a line explains Group owes honestly: tagged items + members' own untagged shares + loans + collective; and what the members owe in total on their own pages (₹10,000)", /Group owes ₹10,000 = items tagged to this group \(₹8,500 from members\)/.test(split) && /members' own expense shares not tagged to a group/.test(split) && /owe you ₹10,000 in total/.test(split), split);
   rec("G6 the existing You owe tile and Statement button are still there", (await T("group-you-owe").count()) === 1 && (await T("group-statement").count()) === 1, {});
 } catch (e) { rec("RUN", false, String(e).slice(0, 500)); }
 rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));

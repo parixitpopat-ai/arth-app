@@ -12797,7 +12797,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       const info = src.people?.[pid];
                       return s + (info && info.mode==="owes" ? Number(info.amount||0) : 0);
                     },0);
-                    return { p, totalSpend:fromTxns+fromBills, isMe };
+                    return { p, totalSpend:fromTxns+fromBills, isMe, owed:isMe?0:getGroupMemberOwed(g.id,pid), owedTotal:isMe?0:Number(settlements[pid]?.owesMe||0) };
                   }).filter(Boolean);                                  // every member is listed, with nothing where there is nothing
                   const spendPeriodLabel = groupViewMode==="overall"?` · FY ${currentFYStartYear}-${String(currentFYStartYear+1).slice(-2)}`:`· ${smLabel}`;
                   const anyData = memberBalances.some(m=>m.totalSpend>0) || periodTxns.filter(t=>t.type==="expense").some(t=>Number(t.groupCollectiveAmount||0)>0);
@@ -12806,7 +12806,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div style={{ marginTop:10 }}>
                       <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6 }}>Individual Spend {spendPeriodLabel}</div>
                       <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
-                        {memberBalances.map(({p,totalSpend,isMe})=>{
+                        {memberBalances.map(({p,totalSpend,isMe,owed,owedTotal})=>{
                           const isFiltered = groupSpendFilter===p.id;
                           return (
                           <div key={p.id} onClick={()=>setGroupSpendFilter(isFiltered?null:p.id)} style={{ background:T.input,borderRadius:10,padding:"10px 10px",position:"relative",cursor:"pointer",boxShadow:isFiltered?`0 0 0 2px ${p.color||T.accent}`:"none",transition:"box-shadow 0.15s" }}>
@@ -12815,6 +12815,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                               <div style={{ color:T.text,fontSize:11,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{isMe?"You":p.name}</div>
                             </div>
                             <div style={{ color:isMe?T.info:T.accent,fontSize:14,fontWeight:800 }}>{sym}{fmt(totalSpend)}</div>
+                            {!isMe&&<div data-testid="member-owes" style={{ color:owedTotal>0?T.success:T.sub,fontSize:9,fontWeight:700,marginTop:2,lineHeight:1.3 }}>{owedTotal>0?`Owes you ${sym}${fmt(owedTotal)} in total`:"Owes you nothing"}{owedTotal>0&&<span style={{ display:"block",color:T.sub,fontWeight:600 }}>{owed>0?`${sym}${fmt(owed)} of it tagged to this group`:"none of it tagged to this group"}</span>}</div>}
                           </div>
                           );
                         })}
@@ -12833,6 +12834,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           );
                         })()}
                       </div>
+                      {(()=>{
+                        const inGroup = memberBalances.reduce((sum,m)=>sum+(m.isMe?0:m.owed),0);
+                        const onPages = memberBalances.reduce((sum,m)=>sum+(m.isMe?0:m.owedTotal),0);
+                        if(!(groupOwesMe>0) && !(onPages>0)) return null;
+                        return <div data-testid="group-owes-split" style={{ color:T.sub,fontSize:10,marginTop:6,lineHeight:1.4 }}>Group owes {sym}{fmt(groupOwesMe)} = items tagged to this group ({sym}{fmt(inGroup)} from members) + members' own expense shares not tagged to a group + loans to members + the group's collective part. Individual Spend counts only items tagged to the group in this period. On their own pages these members owe you {sym}{fmt(onPages)} in total, which can also include other groups.</div>;
+                      })()}
                     </div>
                   );
                 })()}
@@ -15672,7 +15679,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Statement import: \"Entries that do not match\" lists what Arth has for the period that the statement does not, with a hint when one looks like the same purchase typed differently, and a View button; a card statement now also lists the payments or refunds it has that Arth does not (they explain a gap against the total due)",
             "Card statement bill: a wrongly typed bank amount can now be changed (\"Typed the wrong bank amount? Change it\")",
             "A person's statement from one date to another: open their page, Existing capabilities, Statement. It lists their share of each bill (by type, with the bill date, due date and reading period), what is paid and still due, which bill each payment went to, debts moved to someone else, and the balance; then Share a short message with your UPI handle",
-            "Group page made clearer: Individual Spend now lists every member (including those with nothing) and counts shares recorded on the group's bills; the budget card says which month it is for; each figure says its range (FY or month, or all time for what is unpaid)",
+            "Group page made clearer: Individual Spend now lists every member (including those with nothing) and counts shares recorded on the group's bills; the budget card says which month it is for; each figure says its range (FY or month, or all time for what is unpaid); each member tile shows what that person owes you in total (as on their own page) and how much of it is tagged to the group, with a line explaining what Group owes is made of",
             "A family (group) statement and one request for the whole family: on a group page, Statement for the group. It shows the family total for the dates you choose, who owes what, and each member's own statement, then Request the family's total in one message with your UPI handle",
             "Transactions filters: new Work expenses control (all work expenses, waiting for reimbursement, reimbursed) with a total, reimbursed and waiting summary",
             "Card statement with an EMI instalment printed as principal, interest and GST rows: Arth now shows it as ONE item and records it as one instalment of your EMI plan (the breakup is kept inside the entry and shown in its details), or links it to the entry you already have. It is never added as three separate expenses",
