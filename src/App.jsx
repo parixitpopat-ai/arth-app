@@ -12693,7 +12693,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {(groupBudget>0 || groupTotalSpend>0) && (
                   <div style={{ marginTop:8, padding:10, borderRadius:10, background:groupOver?T.danger+"22":T.input, border:`1px solid ${groupOver?T.danger:T.border}` }}>
                     <div style={{ fontSize:11, fontWeight:700, color:groupOver?T.danger:T.sub }}>Group budget{groupBudget>0?`: ${sym}${fmt(groupBudget)}`:" (not set)"}</div>
-                    <div style={{ fontSize:12, fontWeight:800, color:groupOver?T.danger:T.text, marginTop:3 }}>Spent: {sym}{fmt(groupTotalSpend)} {groupBudget>0 && `(remaining ${sym}${fmt(Math.max(0, groupBudget-groupTotalSpend))})`}</div>
+                    <div data-testid="group-spent" style={{ fontSize:12, fontWeight:800, color:groupOver?T.danger:T.text, marginTop:3 }}>Spent in {smLabel}: {sym}{fmt(groupTotalSpend)} {groupBudget>0 && `(remaining ${sym}${fmt(Math.max(0, groupBudget-groupTotalSpend))})`}</div>
+                    <div style={{ fontSize:10, color:T.sub, marginTop:2 }}>This month's expenses plus what is still to pay on the group's unpaid bills. Not the same period as the figures below.</div>
                     {groupOver && <div style={{ color:T.danger, fontSize:11, fontWeight:700, marginTop:4 }}>⚠️ Over budget by {sym}{fmt(groupTotalSpend-groupBudget)}</div>}
                   </div>
                 )}
@@ -12727,18 +12728,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div style={{ background:T.input,borderRadius:10,padding:8,textAlign:"center" }}>
                     <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>YOU PAID</div>
                     <div style={{ color:T.info,fontSize:16,fontWeight:800 }}>{sym}{fmt(displayPaidByMe)}</div>
+                    <div style={{ color:T.sub,fontSize:9,marginTop:1 }}>{groupViewMode==="overall"?`FY ${currentFYStartYear}-${String(currentFYStartYear+1).slice(-2)}`:smLabel} · expenses only</div>
                   </div>
                   <div style={{ background:T.input,borderRadius:10,padding:8,textAlign:"center" }}>
                     <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>YOUR SHARE</div>
                     <div style={{ color:T.accent,fontSize:16,fontWeight:800 }}>{sym}{fmt(displayMySpend)}</div>
+                    <div style={{ color:T.sub,fontSize:9,marginTop:1 }}>{groupViewMode==="overall"?`FY ${currentFYStartYear}-${String(currentFYStartYear+1).slice(-2)}`:smLabel} · after others' shares</div>
                   </div>
                   <div style={{ background:T.input,borderRadius:10,padding:8,textAlign:"center" }}>
                     <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>YOU OWE</div>
                     <div data-testid="group-you-owe" style={{ color:T.danger,fontSize:16,fontWeight:800 }}>{sym}{fmt(groupIOwe+groupMembersOwed)}</div>
+                    <div style={{ color:T.sub,fontSize:9,marginTop:1 }}>all time, unpaid</div>
                   </div>
                   <div onClick={groupOwesMe>0?()=>setShowGroupOwesBreakdown(true):undefined} style={{ background:T.input,borderRadius:10,padding:8,textAlign:"center",cursor:groupOwesMe>0?"pointer":"default",position:"relative" }}>
                     <div style={{ color:T.sub,fontSize:10,fontWeight:700 }}>GROUP OWES{groupOwesMe>0&&<span style={{ marginLeft:4 }}>›</span>}</div>
                     <div style={{ color:T.success,fontSize:16,fontWeight:800 }}>{sym}{fmt(groupOwesMe)}</div>
+                    <div style={{ color:T.sub,fontSize:9,marginTop:1 }}>all time, unpaid · tap for the list</div>
                   </div>
                 </div>
                 {showGroupOwesBreakdown&&(()=>{
@@ -12779,13 +12784,23 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     const p = pid===meP.id ? meP : getPerson(pid);
                     if(!p) return null;
                     const isMe = pid===meP.id || p.isMe;
-                    const totalSpend = periodTxns
+                    const fromTxns = periodTxns
                       .filter(t=>t.type==="expense"&&t.people?.[pid]&&Number(t.people[pid]?.amount||0)>0)
                       .reduce((s,t)=>s+Number(t.people[pid]?.amount||0),0);
-                    return { p, totalSpend, isMe };
-                  }).filter(m=>m&&m.totalSpend>0);
+                    // shares recorded on this group's BILLS (paid or not) were left out before, so members split only on bills never showed. A paid bill's share is on its
+                    // payment entry (getBillSplitSource): counted here only when that entry is not already one of the period's transactions above.
+                    const periodIds = new Set(periodTxns.map(t=>String(t.id)));
+                    const inPeriod = d => groupViewMode==="overall" ? (d>=fyStart&&d<=fyEnd) : String(d).startsWith(shareMonth);
+                    const fromBills = bills.filter(b=>b.groupId===g.id&&inPeriod(String(b.billDate||b.createdDate||b.dueDate||""))).reduce((s,b)=>{
+                      const src = getBillSplitSource(b, txns);
+                      if(src.kind==="txn" && periodIds.has(String(src.id))) return s;
+                      const info = src.people?.[pid];
+                      return s + (info && info.mode==="owes" ? Number(info.amount||0) : 0);
+                    },0);
+                    return { p, totalSpend:fromTxns+fromBills, isMe };
+                  }).filter(Boolean);                                  // every member is listed, with nothing where there is nothing
                   const spendPeriodLabel = groupViewMode==="overall"?` · FY ${currentFYStartYear}-${String(currentFYStartYear+1).slice(-2)}`:`· ${smLabel}`;
-                  const anyData = memberBalances.length>0 || periodTxns.filter(t=>t.type==="expense").some(t=>Number(t.groupCollectiveAmount||0)>0);
+                  const anyData = memberBalances.some(m=>m.totalSpend>0) || periodTxns.filter(t=>t.type==="expense").some(t=>Number(t.groupCollectiveAmount||0)>0);
                   if(!anyData) return null;
                   return (
                     <div style={{ marginTop:10 }}>
@@ -15657,6 +15672,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Statement import: \"Entries that do not match\" lists what Arth has for the period that the statement does not, with a hint when one looks like the same purchase typed differently, and a View button; a card statement now also lists the payments or refunds it has that Arth does not (they explain a gap against the total due)",
             "Card statement bill: a wrongly typed bank amount can now be changed (\"Typed the wrong bank amount? Change it\")",
             "A person's statement from one date to another: open their page, Existing capabilities, Statement. It lists their share of each bill (by type, with the bill date, due date and reading period), what is paid and still due, which bill each payment went to, debts moved to someone else, and the balance; then Share a short message with your UPI handle",
+            "Group page made clearer: Individual Spend now lists every member (including those with nothing) and counts shares recorded on the group's bills; the budget card says which month it is for; each figure says its range (FY or month, or all time for what is unpaid)",
             "A family (group) statement and one request for the whole family: on a group page, Statement for the group. It shows the family total for the dates you choose, who owes what, and each member's own statement, then Request the family's total in one message with your UPI handle",
             "Transactions filters: new Work expenses control (all work expenses, waiting for reimbursement, reimbursed) with a total, reimbursed and waiting summary",
             "Card statement with an EMI instalment printed as principal, interest and GST rows: Arth now shows it as ONE item and records it as one instalment of your EMI plan (the breakup is kept inside the entry and shown in its details), or links it to the entry you already have. It is never added as three separate expenses",
