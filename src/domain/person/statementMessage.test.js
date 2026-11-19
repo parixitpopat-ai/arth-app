@@ -27,3 +27,23 @@ test("settled and credit: no balance due and no pay-to line", () => {
 test("no UPI handle saved: the pay-to line is left off, never invented", () => {
   assert.doesNotMatch(buildStatementMessage(st(), { name: "Ravi", fmt }), /Pay to/);
 });
+
+import { buildFamilyStatement } from "./personStatement.js";
+import { buildFamilyMessage } from "./statementMessage.js";
+test("the family message: sections added up across members, a move inside the family netted out, who owes what, and the pay-to line", () => {
+  const owes = (amount, settledAmt = 0, extra = {}) => ({ amount, mode: "owes", settled: settledAmt >= amount, settledAmt, remainingAmt: Math.max(0, amount - settledAmt), ...extra });
+  const bills = [{ id: "b1", name: "Electricity", billDate: "2026-07-27", billerAccountId: "ba-el", splitPeople: { r: owes(3000, 1000) } }, { id: "b3", name: "Maintenance", billDate: "2026-08-02", billerAccountId: "ba-mt", splitPeople: { r: owes(1200) } }];
+  const txns = [
+    { id: "e1", type: "expense", date: "2026-07-04", desc: "Plumber", amount: 800, people: { r: owes(800) } },
+    { id: "e2", type: "expense", date: "2026-07-12", desc: "Repair", amount: 350, people: { s: owes(350, 350) } },
+    { id: "e3", type: "expense", date: "2026-07-08", desc: "Gate fix", amount: 150, people: { g: owes(150, 150, { transferredTo: "r" }) } },
+    { id: "e4", type: "expense", date: "2026-08-20", desc: "Transferred", note: "Debt transferred from Guru", amount: 150, people: { r: owes(150) } },
+    { id: "pay1", type: "settlement_in", isRefund: false, date: "2026-08-05", amount: 1350, fromGroupId: "fam", settlementLinks: [{ kind: "group-bill", id: "b1", personId: "r", amount: 1000 }, { kind: "group-txn", id: "e2", personId: "s", amount: 350 }] },
+  ];
+  const nameOf = id => ({ r: "Ravi", s: "Sunny", m: "Mangal", g: "Guru" })[id];
+  const labelOf = c => (c.billerAccountId === "ba-el" ? "Electricity" : c.billerAccountId === "ba-mt" ? "Society Maintenance" : "Own expenses");
+  const fam = buildFamilyStatement({ memberIds: ["r", "s", "m", "g"], groupId: "fam", txns, bills, from: "2026-07-01", to: "2026-08-31", nameOf, labelOf });
+  const m = buildFamilyMessage(fam, { groupName: "Suryamandal", nameOf, fmt: n => Number(n).toFixed(2), upiHandle: "sample@upi" });
+  assert.equal(m, ["Hi, statement for the Suryamandal family, 1 Jul 2026 – 31 Aug 2026:", "Own expenses ₹1300.00", "Electricity ₹3000.00", "Society Maintenance ₹1200.00", "Paid by the family −₹1350.00", "Balance due ₹4150.00", "By person: Ravi ₹4150.00", "Pay to: sample@upi"].join("\n"));
+  // own expenses: plumber 800 + repair 350 + gate fix 150 + "transferred from Guru" 150, less the 150 that moved inside the family = 1,300; balance 3,000 + 1,200 + 1,450 − 150 − 1,350 = 4,150 (all Ravi's)
+});

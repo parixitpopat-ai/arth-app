@@ -244,6 +244,7 @@ import CreditCardsListScreen from "./components/CreditCardsListScreen";
 import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import PayInParts from "./components/PayInParts";
 import PersonStatementSheet from "./components/PersonStatementSheet";
+import FamilyStatementSheet from "./components/FamilyStatementSheet";
 import { startParts, partsFromTxn, payPartsStatus, toPaymentLines } from "./domain/payments/payInParts";
 import { planStatementBillFromPdf } from "./domain/cards/statementFromPdf";
 import { applyDuplicateMerge, undoDuplicateMerge } from "./domain/imports/duplicatePairs";
@@ -1716,6 +1717,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [incomeTypeFilter, setIncomeTypeFilter] = useState("all");
   const [incomeAccountFilter, setIncomeAccountFilter] = useState("all");
   const [investmentTypeFilter, setInvestmentTypeFilter] = useState("all");
+  const [statementGroupId, setStatementGroupId] = useState(null);   // a family (group) statement sheet, opened from the group page
   const [statementPersonId, setStatementPersonId] = useState(null);   // a person's statement sheet (Statement on their page)
   const [txnReimbursableOnly, setTxnReimbursableOnly] = useState("");   // work-expense filter: "" off | "all" | "waiting" | "reimbursed"
   const [txnGroupFilter, setTxnGroupFilter] = useState("all");
@@ -12822,6 +12824,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {(groupIOwe>0||groupMembersOwed>0)&&(
                   <button data-testid="group-payback" onClick={()=>setPaybackTarget({ personId:null, groupId:g.id })} style={{ ...btnP,marginTop:8,background:T.danger+"18",border:`1px solid ${T.danger}44`,color:T.danger,width:"100%" }}>Pay back someone in this group</button>
                 )}
+                <button data-testid="group-statement" onClick={()=>setStatementGroupId(g.id)} style={{ ...btnP,marginTop:8,background:T.input,border:`1px solid ${T.border}`,color:T.text,width:"100%" }}>📄 Statement for {g.name}</button>
                 {groupOwesMe>0&&(()=>{
                   const buildMsg=(upiHandle)=>{
                     const msgBills=bills.filter(b=>b.groupId===g.id&&b.status==="unpaid"&&((b.dueDate||b.billDate||"").startsWith(shareMonth)));
@@ -15654,6 +15657,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Statement import: \"Entries that do not match\" lists what Arth has for the period that the statement does not, with a hint when one looks like the same purchase typed differently, and a View button; a card statement now also lists the payments or refunds it has that Arth does not (they explain a gap against the total due)",
             "Card statement bill: a wrongly typed bank amount can now be changed (\"Typed the wrong bank amount? Change it\")",
             "A person's statement from one date to another: open their page, Existing capabilities, Statement. It lists their share of each bill (by type, with the bill date, due date and reading period), what is paid and still due, which bill each payment went to, debts moved to someone else, and the balance; then Share a short message with your UPI handle",
+            "A family (group) statement and one request for the whole family: on a group page, Statement for the group. It shows the family total for the dates you choose, who owes what, and each member's own statement, then Request the family's total in one message with your UPI handle",
             "Transactions filters: new Work expenses control (all work expenses, waiting for reimbursement, reimbursed) with a total, reimbursed and waiting summary",
             "Card statement with an EMI instalment printed as principal, interest and GST rows: Arth now shows it as ONE item and records it as one instalment of your EMI plan (the breakup is kept inside the entry and shown in its details), or links it to the entry you already have. It is never added as three separate expenses",
             "One purchase paid in parts (for example ₹500 as ₹100 cash plus ₹400 UPI): in Add or Edit Transaction, open Details and choose \"Paid in parts? Use more than one account\". It stays one purchase; each account only loses its own part",
@@ -22257,6 +22261,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             accounts={getPaidFromAccounts(accounts,{ isInvestmentAccount, allowCard:true })} defaultAccId=""
             onConvert={convertNow} onClose={()=>setConvertingBill(null)}/>;
         })()}
+        {statementGroupId&&(()=>{ const sg=groups.find(x=>String(x.id)===String(statementGroupId)); return sg?<FamilyStatementSheet T={T} sym={sym} fmt={fmt} group={sg} people={people} txns={txns} bills={bills} billerAccounts={billerAccounts} upiHandle={accounts.find(a=>a.type==="upi"&&a.handle)?.handle||""} meId={people.find(x=>x.isMe)?.id} onClose={()=>setStatementGroupId(null)}/>:null; })()}
         {statementPersonId&&(()=>{ const sp=people.find(x=>String(x.id)===String(statementPersonId)); return sp?<PersonStatementSheet T={T} sym={sym} fmt={fmt} person={sp} people={people} txns={txns} bills={bills} billerAccounts={billerAccounts} upiHandle={accounts.find(a=>a.type==="upi"&&a.handle)?.handle||""} meId={people.find(x=>x.isMe)?.id} onClose={()=>setStatementPersonId(null)}/>:null; })()}
         {spreadSheetFor&&<SpreadSheet T={T} sym={sym} fmt={fmt} title={spreadSheetFor.label} amount={spreadSheetFor.amount}
           cashMonth={String(spreadSheetFor.cashDate||todayStr()).slice(0,7)} initial={spreadSheetFor.existing}
