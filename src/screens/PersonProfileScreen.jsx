@@ -377,7 +377,7 @@ export function PersonProfileScreen({
         <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0" }}>
           <span style={{ color: T.text, fontSize: 13 }}>📄 Statement</span>
           {onShareStatement ? (
-            <button onClick={() => onShareStatement(person)} style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Share</button>
+            <button data-testid="person-statement-share" onClick={() => onShareStatement(person)} style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Statement</button>
           ) : (
             <span style={{ color: T.sub, fontSize: 11, fontStyle: "italic" }}>Not available yet</span>
           )}

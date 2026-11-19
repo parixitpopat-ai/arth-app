@@ -243,6 +243,7 @@ import ChangeBillingModal from "./components/ChangeBillingModal";
 import CreditCardsListScreen from "./components/CreditCardsListScreen";
 import MarkBillPaidModal from "./components/MarkBillPaidModal";
 import PayInParts from "./components/PayInParts";
+import PersonStatementSheet from "./components/PersonStatementSheet";
 import { startParts, partsFromTxn, payPartsStatus, toPaymentLines } from "./domain/payments/payInParts";
 import { planStatementBillFromPdf } from "./domain/cards/statementFromPdf";
 import { applyDuplicateMerge, undoDuplicateMerge } from "./domain/imports/duplicatePairs";
@@ -1715,7 +1716,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [incomeTypeFilter, setIncomeTypeFilter] = useState("all");
   const [incomeAccountFilter, setIncomeAccountFilter] = useState("all");
   const [investmentTypeFilter, setInvestmentTypeFilter] = useState("all");
-  const [txnReimbursableOnly, setTxnReimbursableOnly] = useState(false);
+  const [statementPersonId, setStatementPersonId] = useState(null);   // a person's statement sheet (Statement on their page)
+  const [txnReimbursableOnly, setTxnReimbursableOnly] = useState("");   // work-expense filter: "" off | "all" | "waiting" | "reimbursed"
   const [txnGroupFilter, setTxnGroupFilter] = useState("all");
   const [selectedInvestmentTypeView, setSelectedInvestmentTypeView] = useState("all");
   const [editingLiability, setEditingLiability] = useState(null);
@@ -2750,7 +2752,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
     if(fType==="investment" && investmentTypeFilter!=="all" && String(t.investType||"mf")!==String(investmentTypeFilter)) return false;
 
-    if(txnReimbursableOnly && !(t.reimbursable && !t.reimbursedByTxnId)) return false;
+    if(txnReimbursableOnly){                          // "" off | "all" every work expense | "waiting" not yet reimbursed | "reimbursed" (true, from older code, means waiting)
+      if(!t.reimbursable) return false;
+      const mode = txnReimbursableOnly===true ? "waiting" : txnReimbursableOnly;
+      if(mode==="waiting" && t.reimbursedByTxnId) return false;
+      if(mode==="reimbursed" && !t.reimbursedByTxnId) return false;
+    }
 
     // Text search
     if(txnSearch&&txnSearch.trim()){
@@ -11249,8 +11256,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {txnSearch&&<button onClick={()=>setTxnSearch("")} style={{ background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:14,fontFamily:"Nunito,sans-serif" }}>✕</button>}
         </div>
         {txnReimbursableOnly&&(
-          <div style={{ background:"#f0a50012",border:"1px solid #f0a50044",borderRadius:10,padding:"8px 12px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-            <span style={{ color:"#f0a500",fontSize:12,fontWeight:700 }}>💼 Showing pending reimbursements only</span>
+          <div data-testid="txn-work-summary" style={{ background:"#f0a50012",border:"1px solid #f0a50044",borderRadius:10,padding:"8px 12px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <span style={{ color:"#f0a500",fontSize:12,fontWeight:700 }}>{(()=>{
+              const mode = txnReimbursableOnly===true ? "waiting" : txnReimbursableOnly;
+              const list = filteredTxns.filter(t=>t.type==="expense"&&t.reimbursable);
+              const amt = t=>Number(t.reimbursableAmount||t.amount||0);
+              const total = list.reduce((s,t)=>s+amt(t),0), done = list.filter(t=>t.reimbursedByTxnId).reduce((s,t)=>s+amt(t),0);
+              return `💼 ${mode==="waiting"?"Waiting for reimbursement":mode==="reimbursed"?"Reimbursed":"Work expenses"} · ${list.length} · ${sym}${fmt(total)}${mode==="all"?` · reimbursed ${sym}${fmt(done)} · waiting ${sym}${fmt(total-done)}`:""}`;
+            })()}</span>
             <button onClick={()=>setTxnReimbursableOnly(false)} style={{ background:"none",border:"none",color:"#f0a500",cursor:"pointer",fontSize:14,fontFamily:"Nunito,sans-serif" }}>✕</button>
           </div>
         )}
@@ -11444,6 +11457,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div>
                     <span style={lbl}>Amount to</span>
                     <input style={inp} type="text" inputMode="decimal" placeholder={`e.g. ${sym}10,000`} value={txnAmountTo||""} onChange={e=>setTxnAmountTo(cleanMoneyInput(e.target.value))}/>
+                  </div>
+                </div>
+
+                <div data-testid="txn-work-filter">
+                  <span style={lbl}>Work expenses</span>
+                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
+                    {[["","Off"],["all","All work expenses"],["waiting","Waiting for reimbursement"],["reimbursed","Reimbursed"]].map(([v,l])=>(
+                      <Chip key={v||"off"} color={T.accent} active={(txnReimbursableOnly===true?"waiting":(txnReimbursableOnly||""))===v} onClick={()=>setTxnReimbursableOnly(v)}><span data-testid={`txn-work-${v||"off"}`}>{l}</span></Chip>
+                    ))}
                   </div>
                 </div>
 
@@ -12134,6 +12156,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             onSettle={handleSettle}
             onRequest={handleRequest}
             onPayBack={person=>setPaybackTarget({ personId:person.id, groupId:null })}
+            onShareStatement={person=>setStatementPersonId(person.id)}
             onArchivePerson={handleArchive}
             getPersonAttributedAmount={getPersonAttributedAmount}
             meId={people.find(x=>x.isMe)?.id}
@@ -15630,6 +15653,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Transactions: new \"Account or card\" filter shows everything on one account or card - purchases, payments and refunds - with the card's statement periods as one-tap date ranges; the card tile on Money has \"Filter in Transactions\"; the filter sheet no longer closes after every tap",
             "Statement import: \"Entries that do not match\" lists what Arth has for the period that the statement does not, with a hint when one looks like the same purchase typed differently, and a View button; a card statement now also lists the payments or refunds it has that Arth does not (they explain a gap against the total due)",
             "Card statement bill: a wrongly typed bank amount can now be changed (\"Typed the wrong bank amount? Change it\")",
+            "A person's statement from one date to another: open their page, Existing capabilities, Statement. It lists their share of each bill (by type, with the bill date, due date and reading period), what is paid and still due, which bill each payment went to, debts moved to someone else, and the balance; then Share a short message with your UPI handle",
+            "Transactions filters: new Work expenses control (all work expenses, waiting for reimbursement, reimbursed) with a total, reimbursed and waiting summary",
             "Card statement with an EMI instalment printed as principal, interest and GST rows: Arth now shows it as ONE item and records it as one instalment of your EMI plan (the breakup is kept inside the entry and shown in its details), or links it to the entry you already have. It is never added as three separate expenses",
             "One purchase paid in parts (for example ₹500 as ₹100 cash plus ₹400 UPI): in Add or Edit Transaction, open Details and choose \"Paid in parts? Use more than one account\". It stays one purchase; each account only loses its own part",
             "Not a bill? A bill that is really a purchase can be turned into a transaction on the card or account you bought it with (\"Not a bill? Make it a transaction\" on the bill)",
@@ -22232,6 +22257,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             accounts={getPaidFromAccounts(accounts,{ isInvestmentAccount, allowCard:true })} defaultAccId=""
             onConvert={convertNow} onClose={()=>setConvertingBill(null)}/>;
         })()}
+        {statementPersonId&&(()=>{ const sp=people.find(x=>String(x.id)===String(statementPersonId)); return sp?<PersonStatementSheet T={T} sym={sym} fmt={fmt} person={sp} people={people} txns={txns} bills={bills} billerAccounts={billerAccounts} upiHandle={accounts.find(a=>a.type==="upi"&&a.handle)?.handle||""} meId={people.find(x=>x.isMe)?.id} onClose={()=>setStatementPersonId(null)}/>:null; })()}
         {spreadSheetFor&&<SpreadSheet T={T} sym={sym} fmt={fmt} title={spreadSheetFor.label} amount={spreadSheetFor.amount}
           cashMonth={String(spreadSheetFor.cashDate||todayStr()).slice(0,7)} initial={spreadSheetFor.existing}
           onClose={()=>setSpreadSheetFor(null)}
