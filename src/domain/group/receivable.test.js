@@ -57,10 +57,12 @@ test("groupReceivableTotal: partially settled multi-group allocation nets down c
   assert.equal(groupReceivableTotal(deps, "groupB"), 300, "600 owed, 50% settled ratio applied to group B's own share");
 });
 
-test("groupReceivableTotal: unpaid Bill split and individually-tagged member expense both still count", () => {
+test("groupReceivableTotal: an unpaid Bill split (and its collective part) counts; a member's own UNTAGGED expense share and a loan to a member do NOT (group and person tags are not clubbed)", () => {
   const bills = [{ id: "b1", groupId: "groupA", status: "unpaid", splitPeople: { p1: { mode: "owes", amount: 100, settled: false } }, groupCollectiveAmount: 50 }];
-  const txns = [{ id: "t2", type: "expense", people: { p1: { mode: "owes", amount: 75, settled: false } } }];
+  const txns = [{ id: "t2", type: "expense", people: { p1: { mode: "owes", amount: 75, settled: false } } }];       // no groupId: the person's own
+  const loans = [{ id: "l1", direction: "given", status: "active", personId: "p1", outstanding: 900 }];
   const groups = [{ id: "groupA", members: ["p1"] }];
-  const deps = { txns, bills, loans: [], groups };
-  assert.equal(groupReceivableTotal(deps, "groupA"), 100 + 50 + 75);
+  assert.equal(groupReceivableTotal({ txns, bills, loans, groups }, "groupA"), 100 + 50);
+  const tagged = [{ id: "t3", type: "expense", groupId: "groupA", people: { p1: { mode: "owes", amount: 40, settled: false } } }];
+  assert.equal(groupReceivableTotal({ txns: [...txns, ...tagged], bills, loans, groups }, "groupA"), 100 + 50 + 40);   // the same person's item tagged to the group does count
 });

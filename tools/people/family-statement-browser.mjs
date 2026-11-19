@@ -43,7 +43,7 @@ try {
   await page.getByText(/Groups/).first().dispatchEvent("click"); await page.waitForTimeout(700);
   await page.getByText("Suryamandal", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(900);
   rec("F1 the group page has a Statement button for the family", (await T("group-statement").count()) === 1, (await text()).slice(0, 200));
-  rec("F1b the existing 'Request from group' button is still there", /Request .* from group/.test(await text()), {});
+  rec("F1b nothing is tagged to the group here, so the group owes ₹0 and the old 'Request from group' button is not shown, while the family Statement button still is", !/Request .* from group/.test(await text()) && (await T("group-statement").count()) === 1, {});
   await T("group-statement").scrollIntoViewIfNeeded().catch(() => {}); await T("group-statement").dispatchEvent("click"); await page.waitForTimeout(700);
   rec("F2 the family sheet opens", (await T("family-statement-sheet").count()) === 1, {});
   await T("fam-from").fill("2026-07-01"); await T("fam-to").fill("2026-08-31"); await page.waitForTimeout(500);

@@ -42,7 +42,7 @@ export function getGroupCollectiveDue(expense) {
 
 /**
  * Total amount a group owes the Master User: unsettled Transaction splits/allocations + unpaid
- * Bill splits + individually-tagged member expenses/loans, all scoped to this one groupId.
+ * Bill splits (+ the group's collective part), all tagged to this one groupId. Members' own untagged shares and loans are not included.
  *
  * @param {Object} deps - { txns, bills, loans, groups }
  * @param {string} groupId
@@ -79,21 +79,7 @@ export function groupReceivableTotal({ txns, bills, loans, groups }, groupId) {
     }, 0) + Number(b.groupCollectiveAmount || 0)
   , 0);
 
-  const group = (groups || []).find(g => g.id === groupId);
-  const memberIndividualOwed = (group?.members || []).reduce((sum, memberId) => {
-    const memberTxnOwed = (txns || []).filter(t =>
-      t.type === "expense" &&
-      t.people?.[memberId]?.mode === "owes" &&
-      !t.people?.[memberId]?.settled &&
-      !t.groupId // not a group expense - avoid double counting
-    ).reduce((s, t) => s + remainingShare(t.people[memberId]), 0);
-    const memberLoanOwed = (loans || []).filter(l =>
-      l.direction !== "taken" &&
-      l.status === "active" &&
-      String(l.personId || l.linkedPersonId || "") === String(memberId)
-    ).reduce((s, l) => s + Number(l.outstanding || 0), 0);
-    return sum + memberTxnOwed + memberLoanOwed;
-  }, 0);
-
-  return txnOwed + billOwed + memberIndividualOwed;
+  // A group and its members each carry their OWN tag and are never clubbed (product decision, 19 Nov 2026): a member's own expense shares that are not tagged to
+  // this group, and loans to a member, belong to that person (their page) and are NOT part of the group's total. They used to be added here.
+  return txnOwed + billOwed;
 }
