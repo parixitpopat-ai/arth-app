@@ -47,6 +47,13 @@ try {
   await T("group-statement").scrollIntoViewIfNeeded().catch(() => {}); await T("group-statement").dispatchEvent("click"); await page.waitForTimeout(700);
   rec("F2 the family sheet opens", (await T("family-statement-sheet").count()) === 1, {});
   await T("fam-from").fill("2026-07-01"); await T("fam-to").fill("2026-08-31"); await page.waitForTimeout(500);
+  const fl = await T("famsel-line").allInnerTexts();
+  rec("FL1 the default view is a tick-list naming each member; only what is still due is ticked", fl.length >= 5 && (await T("famsel-check").evaluateAll(els => els.filter(e => e.checked).length)) === 5, fl.length);
+  const fm = await T("fam-message").innerText();
+  rec("FL2 the message is 'Member: Item - amount' lines, a total (₹4,500) and the UPI line", fm === ["Ravi: Plumber - 800", "Ravi: Transferred from Guru - 150", "Ravi: Electricity - 2000", "Ravi: Water - 350", "Ravi: Maintenance: lift service - 1200", "", "Total = 4500", "Pay to: sample@upi"].join("\n"), fm);
+  await T("famsel-check").first().uncheck(); await page.waitForTimeout(300);
+  rec("FL3 unticking a line changes the total", /Total = 3700/.test(await T("fam-message").innerText()), {});
+  await T("fam-mode-full").click(); await page.waitForTimeout(400);
   const b = await text();
   rec("F3 family totals: charges ₹6,500 (a move inside the family is netted out), paid by the family ₹2,000, balance due ₹4,500", /Charges ₹6,500(\.00)?/.test(b) && /Paid by the family −₹2,000(\.00)?/.test(b) && /Balance due\s*₹4,500(\.00)?/.test(await T("fam-balance").innerText()) , (await T("fam-summary").innerText()).slice(0, 300));
   const who = await T("fam-person").allInnerTexts();

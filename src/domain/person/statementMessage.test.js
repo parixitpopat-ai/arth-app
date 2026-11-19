@@ -47,3 +47,27 @@ test("the family message: sections added up across members, a move inside the fa
   assert.equal(m, ["Hi, statement for the Suryamandal family, 1 Jul 2026 – 31 Aug 2026:", "Own expenses ₹1300.00", "Electricity ₹3000.00", "Society Maintenance ₹1200.00", "Paid by the family −₹1350.00", "Balance due ₹4150.00", "By person: Ravi ₹4150.00", "Pay to: sample@upi"].join("\n"));
   // own expenses: plumber 800 + repair 350 + gate fix 150 + "transferred from Guru" 150, less the 150 that moved inside the family = 1,300; balance 3,000 + 1,200 + 1,450 − 150 − 1,350 = 4,150 (all Ravi's)
 });
+
+import { plainAmount, statementLines, familyLines, buildSimpleMessage } from "./statementMessage.js";
+test("plain amounts: whole numbers have no decimals, others have two", () => {
+  assert.deepEqual([135, 1177.8, 1089, 3045, 360, 0.1 + 0.2].map(plainAmount), ["135", "1177.80", "1089", "3045", "360", "0.30"]);
+});
+test("the simple list is exactly 'Item - amount' lines and a total, for the ticked items only", () => {
+  const lines = [["Common Meter Bill", 135], ["PWD bill", 1177.8], ["New water Bill", 1089], ["Electricity bill", 3045], ["Coffee", 360], ["Left out", 999]].map(([title, due], i) => ({ key: `k${i}`, title, due, amount: due, paid: 0, on: title !== "Left out", prefix: "" }));
+  assert.equal(buildSimpleMessage(lines), ["Common Meter Bill - 135", "PWD bill - 1177.80", "New water Bill - 1089", "Electricity bill - 3045", "Coffee - 360", "", "Total = 5806.80"].join("\n"));
+  assert.match(buildSimpleMessage(lines, { upiHandle: "sample@upi" }), /\nPay to: sample@upi$/);
+  assert.equal(buildSimpleMessage(lines.map(l => ({ ...l, on: false }))), "");
+  assert.equal(buildSimpleMessage(lines.map(l => ({ ...l, on: l.title === "Coffee" })).map(l => ({ ...l, due: 0.1 + l.due - l.due }))), "Coffee - 0.10\n\nTotal = 0.10");
+});
+test("lines come from a statement at what is still due: a fully paid item starts unticked; brought forward is offered", () => {
+  const st = { personId: "r", opening: 500, sections: [{ label: "Electricity", items: [{ kind: "bill", id: "b1", title: "Electricity", amount: 3000, paid: 1000, due: 2000 }, { kind: "bill", id: "b2", title: "Water", amount: 1000, paid: 1000, due: 0 }, { kind: "txn", id: "e4", title: "x", transferredFrom: "Guru", amount: 150, paid: 0, due: 150 }] }] };
+  const ls = statementLines(st);
+  assert.deepEqual(ls.map(l => [l.title, l.due, l.ticked]), [["Brought forward", 500, true], ["Electricity", 2000, true], ["Water", 0, false], ["Transferred from Guru", 150, true]]);
+  const msg = buildSimpleMessage(ls.map(l => ({ ...l, on: l.ticked })));
+  assert.equal(msg, ["Brought forward - 500", "Electricity - 2000", "Transferred from Guru - 150", "", "Total = 2650"].join("\n"));
+});
+test("a family list names each member's lines", () => {
+  const mk = (id, due) => ({ personId: id, opening: 0, sections: [{ label: "X", items: [{ kind: "bill", id: `b${id}`, title: "Electricity", amount: due, paid: 0, due }] }] });
+  const ls = familyLines({ members: [mk("r", 3000), mk("s", 2000)] }, id => ({ r: "Ravi", s: "Sunny" })[id]);
+  assert.equal(buildSimpleMessage(ls.map(l => ({ ...l, on: true })), { withNames: true }), ["Ravi: Electricity - 3000", "Sunny: Electricity - 2000", "", "Total = 5000"].join("\n"));
+});

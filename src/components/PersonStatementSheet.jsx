@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import BottomSheet from "./BottomSheet";
 import StatementPreview from "./StatementPreview";
 import { buildPersonStatement, reconcileWithPosition } from "../domain/person/personStatement";
-import { buildStatementMessage } from "../domain/person/statementMessage";
+import StatementSelection from "./StatementSelection";
+import { buildStatementMessage, statementLines, buildSimpleMessage } from "../domain/person/statementMessage";
 
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 function presets(todayIso) {
@@ -24,13 +25,19 @@ export default function PersonStatementSheet({ T, sym = "₹", fmt = n => Number
   const [preset, setPreset] = useState("fy");
   const [from, setFrom] = useState(P.fy.from), [to, setTo] = useState(P.fy.to);
   const [status, setStatus] = useState("");
+  const [mode, setMode] = useState("simple");            // "simple": Item - amount lines you tick, then a total | "full": the whole statement
+  const [overrides, setOverrides] = useState({});       // ticks the person changed (key -> bool); everything else follows the default
   const nameOf = id => (people.find(p => String(p.id) === String(id)) || {}).name || "someone";
   const labelOf = c => { const ba = billerAccounts.find(b => String(b.id) === String(c.billerAccountId)); return (ba && ba.type) || (c.billId ? "Bills" : "Own expenses"); };
   const money = n => `${sym}${fmt(Math.abs(n))}`;
   const st = useMemo(() => (from && to && from <= to ? buildPersonStatement({ personId: person.id, txns, bills, from, to, nameOf, labelOf }) : null), [person.id, txns, bills, from, to, people, billerAccounts]);   // eslint-disable-line react-hooks/exhaustive-deps
   const recon = useMemo(() => (st && to >= today ? reconcileWithPosition(st, { txns, bills, meId }) : null), [st, to, today, txns, bills, meId]);
-  const message = st ? buildStatementMessage(st, { name: person.name, sym, fmt, upiHandle }) : "";
-  const choose = id => { setPreset(id); setFrom(P[id].from); setTo(P[id].to); setStatus(""); };
+  const lines = useMemo(() => (st ? statementLines(st) : []), [st]);
+  const isOn = l => (l.key in overrides ? overrides[l.key] : l.ticked);
+  const simpleMessage = buildSimpleMessage(lines.map(l => ({ ...l, on: isOn(l) })), { upiHandle });
+  const message = !st ? "" : mode === "simple" ? simpleMessage : buildStatementMessage(st, { name: person.name, sym, fmt, upiHandle });
+  const untied = st ? st.payments.some(p => p.applied.some(a => a.noBill)) : false;
+  const choose = id => { setPreset(id); setFrom(P[id].from); setTo(P[id].to); setStatus(""); setOverrides({}); };
   const share = async () => {
     try {
       if (navigator.share) { await navigator.share({ title: `Statement for ${person.name}`, text: message }); setStatus(""); }
@@ -52,22 +59,32 @@ export default function PersonStatementSheet({ T, sym = "₹", fmt = n => Number
           {Object.entries(P).map(([id, p]) => <button key={id} type="button" data-testid={`stmt-preset-${id}`} style={chip(preset === id)} onClick={() => choose(id)}>{p.label}</button>)}
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <label style={{ flex: 1 }}><span style={sub}>From</span><input data-testid="stmt-from" type="date" style={inp} value={from} max={to || undefined} onChange={e => { setFrom(e.target.value); setPreset("custom"); setStatus(""); }} /></label>
-          <label style={{ flex: 1 }}><span style={sub}>Until</span><input data-testid="stmt-to" type="date" style={inp} value={to} min={from || undefined} onChange={e => { setTo(e.target.value); setPreset("custom"); setStatus(""); }} /></label>
+          <label style={{ flex: 1 }}><span style={sub}>From</span><input data-testid="stmt-from" type="date" style={inp} value={from} max={to || undefined} onChange={e => { setFrom(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
+          <label style={{ flex: 1 }}><span style={sub}>Until</span><input data-testid="stmt-to" type="date" style={inp} value={to} min={from || undefined} onChange={e => { setTo(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
         </div>
-        {!st ? <div data-testid="stmt-bad-range" style={{ color: T.warn, fontSize: 13 }}>Choose a start date that is not after the end date.</div> : (
+        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+          <button type="button" data-testid="stmt-mode-simple" style={chip(mode === "simple")} onClick={() => { setMode("simple"); setStatus(""); }}>Simple list</button>
+          <button type="button" data-testid="stmt-mode-full" style={chip(mode === "full")} onClick={() => { setMode("full"); setStatus(""); }}>Full statement</button>
+        </div>
+        {st && mode === "simple" && <>
+          <StatementSelection T={T} sym={sym} fmt={fmt} lines={lines} isOn={isOn} onToggle={(l, on) => setOverrides(o => ({ ...o, [l.key]: on }))}
+            onAll={() => setOverrides(Object.fromEntries(lines.map(l => [l.key, true])))} onNone={() => setOverrides(Object.fromEntries(lines.map(l => [l.key, false])))} />
+          {untied && <div data-testid="stmt-untied" style={{ color: T.warn, fontSize: 12, marginTop: 8 }}>⚠ A payment was recorded without choosing a bill, so item amounts may be more than {person.name} still owes. Check the full statement.</div>}
+        </>}
+        {!st ? <div data-testid="stmt-bad-range" style={{ color: T.warn, fontSize: 13 }}>Choose a start date that is not after the end date.</div> : mode === "simple" ? null : (
           <StatementPreview T={T} sym={sym} fmt={fmt} st={st} name={person.name} nameOf={nameOf}>
             {recon && !recon.matches && <div data-testid="stmt-mismatch" style={{ color: T.warn, fontSize: 12, marginTop: 8 }}>⚠ This differs from the balance on {person.name}'s page by {money(recon.difference)}. Check recent settlements before sending.</div>}
           </StatementPreview>
         )}
         {st && <>
           <div style={{ ...sub, marginTop: 12 }}>Message that will be shared</div>
-          <pre data-testid="stmt-message" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 10, padding: 10, color: T.text, fontSize: 12, whiteSpace: "pre-wrap", margin: "4px 0 10px", fontFamily: "inherit" }}>{message}</pre>
+          {!message && <div data-testid="stmt-none-ticked" style={{ color: T.warn, fontSize: 13, margin: "4px 0 10px" }}>Tick at least one item to send.</div>}
+          {message && <pre data-testid="stmt-message" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 10, padding: 10, color: T.text, fontSize: 12, whiteSpace: "pre-wrap", margin: "4px 0 10px", fontFamily: "inherit" }}>{message}</pre>}
           {!upiHandle && <div style={{ ...sub, marginBottom: 8 }}>No UPI handle is saved, so the message has no "Pay to" line.</div>}
-          <div style={{ display: "flex", gap: 8 }}>
+          {message && <div style={{ display: "flex", gap: 8 }}>
             <button type="button" data-testid="stmt-share" onClick={share} style={{ flex: 1, background: T.accent, color: "#fff", border: "none", borderRadius: 12, padding: "12px", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Nunito,sans-serif" }}>Share</button>
             <button type="button" data-testid="stmt-copy" onClick={copy} style={{ background: "none", color: T.text, border: `1px solid ${T.border}`, borderRadius: 12, padding: "12px 16px", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Nunito,sans-serif" }}>Copy</button>
-          </div>
+          </div>}
           {status && <div data-testid="stmt-status" style={{ ...sub, marginTop: 8 }}>{status}</div>}
         </>}
       </div>

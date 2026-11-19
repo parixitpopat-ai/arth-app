@@ -42,11 +42,26 @@ const openPerson = async name => {
   await T("person-statement-share").scrollIntoViewIfNeeded().catch(() => {});
   await T("person-statement-share").dispatchEvent("click"); await page.waitForTimeout(700);
 };
+const full = async () => { await T("stmt-mode-full").click(); await page.waitForTimeout(300); };
 const range = async (f, t) => { await T("stmt-from").fill(f); await T("stmt-to").fill(t); await page.waitForTimeout(400); };
 try {
   await openPerson("Ravi");
   rec("S1 the person page's Statement button opens the statement sheet", (await T("person-statement-sheet").count()) === 1, {});
   await range("2026-07-01", "2026-08-31");
+  // the default is the SIMPLE list: "Item - amount" lines you tick, then a total
+  const lines0 = await T("sel-line").allInnerTexts();
+  rec("L1 the default view is a tick-list of Ravi's items at what is still due (5 items), each ticked", lines0.length === 5 && (await T("sel-check").evaluateAll(els => els.every(e => e.checked))), lines0.map(x => x.replace(/\s+/g, " ")));
+  const m0 = await T("stmt-message").innerText();
+  rec("L2 the message is exactly Item - amount lines and a total (₹4,500 = his balance), then the UPI line", m0 === ["Plumber - 800", "Transferred from Guru - 150", "Electricity - 2000", "Water - 350", "Maintenance: lift service - 1200", "", "Total = 4500", "Pay to: sample@upi"].join("\n"), m0);
+  rec("L3 a part-paid item says so (Water: ₹650 already paid of ₹1,000)", /₹650(\.00)? already paid of ₹1,000(\.00)?/.test(lines0.join(" ").replace(/\s+/g, " ")), {});
+  await T("sel-check").first().uncheck(); await page.waitForTimeout(300);
+  const m1 = await T("stmt-message").innerText();
+  rec("L4 unticking an item drops it from the message and the total (Plumber out: ₹3,700)", !/Plumber/.test(m1) && /Total = 3700/.test(m1), m1);
+  await T("sel-none").click(); await page.waitForTimeout(300);
+  rec("L5 with nothing ticked there is no message and no Share button, and it says so", (await T("stmt-message").count()) === 0 && (await T("stmt-share").count()) === 0 && (await T("stmt-none-ticked").count()) === 1, {});
+  await T("sel-all").click(); await page.waitForTimeout(300);
+  rec("L6 All brings everything back", /Total = 4500/.test(await T("stmt-message").innerText()), {});
+  await full();
   const body = await text();
   rec("S2 charges are grouped by bill type, with the bill date, due date and reading period", /Electricity/.test(body) && /Water/.test(body) && /Society Maintenance/.test(body) && /Electricity, 10 Jun – 25 Jul/.test(body) && /Bill 27 Jul · due 9 Sep/.test(body), body.slice(body.indexOf("Statement from"), body.indexOf("Statement from") + 300));
   rec("S3 each charge shows paid and still due; an unpaid one says so", /paid ₹1,000(\.00)? · still due ₹2,000(\.00)?/.test(body) && /paid ₹650(\.00)? · still due ₹350(\.00)?/.test(body) && /not paid yet/.test(body), {});
@@ -65,10 +80,13 @@ try {
   rec("S11 an end date before the start date is refused with a plain message", (await T("stmt-bad-range").count()) === 1, {});
   // Guru: charge moved to Ravi
   await openPerson("Guru"); await range("2026-07-01", "2026-08-31");
+  const gl = await T("sel-line").allInnerTexts();
+  rec("L7 Guru's moved item is listed but nothing is due, so it is unticked and cannot be ticked", gl.length === 1 && (await T("sel-check").first().isDisabled()) && !(await T("sel-check").first().isChecked()) && (await T("stmt-message").count()) === 0, gl.map(x => x.replace(/\s+/g, " ")));
+  await full();
   const g = await text();
   rec("S12 Guru's statement shows the move, not a payment, and is settled", /moved to Ravi on 20 Aug/.test(g) && (await T("stmt-moved").count()) === 1 && /Settled/.test(await T("stmt-balance").innerText()), {});
   // Sunny: the part of the family payment applied to him
-  await openPerson("Sunny"); await range("2026-07-01", "2026-08-31");
+  await openPerson("Sunny"); await range("2026-07-01", "2026-08-31"); await full();
   const sn = await text();
   rec("S13 Sunny sees only the part of the family payment applied to him and owes nothing", /Repair/.test(sn) && /−₹350(\.00)?/.test(sn) && !/→ Electricity/.test(sn) && /Settled/.test(await T("stmt-balance").innerText()), {});
   // Work expenses filter

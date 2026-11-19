@@ -54,3 +54,39 @@ export function buildFamilyMessage(fam, { groupName, nameOf, sym = "₹", fmt = 
   if (upiHandle && fam.closing > 0.004) lines.push(`Pay to: ${upiHandle}`);
   return lines.join("\n");
 }
+
+// ── the SIMPLE list: "Item - amount" per line, then "Total = …", for the items the person ticked ─────────────────────────────────────────────
+const P100 = n => Math.round((Number(n) || 0) * 100);
+/** 135 -> "135", 1177.8 -> "1177.80" (whole amounts have no decimals, as people write them). */
+export function plainAmount(n) { const r = P100(n) / 100; return Number.isInteger(r) ? String(r) : r.toFixed(2); }
+
+/**
+ * The lines a person can choose from, from one person's statement: every charge in the period, at what is STILL DUE on it (a fully paid one has nothing due and
+ * starts unticked), plus an amount brought forward when there is one. `key` is stable so a tick survives a re-render.
+ * @returns {Array<{key:string, title:string, due:number, paid:number, amount:number, ticked:boolean, prefix:string}>}
+ */
+export function statementLines(st, { prefix = "" } = {}) {
+  const out = [];
+  if (st.opening > 0.004) out.push({ key: `${st.personId}|opening`, title: "Brought forward", amount: st.opening, paid: 0, due: st.opening, ticked: true, prefix });
+  for (const s of st.sections) for (const it of s.items) {
+    out.push({ key: `${st.personId}|${it.kind}:${it.id}`, title: it.transferredFrom ? `Transferred from ${it.transferredFrom}` : it.title, amount: it.amount, paid: it.paid, due: it.due, ticked: it.due > 0.004, prefix });
+  }
+  return out;
+}
+/** The same for a whole family: each member's lines, named by member. */
+export function familyLines(fam, nameOf) { return fam.members.flatMap(m => statementLines(m, { prefix: nameOf(m.personId) })); }
+
+/**
+ * @param {Array} lines from statementLines/familyLines, each with `on` (true = send it)
+ * @param {{upiHandle?:string, withNames?:boolean}} o  withNames puts the member's name before each line (a family)
+ * @returns {string} "" when nothing is ticked
+ */
+export function buildSimpleMessage(lines, { upiHandle = "", withNames = false } = {}) {
+  const chosen = lines.filter(l => l.on && l.due > 0.004);
+  if (!chosen.length) return "";
+  const out = chosen.map(l => `${withNames && l.prefix ? `${l.prefix}: ` : ""}${l.title} - ${plainAmount(l.due)}`);
+  const total = chosen.reduce((s, l) => s + P100(l.due), 0);
+  out.push("", `Total = ${plainAmount(total / 100)}`);
+  if (upiHandle) out.push(`Pay to: ${upiHandle}`);
+  return out.join("\n");
+}
