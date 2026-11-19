@@ -103,3 +103,17 @@ test("amounts never drift: shares in odd paise add up exactly", () => {
   const b = buildPersonStatement({ personId: "s", txns: [], bills, from: "2026-07-01", to: "2026-07-31", nameOf, labelOf });
   assert.equal(Math.round((a.closing + b.closing) * 100), 171111);
 });
+
+test("Settle on a PAID bill links the payment entry (kind txn); the statement still ties it to that bill and shows it paid", () => {
+  const bills = [{ id: "bw", name: "Water", billDate: "2026-07-27", billPeriodFrom: "2026-06-26", billPeriodTo: "2026-07-24", paidByTxnId: "tw2", splitPeople: { r: owes(1000) } }];
+  const txns = [
+    { id: "tw2", type: "expense", date: "2026-08-02", desc: "Water", amount: 3000, paidBillId: "bw", people: { r: owes(1000, 1000) } },
+    { id: "s9", type: "settlement_in", isRefund: false, date: "2026-08-10", amount: 1000, appliedAmount: 1000, fromPersonId: "r", settlementLinks: [{ kind: "txn", id: "tw2", personId: "r", amount: 1000, title: "Water" }] },
+  ];
+  const st = buildPersonStatement({ personId: "r", txns, bills, from: "2026-07-01", to: "2026-08-31", nameOf, labelOf });
+  const it = st.sections[0].items[0];
+  assert.deepEqual([it.amount, it.paid, it.due, it.periodFrom], [1000, 1000, 0, "2026-06-26"]);
+  assert.deepEqual(st.payments[0].applied.map(a => [a.title, a.billDate, a.amount]), [["Water", "2026-07-27", 1000]]);
+  assert.deepEqual([st.closing, st.settled], [0, true]);
+  assert.equal(reconcileWithPosition(st, { txns, bills, meId: "me" }).matches, true);
+});
