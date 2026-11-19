@@ -15685,6 +15685,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Statement import: \"Entries that do not match\" lists what Arth has for the period that the statement does not, with a hint when one looks like the same purchase typed differently, and a View button; a card statement now also lists the payments or refunds it has that Arth does not (they explain a gap against the total due)",
             "Card statement bill: a wrongly typed bank amount can now be changed (\"Typed the wrong bank amount? Change it\")",
             "A person's statement from one date to another: open their page, Existing capabilities, Statement. It lists their share of each bill (by type, with the bill date, due date and reading period), what is paid and still due, which bill each payment went to, debts moved to someone else, and the balance; then Share a short message with your UPI handle",
+            "Settling from a transaction: a transaction that someone owes you for now has a \"Settle with …\" button in its details, the same Settle screen as from a bill or a person's page",
             "Person page, Financial position: new \"Repayments not reflected\" check. It finds money you received from a person that is recorded but is not reducing what they owe (a repayment linked to an item whose balance was never reduced, or a repayment saved without choosing an item). Each fix is previewed, needs your confirm, never changes the repayment itself, and can be undone",
             "Statements are now a simple list by default: one line per item (\"Electricity bill - 3045\"), then \"Total = …\". Tick which items to send (only what is still due is ticked to start), then Share. The full statement is one tap away. Works for a person and for a family",
             "Groups and people are no longer clubbed: a group's \"owes you\" now counts only what is tagged to that group. A member's own expense shares not tagged to a group, and loans to them, stay on their own page. This lowers the group figure where they were included before",
@@ -22751,6 +22752,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     </div>
                   )}
                 </div>
+                {(()=>{
+                  // Settling must be possible from the transaction itself (it already is from a person's page and from a bill): same Settle screen, same effect.
+                  const owedHere = t.type==="expense"&&!t.writtenOff ? Object.entries(t.people||{}).filter(([pid,info])=>info.mode==="owes"&&!info.settled&&pid!=="__me__"&&remainingShare(info)>0) : [];
+                  if(!owedHere.length) return null;
+                  return <button data-testid="txn-detail-settle" onClick={()=>{ setTxnDetailId(null); setSettleTxn(t); }} style={{ width:"100%",minHeight:44,marginTop:12,background:T.success+"20",border:`1px solid ${T.success}44`,borderRadius:12,color:T.success,fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>💰 Settle with {owedHere.map(([pid])=>getPerson(pid).name).join(", ")}</button>;
+                })()}
                 {t.type==="expense"&&Number(t.amount)>0&&(
                   <button data-testid="txn-spread" onClick={()=>openSpreadFor({ key:`txn:${t.id}`, label:t.merchant||t.desc||"Payment", amount:t.amount, cashDate:t.date })} style={{ width:"100%",minHeight:44,marginTop:12,background:"none",border:`1px solid ${T.border}`,borderRadius:12,color:T.text,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit" }}>{spreadButtonLabel(`txn:${t.id}`)}</button>
                 )}
