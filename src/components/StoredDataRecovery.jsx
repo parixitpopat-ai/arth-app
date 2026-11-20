@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { labelFor, readNotice, clearNotice } from "../storage/repairStored.js";
 
-const shell = { minHeight: "100vh", background: "#08080f", color: "#e8e4dc", fontFamily: "Nunito, system-ui, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, boxSizing: "border-box" };
+const shell = { minHeight: "100vh", background: "#08080f", color: "#e8e4dc", fontFamily: "Inter, system-ui, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, boxSizing: "border-box" };
 const card = { maxWidth: 420, width: "100%", boxSizing: "border-box" };
 const btn = primary => ({ width: "100%", minHeight: 48, borderRadius: 14, border: primary ? "none" : "1px solid #2b2b45", background: primary ? "#22c55e" : "none", color: primary ? "#062e13" : "#e8e4dc", fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", marginTop: 10 });
 
@@ -33,7 +33,7 @@ export function RecoveryNotice() {
   if (!items.length) return null;
   const when = at => { try { return new Date(at).toLocaleString(); } catch { return at; } };
   return (
-    <div data-testid="recovery-notice" role="status" style={{ position: "fixed", left: 12, right: 12, bottom: 12, zIndex: 9999, background: "#0f0f1a", color: "#e8e4dc", border: "1px solid #22c55e", borderRadius: 14, padding: "12px 14px", fontFamily: "Nunito, system-ui, sans-serif", fontSize: 13, lineHeight: 1.45, boxShadow: "0 6px 24px rgba(0,0,0,0.5)" }}>
+    <div data-testid="recovery-notice" role="status" style={{ position: "fixed", left: 12, right: 12, bottom: 12, zIndex: 9999, background: "#0f0f1a", color: "#e8e4dc", border: "1px solid #22c55e", borderRadius: 14, padding: "12px 14px", fontFamily: "Inter, system-ui, sans-serif", fontSize: 13, lineHeight: 1.45, boxShadow: "0 6px 24px rgba(0,0,0,0.5)" }}>
       <b>Damaged data was repaired.</b> {items.map(i => `${labelFor(i.key)} (from your ${i.from} of ${when(i.at)})`).join("; ")}. Entries made after that backup may be missing. The damaged copy is kept on this phone.
       <div style={{ marginTop: 8 }}><button type="button" data-testid="recovery-notice-ok" onClick={() => { clearNotice(window.localStorage); setItems([]); }} style={{ minHeight: 40, padding: "0 18px", borderRadius: 12, border: "none", background: "#22c55e", color: "#062e13", fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>OK</button></div>
     </div>

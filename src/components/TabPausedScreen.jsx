@@ -4,10 +4,10 @@ import React from "react";
 // Two tabs share storage but not memory; if both stayed active, one could save its old data over the other's. This screen mounts
 // nothing, so a paused tab cannot save or sync. Colours are fixed (dark) because this renders before the app's theme exists.
 export default function TabPausedScreen({ reason, onTakeOver, onReload }) {
-  const btn = (primary) => ({ width: "100%", minHeight: 48, borderRadius: 12, border: primary ? "none" : "1px solid rgba(255,255,255,0.2)", background: primary ? "#22c55e" : "transparent", color: primary ? "#04210f" : "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Nunito,sans-serif" });
+  const btn = (primary) => ({ width: "100%", minHeight: 48, borderRadius: 12, border: primary ? "none" : "1px solid rgba(255,255,255,0.2)", background: primary ? "#22c55e" : "transparent", color: primary ? "#04210f" : "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Inter,sans-serif" });
   const stale = reason === "stale";
   return (
-    <div data-testid="tab-paused" style={{ minHeight: "100vh", background: "#08080f", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "Nunito,sans-serif" }}>
+    <div data-testid="tab-paused" style={{ minHeight: "100vh", background: "#08080f", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "Inter,sans-serif" }}>
       <div style={{ maxWidth: 380, textAlign: "center" }}>
         <div style={{ fontSize: 44, marginBottom: 12 }}>{stale ? "🔄" : "🪟"}</div>
         <div data-testid="tab-paused-title" style={{ color: "#fff", fontSize: 18, fontWeight: 900, marginBottom: 8 }}>{stale ? "Arth changed in another tab" : "Arth is open in another tab"}</div>

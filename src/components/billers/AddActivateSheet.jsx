@@ -44,7 +44,7 @@ export default function AddActivateSheet({ T, iconFor, statusFor, onPick, onOneO
   return createPortal(
     <div onClick={e => { if (e.target === e.currentTarget) close(); }} style={{ position: "fixed", inset: 0, zIndex: 320, background: "rgba(0,0,0,0.72)", display: "flex", alignItems: "flex-end", justifyContent: "center", opacity: open ? 1 : 0, transition: "opacity 0.2s ease" }}>
       <div role="dialog" aria-modal="true" aria-label="Add or activate a provider" data-testid="aa-sheet"
-        style={{ fontFamily: "Nunito, sans-serif", background: T.card, width: "100%", maxWidth: 480, maxHeight: "92vh", borderRadius: "24px 24px 0 0", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 -10px 30px rgba(0,0,0,0.35)", transform: open ? "translateY(0)" : "translateY(100%)", transition: "transform 0.24s cubic-bezier(0.32, 0.72, 0, 1)" }}>
+        style={{ fontFamily: "Inter, sans-serif", background: T.card, width: "100%", maxWidth: 480, maxHeight: "92vh", borderRadius: "24px 24px 0 0", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 -10px 30px rgba(0,0,0,0.35)", transform: open ? "translateY(0)" : "translateY(100%)", transition: "transform 0.24s cubic-bezier(0.32, 0.72, 0, 1)" }}>
         <div style={{ padding: "8px 16px 12px", flexShrink: 0 }}>
           <div aria-hidden="true" style={{ width: 40, height: 4, borderRadius: 2, background: T.borderStrong || T.border, margin: "0 auto 12px" }} />
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>

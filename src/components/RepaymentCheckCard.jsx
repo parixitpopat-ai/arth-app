@@ -11,7 +11,7 @@ export default function RepaymentCheckCard({ T, sym = "₹", fmt = n => Number(n
   const [pick, setPick] = useState({});              // unlinked repayment key -> chosen item key
   const money = n => `${sym}${fmt(Math.abs(n))}`;
   const sub = { color: T.sub, fontSize: 11, lineHeight: 1.4 };
-  const btn = (primary) => ({ border: primary ? "none" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? "#fff" : T.text, borderRadius: 10, padding: "8px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "Nunito,sans-serif" });
+  const btn = (primary) => ({ border: primary ? "none" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? "#fff" : T.text, borderRadius: 10, padding: "8px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "Inter,sans-serif" });
   const mine = lastFix && String(lastFix.personId) === String(person.id) ? lastFix : null;
   const total = found.unreduced.length + found.unlinked.length;
   if (!total && !mine) return null;
@@ -50,7 +50,7 @@ export default function RepaymentCheckCard({ T, sym = "₹", fmt = n => Number(n
             <div key={u.key} data-testid="rc-unlinked" style={{ borderTop: `1px solid ${T.border}`, padding: "8px 0" }}>
               <div style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{money(u.amount)} received on {shortDate(u.date, true)}: {u.desc}</div>
               <div style={sub}>Not linked to any item.{u.suggested ? ` Same amount as “${u.suggested.title}” (${shortDate(u.suggested.date)}).` : u.ambiguous ? " Several items have this exact amount, so choose which one." : " No open item has exactly this amount."}</div>
-              <select data-testid="rc-pick" value={chosenKey} onChange={e => setPick(p => ({ ...p, [u.key]: e.target.value }))} style={{ width: "100%", marginTop: 6, background: T.input, color: T.text, border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 13, fontFamily: "Nunito,sans-serif" }}>
+              <select data-testid="rc-pick" value={chosenKey} onChange={e => setPick(p => ({ ...p, [u.key]: e.target.value }))} style={{ width: "100%", marginTop: 6, background: T.input, color: T.text, border: `1px solid ${T.border}`, borderRadius: 10, padding: "9px 10px", fontSize: 13, fontFamily: "Inter,sans-serif" }}>
                 <option value="">Choose the item it paid…</option>
                 {u.candidates.map(c => <option key={`${c.kind}:${c.id}`} value={`${c.kind}:${c.id}`}>{c.title} · {shortDate(c.date)} · owes {money(c.remaining)}</option>)}
               </select>

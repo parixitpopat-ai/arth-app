@@ -19,7 +19,7 @@ export default function PhotoOptimizeCard({ T, txns, bills, billerAccounts, setT
   const { stage, preview, msg, needFile, fileSaved, fileOk } = store;
   const setStage = v => set({ stage: v }), setPreview = v => set({ preview: v }), setMsg = v => set({ msg: v });
   const setNeedFile = v => set({ needFile: v }), setFileSaved = v => set({ fileSaved: v }), setFileOk = v => set({ fileOk: v });
-  const btn = (primary, disabled) => ({ background: primary ? T.accent : T.input, color: primary ? (T.accentInk || "#fff") : T.text, border: primary ? "none" : `1px solid ${T.border}`, borderRadius: 10, padding: "9px 14px", fontSize: 12, fontWeight: 800, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1, fontFamily: "Nunito,sans-serif" });
+  const btn = (primary, disabled) => ({ background: primary ? T.accent : T.input, color: primary ? (T.accentInk || "#fff") : T.text, border: primary ? "none" : `1px solid ${T.border}`, borderRadius: 10, padding: "9px 14px", fontSize: 12, fontWeight: 800, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1, fontFamily: "Inter,sans-serif" });
 
   const check = async () => {
     setStage("checking"); setMsg("");

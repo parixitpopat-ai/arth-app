@@ -76,13 +76,13 @@ export default function CloudConflictScreen({
 
         <button
           onClick={onKeepLocal} disabled={busy}
-          style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 14, fontWeight: 800, fontFamily: "Nunito,sans-serif", marginBottom: 10 }}
+          style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 14, fontWeight: 800, fontFamily: "Inter,sans-serif", marginBottom: 10 }}
         >
           Keep this device's data — replace the cloud version
         </button>
         <button
           onClick={onKeepCloud} disabled={busy}
-          style={{ width: "100%", padding: 14, borderRadius: 14, border: `1px solid ${T.border}`, cursor: busy ? "wait" : "pointer", background: "none", color: T.text, fontSize: 14, fontWeight: 800, fontFamily: "Nunito,sans-serif" }}
+          style={{ width: "100%", padding: 14, borderRadius: 14, border: `1px solid ${T.border}`, cursor: busy ? "wait" : "pointer", background: "none", color: T.text, fontSize: 14, fontWeight: 800, fontFamily: "Inter,sans-serif" }}
         >
           Use the cloud version — replace this device's data
         </button>

@@ -100,7 +100,7 @@ export const AddInsurancePolicyModal = ({ existing, prefill, onClose, T, inp, lb
     <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="85vh" padding="20px 16px 48px" zIndex={340}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
         <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit":"Add"} Insurance Policy</div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
       <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
         <div>
@@ -134,7 +134,7 @@ export const AddInsurancePolicyModal = ({ existing, prefill, onClose, T, inp, lb
           <span style={lbl}>Premium Frequency</span>
           <div style={{ display:"flex",gap:6 }}>
             {["monthly","quarterly","halfyearly","annual"].map(f=>(
-              <button key={f} onClick={()=>setPremiumFrequency(f)} style={{ flex:1,background:premiumFrequency===f?T.accent+"22":"none",border:`1px solid ${premiumFrequency===f?T.accent:T.border}`,borderRadius:10,padding:"7px 4px",cursor:"pointer",fontSize:10,fontWeight:700,color:premiumFrequency===f?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{f.charAt(0).toUpperCase()+f.slice(1)}</button>
+              <button key={f} onClick={()=>setPremiumFrequency(f)} style={{ flex:1,background:premiumFrequency===f?T.accent+"22":"none",border:`1px solid ${premiumFrequency===f?T.accent:T.border}`,borderRadius:10,padding:"7px 4px",cursor:"pointer",fontSize:10,fontWeight:700,color:premiumFrequency===f?T.accent:T.sub,fontFamily:"Inter,sans-serif" }}>{f.charAt(0).toUpperCase()+f.slice(1)}</button>
             ))}
           </div>
         </div>
@@ -151,14 +151,14 @@ export const AddInsurancePolicyModal = ({ existing, prefill, onClose, T, inp, lb
         <div style={{ background:T.input,borderRadius:12,padding:"11px 14px",display:"flex",alignItems:"center",gap:10 }}>
           <span>📄</span>
           <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1 }}>Policy schedule (optional)</span>
-          <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>
+          <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Inter,sans-serif" }}>
             {scheduleDoc?"Change":"Upload"}
             <input type="file" accept="image/*,application/pdf" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setScheduleDoc(ev.target.result); r.readAsDataURL(f); }}/>
           </label>
           {scheduleDoc&&<button onClick={()=>setScheduleDoc(null)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:16 }}>✕</button>}
         </div>
         {!isEdit&&<div style={{ color:T.sub,fontSize:10 }}>The premium will appear in Payments → Insurance as an Expected renewal — no Bill is created until a renewal notice is added.</div>}
-        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Policy"}</button>
+        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Policy"}</button>
       </div>
     </BottomSheet>
   );
@@ -168,7 +168,7 @@ export const InsurancePolicyListModal = ({ onClose, T, sym, fmt, insurancePolici
   <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="85vh" padding="20px 16px 48px" zIndex={335}>
     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
       <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Insurance</div>
-      <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+      <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
     </div>
     <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
       {insurancePolicies.length===0&&<EmptyState icon="🛡️" title="No insurance policies yet" subtitle="Track premiums, renewals, and coverage in one place." T={T}/>}
@@ -182,7 +182,7 @@ export const InsurancePolicyListModal = ({ onClose, T, sym, fmt, insurancePolici
         />
       ))}
     </div>
-    <button onClick={()=>{ setEditingPolicy(null); setShowAddPolicy(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>+ Add Insurance Policy</button>
+    <button onClick={()=>{ setEditingPolicy(null); setShowAddPolicy(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>+ Add Insurance Policy</button>
   </BottomSheet>
 );
 
@@ -233,7 +233,7 @@ export const AddInsuranceRenewalNoticeModal = ({ policy, expected, onClose, T, i
     <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="88vh" padding="20px 16px 48px" zIndex={350}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
         <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Add renewal notice</div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
       <RenewalTracker stage="notice" T={T}/>
       <div style={{ color:T.sub,fontSize:13,marginBottom:12 }}>Enter what the insurer's notice says. Saving creates the bill.</div>
@@ -258,7 +258,7 @@ export const AddInsuranceRenewalNoticeModal = ({ policy, expected, onClose, T, i
         <div style={{ background:T.input,borderRadius:12,padding:"11px 14px",display:"flex",alignItems:"center",gap:10 }}>
           <span>📎</span>
           <span style={{ color:T.sub,fontSize:13,fontWeight:700,flex:1 }}>Notice document (optional)</span>
-          <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>
+          <label style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Inter,sans-serif" }}>
             {document?"Change":"Upload"}
             <input type="file" accept="image/*,application/pdf" style={{ display:"none" }} onChange={e=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=ev=>setDocument(ev.target.result); r.readAsDataURL(f); }}/>
           </label>
@@ -274,7 +274,7 @@ export const AddInsuranceRenewalNoticeModal = ({ policy, expected, onClose, T, i
           <span style={{ color:T.sub,fontSize:12 }}>Sum insured</span>
           <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(policy.sumInsured)}</span>
         </div>
-        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>Save · create bill</button>
+        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>Save · create bill</button>
       </div>
     </BottomSheet>
   );
@@ -331,7 +331,7 @@ export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, forma
             <div style={{ color:T.sub,fontSize:11 }}>{policy.policyType}{policy.provider?` · ${policy.provider}`:""}{policy.status==="archived"?" · Archived":""}</div>
           </div>
         </div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif",flexShrink:0 }}>x</button>
       </div>
 
       <RenewalTracker stage={linkedBill?"bill":"expected"} T={T}/>
@@ -381,7 +381,7 @@ export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, forma
               ))}
             </div>
             {badge && badge.kind!=="paid" && (
-              <button onClick={()=>onRecordPayment&&onRecordPayment(linkedBill)} style={{ width:"100%",minHeight:48,background:T.accent,border:"none",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Record payment</button>
+              <button onClick={()=>onRecordPayment&&onRecordPayment(linkedBill)} style={{ width:"100%",minHeight:48,background:T.accent,border:"none",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>Record payment</button>
             )}
           </div>
           <div style={{ color:T.sub,fontSize:12,marginTop:8 }}>Also listed in Payments › Bills.</div>
@@ -410,7 +410,7 @@ export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, forma
               </div>
             )}
             {policy.status!=="archived"&&(
-              <button onClick={()=>onAddRenewalNotice&&onAddRenewalNotice(policy)} style={{ width:"100%",minHeight:48,marginTop:12,background:"transparent",border:`1px solid ${T.accent}`,borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>+ Add renewal notice</button>
+              <button onClick={()=>onAddRenewalNotice&&onAddRenewalNotice(policy)} style={{ width:"100%",minHeight:48,marginTop:12,background:"transparent",border:`1px solid ${T.accent}`,borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:T.accent,fontFamily:"Inter,sans-serif" }}>+ Add renewal notice</button>
             )}
           </div>
         </div>
@@ -455,13 +455,13 @@ export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, forma
       </div>
 
       <div style={{ display:"flex",gap:8 }}>
-        <button onClick={()=>{ setEditingPolicy(policy); setShowAddPolicy(true); onClose(); }} style={{ flex:1,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
+        <button onClick={()=>{ setEditingPolicy(policy); setShowAddPolicy(true); onClose(); }} style={{ flex:1,background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.accent,fontFamily:"Inter,sans-serif" }}>✏️ Edit</button>
         <button onClick={()=>{
           askConfirm(`Archive ${policy.name}? It stays visible in history, just marked inactive.`, ()=>{
             setInsurancePolicies(prev=>prev.map(x=>x.id===policy.id?{...x,status:"archived"}:x));
             onClose();
           });
-        }} style={{ flex:1,background:"none",border:`1px solid ${T.warn}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.warn,fontFamily:"Nunito,sans-serif" }}>🗄 Archive</button>
+        }} style={{ flex:1,background:"none",border:`1px solid ${T.warn}44`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.warn,fontFamily:"Inter,sans-serif" }}>🗄 Archive</button>
       </div>
     </BottomSheet>
   );

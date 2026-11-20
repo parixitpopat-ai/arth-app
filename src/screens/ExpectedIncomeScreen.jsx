@@ -41,7 +41,7 @@ export const AddExpectedIncomeModal = ({ existing, onClose, T, inp, lbl, setExpe
     <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="85vh" padding="20px 16px 48px" zIndex={340}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
         <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit":"Add"} Expected Income</div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
       <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
         <div>
@@ -56,7 +56,7 @@ export const AddExpectedIncomeModal = ({ existing, onClose, T, inp, lbl, setExpe
           <span style={lbl}>Frequency</span>
           <div style={{ display:"flex",gap:6 }}>
             {FREQUENCIES.map(f=>(
-              <button key={f} onClick={()=>setFrequency(f)} style={{ flex:1,background:frequency===f?T.accent+"22":"none",border:`1px solid ${frequency===f?T.accent:T.border}`,borderRadius:10,padding:"7px 4px",cursor:"pointer",fontSize:11,fontWeight:700,color:frequency===f?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{f.charAt(0).toUpperCase()+f.slice(1)}</button>
+              <button key={f} onClick={()=>setFrequency(f)} style={{ flex:1,background:frequency===f?T.accent+"22":"none",border:`1px solid ${frequency===f?T.accent:T.border}`,borderRadius:10,padding:"7px 4px",cursor:"pointer",fontSize:11,fontWeight:700,color:frequency===f?T.accent:T.sub,fontFamily:"Inter,sans-serif" }}>{f.charAt(0).toUpperCase()+f.slice(1)}</button>
             ))}
           </div>
         </div>
@@ -64,7 +64,7 @@ export const AddExpectedIncomeModal = ({ existing, onClose, T, inp, lbl, setExpe
           <span style={lbl}>Next Expected Date</span>
           <input style={inp} type="date" value={nextDate} onChange={e=>setNextDate(e.target.value)}/>
         </div>
-        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Expected Income"}</button>
+        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Expected Income"}</button>
       </div>
     </BottomSheet>
   );
@@ -94,7 +94,7 @@ export const ExpectedIncomeListModal = ({ onClose, T, sym, fmt, formatShortDate,
     <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="85vh" padding="20px 16px 48px" zIndex={335}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
         <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Expected Income</div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
 
       {/* First Financial Engine output rendered anywhere - the vertical slice: Add -> Stored ->
@@ -115,12 +115,12 @@ export const ExpectedIncomeListModal = ({ onClose, T, sym, fmt, formatShortDate,
               </div>
               <span style={{ color:T.success,fontSize:14,fontWeight:900 }}>{sym}{fmt(inc.amount)}</span>
             </div>
-            <button onClick={()=>markReceived(inc)} style={{ marginTop:8,width:"100%",background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:10,padding:"7px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✓ Mark Received</button>
+            <button onClick={()=>markReceived(inc)} style={{ marginTop:8,width:"100%",background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:10,padding:"7px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Inter,sans-serif" }}>✓ Mark Received</button>
           </div>
         ))}
       </div>
 
-      <button onClick={()=>{ setEditingExpectedIncome(null); setShowAddExpectedIncome(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>+ Add Expected Income</button>
+      <button onClick={()=>{ setEditingExpectedIncome(null); setShowAddExpectedIncome(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>+ Add Expected Income</button>
     </BottomSheet>
   );
 };

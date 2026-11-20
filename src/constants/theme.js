@@ -9,7 +9,7 @@
 // yet, so this is a clean rename with zero migration debt as of this commit.
 
 export const FONT = {
-  sans: "'Instrument Sans', system-ui, sans-serif",
+  sans: "Inter, system-ui, sans-serif",
   mono: "'IBM Plex Mono', ui-monospace, monospace",
 };
 
@@ -28,15 +28,15 @@ export const DARK = {
 };
 
 export const LIGHT = {
-  bg: "#f4f3ef", card: "#ffffff", input: "#ede9e3", nav: "#ffffff", pill: "#eeecea",
-  border: "#e5e1d8", borderStrong: "#cfc9bd",
-  text: "#1a1a2e", textStrong: "#08060d",
-  sub: "#5f5d72", subDim: "#6e6c80",
-  accent: "#15803d", accentSoft: "rgba(21,128,61,0.10)", accentInk: "#ffffff", success: "#15803d",
+  bg: "#f1f3ef", card: "#ffffff", input: "#e8ece6", nav: "#ffffff", pill: "#e4e8e2",
+  border: "#dde2dc", borderStrong: "#bfc8c0",
+  text: "#121c17", textStrong: "#0a110d",
+  sub: "#56625b", subDim: "#66726b",
+  accent: "#0a6b44", accentSoft: "rgba(10,107,68,0.10)", accentInk: "#ffffff", success: "#0a6b44",
   attention: "#a16207", attentionSoft: "rgba(161,98,7,0.12)", warn: "#a16207", gold: "#a16207",
   danger: "#dc2626", dangerSoft: "rgba(220,38,38,0.10)", dangerText: "#b91c1c",
   info: "#0e7490", infoSoft: "rgba(14,116,144,0.10)", infoText: "#0e7490",
-  mutedSoft: "rgba(95,93,114,0.10)", mutedText: "#4b4959",
+  mutedSoft: "rgba(86,98,91,0.10)", mutedText: "#3f4a44",
   purple: "#7c3aed", sh: "rgba(0,0,0,0.06)",
 };
 

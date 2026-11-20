@@ -31,7 +31,7 @@ export const AddEventModal = ({ existing, onClose, T, inp, lbl, people, setEvent
     <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="85vh" zIndex={340} padding="20px 16px 48px">
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
         <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit":"Add"} Trip / Outing</div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
       <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
         <div>
@@ -42,7 +42,7 @@ export const AddEventModal = ({ existing, onClose, T, inp, lbl, people, setEvent
           <span style={lbl}>Occasion</span>
           <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
             {EVENT_TYPES.map(et=>(
-              <button key={et.id} onClick={()=>setOccasionType(et.id)} style={{ display:"flex",alignItems:"center",gap:5,background:occasionType===et.id?T.accent+"22":T.input,border:`1px solid ${occasionType===et.id?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:occasionType===et.id?T.accent:T.sub,fontFamily:"Nunito,sans-serif" }}>{et.icon} {et.label}</button>
+              <button key={et.id} onClick={()=>setOccasionType(et.id)} style={{ display:"flex",alignItems:"center",gap:5,background:occasionType===et.id?T.accent+"22":T.input,border:`1px solid ${occasionType===et.id?T.accent:T.border}`,borderRadius:20,padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700,color:occasionType===et.id?T.accent:T.sub,fontFamily:"Inter,sans-serif" }}>{et.icon} {et.label}</button>
             ))}
           </div>
         </div>
@@ -60,12 +60,12 @@ export const AddEventModal = ({ existing, onClose, T, inp, lbl, people, setEvent
             {people.map(p=>{
               const isOn = selectedPeople.includes(p.id);
               return (
-                <button key={p.id} onClick={()=>setSelectedPeople(prev=>isOn?prev.filter(id=>id!==p.id):[...prev,p.id])} style={{ background:isOn?p.color+"22":T.input,border:`1px solid ${isOn?p.color:T.border}`,borderRadius:20,padding:"5px 11px",cursor:"pointer",fontSize:11,fontWeight:700,color:isOn?p.color:T.sub,fontFamily:"Nunito,sans-serif" }}>{p.emoji} {p.name}</button>
+                <button key={p.id} onClick={()=>setSelectedPeople(prev=>isOn?prev.filter(id=>id!==p.id):[...prev,p.id])} style={{ background:isOn?p.color+"22":T.input,border:`1px solid ${isOn?p.color:T.border}`,borderRadius:20,padding:"5px 11px",cursor:"pointer",fontSize:11,fontWeight:700,color:isOn?p.color:T.sub,fontFamily:"Inter,sans-serif" }}>{p.emoji} {p.name}</button>
               );
             })}
           </div>
         </div>
-        <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Trip/Outing"}</button>
+        <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Trip/Outing"}</button>
       </div>
     </BottomSheet>
   );
@@ -83,7 +83,7 @@ export const EventDetailModal = ({ event, onClose, T, sym, fmt, txns, getMyExpen
           <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{et.icon} {event.name}</div>
           <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{formatShortDate(event.date)||event.date}</div>
         </div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
       {event.peopleIds?.length>0&&(
         <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:14 }}>
@@ -126,8 +126,8 @@ export const EventDetailModal = ({ event, onClose, T, sym, fmt, txns, getMyExpen
         ))}
       </div>
       <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-        <button onClick={()=>{ setEditingEvent(event); setShowAddEvent(true); onClose(); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Nunito,sans-serif" }}>✏️ Edit</button>
-        <button onClick={()=>askConfirm(`Delete "${event.name}"? Linked expenses stay in your transactions, only the trip grouping is removed.`,()=>{ setEvents(prev=>prev.filter(x=>x.id!==event.id)); onClose(); })} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Nunito,sans-serif" }}>🗑 Delete</button>
+        <button onClick={()=>{ setEditingEvent(event); setShowAddEvent(true); onClose(); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accent,fontFamily:"Inter,sans-serif" }}>✏️ Edit</button>
+        <button onClick={()=>askConfirm(`Delete "${event.name}"? Linked expenses stay in your transactions, only the trip grouping is removed.`,()=>{ setEvents(prev=>prev.filter(x=>x.id!==event.id)); onClose(); })} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"12px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Inter,sans-serif" }}>🗑 Delete</button>
       </div>
     </BottomSheet>
   );
@@ -138,7 +138,7 @@ export const EventsListModal = ({ onClose, T, sym, fmt, events, txns, formatShor
     <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="85vh" zIndex={335} padding="20px 16px 48px">
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
         <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Trips & Outings</div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
       <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:14 }}>
         {events.length===0&&<EmptyState icon="🧳" title="No trips or outings yet" T={T}/>}
@@ -166,7 +166,7 @@ export const EventsListModal = ({ onClose, T, sym, fmt, events, txns, formatShor
           );
         })}
       </div>
-      <button onClick={()=>{ setEditingEvent(null); setShowAddEvent(true); onClose(); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>+ Add Trip / Outing</button>
+      <button onClick={()=>{ setEditingEvent(null); setShowAddEvent(true); onClose(); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>+ Add Trip / Outing</button>
     </BottomSheet>
   );
 };

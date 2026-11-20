@@ -21,8 +21,8 @@ export default function PayInParts({ lines, onChange, total, accounts, sym, fmt,
         </div>
       ))}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-        <button type="button" data-testid="pay-part-add" onClick={() => onChange([...lines, { accId: "", amount: "" }])} style={{ background: "none", border: "none", color: T.accent, cursor: "pointer", fontSize: 12, fontWeight: 700, padding: 0, fontFamily: "Nunito,sans-serif" }}>+ Add another payment</button>
-        {left > 0.004 && lines.length > 0 && <button type="button" data-testid="pay-part-rest" onClick={() => { const i = lines.findIndex(l => !(parseFloat(l.amount) > 0)); if (i >= 0) set(i, { amount: String(left) }); }} style={{ background: "none", border: "none", color: T.accent, cursor: "pointer", fontSize: 12, fontWeight: 700, padding: 0, fontFamily: "Nunito,sans-serif" }}>Put the rest ({sym}{fmt(left)}) on an empty line</button>}
+        <button type="button" data-testid="pay-part-add" onClick={() => onChange([...lines, { accId: "", amount: "" }])} style={{ background: "none", border: "none", color: T.accent, cursor: "pointer", fontSize: 12, fontWeight: 700, padding: 0, fontFamily: "Inter,sans-serif" }}>+ Add another payment</button>
+        {left > 0.004 && lines.length > 0 && <button type="button" data-testid="pay-part-rest" onClick={() => { const i = lines.findIndex(l => !(parseFloat(l.amount) > 0)); if (i >= 0) set(i, { amount: String(left) }); }} style={{ background: "none", border: "none", color: T.accent, cursor: "pointer", fontSize: 12, fontWeight: 700, padding: 0, fontFamily: "Inter,sans-serif" }}>Put the rest ({sym}{fmt(left)}) on an empty line</button>}
       </div>
       <div data-testid="pay-parts-status" style={{ fontSize: 12, color: st.ok ? T.success : T.sub }}>
         {st.ok ? `✓ ${sym}${fmt(st.placed)} placed, matches the amount.` : Math.abs(left) < 0.005 && Number(total) > 0 ? "" : left > 0 ? `${sym}${fmt(left)} still to place of ${sym}${fmt(total)}.` : `${sym}${fmt(-left)} more than the amount.`}

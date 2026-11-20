@@ -56,7 +56,7 @@ export default function StorageFullGuard({ storage = typeof window !== "undefine
   if (!full && low && !lowHidden) {
     let darkLow = false; try { darkLow = JSON.parse(storage.getItem("arth_dark") || "false") === true; } catch { /* light */ }
     return (
-      <div data-testid="storage-low-strip" role="status" style={{ position: "fixed", left: 12, right: 12, bottom: 84, zIndex: 99000, background: darkLow ? "#2a2410" : "#fff6dd", color: darkLow ? "#f5e6b3" : "#4a3b00", border: `1px solid ${darkLow ? "#5c4d1c" : "#e6cf86"}`, borderRadius: 12, padding: "10px 12px", fontSize: 12, fontWeight: 700, display: "flex", gap: 10, alignItems: "center", fontFamily: "Nunito, system-ui, sans-serif" }}>
+      <div data-testid="storage-low-strip" role="status" style={{ position: "fixed", left: 12, right: 12, bottom: 84, zIndex: 99000, background: darkLow ? "#2a2410" : "#fff6dd", color: darkLow ? "#f5e6b3" : "#4a3b00", border: `1px solid ${darkLow ? "#5c4d1c" : "#e6cf86"}`, borderRadius: 12, padding: "10px 12px", fontSize: 12, fontWeight: 700, display: "flex", gap: 10, alignItems: "center", fontFamily: "Inter, system-ui, sans-serif" }}>
         <span style={{ flex: 1 }}>Storage for Arth on this phone is nearly full. Open Settings → Backup & Restore to shrink photos before saves start failing.</span>
         <button data-testid="storage-low-dismiss" onClick={() => setLowHidden(true)} style={{ background: "none", border: `1px solid currentColor`, color: "inherit", borderRadius: 8, padding: "4px 10px", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>OK</button>
       </div>
@@ -87,7 +87,7 @@ export default function StorageFullGuard({ storage = typeof window !== "undefine
 
   const keyChars = k => (report?.rows.find(r => r.key === k)?.chars) || 0;
   return (
-    <div data-testid="storage-full-guard" role="alertdialog" aria-modal="true" style={{ position: "fixed", inset: 0, zIndex: 100000, background: c.bg, overflowY: "auto", padding: "24px 20px", color: c.text, fontFamily: "Nunito, system-ui, sans-serif" }}>
+    <div data-testid="storage-full-guard" role="alertdialog" aria-modal="true" style={{ position: "fixed", inset: 0, zIndex: 100000, background: c.bg, overflowY: "auto", padding: "24px 20px", color: c.text, fontFamily: "Inter, system-ui, sans-serif" }}>
       <div style={{ maxWidth: 420, margin: "0 auto" }}>
         <div style={{ fontSize: 40, textAlign: "center" }}>🗄️</div>
         <div style={{ fontSize: 20, fontWeight: 900, textAlign: "center", margin: "6px 0 10px" }}>Phone storage for Arth is full</div>

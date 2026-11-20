@@ -2,7 +2,7 @@
 export default function StatementSelection({ T, sym = "₹", fmt = n => Number(n).toFixed(2), lines, isOn, onToggle, onAll, onNone, withNames = false, testPrefix = "sel" }) {
   const money = n => `${sym}${fmt(Math.abs(n))}`;
   const sub = { color: T.sub, fontSize: 11 };
-  const link = { background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0, fontFamily: "Nunito,sans-serif" };
+  const link = { background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0, fontFamily: "Inter,sans-serif" };
   if (!lines.length) return <div data-testid={`${testPrefix}-empty`} style={{ ...sub, padding: "8px 0" }}>Nothing in this period.</div>;
   return (
     <div data-testid={`${testPrefix}-list`}>

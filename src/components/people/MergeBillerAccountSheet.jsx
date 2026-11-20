@@ -41,7 +41,7 @@ export default function MergeBillerAccountSheet({ T, survivor, billerAccounts, b
         </div>
         <button
           onClick={() => onConfirm(picked)}
-          style={{ width: "100%", background: T.danger, border: "none", borderRadius: 14, padding: 13, cursor: "pointer", fontSize: 14, fontWeight: 800, color: "#fff", fontFamily: "Nunito,sans-serif" }}
+          style={{ width: "100%", background: T.danger, border: "none", borderRadius: 14, padding: 13, cursor: "pointer", fontSize: 14, fontWeight: 800, color: "#fff", fontFamily: "Inter,sans-serif" }}
         >
           Merge "{pickedLabel.accountLine || picked.name}" into "{survivorLabel.accountLine || survivor.name}"
         </button>

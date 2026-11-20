@@ -87,7 +87,7 @@ export const SchoolFeeScheduleListModal = ({ onClose, T, sym, fmt, feeSchedules,
     <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="85vh" padding="20px 16px 48px" zIndex={335}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
         <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>School Fees</div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
       <div style={{ display:"flex",flexDirection:"column",gap:8,marginBottom:16 }}>
         {readModel.length===0 && <EmptyState icon="🎓" title="No school fee schedules yet" subtitle="Set up a school year to track periods, payments, and credits in one place." T={T}/>}
@@ -101,7 +101,7 @@ export const SchoolFeeScheduleListModal = ({ onClose, T, sym, fmt, feeSchedules,
           />
         ))}
       </div>
-      <button onClick={()=>setShowAddSchedule(true)} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>+ Add School Year</button>
+      <button onClick={()=>setShowAddSchedule(true)} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>+ Add School Year</button>
     </BottomSheet>
   );
 };
@@ -324,7 +324,7 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
       <BottomSheet onClose={()=>setPendingImpact(null)} T={T} maxWidth={430} maxHeight="85vh" padding="20px 16px 48px" zIndex={341}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
           <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>This will:</div>
-          <button onClick={()=>setPendingImpact(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          <button onClick={()=>setPendingImpact(null)} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
         </div>
         <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
           {pendingImpact.periodsToAdd.length>0 && (
@@ -356,8 +356,8 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
         </div>
         {error && <div style={{ color:T.warn,fontSize:11,marginBottom:10 }}>{error}</div>}
         <div style={{ display:"flex",gap:8 }}>
-          <button onClick={()=>setPendingImpact(null)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
-          <button onClick={confirmImpactAndSave} style={{ flex:1,background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Confirm changes</button>
+          <button onClick={()=>setPendingImpact(null)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Cancel</button>
+          <button onClick={confirmImpactAndSave} style={{ flex:1,background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>Confirm changes</button>
         </div>
       </BottomSheet>
     );
@@ -367,7 +367,7 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
     <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="85vh" padding="20px 16px 48px" zIndex={340}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
         <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit School Fee Schedule":"Add School Year"}</div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
       <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
         <div>
@@ -399,7 +399,7 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
               <div key={idx} style={{ background:T.input,borderRadius:12,padding:10,display:"flex",flexDirection:"column",gap:6 }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                   <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>RATE OVERRIDE</span>
-                  <button onClick={()=>removeExtraRule(idx)} style={{ background:"none",border:"none",color:T.warn,cursor:"pointer",fontSize:11,fontFamily:"Nunito,sans-serif" }}>Remove</button>
+                  <button onClick={()=>removeExtraRule(idx)} style={{ background:"none",border:"none",color:T.warn,cursor:"pointer",fontSize:11,fontFamily:"Inter,sans-serif" }}>Remove</button>
                 </div>
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
                   <input style={inp} type="month" value={r.from} onChange={e=>updateExtraRule(idx,"from",e.target.value)}/>
@@ -408,7 +408,7 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
                 <input style={inp} type="number" placeholder="Monthly fee for this range" value={r.monthlyRate} onChange={e=>updateExtraRule(idx,"monthlyRate",e.target.value)}/>
               </div>
             ))}
-            <button onClick={addExtraRule} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Add a rate override for part of the year</button>
+            <button onClick={addExtraRule} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>+ Add a rate override for part of the year</button>
           </>
         ) : (
           <>
@@ -421,7 +421,7 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
               <div key={idx} style={{ background:T.input,borderRadius:12,padding:10,display:"flex",flexDirection:"column",gap:6 }}>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
                   <span style={{ color:T.sub,fontSize:10,fontWeight:700 }}>PERIOD {idx+1}</span>
-                  {periodRows.length>1 && <button onClick={()=>removePeriodRow(idx)} style={{ background:"none",border:"none",color:T.warn,cursor:"pointer",fontSize:11,fontFamily:"Nunito,sans-serif" }}>Remove</button>}
+                  {periodRows.length>1 && <button onClick={()=>removePeriodRow(idx)} style={{ background:"none",border:"none",color:T.warn,cursor:"pointer",fontSize:11,fontFamily:"Inter,sans-serif" }}>Remove</button>}
                 </div>
                 <input style={inp} placeholder="Label (optional — defaults to the date range, e.g. “Oct – Dec”)" value={r.label} onChange={e=>updatePeriodRow(idx,"label",e.target.value)}/>
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
@@ -436,14 +436,14 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
                 </div>
               </div>
             ))}
-            <button onClick={addPeriodRow} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Add another period</button>
+            <button onClick={addPeriodRow} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>+ Add another period</button>
             <div style={{ color:T.sub,fontSize:10,lineHeight:1.5 }}>Each period is whatever length you decide — 1, 2, 3, 5 months, however many — with its own amount. Covers Tuition and Transport (recurring or billed once), or a one-time Registration/Uniform fee as its own row. For Books, Activities, Exams or anything else, add them later from Pay fees → + Add something not listed — they don't need their own tracked fee period.</div>
           </>
         )}
 
         {error && <div style={{ color:T.warn,fontSize:11 }}>{error}</div>}
         <div style={{ color:T.sub,fontSize:10 }}>{isEdit?"Changes to dates or rates apply to every unpaid, unprotected period — including past months — but never rewrite a period that's already been paid, discounted, or written off.":"Each row becomes one fee period exactly as entered. Every period can be individually corrected, discounted, or written off later — nothing here is final."}</div>
-        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Schedule"}</button>
+        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Schedule"}</button>
       </div>
     </BottomSheet>
   );
@@ -513,8 +513,8 @@ export const SchoolFeeScheduleDetailModal = ({
           <div style={{ color:T.accent,fontSize:10,fontWeight:800,letterSpacing:0.5,textTransform:"uppercase" }}>School fee schedule</div>
           <div style={{ color:T.text,fontSize:18,fontWeight:900,wordBreak:"break-word" }}>{schedule.schoolName}</div>
         </div>
-        <button onClick={()=>{ setEditingSchoolSchedule(schedule); onClose(); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Nunito,sans-serif",flexShrink:0 }}>✏️ Edit</button>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={()=>{ setEditingSchoolSchedule(schedule); onClose(); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}44`,borderRadius:10,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Inter,sans-serif",flexShrink:0 }}>✏️ Edit</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
 
       {/* P1 — read-only display. Person attribution now edits through the
@@ -546,7 +546,7 @@ export const SchoolFeeScheduleDetailModal = ({
             <span style={{ color:T.infoText,fontSize:15,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(availableCredit)}</span>
           </div>
           <div style={{ color:T.sub,fontSize:10.5,lineHeight:1.5,margin:"6px 0 10px" }}>Arth suggests applying this to the next outstanding period — it will not apply this on its own.</div>
-          <button onClick={applyCreditToOldest} style={{ background:T.accent,border:"none",borderRadius:10,padding:"8px 14px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Apply to next outstanding period</button>
+          <button onClick={applyCreditToOldest} style={{ background:T.accent,border:"none",borderRadius:10,padding:"8px 14px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:"#fff",fontFamily:"Inter,sans-serif" }}>Apply to next outstanding period</button>
         </div>
       )}
 
@@ -585,7 +585,7 @@ export const SchoolFeeScheduleDetailModal = ({
                   <button data-testid={`fee-line-select-${p.id}`} onClick={()=>toggleSelect(p.id)} style={{ width:24,height:24,flexShrink:0,display:"grid",placeItems:"center",background:selected?T.accent:T.input,border:`1.5px solid ${selected?T.accent:T.border}`,borderRadius:7,cursor:"pointer",color:"#fff",fontSize:12 }}>{selected?"✓":""}</button>
                 )}
                 {!selectable && <span style={{ width:24,flexShrink:0 }}/>}
-                <button onClick={()=>setViewingPeriod(p)} style={{ flex:1,minWidth:0,display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif",padding:0 }}>
+                <button onClick={()=>setViewingPeriod(p)} style={{ flex:1,minWidth:0,display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"Inter,sans-serif",padding:0 }}>
                   <span style={{ flex:1,minWidth:0 }}>
                     <div style={{ display:"flex",alignItems:"center",gap:6 }}>
                       <span style={{ color:und?T.sub:T.text,fontSize:13.5,fontWeight:700 }}>{feeLineDisplayName(p)}</span>
@@ -617,7 +617,7 @@ export const SchoolFeeScheduleDetailModal = ({
         <div style={{ marginTop:4 }}>
           <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",padding:"6px 2px 8px" }}>Earlier</div>
           {grouped.earlier.map(group=>(
-            <button key={group.key} onClick={()=>setViewingPeriod(group.lines[0])} style={{ width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:52,padding:"11px 14px",background:T.card,border:`1px solid ${T.border}`,borderRadius:14,cursor:"pointer",textAlign:"left",fontFamily:"Nunito,sans-serif",marginBottom:7 }}>
+            <button key={group.key} onClick={()=>setViewingPeriod(group.lines[0])} style={{ width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",minHeight:52,padding:"11px 14px",background:T.card,border:`1px solid ${T.border}`,borderRadius:14,cursor:"pointer",textAlign:"left",fontFamily:"Inter,sans-serif",marginBottom:7 }}>
               <span style={{ minWidth:0 }}>
                 <span style={{ display:"block",color:T.text,fontSize:13,fontWeight:700 }}>{group.label}{group.lines.length>1?` · ${group.lines.length} fees`:""}</span>
                 <span style={{ display:"block",color:T.success,fontSize:10.5,marginTop:2 }}>Paid in full</span>
@@ -632,7 +632,7 @@ export const SchoolFeeScheduleDetailModal = ({
       )}
 
       <div style={{ color:T.sub,fontSize:10.5,lineHeight:1.5,margin:"8px 0 4px" }}>Open a period below to record a discount or write-off against it specifically.</div>
-      <button onClick={()=>setShowCreditNote(true)} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",marginTop:8,width:"100%" }}>+ New Credit Note</button>
+      <button onClick={()=>setShowCreditNote(true)} style={{ background:"none",border:`1px dashed ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif",marginTop:8,width:"100%" }}>+ New Credit Note</button>
 
       {selectedPeriodIds.length>0 && (
         <div style={{ position:"sticky",bottom:0,marginTop:14,padding:"12px 0 0",background:T.bg,borderTop:`1px solid ${T.border}` }}>
@@ -641,8 +641,8 @@ export const SchoolFeeScheduleDetailModal = ({
             <span style={{ color:T.text,fontSize:18,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(selectedTotal)}</span>
           </div>
           <div style={{ display:"flex",gap:8 }}>
-            <button data-testid="schedule-pay-fees-btn" onClick={()=>setShowSettle(true)} style={{ flex:1,padding:13,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Pay fees</button>
-            <button onClick={()=>setSelectedPeriodIds([])} style={{ padding:"13px 16px",borderRadius:12,background:"none",border:`1px solid ${T.border}`,fontSize:13,fontWeight:600,color:T.sub,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Clear</button>
+            <button data-testid="schedule-pay-fees-btn" onClick={()=>setShowSettle(true)} style={{ flex:1,padding:13,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Pay fees</button>
+            <button onClick={()=>setSelectedPeriodIds([])} style={{ padding:"13px 16px",borderRadius:12,background:"none",border:`1px solid ${T.border}`,fontSize:13,fontWeight:600,color:T.sub,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Clear</button>
           </div>
         </div>
       )}
@@ -754,7 +754,7 @@ export const PayFeesModal = ({
     <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="90vh" padding="20px 16px 48px" zIndex={350}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
         <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>Pay {schoolName||"fees"}</div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
 
       <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5,textTransform:"uppercase",padding:"2px 2px 8px" }}>What you're paying</div>
@@ -802,7 +802,7 @@ export const PayFeesModal = ({
 
       {addingExtra ? (
         <div style={{ background:T.input,borderRadius:14,padding:12,marginBottom:10,display:"flex",flexDirection:"column",gap:8 }}>
-          <input data-testid="payfees-extra-name" value={extraName} onChange={e=>setExtraName(e.target.value)} placeholder="e.g. Books" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"9px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}/>
+          <input data-testid="payfees-extra-name" value={extraName} onChange={e=>setExtraName(e.target.value)} placeholder="e.g. Books" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"9px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Inter,sans-serif",outline:"none" }}/>
           <input data-testid="payfees-extra-amount" type="number" value={extraAmount} onChange={e=>setExtraAmount(e.target.value)} placeholder="Amount" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"9px 12px",fontSize:13,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",outline:"none" }}/>
           {/* WP18c-fix: the real category-picker pattern (Category + Sub-category selects),
               reused exactly as App.jsx's ItemSheetModal itemization UI already does it — this
@@ -810,26 +810,26 @@ export const PayFeesModal = ({
           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
             <div>
               <span style={{ display:"block",color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>Category</span>
-              <select data-testid="payfees-extra-catid" value={extraCatId} onChange={e=>{ setExtraCatId(e.target.value); setExtraSubId(""); }} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:12.5,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
+              <select data-testid="payfees-extra-catid" value={extraCatId} onChange={e=>{ setExtraCatId(e.target.value); setExtraSubId(""); }} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:12.5,fontWeight:600,color:T.text,fontFamily:"Inter,sans-serif",outline:"none" }}>
                 <option value="">Select</option>
                 {(cats||[]).map(c=><option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
               </select>
             </div>
             <div>
               <span style={{ display:"block",color:T.sub,fontSize:10,fontWeight:700,marginBottom:4 }}>Sub-category</span>
-              <select data-testid="payfees-extra-subid" value={extraSubId} onChange={e=>setExtraSubId(e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:12.5,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
+              <select data-testid="payfees-extra-subid" value={extraSubId} onChange={e=>setExtraSubId(e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:12.5,fontWeight:600,color:T.text,fontFamily:"Inter,sans-serif",outline:"none" }}>
                 <option value="">Select</option>
                 {(extraCat?.subs||[]).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
           </div>
           <div style={{ display:"flex",gap:8 }}>
-            <button onClick={()=>{ setAddingExtra(false); setExtraName(""); setExtraAmount(""); setExtraCatId(""); setExtraSubId(""); }} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>Cancel</button>
-            <button onClick={addExtraLine} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Add</button>
+            <button onClick={()=>{ setAddingExtra(false); setExtraName(""); setExtraAmount(""); setExtraCatId(""); setExtraSubId(""); }} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Cancel</button>
+            <button onClick={addExtraLine} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#fff",fontFamily:"Inter,sans-serif" }}>Add</button>
           </div>
         </div>
       ) : (
-        <button data-testid="payfees-add-extra-btn" onClick={()=>setAddingExtra(true)} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",marginBottom:12 }}>+ Add something not listed</button>
+        <button data-testid="payfees-add-extra-btn" onClick={()=>setAddingExtra(true)} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:12,padding:"10px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif",marginBottom:12 }}>+ Add something not listed</button>
       )}
 
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"4px 2px 14px",borderTop:`1px solid ${T.border}`,marginTop:2 }}>
@@ -842,19 +842,19 @@ export const PayFeesModal = ({
       {paymentLines.map(pl=>(
         <div key={pl.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"11px 13px",marginBottom:8,display:"flex",flexDirection:"column",gap:8 }}>
           <div style={{ display:"flex",gap:8 }}>
-            <select data-testid={`paidwith-method-${pl.id}`} value={pl.method} onChange={e=>updatePaymentLine(pl.id,"method",e.target.value)} style={{ flex:1,border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:12.5,fontWeight:700,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
+            <select data-testid={`paidwith-method-${pl.id}`} value={pl.method} onChange={e=>updatePaymentLine(pl.id,"method",e.target.value)} style={{ flex:1,border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:12.5,fontWeight:700,color:T.text,fontFamily:"Inter,sans-serif",outline:"none" }}>
               {PAYMENT_METHODS.map(m=><option key={m} value={m}>{m}</option>)}
             </select>
             {paymentLines.length>1 && <button onClick={()=>removePaymentLine(pl.id)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:13 }}>✕</button>}
           </div>
-          <select data-testid={`paidwith-acc-${pl.id}`} value={pl.accId} onChange={e=>updatePaymentLine(pl.id,"accId",e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:12.5,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}>
+          <select data-testid={`paidwith-acc-${pl.id}`} value={pl.accId} onChange={e=>updatePaymentLine(pl.id,"accId",e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:12.5,fontWeight:600,color:T.text,fontFamily:"Inter,sans-serif",outline:"none" }}>
             <option value="">Select an account…</option>
             {(accounts||[]).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
           <input data-testid={`paidwith-amount-${pl.id}`} type="number" value={pl.amount} onChange={e=>updatePaymentLine(pl.id,"amount",e.target.value)} placeholder="0" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:9,padding:"8px 10px",fontSize:14,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",outline:"none" }}/>
         </div>
       ))}
-      <button data-testid="payfees-add-method-btn" onClick={addPaymentLine} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:12,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif",marginBottom:10 }}>+ Add payment method</button>
+      <button data-testid="payfees-add-method-btn" onClick={addPaymentLine} style={{ width:"100%",background:"none",border:`1px dashed ${T.border}`,borderRadius:12,padding:"9px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif",marginBottom:10 }}>+ Add payment method</button>
 
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px",background:diff===0?T.accentSoft:"transparent",borderRadius:12,marginBottom:12 }}>
         <span style={{ color:diff===0?T.success:T.dangerText,fontSize:12,fontWeight:700 }}>{diff===0?"Adds up to the total":diff>0?`${sym}${fmt(diff)} not assigned yet`:`${sym}${fmt(Math.abs(diff))} over the total`}</span>
@@ -862,11 +862,11 @@ export const PayFeesModal = ({
 
       <div style={{ marginBottom:14 }}>
         <span style={{ display:"block",color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",marginBottom:6 }}>Date</span>
-        <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"9px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none" }}/>
+        <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"9px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Inter,sans-serif",outline:"none" }}/>
       </div>
 
       {error && <div style={{ color:T.warn,fontSize:11,marginBottom:10 }}>{error}</div>}
-      <button data-testid="payfees-record-btn" onClick={confirm} disabled={recordDisabled} style={{ width:"100%",padding:15,borderRadius:12,background:recordDisabled?T.border:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:recordDisabled?T.sub:"#fff",cursor:recordDisabled?"not-allowed":"pointer",fontFamily:"Nunito,sans-serif" }}>
+      <button data-testid="payfees-record-btn" onClick={confirm} disabled={recordDisabled} style={{ width:"100%",padding:15,borderRadius:12,background:recordDisabled?T.border:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:recordDisabled?T.sub:"#fff",cursor:recordDisabled?"not-allowed":"pointer",fontFamily:"Inter,sans-serif" }}>
         {!hasAnyLine ? "Select at least one fee" : !balanced ? "Paid with must add up to the total" : `Record ${sym}${fmt(total)}`}
       </button>
     </BottomSheet>
@@ -975,7 +975,7 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
           <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{feeLineDisplayName(period)}</div>
           <div style={{ color:T.sub,fontSize:11.5,marginTop:2 }}>{schedule?.schoolName} · {period.label}</div>
         </div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
 
       {/* E5 — remaining leads the screen whenever paid>0; due/status reuses the 14-day badge rule
@@ -1001,7 +1001,7 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
               <div style={{ marginTop:8,display:"inline-block",background:(badge.kind==="overdue"?T.danger:T.warn)+"18",color:badge.kind==="overdue"?T.danger:T.warn,borderRadius:8,padding:"3px 9px",fontSize:10.5,fontWeight:800 }}>{badge.kind==="overdue"?"Overdue":badge.text}</div>
             )}
             {out>0 && onPayRemaining && (
-              <button onClick={()=>onPayRemaining(period)} style={{ width:"100%",marginTop:12,background:T.accent,border:"none",borderRadius:12,padding:"11px",cursor:"pointer",fontSize:13,fontWeight:700,color:"#fff",fontFamily:"Nunito,sans-serif" }}>Pay {sym}{fmt(out)} remaining</button>
+              <button onClick={()=>onPayRemaining(period)} style={{ width:"100%",marginTop:12,background:T.accent,border:"none",borderRadius:12,padding:"11px",cursor:"pointer",fontSize:13,fontWeight:700,color:"#fff",fontFamily:"Inter,sans-serif" }}>Pay {sym}{fmt(out)} remaining</button>
             )}
           </div>
         );
@@ -1013,8 +1013,8 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
           <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.5,marginBottom:13 }}>This period predates the schedule. Arth has no record of whether it was paid, and will not assume it was outstanding.</div>
           <div style={{ color:T.text,fontSize:12.5,fontWeight:700,marginBottom:8 }}>Was this fee paid?</div>
           <div style={{ display:"flex",gap:8 }}>
-            <button onClick={()=>setStatus(true)} style={{ flex:1,padding:12,borderRadius:12,background:T.success,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Yes — paid</button>
-            <button onClick={()=>setStatus(false)} style={{ flex:1,padding:12,borderRadius:12,background:T.card,border:`1px solid ${T.border}`,fontSize:13,fontWeight:700,color:T.text,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>No — unpaid</button>
+            <button onClick={()=>setStatus(true)} style={{ flex:1,padding:12,borderRadius:12,background:T.success,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Yes — paid</button>
+            <button onClick={()=>setStatus(false)} style={{ flex:1,padding:12,borderRadius:12,background:T.card,border:`1px solid ${T.border}`,fontSize:13,fontWeight:700,color:T.text,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>No — unpaid</button>
           </div>
         </div>
       )}
@@ -1026,8 +1026,8 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
               <div style={{ color:T.text,fontSize:13,fontWeight:700,marginBottom:6 }}>Marked paid at setup — no transaction on file</div>
               <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.5,marginBottom:12 }}>This period was marked paid when the schedule was set up, but Arth has no actual payment on record for it — this is a starting-balance claim, not a witnessed transaction. If that was entered incorrectly, you can correct it.</div>
               <span style={{ display:"block",color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",marginBottom:6 }}>Reason for correction *</span>
-              <input value={correctionReason} onChange={e=>setCorrectionReason(e.target.value)} placeholder="e.g. Marked paid by mistake at setup" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Nunito,sans-serif",outline:"none",marginBottom:11 }}/>
-              <button onClick={correctPeriod} disabled={!correctionReason.trim()} style={{ width:"100%",padding:12,borderRadius:12,background:correctionReason.trim()?T.accent:T.border,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:correctionReason.trim()?"pointer":"not-allowed",fontFamily:"Nunito,sans-serif" }}>Correct — mark as actually unpaid</button>
+              <input value={correctionReason} onChange={e=>setCorrectionReason(e.target.value)} placeholder="e.g. Marked paid by mistake at setup" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Inter,sans-serif",outline:"none",marginBottom:11 }}/>
+              <button onClick={correctPeriod} disabled={!correctionReason.trim()} style={{ width:"100%",padding:12,borderRadius:12,background:correctionReason.trim()?T.accent:T.border,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:correctionReason.trim()?"pointer":"not-allowed",fontFamily:"Inter,sans-serif" }}>Correct — mark as actually unpaid</button>
             </>
           ) : classification==="protected" ? (
             <>
@@ -1038,7 +1038,7 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
             <>
               <input type="number" value={feeDraft} onChange={e=>setFeeDraft(e.target.value)} style={{ width:"100%",border:`1.5px solid ${T.accent}55`,background:T.bg,borderRadius:12,padding:"11px 14px",fontSize:22,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",outline:"none",marginBottom:9 }}/>
               <div style={{ color:T.sub,fontSize:11,lineHeight:1.5,marginBottom:11 }}>Changes only this period. It does not touch any other period, and does not alter any payment already recorded — this is a future obligation, not history.</div>
-              <button onClick={saveFee} style={{ width:"100%",padding:12,borderRadius:12,background:T.accent,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Save fee for {period.label}</button>
+              <button onClick={saveFee} style={{ width:"100%",padding:12,borderRadius:12,background:T.accent,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Save fee for {period.label}</button>
             </>
           )}
         </div>
@@ -1067,7 +1067,7 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8 }}>
                     <span style={{ color:T.sub,fontSize:10.5,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>TXN-{String(txn.id).slice(-8).toUpperCase()}</span>
                     {onViewTransaction && (
-                      <button onClick={()=>onViewTransaction(txn.id)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Nunito,sans-serif" }}>View transaction →</button>
+                      <button onClick={()=>onViewTransaction(txn.id)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Inter,sans-serif" }}>View transaction →</button>
                     )}
                   </div>
                 </>
@@ -1090,8 +1090,8 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
 
       {!und && out>0 && (
         <div style={{ display:"flex",gap:8,marginBottom:12 }}>
-          <button onClick={()=>{ setAdjustTargetPeriodId(period.id); setAdjustKind("discount"); setShowAdjust(true); onClose(); }} style={{ flex:1,padding:11,borderRadius:12,background:T.input,border:`1px solid ${T.border}`,fontSize:11.5,fontWeight:700,color:T.text,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Record discount</button>
-          <button onClick={()=>{ setAdjustTargetPeriodId(period.id); setAdjustKind("writeoff"); setShowAdjust(true); onClose(); }} style={{ flex:1,padding:11,borderRadius:12,background:T.input,border:`1px solid ${T.border}`,fontSize:11.5,fontWeight:700,color:T.text,cursor:"pointer",fontFamily:"Nunito,sans-serif" }}>Write off</button>
+          <button onClick={()=>{ setAdjustTargetPeriodId(period.id); setAdjustKind("discount"); setShowAdjust(true); onClose(); }} style={{ flex:1,padding:11,borderRadius:12,background:T.input,border:`1px solid ${T.border}`,fontSize:11.5,fontWeight:700,color:T.text,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Record discount</button>
+          <button onClick={()=>{ setAdjustTargetPeriodId(period.id); setAdjustKind("writeoff"); setShowAdjust(true); onClose(); }} style={{ flex:1,padding:11,borderRadius:12,background:T.input,border:`1px solid ${T.border}`,fontSize:11.5,fontWeight:700,color:T.text,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Write off</button>
         </div>
       )}
 
@@ -1147,7 +1147,7 @@ export const AdjustmentModal = ({ kind, feePeriods, setFeePeriods, targetPeriodI
           <div style={{ color:isDiscount?T.accent:T.warn,fontSize:10,fontWeight:800,letterSpacing:0.5,textTransform:"uppercase" }}>School fee adjustment</div>
           <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>{isDiscount?"Record a discount":"Write off an amount"}</div>
         </div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
       <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.55,marginBottom:14 }}>
         {isDiscount
@@ -1161,7 +1161,7 @@ export const AdjustmentModal = ({ kind, feePeriods, setFeePeriods, targetPeriodI
       <span style={{ ...lbl,marginTop:10 }}>Reason</span>
       <input style={inp} placeholder="e.g. Sibling concession" value={reason} onChange={e=>setReason(e.target.value)}/>
       {error && <div style={{ color:T.warn,fontSize:11,marginTop:10 }}>{error}</div>}
-      <button onClick={confirm} style={{ width:"100%",padding:14,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Nunito,sans-serif",marginTop:14 }}>{isDiscount?"Record discount":"Record write-off"}</button>
+      <button onClick={confirm} style={{ width:"100%",padding:14,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Inter,sans-serif",marginTop:14 }}>{isDiscount?"Record discount":"Record write-off"}</button>
     </BottomSheet>
   );
 };
@@ -1190,7 +1190,7 @@ export const CreditNoteModal = ({ schedule, feePeriods, setFeePeriods, schoolCre
     <BottomSheet onClose={onClose} T={T} maxWidth={430} maxHeight="80vh" padding="20px 16px 48px" zIndex={360}>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
         <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>New Credit Note</div>
-        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+        <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
       </div>
       <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.55,marginBottom:14 }}>A credit note is a separate fact from any payment. It never touches a historical transaction, and is never applied automatically — you choose where it goes.</div>
       <span style={lbl}>Amount</span>
@@ -1198,7 +1198,7 @@ export const CreditNoteModal = ({ schedule, feePeriods, setFeePeriods, schoolCre
       <span style={{ ...lbl,marginTop:10 }}>Reason</span>
       <input style={inp} placeholder="e.g. School issued a refund credit" value={reason} onChange={e=>setReason(e.target.value)}/>
       {error && <div style={{ color:T.warn,fontSize:11,marginTop:10 }}>{error}</div>}
-      <button onClick={create} style={{ width:"100%",padding:14,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Nunito,sans-serif",marginTop:14 }}>Create Credit Note</button>
+      <button onClick={create} style={{ width:"100%",padding:14,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Inter,sans-serif",marginTop:14 }}>Create Credit Note</button>
     </BottomSheet>
   );
 };

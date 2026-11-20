@@ -18,7 +18,7 @@ export default function ConfirmDialog({ message, onConfirm, onClose, variant = "
         <div style={{ color: T.text, fontSize: 14, fontWeight: 700, lineHeight: 1.5, marginBottom: 18, whiteSpace: "pre-line" }}>{message}</div>
         <div style={{ display: "grid", gridTemplateColumns: hasCancel ? "1fr 1fr" : "1fr", gap: 10 }}>
           {hasCancel && (
-            <button onClick={onClose} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 12, padding: "10px", cursor: "pointer", fontSize: 13, fontWeight: 700, color: T.sub, fontFamily: "Nunito,sans-serif" }}>Cancel</button>
+            <button onClick={onClose} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 12, padding: "10px", cursor: "pointer", fontSize: 13, fontWeight: 700, color: T.sub, fontFamily: "Inter,sans-serif" }}>Cancel</button>
           )}
           <button
             onClick={() => { onClose(); onConfirm?.(); }}
@@ -27,7 +27,7 @@ export default function ConfirmDialog({ message, onConfirm, onClose, variant = "
               border: "none", borderRadius: 12, padding: "10px", cursor: "pointer",
               fontSize: 13, fontWeight: 800,
               color: hasCancel && isDestructive ? "#fff" : (hasCancel ? "#000" : "#000"),
-              fontFamily: "Nunito,sans-serif",
+              fontFamily: "Inter,sans-serif",
             }}
           >
             {confirmLabel || (hasCancel ? "Confirm" : "OK")}

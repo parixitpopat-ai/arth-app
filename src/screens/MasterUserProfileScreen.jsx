@@ -51,7 +51,7 @@ export default function MasterUserProfileScreen({
 
   const inputStyle = {
     width: "100%", boxSizing: "border-box", background: T.input, border: `1px solid ${T.border}`, borderRadius: 12,
-    padding: "12px 14px", fontSize: 14, color: T.text, fontFamily: "Nunito,sans-serif",
+    padding: "12px 14px", fontSize: 14, color: T.text, fontFamily: "Inter,sans-serif",
   };
   const labelStyle = { fontSize: 12, fontWeight: 800, color: T.sub, marginBottom: 6, display: "block" };
 
@@ -126,7 +126,7 @@ export default function MasterUserProfileScreen({
           style={{
             width: "100%", padding: "14px", borderRadius: 14, border: "none", cursor: canSave ? "pointer" : "not-allowed",
             background: canSave ? T.accent : T.border, color: canSave ? "#fff" : T.sub,
-            fontSize: 15, fontWeight: 800, fontFamily: "Nunito,sans-serif",
+            fontSize: 15, fontWeight: 800, fontFamily: "Inter,sans-serif",
           }}
         >
           {isFirstRun ? "Continue into Arth" : "Save changes"}

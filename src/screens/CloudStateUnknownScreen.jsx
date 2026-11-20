@@ -29,7 +29,7 @@ export default function CloudStateUnknownScreen({ onRetry, busy, error, T, local
         )}
         <button
           onClick={onRetry} disabled={busy}
-          style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Nunito,sans-serif" }}
+          style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Inter,sans-serif" }}
         >
           {busy ? "Checking..." : "Try again"}
         </button>

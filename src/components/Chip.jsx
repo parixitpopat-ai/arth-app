@@ -18,7 +18,7 @@ export default function Chip({ icon, label, active, onClick, color, T, size = "m
         border: `1px solid ${active ? activeColor : T.border}`,
         borderRadius: 20, padding: pad, cursor: "pointer",
         fontSize, fontWeight: 700, color: active ? activeColor : T.sub,
-        fontFamily: "Nunito,sans-serif", whiteSpace: "nowrap",
+        fontFamily: "Inter,sans-serif", whiteSpace: "nowrap",
       }}
     >
       {icon && <span style={{ fontSize: fontSize + 2 }}>{icon}</span>}

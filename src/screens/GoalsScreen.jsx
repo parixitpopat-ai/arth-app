@@ -33,7 +33,7 @@ export const AddGoalModal = ({ existing, onClose, T, inp, lbl, accounts, setGoal
       <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
           <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>{isEdit?"Edit":"New"} Goal</div>
-          <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
         </div>
         <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
           <div>
@@ -68,7 +68,7 @@ export const AddGoalModal = ({ existing, onClose, T, inp, lbl, accounts, setGoal
               <input style={inp} type="number" placeholder="0" value={currentAmount} onChange={e=>setCurrentAmount(e.target.value)}/>
             </div>
           )}
-          <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Goal"}</button>
+          <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Goal"}</button>
         </div>
       </div>
     </div>
@@ -88,7 +88,7 @@ export const AddContributionModal = ({ goal, onClose, T, inp, btnP, sym, setGoal
       <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 40px",width:"100%",maxWidth:430 }}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
           <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>Add to {goal.icon} {goal.name}</div>
-          <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
         </div>
         <input autoFocus style={{ ...inp,fontSize:22,fontWeight:800,marginBottom:14 }} type="number" placeholder={`${sym}0`} value={amount} onChange={e=>setAmount(e.target.value)}/>
         <button onClick={save} disabled={!(parseFloat(amount)>0)} style={{ ...btnP,opacity:parseFloat(amount)>0?1:0.5 }}>Add Contribution</button>
@@ -105,7 +105,7 @@ export const GoalsListModal = ({ onClose, T, sym, fmt, formatShortDate, goals, s
       <div style={{ background:T.card,borderRadius:"22px 22px 0 0",padding:"20px 16px 48px",width:"100%",maxWidth:430,maxHeight:"85vh",overflowY:"auto" }}>
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
           <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🎯 Goals</div>
-          <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Nunito,sans-serif" }}>x</button>
+          <button onClick={onClose} style={{ background:T.input,border:"none",color:T.sub,borderRadius:8,padding:"5px 12px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>x</button>
         </div>
         <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:16 }}>
           {activeGoals.length===0&&<div style={{ color:T.sub,fontSize:12,textAlign:"center",padding:"16px 0" }}>No goals yet. Give a rupee a purpose.</div>}
@@ -123,8 +123,8 @@ export const GoalsListModal = ({ onClose, T, sym, fmt, formatShortDate, goals, s
                 <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:complete||g.linkedAccountId?0:8 }}>
                   <div style={{ height:"100%",width:`${pct}%`,background:complete?T.success:T.accent,borderRadius:3 }}/>
                 </div>
-                {complete&&<button onClick={()=>setGoals(prev=>prev.map(x=>x.id===g.id?{...x,status:"completed"}:x))} style={{ marginTop:8,background:T.success+"22",border:`1px solid ${T.success}44`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.success,fontFamily:"Nunito,sans-serif" }}>✓ Mark Complete</button>}
-                {!complete&&!g.linkedAccountId&&<button onClick={()=>setShowAddContribution(g)} style={{ marginTop:8,background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Nunito,sans-serif" }}>+ Add Contribution</button>}
+                {complete&&<button onClick={()=>setGoals(prev=>prev.map(x=>x.id===g.id?{...x,status:"completed"}:x))} style={{ marginTop:8,background:T.success+"22",border:`1px solid ${T.success}44`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.success,fontFamily:"Inter,sans-serif" }}>✓ Mark Complete</button>}
+                {!complete&&!g.linkedAccountId&&<button onClick={()=>setShowAddContribution(g)} style={{ marginTop:8,background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>+ Add Contribution</button>}
               </div>
             );
           })}
@@ -140,7 +140,7 @@ export const GoalsListModal = ({ onClose, T, sym, fmt, formatShortDate, goals, s
             ))}
           </div>
         )}
-        <button onClick={()=>{ setEditingGoal(null); setShowAddGoal(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Nunito,sans-serif" }}>+ New Goal</button>
+        <button onClick={()=>{ setEditingGoal(null); setShowAddGoal(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>+ New Goal</button>
       </div>
     </div>
   );

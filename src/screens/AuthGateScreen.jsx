@@ -43,7 +43,7 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
 
   const inputStyle = {
     width: "100%", boxSizing: "border-box", minHeight: 52, background: T.input, border: `1px solid ${T.border}`, borderRadius: 12,
-    padding: "14px", fontSize: 16, color: T.text, fontFamily: "Nunito,sans-serif", textAlign: "center",
+    padding: "14px", fontSize: 16, color: T.text, fontFamily: "Inter,sans-serif", textAlign: "center",
   };
 
   const handleSendCode = async () => {
@@ -100,7 +100,7 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
             {error && <div style={{ color: T.danger, fontSize: 12, fontWeight: 700, marginTop: 10, textAlign: "center" }}>{error}</div>}
             <button
               onClick={handleSendCode} disabled={busy}
-              style={{ width: "100%", boxSizing: "border-box", minHeight: 52, marginTop: 16, padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Nunito,sans-serif" }}
+              style={{ width: "100%", boxSizing: "border-box", minHeight: 52, marginTop: 16, padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Inter,sans-serif" }}
             >
               {busy ? "Sending..." : copy.button}
             </button>
@@ -119,19 +119,19 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
             {error && <div style={{ color: T.danger, fontSize: 12, fontWeight: 700, marginTop: 10, textAlign: "center" }}>{error}</div>}
             <button
               onClick={handleVerifyCode} disabled={busy}
-              style={{ width: "100%", boxSizing: "border-box", minHeight: 52, marginTop: 16, padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Nunito,sans-serif" }}
+              style={{ width: "100%", boxSizing: "border-box", minHeight: 52, marginTop: 16, padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Inter,sans-serif" }}
             >
               {busy ? "Verifying..." : "Verify & continue"}
             </button>
             <button
               data-testid="auth-resend" onClick={() => { setCode(""); handleSendCode(); }} disabled={busy}
-              style={{ width: "100%", boxSizing: "border-box", minHeight: 44, marginTop: 6, padding: 10, borderRadius: 14, border: "none", background: "none", cursor: "pointer", color: T.accent, fontSize: 13, fontWeight: 700, fontFamily: "Nunito,sans-serif" }}
+              style={{ width: "100%", boxSizing: "border-box", minHeight: 44, marginTop: 6, padding: 10, borderRadius: 14, border: "none", background: "none", cursor: "pointer", color: T.accent, fontSize: 13, fontWeight: 700, fontFamily: "Inter,sans-serif" }}
             >
               Send the code again
             </button>
             <button
               onClick={() => { setStage("email"); setCode(""); setError(""); }}
-              style={{ width: "100%", boxSizing: "border-box", minHeight: 44, marginTop: 10, padding: 10, borderRadius: 14, border: "none", background: "none", cursor: "pointer", color: T.sub, fontSize: 12, fontWeight: 700, fontFamily: "Nunito,sans-serif" }}
+              style={{ width: "100%", boxSizing: "border-box", minHeight: 44, marginTop: 10, padding: 10, borderRadius: 14, border: "none", background: "none", cursor: "pointer", color: T.sub, fontSize: 12, fontWeight: 700, fontFamily: "Inter,sans-serif" }}
             >
               Use a different email
             </button>

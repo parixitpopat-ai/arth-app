@@ -33,8 +33,8 @@ export default function SignOutWarningSheet({ T, info, accountEmail, busy, onSta
         <div style={{ fontSize: 12, color: T.sub, marginBottom: 14, lineHeight: 1.45 }}>
           To send them to your account, stay signed in and use Settings, then Sync Now, or sign back in to this account later. If someone else signs in on this phone, they will be asked what to do with this data.
         </div>
-        <button data-testid="signout-stay" disabled={busy} onClick={onStay} style={{ width: "100%", padding: 13, borderRadius: 14, border: "none", background: T.accent, color: "#fff", fontSize: 14, fontWeight: 800, fontFamily: "Nunito,sans-serif", cursor: busy ? "wait" : "pointer", marginBottom: 8 }}>Stay signed in</button>
-        <button data-testid="signout-anyway" disabled={busy} onClick={onSignOut} style={{ width: "100%", padding: 13, borderRadius: 14, border: `1px solid ${T.danger}`, background: "none", color: T.danger, fontSize: 14, fontWeight: 800, fontFamily: "Nunito,sans-serif", cursor: busy ? "wait" : "pointer" }}>Sign out anyway</button>
+        <button data-testid="signout-stay" disabled={busy} onClick={onStay} style={{ width: "100%", padding: 13, borderRadius: 14, border: "none", background: T.accent, color: "#fff", fontSize: 14, fontWeight: 800, fontFamily: "Inter,sans-serif", cursor: busy ? "wait" : "pointer", marginBottom: 8 }}>Stay signed in</button>
+        <button data-testid="signout-anyway" disabled={busy} onClick={onSignOut} style={{ width: "100%", padding: 13, borderRadius: 14, border: `1px solid ${T.danger}`, background: "none", color: T.danger, fontSize: 14, fontWeight: 800, fontFamily: "Inter,sans-serif", cursor: busy ? "wait" : "pointer" }}>Sign out anyway</button>
       </div>
     </div>
   );
