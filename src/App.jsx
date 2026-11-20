@@ -6458,11 +6458,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
             {/* Full/EMI, moved here (after the combined Amount+Details row) -- still a MODE
                 toggle, same pattern as Itemise Purchase, not bundled with Reference. */}
-            {txnType==="expense"&&(
+            {txnType==="expense"&&(paidByPersonId || people.some(p=>!p.isMe && !isPersonArchived(p) && canOfferPettyPaid(settlements[p.id]?.pettyHeld, false)))&&(
               <div data-testid="paid-by" style={{ display:"flex",gap:6,alignItems:"center",flexWrap:"wrap" }}>
                 <span style={{ ...lbl,marginBottom:0 }}>Paid by</span>
                 <Chip color={T.accent} active={!paidByPersonId} onClick={()=>setPaidByPersonId("")}>Me</Chip>
-                {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=>(
+                {people.filter(p=>!p.isMe && !isPersonArchived(p) && canOfferPettyPaid(settlements[p.id]?.pettyHeld, paidByPersonId===p.id)).map(p=>(
                   <Chip key={p.id} color={T.warn} active={paidByPersonId===p.id} onClick={()=>{ setPaidByPersonId(p.id); setExpensePaymentMode("full"); }}>{p.emoji||"👤"} {p.name}</Chip>
                 ))}
               </div>
@@ -15732,7 +15732,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Group page made clearer: Individual Spend now lists every member (including those with nothing) and counts shares recorded on the group's bills; the budget card says which month it is for; each figure says its range (FY or month, or all time for what is unpaid); each member tile shows what that person owes you in total (as on their own page) and how much of it is tagged to the group, with a line explaining what Group owes is made of",
             "A family (group) statement and one request for the whole family: on a group page, Statement for the group. It shows the family total for the dates you choose, who owes what, and each member's own statement, then Request the family's total in one message with your UPI handle",
             "New look, step 1: a calmer light theme (soft grey-green background, a deeper green for actions) and the Inter font everywhere. Only colours and the font change: every screen, button and number works as before. The dark theme is unchanged for now",
-            "Add screen, person rows: P (paid from their petty cash) now appears only for someone who still holds petty cash from you, and P and A / O / C no longer both stay selected: choosing one clears the other",
+            "Add screen: the Paid by row and the P button now list only people who still hold petty cash from you (nobody else is shown), and P and A / O / C no longer both stay selected: choosing one clears the other",
             "Lending money is now a box on the Add screen, not a top button: add one person, tap C (they owe), then tick \"This is a loan\". Set when it should come back and any yearly interest (interest is a reminder, not added to what they owe). It is saved as a loan, not as spending, and comes out of the account you chose under Paid from. The old \"Loan given\" button is gone",
             "Transactions filters: new Work expenses control (all work expenses, waiting for reimbursement, reimbursed) with a total, reimbursed and waiting summary",
             "Card statement with an EMI instalment printed as principal, interest and GST rows: Arth now shows it as ONE item and records it as one instalment of your EMI plan (the breakup is kept inside the entry and shown in its details), or links it to the entry you already have. It is never added as three separate expenses",
