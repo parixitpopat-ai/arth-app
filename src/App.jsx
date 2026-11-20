@@ -142,6 +142,7 @@ import { getPersonReminders } from "./domain/person/reminders";
 import { getSectionOrder, moveSection } from "./domain/person/sectionOrder";
 import { getPersonTypeUILabel } from "./domain/person/personType";
 import { canOfferPettyPaid, chooseRowMode, choosePettyPaid } from "./domain/person/rowPayer";
+import { getWaitingClaims, autoPickClaims, summarisePick, applyReimbursement } from "./domain/reimbursement/claims";
 import { getSplitShareMode, getNewSplitRowMode, getRowsNeedingSplitChoice, getSplitDefaultChoice, withSplitDefault, SPLIT_DEFAULT_OPTIONS } from "./domain/person/splitDefault";
 import { buildNewPerson, applyPersonSetup } from "./domain/person/newPerson";
 import { buildNewGroup } from "./domain/group/newGroup";
@@ -4529,6 +4530,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [repaymentAllocations, setRepaymentAllocations] = useState(()=>Object.fromEntries((sourceTxn?.settlementLinks||[]).map(link=>[`${link.kind}:${link.id}`, String(link.amount||"")])));
     const [repaymentTouched, setRepaymentTouched] = useState(isEditing&&Boolean(sourceTxn?.settlementLinks?.length));
     const [repaymentPartialKey, setRepaymentPartialKey] = useState(null);
+    const [reimbManual, setReimbManual] = useState(null);   // work-expense ticks for a reimbursement: null follows the automatic ticks, else {expenseId:true|false}
     // ── CC EMI state ──────────────────────────────────────────────────────────
     const firstCcAccId = accounts.find(a=>a.type==="cc")?.id || "";
     const [ccEmiCardId, setCcEmiCardId] = useState(isEditing && sourceTxn?.type==="cc_emi" ? (sourceTxn.accId||firstCcAccId) : firstCcAccId);
@@ -4831,6 +4833,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       ? Math.max(0, priceNet + (parseFloat(priceProcessingFee)||0) + priceInterestAmt + priceGstAmt)
       : null;
     const amt = computedBreakdownTotal!==null ? computedBreakdownTotal : (parseFloat(amount)||0);
+    // Reimbursement received: the work expenses still waiting, ticked from the oldest while the money lasts (domain/reimbursement/claims.js).
+    const reimbClaims = getWaitingClaims(txns);
+    const reimbAutoIds = autoPickClaims(reimbClaims, amt);
+    const reimbPickedIds = reimbManual ? Object.keys(reimbManual).filter(k=>reimbManual[k]) : reimbAutoIds;
+    const reimbSummary = summarisePick(reimbClaims, reimbPickedIds, amt);
+    const reimbListShown = txnType==="settlement_in" && settlementKind==="reimbursement" && !isEditing;
     // T3-SAFE-1 (fix A): this used to be a single blind bills.find(amount+category), applied
     // SILENTLY on Save — never rendered anywhere, no confirmation. A same-amount bill from a
     // different month in the same category would get marked paid instead of the right one, with
@@ -5410,6 +5418,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(submittingRef.current) return;
       if(!hasTxnSubject){ setRefDupWarning("Enter a vendor/note before saving."); return; }
       if(!amt){ setRefDupWarning("Enter an amount before saving."); return; }
+      if(reimbListShown && reimbSummary.short>0){ setRefDupWarning(`You ticked ${sym}${fmt(reimbSummary.short)} more than you received. Untick an expense.`); return; }
       if(txnType==="expense" && useItemizedLines && lineItems.length>0 && !itemsRecon.matches){ setRefDupWarning(`Lines add up to ${sym}${fmt(itemsRecon.linesTotal)} but the total is ${sym}${fmt(amt)}.`); return; }
       if(eduMode){
         setEduShowErrors(true);
@@ -6210,9 +6219,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const matches = getRefundCandidates(newTxn, resolvedTxnId);
           if(matches.length) setRefundMatchSuggestion({ refundTxn:newTxn, matches });
         }
-        if(settlementKind==="reimbursement" && !isEditing){
-          const pending = txns.filter(t=>t.type==="expense" && t.reimbursable && !t.reimbursedByTxnId);
-          if(pending.length>0) setReimbursementMatchSuggestion({ incomeTxnId:resolvedTxnId, pending });
+        if(settlementKind==="reimbursement" && !isEditing && reimbPickedIds.length>0){
+          setTxns(prev=>applyReimbursement(prev, reimbPickedIds, resolvedTxnId));
         }
       } else if(txnType==="cc_emi"){
         if(!ccEmiCardId){ setRefDupWarning("Please select a credit card."); return; }
@@ -7063,6 +7071,29 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     ))}
                   </div>
                 </div>
+                {reimbListShown&&(
+                  <div data-testid="reimb-list" style={{ background:T.input,border:`1px solid ${T.success}33`,borderRadius:12,padding:"12px 14px" }}>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>Work expenses waiting for reimbursement</div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:2,marginBottom:8 }}>Ticked from the oldest while the money lasts. Tap one to tick or untick it.</div>
+                    {reimbClaims.length===0&&<div data-testid="reimb-empty" style={{ color:T.sub,fontSize:11,padding:"8px 0",borderTop:`1px solid ${T.border}` }}>No work expenses are waiting. Mark an expense as "Work expense" when you add it, and it will show here.</div>}
+                    {reimbClaims.map(c=>{
+                      const on = reimbPickedIds.includes(c.id);
+                      return (
+                        <div key={c.id} data-testid={`reimb-row-${c.id}`} onClick={()=>{ const cur = Object.fromEntries(reimbClaims.map(x=>[x.id, reimbPickedIds.includes(x.id)])); cur[c.id] = !on; setReimbManual(cur); }} style={{ display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderTop:`1px solid ${T.border}`,cursor:"pointer",opacity:on?1:0.6 }}>
+                          <div style={{ width:18,height:18,borderRadius:9,border:`2px solid ${on?T.success:T.border}`,background:on?T.success:"none",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center" }}>{on&&<span style={{ color:"#fff",fontSize:10,fontWeight:900 }}>✓</span>}</div>
+                          <div style={{ flex:1,minWidth:0 }}>
+                            <div style={{ color:T.text,fontSize:12,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>💼 {c.title}</div>
+                            <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(c.date)||c.date}{c.spent>c.amount+0.005?` · ${sym}${fmt(c.spent)} spent, ${sym}${fmt(c.amount)} reimbursable`:""}</div>
+                          </div>
+                          <div style={{ background:on?T.success+"22":T.border+"44",borderRadius:20,padding:"4px 10px",fontSize:12,fontWeight:800,color:on?T.success:T.sub,whiteSpace:"nowrap" }}>{sym}{fmt(c.amount)}</div>
+                        </div>
+                      );
+                    })}
+                    {reimbClaims.length>0&&<div data-testid="reimb-summary" style={{ color:reimbSummary.short>0?T.danger:reimbSummary.left>0?T.warn:T.success,fontSize:11,fontWeight:700,marginTop:8 }}>
+                      {reimbSummary.count} ticked · {sym}{fmt(reimbSummary.total)} of {sym}{fmt(amt)} received{reimbSummary.short>0?` · ${sym}${fmt(reimbSummary.short)} more than you received: untick one`:reimbSummary.left>0?` · ${sym}${fmt(reimbSummary.left)} not matched to an expense`:" · nothing left over"}
+                    </div>}
+                  </div>
+                )}
                 {settlementKind!=="reimbursement"&&<div>
                   <span style={lbl}>Person (optional)</span>
                   <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -15732,6 +15763,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Group page made clearer: Individual Spend now lists every member (including those with nothing) and counts shares recorded on the group's bills; the budget card says which month it is for; each figure says its range (FY or month, or all time for what is unpaid); each member tile shows what that person owes you in total (as on their own page) and how much of it is tagged to the group, with a line explaining what Group owes is made of",
             "A family (group) statement and one request for the whole family: on a group page, Statement for the group. It shows the family total for the dates you choose, who owes what, and each member's own statement, then Request the family's total in one message with your UPI handle",
             "New look, step 1: a calmer light theme (soft grey-green background, a deeper green for actions) and the Inter font everywhere. Only colours and the font change: every screen, button and number works as before. The dark theme is unchanged for now",
+            "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Add screen: the Paid by row and the P button now list only people who still hold petty cash from you (nobody else is shown), and P and A / O / C no longer both stay selected: choosing one clears the other",
             "Lending money is now a box on the Add screen, not a top button: add one person, tap C (they owe), then tick \"This is a loan\". Set when it should come back and any yearly interest (interest is a reminder, not added to what they owe). It is saved as a loan, not as spending, and comes out of the account you chose under Paid from. The old \"Loan given\" button is gone",
             "Transactions filters: new Work expenses control (all work expenses, waiting for reimbursement, reimbursed) with a total, reimbursed and waiting summary",
