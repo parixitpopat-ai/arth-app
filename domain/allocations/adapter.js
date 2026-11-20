@@ -173,7 +173,7 @@ export function getCategoryAttributedTotal(transactions, categoryId, { allTransa
     // Path 2 - catIds/catId fallback, netted + evenly split.
     if (t.excludeFromSpend) return sum;
 
-    const netAmount = Math.max(0, Number(t.amount || 0) - Number(refundMap[String(t.id)] || 0));
+    const netAmount = Math.max(0, Number(t.amount || 0) - Number(refundMap[String(t.id)] || 0) - getReimbursedAmount(t));
     if (!(netAmount > 0)) return sum;
 
     let attributedAway = 0;
@@ -336,6 +336,18 @@ export function getHouseholdAttributedTotal({ periodTransactions, allTransaction
 }
 
 /**
+ * The part of a work expense that has been paid back to me by my employer (a reimbursement received). It is not my spend: the money came
+ * back. It is the claimed amount (`reimbursableAmount`, else the whole expense), never more than the expense, and only once the expense is
+ * marked reimbursed (`reimbursedByTxnId`). Waiting work expenses still count in full until the money arrives.
+ */
+export function getReimbursedAmount(expense) {
+  if (!expense || expense.type !== "expense" || !expense.reimbursable || !expense.reimbursedByTxnId) return 0;
+  const amount = Number(expense.amount || 0);
+  const claimed = Number(expense.reimbursableAmount || 0) > 0 ? Number(expense.reimbursableAmount) : amount;
+  return Math.max(0, Math.min(amount, claimed));
+}
+
+/**
  * My share of ONE expense: amount less refunds, less what others owe me (people / group
  * allocations / group collective), zero when excluded from spend. The single per-transaction rule
  * behind both getHouseholdAttributedTotal and App.jsx's getMyExpenseAmount (which used to be a
@@ -351,7 +363,7 @@ export function getMyExpenseShare(expense, refundMap) {
 
   const netAmount = Math.max(
     0,
-    Number(expense?.amount || 0) - Number((refundMap || {})[String(expense?.id)] || 0)
+    Number(expense?.amount || 0) - Number((refundMap || {})[String(expense?.id)] || 0) - getReimbursedAmount(expense)
   );
   if (!(netAmount > 0)) return 0;
 

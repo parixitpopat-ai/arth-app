@@ -13,9 +13,10 @@ async function newPage(withWork) {
   await ctx.addInitScript(withWork => { if (localStorage.getItem("__init")) return; localStorage.setItem("__init", "1"); const set = (k, v) => localStorage.setItem(k, JSON.stringify(v));
     set("arth_accounts", [{ id: "bank1", name: "Test Savings", type: "bank", openingBalance: 100000, openingBalanceDate: "2026-01-01", last4: "9001" }]);
     set("arth_people", [{ id: "me", name: "Me", isMe: true }]);
+    const now = new Date(); const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
     const w = (id, date, desc, amount, extra = {}) => ({ id, type: "expense", reimbursable: true, date, desc, amount, accId: "bank1", catId: "transport", catIds: ["transport"], ...extra });
-    set("arth_txns", withWork ? [w("w1", "2026-11-12", "Taxi to airport", 1850), w("w2", "2026-11-12", "Hotel, 2 nights", 4800, { reimbursableAmount: 4000, createdAt: 2 }), w("w3", "2026-11-14", "Client lunch", 1150), w("w4", "2026-11-15", "Cab to client office", 600),
-      w("w5", "2026-10-01", "Earlier trip", 500, { reimbursedByTxnId: "old" }), { id: "n1", type: "expense", date: "2026-11-10", desc: "Not a work expense", amount: 700, accId: "bank1", catId: "food", catIds: ["food"] }] : []);
+    set("arth_txns", withWork ? [w("w1", `${ym}-01`, "Taxi to airport", 1850, { createdAt: 1 }), w("w2", `${ym}-01`, "Hotel, 2 nights", 4800, { reimbursableAmount: 4000, createdAt: 2 }), w("w3", `${ym}-01`, "Client lunch", 1150, { createdAt: 3 }), w("w4", `${ym}-01`, "Cab to client office", 600, { createdAt: 4 }),
+      w("w5", "2020-01-01", "Earlier trip", 500, { reimbursedByTxnId: "old" }), { id: "n1", type: "expense", date: `${ym}-01`, desc: "Not a work expense", amount: 700, accId: "bank1", catId: "food", catIds: ["food"] }] : []);
     localStorage.setItem("arth_master_user_setup_complete", "true"); }, withWork);
   const page = await ctx.newPage(); page.on("pageerror", e => errors.push(String(e)));
   const unlock = async () => { for (let i = 0; i < 3; i++) { if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await page.getByRole("button", { name: "1", exact: true }).click(); await page.waitForTimeout(100); } await page.waitForTimeout(500); } } };
@@ -26,11 +27,15 @@ async function newPage(withWork) {
     await page.locator("button:visible", { hasText: "Settlement" }).first().dispatchEvent("click"); await page.waitForTimeout(500);
     await page.getByPlaceholder(/e\.g\. ₹5,500/).fill(String(amount)); await page.waitForTimeout(300);
     await page.locator("button:visible", { hasText: /Reimbursement/ }).first().dispatchEvent("click"); await page.waitForTimeout(500); };
-  return { page, T, ls, text, openReimb };
+  return { page, T, ls, text, openReimb, unlock };
 }
 const save = async page => { await page.locator("button:visible", { hasText: /Add ✓|Save|Record/ }).last().click(); await page.waitForTimeout(900); };
 try {
-  { const { page, T, ls, text, openReimb } = await newPage(true);
+  { const { page, T, ls, text, openReimb, unlock } = await newPage(true);
+    await page.goto(APP); await page.waitForTimeout(1000); await (async () => { for (let i = 0; i < 3; i++) { if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await page.getByRole("button", { name: "1", exact: true }).click(); await page.waitForTimeout(100); } await page.waitForTimeout(500); } } })();
+    const spentNow = async () => (await text()).match(/Spent\s*₹([\d,]+)/)?.[1];
+    const before = await spentNow();
+    rec("S0 before the money arrives Home counts all five expenses as spending (₹9,100)", before === "9,100", before);
     await openReimb(7000);
     rec("R1 the list shows the 4 waiting work expenses (not the reimbursed one, not the plain expense)", (await T("reimb-list").count()) === 1 && (await page.locator("[data-testid^='reimb-row-']").count()) === 4 && !/Earlier trip|Not a work expense/.test(await T("reimb-list").innerText()), await page.locator("[data-testid^='reimb-row-']").count());
     const lt = await T("reimb-list").innerText();
@@ -50,7 +55,10 @@ try {
     const all = await ls("arth_txns"); const inc = all.find(t => t.type === "settlement_in");
     rec("R6 saved: one settlement of ₹7,000, and exactly the three ticked expenses are marked reimbursed by it", inc && inc.amount === 7000 && all.filter(t => t.reimbursedByTxnId === inc.id).map(t => t.id).sort().join() === "w1,w2,w3", { inc: inc && inc.id, marked: all.filter(t => t.reimbursedByTxnId === inc?.id).map(t => t.id) });
     rec("R7 the cab stays waiting, the earlier reimbursement is not overwritten, the plain expense is untouched", !all.find(t => t.id === "w4").reimbursedByTxnId && all.find(t => t.id === "w5").reimbursedByTxnId === "old" && !all.find(t => t.id === "n1").reimbursedByTxnId, {});
-    rec("R8 the old 'Mark all reimbursed' pop-up did not appear", !/Mark all reimbursed/.test(await text()), {}); }
+    rec("R8 the old 'Mark all reimbursed' pop-up did not appear", !/Mark all reimbursed/.test(await text()), {});
+    await page.goto(APP); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(800);
+    const after = (await text()).match(/Spent\s*₹([\d,]+)/)?.[1];
+    rec("S1 once the money is received, the reimbursed ₹7,000 is no longer my spending: Home 'Spent' goes from ₹9,100 to ₹2,100", after === "2,100", after); }
   { const { page, T, ls, text, openReimb } = await newPage(false);
     await openReimb(3000);
     rec("E1 with nothing waiting the list says so and tells me how to mark work expenses", (await T("reimb-empty").count()) === 1 && /Work expense/.test(await T("reimb-empty").innerText()), {});

@@ -218,3 +218,14 @@ test("subcategory: an Education payment tagged to several subcategories is a mul
   assert.equal(b.multiTagAmount, 25000);
   assert.equal(b.multiTagCount, 1);
 });
+
+test("getCategorySpendBreakdown: a reimbursed work expense no longer counts in its category, a waiting one still does", () => {
+  const cats = [{ id: "travel", name: "Travel" }, { id: "food", name: "Food" }];
+  const txns = [
+    { id: "a", type: "expense", date: "2026-08-05", catId: "travel", amount: 4800, reimbursable: true, reimbursableAmount: 4000, reimbursedByTxnId: "inc", people: {} },
+    { id: "b", type: "expense", date: "2026-08-06", catId: "food", amount: 600, reimbursable: true, people: {} },
+  ];
+  const rows = getCategorySpendBreakdown(txns, cats, txns);
+  assert.equal(rows.find(r => r.category.id === "travel").amount, 800);   // 4,800 less the 4,000 claimed
+  assert.equal(rows.find(r => r.category.id === "food").amount, 600);     // still waiting: counts in full
+});

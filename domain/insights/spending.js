@@ -13,7 +13,7 @@
 // wrappers over already-canonical functions (getCategoryAttributedTotal, getFrequentVendors),
 // never a new spend engine.
 
-import { getCategoryAttributedTotal, buildRefundTotalsByExpense } from "../allocations/adapter.js";
+import { getCategoryAttributedTotal, buildRefundTotalsByExpense, getReimbursedAmount } from "../allocations/adapter.js";
 import { getCalendarMonthBounds } from "../../src/domain/financialCalendar/calendarMonth.js";
 import { shiftMonthKey } from "../../src/components/shiftMonthKey.js";
 import { getFrequentVendors } from "../../src/domain/transactions/vendorInsights.js";
@@ -80,7 +80,7 @@ const getTxnCategoryAmount = (t, categoryId, refundMap) => {
   }
   if (t.catAllocations) return 0;
   if (t.excludeFromSpend) return 0;
-  const netAmount = Math.max(0, Number(t.amount || 0) - Number(refundMap[String(t.id)] || 0));
+  const netAmount = Math.max(0, Number(t.amount || 0) - Number(refundMap[String(t.id)] || 0) - getReimbursedAmount(t));
   if (!(netAmount > 0)) return 0;
   let attributedAway = 0;
   Object.entries(t.people || {}).forEach(([pid, info]) => {
