@@ -121,3 +121,12 @@ test("an expense paid by another person (no account of mine) stays on the legacy
   const edit = checkRepresentability({ operation: "edit", draft: { ...draft, amount: 1300 }, priorStoredRecord: draft });
   assert.equal(edit.representable, false);
 });
+
+test("a claim only (a work expense with no account, nothing spent) stays on the legacy path, create and edit", () => {
+  const draft = { type: "expense", accId: null, claimOnly: true, reimbursable: true, excludeFromSpend: true, catId: "cat-1", catIds: ["cat-1"], amount: 180, date: "2026-10-03" };
+  const create = checkRepresentability({ operation: "create", draft });
+  assert.equal(create.representable, false);
+  assert.equal(create.code, NOT_YET_REPRESENTABLE);
+  const edit = checkRepresentability({ operation: "edit", draft: { ...draft, amount: 200 }, priorStoredRecord: draft });
+  assert.equal(edit.representable, false);
+});

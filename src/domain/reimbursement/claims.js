@@ -44,3 +44,12 @@ export function applyReimbursement(txns, pickedIds, incomeTxnId) {
   const set = new Set((pickedIds || []).map(String));
   return (txns || []).map(t => (set.has(String(t.id)) && t.type === "expense" && t.reimbursable && !t.reimbursedByTxnId ? { ...t, reimbursedByTxnId: incomeTxnId } : t));
 }
+
+/**
+ * A CLAIM ONLY entry: a work expense with no account behind it (no bank, card or cash account, no one else paid, not paid in parts). Nothing was spent
+ * and no balance moves, so it is not my spending. It exists to be claimed, for example a drop or pick-up in my own vehicle, where the money was not
+ * spent on that trip (the fuel is recorded when I fill the tank). The amount is whatever the person types.
+ */
+export function isClaimOnly({ type, reimbursable, accId, paidByPersonId, payPartsOn }) {
+  return type === "expense" && Boolean(reimbursable) && !accId && !paidByPersonId && !payPartsOn;
+}

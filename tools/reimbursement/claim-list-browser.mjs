@@ -64,6 +64,35 @@ try {
     rec("E1 with nothing waiting the list says so and tells me how to mark work expenses", (await T("reimb-empty").count()) === 1 && /Work expense/.test(await T("reimb-empty").innerText()), {});
     await save(page);
     rec("E2 a reimbursement can still be saved with nothing to tick", (await ls("arth_txns")).filter(t => t.type === "settlement_in").length === 1, {}); }
+  { const { page, T, ls, text, unlock } = await newPage(false);
+    const balanceOf = async () => { await page.getByText(/^money$/i).first().dispatchEvent("click", { timeout: 3000 }).catch(() => {}); await page.waitForTimeout(600); return null; };
+    await page.goto(APP); await page.waitForTimeout(1000); await unlock(); await page.waitForTimeout(500);
+    await page.getByRole("button", { name: "+", exact: true }).first().click(); await page.waitForTimeout(700); await page.getByText("More options →").click(); await page.waitForTimeout(700);
+    await page.getByPlaceholder(/Vendor \/ Person/).fill("Drop to office, 18 km"); await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("180"); await page.waitForTimeout(300);
+    await page.locator("button:visible", { hasText: /^Work expense$|Work expense/ }).first().dispatchEvent("click"); await page.waitForTimeout(400);
+    await page.locator("button:visible", { hasText: /Details/ }).first().dispatchEvent("click"); await page.waitForTimeout(500);
+    rec("C0 before choosing 'No account' the form has no claim-only note", (await T("claim-only-note").count()) === 0, {});
+    await page.getByText("Paid via").locator("xpath=following::button[1]").dispatchEvent("click"); await page.waitForTimeout(500);
+    rec("C1 the account list offers 'No account · claim only' once Work expense is on", (await T("acc-none").count()) === 1, {});
+    await T("acc-none").dispatchEvent("click"); await page.waitForTimeout(400);
+    rec("C2 choosing it shows the plain note: nothing is spent, no balance changes", (await T("claim-only-note").count()) === 1, (await T("claim-only-note").count()) ? await T("claim-only-note").innerText() : "");
+    await page.locator("button:visible", { hasText: /← Details/ }).first().dispatchEvent("click").catch(() => {}); await page.waitForTimeout(400);
+    if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/claim-before-save.png` });
+    await page.locator("button:visible", { hasText: /Add ✓|Save|Record/ }).last().click(); await page.waitForTimeout(900);
+    const saved = (await ls("arth_txns")).find(t => t.amount === 180);
+    if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/claim-after-save.png` });
+    if (!saved) console.log("DEBUG form said:", (await text()).match(/(Enter|Choose|Please|Fill|Select|must|missing|needs?)[^.]{0,80}/gi)?.slice(0, 6));
+    rec("C3 saved as a claim only: work expense of ₹180, NO account, excluded from spend", saved && saved.reimbursable === true && !saved.accId && saved.excludeFromSpend === true && saved.claimOnly === true, saved && { acc: saved.accId, ex: saved.excludeFromSpend, claim: saved.claimOnly });
+    await page.goto(APP); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(800);
+    const spent = (await text()).match(/Spent\s*₹([\d,]+)/)?.[1];
+    rec("C4 it is not my spending: Home 'Spent' is not ₹180", spent !== "180", spent);
+    await page.getByRole("button", { name: "+", exact: true }).first().click(); await page.waitForTimeout(700); await page.getByText("More options →").click(); await page.waitForTimeout(700);
+    await page.locator("button:visible", { hasText: "Settlement" }).first().dispatchEvent("click"); await page.waitForTimeout(500);
+    await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("180"); await page.locator("button:visible", { hasText: /Reimbursement/ }).first().dispatchEvent("click"); await page.waitForTimeout(500);
+    rec("C5 the claim shows in the reimbursement list and is ticked for ₹180", (await page.locator("[data-testid^='reimb-row-']").count()) === 1 && /1 ticked/.test(await T("reimb-summary").innerText()), (await T("reimb-summary").count()) ? await T("reimb-summary").innerText() : "");
+    await page.locator("button:visible", { hasText: /Add ✓|Save|Record/ }).last().click(); await page.waitForTimeout(900);
+    const all = await ls("arth_txns"); const inc = all.find(t => t.type === "settlement_in");
+    rec("C6 receiving it credits the account (₹180 into Test Savings) and marks the claim reimbursed", inc && inc.amount === 180 && inc.accId === "bank1" && all.find(t => t.amount === 180 && t.claimOnly).reimbursedByTxnId === inc.id, inc && { acc: inc.accId }); }
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 500)); }
 await browser.close(); try { process.kill(-server.pid); } catch {}

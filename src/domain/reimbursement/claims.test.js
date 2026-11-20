@@ -46,3 +46,16 @@ test("nothing waiting gives an empty list and picks nothing", () => {
   assert.deepEqual(getWaitingClaims([]), []);
   assert.deepEqual(autoPickClaims([], 5000), []);
 });
+
+import { isClaimOnly } from "./claims.js";
+test("a work expense with no account behind it is a claim only", () => {
+  assert.equal(isClaimOnly({ type: "expense", reimbursable: true, accId: "" }), true);
+  assert.equal(isClaimOnly({ type: "expense", reimbursable: true, accId: null }), true);
+});
+test("it is not a claim only when an account, another payer or part-payments are involved, or it is not a work expense", () => {
+  assert.equal(isClaimOnly({ type: "expense", reimbursable: true, accId: "bank1" }), false);
+  assert.equal(isClaimOnly({ type: "expense", reimbursable: true, accId: "", paidByPersonId: "p1" }), false);
+  assert.equal(isClaimOnly({ type: "expense", reimbursable: true, accId: "", payPartsOn: true }), false);
+  assert.equal(isClaimOnly({ type: "expense", reimbursable: false, accId: "" }), false);
+  assert.equal(isClaimOnly({ type: "income", reimbursable: true, accId: "" }), false);
+});

@@ -142,7 +142,7 @@ import { getPersonReminders } from "./domain/person/reminders";
 import { getSectionOrder, moveSection } from "./domain/person/sectionOrder";
 import { getPersonTypeUILabel } from "./domain/person/personType";
 import { canOfferPettyPaid, chooseRowMode, choosePettyPaid } from "./domain/person/rowPayer";
-import { getWaitingClaims, autoPickClaims, summarisePick, applyReimbursement } from "./domain/reimbursement/claims";
+import { isClaimOnly, getWaitingClaims, autoPickClaims, summarisePick, applyReimbursement } from "./domain/reimbursement/claims";
 import { getSplitShareMode, getNewSplitRowMode, getRowsNeedingSplitChoice, getSplitDefaultChoice, withSplitDefault, SPLIT_DEFAULT_OPTIONS } from "./domain/person/splitDefault";
 import { buildNewPerson, applyPersonSetup } from "./domain/person/newPerson";
 import { buildNewGroup } from "./domain/group/newGroup";
@@ -5853,6 +5853,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const effectiveCatId = itemCategoryRollup ? itemCategoryRollup.catId : catId;
         const effectiveCatIds = itemCategoryRollup ? itemCategoryRollup.catIds : (validCatIds.length ? validCatIds : (catId ? [catId] : []));
         const partsOn = txnType==="expense" && Boolean(payParts) && !paidByPersonId && expensePaymentMode==="full";
+        const claimOnly = isClaimOnly({ type:txnType, reimbursable, accId, paidByPersonId, payPartsOn:partsOn });
         const newTxn = {
           ...base,
           amount:amt,
@@ -5937,6 +5938,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             linkedFeePeriods:collectLinkedFeePeriods(eduPlan),
           } : {}),
           reimbursable:reimbursable||false,
+          claimOnly:claimOnly||undefined,
+          excludeFromSpend: claimOnly ? true : (sourceTxn?.claimOnly ? false : sourceTxn?.excludeFromSpend),   // a claim only is not spending; leaving claim-only by choosing an account clears what it set
           reimbursableAmount:(reimbursable && reimbursableAmount && Number(reimbursableAmount)>0) ? Number(reimbursableAmount) : null,
           paymentImageBase64:paymentImageBase64||null,
           priceMrp:showPriceBreakdown&&priceMrp?parseFloat(priceMrp)||null:null,
@@ -6497,10 +6500,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <span style={lbl}>Paid via</span>
                   <button onClick={()=>setShowAccountSheet(true)} style={{ ...inp,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left" }}>
                     <span style={{ color:T.text }}>
-                      {(() => { const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
+                      {(() => { const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : (reimbursable ? "No account · claim only" : "Select account"); })()}
                     </span>
                     <span style={{ color:T.sub }}>▾</span>
                   </button>
+                  {isClaimOnly({ type:txnType, reimbursable, accId, paidByPersonId, payPartsOn:Boolean(payParts)&&expensePaymentMode==="full" })&&<div data-testid="claim-only-note" style={{ color:T.success,fontSize:11,fontWeight:700,marginTop:4 }}>Claim only: nothing is spent and no balance changes. It waits in your reimbursement list.</div>}
                   {showAccountSheet&&(
                     <AccountPickerSheet
                       selectedId={accId}
@@ -6508,6 +6512,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       recentIds={recentAccountIds}
                       onSelect={setAccId}
                       onClose={()=>setShowAccountSheet(false)}
+                      allowNone={txnType==="expense"&&reimbursable}
                     />
                   )}
                   {expensePaymentMode==="full"&&<button type="button" data-testid="pay-parts-on" onClick={()=>setPayParts(startParts(accId))} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:12,fontWeight:700,padding:"6px 0 0",fontFamily:"Inter,sans-serif" }}>Paid in parts? Use more than one account</button>}
@@ -8504,7 +8509,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Per Arth Component Spec.dc.html: sheet variant, single-select (default -- not multi). Title
   // + optional search (recalls last 8 used) + option rows (icon, name, balance as secondary/
   // amount via the existing accountBalance()) + tap-to-select-and-close, no separate Done button.
-  const AccountPickerSheet = ({ selectedId, accountList, recentIds, onSelect, onClose }) => {
+  const AccountPickerSheet = ({ selectedId, accountList, recentIds, onSelect, onClose, allowNone=false }) => {
     const [search, setSearch] = useState("");
     const q = search.trim().toLowerCase();
     const filtered = q ? accountList.filter(a=>a.name.toLowerCase().includes(q)) : accountList;
@@ -8530,6 +8535,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ ...TYPE_SCALE.cardTitle, color:T.text, marginBottom:14 }}>Select Account</div>
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search accounts…" style={{ ...inp, marginBottom:14 }}/>
           <div style={{ flex:1,overflowY:"auto" }}>
+            {allowNone&&!q&&(
+              <button data-testid="acc-none" onClick={()=>{ onSelect(""); onClose(); }} style={rowStyle}>
+                <span style={{ ...TYPE_SCALE.rowTitle, color:!selectedId?T.accent:T.text }}>No account · claim only</span>
+                <span style={{ color:T.sub,fontSize:11 }}>{!selectedId?"✓":"nothing spent"}</span>
+              </button>
+            )}
             {recentAccs.length>0 && <div style={{ ...TYPE_SCALE.label, color:T.sub, padding:"0 4px 6px" }}>RECENT</div>}
             {recentAccs.map(renderRow)}
             {recentAccs.length>0 && <div style={{ ...TYPE_SCALE.label, color:T.sub, padding:"12px 4px 6px" }}>ALL ACCOUNTS</div>}
@@ -15764,6 +15775,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "A family (group) statement and one request for the whole family: on a group page, Statement for the group. It shows the family total for the dates you choose, who owes what, and each member's own statement, then Request the family's total in one message with your UPI handle",
             "New look, step 1: a calmer light theme (soft grey-green background, a deeper green for actions) and the Inter font everywhere. Only colours and the font change: every screen, button and number works as before. The dark theme is unchanged for now",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
+            "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
             "A work expense that has been reimbursed no longer counts as your spending: its claimed amount (for example ₹4,000 of a ₹4,800 hotel) comes off Spent, the budget and the category breakdown. Work expenses still waiting count in full until the money arrives. This also lowers past months where those expenses were made",
             "Add screen: the Paid by row and the P button now list only people who still hold petty cash from you (nobody else is shown), and P and A / O / C no longer both stay selected: choosing one clears the other",
             "Lending money is now a box on the Add screen, not a top button: add one person, tap C (they owe), then tick \"This is a loan\". Set when it should come back and any yearly interest (interest is a reminder, not added to what they owe). It is saved as a loan, not as spending, and comes out of the account you chose under Paid from. The old \"Loan given\" button is gone",

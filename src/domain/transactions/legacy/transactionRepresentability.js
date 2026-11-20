@@ -89,6 +89,11 @@ export function checkRepresentability({ operation, draft, priorStoredRecord = nu
     return notRepresentable("paid by another person: no account of mine is used, the aggregate requires one");
   }
 
+  // A claim only (domain/reimbursement/claims.js isClaimOnly): a work expense with no account behind it, so nothing is spent. Same reason as Paid by.
+  if (draft.claimOnly || priorStoredRecord?.claimOnly) {
+    return notRepresentable("claim only: no account is used, the aggregate requires one");
+  }
+
   if (hasCategorySplit(draft)) {
     return notRepresentable("category split (catIds.length > 1 or catAllocations) has no Transaction.categoryId equivalent");
   }
