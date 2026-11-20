@@ -111,6 +111,7 @@ import PayGroupSheet from "./screens/PayGroupSheet";
 import SpreadSheet from "./screens/SpreadSheet";
 import { getCardUsage } from "./domain/cards/usage";
 import { shouldDebitOnLoanGiven, buildLoanDisbursalTxn } from "./domain/loans/disbursal";
+import { buildLoanGiven } from "./domain/loans/loanGiven";
 import { suggestBillPaymentVendors } from "./domain/bills/billVendorSuggestions";
 import { createSpread } from "./domain/budget/spread";
 import { isPendingSync, offlineStripText, offlineSavedText } from "./domain/payments/syncState";
@@ -4420,6 +4421,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       ? (sourceTxn.allocations||[]).map(a=>({...a}))
       : [];
     const [allocRows, setAllocRows] = useState(initialAllocRows);
+    // "This is a loan" under C: the money you hand over is a loan to ONE person, not spending (domain/loans/loanGiven.js).
+    const [loanTick, setLoanTick] = useState(false);
+    const [loanDue, setLoanDue] = useState("");
+    const [loanRate, setLoanRate] = useState("");
+    const loanCanShow = !isEditing && txnType==="expense" && allocRows.some(r=>r.targetType==="person" && r.mode==="owes");
+    const loanOn = loanCanShow && loanTick && allocRows.length===1;
     const [allocTargetPicker, setAllocTargetPicker] = useState(null);
     const [tagMode, setTagMode] = useState(isEditing && sourceTxn?.type==="expense"
       ? (sourceTxn.tagMode ||
@@ -5394,7 +5401,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       txnType==="cc_payment" ||
       txnType==="transfer" ||
       txnType==="settlement_in" ||
-      txnType==="cc_emi"
+      txnType==="cc_emi" ||
+      loanOn
     );
 
     const submit = (skipRefCheck) => {
@@ -5435,6 +5443,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         if(!ps.ok){ setRefDupWarning(ps.message.replace(/^(-?[\d.]+) still/, (m,n)=>`${sym}${fmt(Number(n))} still`).replace(/are (-?[\d.]+) more/, (m,n)=>`are ${sym}${fmt(Number(n))} more`)); return; }
       }
       setRefDupWarning("");
+      if(loanOn){
+        const loanRow = allocRows[0]; const loanPerson = getPerson(loanRow.targetId); const loanAcc = getAcc(accId);
+        if(!loanAcc || loanAcc.type==="cc" || isInvestmentAccount(loanAcc)){ setRefDupWarning("A loan comes out of a bank, cash or wallet account. Choose one under Paid from."); return; }
+        const lent = parseFloat(loanRow.amount)>0 ? parseFloat(loanRow.amount) : amt;
+        const built = buildLoanGiven({ personId:loanPerson?.id||"", personName:loanPerson?.name||"", amount:lent, date, fromAccId:loanAcc.id, note:note.trim(), genId, dueDate:loanDue, interestRate:loanRate });
+        if(!built.ok){ setRefDupWarning(built.error); return; }
+        setLoans(prev=>[built.loan,...prev]);
+        if(built.txn) setTxns(prev=>[built.txn,...prev]);
+        try{ localStorage.removeItem(DRAFT_KEY); }catch{}
+        setToast({ message:`${sym}${fmt(built.loan.principal)} lent to ${built.loan.name} and taken out of ${loanAcc.name}`, icon:"✓" });
+        closeModal();
+        return;
+      }
       // Real gap found via a live report: a passive banner (never blocking, by deliberate design
       // to avoid alert()'s WebView reliability issue) was too easy to miss for entries made days
       // apart, resulting in two genuinely separate transactions sharing one reference number with
@@ -6312,7 +6333,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
             : <div>
                 <div style={{ display:"flex",gap:8,marginBottom:10,flexWrap:"wrap" }}>
-                  {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["transfer","🔄","Transfer",T.info],["loan_given","🤝","Loan given",T.warn],["settlement_in","💼","Settlement",T.info],["investment","💹","Invest",T.info]].map(([v,ic,lb,col])=>(
+                  {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["transfer","🔄","Transfer",T.info],["settlement_in","💼","Settlement",T.info],["investment","💹","Invest",T.info]].map(([v,ic,lb,col])=>(
                     <button key={v} onClick={()=>{ if(v==="petty_cash"){ setPettyCashDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } if(v==="loan_given"){ setLoanGivenDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); if(v!=="transfer"){ setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId(""); } }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Nunito,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
                       <span style={{ fontSize:16 }}>{ic}</span>{lb}
                     </button>
@@ -7763,6 +7784,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         return s+(parseFloat(r.amount)||0);
                       },0))} of {sym}{fmt(amt)}</div>
                     </div>
+                  </div>
+                )}
+                {loanCanShow&&(
+                  <div data-testid="loan-box" style={{ background:T.input,borderRadius:12,padding:"10px 14px",marginBottom:8,opacity:allocRows.length===1?1:0.55 }}>
+                    <label style={{ display:"flex",alignItems:"center",gap:8,cursor:allocRows.length===1?"pointer":"not-allowed" }}>
+                      <input data-testid="loan-tick" type="checkbox" disabled={allocRows.length!==1} checked={loanOn} onChange={e=>setLoanTick(e.target.checked)} style={{ width:16,height:16,accentColor:T.accent }}/>
+                      <span style={{ color:T.text,fontSize:12,fontWeight:800 }}>🤝 This is a loan</span>
+                    </label>
+                    {allocRows.length!==1&&<div data-testid="loan-one-person" style={{ color:T.sub,fontSize:10,marginTop:4 }}>A loan goes to one person. Remove the others to lend.</div>}
+                    {loanOn&&(
+                      <div style={{ marginTop:8 }}>
+                        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+                          <div><span style={lbl}>Expected back (optional)</span><input data-testid="loan-due" style={inp} type="date" min={date} value={loanDue} onChange={e=>setLoanDue(e.target.value)}/></div>
+                          <div><span style={lbl}>Interest % a year (optional)</span><input data-testid="loan-rate" style={inp} type="text" inputMode="decimal" placeholder="0" value={loanRate} onChange={e=>setLoanRate(e.target.value.replace(/[^0-9.]/g,""))}/></div>
+                        </div>
+                        <div data-testid="loan-note" style={{ color:T.sub,fontSize:10,marginTop:6 }}>Saved as a loan to them, not as spending. Interest is a reminder: it is not added to what they owe.</div>
+                      </div>
+                    )}
                   </div>
                 )}
                 {showGuestPerson&&(
@@ -15691,6 +15730,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Groups and people are no longer clubbed: a group's \"owes you\" now counts only what is tagged to that group. A member's own expense shares not tagged to a group, and loans to them, stay on their own page. This lowers the group figure where they were included before",
             "Group page made clearer: Individual Spend now lists every member (including those with nothing) and counts shares recorded on the group's bills; the budget card says which month it is for; each figure says its range (FY or month, or all time for what is unpaid); each member tile shows what that person owes you in total (as on their own page) and how much of it is tagged to the group, with a line explaining what Group owes is made of",
             "A family (group) statement and one request for the whole family: on a group page, Statement for the group. It shows the family total for the dates you choose, who owes what, and each member's own statement, then Request the family's total in one message with your UPI handle",
+            "Lending money is now a box on the Add screen, not a top button: add one person, tap C (they owe), then tick \"This is a loan\". Set when it should come back and any yearly interest (interest is a reminder, not added to what they owe). It is saved as a loan, not as spending, and comes out of the account you chose under Paid from. The old \"Loan given\" button is gone",
             "Transactions filters: new Work expenses control (all work expenses, waiting for reimbursement, reimbursed) with a total, reimbursed and waiting summary",
             "Card statement with an EMI instalment printed as principal, interest and GST rows: Arth now shows it as ONE item and records it as one instalment of your EMI plan (the breakup is kept inside the entry and shown in its details), or links it to the entry you already have. It is never added as three separate expenses",
             "One purchase paid in parts (for example ₹500 as ₹100 cash plus ₹400 UPI): in Add or Edit Transaction, open Details and choose \"Paid in parts? Use more than one account\". It stays one purchase; each account only loses its own part",

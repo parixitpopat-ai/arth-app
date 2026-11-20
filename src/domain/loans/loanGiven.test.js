@@ -33,3 +33,16 @@ test("money is rounded to paise and the note is kept on both records", () => {
 test("the loan and its money-out entry carry different ids and are linked", () => {
   const r = buildLoanGiven(base); assert.notEqual(r.loan.id, r.txn.id); assert.equal(r.txn.linkedLoanId, r.loan.id);
 });
+test("an expected return date and a yearly interest rate are kept; interest is only a stored rate, not added to the amount", () => {
+  const r = buildLoanGiven({ ...base, dueDate: "2027-02-01", interestRate: "12" });
+  assert.equal(r.ok, true); assert.equal(r.loan.dueDate, "2027-02-01"); assert.equal(r.loan.hasInterest, true); assert.equal(r.loan.interestRate, 12);
+  assert.equal(r.loan.principal, 15000); assert.equal(r.loan.outstanding, 15000); assert.equal(r.txn.amount, 15000);
+});
+test("no return date and no interest leave them empty, as before", () => {
+  const r = buildLoanGiven(base); assert.equal(r.loan.dueDate, ""); assert.equal(r.loan.hasInterest, false); assert.equal(r.loan.interestRate, 0);
+});
+test("a return date before the lending date, or a nonsense interest rate, is refused", () => {
+  assert.match(buildLoanGiven({ ...base, dueDate: "2026-11-03" }).error, /before the date/);
+  for (const interestRate of ["-1", "101", "abc"]) assert.match(buildLoanGiven({ ...base, interestRate }).error, /Interest/);
+  assert.equal(buildLoanGiven({ ...base, dueDate: "2026-11-04" }).ok, true);
+});
