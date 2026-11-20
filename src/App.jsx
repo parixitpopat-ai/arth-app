@@ -141,6 +141,7 @@ import { getPersonSixMonthActivity } from "./domain/person/activity";
 import { getPersonReminders } from "./domain/person/reminders";
 import { getSectionOrder, moveSection } from "./domain/person/sectionOrder";
 import { getPersonTypeUILabel } from "./domain/person/personType";
+import { canOfferPettyPaid, chooseRowMode, choosePettyPaid } from "./domain/person/rowPayer";
 import { getSplitShareMode, getNewSplitRowMode, getRowsNeedingSplitChoice, getSplitDefaultChoice, withSplitDefault, SPLIT_DEFAULT_OPTIONS } from "./domain/person/splitDefault";
 import { buildNewPerson, applyPersonSetup } from "./domain/person/newPerson";
 import { buildNewGroup } from "./domain/group/newGroup";
@@ -7731,10 +7732,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                               {row.targetType==="person"&&!row.mode&&paidByPersonId!==row.targetId&&<span style={{ color:T.warn,fontSize:10,fontWeight:800 }}>Choose one</span>}
                               <div style={{ display:"flex",gap:4 }}>
                                 {[["spent_on","A"],["i_owe","O"],["owes","C"]].map(([m,label])=>(
-                                  <button key={m} title={label==="A"?"Attribute":label==="O"?"Own":"Collect"} onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,mode:m}:r))} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:800,color:row.mode===m?T.accent:T.sub,fontFamily:"Inter,sans-serif" }}>{label}</button>
+                                  <button key={m} title={label==="A"?"Attribute":label==="O"?"Own":"Collect"} onClick={()=>{ const next = chooseRowMode({ rows:allocRows, rowId:row.id, mode:m, paidByPersonId }); setAllocRows(next.rows); setPaidByPersonId(next.paidByPersonId); }} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:800,color:row.mode===m?T.accent:T.sub,fontFamily:"Inter,sans-serif" }}>{label}</button>
                                 ))}
-                                {row.targetType==="person"&&txnType==="expense"&&(
-                                  <button data-testid="alloc-petty" title="Paid from their petty cash" onClick={()=>{ if(paidByPersonId===row.targetId){ setPaidByPersonId(""); } else { setPaidByPersonId(row.targetId); setExpensePaymentMode("full"); } }} style={{ background:paidByPersonId===row.targetId?T.warn+"22":"none",border:`1px solid ${paidByPersonId===row.targetId?T.warn:T.border}`,color:paidByPersonId===row.targetId?T.warn:T.sub,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"Inter,sans-serif" }}>P</button>
+                                {row.targetType==="person"&&txnType==="expense"&&canOfferPettyPaid(settlements[row.targetId]?.pettyHeld, paidByPersonId===row.targetId)&&(
+                                  <button data-testid="alloc-petty" title="Paid from their petty cash" onClick={()=>{ const next = choosePettyPaid({ rows:allocRows, rowId:row.id, paidByPersonId }); setAllocRows(next.rows); setPaidByPersonId(next.paidByPersonId); if(next.paidByPersonId) setExpensePaymentMode("full"); }} style={{ background:paidByPersonId===row.targetId?T.warn+"22":"none",border:`1px solid ${paidByPersonId===row.targetId?T.warn:T.border}`,color:paidByPersonId===row.targetId?T.warn:T.sub,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"Inter,sans-serif" }}>P</button>
                                 )}
                               </div>
                             </div>
@@ -15731,6 +15732,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Group page made clearer: Individual Spend now lists every member (including those with nothing) and counts shares recorded on the group's bills; the budget card says which month it is for; each figure says its range (FY or month, or all time for what is unpaid); each member tile shows what that person owes you in total (as on their own page) and how much of it is tagged to the group, with a line explaining what Group owes is made of",
             "A family (group) statement and one request for the whole family: on a group page, Statement for the group. It shows the family total for the dates you choose, who owes what, and each member's own statement, then Request the family's total in one message with your UPI handle",
             "New look, step 1: a calmer light theme (soft grey-green background, a deeper green for actions) and the Inter font everywhere. Only colours and the font change: every screen, button and number works as before. The dark theme is unchanged for now",
+            "Add screen, person rows: P (paid from their petty cash) now appears only for someone who still holds petty cash from you, and P and A / O / C no longer both stay selected: choosing one clears the other",
             "Lending money is now a box on the Add screen, not a top button: add one person, tap C (they owe), then tick \"This is a loan\". Set when it should come back and any yearly interest (interest is a reminder, not added to what they owe). It is saved as a loan, not as spending, and comes out of the account you chose under Paid from. The old \"Loan given\" button is gone",
             "Transactions filters: new Work expenses control (all work expenses, waiting for reimbursement, reimbursed) with a total, reimbursed and waiting summary",
             "Card statement with an EMI instalment printed as principal, interest and GST rows: Arth now shows it as ONE item and records it as one instalment of your EMI plan (the breakup is kept inside the entry and shown in its details), or links it to the entry you already have. It is never added as three separate expenses",

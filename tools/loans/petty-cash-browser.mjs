@@ -90,10 +90,23 @@ try {
     await home(); await openAdd();
     rec("P0 the Add screen's top row no longer has a Petty cash chip", (await page.locator("button:visible", { hasText: "Petty cash" }).count()) === 0, {});
     await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("900");
-    await page.getByRole("button", { name: /Add person or group/ }).first().dispatchEvent("click"); await page.waitForTimeout(500);
-    await page.getByPlaceholder(/Search person or group/).fill("Priya"); await page.waitForTimeout(300);
-    await page.locator("button:visible", { hasText: "Priya Test" }).last().dispatchEvent("click"); await page.waitForTimeout(500);
-    rec("P1 her row shows A O C and P", (await T("alloc-petty").count()) === 1 && /\bA\b.*\bO\b.*\bC\b.*\bP\b/.test(await text()), {});
+    const addPriya = async () => { await page.getByRole("button", { name: /Add person or group/ }).first().dispatchEvent("click"); await page.waitForTimeout(500);
+      await page.getByPlaceholder(/Search person or group/).fill("Priya"); await page.waitForTimeout(300);
+      await page.locator("button:visible", { hasText: "Priya Test" }).last().dispatchEvent("click"); await page.waitForTimeout(500); };
+    await addPriya();
+    rec("P1a before any petty cash is given, her row shows A O C and NO P", (await T("alloc-petty").count()) === 0 && /\bA\b.*\bO\b.*\bC\b/.test(await text()), {});
+    // give her petty cash (a saved entry), then open the form again
+    await page.evaluate(() => { const t = JSON.parse(localStorage.getItem("arth_txns") || "[]"); t.unshift({ id: "pc1", type: "transfer", isPettyCash: true, pettyCashPersonId: "p_sp", desc: "Petty cash - Priya Test", amount: 5000, fromAccId: "bank1", toAccId: null, accId: null, date: "2026-11-01", catIds: [], people: {}, createdAt: 1 }); localStorage.setItem("arth_txns", JSON.stringify(t)); });
+    await home(); await openAdd();
+    await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("900"); await addPriya();
+    rec("P1 once she holds petty cash, her row shows A O C and P", (await T("alloc-petty").count()) === 1 && /\bA\b.*\bO\b.*\bC\b.*\bP\b/.test(await text()), {});
+    await page.locator("button[title='Collect']").first().dispatchEvent("click"); await page.waitForTimeout(250);
+    await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(300);
+    const cLit = await page.locator("button[title='Collect']").first().evaluate(e => getComputedStyle(e).color);
+    rec("P1b tapping P clears the C that was lit, so only P is chosen", (await T("paid-by-note").count()) === 1 && (await page.getByText("Choose one").count()) === 0, cLit);
+    await page.locator("button[title='Collect']").first().dispatchEvent("click"); await page.waitForTimeout(300);
+    rec("P1c tapping C afterwards removes P (no 'Paid by' note)", (await T("paid-by-note").count()) === 0, {});
+    await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(250); await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(250);
     await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(300);
     const note = (await T("paid-by-note").count()) ? await T("paid-by-note").innerText() : "";
     rec("P2 tapping P makes her the payer ('Paid by' note) and P lights up; tapping again clears it", /Priya Test paid/.test(note), note.slice(0, 80));
