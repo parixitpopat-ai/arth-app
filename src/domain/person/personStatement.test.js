@@ -117,3 +117,22 @@ test("Settle on a PAID bill links the payment entry (kind txn); the statement st
   assert.deepEqual([st.closing, st.settled], [0, true]);
   assert.equal(reconcileWithPosition(st, { txns, bills, meId: "me" }).matches, true);
 });
+
+test("two water meters (office and house): each bill names its meter; a lone electricity meter stays plain", () => {
+  const owes2 = a => ({ amount: a, mode: "owes", settled: false, settledAmt: 0, remainingAmt: a });
+  const bills = [
+    { id: "w1", name: "Water", billDate: "2026-07-27", billerAccountId: "a1", splitPeople: { r: owes2(500) } },
+    { id: "w2", name: "Water", billDate: "2026-07-28", billerAccountId: "a2", splitPeople: { r: owes2(700) } },
+    { id: "e1", name: "Electricity", billDate: "2026-07-20", billerAccountId: "a3", splitPeople: { r: owes2(900) } },
+  ];
+  const billerAccounts = [
+    { id: "a1", billerId: "water", name: "Office", provider: "City Water" },
+    { id: "a2", billerId: "water", name: "House", provider: "City Water" },
+    { id: "a3", billerId: "elec", name: "Home meter", provider: "Test Power" },
+  ];
+  const st = buildPersonStatement({ personId: "r", txns: [], bills, billerAccounts, from: "2026-07-01", to: "2026-07-31", nameOf, labelOf });
+  const titles = st.sections.flatMap(x => x.items).map(i => i.title).sort();
+  assert.deepEqual(titles, ["July Electricity Bill", "July Water Bill (House)", "July Water Bill (Office)"]);
+  const plain = buildPersonStatement({ personId: "r", txns: [], bills, from: "2026-07-01", to: "2026-07-31", nameOf, labelOf });
+  assert.deepEqual(plain.sections.flatMap(x => x.items).map(i => i.title).sort(), ["July Electricity Bill", "July Water Bill", "July Water Bill"]);   // no meter list given: unchanged
+});

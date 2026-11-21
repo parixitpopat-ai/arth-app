@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { billMonthTitle } from "./billMonthTitle.js";
+import { billMonthTitle, meterNicknamer } from "./billMonthTitle.js";
 
 const today = new Date("2026-11-21");
 test("a bill is named for the month it was generated in, not the month it falls due", () => {
@@ -26,4 +26,25 @@ test("no usable date, or no name, gives a plain name and never fails", () => {
   assert.equal(billMonthTitle({ name: "Water" }, { today }), "Water");
   assert.equal(billMonthTitle({ billDate: "2026-07-27" }, { today }), "July Bill");
   assert.equal(billMonthTitle(undefined, { today }), "Bill");
+});
+
+const meters = [
+  { id: "a1", billerId: "water", name: "Office", provider: "City Water", consumerNo: "WT-77120045" },
+  { id: "a2", billerId: "water", name: "House", provider: "City Water", consumerNo: "WT-55610321" },
+  { id: "a3", billerId: "elec", name: "Home meter", provider: "Test Power", consumerNo: "9001" },
+  { id: "a4", billerId: "water", name: "City Water", provider: "City Water", consumerNo: "WT-99871234" },
+];
+test("with several meters under one biller the meter's nickname is added; one meter stays plain", () => {
+  const nick = meterNicknamer(meters);
+  assert.equal(nick({ billerAccountId: "a1" }), "Office");
+  assert.equal(nick({ billerAccountId: "a2" }), "House");
+  assert.equal(nick({ billerAccountId: "a3" }), "");                      // the only electricity meter
+  assert.equal(nick({ billerAccountId: "zz" }), ""); assert.equal(nick({}), "");
+  assert.equal(billMonthTitle({ name: "Water", billDate: "2026-07-27" }, { today, nickname: nick({ billerAccountId: "a1" }) }), "July Water Bill (Office)");
+});
+test("a meter whose nickname only repeats the provider shows the last four digits of its number instead", () => {
+  assert.equal(meterNicknamer(meters)({ billerAccountId: "a4" }), "…1234");
+});
+test("the nickname is not added when the bill name already has it", () => {
+  assert.equal(billMonthTitle({ name: "Office Water", billDate: "2026-07-27" }, { today, nickname: "Office" }), "July Office Water Bill");
 });

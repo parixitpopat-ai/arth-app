@@ -9,7 +9,7 @@
 // settles (link.personId, else the payer), so a payment recorded under a group is divided among the members who owe: only the parts for the person asked about count.
 // A debt moved with "Transfer debt" shows as a MOVE (never as a payment); the new owner's "Transferred from" expense is an ordinary charge.
 // Refunds are not netted here, exactly as the person's page does not net them. Amounts are held in paise so nothing drifts.
-import { billMonthTitle } from "../bills/billMonthTitle.js";
+import { billMonthTitle, meterNicknamer } from "../bills/billMonthTitle.js";
 import { getBillSplitSource } from "../bills/splitSource.js";
 import { getFinancialPositionBreakdown } from "./financialPosition.js";
 
@@ -42,7 +42,7 @@ function chargeOf(t, personId, bills) {
  * @param {{personId:string, txns:Array, bills:Array, from:string, to:string, nameOf?:(id:string)=>string, labelOf?:(charge:object)=>string}} args
  *   from/to are YYYY-MM-DD, inclusive. labelOf groups a charge into a section ("Electricity"); the default puts bills under "Bills" and the rest under "Own expenses".
  */
-export function buildPersonStatement({ personId, txns = [], bills = [], from, to, nameOf = id => String(id), labelOf }) {
+export function buildPersonStatement({ personId, txns = [], bills = [], billerAccounts = [], from, to, nameOf = id => String(id), labelOf }) {
   const label = labelOf || (c => (c.billId ? "Bills" : "Own expenses"));
   const charges = [];
   for (const t of txns) { const c = chargeOf(t, personId, bills); if (c) charges.push(c); }
@@ -55,6 +55,10 @@ export function buildPersonStatement({ personId, txns = [], bills = [], from, to
     charges.push({ keys: [`bill:${b.id}`], kind: "bill", sourceId: b.id, billId: b.id, txnId: null, date: dateOf(b), title: billMonthTitle(b), billDate: dateOf(b), dueDate: String(b.dueDate || ""),
       periodFrom: String(b.billPeriodFrom || ""), periodTo: String(b.billPeriodTo || ""), billerAccountId: b.billerAccountId || null, bill: b, amount: P(info.amount), transferredTo: info.transferredTo || null, note: "", txnDate: "" });
   }
+
+  // Several meters under one biller (house, office, building): name the meter in the title. One meter stays as it is.
+  const meterNick = meterNicknamer(billerAccounts);
+  for (const c of charges) { if (c.kind === "bill" && c.bill) { const n = meterNick(c.bill); if (n) c.title = billMonthTitle({ ...c.bill, name: c.bill.name || c.bill.merchant || "Bill" }, { nickname: n }); } }
 
   // payments applied to this person, part by part
   const parts = [], unappliedPerson = [];
@@ -130,8 +134,8 @@ export function buildPersonStatement({ personId, txns = [], bills = [], from, to
  * A family: each member's statement, the sums, and the family payments not applied to any member (recorded under the group with no member linked).
  * @param {{memberIds:string[], groupId?:string}} args
  */
-export function buildFamilyStatement({ memberIds, groupId, txns = [], bills = [], from, to, nameOf, labelOf }) {
-  const members = memberIds.map(id => buildPersonStatement({ personId: id, txns, bills, from, to, nameOf, labelOf }));
+export function buildFamilyStatement({ memberIds, groupId, txns = [], bills = [], billerAccounts = [], from, to, nameOf, labelOf }) {
+  const members = memberIds.map(id => buildPersonStatement({ personId: id, txns, bills, billerAccounts, from, to, nameOf, labelOf }));
   const sum = k => R(members.reduce((s, m) => s + P(m[k]), 0));
   const unapplied = [];
   if (groupId != null) {

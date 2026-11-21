@@ -30,7 +30,7 @@ export default function PersonStatementSheet({ T, sym = "₹", fmt = n => Number
   const nameOf = id => (people.find(p => String(p.id) === String(id)) || {}).name || "someone";
   const labelOf = c => { const ba = billerAccounts.find(b => String(b.id) === String(c.billerAccountId)); return (ba && ba.type) || (c.billId ? "Bills" : "Own expenses"); };
   const money = n => `${sym}${fmt(Math.abs(n))}`;
-  const st = useMemo(() => (from && to && from <= to ? buildPersonStatement({ personId: person.id, txns, bills, from, to, nameOf, labelOf }) : null), [person.id, txns, bills, from, to, people, billerAccounts]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const st = useMemo(() => (from && to && from <= to ? buildPersonStatement({ personId: person.id, txns, bills, billerAccounts, from, to, nameOf, labelOf }) : null), [person.id, txns, bills, from, to, people, billerAccounts]);   // eslint-disable-line react-hooks/exhaustive-deps
   const recon = useMemo(() => (st && to >= today ? reconcileWithPosition(st, { txns, bills, meId }) : null), [st, to, today, txns, bills, meId]);
   const lines = useMemo(() => (st ? statementLines(st) : []), [st]);
   const isOn = l => (l.key in overrides ? overrides[l.key] : l.ticked);

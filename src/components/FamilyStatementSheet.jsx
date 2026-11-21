@@ -27,7 +27,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const labelOf = c => { const ba = billerAccounts.find(b => String(b.id) === String(c.billerAccountId)); return (ba && ba.type) || (c.billId ? "Bills" : "Own expenses"); };
   const memberIds = useMemo(() => (group.members || []).filter(id => String(id) !== String(meId) && id !== "__me__"), [group.members, meId]);
   const money = n => `${sym}${fmt(Math.abs(n))}`;
-  const fam = useMemo(() => (from && to && from <= to && memberIds.length ? buildFamilyStatement({ memberIds, groupId: group.id, txns, bills, from, to, nameOf, labelOf }) : null), [memberIds, group.id, txns, bills, from, to, people, billerAccounts]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const fam = useMemo(() => (from && to && from <= to && memberIds.length ? buildFamilyStatement({ memberIds, groupId: group.id, txns, bills, billerAccounts, from, to, nameOf, labelOf }) : null), [memberIds, group.id, txns, bills, from, to, people, billerAccounts]);   // eslint-disable-line react-hooks/exhaustive-deps
   const lines = useMemo(() => (fam ? familyLines(fam, nameOf) : []), [fam]);   // eslint-disable-line react-hooks/exhaustive-deps
   const isOn = l => (l.key in overrides ? overrides[l.key] : l.ticked);
   const simpleMessage = buildSimpleMessage(lines.map(l => ({ ...l, on: isOn(l) })), { upiHandle, withNames: true });
