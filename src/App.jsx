@@ -6385,7 +6385,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     not a transaction type, per ADR-030) - not new logic, just a different entry
                     point into modals that already exist. */}
                 <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
-                  <button onClick={()=>{ closeModal(); setTab("bills"); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>💳 Pay Credit Card</button>
                   <button onClick={()=>{ closeModal(); setShowAddLoan(true); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>🏦 Pay/Receive Loan</button>
                 </div>
               </div>
