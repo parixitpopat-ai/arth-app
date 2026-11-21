@@ -61,8 +61,24 @@ jobs:
       - name: Copy the Web build into the Android project
         run: npx cap sync android
 
+      # Signing key from repository secrets (docs/engineering/ANDROID-SIGNING.md). With no secret set, the build falls back to the old committed key.
+      - name: Load the signing key from secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ARTH_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/arth-release.keystore"
+            echo "ARTH_KEYSTORE_FILE=$RUNNER_TEMP/arth-release.keystore" >> "$GITHUB_ENV"
+            echo "::notice title=Signing::using the key from repository secrets"
+          else
+            echo "::warning title=Signing::no ARTH_KEYSTORE_BASE64 secret, using the old committed key (public, replace it)"
+          fi
+
       - name: Build the debug APK
         working-directory: android
+        env:
+          ARTH_KEYSTORE_PASSWORD: ${{ secrets.ARTH_KEYSTORE_PASSWORD }}
+          ARTH_KEY_ALIAS: ${{ secrets.ARTH_KEY_ALIAS }}
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Show the APK

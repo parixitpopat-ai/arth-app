@@ -17,15 +17,24 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    // ONE fixed signing key for the debug build. Without it every GitHub run made a brand-new debug key, and Android refuses to install an
-    // update signed with a different key over an installed app ("package conflicts"), so the app had to be uninstalled first.
-    // This is a debug key for personal sideloading, kept in the (private) repo on purpose. A Play Store release needs its own key, kept secret.
+    // ONE fixed signing key, so a new build installs over the old one (Android refuses an update signed with a different key).
+    // The repo is PUBLIC, so the key must not live in it. When ARTH_KEYSTORE_FILE is set (the GitHub workflow sets it from repository
+    // secrets, see docs/engineering/ANDROID-SIGNING.md) that key is used. Until the secrets exist, the old committed key is used so
+    // builds keep working; once the switch is done, delete arth-debug.keystore and the fallback below.
+    def envKeystore = System.getenv('ARTH_KEYSTORE_FILE')
     signingConfigs {
         debug {
-            storeFile file('arth-debug.keystore')
-            storePassword 'BH6Bcy5BbHtucFpL4cMa'
-            keyAlias 'arthdebug'
-            keyPassword 'BH6Bcy5BbHtucFpL4cMa'
+            if (envKeystore) {
+                storeFile file(envKeystore)
+                storePassword System.getenv('ARTH_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ARTH_KEY_ALIAS') ?: 'arthdebug'
+                keyPassword System.getenv('ARTH_KEY_PASSWORD') ?: System.getenv('ARTH_KEYSTORE_PASSWORD')
+            } else {
+                storeFile file('arth-debug.keystore')
+                storePassword 'BH6Bcy5BbHtucFpL4cMa'
+                keyAlias 'arthdebug'
+                keyPassword 'BH6Bcy5BbHtucFpL4cMa'
+            }
         }
     }
     buildTypes {
