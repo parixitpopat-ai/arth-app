@@ -32,9 +32,12 @@ try {
   await page.locator("button[title='Collect']").first().dispatchEvent("click"); await page.waitForTimeout(300);
   await page.locator("input[type='number'][placeholder='0']").first().fill("900"); await page.waitForTimeout(300);
   rec("W3 Collect with 900 says Raj Test will owe you 900", /Raj Test will owe you ₹900/.test(await T("row-summary").innerText()), await T("row-summary").innerText());
+  rec("W3b the same sentence sits above the save button", /Raj Test will owe you ₹900/.test(await T("save-result").innerText()), await T("save-result").innerText());
   await page.locator("button[title='Own']").first().dispatchEvent("click"); await page.waitForTimeout(300);
   rec("W4 Own says You will owe Raj Test 900", /You will owe Raj Test ₹900/.test(await T("row-summary").innerText()), await T("row-summary").innerText());
+  rec("W4b and it follows Own", /You will owe Raj Test ₹900/.test(await T("save-result").innerText()), {});
   await page.locator("button[title='Attribute']").first().dispatchEvent("click"); await page.waitForTimeout(300);
+  rec("W5b tagging only owes nothing, so no sentence", (await T("save-result").count()) === 0, {});
   rec("W5 Attribute says it is only tagged and nothing is owed", /Nothing is owed/.test(await T("row-summary").innerText()), await T("row-summary").innerText());
   await page.screenshot({ path: "/tmp/claude-0/-home-claude-repo/271b6b7c-7f32-56d9-9a55-d75ca8158c50/scratchpad/add-people.png" });
 } catch (e) { rec("RUN", false, String(e).slice(0, 400)); }

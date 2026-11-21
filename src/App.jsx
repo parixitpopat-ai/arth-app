@@ -8203,6 +8203,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               if(!missing.length) return null;
               return <div data-testid="form-needs-details" style={{ background:T.warn+"14",border:`1px solid ${T.warn}33`,borderRadius:10,padding:"8px 12px",color:T.sub,fontSize:11,fontWeight:700 }}>❓ Still missing: {missing.map(g=>GAP_LABELS[g].replace("No ","").toLowerCase()).join(", ")}. You can save now; it will wait under Needs details.</div>;
             })()}
+            {/* New look: say what saving does to what is owed, right above the button (the Design canvas "Save · Raj Test owes you ₹900"). The button itself keeps its name. */}
+            {txnType==="expense"&&!paidByPersonId&&allocRows.length>0&&(()=>{
+              const amountOf = r => (r.items||[]).length>0 ? (chargeShares.rows[r.id]?.totalPaise||0)/100 : (parseFloat(r.amount)||0);
+              const nameOf = r => r.targetType==="group" ? (groups.find(g=>g.id===r.targetId)?.name||"the group") : (getPerson(r.targetId)?.name||"them");
+              const owe = allocRows.filter(r=>r.mode==="owes"&&amountOf(r)>0), iowe = allocRows.filter(r=>r.mode==="i_owe"&&amountOf(r)>0);
+              const sum = rs => rs.reduce((t,r)=>t+amountOf(r),0);
+              const parts = [];
+              if(owe.length) parts.push(`${owe.length===1?nameOf(owe[0]):`${owe.length} people or groups`} will owe you ${sym}${fmt(sum(owe))}`);
+              if(iowe.length) parts.push(`You will owe ${iowe.length===1?nameOf(iowe[0]):`${iowe.length} people or groups`} ${sym}${fmt(sum(iowe))}`);
+              if(!parts.length) return null;
+              return <div data-testid="save-result" style={{ color:T.info,background:T.info+"14",borderRadius:10,padding:"8px 12px",fontSize:12,fontWeight:700 }}>{parts.join(" · ")}</div>;
+            })()}
             <div style={{ display:"grid",gridTemplateColumns:"1fr 2fr",gap:10 }}>
               <button onClick={closeModal} style={btnG}>Cancel</button>
               <button onClick={()=>submit()} style={{ ...btnP,opacity:canSubmit?1:0.5 }}>{itemsBlock?`Save · lines must equal ${sym}${fmt(amt)}`:eduMode&&eduShowErrors&&eduErrorCount>0?`Fix ${eduErrorCount} item${eduErrorCount===1?"":"s"}`:canSubmit?(isEditing?"Save Changes ✓":"Add ✓"):txnType==="investment"?"Fill name & amount":"Fill vendor & amount"}</button>
@@ -15907,6 +15919,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Add a loan: Wealth > Loans Taken now has \"+ Add a loan\". The \"Pay/Receive Loan\" shortcut on the Add screen is gone.",
             "New look, Add screen: the type is now one switch, Spent / Received / Moved / More (Settlement and Invest are under More), and the amount comes first, then who it was for. Everything else on the form works as before.",
             "New look, Add screen, step 2: your three most-used categories are one-tap chips above the category picker, and each person row says what it does (\"It was for them. Just tagging it\", \"I owe them\", \"They owe me\") with a line underneath such as \"Raj will owe you ₹900\". Nothing underneath changed.",
+            "Add screen, step 3: right above Add, one line says what saving does to what is owed (for example \"Raj Test will owe you ₹900\" or \"You will owe Raj Test ₹300\"). It shows only when someone owes someone.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
