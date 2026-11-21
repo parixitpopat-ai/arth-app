@@ -24,9 +24,9 @@ function Row({ T, k, v }) {
   );
 }
 
-export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, provider, relationship, accountName, sym, fmt, onClose, onRecordPayment, onSpread, spreadLabel, onEdit, onShare, onOpenProvider, onConvert, extras, txns }) {
+export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, provider, relationship, accountName, sym, fmt, onClose, onRecordPayment, onSpread, spreadLabel, onEdit, onShare, onOpenProvider, onConvert, onSkip, onPutBack, extras, txns }) {
   const bt = getBadgeText(badge, bill);
-  const open = badge.kind !== "paid" && badge.kind !== "cancelled";
+  const open = badge.kind !== "paid" && badge.kind !== "cancelled" && badge.kind !== "skipped";
   const dueLine = (() => {
     if (!bill.dueDate) return "";
     const d = `${formatDayMonth(bill.dueDate)} ${YEAR(bill.dueDate)}`;
@@ -111,6 +111,12 @@ export default function BillDetailSheet({ T, bill, badge, ledger, forLabel, prov
           </button>
         ) : null}
 
+        {open && onSkip ? (
+          <button data-testid="bill-skip" onClick={onSkip} style={{ marginTop: 10, width: "100%", minHeight: 44, background: "none", border: `1px solid ${T.border}`, borderRadius: RADIUS.md, color: T.text, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Skip this month</button>
+        ) : null}
+        {badge.kind === "skipped" && onPutBack ? (
+          <button data-testid="bill-put-back" onClick={onPutBack} style={{ marginTop: 16, width: "100%", minHeight: 48, background: T.accent, border: "none", borderRadius: RADIUS.md, color: T.accentInk || "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>Put back, it is owed again</button>
+        ) : null}
         {open && onConvert ? (
           <button data-testid="bill-convert" onClick={onConvert} style={{ marginTop: 10, width: "100%", minHeight: 44, background: "none", border: `1px solid ${T.border}`, borderRadius: RADIUS.md, color: T.text, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Not a bill? Make it a transaction</button>
         ) : null}

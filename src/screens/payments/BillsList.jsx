@@ -94,6 +94,7 @@ export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, o
   const dueRows = notOverdue.filter(r => r.badge.days <= DUE_SOON_DAYS);
   const laterRows = notOverdue.filter(r => !(r.badge.days <= DUE_SOON_DAYS));
   const paidRows = showAllPaid ? groups.paid : groups.paid.slice(0, 5);
+  const setAside = [...groups.cancelled, ...groups.skipped]; // cancelled and skipped bills: out of every total, kept in one fold
   return (
     <div style={{ padding: "14px 16px 24px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -146,12 +147,12 @@ export default function BillsList({ T, view, forFilter, onForFilter, sym, fmt, o
       <Group T={T} title="Paid" rows={paidRows} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />
       {groups.paid.length > 5 ? <button onClick={onToggleAllPaid} style={{ background: "none", border: "none", color: T.accent, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: "4px 0" }}>{showAllPaid ? "Show fewer paid bills" : `See all ${groups.paid.length} paid bills`}</button> : null}
 
-      {groups.cancelled.length ? (
+      {setAside.length ? (
         <>
           <button data-testid="payments-cancelled-toggle" onClick={onToggleCancelled} style={{ display: "flex", justifyContent: "space-between", width: "100%", background: "none", border: `1px dashed ${T.borderStrong}`, borderRadius: 14, padding: "12px 14px", marginTop: 16, color: T.sub, fontSize: 13, cursor: "pointer" }}>
-            <span>Cancelled</span><span>{groups.cancelled.length} bill{groups.cancelled.length === 1 ? "" : "s"} · not in totals {showCancelled ? "▴" : "▾"}</span>
+            <span>{groups.skipped.length ? (groups.cancelled.length ? "Cancelled or skipped" : "Skipped") : "Cancelled"}</span><span>{setAside.length} bill{setAside.length === 1 ? "" : "s"} · not in totals {showCancelled ? "▴" : "▾"}</span>
           </button>
-          {showCancelled ? <div style={{ marginTop: 8 }}>{groups.cancelled.map(r => <BillRow key={r.bill.id} T={T} row={r} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />)}</div> : null}
+          {showCancelled ? <div style={{ marginTop: 8 }}>{setAside.map(r => <BillRow key={r.bill.id} T={T} row={r} sym={sym} fmt={fmt} onOpen={onOpen} txns={txns} pendingSync={pendingSync} />)}</div> : null}
         </>
       ) : null}
     </div>

@@ -64,6 +64,7 @@ const mapBillToCommittedSpending = (b, groups, refundTotalsByBill, partialRemain
     : getMyBillShare(b, groups, refundTotalsByBill),
   date: b.dueDate || null,
   status: b.status || "unpaid",
+  skipped: Boolean(b.skipped), // a skipped bill is not owed this cycle (domain/bills/skipBill.js)
   recurs: Boolean(b.recurring), // metadata only — NOT used as an inclusion filter
 });
 

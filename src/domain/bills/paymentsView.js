@@ -43,6 +43,7 @@ export function getBillPeriodRange(bill) {
 export function getBadgeText(badge, bill) {
   switch (badge.kind) {
     case "cancelled": return { text: "Cancelled", tone: "muted" };
+    case "skipped": return { text: "Skipped", tone: "muted" };
     case "paid": return { text: `✓ Paid${bill?.paidDate ? ` ${formatDayMonth(bill.paidDate)}` : ""}`, tone: "positive" };
     case "check": return { text: getStatementCheckText(bill), tone: "attention" };
     case "overdue": return { text: `${badge.days} day${badge.days === 1 ? "" : "s"} overdue`, tone: "negative" };
@@ -115,7 +116,7 @@ export function buildPaymentsView({ bills, contributions, refDate = new Date(), 
   const byDue = (a, b) => String(a.bill.dueDate || "9999").localeCompare(String(b.bill.dueDate || "9999"));
   // Open = something is still owed. A ₹0 Bill (e.g. a card statement with nothing due) has
   // nothing to pay, so it neither counts nor blocks "All bills paid" (PY-27).
-  const open = rows.filter(r => r.badge.kind !== "paid" && r.badge.kind !== "cancelled" && r.badge.balance.remaining > 0.005);
+  const open = rows.filter(r => r.badge.kind !== "paid" && r.badge.kind !== "cancelled" && r.badge.kind !== "skipped" && r.badge.balance.remaining > 0.005);
   const groups = {
     overdue: open.filter(r => r.badge.kind === "overdue").sort(byDue),
     dueToday: open.filter(r => r.badge.kind !== "overdue" && r.badge.days === 0).sort(byDue),
@@ -123,6 +124,7 @@ export function buildPaymentsView({ bills, contributions, refDate = new Date(), 
     upcoming: open.filter(r => r.badge.kind !== "overdue" && r.badge.days !== 0 && r.badge.days !== 1).sort(byDue),
     paid: rows.filter(r => r.badge.kind === "paid").sort((a, b) => String(b.bill.paidDate || "").localeCompare(String(a.bill.paidDate || ""))),
     cancelled: rows.filter(r => r.badge.kind === "cancelled"),
+    skipped: rows.filter(r => r.badge.kind === "skipped"),
     // A zero-amount card statement the bank disagrees with: something to check, not to pay. Not in any total. (One with no
     // bank figure either is an empty cycle and is not shown at all.)
     check: rows.filter(r => needsStatementCheck(r.bill)).sort(byDue),

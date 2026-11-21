@@ -103,6 +103,7 @@ import { attemptSchoolAttributionChange, pickMostRecentSchedule } from "./screen
 import { getFeeSchedulesForRelationship } from "./domain/school/feeScheduleLink";
 import { calculateProjectedBalance, calculateSafeToSpend, averageOfLastNMonthsVariableSpend, buildCashFlowTimeline, hasTransientNegativeBalance } from "./domain/financialEngine/engine";
 import { computeNextDueDate, computeNextPeriod } from "./domain/bills/periodCalculations";
+import { canSkipBill, skipBill, unskipBill, buildNextBillAfterSkip } from "./domain/bills/skipBill";
 import useOnline from "./hooks/useOnline";
 import { splitAllocation } from "./domain/budget/commitmentSplit";
 import { buildReadiness, shiftMonthKey } from "./domain/budget/readiness";
@@ -1809,6 +1810,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     }
   }, [accounts]);
 
+  // Skip this month (domain/bills/skipBill.js): the bill stops counting as owed, nothing is paid, and a recurring
+  // bill still gets its next cycle. Put back undoes the skip (the next cycle's bill, if made, stays).
+  const skipBillThisMonth = useCallback(bill => {
+    if(!canSkipBill(bill)) return;
+    const billRelationship = membershipRelationships.find(r=>{
+      if(r.status!=="active" || String(r.billerAccountId)!==String(bill.billerAccountId)) return false;
+      const t = getRelationshipTarget(r);
+      return t.targetType===bill.forType && String(t.targetId)===String(bill.forId);
+    });
+    const scheduleOwnsRegeneration = Boolean(billRelationship && billRelationship.billingMode==="regular" && hasCompleteSchedule(billRelationship));
+    const next = buildNextBillAfterSkip(bill, { today:todayStr(), genId, scheduleOwnsRegeneration, computeNextDueDate, computeNextPeriod });
+    setBills(p=>{ const marked=p.map(x=>x.id===bill.id?skipBill(x,{today:todayStr()}):x); return next?[next,...marked]:marked; });
+    setToast({ message: next?`Skipped. Next bill is due ${formatShortDate(next.dueDate)||next.dueDate}.`:"Skipped. It no longer counts as owed.", icon:"⏭️" });
+  }, [membershipRelationships]);
+  const putBillBack = useCallback(bill => { setBills(p=>p.map(x=>x.id===bill.id?unskipBill(x):x)); setToast({ message:"Put back. It counts as owed again.", icon:"↩️" }); }, []);
+
   // Confirms MarkBillPaidModal — moved out of the Bills list's inline button handler so the
   // account and payment reference are chosen explicitly instead of guessed (account) or never
   // collected at all (reference). Otherwise the exact same transaction-creation, bill-paid, and
@@ -1831,6 +1848,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const paidAmount = payment.amount!==undefined ? Number(payment.amount||0) : balanceBefore.remaining;
     const { applied } = planBillPayment(bill, contributions, paidAmount);
     const becomesPaid = bill.isCcStatement ? true : applied >= balanceBefore.remaining - 0.005;
+    const skipsRest = Boolean(payment.skipRest) && !becomesPaid && canSkipBill(bill); // pay this much, skip the rest (skipBill.js)
     // Payments v2 H2 — everything that can throw (payment planning, next-cycle dates) is computed BEFORE any
     // write, so a failure leaves nothing half-saved and the Record payment sheet can say so honestly.
     // ADR-039 §7 — "the schedule becomes the only generation mechanism. Regeneration stops for
@@ -1844,7 +1862,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     });
     const scheduleOwnsRegeneration = billRelationship && billRelationship.billingMode==="regular" && hasCompleteSchedule(billRelationship);
     let nextBill = null;
-    if(becomesPaid && bill.recurring && bill.autoGenerate!==false && !scheduleOwnsRegeneration){
+    if((becomesPaid||skipsRest) && bill.recurring && bill.autoGenerate!==false && !scheduleOwnsRegeneration){
       const nextDue = computeNextDueDate(bill, paymentDate);
       const nextPeriod = computeNextPeriod(bill, paymentDate);
       const nextValidFrom = bill.billingModel==="prorata" ? nextDue : null;
@@ -1886,6 +1904,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     }
     setBills(p=>p.map(x=>x.id===bill.id?{...x,
       ...(becomesPaid?{status:"paid",paidDate:paymentDate}:{}),
+      ...(skipsRest?{skipped:true,skippedDate:paymentDate,skippedReason:"rest"}:{}),
       ...(isFirstPayment?{paidByTxnId:paymentTxnId}:{}),
       lastPaidAmount:paidAmount,lastPaidDate:paymentDate,lastPaidAt:paymentTxnId}:x));
     // WP-OBL-04a: dual-write — also record a real Contribution alongside the
@@ -15828,6 +15847,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Bills now show the month they were generated in wherever they are listed by name: a person\u0027s bills, a group\u0027s bills, a connection\u0027s open bills, the bill details you share, and what someone owes you. Old bills too, since it comes from each bill\u0027s own date. Nothing saved is renamed",
             "Home: the two tiles that repeated other things are gone (People & Groups, already a tab, and Budget, already a card above). Statements now name each bill for the month it was generated in, for example \"July Water Bill\", taken from the bill\u0027s own date and not the due date. Only the name shown in the message changes; the saved bill is untouched. If you track several meters under one biller (house, office, building), each bill also carries its meter\u0027s nickname, for example \"July Water Bill (Office)\"; with one meter the name stays plain",
             "Make an older entry a loan: open an entry where one person owes you the whole amount and tap \"Make this a loan\". You see first what changes (your spending does not change, how much was already paid back, what is still owed), add a return date and interest if you like, and confirm. Repayments you already recorded become money received on the loan, and your balance does not change. There is no undo, because the app never removes a loan, so check the summary before you confirm",
+            "Skip this month: open a bill (not a card statement) and tap \"Skip this month\". It stops counting as owed and leaves Money Required, a recurring bill still makes its next one, and it waits under Skipped where \"Put back\" undoes it. Paying only part of a bill? Tick \"Skip the rest\" and the unpaid remainder is not owed this month.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
@@ -22417,6 +22437,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             onSpread={()=>openSpreadFor({ key:`bill:${vb.id}`, label:vb.name, amount:ledger.amount, cashDate:vb.status==="paid"?(vb.paidDate||vb.lastPaidDate||vb.dueDate):vb.dueDate })}
             onEdit={()=>{ setViewingBillId(null); setEditingBill(vb); }}
             onConvert={vb.isCcStatement?undefined:()=>setConvertingBill(vb)}
+            onSkip={canSkipBill(vb)?()=>{ skipBillThisMonth(vb); setViewingBillId(null); }:undefined}
+            onPutBack={vb.skipped?()=>putBillBack(vb):undefined}
             onOpenProvider={ba?()=>{ setViewingBillId(null); setActiveBillerForAction(ba); }:undefined}
             onShare={shareBill} txns={txns}
             extras={renderBillExtras(vb)}/>;

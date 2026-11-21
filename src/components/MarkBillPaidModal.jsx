@@ -30,6 +30,8 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
   // next bill (only offered for a Bill that renews). Nothing is applied unless this is switched on.
   const [applyNext, setApplyNext] = useState(false);
   const [split, setSplit] = useState(false);
+  // Pay this much and skip the rest (domain/bills/skipBill.js): only for a part payment of a bill that is not a card statement.
+  const [skipRest, setSkipRest] = useState(false);
   const [lines, setLines] = useState([]);
   const lineId = () => `pl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
@@ -39,6 +41,8 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
   const splitLines = lines.map(l => ({ ...l, amount: parseFloat(l.amount) || 0 }));
   const splitDiff = paidWithDifference(splitLines, amount);
   const splitOk = !split || isPaidWithBalanced(splitLines, amount);
+  const isPart = !isCard && amount > 0 && applied < remaining - 0.005;
+  const skipsRest = skipRest && isPart;
   const canSave = (split ? true : Boolean(accId)) && splitOk && amount > 0 && Boolean(date) && !failed;
   const startSplit = () => {
     setFailed(false); setSplit(true);
@@ -176,6 +180,13 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
         </div>
       )}
 
+      {isPart && (
+        <label data-testid="skip-rest-box" style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 14, minHeight: TOUCH.min, color: T.text, fontSize: 14 }}>
+          <input type="checkbox" data-testid="skip-rest-tick" checked={skipRest} onChange={e => setSkipRest(e.target.checked)} style={{ width: 22, height: 22 }} />
+          <span><b>Skip the rest</b><br /><span style={{ color: T.sub, fontSize: 12 }}>Pay {sym}{fmt(applied)} now. The other {sym}{fmt(remaining - applied)} is not owed this month.</span></span>
+        </label>
+      )}
+
       {failed && (
         <div data-testid="record-payment-error" role="alert" style={{ marginTop: 14, background: T.card, border: `1px solid ${T.danger || T.border}`, borderRadius: RADIUS.md, padding: "12px 14px" }}>
           <div style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>Couldn't record payment</div>
@@ -185,7 +196,7 @@ export default function MarkBillPaidModal({ bill, balance, forLabel, accounts, d
       )}
       <button
         data-testid="record-payment-confirm"
-        onClick={() => { if (!canSave) return; try { onConfirm(split ? splitLines[0].accId : accId, transactionRef.trim(), split ? { amount, date, applyExtraToNext: applyNext && unallocated > 0, paymentLines: splitLines.map(({ id, method, accId: a, amount: n }) => ({ id, method, accId: a, amount: n })) } : { amount, date, applyExtraToNext: applyNext && unallocated > 0 }); } catch (e) { setFailed(true); } }}
+        onClick={() => { if (!canSave) return; try { onConfirm(split ? splitLines[0].accId : accId, transactionRef.trim(), split ? { amount, date, skipRest: skipsRest, applyExtraToNext: applyNext && unallocated > 0, paymentLines: splitLines.map(({ id, method, accId: a, amount: n }) => ({ id, method, accId: a, amount: n })) } : { amount, date, skipRest: skipsRest, applyExtraToNext: applyNext && unallocated > 0 }); } catch (e) { setFailed(true); } }}
         disabled={!canSave}
         style={{ marginTop: 16, width: "100%", minHeight: TOUCH.min, background: canSave ? T.accent : T.border, border: "none", borderRadius: RADIUS.md, color: T.accentInk || "#fff", fontWeight: 700, fontSize: 15, cursor: canSave ? "pointer" : "not-allowed", fontFamily: FONT.sans }}
       >

@@ -111,15 +111,16 @@ const isYMD = v => /^\d{4}-\d{2}-\d{2}/.test(String(v || ""));
 
 /**
  * The single D-16 badge for a Bill, in the approved order:
- * Cancelled → Paid → Check (a zero-amount card statement: attention, not a
+ * Cancelled → Paid → Skipped → Check (a zero-amount card statement: attention, not a
  * payable and never overdue) → Overdue → Partially paid → Due (within 14
  * days, including today) → Unpaid.
- * Returns { kind, days, balance } — kind: cancelled | paid | check | overdue | partial | due | unpaid.
+ * Returns { kind, days, balance } — kind: cancelled | paid | skipped | check | overdue | partial | due | unpaid.
  */
 export function getBillBadge(bill, contributions, refDate = new Date()) {
   const balance = getBillBalance(bill, contributions);
   if (balance.status === "cancelled") return { kind: "cancelled", days: null, balance };
   if (balance.status === "paid") return { kind: "paid", days: null, balance };
+  if (bill?.skipped) return { kind: "skipped", days: null, balance };
   if (isZeroAmountStatement(bill)) return { kind: "check", days: null, balance };
   if (isYMD(bill?.dueDate)) {
     const days = Math.round((noon(bill.dueDate) - noon(localYMD(refDate))) / 86400000);
