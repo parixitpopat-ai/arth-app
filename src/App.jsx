@@ -18,6 +18,7 @@ import SlowLoadEscape from "./components/SlowLoadEscape";
 import PhotoOptimizeCard from "./components/PhotoOptimizeCard";
 import LoanGivenSheet from "./components/LoanGivenSheet";
 import MakeLoanSheet from "./components/MakeLoanSheet";
+import { billMonthTitle, meterNicknamer } from "./domain/bills/billMonthTitle";
 import { loanCandidate, previewConversion, convertCollectToLoan } from "./domain/loans/collectToLoan";
 import LoanEntryNotice from "./components/LoanEntryNotice";
 import NeedsDetailsSheet from "./components/NeedsDetailsSheet";
@@ -1115,6 +1116,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [showAddExpectedIncome, setShowAddExpectedIncome] = useState(false);
   const [editingExpectedIncome, setEditingExpectedIncome] = useState(null);
   const [billerAccounts, setBillerAccounts] = useState(()=>JSON.parse(localStorage.getItem("arth_biller_accounts")||"[]"));
+  // A bill shown by the month it was generated in, with its meter when there are several ("July Water Bill (Office)"). Display only: the saved name is never changed (domain/bills/billMonthTitle.js).
+  const meterNick = useMemo(()=>meterNicknamer(billerAccounts),[billerAccounts]);
+  const billTitle = b => billMonthTitle(b, { nickname:meterNick(b) });
   const [billers, setBillers] = useState(()=>JSON.parse(localStorage.getItem("arth_billers")||"[]"));
   const [memberships, setMemberships] = useState(()=>JSON.parse(localStorage.getItem("arth_memberships")||"[]"));
   // The persistent Provider->Person relationship, separate from the payment/coverage records
@@ -12461,7 +12465,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {personBills.map((b,idx,arr)=>(
                   <div key={b.id} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:idx<arr.length-1?`1px solid ${T.border}`:"none" }}>
                     <div>
-                      <div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{b.name}</div>
+                      <div style={{ color:T.text,fontSize:13,fontWeight:600 }}>{billTitle(b)}</div>
                       <div style={{ color:T.danger,fontSize:11 }}>Due {b.dueDate}</div>
                     </div>
                     <div style={{ textAlign:"right" }}>
@@ -13146,7 +13150,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {gBills.map(b=>(
                   <div key={b.id} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:`1px solid ${T.border}` }}>
                     <div>
-                      <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{b.name}</div>
+                      <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{billTitle(b)}</div>
                       <div style={{ color:T.danger,fontSize:11 }}>Due {b.dueDate}</div>
                     </div>
                     <div style={{ color:T.danger,fontSize:13,fontWeight:700 }}>{sym}{fmt(getNetBillAmount(b, refundTotalsByBill))}</div>
@@ -15821,6 +15825,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Group page made clearer: Individual Spend now lists every member (including those with nothing) and counts shares recorded on the group's bills; the budget card says which month it is for; each figure says its range (FY or month, or all time for what is unpaid); each member tile shows what that person owes you in total (as on their own page) and how much of it is tagged to the group, with a line explaining what Group owes is made of",
             "A family (group) statement and one request for the whole family: on a group page, Statement for the group. It shows the family total for the dates you choose, who owes what, and each member's own statement, then Request the family's total in one message with your UPI handle",
             "New look, step 1: a calmer light theme (soft grey-green background, a deeper green for actions) and the Inter font everywhere. Only colours and the font change: every screen, button and number works as before. The dark theme is unchanged for now",
+            "Bills now show the month they were generated in wherever they are listed by name: a person\u0027s bills, a group\u0027s bills, a connection\u0027s open bills, the bill details you share, and what someone owes you. Old bills too, since it comes from each bill\u0027s own date. Nothing saved is renamed",
             "Home: the two tiles that repeated other things are gone (People & Groups, already a tab, and Budget, already a card above). Statements now name each bill for the month it was generated in, for example \"July Water Bill\", taken from the bill\u0027s own date and not the due date. Only the name shown in the message changes; the saved bill is untouched. If you track several meters under one biller (house, office, building), each bill also carries its meter\u0027s nickname, for example \"July Water Bill (Office)\"; with one meter the name stays plain",
             "Make an older entry a loan: open an entry where one person owes you the whole amount and tap \"Make this a loan\". You see first what changes (your spending does not change, how much was already paid back, what is still owed), add a return date and interest if you like, and confirm. Repayments you already recorded become money received on the loan, and your balance does not change. There is no undo, because the app never removes a loan, so check the summary before you confirm",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
@@ -22002,7 +22007,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       {openBills.map(b=>(
                         <div key={b.id} onClick={()=>{ setActiveBillerForAction(null); setViewingBillId(b.id); }} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderTop:`1px solid ${T.danger}22`,cursor:"pointer" }}>
                           <div>
-                            <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{b.name}{b.dueDate?` · due ${formatShortDate(b.dueDate)||b.dueDate}`:""}</div>
+                            <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{billTitle(b)}{b.dueDate?` · due ${formatShortDate(b.dueDate)||b.dueDate}`:""}</div>
                           </div>
                           <div style={{ color:T.danger,fontSize:12,fontWeight:800 }}>{sym}{fmt(b.amount)} ›</div>
                         </div>
@@ -22397,7 +22402,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           const shell = ba?.billerId ? billers.find(x=>x.id===ba.billerId) : null;
           const ledger = getBillLedger(vb, contributions, txns);
           const shareBill = async ()=>{
-            const text = [`${vb.name}${getBillPeriodLabel(vb)?` · ${getBillPeriodLabel(vb)}`:""}`, `Amount ${sym}${fmt(ledger.amount)}`, vb.dueDate?`Due ${formatShortDate(vb.dueDate)||vb.dueDate}`:null, ledger.remaining>0?`Balance ${sym}${fmt(ledger.remaining)}`:"Paid"].filter(Boolean).join("\n");
+            const text = [`${billTitle(vb)}${getBillPeriodLabel(vb)?` · ${getBillPeriodLabel(vb)}`:""}`, `Amount ${sym}${fmt(ledger.amount)}`, vb.dueDate?`Due ${formatShortDate(vb.dueDate)||vb.dueDate}`:null, ledger.remaining>0?`Balance ${sym}${fmt(ledger.remaining)}`:"Paid"].filter(Boolean).join("\n");
             try{ if(navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); alert("Bill details copied."); } }catch(e){ if(e?.name!=="AbortError") navigator.clipboard?.writeText(text).catch(()=>{}); }
           };
           return <BillDetailSheet T={T} sym={sym} fmt={fmt} bill={vb}

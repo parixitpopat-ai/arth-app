@@ -19,6 +19,7 @@
 // mode:"owes_by_me", settlement_in, settlement_out) instead of routing through a function built
 // for a different question.
 
+import { billMonthTitle } from "../bills/billMonthTitle.js";
 import { getBillSplitSource } from "../bills/splitSource.js";
 import { remainingShare } from "../shared/remainingShare.js";
 import { getPaybacks } from "./payback.js";
@@ -138,7 +139,7 @@ export function getFinancialPositionBreakdown(personId, txns, bills, meId) {
     if (!(remaining > 0)) continue;
     items.push({
       id: b.id, kind: "bill",
-      desc: b.name || b.merchant || "Bill",
+      desc: billMonthTitle(b),
       amount: remaining,
       mode: info.mode === "owes" ? "owesMe" : "iOwe",
       date: b.dueDate || null,

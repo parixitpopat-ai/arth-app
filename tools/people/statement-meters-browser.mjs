@@ -33,6 +33,11 @@ try {
   rec("M1 each water bill names its meter, and the lone electricity meter stays plain", lines.some(l => /July Water Bill \(Office\)/.test(l)) && lines.some(l => /July Water Bill \(House\)/.test(l)) && lines.some(l => /July Electricity Bill\b(?! \()/.test(l)), lines);
   const msg = await T("stmt-message").innerText();
   rec("M2 the message to send says the same, with the total", /July Water Bill \(Office\) - 500/.test(msg) && /July Water Bill \(House\) - 700/.test(msg) && /Total = 2100/.test(msg), msg);
+  await page.goto(APP); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(400);
+  await page.getByText(/^people$/i).last().dispatchEvent("click"); await page.waitForTimeout(900);
+  await page.getByText("Ravi", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(900);
+  const body = await page.evaluate(() => document.body.innerText.replace(/\s+/g, " "));
+  rec("M3 the person's page names the old bills by month too (July Water Bill with its meter)", /July Water Bill \(Office\)/.test(body) && /July Water Bill \(House\)/.test(body) && /July Electricity Bill/.test(body), body.slice(body.search(/July/), body.search(/July/) + 200));
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 400)); }
 await browser.close(); try { process.kill(-server.pid); } catch {}
