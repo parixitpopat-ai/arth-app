@@ -25,6 +25,7 @@ export const DARK = {
   info: "#06b6d4", infoSoft: "rgba(6,182,212,0.16)", infoText: "#22d3ee",
   mutedSoft: "rgba(139,139,171,0.18)", mutedText: "#b9b9cf",
   purple: "#8b5cf6", sh: "rgba(0,0,0,0.6)",
+  coming: "#6ea8ff", owing: "#f0a56a",   // money coming to you / money you owe (Today, People)
 };
 
 export const LIGHT = {
@@ -38,6 +39,7 @@ export const LIGHT = {
   info: "#0e7490", infoSoft: "rgba(14,116,144,0.10)", infoText: "#0e7490",
   mutedSoft: "rgba(86,98,91,0.10)", mutedText: "#3f4a44",
   purple: "#7c3aed", sh: "rgba(0,0,0,0.06)",
+  coming: "#174ea6", owing: "#9a4508",   // money coming to you / money you owe (Today, People)
 };
 
 export const PALETTE = ["#f0a500","#22c55e","#3b82f6","#ef4444","#a855f7","#06b6d4","#f97316","#ec4899","#84cc16","#14b8a6","#8b5cf6","#f43f5e","#0ea5e9","#10b981","#f59e0b"];

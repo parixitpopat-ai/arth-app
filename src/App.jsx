@@ -142,6 +142,8 @@ import { getPersonReminders } from "./domain/person/reminders";
 import { getSectionOrder, moveSection } from "./domain/person/sectionOrder";
 import { getPersonTypeUILabel } from "./domain/person/personType";
 import { canOfferPettyPaid, chooseRowMode, choosePettyPaid } from "./domain/person/rowPayer";
+import { buildNeedsYou, summariseBetweenPeople } from "./domain/home/needsYou";
+import { findRepaymentProblems } from "./domain/person/repaymentCheck";
 import { isClaimOnly, getWaitingClaims, autoPickClaims, summarisePick, applyReimbursement } from "./domain/reimbursement/claims";
 import { getSplitShareMode, getNewSplitRowMode, getRowsNeedingSplitChoice, getSplitDefaultChoice, withSplitDefault, SPLIT_DEFAULT_OPTIONS } from "./domain/person/splitDefault";
 import { buildNewPerson, applyPersonSetup } from "./domain/person/newPerson";
@@ -9686,7 +9688,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // [Upcoming, Budget Health] paired -> AI Insight -> Recent Activity -> Quick
   // Actions. Adjacent pairs render as a 2-column grid — see PAIR_RULES below.
   // Enforced for every user, not just fresh installs.
-  const DEFAULT_CARD_ORDER = ["safeToSpend","moneyRequired","healthScore","bills","budgetHealth","aiInsight","recent","quickActions"];
+  const DEFAULT_CARD_ORDER = ["safeToSpend","needsYou","betweenPeople","moneyRequired","healthScore","bills","budgetHealth","aiInsight","recent","quickActions"];
   // Previously only contained the OLD DEFAULT_CARD_ORDER's five keys, which never
   // included healthScore or aiInsight — meaning any saved cardOrder silently
   // stripped both cards out via the filter step below, for every user, not just
@@ -10772,7 +10774,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         );
       })(),
       safeToSpend: (
-        <div key="safeToSpend" onClick={()=>setTab("budget")} style={{ ...card,textAlign:"center",cursor:"pointer",background:`linear-gradient(135deg,${T.accent}1c,${T.card})`,border:`1px solid ${T.accent}33`,padding:20 }}>
+        <div key="safeToSpend" onClick={()=>setTab("budget")} style={{ ...card,cursor:"pointer",padding:20 }}>
           <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>LEFT IN BUDGET · {homeTodayDate.toLocaleString("en-IN",{month:"long"}).toUpperCase()}</div>
           {homeMonthBudget<=0 ? (
             <div style={{ color:T.sub,fontSize:12,padding:"8px 0" }}>No budget set yet.</div>
@@ -10785,8 +10787,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             const pct = v => `${Math.max(0,Math.min(100,(v/homeMonthBudget)*100))}%`;
             return (
               <>
-                <div style={{ color:homeSafeToSpend>=0?T.accent:T.danger,fontSize:34,fontWeight:900,margin:"6px 0 2px",fontVariantNumeric:"tabular-nums" }}>{homeBudgetLeft.state==="over"?`Overspent by ${sym}${fmt(homeBudgetLeft.overBy)}`:`${sym}${fmt(homeSafeToSpend)}`}</div>
-                <div style={{ display:"flex",alignItems:"baseline",justifyContent:"center",gap:8 }}>
+                <div style={{ color:homeSafeToSpend>=0?T.accent:T.danger,fontFamily:"Manrope,Inter,sans-serif",fontSize:46,fontWeight:800,letterSpacing:"-0.02em",lineHeight:1.05,margin:"8px 0 6px",fontVariantNumeric:"tabular-nums" }}>{homeBudgetLeft.state==="over"?`Overspent by ${sym}${fmt(homeBudgetLeft.overBy)}`:`${sym}${fmt(homeSafeToSpend)}`}</div>
+                <div style={{ display:"flex",alignItems:"baseline",justifyContent:"flex-start",gap:8 }}>
                   <span style={{ color:T.text,fontSize:20,fontWeight:900,fontVariantNumeric:"tabular-nums" }}>Spent {sym}{fmt(homeMonthSpend)}</span>
                   <span style={{ color:T.sub,fontSize:14,fontWeight:600 }}>of {sym}{fmt(homeMonthBudget)}</span>
                 </div>
@@ -10800,12 +10802,56 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </>
             );
           })()}
-          <div style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:4,marginTop:8 }}>
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"flex-start",gap:4,marginTop:8 }}>
             <span style={{ fontSize:12 }}>{homeStatus.icon}</span><span style={{ color:homeStatus.color,fontSize:11,fontWeight:700 }}>{homeStatus.label}</span>
           </div>
           <div style={{ color:T.accent,fontSize:10,fontWeight:700,marginTop:8 }}>View calculation →</div>
         </div>
       ),
+      // Today: what needs the person now (domain/home/needsYou.js). Absent when there is nothing, so Home does not carry an empty box.
+      needsYou: (()=>{
+        const owedPeople = Object.entries(settlements||{}).filter(([pid,st])=>(st?.owesMe||0)>0 && getPerson(pid) && !getPerson(pid).isMe).map(([pid,st])=>({ personId:pid, name:getPerson(pid).name, amount:st.owesMe }));
+        const repaymentProblems = people.filter(pp=>!pp.isMe && !isPersonArchived(pp)).map(pp=>{ const r = findRepaymentProblems({ personId:pp.id, txns, bills }); return { personId:pp.id, name:pp.name, count:(r.unreduced||[]).length+(r.unlinked||[]).length }; }).filter(x=>x.count>0);
+        const items = buildNeedsYou({ commitments:futureMoneyPlanned?.committedSpending||[], today:todayStr(), owedPeople, repaymentProblems });
+        if(items.length===0) return null;
+        const open = it => { if(it.kind==="bill"){ setTab("bills"); return; } const pp = getPerson(it.personId); if(pp){ setSelectedPerson(pp); setTab("people"); } };
+        return (
+          <div key="needsYou" data-testid="home-needs-you" style={{ display:"flex",flexDirection:"column",gap:8 }}>
+            <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase",padding:"0 4px" }}>Needs you · {items.length}</div>
+            {items.map(it=>(
+              <button key={it.key} data-testid={`needs-${it.kind}`} onClick={()=>open(it)} style={{ ...card,display:"flex",alignItems:"center",gap:12,padding:"12px 14px",cursor:"pointer",textAlign:"left",width:"100%",fontFamily:"Inter,sans-serif" }}>
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ color:T.text,fontSize:14,fontWeight:700 }}>{it.kind==="owed" ? `${it.title} ${M(`${sym}${fmt(it.amount)}`)}` : it.title}</div>
+                  <div style={{ color:it.kind==="bill"&&it.days<=0?T.warn:T.sub,fontSize:12,fontWeight:it.kind==="bill"&&it.days<=0?700:500,marginTop:2 }}>{it.sub}{it.kind==="bill"?` · ${M(`${sym}${fmt(it.amount)}`)}`:""}</div>
+                </div>
+                <span aria-hidden="true" style={{ color:T.sub,fontSize:20 }}>›</span>
+              </button>
+            ))}
+          </div>
+        );
+      })(),
+      // Today: money between the person and others, in one picture (coming to you, including loans, against what you owe).
+      betweenPeople: (()=>{
+        const vals = Object.values(settlements||{});
+        const b = summariseBetweenPeople({ owesMe:vals.map(st=>st?.owesMe||0), iOwe:vals.map(st=>st?.iOwe||0), loansGiven:loanGivenTotal });
+        if(!b.hasAny) return null;
+        return (
+          <div key="betweenPeople" data-testid="home-between-people" onClick={()=>setTab("people")} style={{ ...card,cursor:"pointer",padding:16 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline" }}>
+              <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase" }}>Between people</span>
+              {b.loans>0&&<span style={{ color:T.sub,fontSize:11 }}>includes {M(`${sym}${fmt(b.loans)}`)} lent</span>}
+            </div>
+            <div style={{ display:"flex",height:10,borderRadius:5,overflow:"hidden",gap:2,margin:"10px 0" }} aria-hidden="true">
+              {b.coming>0&&<div style={{ flex:b.coming,background:T.coming }}/>}
+              {b.owe>0&&<div style={{ flex:b.owe,background:T.owing }}/>}
+            </div>
+            <div style={{ display:"flex",justifyContent:"space-between",gap:12 }}>
+              <div><div style={{ color:T.coming,fontSize:12,fontWeight:700 }}>Coming to you</div><div data-testid="between-coming" style={{ color:T.text,fontFamily:"Manrope,Inter,sans-serif",fontSize:20,fontWeight:800,fontVariantNumeric:"tabular-nums" }}>{M(`${sym}${fmt(b.coming)}`)}</div></div>
+              <div style={{ textAlign:"right" }}><div style={{ color:T.owing,fontSize:12,fontWeight:700 }}>You owe</div><div data-testid="between-owe" style={{ color:T.text,fontFamily:"Manrope,Inter,sans-serif",fontSize:20,fontWeight:800,fontVariantNumeric:"tabular-nums" }}>{M(`${sym}${fmt(b.owe)}`)}</div></div>
+            </div>
+          </div>
+        );
+      })(),
       moneyRequired: (
         <div key="moneyRequired" onClick={()=>setTab("outlook")} style={{ ...card,cursor:"pointer",padding:14 }}>
           <div style={{ display:"flex",alignItems:"center",gap:6,marginBottom:4 }}>
@@ -15774,6 +15820,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Group page made clearer: Individual Spend now lists every member (including those with nothing) and counts shares recorded on the group's bills; the budget card says which month it is for; each figure says its range (FY or month, or all time for what is unpaid); each member tile shows what that person owes you in total (as on their own page) and how much of it is tagged to the group, with a line explaining what Group owes is made of",
             "A family (group) statement and one request for the whole family: on a group page, Statement for the group. It shows the family total for the dates you choose, who owes what, and each member's own statement, then Request the family's total in one message with your UPI handle",
             "New look, step 1: a calmer light theme (soft grey-green background, a deeper green for actions) and the Inter font everywhere. Only colours and the font change: every screen, button and number works as before. The dark theme is unchanged for now",
+            "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
             "A work expense that has been reimbursed no longer counts as your spending: its claimed amount (for example ₹4,000 of a ₹4,800 hotel) comes off Spent, the budget and the category breakdown. Work expenses still waiting count in full until the money arrives. This also lowers past months where those expenses were made",
@@ -20969,7 +21016,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   return (
     <div style={{ background:T.bg,minHeight:"100vh",transition:"background 0.3s" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Manrope:wght@600;700;800&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;}
         ::-webkit-scrollbar{display:none;}
         input,textarea,select{font-size:16px!important;-webkit-text-size-adjust:100%;}
