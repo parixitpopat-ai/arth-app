@@ -6374,17 +6374,63 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <button onClick={()=>setTxnType("expense")} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif",whiteSpace:"nowrap" }}>← Change type</button>
               </div>
             : <div>
-                <div style={{ display:"flex",gap:8,marginBottom:10,flexWrap:"wrap" }}>
-                  {[["expense","💸","Expense",T.danger],["income","💚","Income",T.success],["transfer","🔄","Transfer",T.info],["settlement_in","💼","Settlement",T.info],["investment","💹","Invest",T.info]].map(([v,ic,lb,col])=>(
-                    <button key={v} onClick={()=>{ if(v==="petty_cash"){ setPettyCashDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } if(v==="loan_given"){ setLoanGivenDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); if(v!=="transfer"){ setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId(""); } }} style={{ flex:1,background:txnType===v?col+"22":"none",border:`1px solid ${txnType===v?col:T.border}`,borderRadius:10,padding:"8px 4px",cursor:"pointer",fontSize:9,fontWeight:700,color:txnType===v?col:T.sub,fontFamily:"Inter,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",gap:3 }}>
-                      <span style={{ fontSize:16 }}>{ic}</span>{lb}
-                    </button>
-                  ))}
-                </div>
+                {/* Add, step 3 of the new look: one switch, Spent / Received / Moved / More (the Design canvas "New entry"). The same five types
+                    as before: Spent = expense, Received = income, Moved = transfer, More = settlement and invest, shown just below. The click
+                    handler is unchanged. */}
+                {(()=>{
+                  const chooseType = v => { if(v==="petty_cash"){ setPettyCashDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } if(v==="loan_given"){ setLoanGivenDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); if(v!=="transfer"){ setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId(""); }};
+                  const moreTypes = ["settlement_in","investment","petty_cash"];
+                  const inMore = moreTypes.includes(txnType);
+                  const seg = [["expense","Spent",T.danger],["income","Received",T.success],["transfer","Moved",T.info],["__more","More",T.info]];
+                  return (
+                    <div style={{ marginBottom:12 }}>
+                      <div role="group" aria-label="Type" style={{ display:"flex",background:T.input,borderRadius:14,padding:3,gap:2 }}>
+                        {seg.map(([v,lb,col])=>{
+                          const active = v==="__more" ? inMore : txnType===v;
+                          return <button key={v} data-testid={`type-${v==="__more"?"more":v}`} aria-pressed={active} onClick={()=>v==="__more"?chooseType("settlement_in"):chooseType(v)}
+                            style={{ flex:1,minHeight:44,borderRadius:11,border:"none",background:active?T.card:"transparent",boxShadow:active?`0 0 0 1px ${col}`:"none",color:active?col:T.sub,fontWeight:active?800:600,fontSize:13,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>{lb}</button>;
+                        })}
+                      </div>
+                      {inMore&&(
+                        <div style={{ display:"flex",gap:8,marginTop:8,flexWrap:"wrap" }}>
+                          {[["settlement_in","💼 Settlement"],["investment","💹 Invest"]].map(([v,lb])=>(
+                            <button key={v} data-testid={`type-${v}`} onClick={()=>chooseType(v)} style={{ minHeight:40,padding:"0 14px",borderRadius:20,border:`1px solid ${txnType===v?T.info:T.border}`,background:txnType===v?T.info+"22":"none",color:txnType===v?T.info:T.sub,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>{lb}</button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
           }
 
           <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+            {/* New look: the amount comes first (the Design canvas "New entry"), then who it was for. Same fields, same handlers, moved up. */}
+            {/* Amount + collapsed Details trigger combined into one row to save a line, per
+                direct request. Only when Details is collapsed -- expanded Details stays
+                full-width below, with Amount on its own row above it. Full/EMI moved to render
+                AFTER this combined row (it used to sit between Amount and Details; now that
+                those two share a row, Full/EMI can't sit between them anymore). */}
+            <div style={{ display:"flex",gap:8 }}>
+              <div style={{ flex: (txnType==="expense"&&!showDetailsCard) ? 1 : "unset", width: (txnType==="expense"&&!showDetailsCard) ? "auto" : "100%" }}>
+                <span style={lbl}>Amount ({sym}) *</span>
+                <input style={{ ...inp,fontSize:28,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} readOnly={eduActive&&eduTotal>0} title={eduActive&&eduTotal>0?"Sum of the Education lines":undefined} onChange={e=>{ setAmountTyped(true); setAmount(cleanMoneyInput(e.target.value)); }}/>
+              </div>
+            {/* T3 slice 1: DetailsCard, per Arth UI-2B T3 Expense Shell.dc.html (T3-3/T3-4).
+                This slice: Paid Via + Date only. Collapsed row always shows the current value
+                per T3-3's rule ("a collapsed row always states its current value"); tapping
+                pushes an expanded view rather than an in-place accordion. */}
+            {txnType==="expense"&&!showDetailsCard&&(
+                <button onClick={()=>setShowDetailsCard(true)} style={{ ...inp,flex:1,display:"flex",flexDirection:"column",alignItems:"flex-start",justifyContent:"center",cursor:"pointer",textAlign:"left",gap:2 }}>
+                  <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Details ▾</span>
+                  <span style={{ color:T.text,fontSize:12,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap" }}>
+                    {(() => { if(paidByPersonId) return `👤 Paid by ${getPerson(paidByPersonId)?.name||""}`; if(payParts && expensePaymentMode==="full") return `💳 Paid in ${payParts.length} parts`; const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
+                    <span style={{ color:T.sub }}>·</span>
+                    {formatShortDate(date)||date}
+                  </span>
+                </button>
+              )}
+            </div>
             {/* STEP 2 — WHO + AMOUNT + DATE */}
             {(txnType!=="cc_payment"&&txnType!=="transfer")&&(
               <div style={{ position:"relative" }}>
@@ -6463,31 +6509,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             )}
 
 
-            {/* Amount + collapsed Details trigger combined into one row to save a line, per
-                direct request. Only when Details is collapsed -- expanded Details stays
-                full-width below, with Amount on its own row above it. Full/EMI moved to render
-                AFTER this combined row (it used to sit between Amount and Details; now that
-                those two share a row, Full/EMI can't sit between them anymore). */}
-            <div style={{ display:"flex",gap:8 }}>
-              <div style={{ flex: (txnType==="expense"&&!showDetailsCard) ? 1 : "unset", width: (txnType==="expense"&&!showDetailsCard) ? "auto" : "100%" }}>
-                <span style={lbl}>Amount ({sym}) *</span>
-                <input style={{ ...inp,fontSize:22,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} readOnly={eduActive&&eduTotal>0} title={eduActive&&eduTotal>0?"Sum of the Education lines":undefined} onChange={e=>{ setAmountTyped(true); setAmount(cleanMoneyInput(e.target.value)); }}/>
-              </div>
-            {/* T3 slice 1: DetailsCard, per Arth UI-2B T3 Expense Shell.dc.html (T3-3/T3-4).
-                This slice: Paid Via + Date only. Collapsed row always shows the current value
-                per T3-3's rule ("a collapsed row always states its current value"); tapping
-                pushes an expanded view rather than an in-place accordion. */}
-            {txnType==="expense"&&!showDetailsCard&&(
-                <button onClick={()=>setShowDetailsCard(true)} style={{ ...inp,flex:1,display:"flex",flexDirection:"column",alignItems:"flex-start",justifyContent:"center",cursor:"pointer",textAlign:"left",gap:2 }}>
-                  <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Details ▾</span>
-                  <span style={{ color:T.text,fontSize:12,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap" }}>
-                    {(() => { if(paidByPersonId) return `👤 Paid by ${getPerson(paidByPersonId)?.name||""}`; if(payParts && expensePaymentMode==="full") return `💳 Paid in ${payParts.length} parts`; const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
-                    <span style={{ color:T.sub }}>·</span>
-                    {formatShortDate(date)||date}
-                  </span>
-                </button>
-              )}
-            </div>
             {/* Full/EMI, moved here (after the combined Amount+Details row) -- still a MODE
                 toggle, same pattern as Itemise Purchase, not bundled with Reference. */}
             {txnType==="expense"&&(paidByPersonId || people.some(p=>!p.isMe && !isPersonArchived(p) && canOfferPettyPaid(settlements[p.id]?.pettyHeld, false)))&&(
@@ -15860,6 +15881,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Coming card EMIs now show in Money Required: a TV bought on a card EMI lists each instalment (for example \"TV EMI 3/9\") on the due date of the statement that will carry it, so you see next month's EMI before the statement closes. Once an instalment is on a statement it is counted there, not twice.",
             "Skip a SIP for one month: on an investment's Recurring Schedule, tap \"Skip December\" (the coming month). That month's instalment stops counting as owed and no due-today reminder fires; \"Put back\" undoes it and later months carry on.",
             "Add a loan: Wealth > Loans Taken now has \"+ Add a loan\". The \"Pay/Receive Loan\" shortcut on the Add screen is gone.",
+            "New look, Add screen: the type is now one switch, Spent / Received / Moved / More (Settlement and Invest are under More), and the amount comes first, then who it was for. Everything else on the form works as before.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
