@@ -6416,21 +6416,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <span style={lbl}>Amount ({sym}) *</span>
                 <input style={{ ...inp,fontSize:28,fontWeight:800,textAlign:"center" }} type="text" inputMode="decimal" placeholder={`e.g. ${sym}5,500`} value={amount||""} readOnly={eduActive&&eduTotal>0} title={eduActive&&eduTotal>0?"Sum of the Education lines":undefined} onChange={e=>{ setAmountTyped(true); setAmount(cleanMoneyInput(e.target.value)); }}/>
               </div>
+            </div>
             {/* T3 slice 1: DetailsCard, per Arth UI-2B T3 Expense Shell.dc.html (T3-3/T3-4).
                 This slice: Paid Via + Date only. Collapsed row always shows the current value
                 per T3-3's rule ("a collapsed row always states its current value"); tapping
                 pushes an expanded view rather than an in-place accordion. */}
             {txnType==="expense"&&!showDetailsCard&&(
-                <button onClick={()=>setShowDetailsCard(true)} style={{ ...inp,flex:1,display:"flex",flexDirection:"column",alignItems:"flex-start",justifyContent:"center",cursor:"pointer",textAlign:"left",gap:2 }}>
-                  <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Details ▾</span>
-                  <span style={{ color:T.text,fontSize:12,display:"flex",alignItems:"center",gap:4,flexWrap:"wrap" }}>
+                <button data-testid="details-open" onClick={()=>setShowDetailsCard(true)} style={{ ...inp,width:"100%",display:"flex",flexDirection:"row",alignItems:"center",justifyContent:"space-between",cursor:"pointer",textAlign:"left",gap:8,minHeight:44 }}>
+                  <span style={{ color:T.text,fontSize:13,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap" }}>
+                    <span style={{ color:T.sub }}>from</span>
                     {(() => { if(paidByPersonId) return `👤 Paid by ${getPerson(paidByPersonId)?.name||""}`; if(payParts && expensePaymentMode==="full") return `💳 Paid in ${payParts.length} parts`; const a = paidViaAccounts.find(x=>x.id===accId); return a ? `${accIcon(a.type)} ${a.name}` : "Select account"; })()}
-                    <span style={{ color:T.sub }}>·</span>
+                    <span style={{ color:T.sub }}>on</span>
                     {formatShortDate(date)||date}
                   </span>
+                  <span style={{ color:T.accent,fontSize:12,fontWeight:800 }}>Details ▾</span>
                 </button>
               )}
-            </div>
             {/* STEP 2 — WHO + AMOUNT + DATE */}
             {(txnType!=="cc_payment"&&txnType!=="transfer")&&(
               <div style={{ position:"relative" }}>
@@ -15920,6 +15921,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "New look, Add screen: the type is now one switch, Spent / Received / Moved / More (Settlement and Invest are under More), and the amount comes first, then who it was for. Everything else on the form works as before.",
             "New look, Add screen, step 2: your three most-used categories are one-tap chips above the category picker, and each person row says what it does (\"It was for them. Just tagging it\", \"I owe them\", \"They owe me\") with a line underneath such as \"Raj will owe you ₹900\". Nothing underneath changed.",
             "Add screen, step 3: right above Add, one line says what saving does to what is owed (for example \"Raj Test will owe you ₹900\" or \"You will owe Raj Test ₹300\"). It shows only when someone owes someone.",
+            "Add screen, step 4: the amount now has the full width, and the account and date read as one line under it (\"from Test Savings on 22-Nov-2026\") with \"Details\" on the right opening the same card as before.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
