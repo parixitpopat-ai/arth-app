@@ -95,13 +95,13 @@ try {
       await page.locator("button:visible", { hasText: "Priya Test" }).last().dispatchEvent("click"); await page.waitForTimeout(500); };
     await addPriya();
     rec("P1x with nobody holding petty cash the whole 'Paid by' row is gone", (await T("paid-by").count()) === 0, {});
-    rec("P1a before any petty cash is given, her row shows A O C and NO P", (await T("alloc-petty").count()) === 0 && /\bA\b.*\bO\b.*\bC\b/.test(await text()), {});
+    rec("P1a before any petty cash is given, her row shows the three choices and NO petty-cash choice", (await T("alloc-petty").count()) === 0 && /Just tagging it.*I owe them.*They owe me/.test(await text()), {});
     // give her petty cash (a saved entry), then open the form again
     await page.evaluate(() => { const t = JSON.parse(localStorage.getItem("arth_txns") || "[]"); t.unshift({ id: "pc1", type: "transfer", isPettyCash: true, pettyCashPersonId: "p_sp", desc: "Petty cash - Priya Test", amount: 5000, fromAccId: "bank1", toAccId: null, accId: null, date: "2026-11-01", catIds: [], people: {}, createdAt: 1 }); localStorage.setItem("arth_txns", JSON.stringify(t)); });
     await home(); await openAdd();
     await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("900"); await addPriya();
     rec("P1y once she holds petty cash the 'Paid by' row returns with Me and her only", (await T("paid-by").count()) === 1 && /Me/.test(await T("paid-by").innerText()) && /Priya Test/.test(await T("paid-by").innerText()), (await T("paid-by").count()) ? await T("paid-by").innerText() : "");
-    rec("P1 once she holds petty cash, her row shows A O C and P", (await T("alloc-petty").count()) === 1 && /\bA\b.*\bO\b.*\bC\b.*\bP\b/.test(await text()), {});
+    rec("P1 once she holds petty cash, her row shows the three choices and the petty-cash choice", (await T("alloc-petty").count()) === 1 && /Just tagging it.*I owe them.*They owe me.*They paid from their petty cash/.test(await text()), {});
     await page.locator("button[title='Collect']").first().dispatchEvent("click"); await page.waitForTimeout(250);
     await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(300);
     const cLit = await page.locator("button[title='Collect']").first().evaluate(e => getComputedStyle(e).color);

@@ -7351,6 +7351,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     +
                   </button>
                 </div>
+                {/* New look: your three most-used categories as one-tap chips (the Design canvas "New entry"); the full picker is below. */}
+                {(()=>{
+                  const counts = {};
+                  txns.forEach(t=>{ if(t.type==="expense" && t.catId) counts[t.catId]=(counts[t.catId]||0)+1; });
+                  const top = Object.entries(counts).sort((x,y)=>y[1]-x[1]).map(([id])=>getCat(id)).filter(c=>c&&c.id).slice(0,3);
+                  if(top.length===0) return null;
+                  return (
+                    <div data-testid="quick-cats" style={{ display:"flex",gap:8,flexWrap:"wrap",marginBottom:8 }}>
+                      {top.map(c=>{
+                        const on = catIds.length===1 && catIds[0]===c.id && subIds.length===0;
+                        return <button key={c.id} data-testid={`quick-cat-${c.id}`} aria-pressed={on} onClick={()=>{ if(on){ setCatIds([]); setSubIds([]); } else { setCatIds([c.id]); setSubIds([]); } setCatAllocations({}); setCategoryTouched(true); }}
+                          style={{ minHeight:40,padding:"0 14px",borderRadius:20,border:`1.5px solid ${on?T.accent:T.border}`,background:on?T.accent+"22":"none",color:on?T.accent:T.sub,fontWeight:on?800:600,fontSize:13,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>{c.icon?`${c.icon} `:""}{c.name}</button>;
+                      })}
+                    </div>
+                  );
+                })()}
                 {/* WP-T1: Picker trigger, per Arth Component Spec.dc.html ("Trigger = Input's
                     box exactly"). Selection semantics (catIds/subIds/catAllocations) unchanged
                     -- identical logic to the removed chip-wall, moved into onToggle/onClear
@@ -7805,15 +7821,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         if(!target) return null;
                         return (
                           <div key={row.id} style={{ display:"flex",flexDirection:"column",gap:6,background:T.card,borderRadius:10,padding:"8px 10px" }}>
-                            <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                            <div style={{ display:"flex",alignItems:"center",gap:6,flexWrap:"wrap" }}>
                               <span style={{ flex:1,color:T.text,fontSize:13,fontWeight:700 }}>{row.targetType==="group"?(target.icon||"👥"):(target.emoji||"👤")} {target.name}</span>
                               {row.targetType==="person"&&!row.mode&&paidByPersonId!==row.targetId&&<span style={{ color:T.warn,fontSize:10,fontWeight:800 }}>Choose one</span>}
-                              <div style={{ display:"flex",gap:4 }}>
-                                {[["spent_on","A"],["i_owe","O"],["owes","C"]].map(([m,label])=>(
-                                  <button key={m} title={label==="A"?"Attribute":label==="O"?"Own":"Collect"} onClick={()=>{ const next = chooseRowMode({ rows:allocRows, rowId:row.id, mode:m, paidByPersonId }); setAllocRows(next.rows); setPaidByPersonId(next.paidByPersonId); }} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:11,fontWeight:800,color:row.mode===m?T.accent:T.sub,fontFamily:"Inter,sans-serif" }}>{label}</button>
+                              {/* New look: each choice says what it does (the Design canvas "Anyone else in this?"). A / O / C are unchanged underneath. */}
+                              <div data-testid="row-modes" style={{ display:"flex",flexDirection:"column",gap:6,width:"100%" }}>
+                                {[["spent_on",row.targetType==="group"?"For the group. Just tagging it":"It was for them. Just tagging it"],["i_owe",row.targetType==="group"?"I owe the group":"I owe them"],["owes",row.targetType==="group"?"The group owes me":"They owe me"]].map(([m,label])=>(
+                                  <button key={m} title={m==="spent_on"?"Attribute":m==="i_owe"?"Own":"Collect"} onClick={()=>{ const next = chooseRowMode({ rows:allocRows, rowId:row.id, mode:m, paidByPersonId }); setAllocRows(next.rows); setPaidByPersonId(next.paidByPersonId); }} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:10,padding:"0 12px",minHeight:44,textAlign:"left",cursor:"pointer",fontSize:13,fontWeight:row.mode===m?800:600,color:row.mode===m?T.accent:T.text,fontFamily:"Inter,sans-serif" }}>{label}</button>
                                 ))}
                                 {row.targetType==="person"&&txnType==="expense"&&canOfferPettyPaid(settlements[row.targetId]?.pettyHeld, paidByPersonId===row.targetId)&&(
-                                  <button data-testid="alloc-petty" title="Paid from their petty cash" onClick={()=>{ const next = choosePettyPaid({ rows:allocRows, rowId:row.id, paidByPersonId }); setAllocRows(next.rows); setPaidByPersonId(next.paidByPersonId); if(next.paidByPersonId) setExpensePaymentMode("full"); }} style={{ background:paidByPersonId===row.targetId?T.warn+"22":"none",border:`1px solid ${paidByPersonId===row.targetId?T.warn:T.border}`,color:paidByPersonId===row.targetId?T.warn:T.sub,borderRadius:8,padding:"4px 9px",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"Inter,sans-serif" }}>P</button>
+                                  <button data-testid="alloc-petty" title="Paid from their petty cash" onClick={()=>{ const next = choosePettyPaid({ rows:allocRows, rowId:row.id, paidByPersonId }); setAllocRows(next.rows); setPaidByPersonId(next.paidByPersonId); if(next.paidByPersonId) setExpensePaymentMode("full"); }} style={{ background:paidByPersonId===row.targetId?T.warn+"22":"none",border:`1px solid ${paidByPersonId===row.targetId?T.warn:T.border}`,color:paidByPersonId===row.targetId?T.warn:T.sub,borderRadius:10,padding:"0 12px",minHeight:44,textAlign:"left",cursor:"pointer",fontSize:13,fontWeight:paidByPersonId===row.targetId?800:600,fontFamily:"Inter,sans-serif" }}>They paid from their petty cash</button>
                                 )}
                               </div>
                             </div>
@@ -7821,6 +7838,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                               {!useItems&&<input style={{ ...inpSm,flex:1,textAlign:"right" }} type="number" min="0" placeholder="0" value={row.amount} onChange={e=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,amount:e.target.value}:r))}/>}
                               {useItems&&<div style={{ flex:1,textAlign:"right",color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(rowItemTotal)} {rowShare&&rowShare.chargePaise>0?`(items ${sym}${fmt(rowShare.itemsPaise/100)} + charges ${sym}${fmt(rowShare.chargePaise/100)})`:"(from items)"}</div>}
                             </div>
+                            {(()=>{
+                              const a = useItems ? rowItemTotal : (parseFloat(row.amount)||0);
+                              const who2 = row.targetType==="group" ? `the group ${target.name}` : target.name;
+                              if(!(a>0) || paidByPersonId===row.targetId) return null;
+                              const line = row.mode==="owes" ? `${who2} will owe you ${sym}${fmt(a)}` : row.mode==="i_owe" ? `You will owe ${who2} ${sym}${fmt(a)}` : row.mode==="spent_on" ? `Tagged to ${who2}. Nothing is owed.` : null;
+                              return line ? <div data-testid="row-summary" style={{ color:T.info,fontSize:11,fontWeight:700 }}>{line}</div> : null;
+                            })()}
                             {lineItems?.length>0&&(
                               <button onClick={()=>setAllocRows(prev=>prev.map(r=>r.id===row.id?(useItems?{...r,items:[],byItems:false}:{...r,items:[],byItems:true,amount:""}):r))} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:10,fontWeight:700,textAlign:"left",fontFamily:"Inter,sans-serif" }}>{useItems?"← Use flat amount instead":"Link to specific items instead →"}</button>
                             )}
@@ -15882,6 +15906,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Skip a SIP for one month: on an investment's Recurring Schedule, tap \"Skip December\" (the coming month). That month's instalment stops counting as owed and no due-today reminder fires; \"Put back\" undoes it and later months carry on.",
             "Add a loan: Wealth > Loans Taken now has \"+ Add a loan\". The \"Pay/Receive Loan\" shortcut on the Add screen is gone.",
             "New look, Add screen: the type is now one switch, Spent / Received / Moved / More (Settlement and Invest are under More), and the amount comes first, then who it was for. Everything else on the form works as before.",
+            "New look, Add screen, step 2: your three most-used categories are one-tap chips above the category picker, and each person row says what it does (\"It was for them. Just tagging it\", \"I owe them\", \"They owe me\") with a line underneath such as \"Raj will owe you ₹900\". Nothing underneath changed.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
