@@ -73,3 +73,12 @@ test("nothing to fix, refunds, repayments from others, and shares moved away are
   assert.equal(applyRepaymentFix({ txns: T, bills: [] }, { type: "link", personId: "r", repaymentId: "ok", link: { kind: "txn", id: "a", amount: 800 } }), null);       // already linked
   assert.equal(applyRepaymentFix({ txns: T, bills: [] }, { type: "unreduced", personId: "r", recordKind: "txn", recordId: "missing", settleTo: 1 }), null);
 });
+
+test("a loan receipt (money received against a loan) is never listed as a repayment that was not applied", () => {
+  const txns = [
+    { id: "lr", type: "settlement_in", isRefund: false, date: "2026-07-11", desc: "Loan receipt - Raj", amount: 1500, fromPersonId: "r", linkedLoanId: "loan1", settlementLinks: [] },
+    { id: "rp", type: "settlement_in", isRefund: false, date: "2026-07-12", desc: "Raj paid", amount: 800, fromPersonId: "r", settlementLinks: [] },
+  ];
+  const r = findRepaymentProblems({ personId: "r", txns, bills: [] });
+  assert.deepEqual(r.unlinked.map(u => u.id), ["rp"]);
+});

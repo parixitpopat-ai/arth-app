@@ -70,7 +70,7 @@ export function findRepaymentProblems({ personId, txns = [], bills = [] }) {
     if (info && info.mode === "owes" && !info.transferredTo && P(info.amount) - settledOf(info) > 0) open.push({ kind: "bill", id: b.id, title: b.name || b.merchant || "Bill", date: String(b.billDate || b.createdDate || b.dueDate || ""), remaining: R(P(info.amount) - settledOf(info)) });
   }
   const used = new Set(), unlinked = [];
-  const reps = txns.filter(t => isRepayment(t) && t.fromPersonId === personId && !(t.settlementLinks || []).length && !t.againstTxnId && P(t.amount) > 0).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const reps = txns.filter(t => isRepayment(t) && t.fromPersonId === personId && !(t.settlementLinks || []).length && !t.againstTxnId && !t.linkedLoanId && P(t.amount) > 0).sort((a, b) => String(a.date).localeCompare(String(b.date)));
   for (const t of reps) {
     const amt = P(t.amount);
     const exact = open.filter(o => P(o.remaining) === amt && !used.has(`${o.kind}:${o.id}`));

@@ -17,6 +17,8 @@ import SignOutWarningSheet from "./components/SignOutWarningSheet";
 import SlowLoadEscape from "./components/SlowLoadEscape";
 import PhotoOptimizeCard from "./components/PhotoOptimizeCard";
 import LoanGivenSheet from "./components/LoanGivenSheet";
+import MakeLoanSheet from "./components/MakeLoanSheet";
+import { loanCandidate, previewConversion, convertCollectToLoan } from "./domain/loans/collectToLoan";
 import LoanEntryNotice from "./components/LoanEntryNotice";
 import NeedsDetailsSheet from "./components/NeedsDetailsSheet";
 import PettyCashSheet from "./components/PettyCashSheet";
@@ -1631,6 +1633,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [showAddAsset, setShowAddAsset] = useState(false);
   const [showAddLoan, setShowAddLoan] = useState(false);
   const [loanGivenDraft, setLoanGivenDraft] = useState(null);
+  const [makeLoanTxn, setMakeLoanTxn] = useState(null);   // an older entry the person is turning into a loan (domain/loans/collectToLoan.js)
   // Vendors the person said are NOT the same (signatures of the spellings asked about). Device-only: the question may be asked again on another device.
   const [vendorNotSame, setVendorNotSame] = useState(()=>{ try{ const v=JSON.parse(localStorage.getItem("arth_vendor_not_same")||"[]"); return Array.isArray(v)?v:[]; }catch{ return []; } });
   useEffect(()=>safeSetLocalStorage("arth_vendor_not_same", JSON.stringify(vendorNotSame)),[vendorNotSame]);
@@ -15819,6 +15822,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "A family (group) statement and one request for the whole family: on a group page, Statement for the group. It shows the family total for the dates you choose, who owes what, and each member's own statement, then Request the family's total in one message with your UPI handle",
             "New look, step 1: a calmer light theme (soft grey-green background, a deeper green for actions) and the Inter font everywhere. Only colours and the font change: every screen, button and number works as before. The dark theme is unchanged for now",
             "Home: the two tiles that repeated other things are gone (People & Groups, already a tab, and Budget, already a card above). Statements now name each bill for the month it was generated in, for example \"July Water Bill\", taken from the bill\u0027s own date and not the due date. Only the name shown in the message changes; the saved bill is untouched. If you track several meters under one biller (house, office, building), each bill also carries its meter\u0027s nickname, for example \"July Water Bill (Office)\"; with one meter the name stays plain",
+            "Make an older entry a loan: open an entry where one person owes you the whole amount and tap \"Make this a loan\". You see first what changes (your spending does not change, how much was already paid back, what is still owed), add a return date and interest if you like, and confirm. Repayments you already recorded become money received on the loan, and your balance does not change. There is no undo, because the app never removes a loan, so check the summary before you confirm",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
@@ -22804,6 +22808,25 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             setLoanGivenDraft(null);
             setToast({ message: txn ? `${sym}${fmt(loan.principal)} lent to ${loan.name} and taken out of ${accounts.find(a=>a.id===txn.fromAccId)?.name||"the account"}` : `${sym}${fmt(loan.principal)} lent to ${loan.name}`, icon:"✓" });
           }}/>}        
+        {makeLoanTxn&&(()=>{
+          const t = makeLoanTxn;
+          const la = accounts.find(a=>String(a.id)===String(t.accId));
+          const lendable = Boolean(la) && la.type!=="cc" && !isInvestmentAccount(la);
+          const pv = previewConversion({ txn:t, txns, lendable });
+          if(!pv.ok) return null;
+          const person = getPerson(pv.personId);
+          const cat = cats.find(c=>String(c.id)===String((pv.spendDrop.catIds||[])[0]));
+          const d = new Date(t.date);
+          return <MakeLoanSheet T={T} sym={sym} fmt={fmt} name={person?.name||"them"} preview={pv} dateLabel={formatShortDate(t.date)||t.date} catLabel={cat?.name||""} monthLabel={Number.isNaN(d.getTime())?"that month":d.toLocaleString("en-IN",{month:"long",year:"numeric"})}
+            onClose={()=>setMakeLoanTxn(null)}
+            onConfirm={({ dueDate, interestRate })=>{
+              const r = convertCollectToLoan({ txn:t, txns, personName:person?.name||"", dueDate, interestRate, lendable, genId });
+              if(!r.ok) return r.reason;
+              setTxns(r.txns); setLoans(prev=>[r.loan,...prev]); setMakeLoanTxn(null);
+              setToast({ message:`Now a loan: ${sym}${fmt(r.loan.outstanding)} still owed by ${person?.name||"them"}`, icon:"✓" });
+              return "";
+            }}/>;
+        })()}
         {repaymentLoan&&<LoanRepaymentModal item={repaymentLoan} onClose={()=>setRepaymentLoan(null)}/>}
         {/* Transaction Detail */}
         {viewingVendor&&<VendorDetailModal merchant={viewingVendor} onClose={()=>setViewingVendor(null)}/>}
@@ -22891,6 +22914,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   const owedHere = t.type==="expense"&&!t.writtenOff ? Object.entries(t.people||{}).filter(([pid,info])=>info.mode==="owes"&&!info.settled&&pid!=="__me__"&&remainingShare(info)>0) : [];
                   if(!owedHere.length) return null;
                   return <button data-testid="txn-detail-settle" onClick={()=>{ setTxnDetailId(null); setSettleTxn(t); }} style={{ width:"100%",minHeight:44,marginTop:12,background:T.success+"20",border:`1px solid ${T.success}44`,borderRadius:12,color:T.success,fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>💰 Settle with {owedHere.map(([pid])=>getPerson(pid).name).join(", ")}</button>;
+                })()}
+                {(()=>{
+                  // An older Collect entry where ONE person owes the WHOLE amount can become a loan (domain/loans/collectToLoan.js).
+                  if(t.type!=="expense") return null;
+                  const la = accounts.find(a=>String(a.id)===String(t.accId));
+                  const c = loanCandidate(t,{ lendable:Boolean(la) && la.type!=="cc" && !isInvestmentAccount(la) });
+                  if(!c.ok) return null;
+                  return <button data-testid="txn-make-loan" onClick={()=>{ setTxnDetailId(null); setMakeLoanTxn(t); }} style={{ width:"100%",minHeight:44,marginTop:12,background:T.info+"18",border:`1px solid ${T.info}44`,borderRadius:12,color:T.info,fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>🤝 Make this a loan</button>;
                 })()}
                 {t.type==="expense"&&Number(t.amount)>0&&(
                   <button data-testid="txn-spread" onClick={()=>openSpreadFor({ key:`txn:${t.id}`, label:t.merchant||t.desc||"Payment", amount:t.amount, cashDate:t.date })} style={{ width:"100%",minHeight:44,marginTop:12,background:"none",border:`1px solid ${T.border}`,borderRadius:12,color:T.text,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit" }}>{spreadButtonLabel(`txn:${t.id}`)}</button>
