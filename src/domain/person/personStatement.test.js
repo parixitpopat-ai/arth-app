@@ -26,15 +26,15 @@ const args = { txns: TXNS, bills: BILLS, from: "2026-07-01", to: "2026-08-31", n
 test("Ravi: charges by type, which bill each payment went to, paid and still due on every charge", () => {
   const st = buildPersonStatement({ personId: "r", ...args });
   assert.equal(st.opening, 0);
-  assert.deepEqual(st.sections.map(x => [x.label, x.subtotal]), [["Own expenses", 950], ["Electricity", 3000], ["Water", 1000], ["Maintenance", 1200]]);   // own = plumber 800 + transferred from Guru 150
+  assert.deepEqual(st.sections.map(x => [x.label, x.subtotal]), [["Own expenses", 950], ["July Electricity Bill", 3000], ["July Water Bill", 1000], ["August Maintenance", 1200]]);   // own = plumber 800 + transferred from Guru 150
   const item = t => st.sections.flatMap(x => x.items).find(i => i.title === t);
-  assert.deepEqual([item("Electricity").amount, item("Electricity").paid, item("Electricity").due, item("Electricity").billDate, item("Electricity").dueDate, item("Electricity").periodFrom, item("Electricity").periodTo], [3000, 1000, 2000, "2026-07-27", "2026-09-09", "2026-06-10", "2026-07-25"]);
-  assert.deepEqual([item("Water").amount, item("Water").paid, item("Water").due], [1000, 650, 350]);    // a paid bill: its share is on the payment entry, counted once
-  assert.deepEqual([item("Maintenance: lift service").paid, item("Maintenance: lift service").due], [0, 1200]);
+  assert.deepEqual([item("July Electricity Bill").amount, item("July Electricity Bill").paid, item("July Electricity Bill").due, item("July Electricity Bill").billDate, item("July Electricity Bill").dueDate, item("July Electricity Bill").periodFrom, item("July Electricity Bill").periodTo], [3000, 1000, 2000, "2026-07-27", "2026-09-09", "2026-06-10", "2026-07-25"]);
+  assert.deepEqual([item("July Water Bill").amount, item("July Water Bill").paid, item("July Water Bill").due], [1000, 650, 350]);    // a paid bill: its share is on the payment entry, counted once
+  assert.deepEqual([item("August Maintenance: lift service").paid, item("August Maintenance: lift service").due], [0, 1200]);
   assert.equal(st.sections.flatMap(x => x.items).find(i => i.transferredFrom === "Guru").amount, 150);
   assert.equal(st.chargesTotal, 6150); assert.equal(st.paymentsTotal, 1650); assert.equal(st.closing, 4500);
   assert.equal(st.payments.length, 1);
-  assert.deepEqual(st.payments[0].applied.map(a => [a.title, a.amount]), [["Electricity", 1000], ["Water", 650]]);
+  assert.deepEqual(st.payments[0].applied.map(a => [a.title, a.amount]), [["July Electricity Bill", 1000], ["July Water Bill", 650]]);
 });
 test("Sunny: only the part of the family payment applied to him; Mangal: nothing", () => {
   const s = buildPersonStatement({ personId: "s", ...args });
@@ -69,7 +69,7 @@ test("brought forward: earlier charges less earlier payments; a payment before t
 });
 test("paid and still due are as of the end date: a payment after it is not counted", () => {
   const st = buildPersonStatement({ personId: "r", ...args, to: "2026-08-04" });
-  const el = st.sections.flatMap(x => x.items).find(i => i.title === "Electricity");
+  const el = st.sections.flatMap(x => x.items).find(i => i.title === "July Electricity Bill");
   assert.deepEqual([el.paid, el.due], [0, 3000]); assert.equal(st.paymentsTotal, 0);
 });
 test("the person's own repayment (Settle on a bill): applied to that bill; extra is kept as an advance credit; one with no bill is shown as such", () => {
@@ -113,7 +113,7 @@ test("Settle on a PAID bill links the payment entry (kind txn); the statement st
   const st = buildPersonStatement({ personId: "r", txns, bills, from: "2026-07-01", to: "2026-08-31", nameOf, labelOf });
   const it = st.sections[0].items[0];
   assert.deepEqual([it.amount, it.paid, it.due, it.periodFrom], [1000, 1000, 0, "2026-06-26"]);
-  assert.deepEqual(st.payments[0].applied.map(a => [a.title, a.billDate, a.amount]), [["Water", "2026-07-27", 1000]]);
+  assert.deepEqual(st.payments[0].applied.map(a => [a.title, a.billDate, a.amount]), [["July Water Bill", "2026-07-27", 1000]]);
   assert.deepEqual([st.closing, st.settled], [0, true]);
   assert.equal(reconcileWithPosition(st, { txns, bills, meId: "me" }).matches, true);
 });

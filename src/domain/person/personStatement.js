@@ -9,6 +9,7 @@
 // settles (link.personId, else the payer), so a payment recorded under a group is divided among the members who owe: only the parts for the person asked about count.
 // A debt moved with "Transfer debt" shows as a MOVE (never as a payment); the new owner's "Transferred from" expense is an ordinary charge.
 // Refunds are not netted here, exactly as the person's page does not net them. Amounts are held in paise so nothing drifts.
+import { billMonthTitle } from "../bills/billMonthTitle.js";
 import { getBillSplitSource } from "../bills/splitSource.js";
 import { getFinancialPositionBreakdown } from "./financialPosition.js";
 
@@ -32,7 +33,7 @@ function chargeOf(t, personId, bills) {
   const bill = (bills || []).find(b => b.paidByTxnId != null && String(b.paidByTxnId) === String(t.id)) || (t.paidBillId != null ? (bills || []).find(b => String(b.id) === String(t.paidBillId)) : null);
   const src = bill || t;
   return { keys: [`txn:${t.id}`, ...(bill ? [`bill:${bill.id}`] : [])], kind: bill ? "bill" : "txn", sourceId: bill ? bill.id : t.id, billId: bill ? bill.id : null, txnId: t.id,
-    date: bill ? dateOf(bill) || String(t.date || "") : String(t.date || ""), title: bill ? (bill.name || bill.merchant || t.desc || "Bill") : (t.desc || t.merchant || "Expense"),
+    date: bill ? dateOf(bill) || String(t.date || "") : String(t.date || ""), title: bill ? billMonthTitle(bill.name || bill.merchant ? bill : { ...bill, name: t.desc || "Bill" }) : (t.desc || t.merchant || "Expense"),
     billDate: bill ? dateOf(bill) : "", dueDate: bill ? String(bill.dueDate || "") : "", periodFrom: bill ? String(bill.billPeriodFrom || "") : "", periodTo: bill ? String(bill.billPeriodTo || "") : "",
     billerAccountId: bill ? bill.billerAccountId || null : null, bill, amount, transferredTo, note: String(t.note || ""), txnDate: String(t.date || "") };
 }
@@ -51,7 +52,7 @@ export function buildPersonStatement({ personId, txns = [], bills = [], from, to
     if (src.kind === "txn") continue;                                    // a paid bill's share lives on its payment entry, counted above
     const info = src.people && src.people[personId];
     if (!info || info.mode !== "owes" || !(Number(info.amount) > 0)) continue;
-    charges.push({ keys: [`bill:${b.id}`], kind: "bill", sourceId: b.id, billId: b.id, txnId: null, date: dateOf(b), title: b.name || b.merchant || "Bill", billDate: dateOf(b), dueDate: String(b.dueDate || ""),
+    charges.push({ keys: [`bill:${b.id}`], kind: "bill", sourceId: b.id, billId: b.id, txnId: null, date: dateOf(b), title: billMonthTitle(b), billDate: dateOf(b), dueDate: String(b.dueDate || ""),
       periodFrom: String(b.billPeriodFrom || ""), periodTo: String(b.billPeriodTo || ""), billerAccountId: b.billerAccountId || null, bill: b, amount: P(info.amount), transferredTo: info.transferredTo || null, note: "", txnDate: "" });
   }
 

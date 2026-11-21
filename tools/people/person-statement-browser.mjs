@@ -52,7 +52,7 @@ try {
   const lines0 = await T("sel-line").allInnerTexts();
   rec("L1 the default view is a tick-list of Ravi's items at what is still due (5 items), each ticked", lines0.length === 5 && (await T("sel-check").evaluateAll(els => els.every(e => e.checked))), lines0.map(x => x.replace(/\s+/g, " ")));
   const m0 = await T("stmt-message").innerText();
-  rec("L2 the message is exactly Item - amount lines and a total (₹4,500 = his balance), then the UPI line", m0 === ["Plumber - 800", "Transferred from Guru - 150", "Electricity - 2000", "Water - 350", "Maintenance: lift service - 1200", "", "Total = 4500", "Pay to: sample@upi"].join("\n"), m0);
+  rec("L2 the message is exactly Item - amount lines and a total (₹4,500 = his balance), then the UPI line", m0 === ["Plumber - 800", "Transferred from Guru - 150", "July Electricity Bill - 2000", "July Water Bill - 350", "August Maintenance: lift service - 1200", "", "Total = 4500", "Pay to: sample@upi"].join("\n"), m0);
   rec("L3 a part-paid item says so (Water: ₹650 already paid of ₹1,000)", /₹650(\.00)? already paid of ₹1,000(\.00)?/.test(lines0.join(" ").replace(/\s+/g, " ")), {});
   await T("sel-check").first().uncheck(); await page.waitForTimeout(300);
   const m1 = await T("stmt-message").innerText();
@@ -63,9 +63,9 @@ try {
   rec("L6 All brings everything back", /Total = 4500/.test(await T("stmt-message").innerText()), {});
   await full();
   const body = await text();
-  rec("S2 charges are grouped by bill type, with the bill date, due date and reading period", /Electricity/.test(body) && /Water/.test(body) && /Society Maintenance/.test(body) && /Electricity, 10 Jun – 25 Jul/.test(body) && /Bill 27 Jul · due 9 Sep/.test(body), body.slice(body.indexOf("Statement from"), body.indexOf("Statement from") + 300));
+  rec("S2 charges are grouped by bill type, with the bill date, due date and reading period", /July Electricity Bill/.test(body) && /July Water Bill/.test(body) && /Society Maintenance/.test(body) && /July Electricity Bill, 10 Jun – 25 Jul/.test(body) && /Bill 27 Jul · due 9 Sep/.test(body), body.slice(body.indexOf("Statement from"), body.indexOf("Statement from") + 300));
   rec("S3 each charge shows paid and still due; an unpaid one says so", /paid ₹1,000(\.00)? · still due ₹2,000(\.00)?/.test(body) && /paid ₹650(\.00)? · still due ₹350(\.00)?/.test(body) && /not paid yet/.test(body), {});
-  rec("S4 the payment names the bills it went to, with bill date and reading period", /→ Electricity \(bill 27 Jul, 10 Jun – 25 Jul\) ₹1,000(\.00)?/.test(body) && /→ Water \(bill 27 Jul, 26 Jun – 24 Jul\) ₹650(\.00)?/.test(body), {});
+  rec("S4 the payment names the bills it went to, with bill date and reading period", /→ July Electricity Bill \(bill 27 Jul, 10 Jun – 25 Jul\) ₹1,000(\.00)?/.test(body) && /→ July Water Bill \(bill 27 Jul, 26 Jun – 24 Jul\) ₹650(\.00)?/.test(body), {});
   rec("S5 charges ₹6,150, paid ₹1,650, balance due ₹4,500", /Charges ₹6,150(\.00)?/.test(body) && /Balance due ₹4,500(\.00)?/.test(body) && /−₹1,650(\.00)?/.test(body), {});
   rec("S6 the debt moved from Guru is a charge on Ravi's statement", /Transferred from Guru/.test(body), {});
   const msg = await T("stmt-message").innerText();

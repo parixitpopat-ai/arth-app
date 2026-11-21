@@ -50,7 +50,7 @@ try {
   const fl = await T("famsel-line").allInnerTexts();
   rec("FL1 the default view is a tick-list naming each member; only what is still due is ticked", fl.length >= 5 && (await T("famsel-check").evaluateAll(els => els.filter(e => e.checked).length)) === 5, fl.length);
   const fm = await T("fam-message").innerText();
-  rec("FL2 the message is 'Member: Item - amount' lines, a total (₹4,500) and the UPI line", fm === ["Ravi: Plumber - 800", "Ravi: Transferred from Guru - 150", "Ravi: Electricity - 2000", "Ravi: Water - 350", "Ravi: Maintenance: lift service - 1200", "", "Total = 4500", "Pay to: sample@upi"].join("\n"), fm);
+  rec("FL2 the message is 'Member: Item - amount' lines, a total (₹4,500) and the UPI line", fm === ["Ravi: Plumber - 800", "Ravi: Transferred from Guru - 150", "Ravi: July Electricity Bill - 2000", "Ravi: July Water Bill - 350", "Ravi: August Maintenance: lift service - 1200", "", "Total = 4500", "Pay to: sample@upi"].join("\n"), fm);
   await T("famsel-check").first().uncheck(); await page.waitForTimeout(300);
   rec("FL3 unticking a line changes the total", /Total = 3700/.test(await T("fam-message").innerText()), {});
   await T("fam-mode-full").click(); await page.waitForTimeout(400);
@@ -63,7 +63,7 @@ try {
   rec("F6 the button asks for the family's total", /Request ₹4,500(\.00)? from the family/.test(await T("fam-share").innerText()), await T("fam-share").innerText());
   rec("F7 a family payment with no member chosen is flagged and not in anyone's balance", (await T("fam-unapplied").count()) === 1 && /₹500(\.00)? paid by the family is not applied/.test(await T("fam-unapplied").innerText()), {});
   await T("fam-member").first().locator("summary").click(); await page.waitForTimeout(400);
-  rec("F8 each member's own statement opens under the total (Ravi: the bills it went to)", /Ravi's statement/.test(await text()) && (await T("fam-member").count()) >= 1 && /→ Electricity \(bill 27 Jul/.test(await text()), (await T("fam-member").count()));
+  rec("F8 each member's own statement opens under the total (Ravi: the bills it went to)", /Ravi's statement/.test(await text()) && (await T("fam-member").count()) >= 1 && /→ July Electricity Bill \(bill 27 Jul/.test(await text()), (await T("fam-member").count()));
   await T("fam-from").fill("2026-09-01"); await T("fam-to").fill("2026-09-30"); await page.waitForTimeout(400);
   rec("F9 a period with nothing new still carries the balance forward and asks for it", /Brought forward ₹4,500(\.00)?/.test(await text()), (await T("fam-summary").innerText()).slice(0, 200));
   await T("fam-to").fill("2026-06-01"); await page.waitForTimeout(300);
