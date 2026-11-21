@@ -12,7 +12,7 @@ await ctx.addInitScript(() => { if (localStorage.getItem("__init")) return; loca
     { id: "cc1", name: "Coral RuPay", type: "cc", limit: 200000, outstanding: 0, statementDate: 15, dueDate: 5, last4: "8004" }]);
   set("arth_people", [{ id: "me", name: "Me", isMe: true }]); set("arth_txns", []); set("arth_loans", []);
   localStorage.setItem("arth_master_user_setup_complete", "true"); });
-const page = await ctx.newPage(); const errors = []; page.on("pageerror", e => errors.push(String(e)));
+const page = await ctx.newPage(); const errors = []; page.on("pageerror", e => { errors.push(String(e)); console.log("PAGEERR", String(e).slice(0,300)); });
 const unlock = async () => { for (let i = 0; i < 3; i++) { if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await page.getByRole("button", { name: "1", exact: true }).click(); await page.waitForTimeout(100); } await page.waitForTimeout(400); } } };
 const ls = k => page.evaluate(k => JSON.parse(localStorage.getItem(k) || "[]"), k);
 const text = () => page.evaluate(() => document.body.innerText.replace(/\s+/g, " "));

@@ -126,7 +126,11 @@ export const getNextRecurringOccurrence = (schedule, refDate = new Date()) => {
   if (!Number.isFinite(day) || day < 1) return null;
   const ref = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate(), 0, 0, 0, 0);
   const thisMonthDue = dateAtDay(ref.getFullYear(), ref.getMonth(), day);
-  const due = thisMonthDue >= ref ? thisMonthDue : dateAtDay(ref.getFullYear(), ref.getMonth() + 1, day);
+  let offset = thisMonthDue >= ref ? 0 : 1;
+  // Months the person skipped (domain/recurring/skipMonth.js) are not occurrences: move on to the next month that is not.
+  const skipped = Array.isArray(schedule?.skippedMonths) ? schedule.skippedMonths : [];
+  let due = dateAtDay(ref.getFullYear(), ref.getMonth() + offset, day);
+  for (let guard = 0; guard < 36 && skipped.includes(toLocalDateStr(due).slice(0, 7)); guard++) { offset += 1; due = dateAtDay(ref.getFullYear(), ref.getMonth() + offset, day); }
   return toLocalDateStr(due);
 };
 

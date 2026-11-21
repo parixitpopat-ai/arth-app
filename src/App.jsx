@@ -172,7 +172,7 @@ import { getBillsFor } from "./domain/bills/billFor";
 import GroupSettingsEditor from "./components/people/GroupSettingsEditor";
 import { isSchoolRelationshipCurrent, getSchoolRelationships, getCurrentSchoolBillerAccountIds, migrateSchoolRelationshipsIntoCanonicalStore } from "./domain/school/relationship";
 import { computeRefundTotalsByBill, getNetBillAmount } from "./domain/bills/refunds";
-import { getCommitments, isRechargeBiller } from "./domain/bills/commitments";
+import { getCommitments, isRechargeBiller, getNextRecurringOccurrence } from "./domain/bills/commitments";
 import { getRechargeWords } from "./domain/bills/rechargeWords";
 import { getPaidFromAccounts } from "./domain/accounts/paymentSources";
 import { withMembershipPaymentSynced } from "./domain/membership/paymentSync";
@@ -212,6 +212,8 @@ import { resolveCreditCardAccount } from "./domain/cards/billerShellResolution";
 import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVersion, migrateLegacyBillingHistory } from "./domain/cards/billingConfig";
 import { generateDueStatements, isEmptyStatementBill, getPendingStatementChecks } from "./domain/cards/statementBills";
 import { reconcileAutoEmiLoans } from "./domain/loans/autoEmiProgress";
+import { projectCardEmiInstalments } from "./domain/loans/cardEmiProjection";
+import { skipMonth, putMonthBack, isMonthSkipped, monthKeyOf } from "./domain/recurring/skipMonth";
 import { getCardAlerts } from "./domain/cards/alerts";
 import { getPaybackTotalsByPerson, applyPaybacks, buildPaybackTxn } from "./domain/person/payback";
 import { isPaidByOther, getPaidByPayable } from "./domain/person/paidBy";
@@ -6379,14 +6381,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     </button>
                   ))}
                 </div>
-                {/* Quick Actions - real decision made during implementation (WF-TXN001 v1.4): CC
-                    Payment stays a real ADR-030 type, reached here rather than as a 6th chip.
-                    Loan actions open the existing, separate LoanRepaymentModal (Loan is a domain,
-                    not a transaction type, per ADR-030) - not new logic, just a different entry
-                    point into modals that already exist. */}
-                <div style={{ display:"flex",gap:8,marginBottom:16,flexWrap:"wrap" }}>
-                  <button onClick={()=>{ closeModal(); setShowAddLoan(true); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>🏦 Pay/Receive Loan</button>
-                </div>
               </div>
           }
 
@@ -9614,6 +9608,19 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div>
                     <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>🔄 Recurring Schedule</div>
                     {existing?<div style={{ color:T.success,fontSize:11,marginTop:2 }}>Active · {existing.day}th every month · {sym}{fmt(existing.amount)}</div>:<div style={{ color:T.sub,fontSize:11,marginTop:2 }}>Not set</div>}
+                    {existing&&(()=>{
+                      // Skip this month (domain/recurring/skipMonth.js): the coming instalment is not owed; later months carry on.
+                      const next = getNextRecurringOccurrence({ day:existing.day }, new Date());
+                      const key = monthKeyOf(next);
+                      const skipped = isMonthSkipped(existing, key);
+                      const monthName = next ? new Date(next+"T12:00:00").toLocaleString("en-IN",{ month:"long" }) : "";
+                      return next ? (
+                        <button data-testid="sip-skip-month" onClick={()=>setRecurringSchedules(prev=>prev.map(r=>r.id===existing.id?(skipped?putMonthBack(r,key):skipMonth(r,key)):r))}
+                          style={{ marginTop:6,background:"none",border:`1px solid ${T.border}`,borderRadius:16,padding:"6px 12px",minHeight:36,cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>
+                          {skipped?`${monthName} skipped · Put back`:`Skip ${monthName}`}
+                        </button>
+                      ) : null;
+                    })()}
                   </div>
                   <button onClick={()=>setEditingRecurring(editingRecurring===groupKey?null:groupKey)} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:20,padding:"4px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Inter,sans-serif" }}>{editingRecurring===groupKey?"Cancel":existing?"Edit":"Set up"}</button>
                 </div>
@@ -9630,7 +9637,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         const amount = parseFloat(cleanMoneyInput(document.getElementById(`rec-amt-${groupKey}`)?.value||"0"))||0;
                         const accId = document.getElementById(`rec-acc-${groupKey}`)?.value||"";
                         if(!day||!amount) return;
-                        const record = { id:existing?.id||genId(), groupKey, investType:group.type, name:displayTitle, day, amount, accId, active:true, createdAt:existing?.createdAt||Date.now() };
+                        const record = { id:existing?.id||genId(), groupKey, investType:group.type, name:displayTitle, day, amount, accId, active:true, createdAt:existing?.createdAt||Date.now(), ...(existing?.skippedMonths?{skippedMonths:existing.skippedMonths}:{}) };
                         setRecurringSchedules(prev=>existing?prev.map(r=>r.groupKey===groupKey?record:r):[...prev,record]);
                         setEditingRecurring(null);
                       }} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#000",fontFamily:"Inter,sans-serif" }}>Save Schedule</button>
@@ -10534,7 +10541,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // or the following one — see src/domain/debt/futureMoney.js for exactly how. Real loans[],
   // accounts[], txns[], and toDateOnly passed through unmodified; nothing here recomputes
   // anything the adapter doesn't already own.
-  const debtServiceEvents = projectLoansToDebtServiceEvents(loans, accounts, txns, toDateOnly, futureMoneyToday);
+  const debtServiceEvents = [...projectLoansToDebtServiceEvents(loans, accounts, txns, toDateOnly, futureMoneyToday), ...projectCardEmiInstalments({ loans, accounts, txns, today: todayStr() })];
   const futureMoney = composeFutureMoneyCommitments(rawCommitments, [
     getSchoolFeeCommitments(feePeriods),
     debtServiceEvents,
@@ -10698,7 +10705,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const todayDate = new Date();
     const todayDay = todayDate.getDate();
     const todayStr2 = todayStr();
-    const dueRecurring = recurringSchedules.filter(r=>r.active!==false && r.day===todayDay && (!r.snoozedUntil || r.snoozedUntil < todayStr2));
+    const dueRecurring = recurringSchedules.filter(r=>r.active!==false && r.day===todayDay && (!r.snoozedUntil || r.snoozedUntil < todayStr2) && !isMonthSkipped(r, monthKeyOf(todayStr2)));
     // All investment folios for dashboard recording
     const investmentGroups = Object.values(investments.reduce((acc,inv)=>{
       const key = inv.folioNo||inv.name||inv.id;
@@ -13929,7 +13936,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const sipsAsBills = (recurringSchedules||[]).filter(r=>r.active!==false).map(r=>{
       const thisMonthDue = new Date(todayDate.getFullYear(), todayDate.getMonth(), r.day);
       const nextDue = thisMonthDue >= todayDate ? thisMonthDue : new Date(todayDate.getFullYear(), todayDate.getMonth()+1, r.day);
-      return { id:`sip_${r.id}`, type:"sip", name:r.name?`${r.name} SIP`:"SIP", amount:r.amount, dueDate:toLocalDateStr(nextDue), status:"unpaid" };
+      // A month the person skipped (domain/recurring/skipMonth.js) is not owed: the reserve moves to the next month that is.
+      const dueDate = getNextRecurringOccurrence({ day:r.day, skippedMonths:r.skippedMonths }, todayDate) || toLocalDateStr(nextDue);
+      return { id:`sip_${r.id}`, type:"sip", name:r.name?`${r.name} SIP`:"SIP", amount:r.amount, dueDate, status:"unpaid" };
     });
     // Same gap, different entity: CC statement amounts are computed dynamically via
     // getCardSummary's cycle logic (confirmed by an explicit code comment: "card statements
@@ -15192,6 +15201,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <div>
                 <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>🤲 Loans Taken</div>
                 <div style={{ color:T.sub,fontSize:10 }}>{activeTakenLoans.length} active loan(s)</div>
+                <button data-testid="wealth-add-loan" onClick={e=>{ e.stopPropagation(); setShowAddLoan(true); }} style={{ marginTop:6,minHeight:36,padding:"0 12px",background:"none",border:`1px solid ${T.border}`,borderRadius:16,color:T.accent,fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>+ Add a loan</button>
               </div>
               <div style={{ display:"flex",alignItems:"center",gap:8 }}>
                 <div style={{ color:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(loanTakenTotal)}</div>
@@ -15847,6 +15857,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Home: the two tiles that repeated other things are gone (People & Groups, already a tab, and Budget, already a card above). Statements now name each bill for the month it was generated in, for example \"July Water Bill\", taken from the bill\u0027s own date and not the due date. Only the name shown in the message changes; the saved bill is untouched. If you track several meters under one biller (house, office, building), each bill also carries its meter\u0027s nickname, for example \"July Water Bill (Office)\"; with one meter the name stays plain",
             "Make an older entry a loan: open an entry where one person owes you the whole amount and tap \"Make this a loan\". You see first what changes (your spending does not change, how much was already paid back, what is still owed), add a return date and interest if you like, and confirm. Repayments you already recorded become money received on the loan, and your balance does not change. There is no undo, because the app never removes a loan, so check the summary before you confirm",
             "Skip this month: open a bill (not a card statement) and tap \"Skip this month\". It stops counting as owed and leaves Money Required, a recurring bill still makes its next one, and it waits under Skipped where \"Put back\" undoes it. Paying only part of a bill? Tick \"Skip the rest\" and the unpaid remainder is not owed this month.",
+            "Coming card EMIs now show in Money Required: a TV bought on a card EMI lists each instalment (for example \"TV EMI 3/9\") on the due date of the statement that will carry it, so you see next month's EMI before the statement closes. Once an instalment is on a statement it is counted there, not twice.",
+            "Skip a SIP for one month: on an investment's Recurring Schedule, tap \"Skip December\" (the coming month). That month's instalment stops counting as owed and no due-today reminder fires; \"Put back\" undoes it and later months carry on.",
+            "Add a loan: Wealth > Loans Taken now has \"+ Add a loan\". The \"Pay/Receive Loan\" shortcut on the Add screen is gone.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
