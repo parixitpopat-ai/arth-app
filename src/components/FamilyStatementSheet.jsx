@@ -40,7 +40,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const lines = useMemo(() => (fam ? familyLines(fam, nameOf) : []), [fam]);   // eslint-disable-line react-hooks/exhaustive-deps
   const isOn = l => (l.key in overrides ? overrides[l.key] : l.ticked);
   const simpleMessage = buildSimpleMessage(lines.map(l => ({ ...l, on: isOn(l) })), { upiHandle, withNames: true });
-  const ex = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, memberIds, meId: inGroup ? meId : null, includePeople: withPeople, txns, bills, billerAccounts, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, billerAccounts, from, to, people, withPeople]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const ex = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, groupName: group.name, memberIds, meId: inGroup ? meId : null, includePeople: withPeople, txns, bills, billerAccounts, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, billerAccounts, from, to, people, withPeople]);   // eslint-disable-line react-hooks/exhaustive-deps
   const exItems = ex ? ex.items.map(i => ({ ...i, on: !exOff[i.key] })) : [];
   const breakup = useMemo(() => {   // only my part: each expense counts at my share of it, spread over its categories in the same proportion
     const on = exItems.filter(i => i.on);

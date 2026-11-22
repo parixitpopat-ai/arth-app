@@ -49,7 +49,7 @@ const dateOfBill = b => String(b.billDate || b.createdDate || b.dueDate || "").s
  * @returns {{items:Array<{key:string,kind:"expense"|"bill",id:any,date:string,title:string,total:number,payer:string,note:string,shares:Array<{personId:string,name:string,amount:number,remaining:number}>,memberTotal:number,due:number,groupAmount:number,yourShare:number|null}>,
  *           totals:{count:number,total:number,memberTotal:number,due:number}}}
  */
-export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, includePeople = false, txns = [], bills = [], billerAccounts = [], from, to, nameOf = id => String(id) }) {
+export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, includePeople = false, groupName = "", txns = [], bills = [], billerAccounts = [], from, to, nameOf = id => String(id) }) {
   const gid = String(groupId);
   const inRange = d => d && d >= from && d <= to;
   const members = new Set((memberIds || []).map(String));
@@ -57,7 +57,9 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
     .filter(([pid, info]) => members.has(String(pid)) && info && info.mode === "owes" && Number(info.amount) > 0 && !info.transferredTo)
     .map(([pid, info]) => ({ personId: pid, name: nameOf(pid), amount: R(P(info.amount)), remaining: R(P(remainingShare(info))) }));
   const nick = meterNicknamer(billerAccounts);
-  const billTitle = b => billMonthTitle(b, { nickname: nick(b) });          // "July Water Bill (Office)", the same naming the statements use
+  // "July Water Bill (Office)": the statements' own naming, with the meter's nickname. For a family the person is NOT part of, a bill that is entirely theirs reads
+  // "(Suryamandal)" instead (the group's name), while a bill they only share in keeps its meter, e.g. "(Common Meter)".
+  const billTitle = (b, forThemOnly = false) => (meId == null && forThemOnly && groupName ? billMonthTitle(b, { nickname: groupName }) : billMonthTitle(b, { nickname: nick(b) }));
   const isMe = id => meId != null && String(id) === String(meId);
   // Whose part each expense is. Members with a share each have theirs; the person using Arth has what is left of the total (yourShare). With no split it is the
   // person it is tagged to (a member, or the person using Arth: "attributed to my name"), else it belongs to the group as a whole (personId null).
@@ -79,7 +81,7 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
     const total = R(P(t.amount));
     const paidBill = t.paidBillId != null ? (bills || []).find(b => b && String(b.id) === String(t.paidBillId)) : null;
     const yourShare = shares.length && !(Number(t.groupCollectiveAmount) > 0) ? Math.max(0, R(P(total) - P(memberTotal))) : null;
-    items.push({ key: `txn:${t.id}`, kind: "expense", scope: "group", id: t.id, date, title: paidBill ? billTitle(paidBill) : (t.paidBillName || vendorOf(t)), total,
+    items.push({ key: `txn:${t.id}`, kind: "expense", scope: "group", id: t.id, date, title: paidBill ? billTitle(paidBill, !shares.length || P(memberTotal) >= P(total) - 1) : (t.paidBillName || vendorOf(t)), total,
       payer: t.paidByPersonId ? nameOf(t.paidByPersonId) : "you", note: String(t.note || ""), shares, memberTotal, due: R(shares.reduce((s, x) => s + P(x.remaining), 0)),
       groupAmount: R(P(t.groupCollectiveAmount)), yourShare, parts: partsOf({ shares, total, yourShare, forPerson: t.forPerson }), categories: categorySplit(t, P(total)) });
   }
@@ -94,7 +96,7 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
     const memberTotal = R(shares.reduce((s, x) => s + P(x.amount), 0));
     const total = R(P(b.amount));
     const yourShareB = shares.length && !(Number(b.groupCollectiveAmount) > 0) ? Math.max(0, R(P(total) - P(memberTotal))) : null;
-    items.push({ key: `bill:${b.id}`, kind: "bill", scope: "group", id: b.id, date, title: billTitle(b), total, payer: "not paid yet", note: "", shares, memberTotal,
+    items.push({ key: `bill:${b.id}`, kind: "bill", scope: "group", id: b.id, date, title: billTitle(b, !shares.length || P(memberTotal) >= P(total) - 1), total, payer: "not paid yet", note: "", shares, memberTotal,
       due: R(shares.reduce((s, x) => s + P(x.remaining), 0)), groupAmount: R(P(b.groupCollectiveAmount)), yourShare: yourShareB, parts: partsOf({ shares, total, yourShare: yourShareB, forPerson: null }), categories: categorySplit({ catId: b.catId, catIds: b.catIds }, P(total)) });
   }
   // Expenses tagged to the group's PEOPLE rather than to the group (a member's own K Auto, a bill split to a member), when asked for: one statement for both.
@@ -113,7 +115,7 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
       const parts = shares.length ? shares.map(x => ({ personId: x.personId, name: x.name, amount: x.amount })) : [{ personId: String(t.forPerson), name: nameOf(t.forPerson), amount: total }];
       const mine = R(parts.reduce((sum, x) => sum + P(x.amount), 0));
       const paidBill = t.paidBillId != null ? (bills || []).find(b => b && String(b.id) === String(t.paidBillId)) : null;
-      items.push({ key: `txn:${t.id}`, kind: "expense", scope: "people", id: t.id, date, title: paidBill ? billTitle(paidBill) : (t.paidBillName || vendorOf(t)), total: mine,
+      items.push({ key: `txn:${t.id}`, kind: "expense", scope: "people", id: t.id, date, title: paidBill ? billTitle(paidBill, P(mine) >= P(total) - 1) : (t.paidBillName || vendorOf(t)), total: mine,
         payer: t.paidByPersonId ? nameOf(t.paidByPersonId) : "you", note: String(t.note || ""), shares, memberTotal: mine, due: R(shares.reduce((sum, x) => sum + P(x.remaining), 0)),
         groupAmount: 0, yourShare: null, parts, categories: categorySplit(t, P(mine)) });
     }
@@ -125,7 +127,7 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
       const shares = sharesOf(getBillSplitSource(b, txns).people);
       if (!shares.length) continue;
       const mine = R(shares.reduce((sum, x) => sum + P(x.amount), 0));
-      items.push({ key: `bill:${b.id}`, kind: "bill", scope: "people", id: b.id, date, title: billTitle(b), total: mine, payer: "not paid yet", note: "", shares, memberTotal: mine,
+      items.push({ key: `bill:${b.id}`, kind: "bill", scope: "people", id: b.id, date, title: billTitle(b, P(mine) >= P(b.amount) - 1), total: mine, payer: "not paid yet", note: "", shares, memberTotal: mine,
         due: R(shares.reduce((sum, x) => sum + P(x.remaining), 0)), groupAmount: 0, yourShare: null, parts: shares.map(x => ({ personId: x.personId, name: x.name, amount: x.amount })), categories: categorySplit({ catId: b.catId, catIds: b.catIds }, P(mine)) });
     }
   }

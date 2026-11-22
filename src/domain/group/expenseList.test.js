@@ -173,3 +173,22 @@ test("showNames false: one plain list per month, no names, no headings, then the
   assert.equal(m, ["Neighbours · 1 Jul 2026 – 31 Aug 2026", "", "July", "Electricity - 6000", "Amazon - Coffee - 678", "Sum - 6678", "", "August", "Water - 1000", "Sum - 1000", "", "PTD total - 7678", "", "Pay to: me@upi"].join("\n"));
   assert.doesNotMatch(m, /Raj|Mangal|expenses\n/);
 });
+
+test("a family the person is not part of: a bill that is entirely theirs reads (Group name); a bill they only share keeps its meter; with several meters or none", () => {
+  const owes = a => ({ amount: a, mode: "owes" });
+  const ba = [{ id: "ba1", name: "Common Meter", type: "Electricity" }, { id: "ba2", name: "Raj flat", type: "Electricity" }];
+  const bills2 = [
+    { id: "b1", name: "Goa Electricity", billDate: "2026-11-02", billerAccountId: "ba1", amount: 9000, status: "paid", paidByTxnId: "t1" },
+    { id: "b2", name: "Goa Electricity", billDate: "2026-11-03", billerAccountId: "ba2", amount: 2400, status: "paid", paidByTxnId: "t2" },
+    { id: "b3", name: "Goa Electricity", billDate: "2026-11-04", billerAccountId: "ba2", amount: 700, status: "unpaid", groupId: "g1" },   // unpaid, tagged to the group, no split: theirs
+  ];
+  const t = [
+    { id: "t1", type: "expense", desc: "x", date: "2026-11-05", amount: 9000, groupId: "g1", paidBillId: "b1", people: { r: owes(3000), m: owes(3000) } },   // they bear 6000 of 9000: shared
+    { id: "t2", type: "expense", desc: "x", date: "2026-11-06", amount: 2400, paidBillId: "b2", people: { r: owes(2400) } },                                 // all theirs, tagged to Raj
+  ];
+  const titles = (o) => buildGroupExpenseList({ ...base, meId: null, includePeople: true, groupName: "Suryamandal", txns: t, bills: bills2, billerAccounts: ba, ...o }).items.map(i => i.title);
+  // by date: the unpaid group bill (4th), the shared payment (5th), Raj's own (6th)
+  assert.deepEqual(titles({}), ["November Goa Electricity Bill (Suryamandal)", "November Goa Electricity Bill (Common Meter)", "November Goa Electricity Bill (Suryamandal)"]);
+  assert.deepEqual(titles({ billerAccounts: [] }), ["November Goa Electricity Bill (Suryamandal)", "November Goa Electricity Bill", "November Goa Electricity Bill (Suryamandal)"]);   // no meter nickname: the shared one stays plain
+  assert.equal(buildGroupExpenseList({ ...base, meId: "me", includePeople: true, groupName: "Suryamandal", txns: t, bills: bills2, billerAccounts: ba }).items.some(i => /Suryamandal/.test(i.title)), false);   // my own flat: never
+});
