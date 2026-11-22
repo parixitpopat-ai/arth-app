@@ -217,6 +217,9 @@ import { splitGstAcrossInstalments } from "./domain/loans/emiGst";
 import { getCardUnbilledEvents } from "./domain/cards/unbilledCommitments";
 import { skipMonth, putMonthBack, isMonthSkipped, monthKeyOf } from "./domain/recurring/skipMonth";
 import { planTheyPaid } from "./domain/person/theyPaid";
+import { buildDueReminders } from "./domain/notifications/dueReminders";
+import { dueNotifAvailable, dueNotifEnable, dueNotifCancelAll, dueNotifSchedule, dueNotifOnOpen } from "./native/dueNotifications";
+import { whatsappLink } from "./domain/share/whatsapp";
 import { readClipboardText, PASTE_BLOCKED_MESSAGE, PASTE_EMPTY_MESSAGE } from "./native/clipboard";
 import { QUICK_FILTERS, matchesQuickFilter } from "./domain/transactions/quickFilters";
 import { getCardAlerts } from "./domain/cards/alerts";
@@ -1814,6 +1817,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         upiHandle ? `Payment UPI: ${upiHandle}${linkedLabel}` : "",
       ].filter(Boolean).join("\n");
     }
+    // One-tap WhatsApp (domain/share/whatsapp.js): opens the person's chat from MY WhatsApp with the message typed; I press Send. A photo cannot ride along on a link.
+    if(shareRequest.via==="whatsapp"){
+      try{ window.open(whatsappLink({ phone:shareRequest.phone, text:lines }), "_blank"); }catch{ navigator.clipboard?.writeText(lines).catch(()=>{}); }
+      return;
+    }
     try {
       const file = await dataUrlToShareFile(imageBase64, (shareTitle || contextLabel || "arth-bill").replace(/[^\w-]+/g, "-").slice(0, 48));
       const payload = { title:shareTitle || "Arth share request", text:lines };
@@ -2687,6 +2695,27 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const ok = await weeklyNotifEnable();
     if(!ok){ setToast({ message:"Notifications are blocked for Arth. Allow them in your phone's settings, then try again.", icon:"⚠️" }); return; }
     setWeeklyNotifOn(true); setToast({ message:"On: a summary every Sunday at 7 pm", icon:"🔔" });
+  };
+  // Bill reminders on the phone (domain/notifications/dueReminders.js): 3 days before and on the due day, at 9 am, for bills still owed. Android app only; off by default.
+  const [dueNotifOn, setDueNotifOn] = useState(()=>{ try { return localStorage.getItem("arth_due_notif")==="1"; } catch { return false; } });
+  useEffect(()=>{ try { localStorage.setItem("arth_due_notif", dueNotifOn?"1":"0"); } catch { /* the choice is simply not kept */ } },[dueNotifOn]);
+  useEffect(()=>{
+    if(!dueNotifAvailable()) return undefined;
+    if(!dueNotifOn){ dueNotifCancelAll(); return undefined; }
+    const timer = setTimeout(()=>{ dueNotifSchedule(buildDueReminders({ bills, now:new Date(), sym, fmt, balanceOf:b=>getBillBalance(b, contributions).remaining })); }, 1500);
+    return ()=>clearTimeout(timer);
+  },[dueNotifOn, bills, contributions]);
+  useEffect(()=>{
+    if(!dueNotifAvailable() || !dueNotifOn) return undefined;
+    let remove = ()=>{}; let gone = false;
+    dueNotifOnOpen(billId=>{ setShowSettings(false); setTab("bills"); setViewingBillId(billId); }).then(r=>{ if(gone) r(); else remove = r; });
+    return ()=>{ gone = true; remove(); };
+  },[dueNotifOn]);
+  const toggleDueNotif = async()=>{
+    if(dueNotifOn){ setDueNotifOn(false); setToast({ message:"Bill reminders are off", icon:"🔕" }); return; }
+    const ok = await dueNotifEnable();
+    if(!ok){ setToast({ message:"Notifications are blocked for Arth. Allow them in your phone's settings, then try again.", icon:"⚠️" }); return; }
+    setDueNotifOn(true); setToast({ message:"On: a reminder 3 days before a bill is due and on the day, at 9 am", icon:"🔔" });
   };
   const smsInbox = useSmsInbox({ accounts, txns, people });   // bank messages caught as they arrive (Android app only); proposals, never entries
   const activePrepaidAlerts = useMemo(()=>getPrepaidAlerts({ billerAccounts, bills, relationships:membershipRelationships, today:new Date(), dismissed:dismissedAlerts }),[billerAccounts,bills,membershipRelationships,dismissedAlerts]);
@@ -10990,6 +11019,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               const archive = ()=>setNeedsArchived(prev=>prev.includes(it.signature)?prev:[...prev,it.signature]);
               const remind = async ()=>{
                 const text = `Hi ${it.title.replace(/ owes you$/,"")}, a gentle reminder that ${sym}${fmt(it.amount)} is pending with you. Thank you!`;
+                const owedPerson = getPerson(it.personId);
+                // One tap: WhatsApp from my own number with the reminder typed (domain/share/whatsapp.js), I press Send. No number saved: WhatsApp's chooser.
+                if(owedPerson?.phone){ try{ window.open(whatsappLink({ phone:owedPerson.phone, text }), "_blank"); archive(); return; }catch{ /* fall back to the share sheet below */ } }
                 try{ if(navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); setToast({ message:"Reminder copied. Paste it in a chat.", icon:"📋" }); } archive(); }catch(e){ if(e?.name!=="AbortError"){ try{ await navigator.clipboard.writeText(text); setToast({ message:"Reminder copied. Paste it in a chat.", icon:"📋" }); archive(); }catch{} } }
               };
               const act = { background:T.accent,border:"none",borderRadius:16,padding:"0 14px",minHeight:44,color:T.accentInk||"#fff",fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"Inter,sans-serif" };
@@ -16069,6 +16101,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Fixed: a card with an old statement bill that has no period saved could make the app crash on Home (\"Something went wrong\") once a statement cycle closed. Statements are also never added twice now.",
             "Cards: Money now shows one box for all your cards (total limit, used, available) with each card's use under it. Used counts what is billed, what is spent but not yet billed, and EMI purchases still to be billed, because the bank keeps those blocked on the limit (check against your own statement). Money Required also lists what you have spent on a card since its last statement, due when that statement is due.",
             "New look, dark theme: the dark theme now matches the light one, a deep green-tinted charcoal with a softer green, in place of the old blue-violet navy. The PIN screen and the screens shown while the app waits use the same colours.",
+            "One-tap WhatsApp: on a bill's split there is now a WhatsApp button next to Share for each person who owes. It opens that person's chat from your own WhatsApp with their share and the due date already typed (add their phone number on their profile; without one WhatsApp lets you pick the contact), and you press Send. Home, Needs you, Remind does the same. Arth cannot send WhatsApp messages by itself from a personal number.",
+            "Bill reminders (Android app, Settings): a phone notification 3 days before a bill is due and on the day, at 9 am, for bills still owed. Tap it to open the bill. Off by default.",
             "Fixed: the Paste button under Bank SMS import did nothing on some phones and said nothing. It now uses the phone's own clipboard in the Android app, and if pasting is blocked it tells you to long-press the box and choose Paste.",
             "Transactions, new look: the list starts with what you spent and what came in, then four quick filters (Everything, With people, Work, Loans). A split row says who owes you in words (\"Raj owes you ₹900\"), and a transfer is named \"Transfer\" and shows from and to accounts.",
             "Add screen, last steps of this round: in an itemised purchase the items now come before the charges, and with two or more categories an \"Items by category\" card shows what each gets. Under More there are now five choices: Invest, Give petty cash, Buy on card EMI, Pay a bill and Lend money (it tells you to add the person and tick \"This is a loan\").",
@@ -16520,6 +16554,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Manage</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
           <Row icon="🏦" title="Accounts" subtitle={`${accounts.length} account${accounts.length===1?"":"s"}`} onClick={()=>setSettingsSection("accounts")}/>
+          {dueNotifAvailable()&&<Row icon="🧾" title="Bill reminders" subtitle={dueNotifOn?"On · 3 days before and on the day, 9 am":"Off"} onClick={toggleDueNotif}/>}
           {weeklyNotifAvailable()&&<Row icon="🔔" title="Weekly summary notification" subtitle={weeklyNotifOn?"On · Sundays at 7 pm":"Off"} onClick={toggleWeeklyNotif}/>}
           <Row icon="🗂️" title="Categories" subtitle={`${cats.length} categories`} onClick={()=>setSettingsSection("categories")}/>
           <Row icon="🏷️" title="Account, Income & Liability Types" subtitle="Add custom types" onClick={()=>setSettingsSection("types")}/>
@@ -18039,7 +18074,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         <div key={pid} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,fontSize:11,color:info.mode==="owes"?(info.settled?T.success:Number(info.settledAmt||0)>0?T.warn:T.accent):T.sub,marginBottom:2 }}>
                           <span>{p.emoji} {p.name}</span>
                           <div style={{ display:"flex",alignItems:"center",gap:6 }}>
-                            {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind===splitSource.kind&&String(l.id)===String(splitSource.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canShare=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canShare&&<button onClick={e=>{ e.stopPropagation(); sharePaymentRequest(p.name,left,b.name||"Bill",{ dueDate:b.dueDate||b.billDate, billDate:b.billDate, billPeriodFrom:b.billPeriodFrom, billPeriodTo:b.billPeriodTo, totalAmount:b.amount, imageBase64:b.imageBase64||paymentImageSrc||billImageSrc||null, shareTitle:b.name||"Bill" }); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Inter,sans-serif",flexShrink:0 }}>Share</button>; })()}
+                            {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind===splitSource.kind&&String(l.id)===String(splitSource.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canShare=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canShare&&<><button onClick={e=>{ e.stopPropagation(); sharePaymentRequest(p.name,left,b.name||"Bill",{ dueDate:b.dueDate||b.billDate, billDate:b.billDate, billPeriodFrom:b.billPeriodFrom, billPeriodTo:b.billPeriodTo, totalAmount:b.amount, imageBase64:b.imageBase64||paymentImageSrc||billImageSrc||null, shareTitle:b.name||"Bill" }); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Inter,sans-serif",flexShrink:0 }}>Share</button><button data-testid="bill-whatsapp" onClick={e=>{ e.stopPropagation(); sharePaymentRequest(p.name,left,b.name||"Bill",{ dueDate:b.dueDate||b.billDate, billDate:b.billDate, billPeriodFrom:b.billPeriodFrom, billPeriodTo:b.billPeriodTo, totalAmount:b.amount, via:"whatsapp", phone:p.phone||"" }); }} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Inter,sans-serif",flexShrink:0 }}>WhatsApp</button></>; })()}
                             {(()=>{ const owed=Number(info.amount||0); const left=remainingShare(info); const paid=Number(info.settledAmt||0); if(info.mode!=="owes") return <span>Owes {sym}{fmt(owed)} | on you</span>; if(left<=0) return <span>Settled {sym}{fmt(owed)}</span>; if(paid>0) return <span>Owes {sym}{fmt(owed)} | Partly settled {sym}{fmt(paid)} | Bal. {sym}{fmt(left)}</span>; return <span>Owes {sym}{fmt(owed)} | Bal. {sym}{fmt(left)}</span>; })()}
                             {(()=>{ const alreadySettledViaTxn=txns.some(x=>x.type==="settlement_in"&&x.settlementLinks?.some(l=>l.kind===splitSource.kind&&String(l.id)===String(splitSource.id)&&String(l.personId)===String(pid))); const left=remainingShare(info); const canSettle=info.mode==="owes"&&!info.settled&&!alreadySettledViaTxn&&left>0; return canSettle&&<button onClick={e=>{ e.stopPropagation(); setSettleTxn({ id:"bill_person_settle_"+b.id+"_"+pid, type:"expense", desc:b.name, amount:left, people:{ [pid]:{ amount:left, mode:"owes", settled:false } }, _billIds:splitSource.kind==="bill"?[splitSource.id]:[], _txnIds:splitSource.kind==="txn"?[splitSource.id]:[], _isBillSettle:true }); }} style={{ background:T.success+"18",border:`1px solid ${T.success}33`,borderRadius:12,padding:"2px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.success,fontFamily:"Inter,sans-serif",flexShrink:0 }}>💰 Settle</button>; })()}
                           </div>
