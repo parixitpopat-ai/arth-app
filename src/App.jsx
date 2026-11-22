@@ -217,6 +217,7 @@ import { splitGstAcrossInstalments } from "./domain/loans/emiGst";
 import { getCardUnbilledEvents } from "./domain/cards/unbilledCommitments";
 import { skipMonth, putMonthBack, isMonthSkipped, monthKeyOf } from "./domain/recurring/skipMonth";
 import { planTheyPaid } from "./domain/person/theyPaid";
+import { QUICK_FILTERS, matchesQuickFilter } from "./domain/transactions/quickFilters";
 import { getCardAlerts } from "./domain/cards/alerts";
 import { getPaybackTotalsByPerson, applyPaybacks, buildPaybackTxn } from "./domain/person/payback";
 import { isPaidByOther, getPaidByPayable } from "./domain/person/paidBy";
@@ -584,7 +585,7 @@ const getTxnDisplayTitle = txn => {
   const desc = String(txn.desc || "").trim();
   const merchant = String(txn.merchant || "").trim();
   const note = String(txn.note || "").trim();
-  if(txn.type === "cc_payment" || txn.type === "transfer") return desc || note || merchant || "—";
+  if(txn.type === "cc_payment" || txn.type === "transfer") return desc || note || merchant || (txn.type === "cc_payment" ? "Card payment" : "Transfer");
   return desc || merchant || note || "—";
 };
 const extractSmsLast4s = txt => {
@@ -1747,6 +1748,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [lastRepaymentFix, setLastRepaymentFix] = useState(null);   // the last "Repayments not reflected" fix and how to undo it (kept here: the person page redraws when data changes)
   const [statementGroupId, setStatementGroupId] = useState(null);   // a family (group) statement sheet, opened from the group page
   const [statementPersonId, setStatementPersonId] = useState(null);   // a person's statement sheet (Statement on their page)
+  const [txnQuick, setTxnQuick] = useState("all");   // quick filter above the list: all | people | work | loans (domain/transactions/quickFilters.js)
   const [txnReimbursableOnly, setTxnReimbursableOnly] = useState("");   // work-expense filter: "" off | "all" | "waiting" | "reimbursed"
   const [txnGroupFilter, setTxnGroupFilter] = useState("all");
   const [selectedInvestmentTypeView, setSelectedInvestmentTypeView] = useState("all");
@@ -2767,6 +2769,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const filteredTxns = useMemo(()=>[
     ...txns
   ].filter(t=>{
+    if(txnQuick!=="all" && !matchesQuickFilter(t, txnQuick)) return false;
     if(fType!=="All" && t.type!==fType) return false;
     if(!isDateInRange(t.date, txnDateFrom, txnDateTo)) return false;
 
@@ -2853,7 +2856,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(recordedB !== recordedA) return recordedB - recordedA;
     if(dateB !== dateA) return dateB - dateA;
     return tieDesc;
-  }),[txns,fType,txnDateFrom,txnDateTo,txnAmountFrom,txnAmountTo,txnCategoryFilter,txnPersonFilter,txnAccountFilter,txnGroupFilter,accounts,expenseSourceFilter,expenseCardFilter,incomeTypeFilter,incomeAccountFilter,investmentTypeFilter,txnSort,txnReimbursableOnly,txnSearch]);
+  }),[txns,fType,txnDateFrom,txnDateTo,txnAmountFrom,txnAmountTo,txnCategoryFilter,txnPersonFilter,txnAccountFilter,txnGroupFilter,accounts,expenseSourceFilter,expenseCardFilter,incomeTypeFilter,incomeAccountFilter,investmentTypeFilter,txnSort,txnReimbursableOnly,txnSearch,txnQuick]);
 
   // Cash balance: domain/accounts/accountBalance.js (a linked UPI/debit is a rail with no balance of its own).
   const accountBalance = useCallback((accId, endDate=null)=>computeAccountBalance({ accId, accounts, txns, endDate, isDateInRange }),[txns,accounts]);
@@ -3464,10 +3467,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               {t.type==="investment"&&t.investFolio&&<span style={{ background:T.pill,color:T.sub,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>Folio {t.investFolio}</span>}
               {investmentMetricText&&<span style={{ color:T.sub,fontSize:10 }}>{investmentMetricText}</span>}
               {t.catAllocations&&Object.keys(t.catAllocations).length>0&&<span style={{ color:T.sub,fontSize:10 }}>{Object.entries(t.catAllocations).map(([cid,val])=>`${getCat(cid).name.split(" ")[0]} ${sym}${fmt(val)}`).join(" · ")}</span>}
-              {acc&&<span style={{ color:T.sub,fontSize:10 }}>{accIcon(acc.type)} {acc.name}</span>}
+              {acc&&(t.type==="transfer"||t.type==="cc_payment")&&t.toAccId&&getAcc(t.toAccId)?.name
+                ? <span style={{ color:T.sub,fontSize:10 }}>{accIcon(acc.type)} {acc.name} → {getAcc(t.toAccId).name}</span>
+                : acc&&<span style={{ color:T.sub,fontSize:10 }}>{accIcon(acc.type)} {acc.name}</span>}
               {t.paidByPersonId&&<span data-testid="txn-paid-by" style={{ color:T.warn,fontSize:10,fontWeight:700 }}>👤 Paid by {getPerson(t.paidByPersonId)?.name||"someone"}</span>}
               {t.transactionRef&&<span style={{ color:T.sub,fontSize:10 }}># {t.transactionRef}</span>}
-              {totalOwed>0&&!allSettled&&<span style={{ color:T.accent,fontSize:10,fontWeight:700 }}>↗ {sym}{fmt(totalOwed)}</span>}
+              {totalOwed>0&&!allSettled&&<span data-testid="txn-owes-you" style={{ color:T.accent,fontSize:10,fontWeight:700 }}>{owedPeople.length>0?`${owedPeople.map(([pid])=>(getPerson(pid)?.name||"Someone").split(" ")[0]).slice(0,2).join(" and ")}${owedPeople.length>2?` +${owedPeople.length-2}`:""} ${owedPeople.length>1?"owe":"owes"} you`:"Group owes you"} {M(`${sym}${fmt(totalOwed)}`)}</span>}
               {t.type==="settlement_in"&&t.isRefund&&<span style={{ background:refundTone+"18",color:refundTone,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>↩ Refund</span>}
               {t.type==="settlement_in"&&!t.isRefund&&t.settlementLinks?.length>0&&<span style={{ background:T.info+"18",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💰 Repayment</span>}
               {t.type==="expense"&&refundedAmount>0&&<span style={{ background:T.info+"20",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>↩ {refundStatus}</span>}
@@ -11620,6 +11625,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <button onClick={()=>{ if(bulkMode) exitBulk(); else setBulkMode(true); }} style={{ height:38,borderRadius:12,border:`1px solid ${bulkMode?T.accent:T.border}`,background:bulkMode?T.accentSoft:T.card,color:bulkMode?T.accent:T.sub,cursor:"pointer",padding:"0 12px",fontSize:11,fontWeight:800,fontFamily:"Inter,sans-serif" }}>{bulkMode?"Cancel":"Select"}</button>
           </div>
         </div>
+        {/* New look: what came in and went out in this list, and four quick filters (the Design canvas "Money"). */}
+        {(()=>{
+          const spent = filteredTxns.filter(t=>t.type==="expense").reduce((sum,t)=>sum+getMyExpenseAmount(t),0);
+          const cameIn = filteredTxns.filter(t=>t.type==="income").reduce((sum,t)=>sum+Number(t.amount||0),0);
+          return (
+            <div style={{ display:"flex",gap:10,marginBottom:10 }}>
+              <div data-testid="txn-summary-spent" style={{ flex:1,background:T.card,borderRadius:14,padding:"10px 14px" }}><div style={{ color:T.sub,fontSize:11,fontWeight:600 }}>Spent</div><div style={{ color:T.text,fontFamily:"Manrope,Inter,sans-serif",fontSize:20,fontWeight:800,fontVariantNumeric:"tabular-nums" }}>{M(`${sym}${fmt(spent)}`)}</div></div>
+              <div data-testid="txn-summary-in" style={{ flex:1,background:T.card,borderRadius:14,padding:"10px 14px" }}><div style={{ color:T.sub,fontSize:11,fontWeight:600 }}>Came in</div><div style={{ color:T.text,fontFamily:"Manrope,Inter,sans-serif",fontSize:20,fontWeight:800,fontVariantNumeric:"tabular-nums" }}>{M(`${sym}${fmt(cameIn)}`)}</div></div>
+            </div>
+          );
+        })()}
+        <div role="group" aria-label="Quick filters" style={{ display:"flex",background:T.input,borderRadius:14,padding:3,gap:2,marginBottom:12 }}>
+          {QUICK_FILTERS.map(f=>(
+            <button key={f.id} data-testid={`txn-quick-${f.id}`} aria-pressed={txnQuick===f.id} onClick={()=>setTxnQuick(f.id)} style={{ flex:1,minHeight:44,borderRadius:11,border:"none",background:txnQuick===f.id?T.card:"transparent",boxShadow:txnQuick===f.id?`0 0 0 1px ${T.accent}`:"none",color:txnQuick===f.id?T.accent:T.sub,fontWeight:txnQuick===f.id?800:600,fontSize:12,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>{f.label}</button>
+          ))}
+        </div>
 
         {bulkMode&&bulkSelected.length>0&&(
           <div style={{ position:"sticky",top:0,zIndex:20,background:T.accent,borderRadius:14,padding:"10px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
@@ -16042,6 +16063,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Fixed: a card with an old statement bill that has no period saved could make the app crash on Home (\"Something went wrong\") once a statement cycle closed. Statements are also never added twice now.",
             "Cards: Money now shows one box for all your cards (total limit, used, available) with each card's use under it. Used counts what is billed, what is spent but not yet billed, and EMI purchases still to be billed, because the bank keeps those blocked on the limit (check against your own statement). Money Required also lists what you have spent on a card since its last statement, due when that statement is due.",
             "New look, dark theme: the dark theme now matches the light one, a deep green-tinted charcoal with a softer green, in place of the old blue-violet navy. The PIN screen and the screens shown while the app waits use the same colours.",
+            "Transactions, new look: the list starts with what you spent and what came in, then four quick filters (Everything, With people, Work, Loans). A split row says who owes you in words (\"Raj owes you ₹900\"), and a transfer is named \"Transfer\" and shows from and to accounts.",
             "Add screen, last steps of this round: in an itemised purchase the items now come before the charges, and with two or more categories an \"Items by category\" card shows what each gets. Under More there are now five choices: Invest, Give petty cash, Buy on card EMI, Pay a bill and Lend money (it tells you to add the person and tick \"This is a loan\").",
             "They paid: in Add, a person's row now says \"They paid. I owe them\". Put how much they paid (blank means all of it): your account is debited only for the rest, what they paid becomes a debt to them until you pay back, and spending still counts the whole amount. It is saved as two entries (your part and their part). The separate \"Paid by\" row and the P button are gone; entries saved with them before still work.",
             "Home, Needs you: a bill row has Pay, a person row has Remind (opens your share sheet with a short message), and the tick archives a row you have seen. An archived row comes back by itself if the amount changes or the bill becomes overdue, and \"Show archived\" brings them all back. The To Receive and Net Savings tiles are gone; work expenses waiting to be reimbursed now count in Between people.",
