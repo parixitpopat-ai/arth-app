@@ -113,7 +113,7 @@ import { createGroup as createPayGroup, removeItem as removePayGroupItem, listPa
 import { planGroupPayment } from "./domain/payTogether/payPlan";
 import PayGroupSheet from "./screens/PayGroupSheet";
 import SpreadSheet from "./screens/SpreadSheet";
-import { getCardUsage } from "./domain/cards/usage";
+import { getCardUsage, summariseCardLimits, emiBalanceForCard } from "./domain/cards/usage";
 import { shouldDebitOnLoanGiven, buildLoanDisbursalTxn } from "./domain/loans/disbursal";
 import { buildLoanGiven } from "./domain/loans/loanGiven";
 import { suggestBillPaymentVendors } from "./domain/bills/billVendorSuggestions";
@@ -213,6 +213,7 @@ import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVer
 import { generateDueStatements, isEmptyStatementBill, getPendingStatementChecks } from "./domain/cards/statementBills";
 import { reconcileAutoEmiLoans } from "./domain/loans/autoEmiProgress";
 import { projectCardEmiInstalments } from "./domain/loans/cardEmiProjection";
+import { getCardUnbilledEvents } from "./domain/cards/unbilledCommitments";
 import { skipMonth, putMonthBack, isMonthSkipped, monthKeyOf } from "./domain/recurring/skipMonth";
 import { getCardAlerts } from "./domain/cards/alerts";
 import { getPaybackTotalsByPerson, applyPaybacks, buildPaybackTxn } from "./domain/person/payback";
@@ -9458,7 +9459,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           { l:"Unbilled", v:`${sym}${fmt(cardSummary?.currentCycleSpend||0)}`, c:T.warn },
           // "Outstanding" used to repeat "Due Now" (the same figure); this tile is current utilisation instead:
           // billed + unbilled, the amount the bank counts against the limit (domain/cards/usage.js).
-          (()=>{ const u = getCardUsage({ limit:a.limit, billedOutstanding:cardSummary?.totalOutstanding, unbilled:cardSummary?.currentCycleSpend }); return { l:"In use", v:`${sym}${fmt(u.used)}${u.utilisationPct!=null?` · ${u.utilisationPct}%`:""}`, c:u.utilisationPct==null?T.text:u.utilisationPct>80?T.danger:u.utilisationPct>50?T.warn:T.success }; })(),
+          (()=>{ const u = getCardUsage({ limit:a.limit, billedOutstanding:cardSummary?.totalOutstanding, unbilled:cardSummary?.currentCycleSpend, emiBalance:emiBalanceForCard(loans, a.id) }); return { l:"In use", v:`${sym}${fmt(u.used)}${u.utilisationPct!=null?` · ${u.utilisationPct}%`:""}`, c:u.utilisationPct==null?T.text:u.utilisationPct>80?T.danger:u.utilisationPct>50?T.warn:T.success }; })(),
         ]
       : [
           { l:a.type==="debit"?"Linked Bank":a.type==="upi"&&linkedUpiAcc?"Linked Account":"Live Balance",
@@ -10597,8 +10598,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // accounts[], txns[], and toDateOnly passed through unmodified; nothing here recomputes
   // anything the adapter doesn't already own.
   const debtServiceEvents = [...projectLoansToDebtServiceEvents(loans, accounts, txns, toDateOnly, futureMoneyToday), ...projectCardEmiInstalments({ loans, accounts, txns, today: todayStr() })];
+  // Spent on a card but not yet on a statement: certain, so it belongs in Money Required (domain/cards/unbilledCommitments.js).
+  const ccUnbilledEvents = getCardUnbilledEvents({ accounts, unbilledOf:card=>getCardSummary(card, accounts, expandPaymentLines(txns), toDateOnly).currentCycleSpend, today:new Date() });
   const futureMoney = composeFutureMoneyCommitments(rawCommitments, [
     getSchoolFeeCommitments(feePeriods),
+    ccUnbilledEvents,
     debtServiceEvents,
     getMembershipFutureMoneyEvents(billerAccounts, memberships, getCurrentPeriod, membershipRelationships),
     getInsuranceFutureMoneyEvents(insurancePolicies),
@@ -14919,6 +14923,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const bankAccts = accounts.filter(a=>a.type==="bank"&&!isInvestmentAccount(a));
     const cashAccts = accounts.filter(a=>a.type==="cash"&&!isInvestmentAccount(a));
     const ccAccts = accounts.filter(a=>a.type==="cc");
+    // Per-card use of the limit, and the total across cards (domain/cards/usage.js). EMI purchases still to be billed count as used.
+    const cardRows = ccAccts.map(a=>({
+      id:a.id, name:a.name, limit:Number(a.limit)||0,
+      usage:getCardUsage({
+        limit:a.limit, billedOutstanding:Math.abs(cardOutstanding(a)),
+        unbilled:getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly).currentCycleSpend,
+        emiBalance:emiBalanceForCard(loans, a.id),
+      }),
+    }));
+    const cardRowsById = Object.fromEntries(cardRows.map(r=>[r.id,r]));
+    const cardTotals = summariseCardLimits(cardRows);
     const receivable = Object.entries(settlements).filter(([,v])=>Number(v?.owesMe||0)>0);
     const payable = Object.entries(settlements).filter(([,v])=>Number(v?.iOwe||v?.owed||0)>0);
     const Section = ({ title, children }) => (
@@ -14968,6 +14983,31 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         </Section>
 
         <Section title="Credit Cards">
+          {cardTotals.cardsWithLimit>0&&(
+            <div data-testid="card-limits" style={{ ...card,marginBottom:10 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline" }}>
+                <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>ALL CARDS · CREDIT LIMIT</div>
+                <div style={{ color:T.text,fontSize:15,fontWeight:900 }}>{sym}{fmt(cardTotals.totalLimit)}</div>
+              </div>
+              <div style={{ height:8,borderRadius:4,background:T.input,marginTop:8,overflow:"hidden" }}><div style={{ width:`${cardTotals.utilisationPct||0}%`,height:"100%",background:cardTotals.utilisationPct>80?T.danger:cardTotals.utilisationPct>50?T.warn:T.success }}/></div>
+              <div style={{ display:"flex",justifyContent:"space-between",fontSize:11,marginTop:6 }}>
+                <span style={{ color:T.sub }}>Used <b style={{ color:T.text }}>{sym}{fmt(cardTotals.totalUsed)}</b> ({cardTotals.utilisationPct}%)</span>
+                <span style={{ color:T.sub }}>Available <b style={{ color:T.text }}>{sym}{fmt(cardTotals.totalAvailable)}</b></span>
+              </div>
+              <div style={{ marginTop:10,display:"flex",flexDirection:"column",gap:8 }}>
+                {cardRows.filter(r=>r.usage.hasLimit).map(r=>(
+                  <div key={r.id} data-testid={`card-limit-${r.id}`}>
+                    <div style={{ display:"flex",justifyContent:"space-between",fontSize:12 }}>
+                      <span style={{ color:T.text,fontWeight:700 }}>{r.name}</span>
+                      <span style={{ color:T.sub }}>{sym}{fmt(r.usage.used)} of {sym}{fmt(r.limit)} · {r.usage.utilisationPct}%</span>
+                    </div>
+                    <div style={{ height:6,borderRadius:3,background:T.input,marginTop:4,overflow:"hidden" }}><div style={{ width:`${r.usage.utilisationPct||0}%`,height:"100%",background:r.usage.utilisationPct>80?T.danger:r.usage.utilisationPct>50?T.warn:T.success }}/></div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ color:T.sub,fontSize:10,marginTop:8 }}>Used = billed + not yet billed + EMI purchases still to be billed.</div>
+            </div>
+          )}
           <div style={{ ...card }}>
             {ccAccts.map(a=>{
               // accountBalance() explicitly returns 0 for any CC account by design (confirmed by
@@ -14981,7 +15021,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               // is a real field, already collected in Add Account for CC type and already used by
               // a utilization calculation elsewhere (line ~6588). Fixed to use it here too.
               // Used = billed outstanding + unbilled (domain/cards/usage.js): the bank counts unbilled spend against the limit.
-              const rowUsage = getCardUsage({ limit:a.limit, billedOutstanding:Math.abs(bal), unbilled:getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly).currentCycleSpend });
+              const rowUsage = cardRowsById[a.id]?.usage || getCardUsage({ limit:a.limit, billedOutstanding:Math.abs(bal), unbilled:getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly).currentCycleSpend });
               const hasLimit = rowUsage.hasLimit;
               const availableLimit = rowUsage.available;
               const utilPct = rowUsage.utilisationPct;
@@ -14996,6 +15036,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     <div><span style={{ color:T.sub }}>Available Limit: </span><span style={{ color:hasLimit?T.text:T.sub,fontWeight:hasLimit?800:400 }}>{hasLimit?`${sym}${fmt(availableLimit)}`:"Not set"}</span></div>
                     <div><span style={{ color:T.sub }}>Utilisation: </span><span style={{ color:hasLimit?(utilPct>80?T.danger:utilPct>50?T.warn:T.success):T.sub,fontWeight:hasLimit?800:400 }}>{hasLimit?`${utilPct}%`:"—"}</span></div>
                     <div><span style={{ color:T.sub }}>Unbilled: </span><span style={{ color:rowUsage.unbilled>0?T.warn:T.success,fontWeight:800 }}>{sym}{fmt(rowUsage.unbilled)}</span></div>
+                    {rowUsage.emi>0&&<div><span style={{ color:T.sub }}>EMI still to bill: </span><span style={{ color:T.warn,fontWeight:800 }}>{sym}{fmt(rowUsage.emi)}</span></div>}
                   </div>
                   <div data-testid="card-view-txns" onClick={()=>setShowAccDetail(a)} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>📄 View transactions</div>
                   <div data-testid="card-filter-txns" onClick={()=>{ setFType("All"); applyTxnDatePreset("all"); setTxnAmountFrom(""); setTxnAmountTo(""); setTxnCategoryFilter("all"); setTxnPersonFilter("all"); setTxnGroupFilter("all"); setExpenseSourceFilter("all"); setExpenseCardFilter("all"); setIncomeTypeFilter("all"); setIncomeAccountFilter("all"); setInvestmentTypeFilter("all"); setTxnReimbursableOnly(false); setTxnSearch(""); setTxnAccountFilter(String(a.id)); setTab("transactions"); }} style={{ marginTop:6,color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>🔎 Filter in Transactions (purchases, payments, refunds)</div>
@@ -15922,6 +15963,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Add screen, step 5: under Received, \"What is it?\" gives four big choices: Salary or income, Someone paid me back, A refund, Work reimbursement (the last three are the old Settlement form, already set). Settlement is no longer under More; More now holds Invest and Give petty cash.",
             "Add screen, step 6: Transfer now shows From and To right under the amount, and the long lists of category, person and group tags are gone: a transfer only moves money between two of your accounts. Transfers you tagged before keep their tags.",
             "Fixed: a card with an old statement bill that has no period saved could make the app crash on Home (\"Something went wrong\") once a statement cycle closed. Statements are also never added twice now.",
+            "Cards: Money now shows one box for all your cards (total limit, used, available) with each card's use under it. Used counts what is billed, what is spent but not yet billed, and EMI purchases still to be billed, because the bank keeps those blocked on the limit (check against your own statement). Money Required also lists what you have spent on a card since its last statement, due when that statement is due.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
@@ -18884,7 +18926,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             const ccAccs = accounts.filter(a=>a.type==="cc");
             if(!ccAccs.length) return null;
             const totalLimit = ccAccs.reduce((s,a)=>s+Number(a.limit||0),0);
-            const usageOf = a => getCardUsage({ limit:a.limit, billedOutstanding:cardOutstanding(a), unbilled:getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly).currentCycleSpend });
+            const usageOf = a => getCardUsage({ limit:a.limit, billedOutstanding:cardOutstanding(a), unbilled:getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly).currentCycleSpend, emiBalance:emiBalanceForCard(loans, a.id) });
             const totalOutstanding = ccAccs.reduce((s,a)=>s+usageOf(a).used,0); // billed + unbilled
             const utilPct = totalLimit>0 ? Math.round((totalOutstanding/totalLimit)*100) : 0;
             const utilColor = utilPct>=70 ? T.danger : utilPct>=40 ? T.warn : T.success;
