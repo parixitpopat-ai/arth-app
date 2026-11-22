@@ -34,8 +34,13 @@ export function categorySplit(t, totalPaise) {
   return [...out.values()].filter(x => x.paise > 0).map(x => ({ catId: x.catId, amount: R(x.paise), labels: x.labels }));
 }
 
-/** What a line is called: the VENDOR when the expense has one ("Third Wave Coffee"), else what it was described as. No extra words. */
-const vendorOf = t => String(t.merchant || "").trim() || String(t.desc || "").trim() || "Expense";
+/** What a line is called: "Vendor - Item" (e.g. "Amazon - Coffee"), the vendor being who it was paid to and the item what it was for. Only one of them when only one is
+ *  known, or when one already says the other ("Amazon order" from Amazon). No extra words. */
+const vendorOf = t => {
+  const v = String(t.merchant || "").trim(), d = String(t.desc || "").trim();
+  if (v && d) { const lv = v.toLowerCase(), ld = d.toLowerCase(); if (lv === ld || ld.includes(lv)) return d; if (lv.includes(ld)) return v; return `${v} - ${d}`; }
+  return v || d || "Expense";
+};
 
 const dateOfBill = b => String(b.billDate || b.createdDate || b.dueDate || "").slice(0, 10);
 

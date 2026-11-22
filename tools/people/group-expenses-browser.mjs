@@ -71,7 +71,10 @@ await p.getByText("Neighbours", { exact: true }).first().dispatchEvent("click");
 await T("group-statement").scrollIntoViewIfNeeded().catch(() => {}); await T("group-statement").dispatchEvent("click"); await p.waitForTimeout(700);
 const nmsg = await T("fam-message").innerText();
 rec("N1 a family I am not part of: no 'Only my part' choice, no block for me, the whole bill kept on screen", (await T("fam-who-me").count()) === 0 && !/Me - expenses/.test(nmsg) && /whole bill ₹9,000/.test(await body()), nmsg.slice(0, 120));
-rec("N2 the electricity counts at the family's 3,000 each (not the 9,000 bill), Raj's own K Auto joins, and the coffee tagged to the group is a line under 'Neighbours - expenses'; the month total is 7,178", /Raj - expenses\nNeighbour electricity - 3000/.test(nmsg) && /Mangal - expenses\nNeighbour electricity - 3000/.test(nmsg) && /Neighbours - expenses\nCoffee for them - 678/.test(nmsg) && /November total - 7178/.test(nmsg), nmsg);
+rec("N2 sent to a family I am not part of: no names at all, 'Vendor - Item - amount' lines, the electricity at the family's 6,000, a Sum", !/Raj|Mangal|expenses\n/.test(nmsg) && /Neighbour electricity - 6000/.test(nmsg) && /Coffee for them - 678/.test(nmsg) && /Sum - 7178/.test(nmsg), nmsg);
+await T("fam-show-names").check(); await p.waitForTimeout(300);
+const named = await T("fam-message").innerText();
+rec("N3 ticking 'Put each person's name as a heading' brings the blocks back (Raj - expenses ... Neighbours - expenses)", /Raj - expenses\nNeighbour electricity - 3000/.test(named) && /Neighbours - expenses\nCoffee for them - 678/.test(named), named.slice(0, 200));
 rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 await b.close(); try { process.kill(-server.pid); } catch {}
 const bad = results.filter(r => !r.pass).length; console.log(`\n${results.length - bad}/${results.length} passed`); process.exit(bad ? 1 : 0);

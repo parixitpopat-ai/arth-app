@@ -13,9 +13,10 @@ import { shortDate, plainAmount } from "../person/statementMessage.js";
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 /** @param {Array} items from buildGroupExpenseList, each with `on` (true = send it) and `parts` ([{personId,name,amount}])
- *  @param {{meId?:any, onlyPersonId?:any}} o  meId: the person using Arth is listed first; onlyPersonId: leave everyone else's parts out
+ *  @param {{meId?:any, onlyPersonId?:any, showNames?:boolean}} o  meId: the person using Arth is listed first; onlyPersonId: leave everyone else's parts out;
+ *    showNames false: no names at all, just the month's lines "Item - amount" and the Sum (what is sent to a family the person is not part of)
  *  @returns {string} "" when nothing is ticked */
-export function buildGroupExpenseMessage(items, { groupName = "", from, to, upiHandle = "", breakup = null, meId = null, onlyPersonId = null } = {}) {
+export function buildGroupExpenseMessage(items, { groupName = "", from, to, upiHandle = "", breakup = null, meId = null, onlyPersonId = null, showNames = true } = {}) {
   const chosen = (items || []).filter(i => i.on && (onlyPersonId == null || (i.parts || []).some(pt => pt.personId != null && String(pt.personId) === String(onlyPersonId)))).slice().sort((a, b) => a.date.localeCompare(b.date) || String(a.key).localeCompare(String(b.key)));
   if (!chosen.length) return "";
   const P = n => Math.round((Number(n) || 0) * 100);
@@ -26,6 +27,11 @@ export function buildGroupExpenseMessage(items, { groupName = "", from, to, upiH
   let all = 0;
   for (const m of months) {
     const label = `${MONTHS[Number(m.key.slice(5, 7)) - 1]}${years.size > 1 ? ` ${m.key.slice(0, 4)}` : ""}`;
+    if (!showNames) {   // one plain list for the month: no person, no heading
+      const lines = [label]; let sum = 0;
+      for (const i of m.items) { lines.push(`${i.title}${i.payer === "not paid yet" ? " (not paid yet)" : ""} - ${plainAmount(i.total)}`); sum += P(i.total); }
+      lines.push(`Sum - ${plainAmount(sum / 100)}`); blocks.push(lines); all += sum; continue;
+    }
     const who = new Map();   // person key -> { name, lines, paise }
     for (const i of m.items) {
       let parts = i.parts && i.parts.length ? i.parts : [{ personId: null, name: "", amount: i.total }];

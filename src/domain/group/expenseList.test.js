@@ -150,11 +150,26 @@ test("a group the person is NOT part of (meId null): items count at the family's
   assert.doesNotMatch(m, /You|Me /); assert.match(m, /Neighbours - expenses\nCoffee - 678/);
 });
 
-test("a line is named by its vendor when the expense has one, else by its description", () => {
+test("a line is 'Vendor - Item' (Amazon - Coffee); one of them alone when only one is known or one already says the other", () => {
   const t = [
-    { id: "v1", type: "expense", desc: "Coffee for the family", merchant: "Third Wave Coffee", date: "2026-11-06", amount: 678, groupId: "g1" },
+    { id: "v1", type: "expense", desc: "Coffee", merchant: "Amazon", date: "2026-11-06", amount: 678, groupId: "g1" },
     { id: "v2", type: "expense", desc: "Gate fix", date: "2026-11-07", amount: 150, groupId: "g1" },
     { id: "v3", type: "expense", desc: "x", merchant: "  ", date: "2026-11-08", amount: 10, groupId: "g1" },
+    { id: "v4", type: "expense", desc: "Amazon order", merchant: "Amazon", date: "2026-11-09", amount: 10, groupId: "g1" },
+    { id: "v5", type: "expense", desc: "Swiggy", merchant: "Swiggy", date: "2026-11-10", amount: 10, groupId: "g1" },
+    { id: "v6", type: "expense", desc: "", merchant: "K Auto", date: "2026-11-11", amount: 10, groupId: "g1" },
   ];
-  assert.deepEqual(buildGroupExpenseList({ ...base, meId: null, txns: t, bills: [] }).items.map(i => i.title), ["Third Wave Coffee", "Gate fix", "x"]);
+  assert.deepEqual(buildGroupExpenseList({ ...base, meId: null, txns: t, bills: [] }).items.map(i => i.title), ["Amazon - Coffee", "Gate fix", "x", "Amazon order", "Swiggy", "K Auto"]);
+});
+test("showNames false: one plain list per month, no names, no headings, then the Sum and the PTD total", () => {
+  const nm = id => ({ r: "Raj", m: "Mangal" }[id] || id);
+  const t = [
+    { id: "a", type: "expense", desc: "Electricity", date: "2026-07-04", amount: 12000, groupId: "g1", people: { r: { amount: 3000, mode: "owes" }, m: { amount: 3000, mode: "owes" } } },
+    { id: "b", type: "expense", desc: "Coffee", merchant: "Amazon", date: "2026-07-22", amount: 678, groupId: "g1" },
+    { id: "c", type: "expense", desc: "Water", date: "2026-08-05", amount: 1000, groupId: "g1", people: { r: { amount: 500, mode: "owes" }, m: { amount: 500, mode: "owes" } } },
+  ];
+  const items = buildGroupExpenseList({ ...base, meId: null, from: "2026-07-01", to: "2026-08-31", txns: t, bills: [], nameOf: nm }).items.map(i => ({ ...i, on: true }));
+  const m = buildGroupExpenseMessage(items, { groupName: "Neighbours", from: "2026-07-01", to: "2026-08-31", showNames: false, upiHandle: "me@upi" });
+  assert.equal(m, ["Neighbours · 1 Jul 2026 – 31 Aug 2026", "", "July", "Electricity - 6000", "Amazon - Coffee - 678", "Sum - 6678", "", "August", "Water - 1000", "Sum - 1000", "", "PTD total - 7678", "", "Pay to: me@upi"].join("\n"));
+  assert.doesNotMatch(m, /Raj|Mangal|expenses\n/);
 });

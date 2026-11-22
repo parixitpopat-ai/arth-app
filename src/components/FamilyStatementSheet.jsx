@@ -27,6 +27,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const [mode, setMode] = useState(() => (buildGroupExpenseList({ groupId: group.id, memberIds: (group.members || []).filter(id => String(id) !== String(meId) && id !== "__me__"), includePeople: true, txns, bills, from: presets(iso(new Date())).fy.from, to: iso(new Date()) }).totals.count > 0 ? "expenses" : "simple"));   // a group with expenses tagged to it opens on them
   const [exOff, setExOff] = useState({});
   const [withPeople, setWithPeople] = useState(true);       // one statement: the group's expenses AND the expenses tagged to its people
+  const [showNames, setShowNames] = useState(group.includeMe !== false && meId != null);   // names as headings: on for my own flat, off for a family I send it to
   const [onlyMine, setOnlyMine] = useState(false);          // the message carries only the person using Arth's own parts
   const [withBreakup, setWithBreakup] = useState(true);   // the category break-up goes in the message too                // itemised expenses the person un-ticked            // "simple": Member: Item - amount lines you tick, then a total | "full": the family statement
   const [overrides, setOverrides] = useState({});
@@ -46,7 +47,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
     if (!onlyMine) return buildCategoryBreakup(on, cats);
     return buildCategoryBreakup(on.map(i => { const mine = (i.parts || []).filter(pt => pt.personId != null && String(pt.personId) === String(meId)).reduce((s, pt) => s + pt.amount, 0); if (!(mine > 0) || !(i.total > 0)) return null; const r = mine / i.total; return { ...i, categories: i.categories.map(c => ({ ...c, amount: Math.round(c.amount * r * 100) / 100 })) }; }).filter(Boolean), cats);
   }, [ex, exOff, cats, onlyMine]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const exMessage = ex ? buildGroupExpenseMessage(exItems, { groupName: group.name, from, to, upiHandle, meId: inGroup ? meId : null, onlyPersonId: inGroup && onlyMine ? meId : null, breakup: withBreakup ? breakup : null }) : "";
+  const exMessage = ex ? buildGroupExpenseMessage(exItems, { groupName: group.name, from, to, upiHandle, meId: inGroup ? meId : null, onlyPersonId: inGroup && onlyMine && showNames ? meId : null, showNames, breakup: withBreakup ? breakup : null }) : "";
   const message = mode === "expenses" ? exMessage : !fam ? "" : mode === "simple" ? simpleMessage : buildFamilyMessage(fam, { groupName: group.name, nameOf, sym, fmt, upiHandle });
   const owed = fam ? fam.closing : 0;
   const choose = id => { setPreset(id); setFrom(P[id].from); setTo(P[id].to); setStatus(""); setOverrides({}); setExOff({}); };
@@ -115,7 +116,8 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
               <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, ...sub }}><input data-testid="fam-breakup-in-message" type="checkbox" checked={withBreakup} onChange={e => setWithBreakup(e.target.checked)} />Put this break-up in the message</label>
             </div>}
             <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, ...sub }}><input data-testid="fam-with-people" type="checkbox" checked={withPeople} onChange={e => { setWithPeople(e.target.checked); setExOff({}); }} />Also include expenses tagged to {group.name}'s people (not to the group), at what they bear</label>
-            {inGroup && <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, ...sub }}><input data-testid="fam-show-names" type="checkbox" checked={showNames} onChange={e => setShowNames(e.target.checked)} />Put each person's name as a heading in the message</label>
+            {inGroup && showNames && <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
               <span style={sub}>Message shows</span>
               {inGroup && <button type="button" data-testid="fam-who-all" style={chip(!onlyMine)} onClick={() => setOnlyMine(false)}>Everyone's parts</button>}
               {inGroup && <button type="button" data-testid="fam-who-me" style={chip(onlyMine)} onClick={() => setOnlyMine(true)}>Only my part</button>}
