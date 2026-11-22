@@ -11,16 +11,24 @@ import { buildGroupExpenseMessage } from "../domain/group/expenseMessage";
 import { buildCategoryBreakup } from "../domain/group/categoryBreakup";
 
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-function presets(todayIso) {
+function presets(todayIso, earliest = "2000-01-01") {
   const [y, m] = [+todayIso.slice(0, 4), +todayIso.slice(5, 7) - 1];
   const fyY = m >= 3 ? y : y - 1;
   return { month: { label: "This month", from: iso(new Date(y, m, 1)), to: todayIso }, last: { label: "Last month", from: iso(new Date(y, m - 1, 1)), to: iso(new Date(y, m, 0)) },
-    fy: { label: "This financial year", from: `${fyY}-04-01`, to: todayIso }, all: { label: "Everything", from: "2000-01-01", to: todayIso } };
+    fy: { label: "This financial year", from: `${fyY}-04-01`, to: todayIso }, all: { label: "Everything", from: earliest, to: todayIso } };
 }
 
 export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number(n).toFixed(2), group, people = [], txns = [], bills = [], billerAccounts = [], groups = [], cats = [], upiHandle = "", meId, startAll = false, cardBalance = null, onClose }) {
   const today = useMemo(() => iso(new Date()), []);
-  const P = useMemo(() => presets(today), [today]);
+  // "Everything" starts at the first entry that concerns this group or its people, not at a made-up year
+  const earliest = useMemo(() => {
+    const ids = new Set((group.members || []).map(String)); const gid = String(group.id);
+    const hit = x => String(x.groupId) === gid || (x.groupAllocations || []).some(a => String(a.groupId) === gid) || Object.keys({ ...(x.splitPeople || {}), ...(x.people || {}) }).some(k => ids.has(k)) || (x.forPerson != null && ids.has(String(x.forPerson)));
+    let m = "";
+    for (const x of [...txns, ...bills]) { if (!x || !hit(x)) continue; const d = String(x.date || x.billDate || x.createdDate || x.dueDate || "").slice(0, 10); if (d.length === 10 && (!m || d < m)) m = d; }
+    return m || `${today.slice(0, 4)}-01-01`;
+  }, [group.id, group.members, txns, bills, today]);
+  const P = useMemo(() => presets(today, earliest), [today, earliest]);
   const [preset, setPreset] = useState(startAll ? "all" : "fy");   // startAll: opened from "Everything owed to me", all time
   const [from, setFrom] = useState(startAll ? P.all.from : P.fy.from), [to, setTo] = useState(startAll ? P.all.to : P.fy.to);
   const [status, setStatus] = useState("");
@@ -147,7 +155,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
                 <input data-testid="fam-exp-check" type="checkbox" checked={!exOff[i.key]} onChange={e => setExOff(o => ({ ...o, [i.key]: !e.target.checked }))} style={{ marginTop: 3 }} />
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ color: T.text, fontSize: 13, fontWeight: 700, display: "block", wordBreak: "break-word" }}>{i.title}</span>
-                  <span style={sub}>{shortDate(i.date, true)} · {i.scope === "people" ? (i.fromGroup ? `for its people, tagged to ${i.fromGroup} · ` : "tagged to people, not the group · ") : ""}{i.kind === "bill" ? "bill, not paid yet" : `paid by ${i.payer}`}{i.wholeTotal && i.wholeTotal !== i.total ? ` · whole bill ${money(i.wholeTotal)}` : ""}{i.groupAmount > 0 && !i.shares.length ? ` · for the group: ${money(i.groupAmount)}` : ""}</span>
+                  <span style={sub}>{shortDate(i.date, true)} · {i.scope === "people" ? (i.fromGroup ? `for its people, tagged to ${i.fromGroup} · ` : "tagged to people, not the group · ") : ""}{i.kind === "bill" ? "bill, not paid yet" : `paid by ${i.payer}`}{i.wholeTotal && i.wholeTotal !== i.total ? ` · whole bill ${money(i.wholeTotal)}` : ""}{i.groupAmount > 0 && !i.shares.length ? ` · ${group.name}'s part ${money(i.groupAmount)}${onlyUnpaid && i.total < i.groupAmount - 0.004 ? `, ${money(i.total)} still owed` : ""}` : ""}</span>
                   {i.shares.length > 0 && <span style={{ ...sub, display: "block" }}>{i.shares.map(x => `${x.name} ${money(x.amount)}${x.remaining < 0.005 ? " ✓" : ""}`).join(" · ")}{i.yourShare ? ` · you ${money(i.yourShare)}` : ""}</span>}
                 </span>
                 <span style={{ color: T.text, fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>{money(i.total)}</span>

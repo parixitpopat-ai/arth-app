@@ -95,7 +95,7 @@ await p.waitForTimeout(300);
 await T("group-owed-all").scrollIntoViewIfNeeded().catch(() => {}); rec("O1 the group page has an Everything owed to me button", (await T("group-owed-all").count()) === 1, {});
 await T("group-owed-all").dispatchEvent("click"); await p.waitForTimeout(800);
 const oMsg = (await T("fam-message").count()) ? await T("fam-message").innerText() : "";
-rec("O2 it opens on the expenses view, all time, unpaid only, the message says so", (await T("fam-only-unpaid").isChecked()) && /Only unpaid entries/.test(oMsg) && /Everything/i.test(await body()), oMsg.slice(0, 120));
+rec("O2 it opens on the expenses view, all time, unpaid only, the message says so", (await T("fam-only-unpaid").isChecked()) && /Only unpaid entries/.test(oMsg) && /Everything/i.test(await body()) && !/2000/.test(oMsg) && !/2000/.test(await T("fam-expenses").innerText().catch(() => "")), oMsg.slice(0, 120));
 rec("O3 it shows the total of the entries listed and the balance on the cards", (await T("fam-owed-entries").count()) === 1 && (await T("fam-owed-card").count()) === 1, [await T("fam-owed-entries").innerText().catch(() => ""), await T("fam-owed-card").innerText().catch(() => "")]);
 await T("fam-only-unpaid").uncheck(); await p.waitForTimeout(300);
 rec("O4 the two totals go away when the unpaid filter is off", (await T("fam-owed-card").count()) === 0, {});
