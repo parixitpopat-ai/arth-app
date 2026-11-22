@@ -1,4 +1,4 @@
-// Add screen, new look step: the type switch (Spent / Received / Moved / More). SYNTHETIC data, real app in Chromium. CHROMIUM check only.
+// Add screen, new look step: the type switch (Spent / Received / Transfer / More). SYNTHETIC data, real app in Chromium. CHROMIUM check only.
 // Run: node tools/ui/add-type-browser.mjs
 import { chromium } from "/opt/node22/lib/node_modules/playwright/index.mjs";
 import { spawn } from "node:child_process";
@@ -32,13 +32,13 @@ try {
   await T("what-income").click(); await page.waitForTimeout(300);
   rec("A3e Salary or income goes back to the income form", (await page.getByPlaceholder(/Source \(e\.g\. Salary/).count()) === 1, {});
   await T("type-transfer").click(); await page.waitForTimeout(300);
-  rec("A4 Moved switches to a transfer (a Note instead of a vendor)", await pressed("type-transfer") && (await page.getByPlaceholder("Note (optional)").count()) === 1, {});
-  rec("A4b under Moved the tag chips are folded away until opened", (await T("move-tag").count()) === 1 && (await T("move-tag").evaluate(e => e.open)) === false, {});
+  rec("A4 Transfer switches to a transfer (a Note instead of a vendor)", await pressed("type-transfer") && (await page.getByPlaceholder("Note (optional)").count()) === 1, {});
+  rec("A4b under Transfer the tag chips are folded away until opened", (await T("move-tag").count()) === 1 && (await T("move-tag").evaluate(e => e.open)) === false, {});
   const sels = page.locator("select"); await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("500");
   await sels.nth(0).selectOption("bank1"); await sels.nth(1).selectOption("bank2");
   await page.getByRole("button", { name: /^Add ✓$/ }).click(); await page.waitForTimeout(900);
   const tr = (await page.evaluate(() => JSON.parse(localStorage.getItem("arth_txns") || "[]"))).find(t => t.type === "transfer");
-  rec("A4c a Moved entry saves as a transfer from Savings to Current", tr && tr.amount === 500 && tr.fromAccId === "bank1" && tr.toAccId === "bank2", tr && { amount: tr.amount, from: tr.fromAccId, to: tr.toAccId });
+  rec("A4c a Transfer entry saves as a transfer from Savings to Current", tr && tr.amount === 500 && tr.fromAccId === "bank1" && tr.toAccId === "bank2", tr && { amount: tr.amount, from: tr.fromAccId, to: tr.toAccId });
   await page.getByRole("button", { name: "+", exact: true }).first().click(); await page.waitForTimeout(600); await page.getByText("More options →").click(); await page.waitForTimeout(500);
   await T("type-more").click(); await page.waitForTimeout(300);
   rec("A5 More opens Invest and Give petty cash, with Invest chosen", await pressed("type-more") && (await T("type-petty_cash").count()) === 1 && (await T("type-investment").count()) === 1, {});

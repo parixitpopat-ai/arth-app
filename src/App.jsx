@@ -6375,13 +6375,13 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               </div>
             : <div>
                 {/* Add, step 3 of the new look: one switch, Spent / Received / Moved / More (the Design canvas "New entry"). The same five types
-                    as before: Spent = expense, Received = income, Moved = transfer, More = settlement and invest, shown just below. The click
+                    as before: Spent = expense, Received = income, Transfer = transfer, More = settlement and invest, shown just below. The click
                     handler is unchanged. */}
                 {(()=>{
                   const chooseType = v => { if(v==="petty_cash"){ setPettyCashDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } if(v==="loan_given"){ setLoanGivenDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); if(v!=="transfer"){ setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId(""); }};
                   const moreTypes = ["investment","petty_cash"];
                   const inMore = moreTypes.includes(txnType);
-                  const seg = [["expense","Spent",T.danger],["income","Received",T.success],["transfer","Moved",T.info],["__more","More",T.info]];
+                  const seg = [["expense","Spent",T.danger],["income","Received",T.success],["transfer","Transfer",T.info],["__more","More",T.info]];
                   return (
                     <div style={{ marginBottom:12 }}>
                       <div role="group" aria-label="Type" style={{ display:"flex",background:T.input,borderRadius:14,padding:3,gap:2 }}>
@@ -6492,7 +6492,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 })()}
               </div>
             )}
-            {/* New look: for Moved, say from where to where right under the amount (the Design canvas "Moved"); the tag chips fold away below. */}
+            {/* New look: for Transfer, say from where to where right under the amount (the Design canvas "Moved"); the tag chips fold away below. */}
             {(txnType==="transfer"||txnType==="cc_payment")&&(
               <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
                 <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
@@ -15940,12 +15940,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Coming card EMIs now show in Money Required: a TV bought on a card EMI lists each instalment (for example \"TV EMI 3/9\") on the due date of the statement that will carry it, so you see next month's EMI before the statement closes. Once an instalment is on a statement it is counted there, not twice.",
             "Skip a SIP for one month: on an investment's Recurring Schedule, tap \"Skip December\" (the coming month). That month's instalment stops counting as owed and no due-today reminder fires; \"Put back\" undoes it and later months carry on.",
             "Add a loan: Wealth > Loans Taken now has \"+ Add a loan\". The \"Pay/Receive Loan\" shortcut on the Add screen is gone.",
-            "New look, Add screen: the type is now one switch, Spent / Received / Moved / More (Settlement and Invest are under More), and the amount comes first, then who it was for. Everything else on the form works as before.",
+            "New look, Add screen: the type is now one switch, Spent / Received / Transfer / More (Invest and Give petty cash are under More), and the amount comes first, then who it was for. Everything else on the form works as before.",
             "New look, Add screen, step 2: your three most-used categories are one-tap chips above the category picker, and each person row says what it does (\"It was for them. Just tagging it\", \"I owe them\", \"They owe me\") with a line underneath such as \"Raj will owe you ₹900\". Nothing underneath changed.",
             "Add screen, step 3: right above Add, one line says what saving does to what is owed (for example \"Raj Test will owe you ₹900\" or \"You will owe Raj Test ₹300\"). It shows only when someone owes someone.",
             "Add screen, step 4: the amount now has the full width, and the account and date read as one line under it (\"from Test Savings on 22-Nov-2026\") with \"Details\" on the right opening the same card as before.",
             "Add screen, step 5: under Received, \"What is it?\" gives four big choices: Salary or income, Someone paid me back, A refund, Work reimbursement (the last three are the old Settlement form, already set). Settlement is no longer under More; More now holds Invest and Give petty cash.",
-            "Add screen, step 6: Moved now shows From and To right under the amount, and the long list of tags (category, person, group) is folded under \"Tag to a category, person or group (optional)\" until you open it.",
+            "Add screen, step 6: Transfer now shows From and To right under the amount, and the long list of tags (category, person, group) is folded under \"Tag to a category, person or group (optional)\" until you open it.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
