@@ -24,8 +24,13 @@ test("an overdue bill says so; a bill due today says so; paid, zero and far-away
 test("repayments not applied and the person who owes most follow, at most three items in all", () => {
   const r = buildNeedsYou({ commitments: bills, today, repaymentProblems: [{ personId: "r", name: "Raj", count: 1 }, { personId: "s", name: "Sunny", count: 1 }, { personId: "x", name: "None", count: 0 }],
     owedPeople: [{ personId: "a", name: "Mangal", amount: 1053 }, { personId: "b", name: "Sunny", amount: 17387 }] });
-  assert.deepEqual(r.map(i => i.kind), ["bill", "repayments", "owed"]);
-  assert.equal(r[1].title, "2 repayments not applied"); assert.equal(r[2].title, "Sunny owes you"); assert.equal(r[2].amount, 17387);
+  assert.deepEqual(r.map(i => i.kind), ["bill", "repayments", "repayments"]);
+  assert.equal(r[1].title, "Raj: 1 repayment not applied"); assert.equal(r[2].title, "Sunny: 1 repayment not applied");
+  assert.equal(r[1].personId, "r"); assert.equal(r[2].personId, "s");
+  const solo = buildNeedsYou({ commitments: [], today, repaymentProblems: [{ personId: "r", name: "Raj", count: 9 }], owedPeople: [{ personId: "b", name: "Sunny", amount: 17387 }] });
+  assert.deepEqual(solo.map(i => i.title), ["Raj: 9 repayments not applied", "Sunny owes you"]);
+  const many = buildNeedsYou({ commitments: [], today, repaymentProblems: [{ personId: "a", name: "A", count: 5 }, { personId: "b", name: "B", count: 3 }, { personId: "c", name: "C", count: 1 }] });
+  assert.equal(many.length, 2); assert.match(many[1].sub, /1 more person after this/);
 });
 test("with nothing to do the list is empty", () => {
   assert.deepEqual(buildNeedsYou({ commitments: [], today }), []);

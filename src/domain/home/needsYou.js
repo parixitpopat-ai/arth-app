@@ -17,7 +17,7 @@ const daysUntil = (date, today) => Math.ceil((new Date(date) - new Date(today)) 
  */
 export const needsSignature = {
   bill: (c, today) => `bill:${c.sourceType || ""}:${c.sourceId ?? ""}|${r2(c.amount)}|${daysUntil(c.date, today) < 0 ? "overdue" : "due"}`,
-  repayments: total => `repayments|${total}`,
+  repayments: p => `repayments:${p.personId}|${p.count}`,
   owed: p => `owed:${p.personId}|${r2(p.amount)}`,
 };
 
@@ -33,9 +33,13 @@ export function buildNeedsYou({ commitments = [], today, owedPeople = [], repaym
     items.push({ kind: "bill", key: `bill:${c.sourceType || ""}:${c.sourceId ?? ""}`, signature: needsSignature.bill(c, today), sourceType: c.sourceType, sourceId: c.sourceId, title: c.name || "Bill", amount: r2(c.amount), days: d,
       sub: (d < 0 ? `Overdue by ${-d} day${d === -1 ? "" : "s"}` : d === 0 ? "Due today" : `Due in ${d} day${d === 1 ? "" : "s"}`) + (due.length > 1 ? ` · ${due.length - 1} more this week` : "") });
   }
-  const unapplied = (repaymentProblems || []).filter(p => p && p.count > 0);
-  const total = unapplied.reduce((s, p) => s + p.count, 0);
-  if (total > 0 && !hidden.has(needsSignature.repayments(total))) items.push({ kind: "repayments", key: "repayments", signature: needsSignature.repayments(total), title: `${total} repayment${total === 1 ? "" : "s"} not applied`, sub: "Money received that is not matched to anything", personId: unapplied[0].personId, count: total });
+  // One row per person, so the row names who it is about and opens that person (a single summed row opened only the first person).
+  const unapplied = (repaymentProblems || []).filter(p => p && p.count > 0).sort((x, y) => y.count - x.count);
+  const shown = unapplied.filter(p => !hidden.has(needsSignature.repayments(p)));
+  shown.slice(0, 2).forEach((p, i, arr) => {
+    const more = i === arr.length - 1 ? shown.length - arr.length : 0;
+    items.push({ kind: "repayments", key: `repayments:${p.personId}`, signature: needsSignature.repayments(p), title: `${p.name || "Someone"}: ${p.count} repayment${p.count === 1 ? "" : "s"} not applied`, sub: "Money received that is not matched to anything" + (more > 0 ? ` · ${more} more ${more === 1 ? "person" : "people"} after this` : ""), personId: p.personId, count: p.count });
+  });
   const top = [...(owedPeople || [])].filter(p => (Number(p.amount) || 0) > 0 && !hidden.has(needsSignature.owed(p))).sort((a, b) => b.amount - a.amount)[0];
   if (top) items.push({ kind: "owed", key: `owed:${top.personId}`, signature: needsSignature.owed(top), title: `${top.name} owes you`, amount: r2(top.amount), personId: top.personId, sub: "Tap to see what for" });
   return items.slice(0, max);
