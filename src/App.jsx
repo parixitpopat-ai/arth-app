@@ -213,8 +213,10 @@ import { getEffectiveBillingConfig, getEarliestEligibleChangeDate, addBillingVer
 import { generateDueStatements, isEmptyStatementBill, getPendingStatementChecks } from "./domain/cards/statementBills";
 import { reconcileAutoEmiLoans } from "./domain/loans/autoEmiProgress";
 import { projectCardEmiInstalments } from "./domain/loans/cardEmiProjection";
+import { splitGstAcrossInstalments } from "./domain/loans/emiGst";
 import { getCardUnbilledEvents } from "./domain/cards/unbilledCommitments";
 import { skipMonth, putMonthBack, isMonthSkipped, monthKeyOf } from "./domain/recurring/skipMonth";
+import { planTheyPaid } from "./domain/person/theyPaid";
 import { getCardAlerts } from "./domain/cards/alerts";
 import { getPaybackTotalsByPerson, applyPaybacks, buildPaybackTxn } from "./domain/person/payback";
 import { isPaidByOther, getPaidByPayable } from "./domain/person/paidBy";
@@ -1012,6 +1014,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [txns, setTxns] = useState(()=>normalizeTxns(JSON.parse(localStorage.getItem("arth_txns")||"[]")));
   const [investments, setInvestments] = useState(()=>JSON.parse(localStorage.getItem("arth_investments")||"[]"));
   const [recurringSchedules, setRecurringSchedules] = useState(()=>JSON.parse(localStorage.getItem("arth_recurring")||"[]"));
+  // Home "Needs you": items the person has archived (viewed or acted on). Device-only convenience, not part of the synced data.
+  const [needsArchived, setNeedsArchived] = useState(()=>{ try{ const v = JSON.parse(localStorage.getItem("arth_needs_archived")||"[]"); return Array.isArray(v)?v:[]; }catch{ return []; } });
+  useEffect(()=>{ try{ localStorage.setItem("arth_needs_archived", JSON.stringify(needsArchived.slice(-100))); }catch{} },[needsArchived]);
   const [skippedInvestmentMonths, setSkippedInvestmentMonths] = useState(()=>JSON.parse(localStorage.getItem("arth_skipped_investments")||"[]"));
   const [gifts, setGifts] = useState(()=>JSON.parse(localStorage.getItem("arth_gifts")||"[]"));
   // Vehicle screen state lives here, not inside Settings: Settings is re-created on every AppContent render, so state held in it is lost whenever
@@ -5475,7 +5480,18 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(txnType==="expense" && (splitMode==="allocate" || splitMode==="unified")){
         // a person marked P (paid from their petty cash) is the payer, not someone the spend is split with: no A / O / C is needed for them
         const unchosen = getRowsNeedingSplitChoice(allocRows.filter(r=>!(paidByPersonId && r.targetType==="person" && String(r.targetId)===String(paidByPersonId) && !r.mode)));
-        if(unchosen.length){ setRefDupWarning(`Choose A (I pay), O (I owe) or C (they owe) for ${unchosen.map(r=>getPerson(r.targetId).name).join(", ")}.`); return; }
+        if(unchosen.length){ setRefDupWarning(`Choose what ${unchosen.map(r=>getPerson(r.targetId).name).join(", ")} ${unchosen.length>1?"are":"is"} in this: just tagged, they paid, or they owe you.`); return; }
+      }
+      // "They paid. I owe them" (domain/person/theyPaid.js): a person's row on "i_owe" means they paid that much from their own pocket. My account is
+      // debited only for the rest. Saved as my own part plus one "paid by" expense per payer. New entries only; an older entry keeps what it had.
+      const tpRows = (!isEditing && txnType==="expense") ? allocRows.filter(r=>r.targetType==="person" && r.targetId && r.mode==="i_owe") : [];
+      const tpPlan = tpRows.length ? planTheyPaid({ amount:amt, rows:tpRows.map(r=>({ personId:r.targetId, amount:r.amount })) }) : null;
+      if(tpPlan && !tpPlan.ok){ setRefDupWarning(tpPlan.error); return; }
+      if(tpPlan && (useItemizedLines || payParts)){ setRefDupWarning("\"They paid\" can't be combined with an itemised purchase or a purchase paid in parts yet."); return; }
+      const allocRowsRest = tpPlan ? allocRows.filter(r=>!tpRows.includes(r)) : allocRows;
+      if(tpPlan){
+        const restTotal = allocRowsRest.reduce((t,r)=>t+(r.items?.length ? (chargeShares.rows[r.id]?.totalPaise||0)/100 : (parseFloat(r.amount)||0)),0);
+        if(restTotal > tpPlan.myPart+0.01){ setRefDupWarning(`The rest you allocated (${sym}${fmt(restTotal)}) is more than your own part (${sym}${fmt(tpPlan.myPart)}).`); return; }
       }
       if(txnType==="expense" && billLinkMismatch){ setRefDupWarning(`This payment is ${sym}${fmt(billLinkMismatch.paymentAmount)} but the bill's balance is ${sym}${fmt(billLinkMismatch.billAmount)}. Change the amount or the bill before saving.`); return; }
       // Credit Card WP: "Add missing transaction" from a statement's reconciliation carries the
@@ -5636,6 +5652,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               // One instalment on each statement day after the purchase (domain/loans/emiInstalments.js).
               const instDates = getEmiInstalmentDates({ purchaseDate: date || todayStr(), statementDay: stmtDay, tenure: tenureNum });
               const instCatIds = catIds.length ? catIds : (catId ? [catId] : ["financial"]);
+              // GST on the interest is billed with each instalment (domain/loans/emiGst.js): the card is charged EMI + that share of the GST.
+              const gstPerInst = splitGstAcrossInstalments(emiGstOnInterest ? parseFloat(emiGstOnInterest) : 0, tenureNum);
               for(let i=0; i<tenureNum; i++){
                 autoInstallments.push({
                   id:genId(),
@@ -5644,7 +5662,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   merchant:who.trim() || "EMI purchase",
                   date:instDates[i],
                   note:`CC EMI installment ${i+1} of ${tenureNum}`,
-                  amount:emiAmt,
+                  amount:Math.round((emiAmt+gstPerInst[i])*100)/100,
+                  emiPrincipalPart:emiAmt,
+                  ...(gstPerInst[i]>0 ? { emiGstPart:gstPerInst[i] } : {}),
                   accId,
                   catId:instCatIds[0],
                   catIds:instCatIds,
@@ -5726,7 +5746,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         // Allocate mode: build psplit + groupAllocations from allocRows
         const groupAllocationsVal = [];
         if(splitMode==="allocate" || splitMode==="unified"){
-          allocRows.forEach(row=>{
+          allocRowsRest.forEach(row=>{
             if(!row.targetId) return;
             if(paidByPersonId && row.targetType==="person" && String(row.targetId)===String(paidByPersonId) && !row.mode) return;   // the P payer with no A/O/C: nothing to split
             const rowAmt = row.items?.length
@@ -5768,14 +5788,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             setRefDupWarning(`Allocated qty for item "${src?.label||"Unnamed item"}" exceeds bought qty.`);
             return;
           }
-          const allocTotal = allocRows.reduce((sum,row)=>{
+          const allocTotal = allocRowsRest.reduce((sum,row)=>{
             if(!row.targetId) return sum;
             const rowAmt = row.items?.length
               ? (chargeShares.rows[row.id]?.totalPaise||0)/100
               : parseFloat(row.amount)||0;
             return sum + Math.max(0,rowAmt);
           },0);
-          if(allocTotal > amt+0.01){
+          if(allocTotal > (tpPlan ? tpPlan.myPart : amt)+0.01){
             setRefDupWarning("Allocated total cannot exceed the total expense amount.");
             return;
           }
@@ -5938,7 +5958,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           tagMode:tagMode||null,
           taggedPersonId:forPersonVal||null,
           groupCollectiveAmount,
-          allocations:(splitMode==="allocate" || splitMode==="unified")?allocRows.filter(r=>r.targetId).map(r=>{
+          allocations:(splitMode==="allocate" || splitMode==="unified")?allocRowsRest.filter(r=>r.targetId).map(r=>{
             const normalizedItems = (r.items||[])
               .map(i=>{
                 const amtVal = allocItemAmount(i);
@@ -5984,12 +6004,22 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           priceInterestAmt:showPriceBreakdown&&priceInterestAmt>0?priceInterestAmt:null,
           priceGstAmt:showPriceBreakdown&&priceGstAmt>0?priceGstAmt:null,
         };
-        if(!isEditing) submitCreateThroughBoundary(newTxn); else upsertTxn(newTxn);
+        if(tpPlan){
+          // My own part (if any) keeps the entry's id and account; each payer gets a "paid by" expense with no account of mine.
+          if(tpPlan.myPart>0.005) submitCreateThroughBoundary({ ...newTxn, amount:tpPlan.myPart, partOfPurchase:{ total:amt, id:resolvedTxnId } });
+          tpPlan.payers.forEach((pay,i)=>submitCreateThroughBoundary({
+            ...newTxn, id:resolvedTxnId+1+i, createdAt:resolvedTxnId+1+i, amount:pay.amount, accId:null, paidByPersonId:pay.personId,
+            paymentLines:undefined, paymentMethod:null, people:{}, allocations:null, groupAllocations:null, tagPersonAmount:null, tagGroupAmount:null, tagItems:null,
+            reimbursable:false, claimOnly:undefined, excludeFromSpend:undefined, reimbursableAmount:null, isBillPayment:false, paidBillId:null, paidBillName:null,
+            billInvoiceNo:null, transactionRef:null, smsRaw:null, lineItems:null, catAllocations:null,
+            partOfPurchase:{ total:amt, id:resolvedTxnId },
+          }));
+        } else if(!isEditing) submitCreateThroughBoundary(newTxn); else upsertTxn(newTxn);
         learnQueueRef.current.forEach(fn=>fn()); learnQueueRef.current = [];
         if(eduMode && newTxn.linkedFeePeriods?.length){
           setFeePeriods(prev=>applyEducationSettlement(prev, newTxn.linkedFeePeriods, resolvedTxnId, schoolFeesService.settlePeriods));
         }
-        if(!isEditing && !(txnType==="expense" && paidByPersonId) && getAcc(accId)?.type==="cc") setAccounts(prev=>prev.map(a=>a.id===accId?{...a,outstanding:(a.outstanding||0)+amt}:a));
+        if(!isEditing && !(txnType==="expense" && paidByPersonId) && getAcc(accId)?.type==="cc" && !(tpPlan && !(tpPlan.myPart>0.005))) setAccounts(prev=>prev.map(a=>a.id===accId?{...a,outstanding:(a.outstanding||0)+(tpPlan?tpPlan.myPart:amt)}:a));
 
         // Odometer on a fuel expense: create / update / remove the refuel linked to THIS expense (domain/vehicles/fuelFills.js). The expense is already saved;
         // if the reading does not pass the odometer checks the person is told and the refuel is simply not added.
@@ -6519,7 +6549,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
             {/* Full/EMI, moved here (after the combined Amount+Details row) -- still a MODE
                 toggle, same pattern as Itemise Purchase, not bundled with Reference. */}
-            {txnType==="expense"&&(paidByPersonId || people.some(p=>!p.isMe && !isPersonArchived(p) && canOfferPettyPaid(settlements[p.id]?.pettyHeld, false)))&&(
+            {txnType==="expense"&&paidByPersonId&&(
               <div data-testid="paid-by" style={{ display:"flex",gap:6,alignItems:"center",flexWrap:"wrap" }}>
                 <span style={{ ...lbl,marginBottom:0 }}>Paid by</span>
                 <Chip color={T.accent} active={!paidByPersonId} onClick={()=>setPaidByPersonId("")}>Me</Chip>
@@ -6874,6 +6904,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           <div style={{ color:T.sub,fontSize:10 }}>Interest waiver: {sym}{fmt(parseFloat(emiInterestWaiver)||0)}</div>
                           <div style={{ color:T.danger,fontSize:10 }}>GST on interest: {sym}{fmt(parseFloat(emiGstOnInterest)||0)}</div>
                           <div style={{ color:T.text,fontSize:12,fontWeight:800,marginTop:4 }}>True cost of financing: {sym}{fmt(parseFloat(emiGstOnInterest)||0)}</div>
+                          {emiSourceType==="cc"&&Number(emiTenureMonths)>0&&parseFloat(emiGstOnInterest)>0&&<div data-testid="emi-gst-each" style={{ color:T.sub,fontSize:11,marginTop:2 }}>GST is billed with each instalment: {sym}{fmt(splitGstAcrossInstalments(parseFloat(emiGstOnInterest)||0, Number(emiTenureMonths))[0])} a month on top of the EMI.</div>}
                         </div>
                       )}
                     </div>
@@ -7825,22 +7856,26 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                               {row.targetType==="person"&&!row.mode&&paidByPersonId!==row.targetId&&<span style={{ color:T.warn,fontSize:10,fontWeight:800 }}>Choose one</span>}
                               {/* New look: each choice says what it does (the Design canvas "Anyone else in this?"). A / O / C are unchanged underneath. */}
                               <div data-testid="row-modes" style={{ display:"flex",flexDirection:"column",gap:6,width:"100%" }}>
-                                {[["spent_on",row.targetType==="group"?"For the group. Just tagging it":"It was for them. Just tagging it"],["i_owe",row.targetType==="group"?"I owe the group":"I owe them"],["owes",row.targetType==="group"?"The group owes me":"They owe me"]].map(([m,label])=>(
+                                {[["spent_on",row.targetType==="group"?"For the group. Just tagging it":"It was for them. Just tagging it"],["i_owe",row.targetType==="group"?"I owe the group":"They paid. I owe them"],["owes",row.targetType==="group"?"The group owes me":"They owe me"]].map(([m,label])=>(
                                   <button key={m} title={m==="spent_on"?"Attribute":m==="i_owe"?"Own":"Collect"} onClick={()=>{ const next = chooseRowMode({ rows:allocRows, rowId:row.id, mode:m, paidByPersonId }); setAllocRows(next.rows); setPaidByPersonId(next.paidByPersonId); }} style={{ background:row.mode===m?T.accent+"22":"none",border:`1px solid ${row.mode===m?T.accent:T.border}`,borderRadius:10,padding:"0 12px",minHeight:44,textAlign:"left",cursor:"pointer",fontSize:13,fontWeight:row.mode===m?800:600,color:row.mode===m?T.accent:T.text,fontFamily:"Inter,sans-serif" }}>{label}</button>
                                 ))}
-                                {row.targetType==="person"&&txnType==="expense"&&canOfferPettyPaid(settlements[row.targetId]?.pettyHeld, paidByPersonId===row.targetId)&&(
+                                {row.targetType==="person"&&txnType==="expense"&&paidByPersonId===row.targetId&&(
                                   <button data-testid="alloc-petty" title="Paid from their petty cash" onClick={()=>{ const next = choosePettyPaid({ rows:allocRows, rowId:row.id, paidByPersonId }); setAllocRows(next.rows); setPaidByPersonId(next.paidByPersonId); if(next.paidByPersonId) setExpensePaymentMode("full"); }} style={{ background:paidByPersonId===row.targetId?T.warn+"22":"none",border:`1px solid ${paidByPersonId===row.targetId?T.warn:T.border}`,color:paidByPersonId===row.targetId?T.warn:T.sub,borderRadius:10,padding:"0 12px",minHeight:44,textAlign:"left",cursor:"pointer",fontSize:13,fontWeight:paidByPersonId===row.targetId?800:600,fontFamily:"Inter,sans-serif" }}>They paid from their petty cash</button>
                                 )}
                               </div>
                             </div>
                             <div style={{ display:"flex",gap:6,alignItems:"center" }}>
-                              {!useItems&&<input style={{ ...inpSm,flex:1,textAlign:"right" }} type="number" min="0" placeholder="0" value={row.amount} onChange={e=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,amount:e.target.value}:r))}/>}
+                              {!useItems&&<input style={{ ...inpSm,flex:1,textAlign:"right" }} type="number" min="0" placeholder={row.mode==="i_owe"&&row.targetType==="person"&&!isEditing?"All of it":"0"} value={row.amount} onChange={e=>setAllocRows(prev=>prev.map(r=>r.id===row.id?{...r,amount:e.target.value}:r))}/>}
                               {useItems&&<div style={{ flex:1,textAlign:"right",color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(rowItemTotal)} {rowShare&&rowShare.chargePaise>0?`(items ${sym}${fmt(rowShare.itemsPaise/100)} + charges ${sym}${fmt(rowShare.chargePaise/100)})`:"(from items)"}</div>}
                             </div>
                             {(()=>{
-                              const a = useItems ? rowItemTotal : (parseFloat(row.amount)||0);
+                              const theyPaidRow = row.mode==="i_owe" && row.targetType==="person" && !isEditing && txnType==="expense";
+                              const tpOthers = allocRows.filter(r=>r.targetType==="person" && r.mode==="i_owe");
+                              const tpPlanNow = theyPaidRow ? planTheyPaid({ amount:amt, rows:tpOthers.map(r=>({ personId:r.targetId, amount:r.amount })) }) : null;
+                              const a = theyPaidRow ? (tpPlanNow?.ok ? tpPlanNow.payers.find(p=>p.personId===row.targetId)?.amount||0 : (parseFloat(row.amount)||0)) : (useItems ? rowItemTotal : (parseFloat(row.amount)||0));
                               const who2 = row.targetType==="group" ? `the group ${target.name}` : target.name;
                               if(!(a>0) || paidByPersonId===row.targetId) return null;
+                              if(theyPaidRow) return <div data-testid="row-summary" style={{ color:T.info,fontSize:11,fontWeight:700 }}>{tpPlanNow?.ok ? `${who2} paid ${sym}${fmt(a)}. You owe them ${sym}${fmt(a)} until you pay back. Your account is debited ${sym}${fmt(tpPlanNow.myPart)}.` : tpPlanNow?.error}</div>;
                               const line = row.mode==="owes" ? `${who2} will owe you ${sym}${fmt(a)}` : row.mode==="i_owe" ? `You will owe ${who2} ${sym}${fmt(a)}` : row.mode==="spent_on" ? `Tagged to ${who2}. Nothing is owed.` : null;
                               return line ? <div data-testid="row-summary" style={{ color:T.info,fontSize:11,fontWeight:700 }}>{line}</div> : null;
                             })()}
@@ -8211,6 +8246,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               const parts = [];
               if(owe.length) parts.push(`${owe.length===1?nameOf(owe[0]):`${owe.length} people or groups`} will owe you ${sym}${fmt(sum(owe))}`);
               if(iowe.length) parts.push(`You will owe ${iowe.length===1?nameOf(iowe[0]):`${iowe.length} people or groups`} ${sym}${fmt(sum(iowe))}`);
+              {
+                const tpNow = !isEditing ? planTheyPaid({ amount:amt, rows:allocRows.filter(r=>r.targetType==="person"&&r.mode==="i_owe").map(r=>({ personId:r.targetId, amount:r.amount })) }) : null;
+                if(tpNow?.ok && iowe.length===0) parts.push(`You will owe ${tpNow.payers.length===1?nameOf(allocRows.find(r=>r.targetId===tpNow.payers[0].personId)):`${tpNow.payers.length} people`} ${sym}${fmt(tpNow.payers.reduce((t,p)=>t+p.amount,0))}`);
+                if(tpNow?.ok) parts.push(`your account is debited ${sym}${fmt(tpNow.myPart)}`);
+              }
               if(!parts.length) return null;
               return <div data-testid="save-result" style={{ color:T.info,background:T.info+"14",borderRadius:10,padding:"8px 12px",fontSize:12,fontWeight:700 }}>{parts.join(" · ")}</div>;
             })()}
@@ -10903,34 +10943,50 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       needsYou: (()=>{
         const owedPeople = Object.entries(settlements||{}).filter(([pid,st])=>(st?.owesMe||0)>0 && getPerson(pid) && !getPerson(pid).isMe).map(([pid,st])=>({ personId:pid, name:getPerson(pid).name, amount:st.owesMe }));
         const repaymentProblems = people.filter(pp=>!pp.isMe && !isPersonArchived(pp)).map(pp=>{ const r = findRepaymentProblems({ personId:pp.id, txns, bills }); return { personId:pp.id, name:pp.name, count:(r.unreduced||[]).length+(r.unlinked||[]).length }; }).filter(x=>x.count>0);
-        const items = buildNeedsYou({ commitments:futureMoneyPlanned?.committedSpending||[], today:todayStr(), owedPeople, repaymentProblems });
-        if(items.length===0) return null;
+        const items = buildNeedsYou({ commitments:futureMoneyPlanned?.committedSpending||[], today:todayStr(), owedPeople, repaymentProblems, archived:needsArchived });
+        const hiddenCount = buildNeedsYou({ commitments:futureMoneyPlanned?.committedSpending||[], today:todayStr(), owedPeople, repaymentProblems, archived:[], max:50 }).filter(i=>needsArchived.includes(i.signature)).length;
+        if(items.length===0 && hiddenCount===0) return null;
         const open = it => { if(it.kind==="bill"){ setTab("bills"); return; } const pp = getPerson(it.personId); if(pp){ setSelectedPerson(pp); setTab("people"); } };
         return (
           <div key="needsYou" data-testid="home-needs-you" style={{ display:"flex",flexDirection:"column",gap:8 }}>
             <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase",padding:"0 4px" }}>Needs you · {items.length}</div>
-            {items.map(it=>(
-              <button key={it.key} data-testid={`needs-${it.kind}`} onClick={()=>open(it)} style={{ ...card,display:"flex",alignItems:"center",gap:12,padding:"12px 14px",cursor:"pointer",textAlign:"left",width:"100%",fontFamily:"Inter,sans-serif" }}>
-                <div style={{ flex:1,minWidth:0 }}>
-                  <div style={{ color:T.text,fontSize:14,fontWeight:700 }}>{it.kind==="owed" ? `${it.title} ${M(`${sym}${fmt(it.amount)}`)}` : it.title}</div>
-                  <div style={{ color:it.kind==="bill"&&it.days<=0?T.warn:T.sub,fontSize:12,fontWeight:it.kind==="bill"&&it.days<=0?700:500,marginTop:2 }}>{it.sub}{it.kind==="bill"?` · ${M(`${sym}${fmt(it.amount)}`)}`:""}</div>
+            {items.length===0&&<div style={{ ...card,padding:"12px 14px",color:T.sub,fontSize:13 }}>Nothing needs you right now.</div>}
+            {items.map(it=>{
+              const bill = it.kind==="bill"&&it.sourceType==="bill" ? bills.find(b=>String(b.id)===String(it.sourceId)) : null;
+              const archive = ()=>setNeedsArchived(prev=>prev.includes(it.signature)?prev:[...prev,it.signature]);
+              const remind = async ()=>{
+                const text = `Hi ${it.title.replace(/ owes you$/,"")}, a gentle reminder that ${sym}${fmt(it.amount)} is pending with you. Thank you!`;
+                try{ if(navigator.share) await navigator.share({ text }); else { await navigator.clipboard.writeText(text); setToast({ message:"Reminder copied. Paste it in a chat.", icon:"📋" }); } archive(); }catch(e){ if(e?.name!=="AbortError"){ try{ await navigator.clipboard.writeText(text); setToast({ message:"Reminder copied. Paste it in a chat.", icon:"📋" }); archive(); }catch{} } }
+              };
+              const act = { background:T.accent,border:"none",borderRadius:16,padding:"0 14px",minHeight:44,color:T.accentInk||"#fff",fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:"Inter,sans-serif" };
+              return (
+                <div key={it.key} style={{ ...card,display:"flex",alignItems:"center",gap:8,padding:"6px 8px 6px 14px" }}>
+                  <button data-testid={`needs-${it.kind}`} onClick={()=>{ open(it); }} style={{ flex:1,minWidth:0,display:"flex",alignItems:"center",gap:12,minHeight:56,background:"none",border:"none",cursor:"pointer",textAlign:"left",padding:0,fontFamily:"Inter,sans-serif" }}>
+                    <div style={{ flex:1,minWidth:0 }}>
+                      <div style={{ color:T.text,fontSize:14,fontWeight:700 }}>{it.kind==="owed" ? `${it.title} ${M(`${sym}${fmt(it.amount)}`)}` : it.title}</div>
+                      <div style={{ color:it.kind==="bill"&&it.days<=0?T.warn:T.sub,fontSize:12,fontWeight:it.kind==="bill"&&it.days<=0?700:500,marginTop:2 }}>{it.sub}{it.kind==="bill"?` · ${M(`${sym}${fmt(it.amount)}`)}`:""}</div>
+                    </div>
+                  </button>
+                  {it.kind==="bill"&&bill&&!bill.isCcStatement&&<button data-testid="needs-pay" onClick={()=>setMarkingBillPaid(bill)} style={act}>Pay</button>}
+                  {it.kind==="owed"&&<button data-testid="needs-remind" onClick={remind} style={act}>Remind</button>}
+                  <button data-testid="needs-archive" aria-label="Archive, I have seen this" title="Archive" onClick={archive} style={{ minWidth:44,minHeight:44,borderRadius:22,border:`1px solid ${T.border}`,background:"none",color:T.sub,fontSize:16,cursor:"pointer" }}>✓</button>
                 </div>
-                <span aria-hidden="true" style={{ color:T.sub,fontSize:20 }}>›</span>
-              </button>
-            ))}
+              );
+            })}
+            {hiddenCount>0&&<button data-testid="needs-show-archived" onClick={()=>setNeedsArchived([])} style={{ background:"none",border:"none",color:T.accent,fontSize:12,fontWeight:700,cursor:"pointer",minHeight:36,textAlign:"left",padding:"0 4px",fontFamily:"Inter,sans-serif" }}>Show {hiddenCount} archived</button>}
           </div>
         );
       })(),
       // Today: money between the person and others, in one picture (coming to you, including loans, against what you owe).
       betweenPeople: (()=>{
         const vals = Object.values(settlements||{});
-        const b = summariseBetweenPeople({ owesMe:vals.map(st=>st?.owesMe||0), iOwe:vals.map(st=>st?.iOwe||0), loansGiven:loanGivenTotal });
+        const b = summariseBetweenPeople({ owesMe:vals.map(st=>st?.owesMe||0), iOwe:vals.map(st=>st?.iOwe||0), loansGiven:loanGivenTotal, claims:getWaitingClaims(txns).reduce((t,c)=>t+c.amount,0) });
         if(!b.hasAny) return null;
         return (
           <div key="betweenPeople" data-testid="home-between-people" onClick={()=>setTab("people")} style={{ ...card,cursor:"pointer",padding:16 }}>
             <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline" }}>
               <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase" }}>Between people</span>
-              {b.loans>0&&<span style={{ color:T.sub,fontSize:11 }}>includes {M(`${sym}${fmt(b.loans)}`)} lent</span>}
+              {(b.loans>0||b.claims>0)&&<span data-testid="between-includes" style={{ color:T.sub,fontSize:11 }}>includes {[b.loans>0?`${M(`${sym}${fmt(b.loans)}`)} lent`:null,b.claims>0?`${M(`${sym}${fmt(b.claims)}`)} work claims`:null].filter(Boolean).join(" · ")}</span>}
             </div>
             <div style={{ display:"flex",height:10,borderRadius:5,overflow:"hidden",gap:2,margin:"10px 0" }} aria-hidden="true">
               {b.coming>0&&<div style={{ flex:b.coming,background:T.coming }}/>}
@@ -10969,8 +11025,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {[
             {label:"Income",value:M(`${sym}${fmt(totalIncome)}`),color:T.success,icon:"💚",action:()=>{ setTab("transactions"); setFType("income"); }},
             {label:"Investments",value:`${sym}${fmt(monthlyInvestmentFlow)}`,color:T.info,icon:"💹",action:()=>{ setSelectedInvestmentTypeView("all"); setShowInvestments(true); }},
-            {label:"To Receive",value:`${sym}${fmt(monthTotalOwedToMe + loanGivenTotal)}`,color:T.accent,icon:"🔄",action:()=>setShowReceivablesList(true),sub:(loanGivenTotal>0&&monthTotalOwedToMe>0)?`incl. ${sym}${fmtK(loanGivenTotal)} loans`:loanGivenTotal>0?`${sym}${fmtK(loanGivenTotal)} loans outstanding`:undefined},
-            {label:"Net Savings",value:M(`${sym}${fmtK(Math.max(0,totalIncome-myActual-monthlyInvestmentFlow))}`),color:T.success,icon:"💰",action:()=>setTab("home")},
           ].map(s=>(
             <div key={s.label} onClick={s.action} style={{ ...card,marginBottom:0,padding:"12px",cursor:"pointer" }}>
               <div style={{ fontSize:20,marginBottom:4 }}>{s.icon}</div>
@@ -15965,6 +16019,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Fixed: a card with an old statement bill that has no period saved could make the app crash on Home (\"Something went wrong\") once a statement cycle closed. Statements are also never added twice now.",
             "Cards: Money now shows one box for all your cards (total limit, used, available) with each card's use under it. Used counts what is billed, what is spent but not yet billed, and EMI purchases still to be billed, because the bank keeps those blocked on the limit (check against your own statement). Money Required also lists what you have spent on a card since its last statement, due when that statement is due.",
             "New look, dark theme: the dark theme now matches the light one, a deep green-tinted charcoal with a softer green, in place of the old blue-violet navy. The PIN screen and the screens shown while the app waits use the same colours.",
+            "They paid: in Add, a person's row now says \"They paid. I owe them\". Put how much they paid (blank means all of it): your account is debited only for the rest, what they paid becomes a debt to them until you pay back, and spending still counts the whole amount. It is saved as two entries (your part and their part). The separate \"Paid by\" row and the P button are gone; entries saved with them before still work.",
+            "Home, Needs you: a bill row has Pay, a person row has Remind (opens your share sheet with a short message), and the tick archives a row you have seen. An archived row comes back by itself if the amount changes or the bill becomes overdue, and \"Show archived\" brings them all back. The To Receive and Net Savings tiles are gone; work expenses waiting to be reimbursed now count in Between people.",
+            "Card EMI with GST: the GST on interest is billed with each instalment, so each instalment entry is the EMI plus its share of the GST (for example 6,000 + 72). The loan balance only falls by the EMI part.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",

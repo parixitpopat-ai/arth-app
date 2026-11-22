@@ -53,7 +53,7 @@ try {
     rec("A9 her page shows Rs 4,000 with her (10,000 given, 6,000 used) and says it is kept apart from what is owed to me and not in net worth", (await T("petty-cash-banner").count()) === 1 && /4,000 petty cash with Priya Test/.test(await T("petty-cash-banner").innerText()) && /not part of your net worth/.test(await T("petty-cash-banner").innerText()), (await T("petty-cash-banner").count()) ? await T("petty-cash-banner").innerText() : null);
     await home();
     const homeTxt = await text();
-    rec("A10 the Rs 4,000 is NOT a receivable: Home's 'To Receive' tile is still Rs 0", /₹0 To Receive/i.test(homeTxt) || !/₹4,000 To Receive/i.test(homeTxt), (homeTxt.match(/₹[\d,]+ To Receive/i) || ["(no tile found)"])[0]);
+    rec("A10 the Rs 4,000 is NOT a receivable: Home's 'Between people' does not show it as coming to you", !/Coming to you\s*₹4,000/i.test(homeTxt), (homeTxt.match(/Coming to you.{0,20}/i) || ["(no card: nothing coming)"])[0]);
   }
   // ── 2: she spent more than she held ──
   {
@@ -100,26 +100,15 @@ try {
     await page.evaluate(() => { const t = JSON.parse(localStorage.getItem("arth_txns") || "[]"); t.unshift({ id: "pc1", type: "transfer", isPettyCash: true, pettyCashPersonId: "p_sp", desc: "Petty cash - Priya Test", amount: 5000, fromAccId: "bank1", toAccId: null, accId: null, date: "2026-11-01", catIds: [], people: {}, createdAt: 1 }); localStorage.setItem("arth_txns", JSON.stringify(t)); });
     await home(); await openAdd();
     await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("900"); await addPriya();
-    rec("P1y once she holds petty cash the 'Paid by' row returns with Me and her only", (await T("paid-by").count()) === 1 && /Me/.test(await T("paid-by").innerText()) && /Priya Test/.test(await T("paid-by").innerText()), (await T("paid-by").count()) ? await T("paid-by").innerText() : "");
-    rec("P1 once she holds petty cash, her row shows the three choices and the petty-cash choice", (await T("alloc-petty").count()) === 1 && /Just tagging it.*I owe them.*They owe me.*They paid from their petty cash/.test(await text()), {});
-    await page.locator("button[title='Collect']").first().dispatchEvent("click"); await page.waitForTimeout(250);
-    await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(300);
-    const cLit = await page.locator("button[title='Collect']").first().evaluate(e => getComputedStyle(e).color);
-    rec("P1b tapping P clears the C that was lit, so only P is chosen", (await T("paid-by-note").count()) === 1 && (await page.getByText("Choose one").count()) === 0, cLit);
-    await page.locator("button[title='Collect']").first().dispatchEvent("click"); await page.waitForTimeout(300);
-    rec("P1c tapping C afterwards removes P (no 'Paid by' note)", (await T("paid-by-note").count()) === 0, {});
-    await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(250); await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(250);
-    await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(300);
-    const note = (await T("paid-by-note").count()) ? await T("paid-by-note").innerText() : "";
-    rec("P2 tapping P makes her the payer ('Paid by' note) and P lights up; tapping again clears it", /Priya Test paid/.test(note), note.slice(0, 80));
-    await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(300);
-    rec("P3 second tap clears it", (await T("paid-by-note").count()) === 0, {});
-    await T("alloc-petty").dispatchEvent("click"); await page.waitForTimeout(300);
+    rec("P1y even when she holds petty cash there is no separate 'Paid by' row or petty-cash button: 'They paid' covers it", (await T("paid-by").count()) === 0 && (await T("alloc-petty").count()) === 0, {});
+    await page.locator("button[title='Own']").first().dispatchEvent("click"); await page.waitForTimeout(300);
+    const sm = (await T("row-summary").innerText()).replace(/\s+/g, " ");
+    rec("P2 'They paid' with no amount means all of it: she paid 900, you owe her until you pay back, your account is debited 0", /Priya Test paid ₹900/.test(sm) && /debited ₹0/.test(sm), sm);
     await page.getByPlaceholder(/Vendor \/ Person/).fill("Vegetable seller"); await page.waitForTimeout(300);
     await page.locator("button:visible", { hasText: /Save|Add|Record/ }).last().click();
     await page.waitForTimeout(900);
     const allT = await ls("arth_txns"); const saved = allT.find(t => t.amount === 900);
-    rec("P4 P alone (no A, O or C chosen) saves: paid by her, none of my accounts used, no owe/attribution recorded for her row", saved && saved.paidByPersonId === "p_sp" && !saved.accId && !Object.keys(saved.people || {}).some(k => k === "p_sp" && saved.people[k] && saved.people[k].mode), saved ? { paidBy: saved.paidByPersonId, accId: saved.accId, people: saved.people } : "not saved");
+    rec("P4 saved as ONE 'paid by her' expense: none of my accounts used, no owe/attribution on her row; her petty cash offsets it in the totals", saved && saved.paidByPersonId === "p_sp" && !saved.accId && allT.filter(t => t.desc === "Vegetable seller").length === 1, saved && { by: saved.paidByPersonId, acc: saved.accId });
   }
   rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 500)); }

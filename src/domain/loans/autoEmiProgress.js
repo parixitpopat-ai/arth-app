@@ -24,7 +24,8 @@ export function reconcileAutoEmiLoan(loan, txns, today) {
   const insts = (txns || []).filter(t => ids.has(String(t.id)) && t.date).sort((a, b) => String(a.date).localeCompare(String(b.date)));
   if (insts.length === 0) return { loan, changed: false };
 
-  const billed = r2(insts.filter(t => String(t.date) <= today).reduce((s, t) => s + Number(t.amount || 0), 0));
+  // Only the EMI (principal) part of an instalment pays the loan down; GST billed with it (emiGstPart) is a cost, not repayment.
+  const billed = r2(insts.filter(t => String(t.date) <= today).reduce((s, t) => s + Number(t.emiPrincipalPart ?? t.amount ?? 0), 0));
   const current = Number(loan.outstanding || 0);
   const target = Math.max(0, r2(Number(loan.principal || 0) - billed));
   const outstanding = Math.min(current, target);

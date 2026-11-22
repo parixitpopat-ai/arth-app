@@ -39,7 +39,7 @@ try {
   await home();
   let body = await text();
   rec("N1 the Spend by Category wheel is back on Home (it was missing from the saved layout)", /Spend by Category/.test(body), {});
-  rec("N2 the tiles are back (Income, Investments, Budget, To Receive, Net Savings)", /INCOME/i.test(body) && /NET SAVINGS/i.test(body) && /TO RECEIVE/i.test(body), {});
+  rec("N2 the Income and Investments tiles are there (To Receive and Net Savings were retired for Between people)", /INCOME/i.test(body) && /INVESTMENTS/i.test(body) && !/NET SAVINGS/i.test(body), {});
   rec("N3 the wheel lists Uncategorised (the expense with no category)", /❓ Uncategorised/.test(body), {});
   rec("N4 the Needs details card counts 3 expenses (no category, no sub-category, tagged to nobody) and NOT the one for Me alone, the complete one or the vehicle one", (await T("needs-details-card").count()) === 1 && /3 expenses/.test(await T("needs-details-card").innerText()) && /1 no person or group/.test(await T("needs-details-card").innerText()), (await T("needs-details-card").count()) ? await T("needs-details-card").innerText() : null);
   rec("N5 the layout the person already had is kept (core cards first, goalsHome kept)", body.indexOf("Needs details") > body.indexOf("QUICK") || body.indexOf("Needs details") > 0, {});

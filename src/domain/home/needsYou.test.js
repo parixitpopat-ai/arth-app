@@ -35,3 +35,23 @@ test("between people: loans given are part of what is coming to you, and the net
   assert.equal(s.coming, 20800); assert.equal(s.owe, 13500); assert.equal(s.net, 7300); assert.equal(s.loans, 15000); assert.equal(s.hasAny, true);
   assert.equal(summariseBetweenPeople({}).hasAny, false);
 });
+
+import { needsSignature } from "./needsYou.js";
+test("an archived item stays out of the list until it changes", () => {
+  const base = { today: "2026-11-22", commitments: [{ name: "Water", amount: 500, date: "2026-11-24", sourceType: "bill", sourceId: "b1" }], owedPeople: [{ personId: "r", name: "Raj", amount: 900 }] };
+  const first = buildNeedsYou(base);
+  assert.deepEqual(first.map(i => i.kind), ["bill", "owed"]);
+  const archived = first.map(i => i.signature);
+  assert.deepEqual(buildNeedsYou({ ...base, archived }), []);
+  // the amount changed: it comes back
+  assert.deepEqual(buildNeedsYou({ ...base, archived, owedPeople: [{ personId: "r", name: "Raj", amount: 1200 }] }).map(i => i.kind), ["owed"]);
+  // the bill became overdue: it comes back
+  assert.deepEqual(buildNeedsYou({ ...base, archived, today: "2026-11-26" }).map(i => i.kind), ["bill"]);
+  assert.ok(needsSignature.bill(base.commitments[0], "2026-11-22").startsWith("bill:bill:b1|500|"));
+});
+
+test("work expenses waiting to be reimbursed count as coming to you, and are shown on their own", () => {
+  const s = summariseBetweenPeople({ owesMe: [900], iOwe: [400], loansGiven: 1000, claims: 7000 });
+  assert.deepEqual([s.coming, s.owe, s.net, s.claims, s.loans], [8900, 400, 8500, 7000, 1000]);
+  assert.equal(summariseBetweenPeople({ claims: 500 }).hasAny, true);
+});

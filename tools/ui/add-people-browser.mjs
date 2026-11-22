@@ -34,7 +34,7 @@ try {
   rec("W3 Collect with 900 says Raj Test will owe you 900", /Raj Test will owe you ₹900/.test(await T("row-summary").innerText()), await T("row-summary").innerText());
   rec("W3b the same sentence sits above the save button", /Raj Test will owe you ₹900/.test(await T("save-result").innerText()), await T("save-result").innerText());
   await page.locator("button[title='Own']").first().dispatchEvent("click"); await page.waitForTimeout(300);
-  rec("W4 Own says You will owe Raj Test 900", /You will owe Raj Test ₹900/.test(await T("row-summary").innerText()), await T("row-summary").innerText());
+  rec("W4 They paid says Raj Test paid 900, you owe him, your account is debited 0", /Raj Test paid ₹900.*debited ₹0/.test(await T("row-summary").innerText()), await T("row-summary").innerText());
   rec("W4b and it follows Own", /You will owe Raj Test ₹900/.test(await T("save-result").innerText()), {});
   await page.locator("button[title='Attribute']").first().dispatchEvent("click"); await page.waitForTimeout(300);
   rec("W5b tagging only owes nothing, so no sentence", (await T("save-result").count()) === 0, {});

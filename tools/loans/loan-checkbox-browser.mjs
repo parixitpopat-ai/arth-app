@@ -54,7 +54,7 @@ try {
   rec("T9 NO ordinary expense with Raj owing a share was created (he is not double counted)", txns.every(t => !t.people || !Object.keys(t.people).length), {});
   await page.goto(APP); await page.waitForTimeout(900); await unlock();
   const t = await text();
-  rec("T10 To Receive on Home now includes the 15,000 loan", /15,000/.test(t) && /To Receive/i.test(t), (t.match(/₹[\d,]+ To Receive/i) || ["(none)"])[0]);
+  rec("T10 Between people on Home includes the 15,000 loan as coming to you", /Coming to you/i.test(t) && /15,000/.test(t), (t.match(/Coming to you.{0,30}/i) || ["(none)"])[0]);
   rec("T11 no page errors", errors.length === 0, errors.slice(0, 2));
 } catch (e) { rec("RUN", false, String(e).slice(0, 400)); }
 finally { await browser.close(); try { process.kill(-server.pid); } catch {} }

@@ -38,6 +38,13 @@ try {
     rec("T1 'Needs you' shows on Home, with the bill due soon first", (await T("home-needs-you").count()) === 1 && (await T("needs-bill").count()) === 1 && /Electricity/.test(await T("needs-bill").innerText()) && /Due in 2 days/.test(await T("needs-bill").innerText()), (await T("needs-bill").count()) ? await T("needs-bill").innerText() : "");
     rec("T2 repayments not applied is listed (Raj's ₹800 repayment has no item chosen)", (await T("needs-repayments").count()) === 1 && /1 repayment not applied/.test(await T("needs-repayments").innerText()), (await T("needs-repayments").count()) ? await T("needs-repayments").innerText() : "");
     rec("T3 the person who owes most is listed", (await T("needs-owed").count()) === 1 && /Raj Test owes you/.test(await T("needs-owed").innerText()), (await T("needs-owed").count()) ? await T("needs-owed").innerText() : "");
+    rec("T3a each bill row has Pay and each person row has Remind", (await T("needs-pay").count()) === 1 && (await T("needs-remind").count()) === 1, {});
+    await T("needs-archive").first().click(); await page.waitForTimeout(400);
+    rec("T3b archiving the bill row removes it and offers 'Show 1 archived'", (await T("needs-bill").count()) === 0 && /Show 1 archived/.test(await T("needs-show-archived").innerText()), {});
+    await page.reload(); await page.waitForTimeout(1200); for (let i = 0; i < 3; i++) { if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await page.getByRole("button", { name: "1", exact: true }).click(); await page.waitForTimeout(100); } await page.waitForTimeout(500); } } await page.waitForTimeout(500);
+    rec("T3c it stays archived after a reload", (await T("needs-bill").count()) === 0 && (await T("needs-show-archived").count()) === 1, {});
+    await T("needs-show-archived").click(); await page.waitForTimeout(400);
+    rec("T3d 'Show archived' brings it back", (await T("needs-bill").count()) === 1, {});
     rec("T4 'Between people' shows coming to you including the ₹15,000 loan, and that it includes a loan", (await T("home-between-people").count()) === 1 && /15,000 lent/.test(await T("home-between-people").innerText()), (await T("home-between-people").count()) ? (await T("home-between-people").innerText()).replace(/\s+/g, " ") : "");
     await T("needs-owed").click(); await page.waitForTimeout(900);
     rec("T5 tapping the person row opens that person's page", /Raj Test/.test(await page.evaluate(() => document.body.innerText)) && /FINANCIAL POSITION|Financial position|Statement/i.test(await page.evaluate(() => document.body.innerText)), {}); }
