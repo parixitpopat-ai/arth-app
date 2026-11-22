@@ -149,3 +149,12 @@ test("a group the person is NOT part of (meId null): items count at the family's
   const m = buildGroupExpenseMessage(r.items.map(i => ({ ...i, on: true })), { groupName: "Neighbours", from: "2026-11-01", to: "2026-11-30" });
   assert.doesNotMatch(m, /You|Me /); assert.match(m, /Neighbours - expenses\nCoffee - 678/);
 });
+
+test("a line is named by its vendor when the expense has one, else by its description", () => {
+  const t = [
+    { id: "v1", type: "expense", desc: "Coffee for the family", merchant: "Third Wave Coffee", date: "2026-11-06", amount: 678, groupId: "g1" },
+    { id: "v2", type: "expense", desc: "Gate fix", date: "2026-11-07", amount: 150, groupId: "g1" },
+    { id: "v3", type: "expense", desc: "x", merchant: "  ", date: "2026-11-08", amount: 10, groupId: "g1" },
+  ];
+  assert.deepEqual(buildGroupExpenseList({ ...base, meId: null, txns: t, bills: [] }).items.map(i => i.title), ["Third Wave Coffee", "Gate fix", "x"]);
+});

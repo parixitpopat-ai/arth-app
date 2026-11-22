@@ -34,6 +34,9 @@ export function categorySplit(t, totalPaise) {
   return [...out.values()].filter(x => x.paise > 0).map(x => ({ catId: x.catId, amount: R(x.paise), labels: x.labels }));
 }
 
+/** What a line is called: the VENDOR when the expense has one ("Third Wave Coffee"), else what it was described as. No extra words. */
+const vendorOf = t => String(t.merchant || "").trim() || String(t.desc || "").trim() || "Expense";
+
 const dateOfBill = b => String(b.billDate || b.createdDate || b.dueDate || "").slice(0, 10);
 
 /**
@@ -71,7 +74,7 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
     const total = R(P(t.amount));
     const paidBill = t.paidBillId != null ? (bills || []).find(b => b && String(b.id) === String(t.paidBillId)) : null;
     const yourShare = shares.length && !(Number(t.groupCollectiveAmount) > 0) ? Math.max(0, R(P(total) - P(memberTotal))) : null;
-    items.push({ key: `txn:${t.id}`, kind: "expense", scope: "group", id: t.id, date, title: paidBill ? billTitle(paidBill) : (t.paidBillName || t.desc || t.merchant || "Expense"), total,
+    items.push({ key: `txn:${t.id}`, kind: "expense", scope: "group", id: t.id, date, title: paidBill ? billTitle(paidBill) : (t.paidBillName || vendorOf(t)), total,
       payer: t.paidByPersonId ? nameOf(t.paidByPersonId) : "you", note: String(t.note || ""), shares, memberTotal, due: R(shares.reduce((s, x) => s + P(x.remaining), 0)),
       groupAmount: R(P(t.groupCollectiveAmount)), yourShare, parts: partsOf({ shares, total, yourShare, forPerson: t.forPerson }), categories: categorySplit(t, P(total)) });
   }
@@ -105,7 +108,7 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
       const parts = shares.length ? shares.map(x => ({ personId: x.personId, name: x.name, amount: x.amount })) : [{ personId: String(t.forPerson), name: nameOf(t.forPerson), amount: total }];
       const mine = R(parts.reduce((sum, x) => sum + P(x.amount), 0));
       const paidBill = t.paidBillId != null ? (bills || []).find(b => b && String(b.id) === String(t.paidBillId)) : null;
-      items.push({ key: `txn:${t.id}`, kind: "expense", scope: "people", id: t.id, date, title: paidBill ? billTitle(paidBill) : (t.paidBillName || t.desc || t.merchant || "Expense"), total: mine,
+      items.push({ key: `txn:${t.id}`, kind: "expense", scope: "people", id: t.id, date, title: paidBill ? billTitle(paidBill) : (t.paidBillName || vendorOf(t)), total: mine,
         payer: t.paidByPersonId ? nameOf(t.paidByPersonId) : "you", note: String(t.note || ""), shares, memberTotal: mine, due: R(shares.reduce((sum, x) => sum + P(x.remaining), 0)),
         groupAmount: 0, yourShare: null, parts, categories: categorySplit(t, P(mine)) });
     }
