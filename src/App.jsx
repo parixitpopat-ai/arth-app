@@ -217,6 +217,7 @@ import { splitGstAcrossInstalments } from "./domain/loans/emiGst";
 import { getCardUnbilledEvents } from "./domain/cards/unbilledCommitments";
 import { skipMonth, putMonthBack, isMonthSkipped, monthKeyOf } from "./domain/recurring/skipMonth";
 import { planTheyPaid } from "./domain/person/theyPaid";
+import { readClipboardText, PASTE_BLOCKED_MESSAGE, PASTE_EMPTY_MESSAGE } from "./native/clipboard";
 import { QUICK_FILTERS, matchesQuickFilter } from "./domain/transactions/quickFilters";
 import { getCardAlerts } from "./domain/cards/alerts";
 import { getPaybackTotalsByPerson, applyPaybacks, buildPaybackTxn } from "./domain/person/payback";
@@ -8200,11 +8201,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     onChange={e=>{ setSmsTxt(e.target.value); parseSms(e.target.value, { adjustBalance: true }); }}
                     onPaste={e=>{ const txt=e.clipboardData?.getData("text")||""; if(txt){ e.preventDefault(); setSmsTxt(txt); parseSms(txt, { adjustBalance:true }); } }}
                   />
-                  <button onClick={async()=>{
+                  <button data-testid="sms-paste-button" onClick={async()=>{
                     try{
-                      const txt = await navigator.clipboard.readText();
-                      if(txt){ setSmsTxt(txt); parseSms(txt,{ adjustBalance:true }); }
-                    }catch(e){ /* permission denied, user must paste manually */ }
+                      const txt = await readClipboardText();
+                      if(txt.trim()){ setSmsTxt(txt); parseSms(txt,{ adjustBalance:true }); setSmsImportStatus(""); }
+                      else setSmsImportStatus(PASTE_EMPTY_MESSAGE);
+                    }catch(e){
+                      // Was swallowed silently, so the button looked dead. Say so, and put the cursor in the box so a long-press Paste works.
+                      setSmsImportStatus(PASTE_BLOCKED_MESSAGE);
+                      try{ document.querySelector('textarea[placeholder="Paste bank SMS here..."]')?.focus(); }catch{}
+                    }
                   }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accent,fontFamily:"Inter,sans-serif",flexShrink:0,alignSelf:"stretch" }}>📋<br/>Paste</button>
                 </div>
                 {smsParseMeta?.balanceAdjusted&&<div style={{ color:T.success,fontSize:11,fontWeight:700 }}>✅ Balance synced ({smsParseMeta.balanceDiff>0?"+":""}{sym}{fmt(smsParseMeta.balanceDiff)})</div>}
@@ -16063,6 +16069,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Fixed: a card with an old statement bill that has no period saved could make the app crash on Home (\"Something went wrong\") once a statement cycle closed. Statements are also never added twice now.",
             "Cards: Money now shows one box for all your cards (total limit, used, available) with each card's use under it. Used counts what is billed, what is spent but not yet billed, and EMI purchases still to be billed, because the bank keeps those blocked on the limit (check against your own statement). Money Required also lists what you have spent on a card since its last statement, due when that statement is due.",
             "New look, dark theme: the dark theme now matches the light one, a deep green-tinted charcoal with a softer green, in place of the old blue-violet navy. The PIN screen and the screens shown while the app waits use the same colours.",
+            "Fixed: the Paste button under Bank SMS import did nothing on some phones and said nothing. It now uses the phone's own clipboard in the Android app, and if pasting is blocked it tells you to long-press the box and choose Paste.",
             "Transactions, new look: the list starts with what you spent and what came in, then four quick filters (Everything, With people, Work, Loans). A split row says who owes you in words (\"Raj owes you ₹900\"), and a transfer is named \"Transfer\" and shows from and to accounts.",
             "Add screen, last steps of this round: in an itemised purchase the items now come before the charges, and with two or more categories an \"Items by category\" card shows what each gets. Under More there are now five choices: Invest, Give petty cash, Buy on card EMI, Pay a bill and Lend money (it tells you to add the person and tick \"This is a loan\").",
             "They paid: in Add, a person's row now says \"They paid. I owe them\". Put how much they paid (blank means all of it): your account is debited only for the rest, what they paid becomes a debt to them until you pay back, and spending still counts the whole amount. It is saved as two entries (your part and their part). The separate \"Paid by\" row and the P button are gone; entries saved with them before still work.",
