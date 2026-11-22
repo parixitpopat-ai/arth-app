@@ -3,7 +3,7 @@ import { shortDate, plainAmount } from "../person/statementMessage.js";
 
 /** @param {Array} items from buildGroupExpenseList, each with `on` (true = send it)
  *  @returns {string} "" when nothing is ticked */
-export function buildGroupExpenseMessage(items, { groupName = "", from, to, upiHandle = "", showShares = true } = {}) {
+export function buildGroupExpenseMessage(items, { groupName = "", from, to, upiHandle = "", showShares = true, breakup = null } = {}) {
   const chosen = (items || []).filter(i => i.on);
   if (!chosen.length) return "";
   const out = [`${groupName ? `${groupName} · ` : ""}expenses${from && to ? ` ${shortDate(from)} – ${shortDate(to)}` : ""}`, ""];
@@ -11,6 +11,7 @@ export function buildGroupExpenseMessage(items, { groupName = "", from, to, upiH
     const who = showShares && i.shares.length ? ` (${i.shares.map(s => `${s.name} ${plainAmount(s.amount)}`).join(", ")}${i.yourShare ? `, you ${plainAmount(i.yourShare)}` : ""})` : "";
     out.push(`${shortDate(i.date)} · ${i.title}${i.payer === "not paid yet" ? " (bill, not paid yet)" : ""} - ${plainAmount(i.total)}${who}`);
   }
+  if (breakup && breakup.rows && breakup.rows.length) { out.push("", "By category:"); for (const r of breakup.rows) out.push(`${r.name} - ${plainAmount(r.amount)} (${r.pct}%)`); }
   const P = n => Math.round((Number(n) || 0) * 100);
   const total = chosen.reduce((s, i) => s + P(i.total), 0) / 100;
   const due = chosen.reduce((s, i) => s + P(i.due), 0) / 100;

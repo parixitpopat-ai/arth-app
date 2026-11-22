@@ -13,6 +13,26 @@ import { getBillSplitSource } from "../bills/splitSource.js";
 
 const P = n => Math.round((Number(n) || 0) * 100);
 const R = p => Math.round(p) / 100;
+/** How an expense divides across categories: line items with a category count by their own amount; whatever is left (tax, rounding, items without a category)
+ *  goes to the expense's main category, or to "no category". No line items: the whole amount to its category. Always adds up to `total` (in paise). */
+export function categorySplit(t, totalPaise) {
+  const main = t.catId || (Array.isArray(t.catIds) && t.catIds[0]) || null;
+  const lines = Array.isArray(t.lineItems) ? t.lineItems : [];
+  const out = new Map(); let used = 0;
+  for (const li of lines) {
+    if (!li || !li.catId) continue;
+    const amt = P((parseFloat(li.qty) || 0) * (parseFloat(li.unitPrice) || 0));
+    if (!(amt > 0)) continue;
+    used += amt;
+    const cur = out.get(li.catId) || { catId: li.catId, paise: 0, labels: [] };
+    cur.paise += amt; if (li.label) cur.labels.push(String(li.label)); out.set(li.catId, cur);
+  }
+  if (used > totalPaise) { out.clear(); used = 0; }          // the lines add up to more than the expense: do not trust them, use the main category
+  const rest = totalPaise - used;
+  if (rest > 0 || !out.size) { const k = main || "__none__"; const cur = out.get(k === "__none__" ? null : k) || { catId: main, paise: 0, labels: [] }; cur.paise += rest; out.set(main, cur); }
+  return [...out.values()].filter(x => x.paise > 0).map(x => ({ catId: x.catId, amount: R(x.paise), labels: x.labels }));
+}
+
 const dateOfBill = b => String(b.billDate || b.createdDate || b.dueDate || "").slice(0, 10);
 
 /**
@@ -39,7 +59,7 @@ export function buildGroupExpenseList({ groupId, memberIds = [], txns = [], bill
     const total = R(P(t.amount));
     items.push({ key: `txn:${t.id}`, kind: "expense", id: t.id, date, title: t.paidBillName || t.desc || t.merchant || "Expense", total,
       payer: t.paidByPersonId ? nameOf(t.paidByPersonId) : "you", note: String(t.note || ""), shares, memberTotal, due: R(shares.reduce((s, x) => s + P(x.remaining), 0)),
-      groupAmount: R(P(t.groupCollectiveAmount)), yourShare: shares.length && !(Number(t.groupCollectiveAmount) > 0) ? Math.max(0, R(P(total) - P(memberTotal))) : null });
+      groupAmount: R(P(t.groupCollectiveAmount)), yourShare: shares.length && !(Number(t.groupCollectiveAmount) > 0) ? Math.max(0, R(P(total) - P(memberTotal))) : null, categories: categorySplit(t, P(total)) });
   }
   for (const b of bills || []) {
     if (!b || String(b.groupId || "") !== gid || b.status === "cancelled" || b.skipped) continue;
@@ -52,7 +72,7 @@ export function buildGroupExpenseList({ groupId, memberIds = [], txns = [], bill
     const memberTotal = R(shares.reduce((s, x) => s + P(x.amount), 0));
     const total = R(P(b.amount));
     items.push({ key: `bill:${b.id}`, kind: "bill", id: b.id, date, title: b.name || b.merchant || "Bill", total, payer: "not paid yet", note: "", shares, memberTotal,
-      due: R(shares.reduce((s, x) => s + P(x.remaining), 0)), groupAmount: R(P(b.groupCollectiveAmount)), yourShare: shares.length && !(Number(b.groupCollectiveAmount) > 0) ? Math.max(0, R(P(total) - P(memberTotal))) : null });
+      due: R(shares.reduce((s, x) => s + P(x.remaining), 0)), groupAmount: R(P(b.groupCollectiveAmount)), yourShare: shares.length && !(Number(b.groupCollectiveAmount) > 0) ? Math.max(0, R(P(total) - P(memberTotal))) : null, categories: categorySplit({ catId: b.catId, catIds: b.catIds }, P(total)) });
   }
   items.sort((a, b) => a.date.localeCompare(b.date) || String(a.key).localeCompare(String(b.key)));
   const sum = k => R(items.reduce((s, i) => s + P(i[k]), 0));

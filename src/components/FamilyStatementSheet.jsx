@@ -8,6 +8,7 @@ import StatementSelection from "./StatementSelection";
 import { buildFamilyMessage, shortDate, familyLines, buildSimpleMessage } from "../domain/person/statementMessage";
 import { buildGroupExpenseList } from "../domain/group/expenseList";
 import { buildGroupExpenseMessage } from "../domain/group/expenseMessage";
+import { buildCategoryBreakup } from "../domain/group/categoryBreakup";
 
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 function presets(todayIso) {
@@ -17,14 +18,15 @@ function presets(todayIso) {
     fy: { label: "This financial year", from: `${fyY}-04-01`, to: todayIso }, all: { label: "Everything", from: "2000-01-01", to: todayIso } };
 }
 
-export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number(n).toFixed(2), group, people = [], txns = [], bills = [], billerAccounts = [], upiHandle = "", meId, onClose }) {
+export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number(n).toFixed(2), group, people = [], txns = [], bills = [], billerAccounts = [], cats = [], upiHandle = "", meId, onClose }) {
   const today = useMemo(() => iso(new Date()), []);
   const P = useMemo(() => presets(today), [today]);
   const [preset, setPreset] = useState("fy");
   const [from, setFrom] = useState(P.fy.from), [to, setTo] = useState(P.fy.to);
   const [status, setStatus] = useState("");
   const [mode, setMode] = useState(() => (buildGroupExpenseList({ groupId: group.id, memberIds: [], txns, bills, from: presets(iso(new Date())).fy.from, to: iso(new Date()) }).totals.count > 0 ? "expenses" : "simple"));   // a group with expenses tagged to it opens on them
-  const [exOff, setExOff] = useState({});                // itemised expenses the person un-ticked            // "simple": Member: Item - amount lines you tick, then a total | "full": the family statement
+  const [exOff, setExOff] = useState({});
+  const [withBreakup, setWithBreakup] = useState(true);   // the category break-up goes in the message too                // itemised expenses the person un-ticked            // "simple": Member: Item - amount lines you tick, then a total | "full": the family statement
   const [overrides, setOverrides] = useState({});
   const nameOf = id => (people.find(p => String(p.id) === String(id)) || {}).name || "someone";
   const labelOf = c => { const ba = billerAccounts.find(b => String(b.id) === String(c.billerAccountId)); return (ba && ba.type) || (c.billId ? "Bills" : "Own expenses"); };
@@ -36,7 +38,8 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const simpleMessage = buildSimpleMessage(lines.map(l => ({ ...l, on: isOn(l) })), { upiHandle, withNames: true });
   const ex = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, memberIds, txns, bills, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, from, to, people]);   // eslint-disable-line react-hooks/exhaustive-deps
   const exItems = ex ? ex.items.map(i => ({ ...i, on: !exOff[i.key] })) : [];
-  const exMessage = ex ? buildGroupExpenseMessage(exItems, { groupName: group.name, from, to, upiHandle }) : "";
+  const breakup = useMemo(() => buildCategoryBreakup(exItems.filter(i => i.on), cats), [ex, exOff, cats]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const exMessage = ex ? buildGroupExpenseMessage(exItems, { groupName: group.name, from, to, upiHandle, breakup: withBreakup ? breakup : null }) : "";
   const message = mode === "expenses" ? exMessage : !fam ? "" : mode === "simple" ? simpleMessage : buildFamilyMessage(fam, { groupName: group.name, nameOf, sym, fmt, upiHandle });
   const owed = fam ? fam.closing : 0;
   const choose = id => { setPreset(id); setFrom(P[id].from); setTo(P[id].to); setStatus(""); setOverrides({}); setExOff({}); };
@@ -90,6 +93,20 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
               <div style={line}><span style={{ color: T.text, fontSize: 13 }}>{ex.totals.count} expense{ex.totals.count === 1 ? "" : "s"} tagged to {group.name}</span><span data-testid="fam-exp-total" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.total)}</span></div>
               {ex.totals.due > 0.004 && <div style={line}><span style={{ color: T.text, fontSize: 13 }}>Still to be paid by members</span><span data-testid="fam-exp-due" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.due)}</span></div>}
             </div>
+            {breakup.rows.length > 0 && <div data-testid="fam-breakup" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 12, padding: "10px 12px", marginBottom: 10 }}>
+              <div style={{ color: T.text, fontSize: 13, fontWeight: 800, marginBottom: 6 }}>By category</div>
+              {breakup.rows.map(r => (
+                <details key={String(r.catId)} data-testid="fam-cat-row" style={{ borderTop: `1px solid ${T.border}` }}>
+                  <summary style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", cursor: "pointer", listStyle: "none" }}>
+                    <span style={{ fontSize: 15 }}>{r.icon}</span>
+                    <span style={{ flex: 1, minWidth: 0, color: T.text, fontSize: 13, fontWeight: 700 }}>{r.name}<span style={{ color: T.sub, fontWeight: 500 }}> · {r.pct}%</span></span>
+                    <span style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(r.amount)}</span>
+                  </summary>
+                  {r.entries.map((e, k) => <div key={e.key + k} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "3px 0 3px 23px", ...sub }}><span style={{ minWidth: 0 }}>{shortDate(e.date)} · {e.title}{e.labels.length ? ` (${e.labels.join(", ")})` : ""}</span><span style={{ whiteSpace: "nowrap" }}>{money(e.amount)}</span></div>)}
+                </details>
+              ))}
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, ...sub }}><input data-testid="fam-breakup-in-message" type="checkbox" checked={withBreakup} onChange={e => setWithBreakup(e.target.checked)} />Put this break-up in the message</label>
+            </div>}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
               <span style={sub}>Tick what to send</span>
               <span style={{ display: "flex", gap: 12 }}><button type="button" data-testid="fam-exp-all" style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }} onClick={() => setExOff({})}>All</button><button type="button" data-testid="fam-exp-none" style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }} onClick={() => setExOff(Object.fromEntries(ex.items.map(i => [i.key, true])))}>None</button></span>

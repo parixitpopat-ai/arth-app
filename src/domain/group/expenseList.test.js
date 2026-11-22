@@ -54,3 +54,38 @@ test("the message lists the ticked items with each member's share, then the tota
   assert.doesNotMatch(m, /Internet/);
   assert.equal(buildGroupExpenseMessage(items.map(i => ({ ...i, on: false })), {}), "");
 });
+
+import { categorySplit } from "./expenseList.js";
+import { buildCategoryBreakup } from "./categoryBreakup.js";
+test("an expense without line items goes whole to its category; with none it is 'no category'", () => {
+  assert.deepEqual(categorySplit({ catId: "food" }, 100000), [{ catId: "food", amount: 1000, labels: [] }]);
+  assert.deepEqual(categorySplit({}, 50000), [{ catId: null, amount: 500, labels: [] }]);
+  assert.deepEqual(categorySplit({ catIds: ["a", "b"] }, 50000), [{ catId: "a", amount: 500, labels: [] }]);
+});
+test("line items count by their own category and amount; what is left (tax, rounding) goes to the main category; it always adds up", () => {
+  const t = { catId: "groc", lineItems: [{ label: "Rice", qty: 2, unitPrice: 100, catId: "groc" }, { label: "Soap", qty: 1, unitPrice: 50, catId: "home" }, { label: "Bag", qty: 1, unitPrice: 20 }] };
+  const r = categorySplit(t, 30000);   // total 300: groc 200 + home 50, 50 left -> main (groc)
+  assert.deepEqual(r.map(x => [x.catId, x.amount]).sort(), [["groc", 250], ["home", 50]]);
+  assert.equal(r.reduce((s, x) => s + x.amount, 0), 300);
+});
+test("line items that add up to more than the expense are not trusted", () => {
+  assert.deepEqual(categorySplit({ catId: "x", lineItems: [{ qty: 1, unitPrice: 500, catId: "y" }] }, 30000).map(c => [c.catId, c.amount]), [["x", 300]]);
+});
+test("the break-up adds the ticked items by category, biggest first, no-category last, with shares and the entries behind each", () => {
+  const cats = [{ id: "food", name: "Food", icon: "🍔" }, { id: "util", name: "Utilities", icon: "💡" }];
+  const items = [
+    { key: "a", title: "Electricity", date: "2026-11-05", categories: [{ catId: "util", amount: 3000, labels: [] }] },
+    { key: "b", title: "Party", date: "2026-11-10", categories: [{ catId: "food", amount: 700, labels: ["Cake"] }, { catId: null, amount: 100, labels: [] }] },
+    { key: "c", title: "Dinner", date: "2026-11-12", categories: [{ catId: "food", amount: 200, labels: [] }] },
+  ];
+  const b = buildCategoryBreakup(items, cats);
+  assert.deepEqual(b.rows.map(r => [r.name, r.amount, r.pct]), [["Utilities", 3000, 75], ["Food", 900, 22.5], ["No category", 100, 2.5]]);
+  assert.equal(b.total, 4000); assert.deepEqual(b.rows[1].entries.map(e => e.title), ["Party", "Dinner"]); assert.deepEqual(b.rows[1].entries[0].labels, ["Cake"]);
+  assert.deepEqual(buildCategoryBreakup([], cats), { rows: [], total: 0 });
+  assert.equal(buildCategoryBreakup([{ key: "z", title: "x", date: "2026-11-01", categories: [{ catId: "gone", amount: 5 }] }], cats).rows[0].name, "Other category");
+});
+test("the message adds a By category section with the shares", () => {
+  const items = buildGroupExpenseList({ ...base, txns: [{ id: "q", type: "expense", desc: "Lunch", date: "2026-11-05", amount: 400, groupId: "g1", catId: "food" }], bills: [] }).items.map(i => ({ ...i, on: true }));
+  const m = buildGroupExpenseMessage(items, { groupName: "Flat", from: base.from, to: base.to, breakup: buildCategoryBreakup(items, [{ id: "food", name: "Food" }]) });
+  assert.match(m, /By category:\nFood - 400 \(100%\)/);
+});
