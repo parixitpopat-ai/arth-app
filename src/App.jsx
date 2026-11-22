@@ -225,6 +225,10 @@ import { segmentsFor, sectionOfTab, activeSegmentId, bottomTabs, isSectionTabAct
 import BiometricUnlock from "./components/BiometricUnlock";
 import { summariseLoans } from "./domain/loans/loanList";
 import { findPossibleDuplicates } from "./domain/futureMoney/duplicateFlags";
+import { applyValuations } from "./domain/investments/valuation";
+import { fetchLatestNav } from "./native/navClient";
+import { navFailureMessage } from "./domain/investments/mfNav";
+import HoldingValuePanel from "./components/HoldingValuePanel";
 import { dailySummary } from "../domain/insights/dailySummary";
 import { dailyNotifAvailable, dailyNotifSchedule, dailyNotifCancel, dailyNotifOnOpen } from "./native/dailyNotification";
 import { ensureNotifPermission, openNotificationSettings, notifBlockedMessage } from "./native/notifPermission";
@@ -2737,6 +2741,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Outlook: pairs the person said are not duplicates (domain/futureMoney/duplicateFlags.js). This phone only.
   const [dupDismissed, setDupDismissed] = useState(()=>{ try { return JSON.parse(localStorage.getItem("arth_outlook_dups_dismissed")||"[]"); } catch { return []; } });
   useEffect(()=>{ try { localStorage.setItem("arth_outlook_dups_dismissed", JSON.stringify(dupDismissed)); } catch { /* the choice is simply not kept */ } },[dupDismissed]);
+  // What each holding is worth now (domain/investments/valuation.js): { [holding key]: { units?, price, priceDate, schemeCode?, fundName?, source } }. This phone only.
+  const [holdingValues, setHoldingValues] = useState(()=>{ try { const v = JSON.parse(localStorage.getItem("arth_holding_values")||"{}"); return v && typeof v==="object" && !Array.isArray(v) ? v : {}; } catch { return {}; } });
+  useEffect(()=>{ try { localStorage.setItem("arth_holding_values", JSON.stringify(holdingValues)); } catch { /* the values are simply not kept */ } },[holdingValues]);
   const [dupReviewOpen, setDupReviewOpen] = useState(false);   // Outlook shows only the possible duplicates, to check
   const [moneyView, setMoneyView] = useState("accounts");   // which part of the money hub shows (new navigation only): accounts | cards | loans | invest
   const bio = useBiometric(setToast);   // fingerprint unlock (Android app): src/native/biometric.js
@@ -2762,6 +2769,29 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(!perm.ok){ setToast({ message:notifBlockedMessage(perm.state), icon:"⚠️", actionLabel:"Open settings", onAction:()=>{ openNotificationSettings(); } }); return; }
     setDailyNotifOn(true); setToast({ message:"On: a summary of the day's spending at 9 pm", icon:"🔔" });
   };
+  // Fund NAVs: every holding with a saved scheme code is refreshed from the NAV service, by hand (Refresh on the Investments screen) and once a day when Arth opens.
+  // A failed lookup keeps the old value and says why; it never writes a guess.
+  const refreshNavs = useCallback(async ({ silent=false }={})=>{
+    const entries = Object.entries(holdingValues).filter(([,v])=>v && v.schemeCode);
+    if(!entries.length){ if(!silent) setToast({ message:"Add a fund's scheme code to a holding first (open it under Investments).", icon:"ℹ️" }); return; }
+    let ok = 0, firstFail = "";
+    const next = {};
+    for(const [key,v] of entries){
+      const r = await fetchLatestNav(v.schemeCode);
+      if(r.ok){ ok += 1; next[key] = { ...v, price:r.nav, priceDate:r.date, source:"mfapi", updatedAt:Date.now() }; }
+      else if(!firstFail) firstFail = navFailureMessage(r.reason);
+    }
+    if(ok) setHoldingValues(prev=>{ const n={ ...prev }; for(const k of Object.keys(next)) if(n[k]) n[k] = { ...n[k], ...next[k] }; return n; });
+    try { localStorage.setItem("arth_nav_last_refresh", todayStr()); } catch { /* it just tries again next time */ }
+    if(!silent || (!ok && firstFail)) setToast({ message: ok===entries.length ? `NAV updated for ${ok} fund${ok===1?"":"s"}` : `${ok} of ${entries.length} updated. ${firstFail}`, icon: ok===entries.length?"📈":"⚠️" });
+  },[holdingValues]);
+  useEffect(()=>{
+    if(!Object.values(holdingValues).some(v=>v&&v.schemeCode)) return undefined;
+    let last = ""; try { last = localStorage.getItem("arth_nav_last_refresh")||""; } catch { /* treat as never */ }
+    if(last===todayStr()) return undefined;
+    const timer = setTimeout(()=>{ refreshNavs({ silent:true }); }, 4000);
+    return ()=>clearTimeout(timer);
+  },[]);   // once per opening; the daily limit is the saved date
   const smsInbox = useSmsInbox({ accounts, txns, people, billerAccounts });   // bank messages caught as they arrive (Android app only); proposals, never entries
   const activePrepaidAlerts = useMemo(()=>getPrepaidAlerts({ billerAccounts, bills, relationships:membershipRelationships, today:new Date(), dismissed:dismissedAlerts }),[billerAccounts,bills,membershipRelationships,dismissedAlerts]);
   const directOwedToMe = useMemo(()=>Object.values(settlements).reduce((s,p)=>s+(p.owesMe||0),0),[settlements]);
@@ -3020,14 +3050,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       if(!group.title || group.title === "Investment") group.title = account.name || grouping.primaryName;
       if(!group.color) group.color = account.color || typeMeta?.color || T.info;
     });
-    return Array.from(map.values())
+    return applyValuations(Array.from(map.values()), holdingValues, todayStr())   // market value instead of money put in, where units and a price are known
       .map(group=>({
         ...group,
         total:group.trackedTotal>0 && group.accountTotal>0 ? Math.max(group.trackedTotal, group.accountTotal) : (group.trackedTotal + group.accountTotal),
       }))
       .filter(group=>group.total>0)
       .sort((a,b)=>b.total-a.total);
-  },[trackedInvestments,investmentAccounts,accountBalance]);
+  },[trackedInvestments,investmentAccounts,accountBalance,holdingValues]);
   const investmentAssetsTotal = useMemo(()=>investmentDashboardGroups.reduce((sum,group)=>sum+Number(group.total||0),0),[investmentDashboardGroups]);
   const investmentTypeSummaries = useMemo(()=>INVEST_TYPES.map(type=>{
     const groups = investmentDashboardGroups.filter(group=>group.type===type.id && Number(group.total||0)>0);
@@ -9778,6 +9808,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const InvestmentDetailModal = () => {
     const group = selectedInvestmentDetail;
     if(!group) return null;
+    const live = investmentDashboardGroups.find(g=>g.id===group.id) || group;   // the copy in state is from when it was tapped; this one follows a saved price
     const type = INVEST_TYPES.find(x=>x.id===group.type) || group.typeMeta || INVEST_TYPES[0];
     const displayFolio = String(group.folioNo || group.items.find(item=>String(item?.folioNo || "").trim())?.folioNo || "").trim();
     const displayTitle = displayFolio ? `Folio ${displayFolio}` : (group.primaryName || group.title || type.name);
@@ -9809,9 +9840,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
           </div>
 
+          {["mf","stocks","gold","crypto"].includes(type.id)&&group.items?.length>0&&(
+            <HoldingValuePanel key={group.id} T={T} sym={sym} fmt={fmt} type={type.id} valuation={live.valuation} saved={holdingValues[group.id]} today={todayStr()}
+              onSave={next=>setHoldingValues(prev=>({ ...prev, [group.id]:{ ...(prev[group.id]||{}), ...next, updatedAt:Date.now() } }))}
+              onClear={()=>setHoldingValues(prev=>{ const n={ ...prev }; delete n[group.id]; return n; })}
+              onNote={m=>setToast({ message:m, icon:"📈" })}/>
+          )}
+
           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
             {[
-              { l:"Worth", v:`${sym}${fmt(group.total)}`, c:type.color },
+              { l:"Worth", v:`${sym}${fmt(live.total)}`, c:type.color },
               { l:"Start date", v:groupStartDate ? (formatShortDate(groupStartDate) || groupStartDate) : "—", c:T.purple },
               { l:type.id==="mf" ? "Folio" : "Section", v:type.id==="mf" ? (displayFolio || "—") : type.name, c:T.text },
               { l:"Entries", v:String(group.items.length), c:T.success }
@@ -13654,6 +13692,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
           <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>💹 Investments</div>
           <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+            {Object.values(holdingValues).some(v=>v&&v.schemeCode)&&<button data-testid="invest-refresh-navs" onClick={()=>refreshNavs()} style={{ background:"none",border:`1px solid ${T.border}`,color:T.text,borderRadius:10,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"Inter,sans-serif" }}>↻ NAV</button>}
             <button onClick={openInvestmentComposer} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Inter,sans-serif" }}>+ Add</button>
             {onClose && <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>✕</button>}
           </div>
@@ -13754,7 +13793,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     </div>
                     <div style={{ textAlign:"right" }}>
                       <div style={{ color:activeType.color||T.info,fontSize:12,fontWeight:800 }}>{sym}{fmt(folio.total)}</div>
-                      <div style={{ color:T.sub,fontSize:10 }}>Tap to view</div>
+                      {folio.valuation?.valued
+                        ? <div data-testid="folio-gain" style={{ color:folio.valuation.gain>=0?T.success:T.danger,fontSize:10,fontWeight:700 }}>{folio.valuation.gain>=0?"+":"−"}{sym}{fmt(Math.abs(folio.valuation.gain))}{folio.valuation.gainPct!==null?` (${folio.valuation.gain>=0?"+":""}${folio.valuation.gainPct}%)`:""}{folio.valuation.stale?" · old price":""}</div>
+                        : <div style={{ color:T.sub,fontSize:10 }}>{folio.valuation?"Put in · tap to add price":"Tap to view"}</div>}
                     </div>
                   </div>
                 </div>
@@ -16228,6 +16269,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Match your bank (Money → an account): each bank and cash account's own page now has \"Does this match your bank?\" with a Set actual balance button, and shows the gap or Matched. It is the same check that was in Settings, which still has it.",
             "New navigation (Settings, off by default): the bottom bar becomes Today, Money, People and Plan. Money opens on your activity, with Accounts, Cards, Loans and Invest one tap away (those four ask for the PIN; Loans is a new list of what you owe and what you gave); Plan holds Bills, Budget, Goals, Events and Outlook. Every screen is the same one as before, only grouped; switch it off any time.",
             "Settings, tidied: five groups (You and your data, Money setup, Look and behaviour, Privacy and notifications, Help). On/off items are real switches and the whole row is the tap target. Notifications is one screen: Bill reminders, Weekly summary and the new Daily summary (what you spent today, at 9 pm, Android app, off by default). PIN, fingerprint and lock are one screen. If the phone will not allow notifications, Arth now says why and offers Open settings instead of doing nothing. The version shows once.",
+            "Investments worth what they are worth now: open a mutual fund, stock, gold or crypto holding and add today's price (a fund can look its NAV up by name or scheme code). Net worth then counts units x price instead of the money put in, and shows the gain. Units are worked out from your entries (amount / NAV bought at; stocks and gold use the units on each entry) or you type your real units. A failed lookup keeps the old value and says why. Funds with a scheme code refresh once a day when Arth opens, or tap \"↻ NAV\" on Investments. Stock, gold and crypto prices are typed, with their date. Saved on this phone.",
             "Outlook, tidied: the repeated Budget and Payments links, the second Available cash and the third Buffer are gone; What changed since yesterday moved to Money, under net worth. Possible duplicate payments (same amount, dates within a week, same words in the name) are now reported in Notifications: tap it and Outlook shows only those pairs to check, with These are different. Nothing is deleted for you.",
             "Fingerprint unlock (Android app, Settings): touch the sensor instead of typing the PIN. Off by default; turning it on asks for your fingerprint once. The phone is asked up to 4 times, then only the PIN is left (at once if you choose the PIN). The lock-out after 5 wrong PINs is unchanged. Arth never stores the fingerprint; the phone keeps it.",
             "Bill reminders (Android app, Settings): a phone notification 3 days before a bill is due and on the day, at 9 am, for bills still owed. Tap it to open the bill. Off by default.",
