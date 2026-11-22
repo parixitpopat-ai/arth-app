@@ -6427,9 +6427,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         })}
                       </div>
                       {inMore&&(
-                        <div style={{ display:"flex",gap:8,marginTop:8,flexWrap:"wrap" }}>
-                          {[["investment","💹 Invest"],["petty_cash","💵 Give petty cash"]].map(([v,lb])=>(
-                            <button key={v} data-testid={`type-${v}`} onClick={()=>chooseType(v)} style={{ minHeight:40,padding:"0 14px",borderRadius:20,border:`1px solid ${txnType===v?T.info:T.border}`,background:txnType===v?T.info+"22":"none",color:txnType===v?T.info:T.sub,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>{lb}</button>
+                        <div data-testid="more-types" style={{ display:"flex",gap:8,marginTop:8,flexWrap:"wrap" }}>
+                          {[
+                            ["investment","💹 Invest",()=>chooseType("investment")],
+                            ["petty_cash","💵 Give petty cash",()=>chooseType("petty_cash")],
+                            ["card_emi","🧾 Buy on card EMI",()=>{ chooseType("expense"); setExpensePaymentMode("emi"); setEmiSourceType("cc"); }],
+                            ["pay_bill","📄 Pay a bill",()=>{ closeModal(); setTab("bills"); }],
+                            ["lend","🤝 Lend money",()=>{ chooseType("expense"); setToast({ message:"Add the person under \"Who is this for?\", choose \"They owe me\", and tick \"This is a loan\".", icon:"🤝" }); }],
+                          ].map(([v,lb,go])=>(
+                            <button key={v} data-testid={`type-${v}`} onClick={go} style={{ minHeight:40,padding:"0 14px",borderRadius:20,border:`1px solid ${txnType===v?T.info:T.border}`,background:txnType===v?T.info+"22":"none",color:txnType===v?T.info:T.sub,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>{lb}</button>
                           ))}
                         </div>
                       )}
@@ -6725,38 +6731,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {/* Items list moved here directly - real bug fix: previously the actual item
                     entry UI stayed far below in the form while this toggle lived up here,
                     so flipping it ON hid Category with nothing visible taking its place. */}
-                {useItemizedLines&&(
-                  <div data-testid="charges-card" style={{ background:T.input,borderRadius:10,padding:10,border:`1.5px solid ${T.accent}` }}>
-                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                      <div style={{ color:T.accent,fontSize:10,fontWeight:700,letterSpacing:1 }}>CHARGES · not items</div>
-                    </div>
-                    <div style={{ marginTop:8,display:"flex",flexDirection:"column",gap:6 }}>
-                      {(()=>{
-                        const seen = {};
-                        const rows = chargeLines.map(l=>{ const t = l.chargeType||"other"; seen[t]=(seen[t]||0)+1; return { type:t, line:l, n:seen[t]-1 }; });
-                        ["handling","platform","delivery"].forEach(t=>{ if(!seen[t]) rows.push({ type:t, line:null, n:0 }); });
-                        const order = ["handling","platform","delivery","cgst","sgst","other"];
-                        rows.sort((a,b)=>order.indexOf(a.type)-order.indexOf(b.type) || a.n-b.n);
-                        return rows.map(({type,line,n})=>(
-                          <div key={`${type}-${n}`} data-testid={`charge-row-${type}${n?`-${n}`:""}`} style={{ display:"flex",alignItems:"center",gap:8,background:T.card||T.bg,borderRadius:10,padding:"8px 10px",border:`1px solid ${T.border}` }}>
-                            <div style={{ flex:1,minWidth:0 }}>
-                              <div style={{ color:line?T.text:T.sub,fontSize:12,fontWeight:700 }}>{line&&line.label&&line.label!==chargeTypeLabel(type)?line.label:chargeTypeLabel(type)}</div>
-                              {line?.taxIncluded&&(Number(line.taxIncluded.cgst)>0||Number(line.taxIncluded.sgst)>0)&&<div style={{ color:T.sub,fontSize:10 }}>includes CGST {sym}{fmt(line.taxIncluded.cgst||0)} + SGST {sym}{fmt(line.taxIncluded.sgst||0)}</div>}
-                            </div>
-                            <input data-testid={`charge-amount-${type}${n?`-${n}`:""}`} style={{ ...inp,width:92,textAlign:"right" }} type="text" inputMode="decimal" placeholder="+ add" value={line?String(line.unitPrice??""):""} onChange={e=>setChargeAmount(type, line?line.id:null, e.target.value)}/>
-                            {line&&!["handling","platform","delivery"].includes(type)||line&&n>0?<button onClick={()=>removeChargeLine(line.id)} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:11,color:T.danger,fontFamily:"Inter,sans-serif" }}>x</button>:null}
-                          </div>
-                        ));
-                      })()}
-                    </div>
-                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:8 }}>
-                      {["cgst","sgst","other"].filter(t=>!chargeLines.some(l=>l.chargeType===t)).map(t=>(
-                        <button key={t} data-testid={`charge-add-${t}`} onClick={()=>addChargeLine(t)} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:T.accent,fontFamily:"Inter,sans-serif" }}>+ {t==="other"?"Other":t.toUpperCase()}</button>
-                      ))}
-                    </div>
-                    <div style={{ color:T.sub,fontSize:10,marginTop:8 }}>{chargeSummary.total>0?`Charges ${sym}${fmt(chargeSummary.total)}. `:""}Charges are shared equally between the people and groups you choose below, you included. GST already inside an item's price is not added again.</div>
-                  </div>
-                )}
+                {/* New look: the items come first and the charges after them (the Design canvas "Itemised"); the Lines add up to total sits under the items, as before. */}
                 {useItemizedLines&&(
                   <div style={{ background:T.input,borderRadius:10,padding:10 }}>
                     <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
@@ -6841,6 +6816,54 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+                {useItemizedLines&&itemCategoryRollup&&itemCategoryRollup.catIds.length>=2&&(()=>{
+                  // New look: one seller, several categories: what each category gets, as bars (the Design canvas "One seller, many categories"). Items only; charges are shown in their own card.
+                  const rows = itemCategoryRollup.catIds.map(id=>({ id, cat:getCat(id), amt:itemCategoryRollup.catAmounts[id]||0 })).filter(r=>r.cat);
+                  const top = Math.max(1, ...rows.map(r=>r.amt));
+                  return (
+                    <div data-testid="items-by-category" style={{ background:T.input,borderRadius:10,padding:"10px 12px",display:"flex",flexDirection:"column",gap:8 }}>
+                      <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:1 }}>ITEMS BY CATEGORY</div>
+                      {rows.map(r=>(
+                        <div key={r.id}>
+                          <div style={{ display:"flex",justifyContent:"space-between",fontSize:12 }}><span style={{ color:T.text,fontWeight:700 }}>{r.cat.icon?`${r.cat.icon} `:""}{r.cat.name}</span><span style={{ color:T.text,fontWeight:800 }}>{sym}{fmt(r.amt)}</span></div>
+                          <div style={{ height:6,borderRadius:3,background:T.card,marginTop:4,overflow:"hidden" }}><div style={{ width:`${Math.round((r.amt/top)*100)}%`,height:"100%",background:T.accent }}/></div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+                {useItemizedLines&&(
+                  <div data-testid="charges-card" style={{ background:T.input,borderRadius:10,padding:10,border:`1.5px solid ${T.accent}` }}>
+                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+                      <div style={{ color:T.accent,fontSize:10,fontWeight:700,letterSpacing:1 }}>CHARGES · not items</div>
+                    </div>
+                    <div style={{ marginTop:8,display:"flex",flexDirection:"column",gap:6 }}>
+                      {(()=>{
+                        const seen = {};
+                        const rows = chargeLines.map(l=>{ const t = l.chargeType||"other"; seen[t]=(seen[t]||0)+1; return { type:t, line:l, n:seen[t]-1 }; });
+                        ["handling","platform","delivery"].forEach(t=>{ if(!seen[t]) rows.push({ type:t, line:null, n:0 }); });
+                        const order = ["handling","platform","delivery","cgst","sgst","other"];
+                        rows.sort((a,b)=>order.indexOf(a.type)-order.indexOf(b.type) || a.n-b.n);
+                        return rows.map(({type,line,n})=>(
+                          <div key={`${type}-${n}`} data-testid={`charge-row-${type}${n?`-${n}`:""}`} style={{ display:"flex",alignItems:"center",gap:8,background:T.card||T.bg,borderRadius:10,padding:"8px 10px",border:`1px solid ${T.border}` }}>
+                            <div style={{ flex:1,minWidth:0 }}>
+                              <div style={{ color:line?T.text:T.sub,fontSize:12,fontWeight:700 }}>{line&&line.label&&line.label!==chargeTypeLabel(type)?line.label:chargeTypeLabel(type)}</div>
+                              {line?.taxIncluded&&(Number(line.taxIncluded.cgst)>0||Number(line.taxIncluded.sgst)>0)&&<div style={{ color:T.sub,fontSize:10 }}>includes CGST {sym}{fmt(line.taxIncluded.cgst||0)} + SGST {sym}{fmt(line.taxIncluded.sgst||0)}</div>}
+                            </div>
+                            <input data-testid={`charge-amount-${type}${n?`-${n}`:""}`} style={{ ...inp,width:92,textAlign:"right" }} type="text" inputMode="decimal" placeholder="+ add" value={line?String(line.unitPrice??""):""} onChange={e=>setChargeAmount(type, line?line.id:null, e.target.value)}/>
+                            {line&&!["handling","platform","delivery"].includes(type)||line&&n>0?<button onClick={()=>removeChargeLine(line.id)} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:11,color:T.danger,fontFamily:"Inter,sans-serif" }}>x</button>:null}
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                    <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:8 }}>
+                      {["cgst","sgst","other"].filter(t=>!chargeLines.some(l=>l.chargeType===t)).map(t=>(
+                        <button key={t} data-testid={`charge-add-${t}`} onClick={()=>addChargeLine(t)} style={{ background:"none",border:`1px dashed ${T.accent}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:T.accent,fontFamily:"Inter,sans-serif" }}>+ {t==="other"?"Other":t.toUpperCase()}</button>
+                      ))}
+                    </div>
+                    <div style={{ color:T.sub,fontSize:10,marginTop:8 }}>{chargeSummary.total>0?`Charges ${sym}${fmt(chargeSummary.total)}. `:""}Charges are shared equally between the people and groups you choose below, you included. GST already inside an item's price is not added again.</div>
                   </div>
                 )}
                 {(()=>{
@@ -16019,6 +16042,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Fixed: a card with an old statement bill that has no period saved could make the app crash on Home (\"Something went wrong\") once a statement cycle closed. Statements are also never added twice now.",
             "Cards: Money now shows one box for all your cards (total limit, used, available) with each card's use under it. Used counts what is billed, what is spent but not yet billed, and EMI purchases still to be billed, because the bank keeps those blocked on the limit (check against your own statement). Money Required also lists what you have spent on a card since its last statement, due when that statement is due.",
             "New look, dark theme: the dark theme now matches the light one, a deep green-tinted charcoal with a softer green, in place of the old blue-violet navy. The PIN screen and the screens shown while the app waits use the same colours.",
+            "Add screen, last steps of this round: in an itemised purchase the items now come before the charges, and with two or more categories an \"Items by category\" card shows what each gets. Under More there are now five choices: Invest, Give petty cash, Buy on card EMI, Pay a bill and Lend money (it tells you to add the person and tick \"This is a loan\").",
             "They paid: in Add, a person's row now says \"They paid. I owe them\". Put how much they paid (blank means all of it): your account is debited only for the rest, what they paid becomes a debt to them until you pay back, and spending still counts the whole amount. It is saved as two entries (your part and their part). The separate \"Paid by\" row and the P button are gone; entries saved with them before still work.",
             "Home, Needs you: a bill row has Pay, a person row has Remind (opens your share sheet with a short message), and the tick archives a row you have seen. An archived row comes back by itself if the amount changes or the bill becomes overdue, and \"Show archived\" brings them all back. The To Receive and Net Savings tiles are gone; work expenses waiting to be reimbursed now count in Between people.",
             "Card EMI with GST: the GST on interest is billed with each instalment, so each instalment entry is the EMI plus its share of the GST (for example 6,000 + 72). The loan balance only falls by the EMI part.",

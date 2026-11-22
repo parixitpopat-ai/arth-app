@@ -41,7 +41,10 @@ try {
   rec("A4c a Transfer entry saves as a transfer from Savings to Current", tr && tr.amount === 500 && tr.fromAccId === "bank1" && tr.toAccId === "bank2", tr && { amount: tr.amount, from: tr.fromAccId, to: tr.toAccId });
   await page.getByRole("button", { name: "+", exact: true }).first().click(); await page.waitForTimeout(600); await page.getByText("More options →").click(); await page.waitForTimeout(500);
   await T("type-more").click(); await page.waitForTimeout(300);
-  rec("A5 More opens Invest and Give petty cash, with Invest chosen", await pressed("type-more") && (await T("type-petty_cash").count()) === 1 && (await T("type-investment").count()) === 1, {});
+  rec("A5 More opens five choices (Invest, Give petty cash, Buy on card EMI, Pay a bill, Lend money), Invest chosen", await pressed("type-more") && (await T("more-types").locator("button").count()) === 5 && (await T("type-investment").count()) === 1, {});
+  await T("type-card_emi").click(); await page.waitForTimeout(500);
+  rec("A5b Buy on card EMI goes back to Spent with the EMI plan open (Credit card EMI)", await pressed("type-expense") && /EMI plan details/.test(await page.evaluate(() => document.body.innerText)), {});
+  await T("type-more").click(); await page.waitForTimeout(300);
   rec("A6 Invest stays under More, and More stays lit", await pressed("type-more") && (await T("type-investment").count()) === 1, {});
   await T("type-expense").click(); await page.waitForTimeout(300);
   rec("A7 back to Spent hides the extra row", await pressed("type-expense") && (await T("type-investment").count()) === 0, {});
