@@ -3,7 +3,7 @@
 // The four-section layout (Today / Money / People / Plan), switched on in Settings. It is a layer over the screens that already exist:
 // nothing is moved or rewritten, each section is a group of the current tabs, with a switch of its parts at the top. Pure.
 //   Today  : Home (and Insights, reached from Home).
-//   Money  : Activity (the transactions list) and Accounts (the PIN-protected money hub).
+//   Money  : Activity (the transactions list), then Accounts, Cards, Loans and Invest: four views of the PIN-protected money hub.
 //   People : People.
 //   Plan   : Bills (Payments), Budget, Goals, Events, Outlook.
 
@@ -22,7 +22,13 @@ export function sectionOfTab(tab) {
 
 // What each section lets the person switch between. kind "tab" opens that tab; kind "modal" opens a list that is a sheet today.
 const SEGMENTS = {
-  money: [{ id: "activity", label: "Activity", kind: "tab", target: "transactions" }, { id: "accounts", label: "Accounts", kind: "tab", target: "wealth", private: true }],
+  money: [
+    { id: "activity", label: "Activity", kind: "tab", target: "transactions" },
+    { id: "accounts", label: "Accounts", kind: "tab", target: "wealth", view: "accounts", private: true },
+    { id: "cards", label: "Cards", kind: "tab", target: "wealth", view: "cards", private: true },
+    { id: "loans", label: "Loans", kind: "tab", target: "wealth", view: "loans", private: true },
+    { id: "invest", label: "Invest", kind: "tab", target: "wealth", view: "invest", private: true },
+  ],
   plan: [
     { id: "bills", label: "Bills", kind: "tab", target: "bills" }, { id: "budget", label: "Budget", kind: "tab", target: "budget" },
     { id: "goals", label: "Goals", kind: "modal", target: "goals" }, { id: "events", label: "Events", kind: "modal", target: "events" },
@@ -34,9 +40,9 @@ const SEGMENTS = {
 export function segmentsFor(sectionId) { return SEGMENTS[sectionId] || []; }
 
 /** Which segment of the section is showing for the current tab, or null. A sheet (kind "modal") is never the active one. */
-export function activeSegmentId(tab) {
+export function activeSegmentId(tab, moneyView = "accounts") {
   const sec = sectionOfTab(tab); if (!sec) return null;
-  const seg = segmentsFor(sec).find(s => s.kind === "tab" && s.target === tab);
+  const seg = segmentsFor(sec).find(s => s.kind === "tab" && s.target === tab && (s.view === undefined || s.view === moneyView));
   return seg ? seg.id : null;
 }
 
@@ -48,3 +54,14 @@ export function bottomTabs() {
 
 /** True when the tab should light up for a bottom-bar item (a section lights up for any of its tabs). */
 export function isSectionTabActive(item, tab) { return Boolean(item.section) && sectionOfTab(tab) === item.section; }
+
+/** Which parts of the money hub a view shows. "all" is the current single page (new navigation off): everything it has today. */
+export const MONEY_VIEWS = {
+  accounts: { summary: true, cash: true, investments: false, cards: false, people: false, loans: false, assets: false },
+  cards: { summary: false, cash: false, investments: false, cards: true, people: false, loans: false, assets: false },
+  loans: { summary: false, cash: false, investments: false, cards: false, people: true, loans: true, assets: false },
+  invest: { summary: false, cash: false, investments: true, cards: false, people: false, loans: false, assets: true },
+};
+export function moneyViewParts(view) {
+  return MONEY_VIEWS[view] || { summary: true, cash: true, investments: true, cards: true, people: true, loans: false, assets: true };
+}

@@ -221,8 +221,9 @@ import { detectSubscriptions, subscriptionTotals, merchantKey } from "../domain/
 import { buildDueReminders } from "./domain/notifications/dueReminders";
 import { dueNotifAvailable, dueNotifEnable, dueNotifCancelAll, dueNotifSchedule, dueNotifOnOpen } from "./native/dueNotifications";
 import { useBiometric } from "./native/useBiometric";
-import { segmentsFor, sectionOfTab, activeSegmentId, bottomTabs, isSectionTabActive } from "./domain/navigation/sections";
+import { segmentsFor, sectionOfTab, activeSegmentId, bottomTabs, isSectionTabActive, moneyViewParts } from "./domain/navigation/sections";
 import BiometricUnlock from "./components/BiometricUnlock";
+import { summariseLoans } from "./domain/loans/loanList";
 import { whatsappLink } from "./domain/share/whatsapp";
 import { readClipboardText, PASTE_BLOCKED_MESSAGE, PASTE_EMPTY_MESSAGE } from "./native/clipboard";
 import { QUICK_FILTERS, matchesQuickFilter } from "./domain/transactions/quickFilters";
@@ -2729,6 +2730,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // The four-section layout (Today / Money / People / Plan), chosen in Settings; off by default. domain/navigation/sections.js
   const [navV2, setNavV2] = useState(()=>{ try { return localStorage.getItem("arth_nav_v2")==="1"; } catch { return false; } });
   useEffect(()=>{ try { localStorage.setItem("arth_nav_v2", navV2?"1":"0"); } catch { /* the choice is simply not kept */ } },[navV2]);
+  const [moneyView, setMoneyView] = useState("accounts");   // which part of the money hub shows (new navigation only): accounts | cards | loans | invest
   const bio = useBiometric(setToast);   // fingerprint unlock (Android app): src/native/biometric.js
   const smsInbox = useSmsInbox({ accounts, txns, people, billerAccounts });   // bank messages caught as they arrive (Android app only); proposals, never entries
   const activePrepaidAlerts = useMemo(()=>getPrepaidAlerts({ billerAccounts, bills, relationships:membershipRelationships, today:new Date(), dismissed:dismissedAlerts }),[billerAccounts,bills,membershipRelationships,dismissedAlerts]);
@@ -15158,41 +15160,43 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{value}</div>
       </div>
     );
+    const parts = moneyViewParts(navV2 ? moneyView : "all");   // new navigation: one part of the hub at a time (domain/navigation/sections.js)
+    const loanSummary = parts.loans ? summariseLoans(loans, isCreditCardBackedLoan) : null;
     return (
       <div style={{ padding:"14px 16px 90px" }}>
-        <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:20 }}>💰 Money</div>
+        {!navV2&&<div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:20 }}>💰 Money</div>}
 
-        <div style={{ ...card,textAlign:"center",marginBottom:20 }}>
+        {parts.summary&&<div style={{ ...card,textAlign:"center",marginBottom:20 }}>
           <div style={{ color:T.sub,fontSize:10,fontWeight:700,letterSpacing:0.5 }}>NET WORTH</div>
           <div style={{ color:netWorthValue>=0?T.success:T.danger,fontSize:28,fontWeight:900,marginTop:4 }}>{sym}{fmt(netWorthValue)}</div>
           <div style={{ display:"flex",justifyContent:"center",gap:20,marginTop:10 }}>
             <div><div style={{ color:T.sub,fontSize:9 }}>Assets</div><div style={{ color:T.success,fontSize:14,fontWeight:800 }}>{sym}{fmt(totalAssetsValue)}</div></div>
             <div><div style={{ color:T.sub,fontSize:9 }}>Liabilities</div><div style={{ color:T.danger,fontSize:14,fontWeight:800 }}>{sym}{fmt(totalLiabilitiesValue)}</div></div>
           </div>
-        </div>
+        </div>}
 
-        <CashFlowCard T={T} sym={sym} fmt={fmt} txns={txns} cats={cats} todayMonthKey={todayStr().slice(0,7)}
+        {parts.summary&&<><CashFlowCard T={T} sym={sym} fmt={fmt} txns={txns} cats={cats} todayMonthKey={todayStr().slice(0,7)}
           todayLabel={`${Number(todayStr().slice(8,10))} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][Number(todayStr().slice(5,7))-1]}`}
           onOpen={mk=>setCashFlowMonth(mk)}/>
 
-        <ReportsCard T={T} fy={new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1} onOpen={()=>setReportsOpen(true)}/>
+        <ReportsCard T={T} fy={new Date().getMonth()>=3 ? new Date().getFullYear() : new Date().getFullYear()-1} onOpen={()=>setReportsOpen(true)}/></>}
 
-        <Section title="Cash">
+        {parts.cash&&<Section title="Cash">
           <div style={{ ...card }}>
             {bankAccts.map(a=><Line key={a.id} label={a.name} value={`${sym}${fmt(accountBalance(a.id))}`} sub="Bank" onClick={()=>setShowAccDetail(a)}/>)}
             {cashAccts.map(a=><Line key={a.id} label={a.name} value={`${sym}${fmt(accountBalance(a.id))}`} sub="Cash in hand" onClick={()=>setShowAccDetail(a)}/>)}
             {bankAccts.length===0&&cashAccts.length===0&&<div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>No cash accounts yet.</div>}
           </div>
-        </Section>
+        </Section>}
 
-        <Section title="Investments">
+        {parts.investments&&<Section title="Investments">
           <div style={{ ...card }}>
             {investmentTypeSummaries.map(t=><Line key={t.id} label={t.name.split("/")[0].trim()} value={`${sym}${fmt(t.total)}`} sub={`${t.groupCount} holding${t.groupCount===1?"":"s"}`} onClick={()=>{ setSelectedInvestmentTypeView(t.id); setShowInvestments(true); }}/>)}
             {investmentTypeSummaries.length===0&&<div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>No investments yet.</div>}
           </div>
-        </Section>
+        </Section>}
 
-        <Section title="Credit Cards">
+        {parts.cards&&<Section title="Credit Cards">
           {cardTotals.cardsWithLimit>0&&(
             <div data-testid="card-limits" style={{ ...card,marginBottom:10 }}>
               <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline" }}>
@@ -15257,9 +15261,21 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             })}
             {ccAccts.length===0&&<div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>No credit cards yet.</div>}
           </div>
-        </Section>
+        </Section>}
 
-        <Section title="Money to Receive">
+        {parts.loans&&loanSummary&&(
+          <Section title="Loans">
+            <div data-testid="loans-view" style={{ ...card }}>
+              {loanSummary.taken.map(l=><Line key={l.id} label={l.name} sub={`You owe${l.dueDate?` · due ${l.dueDate}`:""}${l.interest?` · ${l.interest}% p.a.`:""}`} value={`${sym}${fmt(l.outstanding)}`} onClick={()=>setEditingLoan(l.loan)}/>)}
+              {loanSummary.given.map(l=><Line key={l.id} label={l.name} sub={`You gave${l.dueDate?` · due ${l.dueDate}`:""}`} value={`${sym}${fmt(l.outstanding)}`} onClick={()=>setEditingLoan(l.loan)}/>)}
+              {!loanSummary.hasAny&&<div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>No open loans.</div>}
+              {loanSummary.hasAny&&<div style={{ color:T.sub,fontSize:11,paddingTop:8 }}>You owe {sym}{fmt(loanSummary.takenTotal)} · you gave {sym}{fmt(loanSummary.givenTotal)}</div>}
+              <button data-testid="loans-add" onClick={()=>setShowAddLoan(true)} style={{ marginTop:10,minHeight:44,width:"100%",background:"none",border:`1px solid ${T.border}`,borderRadius:12,color:T.accent,fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>+ Add a loan</button>
+            </div>
+          </Section>
+        )}
+
+        {parts.people&&<><Section title="Money to Receive">
           <div style={{ ...card }}>
             {receivable.map(([pid,v])=><Line key={pid} label={getPerson(pid).name} value={`${sym}${fmt(v.owesMe||0)}`}/>)}
             {receivable.length===0&&<div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>Nobody owes you right now.</div>}
@@ -15271,9 +15287,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {payable.map(([pid,v])=><Line key={pid} label={getPerson(pid).name} value={`${sym}${fmt(v.iOwe||v.owed||0)}`}/>)}
             {payable.length===0&&<div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>You don't owe anyone right now.</div>}
           </div>
-        </Section>
+        </Section></>}
 
-        <Section title="Vehicles">
+        {parts.assets&&<><Section title="Vehicles">
           <div style={{ ...card }}>
             {vehicles.map(v=>(
               <Line key={v.id} label={v.name||v.number} sub={v.number} value={v.purchaseValue?`${sym}${fmt(v.purchaseValue)}`:"Value not set"}/>
@@ -15288,7 +15304,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
         <Section title="Business Assets">
           <div style={{ ...card }}><div style={{ color:T.sub,fontSize:12,padding:"10px 0" }}>No business assets added yet.</div></div>
-        </Section>
+        </Section></>}
       </div>
     );
   };
@@ -16174,7 +16190,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "New bills from your messages (Android app): when a provider sends a bill message (for example \"your electricity bill of Rs.3,045 is due on 28-Jul-26\"), Arth shows a NEW BILL card on Home and in the bell with the amount, due date and the connection it matched (by consumer number or provider name). \"Add this bill\" opens the Add Bill form filled in; nothing is saved until you save it. Credit card bills are not offered, because Arth makes those itself. You may need to allow Arth to read messages (Notifications > allow).",
             "One-tap WhatsApp: on a bill's split there is now a WhatsApp button next to Share for each person who owes. It opens that person's chat from your own WhatsApp with their share and the due date already typed (add their phone number on their profile; without one WhatsApp lets you pick the contact), and you press Send. Home, Needs you, Remind does the same. Arth cannot send WhatsApp messages by itself from a personal number.",
             "Match your bank (Money → an account): each bank and cash account's own page now has \"Does this match your bank?\" with a Set actual balance button, and shows the gap or Matched. It is the same check that was in Settings, which still has it.",
-            "New navigation (Settings, off by default): the bottom bar becomes Today, Money, People and Plan. Money opens on your activity (Accounts, with the PIN, is one tap away); Plan holds Bills, Budget, Goals, Events and Outlook. Every screen is the same one as before, only grouped; switch it off any time.",
+            "New navigation (Settings, off by default): the bottom bar becomes Today, Money, People and Plan. Money opens on your activity, with Accounts, Cards, Loans and Invest one tap away (those four ask for the PIN; Loans is a new list of what you owe and what you gave); Plan holds Bills, Budget, Goals, Events and Outlook. Every screen is the same one as before, only grouped; switch it off any time.",
             "Fingerprint unlock (Android app, Settings): touch the sensor instead of typing the PIN. Off by default; turning it on asks for your fingerprint once. The PIN stays as the fallback, and the lock-out after 5 wrong PINs is unchanged. Arth never stores the fingerprint; the phone keeps it.",
             "Bill reminders (Android app, Settings): a phone notification 3 days before a bill is due and on the day, at 9 am, for bills still owed. Tap it to open the bill. Off by default.",
             "Fixed: the Paste button under Bank SMS import did nothing on some phones and said nothing. It now uses the phone's own clipboard in the Android app, and if pasting is blocked it tells you to long-press the box and choose Paste.",
@@ -21483,8 +21499,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {navV2&&!showSettings&&segmentsFor(sectionOfTab(tab)).length>0&&(
           <div data-testid="section-switch" style={{ display:"flex",gap:6,overflowX:"auto",padding:"10px 16px 4px" }}>
             {segmentsFor(sectionOfTab(tab)).map(sg=>{
-              const on=activeSegmentId(tab)===sg.id;
-              return <button key={sg.id} data-testid={`section-${sg.id}`} onClick={()=>{ if(sg.kind==="modal"){ if(sg.target==="goals") setShowGoalsList(true); else setShowEventsList(true); } else handleTab(sg.target); }} style={{ flexShrink:0,minHeight:40,padding:"0 16px",borderRadius:20,border:`1px solid ${on?T.accent:T.border}`,background:on?T.accentSoft:"none",color:on?T.accent:T.text,fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>{sg.label}{sg.private?" 🔒":""}</button>;
+              const on=activeSegmentId(tab,moneyView)===sg.id;
+              return <button key={sg.id} data-testid={`section-${sg.id}`} onClick={()=>{ if(sg.kind==="modal"){ if(sg.target==="goals") setShowGoalsList(true); else setShowEventsList(true); } else { if(sg.view) setMoneyView(sg.view); handleTab(sg.target); } }} style={{ flexShrink:0,minHeight:40,padding:"0 16px",borderRadius:20,border:`1px solid ${on?T.accent:T.border}`,background:on?T.accentSoft:"none",color:on?T.accent:T.text,fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>{sg.label}{sg.private?" 🔒":""}</button>;
             })}
           </div>
         )}
