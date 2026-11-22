@@ -48,7 +48,7 @@ export default function PersonStatementSheet({ T, sym = "₹", fmt = n => Number
 
   const sub = { color: T.sub, fontSize: 11 };
   const chip = on => ({ border: `1px solid ${on ? T.accent : T.border}`, background: on ? T.accent + "22" : "none", color: on ? T.accent : T.sub, borderRadius: 20, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Inter,sans-serif" });
-  const inp = { background: T.input, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, padding: "9px 10px", fontSize: 13, fontFamily: "Inter,sans-serif", width: "100%" };
+  const inp = { minWidth: 0, boxSizing: "border-box", background: T.input, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, padding: "9px 10px", fontSize: 13, fontFamily: "Inter,sans-serif", width: "100%" };
 
   return (
     <BottomSheet onClose={onClose} T={T} maxHeight="92vh">
@@ -59,8 +59,8 @@ export default function PersonStatementSheet({ T, sym = "₹", fmt = n => Number
           {Object.entries(P).map(([id, p]) => <button key={id} type="button" data-testid={`stmt-preset-${id}`} style={chip(preset === id)} onClick={() => choose(id)}>{p.label}</button>)}
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <label style={{ flex: 1 }}><span style={sub}>From</span><input data-testid="stmt-from" type="date" style={inp} value={from} max={to || undefined} onChange={e => { setFrom(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
-          <label style={{ flex: 1 }}><span style={sub}>Until</span><input data-testid="stmt-to" type="date" style={inp} value={to} min={from || undefined} onChange={e => { setTo(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
+          <label style={{ flex: 1, minWidth: 0 }}><span style={sub}>From</span><input data-testid="stmt-from" type="date" style={inp} value={from} max={to || undefined} onChange={e => { setFrom(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
+          <label style={{ flex: 1, minWidth: 0 }}><span style={sub}>Until</span><input data-testid="stmt-to" type="date" style={inp} value={to} min={from || undefined} onChange={e => { setTo(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
           <button type="button" data-testid="stmt-mode-simple" style={chip(mode === "simple")} onClick={() => { setMode("simple"); setStatus(""); }}>Simple list</button>

@@ -11521,7 +11521,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 const idxA = runningIdx, idxB = runningIdx+1;
                 runningIdx += 2;
                 return (
-                  <div key={`pair_${idA}_${idB}`} style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12 }}>
+                  <div key={`pair_${idA}_${idB}`} style={{ display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:10,marginBottom:12 }}>
                     {[[idA,idxA],[idB,idxB]].map(([cardId,idx])=>(
                       <div key={cardId} style={{ position:"relative",opacity:editingCards&&hiddenCards.has(cardId)?0.4:1 }}>
                         {editingCards&&renderControls(cardId, idx, true)}
@@ -11727,10 +11727,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <button onClick={()=>setTxnReimbursableOnly(false)} style={{ background:"none",border:"none",color:"#f0a500",cursor:"pointer",fontSize:14,fontFamily:"Inter,sans-serif" }}>✕</button>
           </div>
         )}
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
-          <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>Transactions</div>
-          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-            <div style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{filteredTxns.length} shown</div>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:14 }}>
+          <div>
+            <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>Transactions</div>
+            <div style={{ color:T.sub,fontSize:11,fontWeight:700,marginTop:2 }}>{filteredTxns.length} shown</div>
+          </div>
+          <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",justifyContent:"flex-end" }}>
             <button
               onClick={()=>setShowTxnSort(true)}
               aria-label="Open transaction sort options"
@@ -13137,7 +13139,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={card}>
             <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:14 }}>
               <div style={{ width:46,height:46,borderRadius:14,background:g.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24 }}>{g.icon}</div>
-              <div style={{ flex:1 }}>
+              <div style={{ flex:1,minWidth:0 }}>
                 {isEditingGroup ? (
                   <div style={{ display:"flex",flexDirection:"column",gap:8,marginTop:2 }}>
                     <input value={editingGroupName} onChange={e=>setEditingGroupName(e.target.value)} style={{ ...inp, padding:"8px 10px", fontSize:16, fontWeight:700, width:"100%" }} placeholder="Group name" />

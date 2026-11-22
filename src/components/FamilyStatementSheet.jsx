@@ -49,7 +49,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const copy = async () => { try { await navigator.clipboard.writeText(message); setStatus("Copied. Paste it into a message."); } catch (e) { setStatus("Could not copy. Select the message and copy it."); } };
   const sub = { color: T.sub, fontSize: 11 }, line = { display: "flex", justifyContent: "space-between", gap: 10, padding: "5px 0" };
   const chip = on => ({ border: `1px solid ${on ? T.accent : T.border}`, background: on ? T.accent + "22" : "none", color: on ? T.accent : T.sub, borderRadius: 20, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Inter,sans-serif" });
-  const inp = { background: T.input, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, padding: "9px 10px", fontSize: 13, fontFamily: "Inter,sans-serif", width: "100%" };
+  const inp = { minWidth: 0, boxSizing: "border-box", background: T.input, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, padding: "9px 10px", fontSize: 13, fontFamily: "Inter,sans-serif", width: "100%" };
   const active = fam ? fam.members.filter(m => m.sections.length || m.payments.length || Math.abs(m.opening) > 0.004) : [];
 
   const shareBlock = (<>
@@ -73,8 +73,8 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
           {Object.entries(P).map(([id, p]) => <button key={id} type="button" data-testid={`fam-preset-${id}`} style={chip(preset === id)} onClick={() => choose(id)}>{p.label}</button>)}
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <label style={{ flex: 1 }}><span style={sub}>From</span><input data-testid="fam-from" type="date" style={inp} value={from} max={to || undefined} onChange={e => { setFrom(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
-          <label style={{ flex: 1 }}><span style={sub}>Until</span><input data-testid="fam-to" type="date" style={inp} value={to} min={from || undefined} onChange={e => { setTo(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
+          <label style={{ flex: 1, minWidth: 0 }}><span style={sub}>From</span><input data-testid="fam-from" type="date" style={inp} value={from} max={to || undefined} onChange={e => { setFrom(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
+          <label style={{ flex: 1, minWidth: 0 }}><span style={sub}>Until</span><input data-testid="fam-to" type="date" style={inp} value={to} min={from || undefined} onChange={e => { setTo(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
           <button type="button" data-testid="fam-mode-expenses" style={chip(mode === "expenses")} onClick={() => { setMode("expenses"); setStatus(""); }}>Group expenses</button>
