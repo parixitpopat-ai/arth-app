@@ -217,6 +217,7 @@ import { splitGstAcrossInstalments } from "./domain/loans/emiGst";
 import { getCardUnbilledEvents } from "./domain/cards/unbilledCommitments";
 import { skipMonth, putMonthBack, isMonthSkipped, monthKeyOf } from "./domain/recurring/skipMonth";
 import { planTheyPaid } from "./domain/person/theyPaid";
+import { detectSubscriptions, subscriptionTotals, merchantKey } from "../domain/insights/subscriptions.js";
 import { buildDueReminders } from "./domain/notifications/dueReminders";
 import { dueNotifAvailable, dueNotifEnable, dueNotifCancelAll, dueNotifSchedule, dueNotifOnOpen } from "./native/dueNotifications";
 import { whatsappLink } from "./domain/share/whatsapp";
@@ -1610,6 +1611,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [addPrefill, setAddPrefill] = useState(null);
   const [showInvestments, setShowInvestments] = useState(false);
   const [showAddBill, setShowAddBill] = useState(false);
+  const [subsDismissed, setSubsDismissed] = useState(()=>{ try{ const v = JSON.parse(localStorage.getItem("arth_subs_dismissed")||"[]"); return Array.isArray(v)?v:[]; }catch{ return []; } });   // merchants the person said are not subscriptions (device-only)
+  useEffect(()=>{ try{ localStorage.setItem("arth_subs_dismissed", JSON.stringify(subsDismissed.slice(-200))); }catch{} },[subsDismissed]);
   const [smsBillPrefill, setSmsBillPrefill] = useState(null);   // a bill notice the person accepted: { billerAccountId, amount, dueDate } (domain/sms/billSms.js)
   useEffect(()=>{ if(!showAddBill) setSmsBillPrefill(null); },[showAddBill]);
   const [defaultBillerAccountId, setDefaultBillerAccountId] = useState("");
@@ -14765,6 +14768,34 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       <div style={{ color:T.text,fontSize:20,fontWeight:900,marginBottom:2 }}>📊 Insights</div>
       <div style={{ color:T.sub,fontSize:12,marginBottom:16 }}>Understand your money.</div>
 
+      {(()=>{
+        // Repeating payments found in your own entries (domain/insights/subscriptions.js): a best guess, each can be dismissed.
+        const subs = detectSubscriptions({ txns, today:todayStr(), dismissed:subsDismissed, tracked:bills.map(b=>merchantKey(b.merchant||b.name)) }).filter(x=>x.active);
+        if(subs.length===0) return null;
+        const tot = subscriptionTotals(subs);
+        return (
+          <div data-testid="subscriptions-card" style={{ ...card,marginBottom:14 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline" }}>
+              <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>🔁 Repeating payments</div>
+              <div style={{ color:T.sub,fontSize:11 }}>{tot.count} found</div>
+            </div>
+            <div style={{ color:T.text,fontFamily:"Manrope,Inter,sans-serif",fontSize:26,fontWeight:800,marginTop:4 }}>{M(`${sym}${fmt(tot.monthly)}`)}<span style={{ color:T.sub,fontSize:12,fontWeight:600 }}> a month · {M(`${sym}${fmt(tot.yearly)}`)} a year</span></div>
+            <div style={{ color:T.sub,fontSize:11,marginBottom:8 }}>Found from your own entries: the same name, the same amount, again and again. It can be wrong.</div>
+            {subs.slice(0,8).map(sb=>(
+              <div key={sb.key} data-testid="subscription-row" style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderTop:`1px solid ${T.border}` }}>
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{sb.merchant}</div>
+                  <div style={{ color:T.sub,fontSize:11 }}>{sb.cadenceLabel} · next about {formatShortDate(sb.next)||sb.next}{sb.tracked?" · already a bill":""}</div>
+                </div>
+                <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{M(`${sym}${fmt(sb.amount)}`)}</div>
+                {!sb.tracked&&<button data-testid="subscription-make-bill" onClick={()=>{ setSmsBillPrefill({ name:sb.merchant, amount:sb.amount, dueDate:sb.next, recurring:true, billerAccountId:"" }); setDefaultBillerAccountId(""); setShowAddBill(true); }} style={{ background:T.accent+"22",border:`1px solid ${T.accent}44`,borderRadius:16,padding:"0 12px",minHeight:36,color:T.accent,fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Make a bill</button>}
+                <button data-testid="subscription-dismiss" aria-label="Not a subscription" title="Not a subscription" onClick={()=>setSubsDismissed(prev=>prev.includes(sb.key)?prev:[...prev,sb.key])} style={{ minWidth:36,minHeight:36,borderRadius:18,border:`1px solid ${T.border}`,background:"none",color:T.sub,cursor:"pointer" }}>✕</button>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
       {!dataReady ? (
         <>
           <div style={{ ...card,marginBottom:14 }}>
@@ -16115,6 +16146,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Fixed: a card with an old statement bill that has no period saved could make the app crash on Home (\"Something went wrong\") once a statement cycle closed. Statements are also never added twice now.",
             "Cards: Money now shows one box for all your cards (total limit, used, available) with each card's use under it. Used counts what is billed, what is spent but not yet billed, and EMI purchases still to be billed, because the bank keeps those blocked on the limit (check against your own statement). Money Required also lists what you have spent on a card since its last statement, due when that statement is due.",
             "New look, dark theme: the dark theme now matches the light one, a deep green-tinted charcoal with a softer green, in place of the old blue-violet navy. The PIN screen and the screens shown while the app waits use the same colours.",
+            "Repeating payments: Insights now has a card that finds payments that repeat in your own entries (the same name, the same amount, weekly, monthly, every 3 months or yearly) and shows what they cost a month and a year. \"Make a bill\" opens Add Bill filled in as a recurring bill; \"✕\" says it is not a subscription. It is a best guess and uses only what you have entered.",
             "New bills from your messages (Android app): when a provider sends a bill message (for example \"your electricity bill of Rs.3,045 is due on 28-Jul-26\"), Arth shows a NEW BILL card on Home and in the bell with the amount, due date and the connection it matched (by consumer number or provider name). \"Add this bill\" opens the Add Bill form filled in; nothing is saved until you save it. Credit card bills are not offered, because Arth makes those itself. You may need to allow Arth to read messages (Notifications > allow).",
             "One-tap WhatsApp: on a bill's split there is now a WhatsApp button next to Share for each person who owes. It opens that person's chat from your own WhatsApp with their share and the due date already typed (add their phone number on their profile; without one WhatsApp lets you pick the contact), and you press Send. Home, Needs you, Remind does the same. Arth cannot send WhatsApp messages by itself from a personal number.",
             "Bill reminders (Android app, Settings): a phone notification 3 days before a bill is due and on the day, at 9 am, for bills still owed. Tap it to open the bill. Off by default.",
@@ -20575,7 +20607,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const [billerAccountId,setBillerAccountId]=useState(defaultBillerAccountId||"");
     const selectedBA = billerAccountId ? billerAccounts.find(b=>b.id===billerAccountId) : null;
     const _preBA = defaultBillerAccountId ? billerAccounts.find(b=>b.id===defaultBillerAccountId) : null;
-    const [name,setName]=useState(_preBA?.name||"");
+    const [name,setName]=useState(_preBA?.name||smsBillPrefill?.name||"");
     const [amount,setAmount]=useState(smsBillPrefill?.amount ? String(smsBillPrefill.amount) : "");
     const [billDate,setBillDate]=useState(todayStr());
     const [dueDate,setDueDate]=useState(smsBillPrefill?.dueDate || "");
@@ -20589,9 +20621,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const _defCat = (()=>{ const d = _preBA0 ? defaultCategoryForBillerType(_preBA0.type) : null; return d && cats.some(c=>c.id===d.catId) ? d : null; })();
     const [billCatIds,setBillCatIds]=useState(_defCat ? [_defCat.catId] : []);
     const [subId,setSubId]=useState(_defCat && cats.find(c=>c.id===_defCat.catId)?.subs?.some(x=>x.id===_defCat.subId) ? _defCat.subId : "");
-    const [recurring,setRecurring]=useState(false);
+    const [recurring,setRecurring]=useState(Boolean(smsBillPrefill?.recurring));
     const [frequency,setFrequency]=useState("monthly");
-    const [merchant,setMerchant]=useState(_preBA?.provider||_preBA?.name||"");
+    const [merchant,setMerchant]=useState(_preBA?.provider||_preBA?.name||smsBillPrefill?.name||"");
     const [billPhoto,setBillPhoto]=useState(null);
     // Message from the bill-photo reader. Kept HERE, not in a toast: a toast re-draws the whole app, and this form (defined inside AppContent) would lose everything just filled in.
     const [photoMsg,setPhotoMsg]=useState(null);
