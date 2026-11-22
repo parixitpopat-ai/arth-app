@@ -31,6 +31,8 @@ await p.getByText(/Groups/).first().dispatchEvent("click"); await p.waitForTimeo
 await p.getByText("Flat", { exact: true }).first().dispatchEvent("click"); await p.waitForTimeout(800);
 await T("group-statement").scrollIntoViewIfNeeded().catch(() => {}); await T("group-statement").dispatchEvent("click"); await p.waitForTimeout(700);
 rec("G1 the group statement opens on the group's expenses (they exist), with a 'Group expenses' view", (await T("fam-expenses").count()) === 1 && (await T("fam-mode-expenses").count()) === 1, {});
+rec("U0 the unpaid filter is on when the statement opens, and the message says so", await T("fam-only-unpaid").isChecked() && /Only unpaid entries/.test(await T("fam-message").innerText().catch(() => "Only unpaid entries")), {});
+await T("fam-only-unpaid").uncheck(); await p.waitForTimeout(400);   // the checks below look at everything
 rec("G2 one statement lists the group's three (Electricity, Party snacks, the unpaid Internet bill) AND Raj's K Auto that is tagged to him, not the group; not the untagged one", (await T("fam-exp-line").count()) === 4 && /K Auto[^]*tagged to people, not the group/.test(await body()) && /Electricity/.test(await body()) && /Party snacks/.test(await body()) && /Internet/.test(await body()) && !/Not the flat/.test(await body()), await T("fam-exp-line").count());
 rec("G3 the total is ₹5,600 (3,000 + 1,200 + 900 + Raj's 500) and ₹2,100 is still to be paid (Raj 1,000 + 300 + 500, Mangal 300)", /₹5,600/.test(await T("fam-exp-total").innerText()) && /₹2,100/.test(await T("fam-exp-due").innerText()), [await T("fam-exp-total").innerText(), await T("fam-exp-due").innerText()]);
 rec("G4 Electricity shows each member's share and that Mangal has paid", /Raj ₹1,000 · Mangal ₹1,000 ✓ · you ₹1,000/.test(await body()), (await body()).match(/Raj ₹1,000[^₹]*₹[\d,]+[^₹]*₹[\d,]+/)?.[0]);
@@ -69,12 +71,14 @@ await p.getByText(/^people$/i).last().dispatchEvent("click"); await p.waitForTim
 await p.getByText(/Groups/).first().dispatchEvent("click"); await p.waitForTimeout(600);
 await p.getByText("Neighbours", { exact: true }).first().dispatchEvent("click"); await p.waitForTimeout(700);
 await T("group-statement").scrollIntoViewIfNeeded().catch(() => {}); await T("group-statement").dispatchEvent("click"); await p.waitForTimeout(700);
+await T("fam-only-unpaid").uncheck(); await p.waitForTimeout(400);
 const nmsg = await T("fam-message").innerText();
 rec("N1 a family I am not part of: no 'Only my part' choice, no block for me, the whole bill kept on screen", (await T("fam-who-me").count()) === 0 && !/Me - expenses/.test(nmsg) && /whole bill ₹9,000/.test(await body()), nmsg.slice(0, 120));
 rec("N2 sent to a family I am not part of: no names, 'Vendor - Item - amount' lines, the electricity at the family's 6,000, a Sum of 6,678", !/Xena|Yash|expenses\n/.test(nmsg) && /Neighbour electricity - 6000/.test(nmsg) && /Coffee for them - 678/.test(nmsg) && /Sum - 6678/.test(nmsg), nmsg);
 await T("fam-show-names").check(); await p.waitForTimeout(300);
 const named = await T("fam-message").innerText();
 rec("N3 ticking 'Put each person's name as a heading' brings the blocks back (Xena - expenses ... Neighbours - expenses)", /Xena - expenses\nNeighbour electricity - 3000/.test(named) && /Neighbours - expenses\nCoffee for them - 678/.test(named), named.slice(0, 200));
+await T("fam-only-unpaid").uncheck(); await p.waitForTimeout(300);
 const nBefore = await T("fam-exp-line").count(); const sumBefore = await T("fam-exp-total").innerText();
 await T("fam-only-unpaid").check(); await p.waitForTimeout(400);
 const nAfter = await T("fam-exp-line").count(); const sumAfter = await T("fam-exp-total").innerText();

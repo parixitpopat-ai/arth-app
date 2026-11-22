@@ -28,7 +28,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const [exOff, setExOff] = useState({});
   const [withPeople, setWithPeople] = useState(true);       // one statement: the group's expenses AND the expenses tagged to its people
   const [showNames, setShowNames] = useState(group.includeMe !== false && meId != null);   // names as headings: on for my own flat, off for a family I send it to
-  const [onlyUnpaid, setOnlyUnpaid] = useState(false);   // only what is still owed: settled items drop out, part-paid ones are cut to what is left
+  const [onlyUnpaid, setOnlyUnpaid] = useState(true);   // only what is still owed: settled items drop out, part-paid ones are cut to what is left
   const [onlyMine, setOnlyMine] = useState(false);          // the message carries only the person using Arth's own parts
   const [withBreakup, setWithBreakup] = useState(true);   // the category break-up goes in the message too                // itemised expenses the person un-ticked            // "simple": Member: Item - amount lines you tick, then a total | "full": the family statement
   const [overrides, setOverrides] = useState({});
@@ -54,7 +54,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
     if (!onlyMine) return buildCategoryBreakup(on, cats);
     return buildCategoryBreakup(on.map(i => { const mine = (i.parts || []).filter(pt => pt.personId != null && String(pt.personId) === String(meId)).reduce((s, pt) => s + pt.amount, 0); if (!(mine > 0) || !(i.total > 0)) return null; const r = mine / i.total; return { ...i, categories: i.categories.map(c => ({ ...c, amount: Math.round(c.amount * r * 100) / 100 })) }; }).filter(Boolean), cats);
   }, [ex, exOff, cats, onlyMine]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const exMessage = ex ? buildGroupExpenseMessage(exItems, { groupName: group.name, from, to, upiHandle, meId: inGroup ? meId : null, onlyPersonId: inGroup && onlyMine && showNames ? meId : null, showNames, breakup: withBreakup ? breakup : null }) : "";
+  const exMessage = ex ? buildGroupExpenseMessage(exItems, { onlyUnpaid, groupName: group.name, from, to, upiHandle, meId: inGroup ? meId : null, onlyPersonId: inGroup && onlyMine && showNames ? meId : null, showNames, breakup: withBreakup ? breakup : null }) : "";
   const message = mode === "expenses" ? exMessage : !fam ? "" : mode === "simple" ? simpleMessage : buildFamilyMessage(fam, { groupName: group.name, nameOf, sym, fmt, upiHandle });
   const owed = fam ? fam.closing : 0;
   const choose = id => { setPreset(id); setFrom(P[id].from); setTo(P[id].to); setStatus(""); setOverrides({}); setExOff({}); };

@@ -247,3 +247,10 @@ test("only what is still unpaid: settled items drop out, part-paid ones are cut 
   assert.equal(items.length, 4);
   assert.deepEqual(unpaidOnly(null), []);
 });
+
+test("the message says it is unpaid-only when asked", () => {
+  const items = [{ key: "k", date: "2026-07-07", title: "BigBasket", total: 547, parts: [{ personId: null, name: "", amount: 547 }], on: true }];
+  const m = buildGroupExpenseMessage(items, { groupName: "Suryamandal", from: "2026-07-01", to: "2026-07-31", onlyUnpaid: true, showNames: false });
+  assert.match(m.split("\n").slice(0, 3).join("\n"), /Suryamandal.*\nOnly unpaid entries\n/);
+  assert.doesNotMatch(buildGroupExpenseMessage(items, { groupName: "S", from: "2026-07-01", to: "2026-07-31", showNames: false }), /Only unpaid/);
+});

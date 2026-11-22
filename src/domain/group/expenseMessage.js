@@ -16,14 +16,14 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
  *  @param {{meId?:any, onlyPersonId?:any, showNames?:boolean}} o  meId: the person using Arth is listed first; onlyPersonId: leave everyone else's parts out;
  *    showNames false: no names at all, just the month's lines "Item - amount" and the Sum (what is sent to a family the person is not part of)
  *  @returns {string} "" when nothing is ticked */
-export function buildGroupExpenseMessage(items, { groupName = "", from, to, upiHandle = "", breakup = null, meId = null, onlyPersonId = null, showNames = true } = {}) {
+export function buildGroupExpenseMessage(items, { groupName = "", from, to, upiHandle = "", breakup = null, meId = null, onlyPersonId = null, showNames = true, onlyUnpaid = false } = {}) {
   const chosen = (items || []).filter(i => i.on && (onlyPersonId == null || (i.parts || []).some(pt => pt.personId != null && String(pt.personId) === String(onlyPersonId)))).slice().sort((a, b) => a.date.localeCompare(b.date) || String(a.key).localeCompare(String(b.key)));
   if (!chosen.length) return "";
   const P = n => Math.round((Number(n) || 0) * 100);
   const years = new Set(chosen.map(i => i.date.slice(0, 4)));
   const months = [];
   for (const i of chosen) { const k = i.date.slice(0, 7); let m = months[months.length - 1]; if (!m || m.key !== k) { m = { key: k, items: [] }; months.push(m); } m.items.push(i); }
-  const blocks = [[`${groupName ? `${groupName} · ` : ""}${from && to ? `${shortDate(from, true)} – ${shortDate(to, true)}` : "expenses"}`]];
+  const blocks = [[`${groupName ? `${groupName} · ` : ""}${from && to ? `${shortDate(from, true)} – ${shortDate(to, true)}` : "expenses"}`, ...(onlyUnpaid ? ["Only unpaid entries"] : [])]];
   let all = 0;
   for (const m of months) {
     const label = `${MONTHS[Number(m.key.slice(5, 7)) - 1]}${years.size > 1 ? ` ${m.key.slice(0, 4)}` : ""}`;
