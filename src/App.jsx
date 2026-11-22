@@ -6492,6 +6492,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 })()}
               </div>
             )}
+            {/* New look: for Moved, say from where to where right under the amount (the Design canvas "Moved"); the tag chips fold away below. */}
+            {(txnType==="transfer"||txnType==="cc_payment")&&(
+              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                  <div><span style={lbl}>From</span><select style={inp} value={fromAccId} onChange={e=>setFromAccId(e.target.value)}>{(txnType==="cc_payment"?nonCCAccs:transferAccs([fromAccId,toAccId])).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
+                  <div><span style={lbl}>To</span><select style={inp} value={toAccId} onChange={e=>setToAccId(e.target.value)}>{(txnType==="cc_payment"?ccAccs:transferAccs([fromAccId,toAccId])).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
+                </div>
+                {txnType==="transfer"&&<div style={{ color:T.sub,fontSize:10 }}>Use `Transfer` for moving money into PPF / FD / NPS accounts. It will not count as an expense, and investment-bucket accounts still show under `Wealth → Investments`.</div>}
+              </div>
+            )}
             {(txnType==="cc_payment"||txnType==="transfer")&&<input style={inp} placeholder="Note (optional)" value={who} onChange={e=>setWho(e.target.value)}/>}
             {/* WP16 — Transfer tagging. Deliberately minimal chip rows (not the Expense split/
                 tag machinery): a transfer that's tagged to a Person/Group counts toward that
@@ -6500,8 +6510,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 decision, not a bug. Category tag is optional and independently usable (e.g. a
                 Household-level category commitment funded by a transfer). */}
             {txnType==="transfer"&&(
-              <div style={{ marginTop:4 }}>
-                <span style={lbl}>Tag to (optional)</span>
+              <details data-testid="move-tag" style={{ marginTop:4 }}>
+                <summary style={{ ...lbl,cursor:"pointer",minHeight:44,display:"flex",alignItems:"center",marginBottom:0 }}>Tag to a category, person or group (optional)</summary>
                 <div style={{ marginBottom:6 }}>
                   <div style={{ color:T.sub,fontSize:10,marginBottom:4 }}>Category</div>
                   <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -6527,7 +6537,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   </div>
                 </div>
                 {(transferTagPersonId||transferTagGroupId)&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Counts toward {(people.find(p=>p.id===transferTagPersonId)||getActiveGroups(groups).find(g=>g.id===transferTagGroupId))?.name}'s Mandatory Commitment this month — part of their existing budget, not a separate pool.</div>}
-              </div>
+              </details>
             )}
 
 
@@ -7000,15 +7010,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     </div>
                   );
                 })()}
-              </div>
-            )}
-            {(txnType==="transfer"||txnType==="cc_payment")&&(
-              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-                  <div><span style={lbl}>From</span><select style={inp} value={fromAccId} onChange={e=>setFromAccId(e.target.value)}>{(txnType==="cc_payment"?nonCCAccs:transferAccs([fromAccId,toAccId])).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
-                  <div><span style={lbl}>To</span><select style={inp} value={toAccId} onChange={e=>setToAccId(e.target.value)}>{(txnType==="cc_payment"?ccAccs:transferAccs([fromAccId,toAccId])).map(a=><option key={a.id} value={a.id}>{accIcon(a.type)} {a.name}</option>)}</select></div>
-                </div>
-                {txnType==="transfer"&&<div style={{ color:T.sub,fontSize:10 }}>Use `Transfer` for moving money into PPF / FD / NPS accounts. It will not count as an expense, and investment-bucket accounts still show under `Wealth → Investments`.</div>}
               </div>
             )}
             {txnType==="investment"&&(
@@ -15944,6 +15945,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Add screen, step 3: right above Add, one line says what saving does to what is owed (for example \"Raj Test will owe you ₹900\" or \"You will owe Raj Test ₹300\"). It shows only when someone owes someone.",
             "Add screen, step 4: the amount now has the full width, and the account and date read as one line under it (\"from Test Savings on 22-Nov-2026\") with \"Details\" on the right opening the same card as before.",
             "Add screen, step 5: under Received, \"What is it?\" gives four big choices: Salary or income, Someone paid me back, A refund, Work reimbursement (the last three are the old Settlement form, already set). Settlement is no longer under More; More now holds Invest and Give petty cash.",
+            "Add screen, step 6: Moved now shows From and To right under the amount, and the long list of tags (category, person, group) is folded under \"Tag to a category, person or group (optional)\" until you open it.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
