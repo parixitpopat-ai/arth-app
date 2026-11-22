@@ -86,6 +86,19 @@ rec("U1 'Only what is still unpaid' never adds lines or money, and the message f
 if (nAfter === 0) await T("fam-only-unpaid-off").uncheck(); else await T("fam-only-unpaid").uncheck();
 await p.waitForTimeout(400);
 rec("U2 un-ticking it brings every entry back", (await T("fam-exp-line").count()) === nBefore, await T("fam-exp-line").count());
+await p.reload(); await p.waitForTimeout(1200);
+for (let i = 0; i < 2; i++) if (await p.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await p.getByRole("button", { name: "1", exact: true }).click(); await p.waitForTimeout(100); } await p.waitForTimeout(500); }
+await p.getByText(/^people$/i).last().dispatchEvent("click"); await p.waitForTimeout(800);
+await p.getByText(/Groups/).first().dispatchEvent("click"); await p.waitForTimeout(600);
+await p.getByText("Neighbours", { exact: true }).first().dispatchEvent("click"); await p.waitForTimeout(700);
+await p.waitForTimeout(300);
+await T("group-owed-all").scrollIntoViewIfNeeded().catch(() => {}); rec("O1 the group page has an Everything owed to me button", (await T("group-owed-all").count()) === 1, {});
+await T("group-owed-all").dispatchEvent("click"); await p.waitForTimeout(800);
+const oMsg = (await T("fam-message").count()) ? await T("fam-message").innerText() : "";
+rec("O2 it opens on the expenses view, all time, unpaid only, the message says so", (await T("fam-only-unpaid").isChecked()) && /Only unpaid entries/.test(oMsg) && /Everything/i.test(await body()), oMsg.slice(0, 120));
+rec("O3 it shows the total of the entries listed and the balance on the cards", (await T("fam-owed-entries").count()) === 1 && (await T("fam-owed-card").count()) === 1, [await T("fam-owed-entries").innerText().catch(() => ""), await T("fam-owed-card").innerText().catch(() => "")]);
+await T("fam-only-unpaid").uncheck(); await p.waitForTimeout(300);
+rec("O4 the two totals go away when the unpaid filter is off", (await T("fam-owed-card").count()) === 0, {});
 rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 await b.close(); try { process.kill(-server.pid); } catch {}
 const bad = results.filter(r => !r.pass).length; console.log(`\n${results.length - bad}/${results.length} passed`); process.exit(bad ? 1 : 0);

@@ -18,13 +18,13 @@ function presets(todayIso) {
     fy: { label: "This financial year", from: `${fyY}-04-01`, to: todayIso }, all: { label: "Everything", from: "2000-01-01", to: todayIso } };
 }
 
-export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number(n).toFixed(2), group, people = [], txns = [], bills = [], billerAccounts = [], groups = [], cats = [], upiHandle = "", meId, onClose }) {
+export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number(n).toFixed(2), group, people = [], txns = [], bills = [], billerAccounts = [], groups = [], cats = [], upiHandle = "", meId, startAll = false, cardBalance = null, onClose }) {
   const today = useMemo(() => iso(new Date()), []);
   const P = useMemo(() => presets(today), [today]);
-  const [preset, setPreset] = useState("fy");
-  const [from, setFrom] = useState(P.fy.from), [to, setTo] = useState(P.fy.to);
+  const [preset, setPreset] = useState(startAll ? "all" : "fy");   // startAll: opened from "Everything owed to me", all time
+  const [from, setFrom] = useState(startAll ? P.all.from : P.fy.from), [to, setTo] = useState(startAll ? P.all.to : P.fy.to);
   const [status, setStatus] = useState("");
-  const [mode, setMode] = useState(() => (buildGroupExpenseList({ groupId: group.id, memberIds: (group.members || []).filter(id => String(id) !== String(meId) && id !== "__me__"), includePeople: true, txns, bills, from: presets(iso(new Date())).fy.from, to: iso(new Date()) }).totals.count > 0 ? "expenses" : "simple"));   // a group with expenses tagged to it opens on them
+  const [mode, setMode] = useState(() => startAll ? "expenses" : (buildGroupExpenseList({ groupId: group.id, memberIds: (group.members || []).filter(id => String(id) !== String(meId) && id !== "__me__"), includePeople: true, txns, bills, from: presets(iso(new Date())).fy.from, to: iso(new Date()) }).totals.count > 0 ? "expenses" : "simple"));   // a group with expenses tagged to it opens on them
   const [exOff, setExOff] = useState({});
   const [withPeople, setWithPeople] = useState(true);       // one statement: the group's expenses AND the expenses tagged to its people
   const [showNames, setShowNames] = useState(group.includeMe !== false && meId != null);   // names as headings: on for my own flat, off for a family I send it to
@@ -106,6 +106,14 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
             : !ex.items.length ? <div data-testid="fam-exp-empty" style={{ ...sub, padding: "8px 0" }}>{onlyUnpaid ? "Nothing is unpaid for " + group.name + " in this period." : <>No expense for {group.name}{withPeople ? " or its people" : ""} in this period.</>}{onlyUnpaid && <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><input data-testid="fam-only-unpaid-off" type="checkbox" checked onChange={() => setOnlyUnpaid(false)} />Only what is still unpaid</label>}</div> : <>
             <div data-testid="fam-exp-summary" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
               <div style={line}><span style={{ color: T.text, fontSize: 13 }}>{ex.totals.count} expense{ex.totals.count === 1 ? "" : "s"}{withPeople ? ` for ${group.name} and its people` : ` tagged to ${group.name}`}</span><span data-testid="fam-exp-total" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.total)}</span></div>
+              {cardBalance != null && onlyUnpaid && (() => {
+                const gap = Math.round((cardBalance - ex.totals.total) * 100) / 100;
+                return <>
+                  <div style={line}><span style={{ color: T.text, fontSize: 13 }}>Total of the entries listed</span><span data-testid="fam-owed-entries" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.total)}</span></div>
+                  <div style={line}><span style={{ color: T.text, fontSize: 13 }}>Balance on your cards (owes you + group owes)</span><span data-testid="fam-owed-card" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(cardBalance)}</span></div>
+                  {Math.abs(gap) >= 0.5 && <div data-testid="fam-owed-gap" style={{ ...sub, fontSize: 11 }}>{money(gap)} {gap > 0 ? "is not in the list above" : "more is listed than the balance"}: the balance nets off paybacks and petty cash, which are not single entries.</div>}
+                </>;
+              })()}
               {ex.totals.due > 0.004 && <div style={line}><span style={{ color: T.text, fontSize: 13 }}>Still to be paid by members</span><span data-testid="fam-exp-due" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.due)}</span></div>}
             </div>
             {breakup.rows.length > 0 && <div data-testid="fam-breakup" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 12, padding: "10px 12px", marginBottom: 10 }}>

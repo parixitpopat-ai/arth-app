@@ -254,3 +254,9 @@ test("the message says it is unpaid-only when asked", () => {
   assert.match(m.split("\n").slice(0, 3).join("\n"), /Suryamandal.*\nOnly unpaid entries\n/);
   assert.doesNotMatch(buildGroupExpenseMessage(items, { groupName: "S", from: "2026-07-01", to: "2026-07-31", showNames: false }), /Only unpaid/);
 });
+
+test("an all-time statement reads 'up to <date>', not a start date in 2000", () => {
+  const items = [{ key: "k", date: "2026-07-07", title: "BigBasket", total: 547, parts: [{ personId: null, name: "", amount: 547 }], on: true }];
+  const m = buildGroupExpenseMessage(items, { groupName: "Suryamandal", from: "2000-01-01", to: "2026-11-22", onlyUnpaid: true, showNames: false });
+  assert.match(m.split("\n")[0], /^Suryamandal · up to 22 Nov 2026$/);
+});

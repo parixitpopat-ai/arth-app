@@ -23,7 +23,7 @@ export function buildGroupExpenseMessage(items, { groupName = "", from, to, upiH
   const years = new Set(chosen.map(i => i.date.slice(0, 4)));
   const months = [];
   for (const i of chosen) { const k = i.date.slice(0, 7); let m = months[months.length - 1]; if (!m || m.key !== k) { m = { key: k, items: [] }; months.push(m); } m.items.push(i); }
-  const blocks = [[`${groupName ? `${groupName} · ` : ""}${from && to ? `${shortDate(from, true)} – ${shortDate(to, true)}` : "expenses"}`, ...(onlyUnpaid ? ["Only unpaid entries"] : [])]];
+  const blocks = [[`${groupName ? `${groupName} · ` : ""}${from && to ? (from <= "2000-01-01" ? `up to ${shortDate(to, true)}` : `${shortDate(from, true)} – ${shortDate(to, true)}`) : "expenses"}`, ...(onlyUnpaid ? ["Only unpaid entries"] : [])]];
   let all = 0;
   for (const m of months) {
     const label = `${MONTHS[Number(m.key.slice(5, 7)) - 1]}${years.size > 1 ? ` ${m.key.slice(0, 4)}` : ""}`;
