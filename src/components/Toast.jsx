@@ -31,9 +31,9 @@ export default function Toast({ message, icon = "✓", T, duration = 2200, onDon
       }}
     >
       <span style={{ fontSize: 15, color: T.success }}>{icon}</span>
-      <span style={{ color: T.text, fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{message}</span>
+      <span style={{ color: T.text, fontSize: 13, fontWeight: 700, lineHeight: 1.35, overflowWrap: "anywhere" }}>{message}</span>
       {actionLabel && (
-        <button type="button" onClick={() => { onAction?.(); onDone?.(); }} style={{ background: "none", border: "none", color: T.accent, fontSize: 13, fontWeight: 800, cursor: "pointer", minHeight: 36, padding: "0 4px", fontFamily: "inherit" }}>{actionLabel}</button>
+        <button type="button" onClick={() => { onAction?.(); onDone?.(); }} style={{ background: "none", border: "none", color: T.accent, fontSize: 13, fontWeight: 800, cursor: "pointer", minHeight: 36, padding: "0 4px", flexShrink: 0, fontFamily: "inherit" }}>{actionLabel}</button>
       )}
     </div>
   );

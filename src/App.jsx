@@ -229,6 +229,7 @@ import { applyValuations } from "./domain/investments/valuation";
 import { fetchLatestNav } from "./native/navClient";
 import { navFailureMessage } from "./domain/investments/mfNav";
 import HoldingValuePanel from "./components/HoldingValuePanel";
+import NotificationStatus from "./components/NotificationStatus";
 import { dailySummary } from "../domain/insights/dailySummary";
 import { dailyNotifAvailable, dailyNotifSchedule, dailyNotifCancel, dailyNotifOnOpen } from "./native/dailyNotification";
 import { ensureNotifPermission, openNotificationSettings, notifBlockedMessage } from "./native/notifPermission";
@@ -2687,6 +2688,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
   // Prepaid plan ending / ended (domain/bills/prepaidAlerts.js): three alerts per plan; none for a connection the person ended or paused.
   // Weekly spend summary: one calculation for the Home card and the weekly phone notification (domain/insights/weeklySummary.js).
+  // Why a notification switch could not be turned on (shown as a box on the Notifications screen, not as a short toast).
+  const [notifProblem, setNotifProblem] = useState("");
   const weeklyTodayKey = todayStr();
   const weeklyNow = useMemo(()=>weeklySummary({ txns, today:weeklyTodayKey, myAmount:getMyExpenseAmount }),[txns,getMyExpenseAmount,weeklyTodayKey]);
   const [weeklyNotifOn, setWeeklyNotifOn] = useState(()=>{ try { return localStorage.getItem("arth_weekly_notif")==="1"; } catch { return false; } });
@@ -2710,9 +2713,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   },[weeklyNotifOn]);
   const toggleWeeklyNotif = async()=>{
     if(weeklyNotifOn){ setWeeklyNotifOn(false); setToast({ message:"Weekly summary notification is off", icon:"🔕" }); return; }
+    setNotifProblem(""); setToast({ message:"Asking your phone…", icon:"⏳" });
     const perm = await ensureNotifPermission();
-    if(!perm.ok){ setToast({ message:notifBlockedMessage(perm.state), icon:"⚠️", actionLabel:"Open settings", onAction:()=>{ openNotificationSettings(); } }); return; }
-    setWeeklyNotifOn(true); setToast({ message:"On: a summary every Sunday at 7 pm", icon:"🔔" });
+    if(!perm.ok){ setNotifProblem(notifBlockedMessage(perm.state)+" ("+perm.state+")"); setToast({ message:"Could not turn it on. See the box at the top.", icon:"⚠️" }); return; }
+    setNotifProblem(""); setWeeklyNotifOn(true); setToast({ message:"On: a summary every Sunday at 7 pm", icon:"🔔" });
   };
   // Bill reminders on the phone (domain/notifications/dueReminders.js): 3 days before and on the due day, at 9 am, for bills still owed. Android app only; off by default.
   const [dueNotifOn, setDueNotifOn] = useState(()=>{ try { return localStorage.getItem("arth_due_notif")==="1"; } catch { return false; } });
@@ -2731,9 +2735,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   },[dueNotifOn]);
   const toggleDueNotif = async()=>{
     if(dueNotifOn){ setDueNotifOn(false); setToast({ message:"Bill reminders are off", icon:"🔕" }); return; }
+    setNotifProblem(""); setToast({ message:"Asking your phone…", icon:"⏳" });
     const perm = await ensureNotifPermission();
-    if(!perm.ok){ setToast({ message:notifBlockedMessage(perm.state), icon:"⚠️", actionLabel:"Open settings", onAction:()=>{ openNotificationSettings(); } }); return; }
-    setDueNotifOn(true); setToast({ message:"On: a reminder 3 days before a bill is due and on the day, at 9 am", icon:"🔔" });
+    if(!perm.ok){ setNotifProblem(notifBlockedMessage(perm.state)+" ("+perm.state+")"); setToast({ message:"Could not turn it on. See the box at the top.", icon:"⚠️" }); return; }
+    setNotifProblem(""); setDueNotifOn(true); setToast({ message:"On: a reminder 3 days before a bill is due and on the day, at 9 am", icon:"🔔" });
   };
   // The four-section layout (Today / Money / People / Plan), chosen in Settings; off by default. domain/navigation/sections.js
   const [navV2, setNavV2] = useState(()=>{ try { return localStorage.getItem("arth_nav_v2")==="1"; } catch { return false; } });
@@ -2765,9 +2770,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   },[dailyNotifOn]);
   const toggleDailyNotif = async()=>{
     if(dailyNotifOn){ setDailyNotifOn(false); setToast({ message:"Daily summary is off", icon:"🔕" }); return; }
+    setNotifProblem(""); setToast({ message:"Asking your phone…", icon:"⏳" });
     const perm = await ensureNotifPermission();
-    if(!perm.ok){ setToast({ message:notifBlockedMessage(perm.state), icon:"⚠️", actionLabel:"Open settings", onAction:()=>{ openNotificationSettings(); } }); return; }
-    setDailyNotifOn(true); setToast({ message:"On: a summary of the day's spending at 9 pm", icon:"🔔" });
+    if(!perm.ok){ setNotifProblem(notifBlockedMessage(perm.state)+" ("+perm.state+")"); setToast({ message:"Could not turn it on. See the box at the top.", icon:"⚠️" }); return; }
+    setNotifProblem(""); setDailyNotifOn(true); setToast({ message:"On: a summary of the day's spending at 9 pm", icon:"🔔" });
   };
   // Fund NAVs: every holding with a saved scheme code is refreshed from the NAV service, by hand (Refresh on the Investments screen) and once a day when Arth opens.
   // A failed lookup keeps the old value and says why; it never writes a guess.
@@ -16523,6 +16529,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
           <div style={{ color:T.text,fontSize:18,fontWeight:900,flex:1 }}>Notifications</div>
         </div>
+        <NotificationStatus T={T} problem={notifProblem}/>
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Phone reminders</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
           {dueNotifAvailable()?<Row icon="🧾" title="Bill reminders" subtitle={dueNotifOn?"On — 3 days before a bill is due and on the day, 9 am":"Off — 3 days before a bill is due and on the day, 9 am"} toggle={{val:dueNotifOn,fn:toggleDueNotif}}/>:null}

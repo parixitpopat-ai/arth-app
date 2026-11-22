@@ -13,6 +13,7 @@ await ctx.addInitScript(([t]) => { window.__ARTH_DAILY_TEST__ = { calls: [] }; w
   set("arth_accounts", [{ id: "b1", name: "Test Savings", type: "bank", openingBalance: 5000, openingBalanceDate: "2026-01-01" }]); set("arth_people", [{ id: "me", name: "Me", isMe: true }]);
   set("arth_txns", [{ id: "a", type: "expense", desc: "Lunch", merchant: "Lunch", date: t, amount: 450, accId: "b1", catId: "food", catIds: ["food"], createdAt: 1 }]); localStorage.setItem("arth_master_user_setup_complete", "true"); }, [today]);
 const p = await ctx.newPage(); const errors = []; p.on("pageerror", e => errors.push(String(e)));
+const T = id => p.getByTestId(id);
 const body = async () => (await p.locator("body").innerText()).replace(/\s+/g, " ");
 const unlock = async () => { for (let i = 0; i < 2; i++) if (await p.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await p.getByRole("button", { name: "1", exact: true }).click(); await p.waitForTimeout(100); } await p.waitForTimeout(500); } };
 const openSettings = async () => { await p.locator("button", { hasText: "☰" }).first().click(); await p.waitForTimeout(500); await p.getByText(/Settings/).first().click(); await p.waitForTimeout(700); };
@@ -40,8 +41,8 @@ await p.getByText("Notifications", { exact: true }).first().click(); await p.wai
 await p.getByText("Bill reminders", { exact: true }).first().click(); await p.waitForTimeout(700);
 t = await body();
 rec("B1 blocked: it says why, in words, and the switch stays off", /switched off for Arth in your phone's settings/.test(t) && (await p.evaluate(() => localStorage.getItem("arth_due_notif"))) === "0" && /Bill reminders Off/.test(t), t.match(/Notifications are[^.]*\./)?.[0]);
-rec("B2 and offers Open settings, which asks the phone to open them", /Open settings/.test(t), {});
-await p.getByText("Open settings").first().click(); await p.waitForTimeout(400);
+rec("B2 and the box stays on the screen (not a toast) with a button to the phone's notification settings", (await T("notif-status").count()) === 1 && (await T("notif-open-settings").count()) === 1 && /Last try:/.test(t), {});
+await T("notif-open-settings").click(); await p.waitForTimeout(400);
 rec("B3 tapping it reaches the phone (called once)", (await p.evaluate(() => window.__ARTH_NOTIF_TEST__.opened)) === 1, await p.evaluate(() => window.__ARTH_NOTIF_TEST__.opened));
 await p.evaluate(() => { sessionStorage.setItem("__notif", JSON.stringify({ ok: false, state: "error: boom" })); }); await p.reload(); await p.waitForTimeout(1300); await unlock(); await openSettings();
 await p.getByText("Notifications", { exact: true }).first().click(); await p.waitForTimeout(500); await p.getByText("Weekly summary", { exact: true }).first().click(); await p.waitForTimeout(700);

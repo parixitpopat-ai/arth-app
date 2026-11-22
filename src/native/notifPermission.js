@@ -24,13 +24,26 @@ export async function ensureNotifPermission() {
   try {
     const ln = await LN();
     let p = await ln.checkPermissions(); state = String(p.display);
-    if (p.display !== "granted") { p = await ln.requestPermissions(); state = String(p.display); }
+    if (p.display !== "granted") { p = await Promise.race([ln.requestPermissions(), new Promise(res => setTimeout(() => res({ display: "no-answer" }), 25000))]); state = String(p.display); }
     if (p.display === "granted") {
       const s = await smsStatus();   // the app's own check also sees "notifications switched off for Arth" in Android settings
       return s.notify ? { ok: true, state: "granted" } : { ok: false, state: "off-in-settings" };
     }
   } catch (e) { state = `error: ${String((e && e.message) || e).slice(0, 80)}`; }
   return { ok: false, state };
+}
+
+/** What the phone says right now, WITHOUT asking (no dialog). @returns {Promise<{ok:boolean, state:string}>} */
+export async function notifPermissionStatus() {
+  const h = hook(); if (h) return h;
+  if (!(Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android")) return { ok: false, state: "not-on-phone" };
+  let state = "unknown";
+  try {
+    const p = await (await LN()).checkPermissions(); state = String(p.display);
+    if (p.display !== "granted") return { ok: false, state };
+    const s = await smsStatus();
+    return s.notify ? { ok: true, state: "granted" } : { ok: false, state: "off-in-settings" };
+  } catch (e) { return { ok: false, state: `error: ${String((e && e.message) || e).slice(0, 80)}` }; }
 }
 
 /** Opens Android's notification settings for Arth. @returns {Promise<boolean>} false when the phone could not open it */
@@ -42,6 +55,7 @@ export async function openNotificationSettings() {
 /** One sentence for the person. */
 export function notifBlockedMessage(state) {
   if (state === "off-in-settings") return "Notifications are switched off for Arth in your phone's settings.";
+  if (state === "no-answer") return "The phone did not answer the notification question. Open Arth's notification settings and allow notifications.";
   if (state === "denied") return "Arth is not allowed to show notifications. Allow it in your phone's settings.";
   if (String(state).startsWith("error")) return `The phone did not answer the notification question (${state}).`;
   return `Arth could not get permission to show notifications (${state}).`;
