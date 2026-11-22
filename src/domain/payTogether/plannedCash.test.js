@@ -127,7 +127,7 @@ import { readFileSync } from "node:fs";
 test("App.jsx feeds Money Required, the timeline and the rhythm from the planned list, never the raw one", () => {
   const src = readFileSync(new URL("../../App.jsx", import.meta.url), "utf8");
   assert.match(src, /const futureMoneyPlanned = applyGroupDates\(futureMoney, payGroups\)/);
-  assert.equal((src.match(/getMoneyRequiredForPeriod\(\{ futureMoney:futureMoneyPlanned,/g) || []).length, 2);
+  assert.equal((src.match(/getMoneyRequiredForPeriod\(\{ futureMoney:futureMoneyPlanned,/g) || []).length, 3);   // Home, Outlook, and the possible-duplicates check in Notifications
   assert.match(src, /buildCommitmentTimeline\(\{ futureMoney:futureMoneyPlanned,/);
   assert.match(src, /groupFutureMoneyByRhythm\(futureMoneyPlanned,/);
   assert.equal(/getMoneyRequiredForPeriod\(\{ futureMoney,/.test(src), false);

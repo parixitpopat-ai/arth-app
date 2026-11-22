@@ -2737,6 +2737,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // Outlook: pairs the person said are not duplicates (domain/futureMoney/duplicateFlags.js). This phone only.
   const [dupDismissed, setDupDismissed] = useState(()=>{ try { return JSON.parse(localStorage.getItem("arth_outlook_dups_dismissed")||"[]"); } catch { return []; } });
   useEffect(()=>{ try { localStorage.setItem("arth_outlook_dups_dismissed", JSON.stringify(dupDismissed)); } catch { /* the choice is simply not kept */ } },[dupDismissed]);
+  const [dupReviewOpen, setDupReviewOpen] = useState(false);   // Outlook shows only the possible duplicates, to check
   const [moneyView, setMoneyView] = useState("accounts");   // which part of the money hub shows (new navigation only): accounts | cards | loans | invest
   const bio = useBiometric(setToast);   // fingerprint unlock (Android app): src/native/biometric.js
   // Daily summary (domain/insights/dailySummary.js): what was spent today, at 9 pm. Android app only; off by default. Same one-shot design as the weekly one.
@@ -10791,6 +10792,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
   // Cash as planned (Pay together): grouped instalments sit on their group's payment date. The one list Home and Outlook read for Money Required.
   const futureMoneyPlanned = applyGroupDates(futureMoney, payGroups);
+  // Possible duplicate payments (domain/futureMoney/duplicateFlags.js): reported in Notifications; tapping it shows only those in Outlook to check.
+  const payDups = (()=>{ const o = getMoneyRequiredForPeriod({ futureMoney:futureMoneyPlanned, today:todayStr(), horizonDays:365 }); return findPossibleDuplicates([...(o.spending||[]),...(o.saving||[]),...(o.debtService||[])], dupDismissed); })();
   const allFutureEvents = () => [...(futureMoney.committedSpending||[]), ...(futureMoney.committedSaving||[]), ...(futureMoney.debtService||[])];
   const confirmPayTogether = ({ keys, date }) => {
     const res = createPayGroup({ events:allFutureEvents(), keys, date, genId, today:todayStr(), groups:payGroups });
@@ -14269,7 +14272,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Forecast period = overdue + due in the next 30 days: the same figure and period as Home's Money Required.
     const OUTLOOK_PERIOD_DAYS = 30;
     const moneyRequired = getMoneyRequiredForPeriod({ futureMoney:futureMoneyPlanned, today:todayStr(), horizonDays:OUTLOOK_PERIOD_DAYS });
-    const dupResult = findPossibleDuplicates([...(moneyRequired.spending||[]),...(moneyRequired.saving||[]),...(moneyRequired.debtService||[])], dupDismissed);
     const debtServiceTotal = moneyRequired.debtServiceTotal;
     const cashRequired = moneyRequired.total;
     const cashAvailable = openingBalance;
@@ -14370,15 +14372,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       }
     };
 
-    // What Changed — Facts tier only, using the real daily snapshot mechanism (wealthSnapshots).
-    // Reasons/Impact tiers omitted here since deriving "why" reliably from raw transactions is a
-    // separate piece of work, not silently assumed — matches the ADS's own "omit when data isn't
-    // available" rule rather than fabricate a reason.
-    const todayStr2 = todayStr();
-    const yesterdaySnap = [...wealthSnapshots].filter(s=>s.date<todayStr2).sort((a,b)=>b.date.localeCompare(a.date))[0];
-    const todaySnap = wealthSnapshots.find(s=>s.date===todayStr2);
-    const netWorthDelta = yesterdaySnap && todaySnap ? todaySnap.netWorth - yesterdaySnap.netWorth : null;
-    const cashDelta = yesterdaySnap && todaySnap ? todaySnap.cash - yesterdaySnap.cash : null;
 
     // WP10 (Outlook redesign) — "The long list is organised by rhythm first, then by date."
     // groupFutureMoneyByRhythm takes the exact, unmodified `futureMoney` object this screen
@@ -14425,7 +14418,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <span style={{ color:T.sub,flexShrink:0 }}>{rowIcon(e.sourceType)}</span>
           <div style={{ flex:1,minWidth:0 }}>
             <div style={{ color:T.text,fontSize:12.5,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{e.name}</div>
-            {dupResult.flagged.has(`${e.sourceType}:${e.sourceId}`)&&<div data-testid="dup-badge" style={{ display:"inline-block",background:T.warn+"22",color:T.warn,borderRadius:10,padding:"1px 8px",fontSize:10,fontWeight:800,marginTop:2 }}>Possible duplicate</div>}
             <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>{getSourceTypeLabel(e.sourceType)}{e.recurs?(section!=="next30"?" · last amount":(Number(e.cycleMonths)>1?` · every ${e.cycleMonths} months`:" · every month")):""}</div>
           </div>
           <div style={{ textAlign:"right",flexShrink:0 }}>
@@ -14436,6 +14428,32 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         </div>
       );
     };
+
+    if(dupReviewOpen){
+      return (
+        <div data-testid="dup-review" style={{ padding:"14px 16px 90px" }}>
+          <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:6 }}>
+            <button aria-label="Back to Outlook" onClick={()=>setDupReviewOpen(false)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
+            <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>Possible duplicate payments</div>
+          </div>
+          <div style={{ color:T.sub,fontSize:12,marginBottom:12,lineHeight:1.5 }}>Each pair below has the same amount, dates within a week of each other and the same words in the name, so it may be one payment entered twice. Both are counted in what you need. Open one to remove or fix it, or say they are different.</div>
+          {payDups.pairs.length===0&&<div style={{ ...card,textAlign:"center",color:T.sub,fontSize:13,padding:20 }}>No possible duplicates left to check.</div>}
+          {payDups.pairs.map(pr=>(
+            <div key={pr.key} data-testid="dup-pair" style={{ ...card,marginBottom:10,border:`1px solid ${T.warn}55` }}>
+              <div style={{ color:T.warn,fontSize:11,fontWeight:800,letterSpacing:0.4,marginBottom:4 }}>POSSIBLE DUPLICATE</div>
+              {[pr.a,pr.b].map(ev=>(
+                <div key={`${ev.sourceType}:${ev.sourceId}`} onClick={()=>openCommitmentRow(ev)} style={{ display:"flex",justifyContent:"space-between",gap:8,padding:"6px 0",cursor:"pointer" }}>
+                  <span style={{ color:T.text,fontSize:13,fontWeight:700,minWidth:0 }}>{ev.name}<span style={{ display:"block",color:T.sub,fontSize:11,fontWeight:500 }}>{getSourceTypeLabel(ev.sourceType)}{ev.date?` · ${formatShortDate(ev.date)||ev.date}`:""}</span></span>
+                  <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono,flexShrink:0 }}>{sym}{fmt(ev.amount)}</span>
+                </div>
+              ))}
+              <button data-testid="dup-not" onClick={()=>setDupDismissed(prev=>prev.includes(pr.key)?prev:[...prev,pr.key])} style={{ marginTop:6,background:"none",border:`1px solid ${T.border}`,borderRadius:14,minHeight:40,padding:"0 16px",color:T.sub,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>These are different</button>
+            </div>
+          ))}
+          <button data-testid="dup-show-all" onClick={()=>setDupReviewOpen(false)} style={{ marginTop:6,background:T.accent,border:"none",borderRadius:22,minHeight:48,width:"100%",color:T.accentInk||"#fff",fontWeight:800,fontSize:14,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Show all of Outlook</button>
+        </div>
+      );
+    }
 
     return (
     <div style={{ padding:"14px 16px 90px" }}>
@@ -14517,10 +14535,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <span style={{ color:T.sub,fontSize:11 }}>Available cash</span>
               <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(cashAvailable)}</span>
             </div>
-            <div style={{ display:"flex",justifyContent:"space-between",marginTop:6,paddingTop:6,borderTop:`1px solid ${T.border}` }}>
-              <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>Buffer</span>
-              <span style={{ color:buffer>=0?T.success:T.danger,fontSize:13,fontWeight:900,fontFamily:FONT.mono }}>{sym}{fmt(buffer)}</span>
-            </div>
 
             {/* Three-line split — Spending/Saving/Debt, replacing the old "Your Future Money"
                 card. Sums to Needed above; every number already existed, just regrouped. */}
@@ -14548,24 +14562,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       {/* One dated list of every open commitment: overdue first, then by date, with the cash left after each.
           Replaces "Next 30 days" + "Forecast timeline" (same items twice, and the timeline left out EMIs and
           overdue items). Rows still open their real source. domain/futureMoney/commitmentTimeline.js. */}
-      {dupResult.pairs.length>0&&(
-        <div data-testid="dup-card" style={{ ...card,marginBottom:12,border:`1px solid ${T.warn}55` }}>
-          <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>Possible duplicates · {dupResult.pairs.length}</div>
-          <div style={{ color:T.sub,fontSize:11,marginTop:2,marginBottom:6 }}>These look like the same payment entered twice, and both are counted in what you need. Open one to fix it, or say they are different.</div>
-          {dupResult.pairs.map(pr=>(
-            <div key={pr.key} data-testid="dup-pair" style={{ borderTop:`1px solid ${T.border}`,padding:"8px 0" }}>
-              {[pr.a,pr.b].map(ev=>(
-                <div key={`${ev.sourceType}:${ev.sourceId}`} onClick={()=>openCommitmentRow(ev)} style={{ display:"flex",justifyContent:"space-between",gap:8,padding:"4px 0",cursor:"pointer" }}>
-                  <span style={{ color:T.text,fontSize:12.5,fontWeight:700,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{ev.name} <span style={{ color:T.sub,fontWeight:500 }}>· {getSourceTypeLabel(ev.sourceType)}{ev.date?` · ${formatShortDate(ev.date)||ev.date}`:""}</span></span>
-                  <span style={{ color:T.text,fontSize:12.5,fontWeight:800,fontFamily:FONT.mono,flexShrink:0 }}>{sym}{fmt(ev.amount)}</span>
-                </div>
-              ))}
-              <button data-testid="dup-not" onClick={()=>setDupDismissed(prev=>prev.includes(pr.key)?prev:[...prev,pr.key])} style={{ marginTop:4,background:"none",border:`1px solid ${T.border}`,borderRadius:14,minHeight:36,padding:"0 14px",color:T.sub,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>These are different</button>
-            </div>
-          ))}
-        </div>
-      )}
-
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6 }}>
         <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>OVERDUE + NEXT {OUTLOOK_PERIOD_DAYS} DAYS · CASH LEFT AFTER EACH</span>
         <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{commitmentTimeline.rows.length} item{commitmentTimeline.rows.length===1?"":"s"}</span>
@@ -14574,13 +14570,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ ...card,textAlign:"center",color:T.sub,fontSize:12,padding:20,marginBottom:12 }}>Nothing overdue or due in the next 30 days.</div>
       ) : (
         <div style={{ ...card,marginBottom:12 }}>
-          <div style={{ display:"flex",justifyContent:"space-between",padding:"2px 0 8px",borderBottom:`1px solid ${T.border}` }}>
-            <span style={{ color:T.sub,fontSize:12 }}>Available now</span>
-            <span style={{ color:T.text,fontSize:13,fontWeight:800,fontFamily:FONT.mono }}>{sym}{fmt(cashAvailable)}</span>
-          </div>
           {commitmentTimeline.rows.map(r=><RhythmRow key={`${r.event.sourceType}:${r.event.sourceId}`} e={r.event} section="next30" showDate balanceAfter={r.balanceAfter} overdue={r.overdue}/>)}
           {commitmentTimeline.laterCount>0&&(
-            <div style={{ color:T.sub,fontSize:12,paddingTop:10 }}>Ends at {commitmentTimeline.buffer<0?"short by":"buffer"} <span style={{ color:commitmentTimeline.buffer<0?T.danger:T.text,fontWeight:800 }}>{sym}{fmt(Math.abs(commitmentTimeline.buffer))}</span>. Another {sym}{fmt(commitmentTimeline.laterTotal)} in {commitmentTimeline.laterCount} item{commitmentTimeline.laterCount===1?"":"s"} falls after {formatShortDate(toLocalDateStr(rhythm.next30CutoffDate))||"30 days"} (below) and is not in the Buffer.</div>
+            <div style={{ color:T.sub,fontSize:12,paddingTop:10 }}>Another {sym}{fmt(commitmentTimeline.laterTotal)} in {commitmentTimeline.laterCount} item{commitmentTimeline.laterCount===1?"":"s"} falls after {formatShortDate(toLocalDateStr(rhythm.next30CutoffDate))||"30 days"} (below) and is not in the Buffer.</div>
           )}
         </div>
       )}
@@ -14644,26 +14636,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         </>
       )}
 
-      {/* Two links replace the old View All Bills / Budget Progress / Manage Bills buttons and
-          the Next Month Preview card (now superseded by the month buckets above). */}
-      <button onClick={()=>setTab("budget")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,cursor:"pointer",border:`1px solid ${T.border}` }}>
-        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>{todayDate.toLocaleString("en-IN",{month:"long"})} budget</span>
-        <ChevronRight size={16} color={T.accent}/>
-      </button>
-      <button onClick={()=>setTab("bills")} style={{ ...card,width:"100%",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,cursor:"pointer",border:`1px solid ${T.border}` }}>
-        <span style={{ color:T.text,fontSize:13,fontWeight:700 }}>All bills in Payments</span>
-        <ChevronRight size={16} color={T.accent}/>
-      </button>
-
-      {/* What Changed — Facts tier, using the real wealthSnapshots mechanism. Reasons/Impact
-          omitted rather than fabricated (ADS rule: omit when the underlying data isn't there). */}
-      {netWorthDelta!==null&&(
-        <div style={{ background:T.info+"12",border:`1px solid ${T.info}33`,borderRadius:14,padding:"12px 14px",marginBottom:12 }}>
-          <div style={{ color:T.info,fontSize:10,fontWeight:800,letterSpacing:0.5,marginBottom:6 }}>WHAT CHANGED — SINCE YESTERDAY</div>
-          <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{netWorthDelta>=0?"📈":"📉"} Net Worth {netWorthDelta>=0?"+":""}{sym}{fmt(netWorthDelta)}</div>
-          {cashDelta!==null&&<div style={{ color:T.text,fontSize:12,fontWeight:700,marginTop:4 }}>{cashDelta>=0?"💰":"💸"} Cash {cashDelta>=0?"+":""}{sym}{fmt(cashDelta)}</div>}
-        </div>
-      )}
     </div>
     );
   };
@@ -15209,6 +15181,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>{value}</div>
       </div>
     );
+    // What changed since yesterday (moved here from Outlook, next to net worth): facts only, from the daily wealth snapshots.
+    const todayStr2 = todayStr();
+    const yesterdaySnap = [...wealthSnapshots].filter(sn=>sn.date<todayStr2).sort((a,b)=>b.date.localeCompare(a.date))[0];
+    const todaySnap = wealthSnapshots.find(sn=>sn.date===todayStr2);
+    const netWorthDelta = yesterdaySnap && todaySnap ? todaySnap.netWorth - yesterdaySnap.netWorth : null;
+    const cashDelta = yesterdaySnap && todaySnap ? todaySnap.cash - yesterdaySnap.cash : null;
     const parts = moneyViewParts(navV2 ? moneyView : "all");   // new navigation: one part of the hub at a time (domain/navigation/sections.js)
     const loanSummary = parts.loans ? summariseLoans(loans, isCreditCardBackedLoan) : null;
     return (
@@ -15223,6 +15201,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div><div style={{ color:T.sub,fontSize:9 }}>Liabilities</div><div style={{ color:T.danger,fontSize:14,fontWeight:800 }}>{sym}{fmt(totalLiabilitiesValue)}</div></div>
           </div>
         </div>}
+
+        {parts.summary&&netWorthDelta!==null&&(
+          <div data-testid="what-changed" style={{ background:T.info+"12",border:`1px solid ${T.info}33`,borderRadius:14,padding:"12px 14px",marginBottom:20 }}>
+            <div style={{ color:T.info,fontSize:10,fontWeight:800,letterSpacing:0.5,marginBottom:6 }}>WHAT CHANGED — SINCE YESTERDAY</div>
+            <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{netWorthDelta>=0?"📈":"📉"} Net Worth {netWorthDelta>=0?"+":""}{sym}{fmt(netWorthDelta)}</div>
+            {cashDelta!==null&&<div style={{ color:T.text,fontSize:12,fontWeight:700,marginTop:4 }}>{cashDelta>=0?"💰":"💸"} Cash {cashDelta>=0?"+":""}{sym}{fmt(cashDelta)}</div>}
+          </div>
+        )}
 
         {parts.summary&&<><CashFlowCard T={T} sym={sym} fmt={fmt} txns={txns} cats={cats} todayMonthKey={todayStr().slice(0,7)}
           todayLabel={`${Number(todayStr().slice(8,10))} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][Number(todayStr().slice(5,7))-1]}`}
@@ -16242,7 +16228,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Match your bank (Money → an account): each bank and cash account's own page now has \"Does this match your bank?\" with a Set actual balance button, and shows the gap or Matched. It is the same check that was in Settings, which still has it.",
             "New navigation (Settings, off by default): the bottom bar becomes Today, Money, People and Plan. Money opens on your activity, with Accounts, Cards, Loans and Invest one tap away (those four ask for the PIN; Loans is a new list of what you owe and what you gave); Plan holds Bills, Budget, Goals, Events and Outlook. Every screen is the same one as before, only grouped; switch it off any time.",
             "Settings, tidied: five groups (You and your data, Money setup, Look and behaviour, Privacy and notifications, Help). On/off items are real switches and the whole row is the tap target. Notifications is one screen: Bill reminders, Weekly summary and the new Daily summary (what you spent today, at 9 pm, Android app, off by default). PIN, fingerprint and lock are one screen. If the phone will not allow notifications, Arth now says why and offers Open settings instead of doing nothing. The version shows once.",
-            "Outlook flags possible duplicates: two open entries with the same amount, within a week of each other and with the same words in the name (a bill and a repeating schedule for the same rent, say) get a Possible duplicate tag and are listed in a card at the top. Both are counted in what you need, so check them; \"These are different\" clears a pair. Nothing is deleted for you.",
+            "Outlook, tidied: the repeated Budget and Payments links, the second Available cash and the third Buffer are gone; What changed since yesterday moved to Money, under net worth. Possible duplicate payments (same amount, dates within a week, same words in the name) are now reported in Notifications: tap it and Outlook shows only those pairs to check, with These are different. Nothing is deleted for you.",
             "Fingerprint unlock (Android app, Settings): touch the sensor instead of typing the PIN. Off by default; turning it on asks for your fingerprint once. The phone is asked up to 4 times, then only the PIN is left (at once if you choose the PIN). The lock-out after 5 wrong PINs is unchanged. Arth never stores the fingerprint; the phone keeps it.",
             "Bill reminders (Android app, Settings): a phone notification 3 days before a bill is due and on the day, at 9 am, for bills still owed. Tap it to open the bill. Off by default.",
             "Fixed: the Paste button under Bank SMS import did nothing on some phones and said nothing. It now uses the phone's own clipboard in the Android app, and if pasting is blocked it tells you to long-press the box and choose Paste.",
@@ -19504,7 +19490,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ padding:"10px 8px",display:"flex",flexDirection:"column",gap:2 }}>
             {[
               { icon:"👤", label:"User Profile", onClick:()=>{ setShowSettings(true); setSettingsSection("myprofile"); onClose(); } },
-              { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+(smsInbox.items.length+(smsInbox.billItems||[]).length), onClick:()=>{ setShowNotifications(true); onClose(); } },
+              { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+payDups.pairs.length+(smsInbox.items.length+(smsInbox.billItems||[]).length), onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"🧾", label:"Payments", onClick:()=>goToTab("bills") },
               { icon:"👥", label:"People & Groups", onClick:()=>goToTab("people") },
               { icon:"🚗", label:"Vehicles", onClick:()=>{ setShowSettings(true); setSettingsSection("vehicles"); onClose(); } },
@@ -19534,8 +19520,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🔔 Notifications</div>
             <button onClick={onClose} style={{ background:"none",border:"none",color:T.sub,fontSize:18,cursor:"pointer" }}>✕</button>
           </div>
-          {activeBudgetAlerts.length===0&&activeCardAlerts.length===0&&activePrepaidAlerts.length===0&&(smsInbox.items.length+(smsInbox.billItems||[]).length)===0&&(
+          {activeBudgetAlerts.length===0&&activeCardAlerts.length===0&&activePrepaidAlerts.length===0&&payDups.pairs.length===0&&(smsInbox.items.length+(smsInbox.billItems||[]).length)===0&&(
             <div style={{ textAlign:"center",padding:"40px 20px",color:T.sub,fontSize:13 }}>You're all caught up.</div>
+          )}
+          {payDups.pairs.length>0&&(
+            <div data-testid="notif-dups" onClick={()=>{ onClose(); setDupReviewOpen(true); setShowSettings(false); setTab("outlook"); }} style={{ background:T.warn+"14",border:`1px solid ${T.warn}44`,borderRadius:14,padding:"12px 14px",marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10 }}>
+              <div style={{ flex:1,minWidth:0 }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>Possible duplicate payments · {payDups.pairs.length}</div>
+                <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>The same payment may be entered twice, and both are counted in what you need. Tap to check only those.</div>
+              </div>
+              <span style={{ color:T.warn,fontSize:18 }}>›</span>
+            </div>
           )}
           {smsInbox.available&&!smsInbox.perm.receive&&(
             <div data-testid="sms-enable" style={{ background:T.accent+"14",border:`1px solid ${T.accent}33`,borderRadius:14,padding:"12px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10 }}>
@@ -21530,7 +21525,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
                     <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
                     {/* The bell opens Notifications; its count is the real number of open alerts (budget, card limit, prepaid plan ending). */}
-                    <button data-testid="home-bell" onClick={()=>setShowNotifications(true)} style={{ position:"relative",background:"none",border:"none",cursor:"pointer",fontSize:18,color:T.text,padding:4 }} title="Notifications">🔔{(activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+(smsInbox.items.length+(smsInbox.billItems||[]).length))>0&&<span data-testid="home-bell-badge" style={{ position:"absolute",top:-2,right:-4,minWidth:16,height:16,borderRadius:8,background:T.danger,color:"#fff",fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px" }}>{activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+(smsInbox.items.length+(smsInbox.billItems||[]).length)}</span>}</button>
+                    <button data-testid="home-bell" onClick={()=>setShowNotifications(true)} style={{ position:"relative",background:"none",border:"none",cursor:"pointer",fontSize:18,color:T.text,padding:4 }} title="Notifications">🔔{(activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+payDups.pairs.length+(smsInbox.items.length+(smsInbox.billItems||[]).length))>0&&<span data-testid="home-bell-badge" style={{ position:"absolute",top:-2,right:-4,minWidth:16,height:16,borderRadius:8,background:T.danger,color:"#fff",fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px" }}>{activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+payDups.pairs.length+(smsInbox.items.length+(smsInbox.billItems||[]).length)}</span>}</button>
                   </div>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8 }}>
                     <div>
