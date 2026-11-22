@@ -17,9 +17,10 @@ for (let i = 0; i < 2; i++) if (await p.getByRole("button", { name: "1", exact: 
 rec("F1 no fingerprint button while it is off", (await p.getByTestId("unlock-fingerprint").count()) === 0, {});
 await p.getByText("☰").first().click().catch(() => {}); await p.waitForTimeout(500);
 await p.getByRole("button", { name: /settings/i }).first().click().catch(() => {}); await p.waitForTimeout(700);
-rec("F2 Settings offers Unlock with fingerprint (Off)", /Unlock with fingerprint/.test(await text()) && /Off · touch the sensor/.test(await text()), {});
-await p.getByText("Unlock with fingerprint").first().click(); await p.waitForTimeout(700);
-rec("F3 turning it on works when the phone confirms", /On · the PIN is still the fallback/.test(await text()) && (await p.evaluate(() => localStorage.getItem("arth_biometric"))) === "1", {});
+await p.getByText("PIN, fingerprint & lock").first().click(); await p.waitForTimeout(600);
+rec("F2 PIN, fingerprint & lock offers Unlock with fingerprint (Off)", /Unlock with fingerprint/.test(await text()) && /Off — touch the sensor/.test(await text()), {});
+await p.getByTestId("security-fingerprint").click(); await p.waitForTimeout(700);
+rec("F3 turning it on works when the phone confirms", /On — touch the sensor/.test(await text()) && (await p.evaluate(() => localStorage.getItem("arth_biometric"))) === "1", {});
 // reload = locked again; the fingerprint is asked at once and unlocks without typing
 await p.reload(); await p.waitForTimeout(1800);
 rec("F4 lock screen: fingerprint unlocks with no PIN typed", /Good (Morning|Afternoon|Evening)|Left in budget/i.test(await text()), (await text()).slice(0, 60));

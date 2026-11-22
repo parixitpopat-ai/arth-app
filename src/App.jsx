@@ -225,6 +225,9 @@ import { segmentsFor, sectionOfTab, activeSegmentId, bottomTabs, isSectionTabAct
 import BiometricUnlock from "./components/BiometricUnlock";
 import { summariseLoans } from "./domain/loans/loanList";
 import { findPossibleDuplicates } from "./domain/futureMoney/duplicateFlags";
+import { dailySummary } from "../domain/insights/dailySummary";
+import { dailyNotifAvailable, dailyNotifSchedule, dailyNotifCancel, dailyNotifOnOpen } from "./native/dailyNotification";
+import { ensureNotifPermission, openNotificationSettings, notifBlockedMessage } from "./native/notifPermission";
 import { whatsappLink } from "./domain/share/whatsapp";
 import { readClipboardText, PASTE_BLOCKED_MESSAGE, PASTE_EMPTY_MESSAGE } from "./native/clipboard";
 import { QUICK_FILTERS, matchesQuickFilter } from "./domain/transactions/quickFilters";
@@ -2703,8 +2706,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   },[weeklyNotifOn]);
   const toggleWeeklyNotif = async()=>{
     if(weeklyNotifOn){ setWeeklyNotifOn(false); setToast({ message:"Weekly summary notification is off", icon:"🔕" }); return; }
-    const ok = await weeklyNotifEnable();
-    if(!ok){ setToast({ message:"Notifications are blocked for Arth. Allow them in your phone's settings, then try again.", icon:"⚠️" }); return; }
+    const perm = await ensureNotifPermission();
+    if(!perm.ok){ setToast({ message:notifBlockedMessage(perm.state), icon:"⚠️", actionLabel:"Open settings", onAction:()=>{ openNotificationSettings(); } }); return; }
     setWeeklyNotifOn(true); setToast({ message:"On: a summary every Sunday at 7 pm", icon:"🔔" });
   };
   // Bill reminders on the phone (domain/notifications/dueReminders.js): 3 days before and on the due day, at 9 am, for bills still owed. Android app only; off by default.
@@ -2724,8 +2727,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   },[dueNotifOn]);
   const toggleDueNotif = async()=>{
     if(dueNotifOn){ setDueNotifOn(false); setToast({ message:"Bill reminders are off", icon:"🔕" }); return; }
-    const ok = await dueNotifEnable();
-    if(!ok){ setToast({ message:"Notifications are blocked for Arth. Allow them in your phone's settings, then try again.", icon:"⚠️" }); return; }
+    const perm = await ensureNotifPermission();
+    if(!perm.ok){ setToast({ message:notifBlockedMessage(perm.state), icon:"⚠️", actionLabel:"Open settings", onAction:()=>{ openNotificationSettings(); } }); return; }
     setDueNotifOn(true); setToast({ message:"On: a reminder 3 days before a bill is due and on the day, at 9 am", icon:"🔔" });
   };
   // The four-section layout (Today / Money / People / Plan), chosen in Settings; off by default. domain/navigation/sections.js
@@ -2736,6 +2739,28 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   useEffect(()=>{ try { localStorage.setItem("arth_outlook_dups_dismissed", JSON.stringify(dupDismissed)); } catch { /* the choice is simply not kept */ } },[dupDismissed]);
   const [moneyView, setMoneyView] = useState("accounts");   // which part of the money hub shows (new navigation only): accounts | cards | loans | invest
   const bio = useBiometric(setToast);   // fingerprint unlock (Android app): src/native/biometric.js
+  // Daily summary (domain/insights/dailySummary.js): what was spent today, at 9 pm. Android app only; off by default. Same one-shot design as the weekly one.
+  const dailyNow = useMemo(()=>dailySummary({ txns, today:weeklyTodayKey, myAmount:getMyExpenseAmount }),[txns,getMyExpenseAmount,weeklyTodayKey]);
+  const [dailyNotifOn, setDailyNotifOn] = useState(()=>{ try { return localStorage.getItem("arth_daily_notif")==="1"; } catch { return false; } });
+  useEffect(()=>{ try { localStorage.setItem("arth_daily_notif", dailyNotifOn?"1":"0"); } catch { /* the choice is simply not kept */ } },[dailyNotifOn]);
+  useEffect(()=>{
+    if(!dailyNotifAvailable()) return undefined;
+    if(!dailyNotifOn){ dailyNotifCancel(); return undefined; }
+    const timer = setTimeout(()=>{ dailyNotifSchedule({ summary:dailyNow, sym, fmt }); }, 1500);
+    return ()=>clearTimeout(timer);
+  },[dailyNotifOn, dailyNow]);
+  useEffect(()=>{
+    if(!dailyNotifAvailable() || !dailyNotifOn) return undefined;
+    let remove = ()=>{}; let gone = false;
+    dailyNotifOnOpen(()=>{ setShowSettings(false); setTab("home"); }).then(r=>{ if(gone) r(); else remove = r; });
+    return ()=>{ gone = true; remove(); };
+  },[dailyNotifOn]);
+  const toggleDailyNotif = async()=>{
+    if(dailyNotifOn){ setDailyNotifOn(false); setToast({ message:"Daily summary is off", icon:"🔕" }); return; }
+    const perm = await ensureNotifPermission();
+    if(!perm.ok){ setToast({ message:notifBlockedMessage(perm.state), icon:"⚠️", actionLabel:"Open settings", onAction:()=>{ openNotificationSettings(); } }); return; }
+    setDailyNotifOn(true); setToast({ message:"On: a summary of the day's spending at 9 pm", icon:"🔔" });
+  };
   const smsInbox = useSmsInbox({ accounts, txns, people, billerAccounts });   // bank messages caught as they arrive (Android app only); proposals, never entries
   const activePrepaidAlerts = useMemo(()=>getPrepaidAlerts({ billerAccounts, bills, relationships:membershipRelationships, today:new Date(), dismissed:dismissedAlerts }),[billerAccounts,bills,membershipRelationships,dismissedAlerts]);
   const directOwedToMe = useMemo(()=>Object.values(settlements).reduce((s,p)=>s+(p.owesMe||0),0),[settlements]);
@@ -15849,14 +15874,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       setEditingCategoryName("");
     };
 
-    const Row=({ icon,title,subtitle,onClick,right })=>(
-      <div onClick={onClick} style={{ display:"flex",alignItems:"center",gap:14,padding:"14px 16px",borderBottom:`1px solid ${T.border}`,cursor:onClick?"pointer":"default" }}>
+    // A row with `toggle={{val,fn}}` is a switch: the whole row is the tap target, not just the small switch.
+    const Row=({ icon,title,subtitle,onClick,right,toggle })=>(
+      <div onClick={toggle?toggle.fn:onClick} role={toggle?"switch":undefined} aria-checked={toggle?Boolean(toggle.val):undefined} style={{ display:"flex",alignItems:"center",gap:14,padding:"14px 16px",minHeight:56,boxSizing:"border-box",borderBottom:`1px solid ${T.border}`,cursor:(onClick||toggle)?"pointer":"default" }}>
         <div style={{ width:36,height:36,borderRadius:10,background:T.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0 }}>{icon}</div>
         <div style={{ flex:1 }}>
           <div style={{ color:T.text,fontSize:14,fontWeight:600 }}>{title}</div>
           {subtitle&&<div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{subtitle}</div>}
         </div>
-        {right||(onClick&&<div style={{ color:T.sub,fontSize:16 }}>›</div>)}
+        {toggle?<div style={{ pointerEvents:"none" }}><Toggle val={toggle.val}/></div>:(right||(onClick&&<div style={{ color:T.sub,fontSize:16 }}>›</div>))}
       </div>
     );
 
@@ -16215,6 +16241,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "One-tap WhatsApp: on a bill's split there is now a WhatsApp button next to Share for each person who owes. It opens that person's chat from your own WhatsApp with their share and the due date already typed (add their phone number on their profile; without one WhatsApp lets you pick the contact), and you press Send. Home, Needs you, Remind does the same. Arth cannot send WhatsApp messages by itself from a personal number.",
             "Match your bank (Money → an account): each bank and cash account's own page now has \"Does this match your bank?\" with a Set actual balance button, and shows the gap or Matched. It is the same check that was in Settings, which still has it.",
             "New navigation (Settings, off by default): the bottom bar becomes Today, Money, People and Plan. Money opens on your activity, with Accounts, Cards, Loans and Invest one tap away (those four ask for the PIN; Loans is a new list of what you owe and what you gave); Plan holds Bills, Budget, Goals, Events and Outlook. Every screen is the same one as before, only grouped; switch it off any time.",
+            "Settings, tidied: five groups (You and your data, Money setup, Look and behaviour, Privacy and notifications, Help). On/off items are real switches and the whole row is the tap target. Notifications is one screen: Bill reminders, Weekly summary and the new Daily summary (what you spent today, at 9 pm, Android app, off by default). PIN, fingerprint and lock are one screen. If the phone will not allow notifications, Arth now says why and offers Open settings instead of doing nothing. The version shows once.",
             "Outlook flags possible duplicates: two open entries with the same amount, within a week of each other and with the same words in the name (a bill and a repeating schedule for the same rent, say) get a Possible duplicate tag and are listed in a card at the top. Both are counted in what you need, so check them; \"These are different\" clears a pair. Nothing is deleted for you.",
             "Fingerprint unlock (Android app, Settings): touch the sensor instead of typing the PIN. Off by default; turning it on asks for your fingerprint once. The phone is asked up to 4 times, then only the PIN is left (at once if you choose the PIN). The lock-out after 5 wrong PINs is unchanged. Arth never stores the fingerprint; the phone keeps it.",
             "Bill reminders (Android app, Settings): a phone notification 3 days before a bill is due and on the day, at 9 am, for bills still owed. Tap it to open the bill. Off by default.",
@@ -16459,12 +16486,45 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       </div>
     );
 
+    if(settingsSection==="notifications_settings") return (
+      <div data-testid="notifications-settings" style={{ padding:"14px 0 0" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:12,padding:"0 16px 16px" }}>
+          <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900,flex:1 }}>Notifications</div>
+        </div>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Phone reminders</div>
+        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
+          {dueNotifAvailable()?<Row icon="🧾" title="Bill reminders" subtitle={dueNotifOn?"On — 3 days before a bill is due and on the day, 9 am":"Off — 3 days before a bill is due and on the day, 9 am"} toggle={{val:dueNotifOn,fn:toggleDueNotif}}/>:null}
+          {weeklyNotifAvailable()?<Row icon="📅" title="Weekly summary" subtitle={weeklyNotifOn?"On — Sundays at 7 pm":"Off — Sundays at 7 pm"} toggle={{val:weeklyNotifOn,fn:toggleWeeklyNotif}}/>:null}
+          {dailyNotifAvailable()?<Row icon="🌙" title="Daily summary" subtitle={dailyNotifOn?"On — what you spent today, at 9 pm":"Off — what you spent today, at 9 pm"} toggle={{val:dailyNotifOn,fn:toggleDailyNotif}}/>:null}
+          {!dueNotifAvailable()&&!weeklyNotifAvailable()&&!dailyNotifAvailable()&&<div style={{ color:T.sub,fontSize:12,padding:"14px 16px" }}>Phone reminders are in the Android app. This is the web version.</div>}
+        </div>
+        <div style={{ color:T.sub,fontSize:11,padding:"0 16px 16px",lineHeight:1.5 }}>The summaries use what Arth last saw, so each says when that was. If you do not open Arth for days, the next one still shows the old figures with its date.</div>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>In the app</div>
+        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
+          <Row icon="🔔" title="Alerts and new bills" subtitle="Budget, card limit, prepaid plans, bank messages and new bills" onClick={()=>setShowNotifications(true)}/>
+        </div>
+        <div style={{ height:96 }}/>
+      </div>
+    );
+
     if(settingsSection==="security") return (
       <div style={{ padding:"14px 16px 0" }}>
         <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
           <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
-          <div style={{ color:T.text,fontSize:18,fontWeight:900,flex:1 }}>Security</div>
+          <div style={{ color:T.text,fontSize:18,fontWeight:900,flex:1 }}>PIN, fingerprint & lock</div>
         </div>
+        {bio.available&&(
+          <div data-testid="security-fingerprint" role="switch" aria-checked={bio.on} onClick={bio.toggle} style={{ ...card,marginBottom:12,cursor:"pointer",minHeight:56 }}>
+            <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+              <div style={{ flex:1,minWidth:0 }}>
+                <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>Unlock with fingerprint</div>
+                <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{bio.on?"On — touch the sensor instead of typing the PIN. After 4 tries that do not match, only the PIN is left.":"Off — touch the sensor instead of typing the PIN. The PIN stays as the fallback."}</div>
+              </div>
+              <div style={{ pointerEvents:"none" }}><Toggle val={bio.on}/></div>
+            </div>
+          </div>
+        )}
         <div style={{ ...card,marginBottom:12 }}>
           <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:8 }}>App PIN</div>
           <div style={{ color:T.sub,fontSize:11,marginBottom:12 }}>Your app is protected by a 4-digit PIN. Change it here or lock Arth immediately.</div>
@@ -16666,54 +16726,43 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>Settings</div>
         </div>
 
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Manage</div>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>You and your data</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
-          <Row icon="🏦" title="Accounts" subtitle={`${accounts.length} account${accounts.length===1?"":"s"}`} onClick={()=>setSettingsSection("accounts")}/>
-          <Row icon="🧭" title="New navigation" subtitle={navV2?"On · Today, Money, People, Plan":"Off · the current tabs"} onClick={()=>{ setNavV2(v=>!v); setTab("home"); setToast({ message:navV2?"Back to the current tabs":"Today, Money, People and Plan are on", icon:"🧭" }); }}/>
-          {bio.available&&<Row icon="🫆" title="Unlock with fingerprint" subtitle={bio.on?"On · the PIN is still the fallback":"Off · touch the sensor instead of typing the PIN"} onClick={bio.toggle}/>}
-          {dueNotifAvailable()&&<Row icon="🧾" title="Bill reminders" subtitle={dueNotifOn?"On · 3 days before and on the day, 9 am":"Off"} onClick={toggleDueNotif}/>}
-          {weeklyNotifAvailable()&&<Row icon="🔔" title="Weekly summary notification" subtitle={weeklyNotifOn?"On · Sundays at 7 pm":"Off"} onClick={toggleWeeklyNotif}/>}
-          <Row icon="🗂️" title="Categories" subtitle={`${cats.length} categories`} onClick={()=>setSettingsSection("categories")}/>
-          <Row icon="🏷️" title="Account, Income & Liability Types" subtitle="Add custom types" onClick={()=>setSettingsSection("types")}/>
-          {/* People & Groups and Vehicles removed from here per real feedback - both are now
-              reachable only via the Drawer shortcuts, avoiding the same two-places-for-one-thing
-              duplication already cleaned up elsewhere. */}
-          {/* Billers row removed — redundant with the "Payments" drawer entry, which routes to
-              the exact same setTab("bills") destination. No functionality removed, only the
-              duplicate navigation entry. Insurance and School Fees moved out of Settings
-              entirely — they're operational financial relationships, not configuration; both
-              remain reachable via Payments' category grid (Bills tab), same real screens. */}
-        </div>
-
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Data</div>
-        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
-          {/* Import intentionally not listed — confirmed not built anywhere in the app today
-              (per the Screen Inventory). Export exists via CSV, listed below under Backup. */}
           <Row icon="🙂" title="My Profile" subtitle={(people.find(p=>p.isMe)?.name)||"Set up your identity in Arth"} onClick={()=>setSettingsSection("myprofile")}/>
           <Row icon="🔑" title="Cloud Sync & Account" subtitle={cloudUser?.email ? `Signed in as ${cloudUser.email}${lastSyncedAt ? " · synced" : ""}` : "Sign in to sync across devices"} onClick={()=>setSettingsSection("cloudsync")}/>
           <Row icon="☁️" title="Backup & Restore" subtitle={autoBackupEnabled?`Auto backup ${autoBackupFrequency} · ${autoBackups.length} saved`:"Auto backup off"} onClick={()=>setSettingsSection("backup")}/>
         </div>
 
-        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Settings</div>
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Money setup</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
-          <Row icon="🌙" title="Dark Mode" subtitle={dark?"On — dark theme active":"Off — light theme active"} right={<Toggle val={dark} fn={()=>setDark(v=>!v)}/>}/>
-          <Row icon="🏷️" title="Auto-suggest Category" subtitle={autoDetectExpenseCategory?"On — category suggested from store name":"Off — manual category selection"} right={<Toggle val={autoDetectExpenseCategory} fn={()=>setAutoDetectExpenseCategory(v=>!v)}/>}/>
-          <Row icon="🔐" title="PIN & Lock" subtitle="Change your app PIN or lock Arth now" onClick={()=>setSettingsSection("security")}/>
-          <Row icon="🔔" title="Notifications" subtitle="Bill reminders and alerts" onClick={()=>{ setShowNotifications(true); }}/>
+          <Row icon="🏦" title="Accounts" subtitle={`${accounts.length} account${accounts.length===1?"":"s"}`} onClick={()=>setSettingsSection("accounts")}/>
+          <Row icon="🗂️" title="Categories" subtitle={`${cats.length} categories`} onClick={()=>setSettingsSection("categories")}/>
+          <Row icon="🏷️" title="Account, Income & Liability Types" subtitle="Add custom types" onClick={()=>setSettingsSection("types")}/>
+        </div>
+
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Look and behaviour</div>
+        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
+          <Row icon="🌙" title="Dark Mode" subtitle={dark?"On — dark theme active":"Off — light theme active"} toggle={{val:dark, fn:()=>setDark(v=>!v)}}/>
+          <Row icon="🏷️" title="Auto-suggest Category" subtitle={autoDetectExpenseCategory?"On — category suggested from store name":"Off — manual category selection"} toggle={{val:autoDetectExpenseCategory, fn:()=>setAutoDetectExpenseCategory(v=>!v)}}/>
+          <Row icon="🧭" title="New navigation" subtitle={navV2?"On — Today, Money, People, Plan":"Off — the current tabs"} toggle={{val:navV2, fn:()=>{ setNavV2(v=>!v); setToast({ message:navV2?"Back to the current tabs":"Today, Money, People and Plan are on", icon:"🧭" }); }}}/>
+        </div>
+
+        <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Privacy and notifications</div>
+        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
+          <Row icon="🔐" title="PIN, fingerprint & lock" subtitle={bio.available?(bio.on?"Fingerprint on · the PIN is the fallback":"Change your PIN, lock now, or use your fingerprint"):"Change your app PIN or lock Arth now"} onClick={()=>setSettingsSection("security")}/>
+          <Row icon="🔔" title="Notifications" subtitle={[dueNotifAvailable()&&`Bill reminders ${dueNotifOn?"on":"off"}`,weeklyNotifAvailable()&&`weekly ${weeklyNotifOn?"on":"off"}`,dailyNotifAvailable()&&`daily ${dailyNotifOn?"on":"off"}`].filter(Boolean).join(" · ")||"Bill reminders and alerts"} onClick={()=>setSettingsSection("notifications_settings")}/>
         </div>
 
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Help</div>
-        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 24px",overflow:"hidden" }}>
+        <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
           <Row icon="📖" title="Help & Support" subtitle="How-to guides for features" onClick={()=>setSettingsSection("guides")}/>
-          <Row icon="🚀" title="About Arth" subtitle={`v${APP_VERSION} · What's new`} onClick={()=>setSettingsSection("releasenotes")}/>
+          <Row icon="🚀" title="About Arth" subtitle={`${APP_VERSION} · What's new`} onClick={()=>setSettingsSection("releasenotes")}/>
         </div>
 
         <div style={{ color:T.sub,fontSize:10,textAlign:"center",padding:"0 16px 8px" }}>
           {txns.length} txns · {accounts.length} accounts · {people.filter(p=>!p.isMe).length} people · {bills.length} bills
         </div>
-        <div style={{ color:T.sub,fontSize:11,textAlign:"center",padding:"0 16px 32px" }}>
-          {APP_VERSION}
-        </div>
+        <div style={{ height:96 }}/>
       </div>
     );
   };

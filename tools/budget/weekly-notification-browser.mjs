@@ -28,10 +28,11 @@ const page = await ctx.newPage(); const errors = []; page.on("pageerror", e => e
 const unlock = async () => { for (let i = 0; i < 3; i++) { if (await page.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await page.getByRole("button", { name: "1", exact: true }).click(); await page.waitForTimeout(100); } await page.waitForTimeout(700); } } };
 try {
   await page.goto(APP); await page.waitForTimeout(1300); await unlock(); await page.waitForTimeout(600);
-  await page.getByText("Budget", { exact: true }).first().dispatchEvent("click").catch(() => {}); await page.waitForTimeout(800);
-  await page.getByText("←", { exact: true }).first().dispatchEvent("click").catch(() => {}); await page.waitForTimeout(700);
-  rec("N1 Settings has the 'Weekly summary notification' row, Off by default", /Weekly summary notification\s*Off/.test(await page.evaluate(() => document.body.innerText.replace(/\s+/g, " "))), {});
-  await page.getByText("Weekly summary notification", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(2600);
+  await page.locator("button", { hasText: "☰" }).first().click(); await page.waitForTimeout(700);
+  await page.getByText(/Settings/).first().click(); await page.waitForTimeout(800);
+  await page.getByText("Notifications", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(600);
+  rec("N1 Notifications has the 'Weekly summary' row, Off by default", /Weekly summary\s*Off/.test(await page.evaluate(() => document.body.innerText.replace(/\s+/g, " "))), {});
+  await page.getByText("Weekly summary", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(2600);
   const calls = await page.evaluate(() => window.__ARTH_WEEKLY_TEST__.calls);
   const sch = calls.filter(c => c.op === "schedule").pop();
   rec("N2 turning it on schedules one notification", Boolean(sch), calls.map(c => c.op));
@@ -48,11 +49,12 @@ try {
   rec("N7 Later schedules the same summary for tomorrow at 7 pm", afterCalls.length === before + 1 && ist(tm).day === ist(tomorrow).day && ist(tm).h === 19, snooze.at);
   await page.evaluate(() => window.__ARTH_WEEKLY_TEST__.onAction("review")); await page.waitForTimeout(800);
   const body = await page.evaluate(() => document.body.innerText.replace(/\s+/g, " "));
-  rec("N8 Review opens Insights", /Insights/i.test(body) && !/Weekly summary notification/.test(body), body.slice(0, 160));
+  rec("N8 Review opens Insights", /Insights/i.test(body) && !/Weekly summary/.test(body), body.slice(0, 160));
   await page.goto(APP); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(600);
-  await page.getByText("Budget", { exact: true }).first().dispatchEvent("click").catch(() => {}); await page.waitForTimeout(800);
-  await page.getByText("←", { exact: true }).first().dispatchEvent("click").catch(() => {}); await page.waitForTimeout(700);
-  await page.getByText("Weekly summary notification", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(800);
+  await page.locator("button", { hasText: "☰" }).first().click(); await page.waitForTimeout(700);
+  await page.getByText(/Settings/).first().click(); await page.waitForTimeout(800);
+  await page.getByText("Notifications", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(600);
+  await page.getByText("Weekly summary", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(800);
   const last = (await page.evaluate(() => window.__ARTH_WEEKLY_TEST__.calls)).pop();
   rec("N9 turning it off cancels the scheduled notification", last && last.op === "cancel" && (await page.evaluate(() => localStorage.getItem("arth_weekly_notif"))) === "0", last);
 } catch (e) { rec("RUN", false, String(e).slice(0, 700)); }

@@ -20,7 +20,7 @@ for (let i = 0; i < 2; i++) if (await p.getByRole("button", { name: "1", exact: 
 rec("N1 off by default: the current bottom bar and no section switch", (await nav()).join("|").toLowerCase().includes("payments") && (await T("section-switch").count()) === 0, await nav());
 await p.getByText("☰").first().click(); await p.waitForTimeout(400); await p.getByRole("button", { name: /settings/i }).first().click(); await p.waitForTimeout(700);
 await p.getByText("New navigation").first().click(); await p.waitForTimeout(600);
-rec("N2 Settings switch turns it on", /On · Today, Money, People, Plan/.test(await text()), {});
+rec("N2 Settings switch turns it on", /On — Today, Money, People, Plan/.test(await text()), {});
 await p.getByText("☰").first().click().catch(() => {}); await p.waitForTimeout(300);
 await p.evaluate(() => { const b = [...document.querySelectorAll("button")].find(x => /^home$/i.test(x.textContent.trim()) || /^today$/i.test(x.textContent.replace(/[^A-Za-z]/g, ""))); });
 await p.reload(); await p.waitForTimeout(1200); for (let i = 0; i < 2; i++) if (await p.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await p.getByRole("button", { name: "1", exact: true }).click(); await p.waitForTimeout(100); } await p.waitForTimeout(500); }

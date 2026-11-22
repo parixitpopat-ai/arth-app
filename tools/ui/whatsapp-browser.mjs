@@ -44,6 +44,7 @@ try {
   await page.goto(APP); await page.waitForTimeout(1200); await unlock(); await page.waitForTimeout(400);
   await page.locator("button", { hasText: "☰" }).first().click(); await page.waitForTimeout(700);
   await page.getByText(/Settings/).first().click(); await page.waitForTimeout(800);
+  await page.getByText("Notifications", { exact: true }).first().dispatchEvent("click"); await page.waitForTimeout(600);
   rec("W5 Settings offers 'Bill reminders', off to begin with", /Bill reminders\s*Off/.test(await page.evaluate(() => document.body.innerText.replace(/\s+/g, " "))), {});
   await page.getByText("Bill reminders").first().dispatchEvent("click"); await page.waitForTimeout(2500);
   const calls = await page.evaluate(() => window.__ARTH_DUE_TEST__.calls);
