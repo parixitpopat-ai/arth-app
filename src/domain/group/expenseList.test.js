@@ -260,3 +260,18 @@ test("an all-time statement reads 'up to <date>', not a start date in 2000", () 
   const m = buildGroupExpenseMessage(items, { groupName: "Suryamandal", from: "2000-01-01", to: "2026-11-22", onlyUnpaid: true, showNames: false });
   assert.match(m.split("\n")[0], /^Suryamandal · up to 22 Nov 2026$/);
 });
+
+test("an expense tagged to a member with no share recorded is owed by them (tagPersonAmount, else the whole amount for 'they owe me back'); a bare tag owes nothing; the unpaid filter keeps it", () => {
+  const t = [
+    { id: "g1", type: "expense", desc: "Owe me back", date: "2026-07-05", amount: 800, forPerson: "x", tagMode: "person" },
+    { id: "g2", type: "expense", desc: "Part of it", date: "2026-07-06", amount: 1000, forPerson: "x", tagMode: "person", tagPersonAmount: 300 },
+    { id: "g3", type: "expense", desc: "Just a tag", date: "2026-07-07", amount: 500, forPerson: "x" },
+  ];
+  const items = buildGroupExpenseList({ ...base, memberIds: ["x", "y"], meId: null, includePeople: true, from: "2026-07-01", to: "2026-07-31", txns: t, bills: [] }).items;
+  const by = k => items.find(i => i.title === k);
+  assert.equal(by("Owe me back").due, 800);
+  assert.equal(by("Part of it").due, 300);
+  assert.equal(by("Just a tag").due, 0);
+  const u = unpaidOnly(items);
+  assert.deepEqual(u.map(i => [i.title, i.total]), [["Owe me back", 800], ["Part of it", 300]]);
+});

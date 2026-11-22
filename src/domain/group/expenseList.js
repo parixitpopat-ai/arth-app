@@ -75,10 +75,12 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
     return null;
   };
   // each part also says how much of it is still unpaid (`remaining`): a member's unpaid share, the group's unpaid allocation; the person's own part and a bare tag owe nothing
-  const partsOf = ({ shares, total, yourShare, forPerson, groupAmt = 0, groupRem = 0 }) => {
+  // What a person tagged on an expense (no share recorded) owes: the same rule the balances use (tagPersonAmount, else the whole amount for a "they owe me back" tag, else nothing: a bare tag)
+  const tagClaim = t => { const a = Number(t.tagPersonAmount || 0); return R(a > 0 ? P(a) : (t.tagMode === "person" ? P(t.amount) : 0)); };
+  const partsOf = ({ shares, total, yourShare, forPerson, groupAmt = 0, groupRem = 0, tagRem = 0 }) => {
     const out = shares.map(x => ({ personId: x.personId, name: x.name, amount: x.amount, remaining: x.remaining }));
     if (shares.length) { if (yourShare > 0 && meId != null) out.push({ personId: meId, name: nameOf(meId), amount: yourShare, remaining: 0 }); return out; }
-    if (forPerson && (members.has(String(forPerson)) || isMe(forPerson))) return [{ personId: String(forPerson), name: nameOf(forPerson), amount: total, remaining: 0 }];
+    if (forPerson && (members.has(String(forPerson)) || isMe(forPerson))) return [{ personId: String(forPerson), name: nameOf(forPerson), amount: total, remaining: isMe(forPerson) ? 0 : tagRem }];
     return [{ personId: null, name: "", amount: groupAmt > 0 ? groupAmt : total, remaining: groupRem }];   // the group's own part: what was allocated to it, else the whole
   };
   const items = [];
@@ -96,8 +98,8 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
     const paidBill = t.paidBillId != null ? (bills || []).find(b => b && String(b.id) === String(t.paidBillId)) : null;
     const yourShare = shares.length && !(Number(t.groupCollectiveAmount) > 0) ? Math.max(0, R(P(total) - P(memberTotal))) : null;
     items.push({ key: `txn:${t.id}`, kind: "expense", scope: "group", isBill: t.paidBillId != null, id: t.id, date, title: paidBill ? billTitle(paidBill, !shares.length || P(memberTotal) >= P(total) - 1) : (t.paidBillName || vendorOf(t)), total,
-      payer: t.paidByPersonId ? nameOf(t.paidByPersonId) : "you", note: String(t.note || ""), shares, memberTotal, due: R(shares.reduce((s, x) => s + P(x.remaining), 0) + (gp.owed ? gp.amt - gp.settled : 0)),
-      groupAmount: R(gp.amt), yourShare, parts: partsOf({ shares, total, yourShare, forPerson: t.forPerson, groupAmt: R(gp.amt), groupRem: gp.owed ? R(gp.amt - gp.settled) : 0 }), categories: categorySplit(t, P(total)) });
+      payer: t.paidByPersonId ? nameOf(t.paidByPersonId) : "you", note: String(t.note || ""), shares, memberTotal, due: R(shares.reduce((s, x) => s + P(x.remaining), 0) + (gp.owed ? gp.amt - gp.settled : 0) + (!shares.length && t.forPerson && !isMe(t.forPerson) && !(gp.owed) ? tagClaim(t) : 0)),
+      groupAmount: R(gp.amt), yourShare, parts: partsOf({ shares, total, yourShare, forPerson: t.forPerson, groupAmt: R(gp.amt), groupRem: gp.owed ? R(gp.amt - gp.settled) : 0, tagRem: t.forPerson && !shares.length ? tagClaim(t) : 0 }), categories: categorySplit(t, P(total)) });
   }
   for (const b of bills || []) {
     if (!b || String(b.groupId || "") !== gid || b.status === "cancelled" || b.skipped) continue;
@@ -126,11 +128,11 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
       if (!shares.length && !tagged) continue;
       if (t.paidBillId != null) paidBillIds.add(String(t.paidBillId));
       const total = R(P(t.amount));
-      const parts = shares.length ? shares.map(x => ({ personId: x.personId, name: x.name, amount: x.amount, remaining: x.remaining })) : [{ personId: String(t.forPerson), name: nameOf(t.forPerson), amount: total, remaining: 0 }];
+      const parts = shares.length ? shares.map(x => ({ personId: x.personId, name: x.name, amount: x.amount, remaining: x.remaining })) : [{ personId: String(t.forPerson), name: nameOf(t.forPerson), amount: total, remaining: tagClaim(t) }];
       const mine = R(parts.reduce((sum, x) => sum + P(x.amount), 0));
       const paidBill = t.paidBillId != null ? (bills || []).find(b => b && String(b.id) === String(t.paidBillId)) : null;
       items.push({ key: `txn:${t.id}`, kind: "expense", scope: "people", isBill: t.paidBillId != null, fromGroup: t.groupId ? groupNameOf(t.groupId) || "another group" : "", id: t.id, date, title: paidBill ? billTitle(paidBill, !t.groupId && P(mine) >= P(total) - 1) : (t.paidBillName || vendorOf(t)), total: mine,
-        payer: t.paidByPersonId ? nameOf(t.paidByPersonId) : "you", note: String(t.note || ""), shares, memberTotal: mine, due: R(shares.reduce((sum, x) => sum + P(x.remaining), 0)),
+        payer: t.paidByPersonId ? nameOf(t.paidByPersonId) : "you", note: String(t.note || ""), shares, memberTotal: mine, due: R(parts.reduce((sum, x) => sum + P(x.remaining), 0)),
         groupAmount: 0, yourShare: null, parts, categories: categorySplit(t, P(mine)) });
     }
     for (const b of bills || []) {
