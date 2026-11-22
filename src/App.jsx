@@ -9494,6 +9494,16 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     );
   };
 
+  // Calibrate an account: its opening balance and the real balance on a date (the sheet near the end of this file). Opened from the Settings account list and from the account's own page under Money.
+  const startCalibrate = a => {
+    const checkpoint = balanceCheckpoints[a.id];
+    setEditingCheckpoint(a.id);
+    setEditingOpeningBalanceVal(String(Number(a.openingBalance||0)));
+    setEditingOpeningBalanceDate(a.openingBalanceDate || todayStr());
+    setEditingCheckpointVal(checkpoint?.amount!=null ? String(checkpoint.amount) : String(Number(accountBalance(a.id)||0)));
+    setEditingCheckpointDate(checkpoint?.date || todayStr());
+  };
+
   // ── ACCOUNT DETAIL MODAL ───────────────────────────────────────────────────
   const AccDetailModal = () => {
     const a=showAccDetail;
@@ -9606,6 +9616,17 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             ))}
           </div>
 
+          {(a.type==="bank" || (a.type==="cash" && !isInvestmentAccount(a)))&&!isInvestmentAccount(a)&&(
+            <div data-testid="acc-calibrate-box" style={{ background:T.input,borderRadius:12,padding:"10px 12px",marginBottom:14,display:"flex",alignItems:"center",gap:10 }}>
+              <div style={{ flex:1,minWidth:0 }}>
+                <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>Does this match your bank?</div>
+                <div style={{ color:checkpoint?.date?(Math.abs(discrepancy||0)<0.01?T.success:T.warn):T.sub,fontSize:11,marginTop:2 }}>
+                  {checkpoint?.date ? `Actual ${formatShortDate(checkpoint.date)} · ${Math.abs(discrepancy||0)<0.01?"Matched":`Gap ${discrepancy>=0?"+":"−"}${sym}${fmt(Math.abs(discrepancy||0))}`}` : "Not checked yet. Enter the balance your bank shows."}
+                </div>
+              </div>
+              <button data-testid="acc-calibrate" onClick={()=>startCalibrate(a)} style={{ background:T.info+"22",border:`1px solid ${T.info}44`,borderRadius:12,minHeight:44,padding:"0 14px",cursor:"pointer",fontSize:12,fontWeight:800,color:T.info,fontFamily:"Inter,sans-serif" }}>📍 Set actual balance</button>
+            </div>
+          )}
 
           {a.type==="cc"&&<>
             <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>
@@ -16059,12 +16080,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         <div style={{ display:"flex",gap:6,alignItems:"center" }}>
                           {(a.needsCalibration || (a.type==="bank" && a.needsCalibration!==false))&&<button onClick={e=>{
                             e.stopPropagation();
-                            const checkpoint = balanceCheckpoints[a.id];
-                            setEditingCheckpoint(a.id);
-                            setEditingOpeningBalanceVal(String(Number(a.openingBalance||0)));
-                            setEditingOpeningBalanceDate(a.openingBalanceDate || todayStr());
-                            setEditingCheckpointVal(checkpoint?.amount!=null ? String(checkpoint.amount) : String(Number(accountBalance(a.id)||0)));
-                            setEditingCheckpointDate(checkpoint?.date || todayStr());
+                            startCalibrate(a);
                           }} style={{ background:T.info+"22",border:`1px solid ${T.info}33`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.info,fontFamily:"Inter,sans-serif" }}>📍 Balance</button>}
                           <button onClick={e=>{e.stopPropagation();setEditingAccount(a);}} style={{ background:T.accentSoft,border:`1px solid ${T.accent}33`,borderRadius:8,padding:"3px 8px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.accent,fontFamily:"Inter,sans-serif" }}>✏️ Edit</button>
                           <button onClick={e=>{e.stopPropagation();setConfirmDeleteAccount(a.id);}} style={{ background:"none",border:"none",color:T.danger,fontSize:14,cursor:"pointer" }}>🗑</button>
@@ -16157,6 +16173,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Repeating payments: Insights now has a card that finds payments that repeat in your own entries (the same name, the same amount, weekly, monthly, every 3 months or yearly) and shows what they cost a month and a year. \"Make a bill\" opens Add Bill filled in as a recurring bill; \"✕\" says it is not a subscription. It is a best guess and uses only what you have entered.",
             "New bills from your messages (Android app): when a provider sends a bill message (for example \"your electricity bill of Rs.3,045 is due on 28-Jul-26\"), Arth shows a NEW BILL card on Home and in the bell with the amount, due date and the connection it matched (by consumer number or provider name). \"Add this bill\" opens the Add Bill form filled in; nothing is saved until you save it. Credit card bills are not offered, because Arth makes those itself. You may need to allow Arth to read messages (Notifications > allow).",
             "One-tap WhatsApp: on a bill's split there is now a WhatsApp button next to Share for each person who owes. It opens that person's chat from your own WhatsApp with their share and the due date already typed (add their phone number on their profile; without one WhatsApp lets you pick the contact), and you press Send. Home, Needs you, Remind does the same. Arth cannot send WhatsApp messages by itself from a personal number.",
+            "Match your bank (Money → an account): each bank and cash account's own page now has \"Does this match your bank?\" with a Set actual balance button, and shows the gap or Matched. It is the same check that was in Settings, which still has it.",
             "New navigation (Settings, off by default): the bottom bar becomes Today, Money, People and Plan. Money opens on your activity (Accounts, with the PIN, is one tap away); Plan holds Bills, Budget, Goals, Events and Outlook. Every screen is the same one as before, only grouped; switch it off any time.",
             "Fingerprint unlock (Android app, Settings): touch the sensor instead of typing the PIN. Off by default; turning it on asks for your fingerprint once. The PIN stays as the fallback, and the lock-out after 5 wrong PINs is unchanged. Arth never stores the fingerprint; the phone keeps it.",
             "Bill reminders (Android app, Settings): a phone notification 3 days before a bill is due and on the day, at 9 am, for bills still owed. Tap it to open the bill. Off by default.",
