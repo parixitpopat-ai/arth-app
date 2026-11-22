@@ -111,3 +111,27 @@ test("the message adds a By category section with the shares", () => {
   const m = buildGroupExpenseMessage(items, { groupName: "Flat", from: base.from, to: base.to, breakup: buildCategoryBreakup(items, [{ id: "food", name: "Food" }]) });
   assert.match(m, /Sum - 400\n\nBy category:\nFood - 400 \(100%\)/);
 });
+
+test("one statement for the group and its people: member-tagged expenses (no group) join in at what the members bear; other groups' and non-members' are left out", () => {
+  const t = [
+    { id: "g1", type: "expense", desc: "Common meter bill", date: "2026-11-05", amount: 900, groupId: "g1", people: { r: { amount: 300, mode: "owes" } } },
+    { id: "p1", type: "expense", desc: "K Auto", date: "2026-11-06", amount: 7899, people: { r: { amount: 7899, mode: "owes" } } },
+    { id: "p2", type: "expense", desc: "Lunch split", date: "2026-11-07", amount: 1000, people: { r: { amount: 250, mode: "owes" }, zed: { amount: 250, mode: "owes" } } },   // zed is not a member: only Raj's 250 counts
+    { id: "p3", type: "expense", desc: "Tagged to Mangal", date: "2026-11-08", amount: 400, forPerson: "m" },
+    { id: "p4", type: "expense", desc: "Other group", date: "2026-11-09", amount: 500, groupId: "g2", people: { r: { amount: 500, mode: "owes" } } },
+    { id: "p5", type: "expense", desc: "Not a member", date: "2026-11-10", amount: 600, people: { zed: { amount: 600, mode: "owes" } } },
+    { id: "p6", type: "expense", desc: "Nobody", date: "2026-11-11", amount: 100 },
+  ];
+  const b = [{ id: "bb", name: "Gas", billDate: "2026-11-12", amount: 800, status: "unpaid", splitPeople: { m: { amount: 400, mode: "owes" } } }];
+  const off = buildGroupExpenseList({ ...base, txns: t, bills: b });
+  assert.deepEqual(off.items.map(i => i.title), ["Common meter bill"]);                                   // default: the group's own only
+  const on = buildGroupExpenseList({ ...base, includePeople: true, txns: t, bills: b });
+  assert.deepEqual(on.items.map(i => [i.title, i.scope, i.total]), [["Common meter bill", "group", 900], ["K Auto", "people", 7899], ["Lunch split", "people", 250], ["Tagged to Mangal", "people", 400], ["November Gas Bill", "people", 400]]);
+  assert.equal(on.items[2].parts.length, 1); assert.equal(on.items[2].parts[0].name, "Raj");
+  assert.equal(on.totals.total, 900 + 7899 + 250 + 400 + 400);
+});
+test("a bill payment that carries a member's share is counted once, from the payment", () => {
+  const t = [{ id: "pay", type: "expense", desc: "Gas", date: "2026-11-12", amount: 800, paidBillId: "bb", people: { m: { amount: 400, mode: "owes" } } }];
+  const b = [{ id: "bb", name: "Gas", billDate: "2026-11-12", amount: 800, status: "paid", paidByTxnId: "pay", splitPeople: { m: { amount: 400, mode: "owes" } } }];
+  assert.equal(buildGroupExpenseList({ ...base, includePeople: true, txns: t, bills: b }).items.length, 1);
+});

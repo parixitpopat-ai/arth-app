@@ -24,8 +24,9 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const [preset, setPreset] = useState("fy");
   const [from, setFrom] = useState(P.fy.from), [to, setTo] = useState(P.fy.to);
   const [status, setStatus] = useState("");
-  const [mode, setMode] = useState(() => (buildGroupExpenseList({ groupId: group.id, memberIds: [], txns, bills, from: presets(iso(new Date())).fy.from, to: iso(new Date()) }).totals.count > 0 ? "expenses" : "simple"));   // a group with expenses tagged to it opens on them
+  const [mode, setMode] = useState(() => (buildGroupExpenseList({ groupId: group.id, memberIds: (group.members || []).filter(id => String(id) !== String(meId) && id !== "__me__"), includePeople: true, txns, bills, from: presets(iso(new Date())).fy.from, to: iso(new Date()) }).totals.count > 0 ? "expenses" : "simple"));   // a group with expenses tagged to it opens on them
   const [exOff, setExOff] = useState({});
+  const [withPeople, setWithPeople] = useState(true);       // one statement: the group's expenses AND the expenses tagged to its people
   const [onlyMine, setOnlyMine] = useState(false);          // the message carries only the person using Arth's own parts
   const [withBreakup, setWithBreakup] = useState(true);   // the category break-up goes in the message too                // itemised expenses the person un-ticked            // "simple": Member: Item - amount lines you tick, then a total | "full": the family statement
   const [overrides, setOverrides] = useState({});
@@ -37,7 +38,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const lines = useMemo(() => (fam ? familyLines(fam, nameOf) : []), [fam]);   // eslint-disable-line react-hooks/exhaustive-deps
   const isOn = l => (l.key in overrides ? overrides[l.key] : l.ticked);
   const simpleMessage = buildSimpleMessage(lines.map(l => ({ ...l, on: isOn(l) })), { upiHandle, withNames: true });
-  const ex = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, memberIds, meId, txns, bills, billerAccounts, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, billerAccounts, from, to, people]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const ex = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, memberIds, meId, includePeople: withPeople, txns, bills, billerAccounts, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, billerAccounts, from, to, people, withPeople]);   // eslint-disable-line react-hooks/exhaustive-deps
   const exItems = ex ? ex.items.map(i => ({ ...i, on: !exOff[i.key] })) : [];
   const breakup = useMemo(() => {   // only my part: each expense counts at my share of it, spread over its categories in the same proportion
     const on = exItems.filter(i => i.on);
@@ -93,9 +94,9 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
           onAll={() => setOverrides(Object.fromEntries(lines.map(l => [l.key, true])))} onNone={() => setOverrides(Object.fromEntries(lines.map(l => [l.key, false])))} />}
         {mode === "expenses" && <div data-testid="fam-expenses">
           {!ex ? <div data-testid="fam-bad-range" style={{ color: T.warn, fontSize: 13 }}>Choose a start date that is not after the end date.</div>
-            : !ex.items.length ? <div data-testid="fam-exp-empty" style={{ ...sub, padding: "8px 0" }}>No expense is tagged to {group.name} in this period.</div> : <>
+            : !ex.items.length ? <div data-testid="fam-exp-empty" style={{ ...sub, padding: "8px 0" }}>No expense for {group.name}{withPeople ? " or its people" : ""} in this period.</div> : <>
             <div data-testid="fam-exp-summary" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
-              <div style={line}><span style={{ color: T.text, fontSize: 13 }}>{ex.totals.count} expense{ex.totals.count === 1 ? "" : "s"} tagged to {group.name}</span><span data-testid="fam-exp-total" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.total)}</span></div>
+              <div style={line}><span style={{ color: T.text, fontSize: 13 }}>{ex.totals.count} expense{ex.totals.count === 1 ? "" : "s"}{withPeople ? ` for ${group.name} and its people` : ` tagged to ${group.name}`}</span><span data-testid="fam-exp-total" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.total)}</span></div>
               {ex.totals.due > 0.004 && <div style={line}><span style={{ color: T.text, fontSize: 13 }}>Still to be paid by members</span><span data-testid="fam-exp-due" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.due)}</span></div>}
             </div>
             {breakup.rows.length > 0 && <div data-testid="fam-breakup" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 12, padding: "10px 12px", marginBottom: 10 }}>
@@ -112,6 +113,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
               ))}
               <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, ...sub }}><input data-testid="fam-breakup-in-message" type="checkbox" checked={withBreakup} onChange={e => setWithBreakup(e.target.checked)} />Put this break-up in the message</label>
             </div>}
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, ...sub }}><input data-testid="fam-with-people" type="checkbox" checked={withPeople} onChange={e => { setWithPeople(e.target.checked); setExOff({}); }} />Also include expenses tagged to {group.name}'s people (not to the group), at what they bear</label>
             <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
               <span style={sub}>Message shows</span>
               <button type="button" data-testid="fam-who-all" style={chip(!onlyMine)} onClick={() => setOnlyMine(false)}>Everyone's parts</button>
@@ -126,7 +128,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
                 <input data-testid="fam-exp-check" type="checkbox" checked={!exOff[i.key]} onChange={e => setExOff(o => ({ ...o, [i.key]: !e.target.checked }))} style={{ marginTop: 3 }} />
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ color: T.text, fontSize: 13, fontWeight: 700, display: "block", wordBreak: "break-word" }}>{i.title}</span>
-                  <span style={sub}>{shortDate(i.date, true)} · {i.kind === "bill" ? "bill, not paid yet" : `paid by ${i.payer}`}{i.groupAmount > 0 && !i.shares.length ? ` · for the group: ${money(i.groupAmount)}` : ""}</span>
+                  <span style={sub}>{shortDate(i.date, true)} · {i.scope === "people" ? "tagged to people, not the group · " : ""}{i.kind === "bill" ? "bill, not paid yet" : `paid by ${i.payer}`}{i.groupAmount > 0 && !i.shares.length ? ` · for the group: ${money(i.groupAmount)}` : ""}</span>
                   {i.shares.length > 0 && <span style={{ ...sub, display: "block" }}>{i.shares.map(x => `${x.name} ${money(x.amount)}${x.remaining < 0.005 ? " ✓" : ""}`).join(" · ")}{i.yourShare ? ` · you ${money(i.yourShare)}` : ""}</span>}
                 </span>
                 <span style={{ color: T.text, fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>{money(i.total)}</span>

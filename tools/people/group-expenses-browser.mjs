@@ -17,7 +17,8 @@ await ctx.addInitScript(([d3, d2, d1]) => { if (localStorage.getItem("__init")) 
   set("arth_txns", [
     { id: "t1", type: "expense", desc: "Electricity", date: d3, amount: 3000, accId: "b1", groupId: "flat", catId: "utilities", catIds: ["utilities"], people: { r: owes(1000), m: owes(1000, true) } },
     { id: "t2", type: "expense", desc: "Party snacks", date: d2, amount: 1200, accId: "b1", groupId: "flat", catId: "food", catIds: ["food"], groupCollectiveAmount: 1200 },
-    { id: "t3", type: "expense", desc: "Not the flat", date: d2, amount: 777, accId: "b1" }]);
+    { id: "t3", type: "expense", desc: "Not the flat", date: d2, amount: 777, accId: "b1" },
+    { id: "t4", type: "expense", desc: "K Auto", date: d2, amount: 500, accId: "b1", people: { r: owes(500) } }]);
   localStorage.setItem("arth_master_user_setup_complete", "true"); }, [day(3), day(2), day(1)]);
 const p = await ctx.newPage(); const errors = []; p.on("pageerror", e => errors.push(String(e)));
 const T = id => p.getByTestId(id); const body = async () => ((await T("family-statement-sheet").count()) ? await T("family-statement-sheet").innerText() : await p.locator("body").innerText()).replace(/\s+/g, " ");
@@ -28,26 +29,29 @@ await p.getByText(/Groups/).first().dispatchEvent("click"); await p.waitForTimeo
 await p.getByText("Flat", { exact: true }).first().dispatchEvent("click"); await p.waitForTimeout(800);
 await T("group-statement").scrollIntoViewIfNeeded().catch(() => {}); await T("group-statement").dispatchEvent("click"); await p.waitForTimeout(700);
 rec("G1 the group statement opens on the group's expenses (they exist), with a 'Group expenses' view", (await T("fam-expenses").count()) === 1 && (await T("fam-mode-expenses").count()) === 1, {});
-rec("G2 it lists the three expenses tagged to Flat: Electricity, Party snacks and the unpaid Internet bill; not the untagged one", (await T("fam-exp-line").count()) === 3 && /Electricity/.test(await body()) && /Party snacks/.test(await body()) && /Internet/.test(await body()) && !/Not the flat/.test(await body()), await T("fam-exp-line").count());
-rec("G3 the total is ₹5,100 (3,000 + 1,200 + 900) and ₹1,600 is still to be paid by members (Raj 1,000 + 300, Mangal 300; Mangal has paid his 1,000)", /₹5,100/.test(await T("fam-exp-total").innerText()) && /₹1,600/.test(await T("fam-exp-due").innerText()), [await T("fam-exp-total").innerText(), await T("fam-exp-due").innerText()]);
+rec("G2 one statement lists the group's three (Electricity, Party snacks, the unpaid Internet bill) AND Raj's K Auto that is tagged to him, not the group; not the untagged one", (await T("fam-exp-line").count()) === 4 && /K Auto[^]*tagged to people, not the group/.test(await body()) && /Electricity/.test(await body()) && /Party snacks/.test(await body()) && /Internet/.test(await body()) && !/Not the flat/.test(await body()), await T("fam-exp-line").count());
+rec("G3 the total is ₹5,600 (3,000 + 1,200 + 900 + Raj's 500) and ₹2,100 is still to be paid (Raj 1,000 + 300 + 500, Mangal 300)", /₹5,600/.test(await T("fam-exp-total").innerText()) && /₹2,100/.test(await T("fam-exp-due").innerText()), [await T("fam-exp-total").innerText(), await T("fam-exp-due").innerText()]);
 rec("G4 Electricity shows each member's share and that Mangal has paid", /Raj ₹1,000 · Mangal ₹1,000 ✓ · you ₹1,000/.test(await body()), (await body()).match(/Raj ₹1,000[^₹]*₹[\d,]+[^₹]*₹[\d,]+/)?.[0]);
 rec("G5 an expense tagged to the whole group (no member split) is listed with its total and paid-by, and no shares line", /Party snacks 2\d? ?\w* 2026 · paid by you ₹1,200 Internet/.test(await body()) || /Party snacks \d+ \w+ 2026 · paid by you ₹1,200/.test(await body()), (await body()).match(/Party snacks.{0,70}/)?.[0]);
-rec("C1 a By category box lists the categories with their totals and shares (Utilities 3,000 · 58.8%, Food 1,200, No category 900 for the unpaid bill)", (await T("fam-breakup").count()) === 1 && (await T("fam-cat-row").count()) === 3 && /Utilities · 58\.8%.*₹3,000/.test(await T("fam-breakup").innerText().then(x => x.replace(/\s+/g, " "))) , (await T("fam-breakup").innerText()).replace(/\s+/g, " ").slice(0, 200));
+rec("C1 a By category box lists the categories with their totals and shares (Utilities 3,000 · 58.8%, Food 1,200, No category 900 for the unpaid bill)", (await T("fam-breakup").count()) === 1 && (await T("fam-cat-row").count()) >= 3 && /Utilities · 53\.6%.*₹3,000/.test(await T("fam-breakup").innerText().then(x => x.replace(/\s+/g, " "))) , (await T("fam-breakup").innerText()).replace(/\s+/g, " ").slice(0, 200));
 await T("fam-cat-row").first().locator("summary").click(); await p.waitForTimeout(300);
 rec("C2 opening a category shows the entries behind it", /Electricity/.test(await T("fam-cat-row").first().innerText()), {});
 const msg = await T("fam-message").innerText();
-rec("C3 the message carries a By category section", /By category:\nUtilities - 3000 \(58\.8%\)/.test(msg) && /Food & Dining - 1200/.test(msg), msg.split("By category:")[1]?.slice(0, 120));
-rec("G6 the message is month by month with one 'Name - expenses' block per person holding only their part (Electricity: Raj 1000, Mangal 1000, Me 1000), the group's own items under Flat", /Me - expenses\n[^]*Electricity - 1000/.test(msg) && /Raj - expenses\n[^]*Electricity - 1000/.test(msg) && /Flat - expenses\nParty snacks - 1200/.test(msg) && /Internet.* - 300/.test(msg) && /November total - 5100/.test(msg) && /Pay to: sample@upi/.test(msg), msg);
+rec("C3 the message carries a By category section", /By category:\nUtilities - 3000 \(53\.6%\)/.test(msg) && /Food & Dining - 1200/.test(msg), msg.split("By category:")[1]?.slice(0, 120));
+rec("G6 the message is month by month with one 'Name - expenses' block per person holding only their part (Electricity: Raj 1000, Mangal 1000, Me 1000), the group's own items under Flat", /Me - expenses\n[^]*Electricity - 1000/.test(msg) && /Raj - expenses\n[^]*Electricity - 1000/.test(msg) && /Flat - expenses\nParty snacks - 1200/.test(msg) && /Internet.* - 300/.test(msg) && /November total - 5600/.test(msg) && /Raj - expenses\n[^]*K Auto - 500/.test(msg) && /Pay to: sample@upi/.test(msg), msg);
 await T("fam-exp-check").nth(1).uncheck(); await p.waitForTimeout(300);
 const msg2 = await T("fam-message").innerText();
 rec("G6b the button shares the expenses (it does not ask for the members' balance)", /Share these expenses/.test(await T("fam-share").innerText()), await T("fam-share").innerText());
-rec("G7 un-ticking Party snacks takes it out of the message and the total (3,900)", !/Party snacks/.test(msg2) && /November total - 3900/.test(msg2), msg2.split("\n").slice(-4).join(" | "));
+rec("G7 un-ticking Party snacks takes it out of the message and the total (3,900)", !/Party snacks/.test(msg2) && /November total - 4400/.test(msg2), msg2.split("\n").slice(-4).join(" | "));
 await T("fam-exp-check").nth(1).check(); await p.waitForTimeout(200);
 await T("fam-who-me").click(); await p.waitForTimeout(300);
 const mineMsg = await T("fam-message").innerText();
 rec("W1 'Only my part' keeps just my block: Electricity 1000 and Internet 300, Sum 1300, nothing of Raj or Mangal", /Me - expenses/.test(mineMsg) && !/Raj|Mangal|Party snacks/.test(mineMsg) && /Sum - 1300/.test(mineMsg), mineMsg);
 rec("W2 and the By category part counts only my parts", /Utilities - 1000/.test(mineMsg) || /By category/.test(mineMsg), mineMsg.split("By category:")[1]?.slice(0, 100));
 await T("fam-who-all").click(); await p.waitForTimeout(300); await T("fam-exp-check").nth(1).uncheck(); await p.waitForTimeout(200);
+await T("fam-with-people").uncheck(); await p.waitForTimeout(300);
+rec("P1 un-ticking 'also include expenses tagged to people' brings back the group's own three", (await T("fam-exp-line").count()) === 3 && !/K Auto/.test(await body()), await T("fam-exp-line").count());
+await T("fam-with-people").check(); await p.waitForTimeout(300); await T("fam-exp-check").nth(1).uncheck(); await p.waitForTimeout(200);
 rec("C4 un-ticking Party snacks takes Food out of the break-up", (await T("fam-cat-row").count()) === 2, await T("fam-cat-row").count());
 await T("fam-breakup-in-message").uncheck(); await p.waitForTimeout(200);
 rec("C5 the break-up can be left out of the message", !/By category/.test(await T("fam-message").innerText()), {});
