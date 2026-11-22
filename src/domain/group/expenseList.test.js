@@ -283,3 +283,21 @@ test("not itemised: what the cards owe beyond the listed entries comes back as o
   assert.deepEqual(notItemised(items, { byPerson: { x: 60 }, group: 10 }), []);   // the cards owe LESS than listed (paybacks netted off): nothing to add
   assert.deepEqual(notItemised(null, null), []);
 });
+
+test("an open bill whose payment entry is not tagged to the group is still listed (the balances count it); once the payment is listed, or the bill is paid, it is not listed twice", () => {
+  const bill = { id: "b9", name: "Electricity", amount: 4000, billDate: "2026-07-10", groupId: "g1", status: "unpaid", groupCollectiveAmount: 3445 };
+  const pay = { id: "p9", type: "expense", desc: "Electricity paid", date: "2026-07-12", amount: 4000, paidBillId: "b9" };   // no groupId: not in the list on its own
+  const base2 = { ...base, from: "2026-07-01", to: "2026-07-31" };
+  const a = buildGroupExpenseList({ ...base2, txns: [pay], bills: [bill] });
+  assert.equal(a.items.length, 1); assert.equal(a.items[0].due, 3445);
+  const payTagged = { ...pay, groupId: "g1", groupCollectiveAmount: 3445 };
+  assert.equal(buildGroupExpenseList({ ...base2, txns: [payTagged], bills: [bill] }).items.length, 1);   // the payment entry is the one line
+  assert.equal(buildGroupExpenseList({ ...base2, txns: [pay], bills: [{ ...bill, status: "paid" }] }).items.length, 0);
+});
+
+test("amounts tagged to a member item by item are listed and owed (the balances count them)", () => {
+  const tx = [{ id: "ti1", type: "expense", desc: "Groceries", date: "2026-07-05", amount: 2000, tagItems: [{ targetType: "person", targetId: "x", amount: 700 }, { targetType: "person", targetId: "y", amount: 300 }, { targetType: "person", targetId: "outsider", amount: 100 }] }];
+  const it = buildGroupExpenseList({ ...base, memberIds: ["x", "y"], meId: null, includePeople: true, from: "2026-07-01", to: "2026-07-31", txns: tx, bills: [] }).items;
+  assert.equal(it.length, 1); assert.equal(it[0].total, 1000); assert.equal(it[0].due, 1000);
+  assert.deepEqual(unpaidOnly(it)[0].parts.map(p => p.amount), [700, 300]);
+});

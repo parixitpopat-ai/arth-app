@@ -104,7 +104,8 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
   for (const b of bills || []) {
     if (!b || String(b.groupId || "") !== gid || b.status === "cancelled" || b.skipped) continue;
     if (paidBillIds.has(String(b.id)) || b.paidByTxnId != null) continue;   // its payment entry is already in the list (or out of the period)
-    if ((txns || []).some(t => t && t.paidBillId != null && String(t.paidBillId) === String(b.id))) continue;
+    // a bill with a payment entry is that entry, unless the bill is still open (the balances still count it) and its payment is not in this list (not tagged to the group): then the bill carries the claim
+    if (b.status !== "unpaid" && (txns || []).some(t => t && t.paidBillId != null && String(t.paidBillId) === String(b.id))) continue;
     const date = dateOfBill(b);
     if (!inRange(date)) continue;
     const src = getBillSplitSource(b, txns);
@@ -125,10 +126,14 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
       if (!inRange(date) || taken.has(`txn:${t.id}`)) continue;
       const shares = sharesOf({ ...(t.splitPeople || {}), ...(t.people || {}) });
       const tagged = !shares.length && t.forPerson && members.has(String(t.forPerson));
-      if (!shares.length && !tagged) continue;
+      // amounts tagged to a member item by item (tagItems), counted by the balances unless that member already has an open share on the expense
+      const shareIds = new Set(shares.map(x => String(x.personId)));
+      const itemParts = (t.tagItems || []).filter(it => it && it.targetType === "person" && it.targetId != null && members.has(String(it.targetId)) && !shareIds.has(String(it.targetId)) && Number(it.amount || 0) > 0)
+        .map(it => ({ personId: String(it.targetId), name: nameOf(it.targetId), amount: R(P(it.amount)), remaining: R(P(it.amount)) }));
+      if (!shares.length && !tagged && !itemParts.length) continue;
       if (t.paidBillId != null) paidBillIds.add(String(t.paidBillId));
       const total = R(P(t.amount));
-      const parts = shares.length ? shares.map(x => ({ personId: x.personId, name: x.name, amount: x.amount, remaining: x.remaining })) : [{ personId: String(t.forPerson), name: nameOf(t.forPerson), amount: total, remaining: tagClaim(t) }];
+      const parts = [...(shares.length ? shares.map(x => ({ personId: x.personId, name: x.name, amount: x.amount, remaining: x.remaining })) : (tagged ? [{ personId: String(t.forPerson), name: nameOf(t.forPerson), amount: total, remaining: tagClaim(t) }] : [])), ...itemParts];
       const mine = R(parts.reduce((sum, x) => sum + P(x.amount), 0));
       const paidBill = t.paidBillId != null ? (bills || []).find(b => b && String(b.id) === String(t.paidBillId)) : null;
       items.push({ key: `txn:${t.id}`, kind: "expense", scope: "people", isBill: t.paidBillId != null, fromGroup: t.groupId ? groupNameOf(t.groupId) || "another group" : "", id: t.id, date, title: paidBill ? billTitle(paidBill, !t.groupId && P(mine) >= P(total) - 1) : (t.paidBillName || vendorOf(t)), total: mine,
