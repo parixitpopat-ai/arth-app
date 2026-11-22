@@ -102,6 +102,7 @@ test("DATA_KEYS is exactly the persisted synced data: every other persisted key 
     arth_recovery_notice: "one-time note that a damaged list was restored from a backup on THIS phone; device-only", arth_damaged_: "PREFIX: a copy of damaged text kept aside (arth_damaged_<key>) on THIS phone; device-only",
     arth_weekly_notif: "whether THIS phone shows the weekly summary notification; device-only by design (it is this phone's notification permission and alarm)",
     arth_sms_pending: "bank messages caught on THIS phone, waiting for accept/discard; device-only by design (they are this phone's messages)", arth_sms_handled: "ids of bank messages already accepted/discarded on this phone; device-only",
+    arth_needs_archived: "Home Needs-you rows the person archived on THIS phone; a device-only convenience (a changed item returns by itself)",
     arth_vendor_not_same: "vendor spellings the person said are NOT the same vendor; device-only", arth_space_probe: "temporary 32 KB test write that checks whether browser storage has room; removed straight away", arth_auth_notes: "why the last session checks failed (names and numbers only); device-only diagnostic, never synced", arth_snapshots: "NOT a storage key: the cloud table name", arth_higher: "NOT a storage key: a comparison constant in card reconciliation",
   };
   const unknown = [...keys].filter(k => !DATA_KEYS.includes(k) && !(k in DEVICE_ONLY));
