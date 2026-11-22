@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildGroupExpenseList, unpaidOnly } from "./expenseList.js";
+import { buildGroupExpenseList, unpaidOnly, notItemised } from "./expenseList.js";
 import { buildGroupExpenseMessage } from "./expenseMessage.js";
 
 const nameOf = id => ({ r: "Raj", m: "Mangal", me: "Me" }[id] || id);
@@ -274,4 +274,12 @@ test("an expense tagged to a member with no share recorded is owed by them (tagP
   assert.equal(by("Just a tag").due, 0);
   const u = unpaidOnly(items);
   assert.deepEqual(u.map(i => [i.title, i.total]), [["Owe me back", 800], ["Part of it", 300]]);
+});
+
+test("not itemised: what the cards owe beyond the listed entries comes back as one line per person and one for the group; never negative", () => {
+  const items = [{ parts: [{ personId: "x", name: "Xena", amount: 100, remaining: 100 }, { personId: null, name: "", amount: 50, remaining: 50 }] }];
+  const g = notItemised(items, { byPerson: { x: 400, y: 70, z: 20 }, group: 80 }, { nameOf: id => ({ x: "Xena", y: "Yash", z: "Zed" }[id]), date: "2026-11-22" });
+  assert.deepEqual(g.map(i => [i.key, i.total]), [["gap:x", 300], ["gap:y", 70], ["gap:z", 20], ["gap:group", 30]]);
+  assert.deepEqual(notItemised(items, { byPerson: { x: 60 }, group: 10 }), []);   // the cards owe LESS than listed (paybacks netted off): nothing to add
+  assert.deepEqual(notItemised(null, null), []);
 });

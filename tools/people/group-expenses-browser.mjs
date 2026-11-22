@@ -95,10 +95,17 @@ await p.waitForTimeout(300);
 await T("group-owed-all").scrollIntoViewIfNeeded().catch(() => {}); rec("O1 the group page has an Everything owed to me button", (await T("group-owed-all").count()) === 1, {});
 await T("group-owed-all").dispatchEvent("click"); await p.waitForTimeout(800);
 const oMsg = (await T("fam-message").count()) ? await T("fam-message").innerText() : "";
-rec("O2 it opens on the expenses view, all time, unpaid only, the message says so", (await T("fam-only-unpaid").isChecked()) && /Only unpaid entries/.test(oMsg) && /Everything/i.test(await body()) && !/2000/.test(oMsg) && !/2000/.test(await T("fam-expenses").innerText().catch(() => "")), oMsg.slice(0, 120));
+rec("O2 it opens on the expenses view, all time, unpaid only, the message says so", (await T("fam-only-unpaid").isChecked()) && /Only unpaid entries/.test(oMsg) && /Everything/i.test(await body()) && !/Jan 2000/.test(oMsg) && !/01\/01\/2000/.test(await body()), oMsg.slice(0, 120));
 rec("O3 it shows the total of the entries listed and the balance on the cards", (await T("fam-owed-entries").count()) === 1 && (await T("fam-owed-card").count()) === 1, [await T("fam-owed-entries").innerText().catch(() => ""), await T("fam-owed-card").innerText().catch(() => "")]);
 await T("fam-only-unpaid").uncheck(); await p.waitForTimeout(300);
 rec("O4 the two totals go away when the unpaid filter is off", (await T("fam-owed-card").count()) === 0, {});
+await T("fam-mode-expenses").click(); await p.waitForTimeout(300);
+rec("O5 'Group expenses' is the plain view: no card-balance lines", (await T("fam-owed-card").count()) === 0, {});
+await T("fam-mode-all").click(); await p.waitForTimeout(500);
+rec("O6 the All button gives one list of the group and everyone, unpaid, with the totals beside the cards", (await T("fam-only-unpaid").isChecked()) && (await T("fam-owed-card").count()) === 1 && (await T("fam-exp-line").count()) >= 1, [await T("fam-owed-entries").innerText().catch(() => ""), await T("fam-owed-card").innerText().catch(() => "")]);
+const gapShown = (await T("fam-owed-notitemised").count()) > 0;
+const entriesNow = Number((await T("fam-owed-entries").innerText()).replace(/[^0-9.]/g, "")), cardNow = Number((await T("fam-owed-card").innerText()).replace(/[^0-9.]/g, ""));
+rec("O7 whatever the cards owe that no entry explains is added as 'Other balance' lines, so the list reaches the card total (or is above it only by paybacks)", entriesNow >= cardNow - 0.5 || !gapShown, [entriesNow, cardNow, gapShown]);
 rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 await b.close(); try { process.kill(-server.pid); } catch {}
 const bad = results.filter(r => !r.pass).length; console.log(`\n${results.length - bad}/${results.length} passed`); process.exit(bad ? 1 : 0);

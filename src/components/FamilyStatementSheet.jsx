@@ -6,7 +6,7 @@ import StatementPreview from "./StatementPreview";
 import { buildFamilyStatement } from "../domain/person/personStatement";
 import StatementSelection from "./StatementSelection";
 import { buildFamilyMessage, shortDate, familyLines, buildSimpleMessage } from "../domain/person/statementMessage";
-import { buildGroupExpenseList, unpaidOnly } from "../domain/group/expenseList";
+import { buildGroupExpenseList, unpaidOnly, notItemised } from "../domain/group/expenseList";
 import { buildGroupExpenseMessage } from "../domain/group/expenseMessage";
 import { buildCategoryBreakup } from "../domain/group/categoryBreakup";
 
@@ -18,7 +18,7 @@ function presets(todayIso, earliest = "2000-01-01") {
     fy: { label: "This financial year", from: `${fyY}-04-01`, to: todayIso }, all: { label: "Everything", from: earliest, to: todayIso } };
 }
 
-export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number(n).toFixed(2), group, people = [], txns = [], bills = [], billerAccounts = [], groups = [], cats = [], upiHandle = "", meId, startAll = false, cardBalance = null, onClose }) {
+export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number(n).toFixed(2), group, people = [], txns = [], bills = [], billerAccounts = [], groups = [], cats = [], upiHandle = "", meId, startAll = false, cardParts = null, onClose }) {
   const today = useMemo(() => iso(new Date()), []);
   // "Everything" starts at the first entry that concerns this group or its people, not at a made-up year
   const earliest = useMemo(() => {
@@ -36,6 +36,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const [exOff, setExOff] = useState({});
   const [withPeople, setWithPeople] = useState(true);       // one statement: the group's expenses AND the expenses tagged to its people
   const [showNames, setShowNames] = useState(group.includeMe !== false && meId != null);   // names as headings: on for my own flat, off for a family I send it to
+  const [allView, setAllView] = useState(startAll);   // "All": everything owed by the group and each member in one list, with what no entry explains added as its own lines, so it reaches the card total
   const [onlyUnpaid, setOnlyUnpaid] = useState(true);   // only what is still owed: settled items drop out, part-paid ones are cut to what is left
   const [onlyMine, setOnlyMine] = useState(false);          // the message carries only the person using Arth's own parts
   const [withBreakup, setWithBreakup] = useState(true);   // the category break-up goes in the message too                // itemised expenses the person un-ticked            // "simple": Member: Item - amount lines you tick, then a total | "full": the family statement
@@ -50,12 +51,15 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const isOn = l => (l.key in overrides ? overrides[l.key] : l.ticked);
   const simpleMessage = buildSimpleMessage(lines.map(l => ({ ...l, on: isOn(l) })), { upiHandle, withNames: true });
   const exAll = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, groupName: group.name, groupNameOf: gid => (groups.find(x => String(x.id) === String(gid)) || {}).name || "", memberIds, meId: inGroup ? meId : null, includePeople: withPeople, txns, bills, billerAccounts, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, billerAccounts, from, to, people, withPeople]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const cardBalance = cardParts ? Math.round((Object.values(cardParts.byPerson || {}).reduce((a, v) => a + Number(v || 0), 0) + Number(cardParts.group || 0)) * 100) / 100 : null;
   const ex = useMemo(() => {
     if (!exAll || !onlyUnpaid) return exAll;
-    const items = unpaidOnly(exAll.items);
     const R = n => Math.round(n * 100) / 100;
-    return { items, totals: { count: items.length, total: R(items.reduce((a, i) => a + i.total, 0)), memberTotal: R(items.reduce((a, i) => a + (i.memberTotal || 0), 0)), due: R(items.reduce((a, i) => a + i.total, 0)) } };
-  }, [exAll, onlyUnpaid]);
+    let items = unpaidOnly(exAll.items);
+    const gaps = allView && cardParts ? notItemised(items, cardParts, { nameOf, date: to }) : [];
+    items = [...items, ...gaps];
+    return { items, gapTotal: R(gaps.reduce((a, i) => a + i.total, 0)), totals: { count: items.length, total: R(items.reduce((a, i) => a + i.total, 0)), memberTotal: R(items.reduce((a, i) => a + (i.memberTotal || 0), 0)), due: R(items.reduce((a, i) => a + i.total, 0)) } };
+  }, [exAll, onlyUnpaid, allView, cardParts, to]);   // eslint-disable-line react-hooks/exhaustive-deps
   const exItems = ex ? ex.items.map(i => ({ ...i, on: !exOff[i.key] })) : [];
   const breakup = useMemo(() => {   // only my part: each expense counts at my share of it, spread over its categories in the same proportion
     const on = exItems.filter(i => i.on);
@@ -103,7 +107,8 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
           <label style={{ flex: 1, minWidth: 0 }}><span style={sub}>Until</span><input data-testid="fam-to" type="date" style={inp} value={to} min={from || undefined} onChange={e => { setTo(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-          <button type="button" data-testid="fam-mode-expenses" style={chip(mode === "expenses")} onClick={() => { setMode("expenses"); setStatus(""); }}>Group expenses</button>
+          <button type="button" data-testid="fam-mode-expenses" style={chip(mode === "expenses" && !allView)} onClick={() => { setMode("expenses"); setAllView(false); setStatus(""); }}>Group expenses</button>
+          {cardParts && <button type="button" data-testid="fam-mode-all" style={chip(mode === "expenses" && allView)} onClick={() => { setMode("expenses"); setAllView(true); setPreset("all"); setFrom(P.all.from); setTo(P.all.to); setOnlyUnpaid(true); setWithPeople(true); setExOff({}); setStatus(""); }}>All</button>}
           <button type="button" data-testid="fam-mode-simple" style={chip(mode === "simple")} onClick={() => { setMode("simple"); setStatus(""); }}>Members, simple</button>
           <button type="button" data-testid="fam-mode-full" style={chip(mode === "full")} onClick={() => { setMode("full"); setStatus(""); }}>Full statement</button>
         </div>
@@ -114,12 +119,13 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
             : !ex.items.length ? <div data-testid="fam-exp-empty" style={{ ...sub, padding: "8px 0" }}>{onlyUnpaid ? "Nothing is unpaid for " + group.name + " in this period." : <>No expense for {group.name}{withPeople ? " or its people" : ""} in this period.</>}{onlyUnpaid && <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><input data-testid="fam-only-unpaid-off" type="checkbox" checked onChange={() => setOnlyUnpaid(false)} />Only what is still unpaid</label>}</div> : <>
             <div data-testid="fam-exp-summary" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
               <div style={line}><span style={{ color: T.text, fontSize: 13 }}>{ex.totals.count} expense{ex.totals.count === 1 ? "" : "s"}{withPeople ? ` for ${group.name} and its people` : ` tagged to ${group.name}`}</span><span data-testid="fam-exp-total" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.total)}</span></div>
-              {cardBalance != null && onlyUnpaid && (() => {
+              {cardBalance != null && onlyUnpaid && allView && (() => {
                 const gap = Math.round((cardBalance - ex.totals.total) * 100) / 100;
                 return <>
                   <div style={line}><span style={{ color: T.text, fontSize: 13 }}>Total of the entries listed</span><span data-testid="fam-owed-entries" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.total)}</span></div>
                   <div style={line}><span style={{ color: T.text, fontSize: 13 }}>Balance on your cards (owes you + group owes)</span><span data-testid="fam-owed-card" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(cardBalance)}</span></div>
-                  {Math.abs(gap) >= 0.5 && <div data-testid="fam-owed-gap" style={{ ...sub, fontSize: 11 }}>{money(gap)} {gap > 0 ? "is not in the list above" : "more is listed than the balance"}: the balance nets off paybacks and petty cash, which are not single entries.</div>}
+                  {ex.gapTotal > 0.004 && <div data-testid="fam-owed-notitemised" style={{ ...sub, fontSize: 11 }}>{money(ex.gapTotal)} of this has no entry to list: your cards say it is owed, but no expense, tag or bill adds up to it. It is shown as "Other balance" lines so you can check it.</div>}
+                  {Math.abs(gap) >= 0.5 && <div data-testid="fam-owed-gap" style={{ ...sub, fontSize: 11 }}>{gap > 0 ? `${money(gap)} on your cards is not in this list.` : `${money(gap)} more is listed than your cards show: paybacks or petty cash are netted off the cards, and they are not single entries.`}</div>}
                 </>;
               })()}
               {ex.totals.due > 0.004 && <div style={line}><span style={{ color: T.text, fontSize: 13 }}>Still to be paid by members</span><span data-testid="fam-exp-due" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.due)}</span></div>}

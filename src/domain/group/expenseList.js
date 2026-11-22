@@ -183,3 +183,30 @@ function scaleCats(cats, r, total) {
   let left = P(total);
   return (cats || []).map((c, k, arr) => { const paise = k === arr.length - 1 ? left : Math.round(P(c.amount) * r); left -= paise; return { ...c, amount: R(paise) }; }).filter(c => c.amount > 0);
 }
+
+/**
+ * What the cards say is owed that no listed entry explains, one item per person (and one for the group itself), so a statement that is meant to
+ * reach the card total can say so openly instead of leaving it out. `cardParts` = { byPerson: {pid: owed}, group: owed }, the figures the group page
+ * shows; the listed side is the unpaid amount on this list's items. Only a positive difference becomes an item (a smaller card figure is paybacks
+ * or petty cash netted off, which are not entries). Pure.
+ */
+export function notItemised(items, cardParts, { nameOf = id => String(id), date = "" } = {}) {
+  const listed = {}; let groupListed = 0;
+  for (const i of items || []) for (const p of i.parts || []) {
+    const r = Number(p.remaining) || 0;
+    if (p.personId == null) groupListed += r; else listed[String(p.personId)] = (listed[String(p.personId)] || 0) + r;
+  }
+  const out = [];
+  const add = (key, pid, name, diff) => {
+    const total = R(P(diff));
+    out.push({ key, kind: "expense", scope: pid == null ? "group" : "people", isBill: false, fromGroup: "", id: key, date, title: "Other balance (no entry to list)", total, payer: "", note: "", shares: [], memberTotal: total, due: total,
+      groupAmount: pid == null ? total : 0, yourShare: null, parts: [{ personId: pid, name, amount: total, remaining: total }], categories: [{ catId: null, amount: total, labels: [] }], soloName: pid == null ? "" : name, notItemised: true });
+  };
+  for (const [pid, card] of Object.entries((cardParts && cardParts.byPerson) || {})) {
+    const diff = Math.round((Number(card || 0) - (listed[String(pid)] || 0)) * 100) / 100;
+    if (diff >= 0.5) add(`gap:${pid}`, String(pid), nameOf(pid), diff);
+  }
+  const gd = Math.round((Number((cardParts && cardParts.group) || 0) - groupListed) * 100) / 100;
+  if (gd >= 0.5) add("gap:group", null, "", gd);
+  return out;
+}
