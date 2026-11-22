@@ -22,6 +22,6 @@ export default function TabGate({ children }) {
     return watchForeignWrites(window, window.localStorage, ()=>setStale(true));   // another tab changed the synced data under this one
   }, [own]);
   if(own==="owner" && !stale) return children;
-  if(own==="waiting" && !showWaiting) return <div style={{ minHeight:"100vh",background:"#08080f" }}/>;
+  if(own==="waiting" && !showWaiting) return <div style={{ minHeight:"100vh",background:"#0e1411" }}/>;
   return <TabPausedScreen reason={stale?"stale":"other"} onTakeOver={()=>{ setStale(false); ctlRef.current?.takeOver(); }} onReload={()=>window.location.reload()}/>;
 }

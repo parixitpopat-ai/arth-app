@@ -14,18 +14,19 @@ export const FONT = {
 };
 
 export const DARK = {
-  bg: "#08080f", card: "#0f0f1a", input: "#0b0b18", nav: "#0a0a16", pill: "#14142a",
-  border: "#1a1a2e", borderStrong: "#2b2b45",
-  text: "#e8e4dc", textStrong: "#ffffff",
-  sub: "#8b8bab",      // was #5a5a7a at 2.9:1 — now 5.8:1
-  subDim: "#7d7d9e",   // 4.8:1 — floor, nothing dimmer ships
-  accent: "#22c55e", accentSoft: "rgba(34,197,94,0.14)", accentInk: "#062e13", success: "#22c55e",
-  attention: "#f0a500", attentionSoft: "rgba(240,165,0,0.16)", warn: "#f0a500", gold: "#f0a500",
-  danger: "#ef4444", dangerSoft: "rgba(239,68,68,0.16)", dangerText: "#f87171",
-  info: "#06b6d4", infoSoft: "rgba(6,182,212,0.16)", infoText: "#22d3ee",
-  mutedSoft: "rgba(139,139,171,0.18)", mutedText: "#b9b9cf",
-  purple: "#8b5cf6", sh: "rgba(0,0,0,0.6)",
-  coming: "#6ea8ff", owing: "#f0a56a",   // money coming to you / money you owe (Today, People)
+  // New look, dark: the same sage-green family as LIGHT (a green-tinted charcoal instead of the old blue-violet navy).
+  bg: "#0e1411", card: "#161e19", input: "#1b2520", nav: "#121915", pill: "#1f2a24",
+  border: "#26332c", borderStrong: "#3a4a41",
+  text: "#e6ece8", textStrong: "#ffffff",
+  sub: "#9aa9a0",      // 6.9:1 on card
+  subDim: "#8a9990",   // 5.7:1 — floor, nothing dimmer ships
+  accent: "#3fcf8e", accentSoft: "rgba(63,207,142,0.14)", accentInk: "#06261a", success: "#3fcf8e",
+  attention: "#e8ad2f", attentionSoft: "rgba(232,173,47,0.16)", warn: "#e8ad2f", gold: "#e8ad2f",
+  danger: "#f06a6a", dangerSoft: "rgba(240,106,106,0.16)", dangerText: "#f58a8a",
+  info: "#4fc3d9", infoSoft: "rgba(79,195,217,0.16)", infoText: "#6fd3e6",
+  mutedSoft: "rgba(154,169,160,0.18)", mutedText: "#bccac1",
+  purple: "#a78bfa", sh: "rgba(0,0,0,0.6)",
+  coming: "#7fb0ff", owing: "#f0a56a",   // money coming to you / money you owe (Today, People)
 };
 
 export const LIGHT = {

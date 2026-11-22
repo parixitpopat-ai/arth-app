@@ -758,7 +758,7 @@ function PinScreen({ onUnlock, isSetup, onCancel, subtitle }) {
   const hiddenInputRef = React.useRef(null);
   React.useEffect(() => { hiddenInputRef.current?.focus(); }, [cur.length]);
   return (
-    <div style={{minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Inter,sans-serif"}}>
+    <div style={{minHeight:"100vh",background:"#0e1411",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Inter,sans-serif"}}>
       {/* B15: Hidden input keeps mobile keyboard context */}
       <input ref={hiddenInputRef} type="tel" inputMode="numeric" pattern="[0-9]*" style={{position:"absolute",opacity:0,width:1,height:1,pointerEvents:"none"}} onChange={e=>{ const v=e.target.value.replace(/\D/g,""); if(v) { handleKey(v[v.length-1]); e.target.value=""; } }} onKeyDown={e=>{ if(e.key==="Backspace") handleKey("del"); }}/>
       <div style={{fontSize:52,marginBottom:12,color:"#22c55e",fontWeight:900,fontFamily:"Inter,sans-serif"}}>₹</div>
@@ -770,7 +770,7 @@ function PinScreen({ onUnlock, isSetup, onCancel, subtitle }) {
       {error&&<div style={{color:"#ef4444",fontSize:12,marginBottom:14,textAlign:"center"}}>{error}</div>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,width:252,marginTop:12}}>
         {["1","2","3","4","5","6","7","8","9","","0","del"].map((k,i)=>k===""?<div key={i}/>:
-          <button key={i} onClick={()=>handleKey(k)} style={{background:"#0f0f1a",border:"1px solid #1a1a2e",borderRadius:14,padding:"19px 0",fontSize:k==="del"?18:24,fontWeight:700,color:k==="del"?"#5a5a7a":"#e8e4dc",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>{k==="del"?"⌫":k}</button>
+          <button key={i} onClick={()=>handleKey(k)} style={{background:"#161e19",border:"1px solid #26332c",borderRadius:14,padding:"19px 0",fontSize:k==="del"?18:24,fontWeight:700,color:k==="del"?"#5a5a7a":"#e8e4dc",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>{k==="del"?"⌫":k}</button>
         )}
       </div>
       {onCancel&&<button onClick={onCancel} style={{marginTop:18,background:"none",border:"1px solid #2a2a3a",borderRadius:12,padding:"10px 22px",cursor:"pointer",fontSize:13,fontWeight:700,color:"#5a5a7a",fontFamily:"Inter,sans-serif"}}>Cancel</button>}
@@ -785,7 +785,7 @@ class ErrorBoundary extends React.Component {
   componentDidCatch(e,info){ console.error("Arth error:",e,info); }
   render(){
     if(this.state.hasError) return (
-      <div style={{minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Inter,sans-serif"}}>
+      <div style={{minHeight:"100vh",background:"#0e1411",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Inter,sans-serif"}}>
         <div style={{fontSize:48,marginBottom:16}}>⚠️</div>
         <div style={{color:"#22c55e",fontSize:20,fontWeight:900,marginBottom:8}}>Something went wrong</div>
         <div style={{color:"#5a5a7a",fontSize:12,marginBottom:24,textAlign:"center",maxWidth:300}}>{this.state.error}</div>
@@ -894,7 +894,7 @@ function ArthInner() {
   }}/>;
 
   if(!unlocked) return (
-    <div style={{ minHeight:"100vh",background:"#08080f",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
+    <div style={{ minHeight:"100vh",background:"#0e1411",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
       {pinIsLocked ? (
         <div style={{ textAlign:"center" }}>
           <div style={{ fontSize:48,marginBottom:12 }}>🔒</div>
@@ -15964,6 +15964,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Add screen, step 6: Transfer now shows From and To right under the amount, and the long lists of category, person and group tags are gone: a transfer only moves money between two of your accounts. Transfers you tagged before keep their tags.",
             "Fixed: a card with an old statement bill that has no period saved could make the app crash on Home (\"Something went wrong\") once a statement cycle closed. Statements are also never added twice now.",
             "Cards: Money now shows one box for all your cards (total limit, used, available) with each card's use under it. Used counts what is billed, what is spent but not yet billed, and EMI purchases still to be billed, because the bank keeps those blocked on the limit (check against your own statement). Money Required also lists what you have spent on a card since its last statement, due when that statement is due.",
+            "New look, dark theme: the dark theme now matches the light one, a deep green-tinted charcoal with a softer green, in place of the old blue-violet navy. The PIN screen and the screens shown while the app waits use the same colours.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",
