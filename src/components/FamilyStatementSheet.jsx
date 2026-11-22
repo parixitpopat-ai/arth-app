@@ -26,6 +26,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const [status, setStatus] = useState("");
   const [mode, setMode] = useState(() => (buildGroupExpenseList({ groupId: group.id, memberIds: [], txns, bills, from: presets(iso(new Date())).fy.from, to: iso(new Date()) }).totals.count > 0 ? "expenses" : "simple"));   // a group with expenses tagged to it opens on them
   const [exOff, setExOff] = useState({});
+  const [onlyMine, setOnlyMine] = useState(false);          // the message carries only the person using Arth's own parts
   const [withBreakup, setWithBreakup] = useState(true);   // the category break-up goes in the message too                // itemised expenses the person un-ticked            // "simple": Member: Item - amount lines you tick, then a total | "full": the family statement
   const [overrides, setOverrides] = useState({});
   const nameOf = id => (people.find(p => String(p.id) === String(id)) || {}).name || "someone";
@@ -36,10 +37,14 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const lines = useMemo(() => (fam ? familyLines(fam, nameOf) : []), [fam]);   // eslint-disable-line react-hooks/exhaustive-deps
   const isOn = l => (l.key in overrides ? overrides[l.key] : l.ticked);
   const simpleMessage = buildSimpleMessage(lines.map(l => ({ ...l, on: isOn(l) })), { upiHandle, withNames: true });
-  const ex = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, memberIds, txns, bills, billerAccounts, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, billerAccounts, from, to, people]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const ex = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, memberIds, meId, txns, bills, billerAccounts, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, billerAccounts, from, to, people]);   // eslint-disable-line react-hooks/exhaustive-deps
   const exItems = ex ? ex.items.map(i => ({ ...i, on: !exOff[i.key] })) : [];
-  const breakup = useMemo(() => buildCategoryBreakup(exItems.filter(i => i.on), cats), [ex, exOff, cats]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const exMessage = ex ? buildGroupExpenseMessage(exItems, { groupName: group.name, from, to, upiHandle, breakup: withBreakup ? breakup : null }) : "";
+  const breakup = useMemo(() => {   // only my part: each expense counts at my share of it, spread over its categories in the same proportion
+    const on = exItems.filter(i => i.on);
+    if (!onlyMine) return buildCategoryBreakup(on, cats);
+    return buildCategoryBreakup(on.map(i => { const mine = (i.parts || []).filter(pt => pt.personId != null && String(pt.personId) === String(meId)).reduce((s, pt) => s + pt.amount, 0); if (!(mine > 0) || !(i.total > 0)) return null; const r = mine / i.total; return { ...i, categories: i.categories.map(c => ({ ...c, amount: Math.round(c.amount * r * 100) / 100 })) }; }).filter(Boolean), cats);
+  }, [ex, exOff, cats, onlyMine]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const exMessage = ex ? buildGroupExpenseMessage(exItems, { groupName: group.name, from, to, upiHandle, meId, onlyPersonId: onlyMine ? meId : null, breakup: withBreakup ? breakup : null }) : "";
   const message = mode === "expenses" ? exMessage : !fam ? "" : mode === "simple" ? simpleMessage : buildFamilyMessage(fam, { groupName: group.name, nameOf, sym, fmt, upiHandle });
   const owed = fam ? fam.closing : 0;
   const choose = id => { setPreset(id); setFrom(P[id].from); setTo(P[id].to); setStatus(""); setOverrides({}); setExOff({}); };
@@ -107,6 +112,11 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
               ))}
               <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, ...sub }}><input data-testid="fam-breakup-in-message" type="checkbox" checked={withBreakup} onChange={e => setWithBreakup(e.target.checked)} />Put this break-up in the message</label>
             </div>}
+            <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={sub}>Message shows</span>
+              <button type="button" data-testid="fam-who-all" style={chip(!onlyMine)} onClick={() => setOnlyMine(false)}>Everyone's parts</button>
+              <button type="button" data-testid="fam-who-me" style={chip(onlyMine)} onClick={() => setOnlyMine(true)}>Only my part</button>
+            </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
               <span style={sub}>Tick what to send</span>
               <span style={{ display: "flex", gap: 12 }}><button type="button" data-testid="fam-exp-all" style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }} onClick={() => setExOff({})}>All</button><button type="button" data-testid="fam-exp-none" style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }} onClick={() => setExOff(Object.fromEntries(ex.items.map(i => [i.key, true])))}>None</button></span>
