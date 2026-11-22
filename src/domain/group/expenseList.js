@@ -49,7 +49,7 @@ const dateOfBill = b => String(b.billDate || b.createdDate || b.dueDate || "").s
  * @returns {{items:Array<{key:string,kind:"expense"|"bill",id:any,date:string,title:string,total:number,payer:string,note:string,shares:Array<{personId:string,name:string,amount:number,remaining:number}>,memberTotal:number,due:number,groupAmount:number,yourShare:number|null}>,
  *           totals:{count:number,total:number,memberTotal:number,due:number}}}
  */
-export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, includePeople = false, groupName = "", txns = [], bills = [], billerAccounts = [], from, to, nameOf = id => String(id) }) {
+export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, includePeople = false, groupName = "", groupNameOf = () => "", txns = [], bills = [], billerAccounts = [], from, to, nameOf = id => String(id) }) {
   const gid = String(groupId);
   const inRange = d => d && d >= from && d <= to;
   const members = new Set((memberIds || []).map(String));
@@ -81,7 +81,7 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
     const total = R(P(t.amount));
     const paidBill = t.paidBillId != null ? (bills || []).find(b => b && String(b.id) === String(t.paidBillId)) : null;
     const yourShare = shares.length && !(Number(t.groupCollectiveAmount) > 0) ? Math.max(0, R(P(total) - P(memberTotal))) : null;
-    items.push({ key: `txn:${t.id}`, kind: "expense", scope: "group", id: t.id, date, title: paidBill ? billTitle(paidBill, !shares.length || P(memberTotal) >= P(total) - 1) : (t.paidBillName || vendorOf(t)), total,
+    items.push({ key: `txn:${t.id}`, kind: "expense", scope: "group", isBill: t.paidBillId != null, id: t.id, date, title: paidBill ? billTitle(paidBill, !shares.length || P(memberTotal) >= P(total) - 1) : (t.paidBillName || vendorOf(t)), total,
       payer: t.paidByPersonId ? nameOf(t.paidByPersonId) : "you", note: String(t.note || ""), shares, memberTotal, due: R(shares.reduce((s, x) => s + P(x.remaining), 0)),
       groupAmount: R(P(t.groupCollectiveAmount)), yourShare, parts: partsOf({ shares, total, yourShare, forPerson: t.forPerson }), categories: categorySplit(t, P(total)) });
   }
@@ -104,7 +104,7 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
   if (includePeople) {
     const taken = new Set(items.map(i => i.key));
     for (const t of txns || []) {
-      if (!t || t.type !== "expense" || t.isRefund || String(t.groupId || "") !== "") continue;
+      if (!t || t.type !== "expense" || t.isRefund || String(t.groupId || "") === gid) continue;   // (this group's own are already listed; another group's count too: a member bears them)
       const date = String(t.date || "").slice(0, 10);
       if (!inRange(date) || taken.has(`txn:${t.id}`)) continue;
       const shares = sharesOf({ ...(t.splitPeople || {}), ...(t.people || {}) });
@@ -115,19 +115,19 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
       const parts = shares.length ? shares.map(x => ({ personId: x.personId, name: x.name, amount: x.amount })) : [{ personId: String(t.forPerson), name: nameOf(t.forPerson), amount: total }];
       const mine = R(parts.reduce((sum, x) => sum + P(x.amount), 0));
       const paidBill = t.paidBillId != null ? (bills || []).find(b => b && String(b.id) === String(t.paidBillId)) : null;
-      items.push({ key: `txn:${t.id}`, kind: "expense", scope: "people", id: t.id, date, title: paidBill ? billTitle(paidBill, P(mine) >= P(total) - 1) : (t.paidBillName || vendorOf(t)), total: mine,
+      items.push({ key: `txn:${t.id}`, kind: "expense", scope: "people", isBill: t.paidBillId != null, fromGroup: t.groupId ? groupNameOf(t.groupId) || "another group" : "", id: t.id, date, title: paidBill ? billTitle(paidBill, !t.groupId && P(mine) >= P(total) - 1) : (t.paidBillName || vendorOf(t)), total: mine,
         payer: t.paidByPersonId ? nameOf(t.paidByPersonId) : "you", note: String(t.note || ""), shares, memberTotal: mine, due: R(shares.reduce((sum, x) => sum + P(x.remaining), 0)),
         groupAmount: 0, yourShare: null, parts, categories: categorySplit(t, P(mine)) });
     }
     for (const b of bills || []) {
-      if (!b || String(b.groupId || "") !== "" || b.status === "cancelled" || b.skipped || paidBillIds.has(String(b.id)) || b.paidByTxnId != null) continue;
+      if (!b || String(b.groupId || "") === gid || b.status === "cancelled" || b.skipped || paidBillIds.has(String(b.id)) || b.paidByTxnId != null) continue;
       if ((txns || []).some(t => t && t.paidBillId != null && String(t.paidBillId) === String(b.id))) continue;
       const date = dateOfBill(b);
       if (!inRange(date)) continue;
       const shares = sharesOf(getBillSplitSource(b, txns).people);
       if (!shares.length) continue;
       const mine = R(shares.reduce((sum, x) => sum + P(x.amount), 0));
-      items.push({ key: `bill:${b.id}`, kind: "bill", scope: "people", id: b.id, date, title: billTitle(b, P(mine) >= P(b.amount) - 1), total: mine, payer: "not paid yet", note: "", shares, memberTotal: mine,
+      items.push({ key: `bill:${b.id}`, kind: "bill", scope: "people", fromGroup: b.groupId ? groupNameOf(b.groupId) || "another group" : "", id: b.id, date, title: billTitle(b, !b.groupId && P(mine) >= P(b.amount) - 1), total: mine, payer: "not paid yet", note: "", shares, memberTotal: mine,
         due: R(shares.reduce((sum, x) => sum + P(x.remaining), 0)), groupAmount: 0, yourShare: null, parts: shares.map(x => ({ personId: x.personId, name: x.name, amount: x.amount })), categories: categorySplit({ catId: b.catId, catIds: b.catIds }, P(mine)) });
     }
   }
@@ -142,6 +142,7 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
       }
     }
   }
+  for (const i of items) i.soloName = i.kind === "expense" && i.parts.length === 1 && i.parts[0].personId != null && !i.isBill ? i.parts[0].name : "";   // "Person B - Vendor - amount"; bills are never named after a person
   items.sort((a, b) => a.date.localeCompare(b.date) || String(a.key).localeCompare(String(b.key)));
   const sum = k => R(items.reduce((s, i) => s + P(i[k]), 0));
   return { items, totals: { count: items.length, total: sum("total"), memberTotal: sum("memberTotal"), due: sum("due") } };

@@ -10,15 +10,15 @@ const ctx = await b.newContext({ viewport: { width: 390, height: 1400 }, timezon
 const day = n => { const x = new Date(); x.setDate(x.getDate() - n); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
 await ctx.addInitScript(([d3, d2, d1]) => { if (localStorage.getItem("__init")) return; localStorage.setItem("__init", "1"); const set = (k, v) => localStorage.setItem(k, JSON.stringify(v));
   set("arth_accounts", [{ id: "b1", name: "Test Savings", type: "bank", openingBalance: 100000, openingBalanceDate: "2026-01-01" }, { id: "u1", name: "Sample UPI", type: "upi", handle: "sample@upi", linkedAccount: "b1" }]);
-  set("arth_people", [{ id: "me", name: "Me", isMe: true }, { id: "r", name: "Raj" }, { id: "m", name: "Mangal" }]);
+  set("arth_people", [{ id: "me", name: "Me", isMe: true }, { id: "r", name: "Raj" }, { id: "m", name: "Mangal" }, { id: "x", name: "Xena" }, { id: "y", name: "Yash" }]);
   const owes = (amount, settled = false) => ({ amount, mode: "owes", settled, remainingAmt: settled ? 0 : amount });
-  set("arth_groups", [{ id: "nb", name: "Neighbours", icon: "🏘️", color: "#0ea5e9", typeId: "other", type: "Other", members: ["r", "m"], includeMe: false, manualLimit: 0, defaultIntent: "split", modules: [] }, { id: "flat", name: "Flat", icon: "🏠", color: "#16a34a", typeId: "other", type: "Other", members: ["r", "m"], includeMe: true, manualLimit: 0, defaultIntent: "split", modules: [] }]);
+  set("arth_groups", [{ id: "nb", name: "Neighbours", icon: "🏘️", color: "#0ea5e9", typeId: "other", type: "Other", members: ["x", "y"], includeMe: false, manualLimit: 0, defaultIntent: "split", modules: [] }, { id: "flat", name: "Flat", icon: "🏠", color: "#16a34a", typeId: "other", type: "Other", members: ["r", "m"], includeMe: true, manualLimit: 0, defaultIntent: "split", modules: [] }]);
   set("arth_bills", [{ id: "bw", name: "Internet", billDate: d1, dueDate: d1, status: "unpaid", amount: 900, groupId: "flat", splitPeople: { r: owes(300), m: owes(300) } }]);
   set("arth_txns", [
     { id: "t1", type: "expense", desc: "Electricity", date: d3, amount: 3000, accId: "b1", groupId: "flat", catId: "utilities", catIds: ["utilities"], people: { r: owes(1000), m: owes(1000, true) } },
     { id: "t2", type: "expense", desc: "Party snacks", date: d2, amount: 1200, accId: "b1", groupId: "flat", catId: "food", catIds: ["food"], groupCollectiveAmount: 1200 },
     { id: "t3", type: "expense", desc: "Not the flat", date: d2, amount: 777, accId: "b1" },
-    { id: "n1", type: "expense", desc: "Neighbour electricity", date: d3, amount: 9000, accId: "b1", groupId: "nb", people: { r: owes(3000), m: owes(3000) } },
+    { id: "n1", type: "expense", desc: "Neighbour electricity", date: d3, amount: 9000, accId: "b1", groupId: "nb", people: { x: owes(3000), y: owes(3000) } },
     { id: "n2", type: "expense", desc: "Coffee for them", date: d2, amount: 678, accId: "b1", groupId: "nb" },
     { id: "t4", type: "expense", desc: "K Auto", date: d2, amount: 500, accId: "b1", people: { r: owes(500) } }]);
   localStorage.setItem("arth_master_user_setup_complete", "true"); }, [day(3), day(2), day(1)]);
@@ -71,10 +71,10 @@ await p.getByText("Neighbours", { exact: true }).first().dispatchEvent("click");
 await T("group-statement").scrollIntoViewIfNeeded().catch(() => {}); await T("group-statement").dispatchEvent("click"); await p.waitForTimeout(700);
 const nmsg = await T("fam-message").innerText();
 rec("N1 a family I am not part of: no 'Only my part' choice, no block for me, the whole bill kept on screen", (await T("fam-who-me").count()) === 0 && !/Me - expenses/.test(nmsg) && /whole bill ₹9,000/.test(await body()), nmsg.slice(0, 120));
-rec("N2 sent to a family I am not part of: no names at all, 'Vendor - Item - amount' lines, the electricity at the family's 6,000, a Sum", !/Raj|Mangal|expenses\n/.test(nmsg) && /Neighbour electricity - 6000/.test(nmsg) && /Coffee for them - 678/.test(nmsg) && /Sum - 7178/.test(nmsg), nmsg);
+rec("N2 sent to a family I am not part of: no names, 'Vendor - Item - amount' lines, the electricity at the family's 6,000, a Sum of 6,678", !/Xena|Yash|expenses\n/.test(nmsg) && /Neighbour electricity - 6000/.test(nmsg) && /Coffee for them - 678/.test(nmsg) && /Sum - 6678/.test(nmsg), nmsg);
 await T("fam-show-names").check(); await p.waitForTimeout(300);
 const named = await T("fam-message").innerText();
-rec("N3 ticking 'Put each person's name as a heading' brings the blocks back (Raj - expenses ... Neighbours - expenses)", /Raj - expenses\nNeighbour electricity - 3000/.test(named) && /Neighbours - expenses\nCoffee for them - 678/.test(named), named.slice(0, 200));
+rec("N3 ticking 'Put each person's name as a heading' brings the blocks back (Xena - expenses ... Neighbours - expenses)", /Xena - expenses\nNeighbour electricity - 3000/.test(named) && /Neighbours - expenses\nCoffee for them - 678/.test(named), named.slice(0, 200));
 rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 await b.close(); try { process.kill(-server.pid); } catch {}
 const bad = results.filter(r => !r.pass).length; console.log(`\n${results.length - bad}/${results.length} passed`); process.exit(bad ? 1 : 0);

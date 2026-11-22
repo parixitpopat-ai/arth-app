@@ -29,7 +29,7 @@ export function buildGroupExpenseMessage(items, { groupName = "", from, to, upiH
     const label = `${MONTHS[Number(m.key.slice(5, 7)) - 1]}${years.size > 1 ? ` ${m.key.slice(0, 4)}` : ""}`;
     if (!showNames) {   // one plain list for the month: no person, no heading
       const lines = [label]; let sum = 0;
-      for (const i of m.items) { lines.push(`${i.title}${i.payer === "not paid yet" ? " (not paid yet)" : ""} - ${plainAmount(i.total)}`); sum += P(i.total); }
+      for (const i of m.items) { lines.push(`${i.soloName ? `${i.soloName} - ` : ""}${i.title}${i.payer === "not paid yet" ? " (not paid yet)" : ""} - ${plainAmount(i.total)}`); sum += P(i.total); }   // a vendor expense that belongs to one person carries their name: "Person B - Vendor - amount"
       lines.push(`Sum - ${plainAmount(sum / 100)}`); blocks.push(lines); all += sum; continue;
     }
     const who = new Map();   // person key -> { name, lines, paise }

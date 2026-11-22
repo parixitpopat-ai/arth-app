@@ -112,23 +112,25 @@ test("the message adds a By category section with the shares", () => {
   assert.match(m, /Sum - 400\n\nBy category:\nFood - 400 \(100%\)/);
 });
 
-test("one statement for the group and its people: member-tagged expenses (no group) join in at what the members bear; other groups' and non-members' are left out", () => {
+test("one statement for the group and its people: member-tagged expenses join in at what the members bear, whether tagged to the group, to nobody or to ANOTHER group (a common meter); non-members' are left out", () => {
   const t = [
     { id: "g1", type: "expense", desc: "Common meter bill", date: "2026-11-05", amount: 900, groupId: "g1", people: { r: { amount: 300, mode: "owes" } } },
     { id: "p1", type: "expense", desc: "K Auto", date: "2026-11-06", amount: 7899, people: { r: { amount: 7899, mode: "owes" } } },
     { id: "p2", type: "expense", desc: "Lunch split", date: "2026-11-07", amount: 1000, people: { r: { amount: 250, mode: "owes" }, zed: { amount: 250, mode: "owes" } } },   // zed is not a member: only Raj's 250 counts
     { id: "p3", type: "expense", desc: "Tagged to Mangal", date: "2026-11-08", amount: 400, forPerson: "m" },
-    { id: "p4", type: "expense", desc: "Other group", date: "2026-11-09", amount: 500, groupId: "g2", people: { r: { amount: 500, mode: "owes" } } },
+    { id: "p4", type: "expense", desc: "Other group", date: "2026-11-09", amount: 500, groupId: "g2", people: { r: { amount: 500, mode: "owes" } } },   // another group: Raj still bears it
     { id: "p5", type: "expense", desc: "Not a member", date: "2026-11-10", amount: 600, people: { zed: { amount: 600, mode: "owes" } } },
     { id: "p6", type: "expense", desc: "Nobody", date: "2026-11-11", amount: 100 },
   ];
   const b = [{ id: "bb", name: "Gas", billDate: "2026-11-12", amount: 800, status: "unpaid", splitPeople: { m: { amount: 400, mode: "owes" } } }];
   const off = buildGroupExpenseList({ ...base, txns: t, bills: b });
   assert.deepEqual(off.items.map(i => i.title), ["Common meter bill"]);                                   // default: the group's own only
-  const on = buildGroupExpenseList({ ...base, includePeople: true, txns: t, bills: b });
-  assert.deepEqual(on.items.map(i => [i.title, i.scope, i.total]), [["Common meter bill", "group", 900], ["K Auto", "people", 7899], ["Lunch split", "people", 250], ["Tagged to Mangal", "people", 400], ["November Gas Bill", "people", 400]]);
+  const gn = id => ({ g2: "Common Meter" }[id] || "");
+  const on = buildGroupExpenseList({ ...base, includePeople: true, groupNameOf: gn, txns: t, bills: b });
+  assert.deepEqual(on.items.map(i => [i.title, i.scope, i.total]), [["Common meter bill", "group", 900], ["K Auto", "people", 7899], ["Lunch split", "people", 250], ["Tagged to Mangal", "people", 400], ["Other group", "people", 500], ["November Gas Bill", "people", 400]]);
+  assert.equal(on.items[4].fromGroup, "Common Meter"); assert.equal(on.items[1].fromGroup, "");
   assert.equal(on.items[2].parts.length, 1); assert.equal(on.items[2].parts[0].name, "Raj");
-  assert.equal(on.totals.total, 900 + 7899 + 250 + 400 + 400);
+  assert.equal(on.totals.total, 900 + 7899 + 250 + 400 + 500 + 400);
 });
 test("a bill payment that carries a member's share is counted once, from the payment", () => {
   const t = [{ id: "pay", type: "expense", desc: "Gas", date: "2026-11-12", amount: 800, paidBillId: "bb", people: { m: { amount: 400, mode: "owes" } } }];
@@ -191,4 +193,21 @@ test("a family the person is not part of: a bill that is entirely theirs reads (
   assert.deepEqual(titles({}), ["November Goa Electricity Bill (Suryamandal)", "November Goa Electricity Bill (Common Meter)", "November Goa Electricity Bill (Suryamandal)"]);
   assert.deepEqual(titles({ billerAccounts: [] }), ["November Goa Electricity Bill (Suryamandal)", "November Goa Electricity Bill", "November Goa Electricity Bill (Suryamandal)"]);   // no meter nickname: the shared one stays plain
   assert.equal(buildGroupExpenseList({ ...base, meId: "me", includePeople: true, groupName: "Suryamandal", txns: t, bills: bills2, billerAccounts: ba }).items.some(i => /Suryamandal/.test(i.title)), false);   // my own flat: never
+});
+
+test("the layout asked for: month by month, 'Common Meter water Bill - 800', 'Person B - Vendor - 800' (a vendor expense of one person), a bill with no person name, 'Amazon - Coffee - 331'", () => {
+  const nm = id => ({ b: "Person B", s: "Sachin Masa" }[id] || id);
+  const owes = a => ({ amount: a, mode: "owes" });
+  const ba = [{ id: "cm", name: "Common Meter", type: "Water" }, { id: "own", name: "Flat", type: "Water" }];
+  const bills3 = [{ id: "w1", name: "Public Works Department (Goa)", billDate: "2026-07-10", billerAccountId: "cm", amount: 2400, status: "paid", paidByTxnId: "t1" }];
+  const t = [
+    { id: "t1", type: "expense", desc: "Public Works Department (Goa)", date: "2026-07-11", amount: 2400, groupId: "commonMeter", paidBillId: "w1", isBillPayment: true, people: { s: owes(800), q: owes(800) } },   // a common meter bill, Sachin bears 800 of it
+    { id: "t2", type: "expense", desc: "Plumber", merchant: "Urban Co", date: "2026-07-14", amount: 800, people: { b: owes(800) } },                                          // Person B's own vendor expense
+    { id: "t3", type: "expense", desc: "Coffee", merchant: "Amazon", date: "2026-07-20", amount: 331, groupId: "fam" },                                                       // tagged to the family
+    { id: "t4", type: "expense", desc: "Water bill", date: "2026-08-03", amount: 500, groupId: "fam" },
+  ];
+  const items = buildGroupExpenseList({ groupId: "fam", groupName: "Suryamandal", memberIds: ["s", "b"], meId: null, includePeople: true, groupNameOf: id => ({ commonMeter: "Common Meter" }[id] || ""), txns: t, bills: bills3, billerAccounts: ba, from: "2026-07-01", to: "2026-08-31", nameOf: nm }).items.map(i => ({ ...i, on: true }));
+  const m = buildGroupExpenseMessage(items, { groupName: "Suryamandal", from: "2026-07-01", to: "2026-08-31", showNames: false });
+  assert.equal(m, ["Suryamandal · 1 Jul 2026 – 31 Aug 2026", "", "July", "July Public Works Department (Goa) Bill (Common Meter) - 800", "Person B - Urban Co - Plumber - 800", "Amazon - Coffee - 331", "Sum - 1931", "", "August", "Water bill - 500", "Sum - 500", "", "PTD total - 2431"].join("\n"));
+  assert.doesNotMatch(m, /Sachin/);   // a bill's share is not named after the person
 });
