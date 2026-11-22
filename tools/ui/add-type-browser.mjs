@@ -33,7 +33,7 @@ try {
   rec("A3e Salary or income goes back to the income form", (await page.getByPlaceholder(/Source \(e\.g\. Salary/).count()) === 1, {});
   await T("type-transfer").click(); await page.waitForTimeout(300);
   rec("A4 Transfer switches to a transfer (a Note instead of a vendor)", await pressed("type-transfer") && (await page.getByPlaceholder("Note (optional)").count()) === 1, {});
-  rec("A4b under Transfer the tag chips are folded away until opened", (await T("move-tag").count()) === 1 && (await T("move-tag").evaluate(e => e.open)) === false, {});
+  rec("A4b a Transfer offers no category, person or group tags", (await T("move-tag").count()) === 0 && !/Tag to/i.test(await page.evaluate(() => document.body.innerText)), {});
   const sels = page.locator("select"); await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("500");
   await sels.nth(0).selectOption("bank1"); await sels.nth(1).selectOption("bank2");
   await page.getByRole("button", { name: /^Add ✓$/ }).click(); await page.waitForTimeout(900);

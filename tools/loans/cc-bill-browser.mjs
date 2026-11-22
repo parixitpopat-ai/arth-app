@@ -8,7 +8,7 @@ for (let i = 0; i < 60; i++) { try { if ((await fetch(APP)).ok) break; } catch {
 const results = []; const rec = (id, pass, d) => { results.push({ id, pass: !!pass }); console.log(`${pass ? "PASS" : "FAIL"}  ${id}  ${JSON.stringify(d)}`); };
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const errors = [];
-const STATEMENT = { id: "st1", name: "Test Card statement", amount: 5000, dueDate: "2026-11-20", billDate: "2026-11-02", status: "unpaid", isCcStatement: true, accId: "cc1", catId: "financial", catIds: ["financial"], subId: "fi6" };
+const STATEMENT = { id: "st1", name: "Test Card statement", amount: 5000, dueDate: "2026-11-20", billDate: "2026-11-02", periodFrom: "2026-10-15", periodTo: "2026-11-15", status: "unpaid", isCcStatement: true, accId: "cc1", catId: "financial", catIds: ["financial"], subId: "fi6" };
 async function newPage(seed) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: "Asia/Kolkata" });
   await ctx.addInitScript(seed => { if (localStorage.getItem("__init")) return; localStorage.setItem("__init", "1");

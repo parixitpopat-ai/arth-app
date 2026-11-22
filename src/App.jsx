@@ -1061,7 +1061,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // are removed, so they cannot show as overdue. One carrying a bank amount is real and stays.
     if(bills.some(isEmptyStatementBill)){ setBills(prev=>prev.filter(b=>!isEmptyStatementBill(b))); return; }
     const newBills = ccAccounts.flatMap(card=>generateDueStatements({ card, accounts, txns:expandPaymentLines(txns), bills, toDateOnly }));
-    if(newBills.length>0){ setBills(prev=>[...prev, ...newBills]); return; }
+    if(newBills.length>0){
+      // Never add a cycle twice, even if this effect runs twice on the same data (React's development double-run did exactly that).
+      setBills(prev=>{ const seen = new Set(prev.filter(b=>b.isCcStatement).map(b=>`${b.accId}|${b.periodTo}`)); const add = newBills.filter(b=>!seen.has(`${b.accId}|${b.periodTo}`)); return add.length ? [...prev, ...add] : prev; });
+      return;
+    }
     // Rule 10/test I: a cc_payment transaction pays a card regardless of a statement's
     // verification status — this reflects that payment onto the specific Bill record it closed,
     // oldest statement first, so it stops appearing as unpaid in Payments once genuinely paid.
@@ -6509,36 +6513,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 regardless of what later happens to the money — an explicit, accepted product
                 decision, not a bug. Category tag is optional and independently usable (e.g. a
                 Household-level category commitment funded by a transfer). */}
-            {txnType==="transfer"&&(
-              <details data-testid="move-tag" style={{ marginTop:4 }}>
-                <summary style={{ ...lbl,cursor:"pointer",minHeight:44,display:"flex",alignItems:"center",marginBottom:0 }}>Tag to a category, person or group (optional)</summary>
-                <div style={{ marginBottom:6 }}>
-                  <div style={{ color:T.sub,fontSize:10,marginBottom:4 }}>Category</div>
-                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                    {cats.map(c=>(
-                      <button key={c.id} onClick={()=>setTransferTagCatId(transferTagCatId===c.id?"":c.id)} style={{ background:transferTagCatId===c.id?c.color+"22":"none",border:`1px solid ${transferTagCatId===c.id?c.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:transferTagCatId===c.id?c.color:T.sub,fontFamily:"Inter,sans-serif" }}>{c.icon} {c.name.split(" ")[0]}</button>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ marginBottom:6 }}>
-                  <div style={{ color:T.sub,fontSize:10,marginBottom:4 }}>Person</div>
-                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                    {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=>(
-                      <button key={p.id} onClick={()=>{ const next = transferTagPersonId===p.id?"":p.id; setTransferTagPersonId(next); if(next) setTransferTagGroupId(""); }} style={{ background:transferTagPersonId===p.id?p.color+"22":"none",border:`1px solid ${transferTagPersonId===p.id?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:transferTagPersonId===p.id?p.color:T.sub,fontFamily:"Inter,sans-serif" }}>{p.emoji} {p.name}</button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color:T.sub,fontSize:10,marginBottom:4 }}>Group</div>
-                  <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                    {getActiveGroups(groups).map(g=>(
-                      <button key={g.id} onClick={()=>{ const next = transferTagGroupId===g.id?"":g.id; setTransferTagGroupId(next); if(next) setTransferTagPersonId(""); }} style={{ background:transferTagGroupId===g.id?g.color+"22":"none",border:`1px solid ${transferTagGroupId===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:transferTagGroupId===g.id?g.color:T.sub,fontFamily:"Inter,sans-serif" }}>{g.icon} {g.name}</button>
-                    ))}
-                  </div>
-                </div>
-                {(transferTagPersonId||transferTagGroupId)&&<div style={{ color:T.sub,fontSize:10,marginTop:4 }}>Counts toward {(people.find(p=>p.id===transferTagPersonId)||getActiveGroups(groups).find(g=>g.id===transferTagGroupId))?.name}'s Mandatory Commitment this month — part of their existing budget, not a separate pool.</div>}
-              </details>
-            )}
+            {/* Transfer is only for moving money between two of your accounts: no category / person / group tags are offered. (Older transfers that were tagged keep their tags; the state is still read when one is edited.) */}
 
 
             {/* Full/EMI, moved here (after the combined Amount+Details row) -- still a MODE
@@ -15945,7 +15920,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Add screen, step 3: right above Add, one line says what saving does to what is owed (for example \"Raj Test will owe you ₹900\" or \"You will owe Raj Test ₹300\"). It shows only when someone owes someone.",
             "Add screen, step 4: the amount now has the full width, and the account and date read as one line under it (\"from Test Savings on 22-Nov-2026\") with \"Details\" on the right opening the same card as before.",
             "Add screen, step 5: under Received, \"What is it?\" gives four big choices: Salary or income, Someone paid me back, A refund, Work reimbursement (the last three are the old Settlement form, already set). Settlement is no longer under More; More now holds Invest and Give petty cash.",
-            "Add screen, step 6: Transfer now shows From and To right under the amount, and the long list of tags (category, person, group) is folded under \"Tag to a category, person or group (optional)\" until you open it.",
+            "Add screen, step 6: Transfer now shows From and To right under the amount, and the long lists of category, person and group tags are gone: a transfer only moves money between two of your accounts. Transfers you tagged before keep their tags.",
+            "Fixed: a card with an old statement bill that has no period saved could make the app crash on Home (\"Something went wrong\") once a statement cycle closed. Statements are also never added twice now.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",

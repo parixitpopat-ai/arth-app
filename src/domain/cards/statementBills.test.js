@@ -122,3 +122,12 @@ test("getPendingStatementChecks: not asked about a cycle that closed before the 
   const late = [{ ...card, type: "cc", openingBalanceDate: "2026-10-01" }];
   assert.equal(getPendingStatementChecks({ accounts: late, txns: [], bills: [], toDateOnly, today: "2026-10-10" }).length, 0);
 });
+
+test("a statement bill with no period on record makes generateDueStatements generate nothing (it used to regenerate forever and crash the app)", () => {
+  const txns = [{ type: "expense", accId: "cc1", date: "2026-10-20", amount: 5000 }];
+  const legacy = { id: "old1", isCcStatement: true, accId: "cc1", amount: 5000, dueDate: "2026-11-20", status: "unpaid" }; // no periodFrom / periodTo
+  const out = generateDueStatements({ card, accounts, txns, bills: [legacy], toDateOnly, refDate: new Date(2026, 10, 22) });
+  assert.deepEqual(out, []);
+  // and a card with no statement bill at all still gets its closed cycle
+  assert.equal(generateDueStatements({ card, accounts, txns, bills: [], toDateOnly, refDate: new Date(2026, 10, 22) }).length, 1);
+});

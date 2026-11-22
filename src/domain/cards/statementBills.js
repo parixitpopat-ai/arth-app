@@ -91,7 +91,11 @@ const iso = d => toLocalDateStr(d);
 export function generateDueStatements({ card, accounts, txns, bills, toDateOnly, refDate = new Date() }) {
   const today = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate(), 12, 0, 0, 0);
   const existing = (bills || []).filter(b => b.isCcStatement && b.accId === card.id);
-  const latestGenerated = existing.length ? existing.map(b => b.periodTo).sort().slice(-1)[0] : null;
+  const latestGenerated = existing.length ? existing.map(b => b.periodTo).filter(Boolean).sort().slice(-1)[0] || null : null;
+  // Statement bills with NO period (made before periods were stored, or typed in by hand) cannot say which cycle they cover. Treating
+  // that as "nothing generated yet" re-generated the latest closed cycle on every run, and the effect in App.jsx that appends the
+  // result then ran forever ("Maximum update depth exceeded"). With such a bill present, generate nothing instead.
+  if (existing.length && !latestGenerated) return [];
 
   const cycles = [];
   if (!latestGenerated) {

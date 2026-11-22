@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { expandPaymentLines, getAccountAmounts } from "./paymentLineSlices.js";
 import { getCardSummary } from "../cards/summaries.js";
 
-const exp = (over = {}) => ({ id: 1, type: "expense", date: "2026-10-02", amount: 10000, accId: "cash1", ...over });
+// Dated today: the card figures below look at the CURRENT statement cycle, so a fixed date made this test fail once that cycle had passed.
+const TODAY = (d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`)(new Date());
+const exp = (over = {}) => ({ id: 1, type: "expense", date: TODAY, amount: 10000, accId: "cash1", ...over });
 const split = exp({ paymentLines: [{ id: "a", method: "Cash", accId: "cash1", amount: 3000 }, { id: "b", method: "Card", accId: "cc1", amount: 7000 }] });
 
 test("a multi-line expense becomes one slice per paying account, same transaction id/date", () => {
   const out = expandPaymentLines([split]);
-  assert.deepEqual(out.map(t => [t.id, t.accId, t.amount, t.date]), [[1, "cash1", 3000, "2026-10-02"], [1, "cc1", 7000, "2026-10-02"]]);
+  assert.deepEqual(out.map(t => [t.id, t.accId, t.amount, t.date]), [[1, "cash1", 3000, TODAY], [1, "cc1", 7000, TODAY]]);
   assert.equal(out.reduce((s, t) => s + t.amount, 0), 10000, "slices add back to the transaction total");
 });
 
