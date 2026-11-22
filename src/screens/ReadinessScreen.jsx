@@ -16,9 +16,17 @@ const MONTH_LONG = ["January", "February", "March", "April", "May", "June", "Jul
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const monthName = mk => MONTH_LONG[Number(mk.split("-")[1]) - 1];
 
-function ColumnHead({ T, title }) {
+/** The two amount columns are as wide as the longest amount needs (a fixed 84px made a long figure run into its neighbour). Smaller type when the figures are long. */
+export function amountColumns(texts) {
+  const len = Math.max(0, ...(texts || []).map(t => String(t || "").length));
+  const fs = len > 10 ? 12 : 14;
+  const w = Math.max(84, Math.ceil(len * 0.62 * fs) + 2);
+  return { cols: `minmax(0,1fr) ${w}px ${w}px`, fs };
+}
+
+function ColumnHead({ T, title, cols }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 84px 84px", gap: 8, alignItems: "center", margin: "18px 0 6px" }}>
+    <div style={{ display: "grid", gridTemplateColumns: cols, gap: 8, alignItems: "center", margin: "18px 0 6px" }}>
       <span style={{ color: T.sub, fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase" }}>{title}</span>
       <span style={{ textAlign: "right" }}><Chip T={T} solid>CASH</Chip></span>
       <span style={{ textAlign: "right" }}><Chip T={T}>BUDGET</Chip></span>
@@ -26,18 +34,18 @@ function ColumnHead({ T, title }) {
   );
 }
 
-function Row({ T, sym, fmt, row, onOpen }) {
+function Row({ T, sym, fmt, row, onOpen, cols, fs }) {
   const tl = v => (row.estimate && Number(v) > 0 ? "~" : "");
-  const num = { fontFamily: FONT.mono, fontSize: 14, fontWeight: 700, color: T.text, textAlign: "right", minWidth: 0 };
+  const num = { fontFamily: FONT.mono, fontSize: fs, fontWeight: 700, color: T.text, textAlign: "right", minWidth: 0 };
   return (
     <button type="button" data-testid={`readiness-row-${row.key}`} onClick={() => onOpen(row)}
-      style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 84px 84px", gap: 8, alignItems: "center", width: "100%", minHeight: 52, padding: "8px 0", background: "none", border: "none", borderTop: `1px solid ${T.border}`, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+      style={{ display: "grid", gridTemplateColumns: cols, gap: 8, alignItems: "center", width: "100%", minHeight: 52, padding: "8px 0", background: "none", border: "none", borderTop: `1px solid ${T.border}`, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
       <span style={{ minWidth: 0 }}>
         <span style={{ display: "block", color: T.text, fontSize: 14, fontWeight: 700, overflowWrap: "anywhere" }}>{row.label}</span>
         {row.sub ? <span style={{ display: "block", color: T.sub, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.sub}</span> : null}
       </span>
       <span style={num}>{tl(row.cash)}{sym}{fmt(row.cash)}</span>
-      <span style={{ ...num, color: row.budget == null ? T.sub : T.text, fontWeight: row.budget == null ? 500 : 700, fontSize: row.budget == null ? 12 : 14 }}>
+      <span style={{ ...num, color: row.budget == null ? T.sub : T.text, fontWeight: row.budget == null ? 500 : 700, fontSize: row.budget == null ? 12 : fs }}>
         {row.budget == null ? "Not in budget" : `${tl(row.budget)}${sym}${fmt(row.budget)}`}
       </span>
     </button>
@@ -54,6 +62,7 @@ export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudge
   const tBudget = r.spendingEstimated && r.budgetUsed > 0 ? "~" : "";
   const over = r.over > 0;
   const nudge = nudgeFor ? nudgeFor(r) : null;
+  const { cols, fs } = amountColumns([...(r.spendingRows || []), ...(r.investmentRows || [])].flatMap(x => [`~${sym}${fmt(x.cash)}`, x.budget == null ? "" : `~${sym}${fmt(x.budget)}`]).concat([`~${sym}${fmt(r.cashNeeded)}`, `~${sym}${fmt(r.budgetUsed)}`]));
   const block = { background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: "14px 14px", minWidth: 0 };
   const big = { fontFamily: FONT.mono, fontSize: 24, fontWeight: 800, marginTop: 6, overflowWrap: "anywhere" };
   const nav = { background: T.input, border: "none", color: T.text, borderRadius: 10, minWidth: 44, minHeight: 44, cursor: "pointer", fontSize: 18, fontFamily: "inherit" };
@@ -113,18 +122,18 @@ export default function ReadinessScreen({ T, sym, fmt, monthKey, buildFor, nudge
           </div>
         </div>
 
-        <ColumnHead T={T} title="Spending by type" />
-        {r.spendingRows.map(row => <Row key={row.key} T={T} sym={sym} fmt={fmt} row={row} onOpen={setDetail} />)}
+        <ColumnHead T={T} title="Spending by type" cols={cols} />
+        {r.spendingRows.map(row => <Row key={row.key} T={T} sym={sym} fmt={fmt} row={row} onOpen={setDetail} cols={cols} fs={fs} />)}
 
         {r.investmentRows.length > 0 && (<>
-          <ColumnHead T={T} title="Investments" />
-          {r.investmentRows.map(row => <Row key={row.key} T={T} sym={sym} fmt={fmt} row={row} onOpen={setDetail} />)}
+          <ColumnHead T={T} title="Investments" cols={cols} />
+          {r.investmentRows.map(row => <Row key={row.key} T={T} sym={sym} fmt={fmt} row={row} onOpen={setDetail} cols={cols} fs={fs} />)}
         </>)}
 
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 84px 84px", gap: 8, alignItems: "center", borderTop: `2px solid ${T.borderStrong || T.border}`, marginTop: 4, padding: "10px 0" }}>
+        <div style={{ display: "grid", gridTemplateColumns: cols, gap: 8, alignItems: "center", borderTop: `2px solid ${T.borderStrong || T.border}`, marginTop: 4, padding: "10px 0" }}>
           <span style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>Total</span>
-          <span style={{ fontFamily: FONT.mono, fontSize: 14, fontWeight: 800, color: T.text, textAlign: "right" }}>{tCash}{sym}{fmt(r.cashNeeded)}</span>
-          <span style={{ fontFamily: FONT.mono, fontSize: 14, fontWeight: 800, color: over ? T.attention : T.text, textAlign: "right" }}>{tBudget}{sym}{fmt(r.budgetUsed)}</span>
+          <span style={{ fontFamily: FONT.mono, fontSize: fs, fontWeight: 800, color: T.text, textAlign: "right" }}>{tCash}{sym}{fmt(r.cashNeeded)}</span>
+          <span style={{ fontFamily: FONT.mono, fontSize: fs, fontWeight: 800, color: over ? T.attention : T.text, textAlign: "right" }}>{tBudget}{sym}{fmt(r.budgetUsed)}</span>
         </div>
         <div style={{ color: T.sub, fontSize: 12, lineHeight: 1.5 }}>~ = estimate, not yet a bill. Cash counts money in the month it leaves. Budget counts the month’s share.</div>
       </>)}
