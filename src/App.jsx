@@ -220,6 +220,8 @@ import { planTheyPaid } from "./domain/person/theyPaid";
 import { detectSubscriptions, subscriptionTotals, merchantKey } from "../domain/insights/subscriptions.js";
 import { buildDueReminders } from "./domain/notifications/dueReminders";
 import { dueNotifAvailable, dueNotifEnable, dueNotifCancelAll, dueNotifSchedule, dueNotifOnOpen } from "./native/dueNotifications";
+import { useBiometric } from "./native/useBiometric";
+import BiometricUnlock from "./components/BiometricUnlock";
 import { whatsappLink } from "./domain/share/whatsapp";
 import { readClipboardText, PASTE_BLOCKED_MESSAGE, PASTE_EMPTY_MESSAGE } from "./native/clipboard";
 import { QUICK_FILTERS, matchesQuickFilter } from "./domain/transactions/quickFilters";
@@ -740,7 +742,7 @@ async function hashPin(pin) {
 }
 
 // ─── PIN SCREEN ───────────────────────────────────────────────────────────────
-function PinScreen({ onUnlock, isSetup, onCancel, subtitle }) {
+function PinScreen({ onUnlock, isSetup, onCancel, subtitle, onFingerprint }) {
   const [pin, setPin] = useState("");
   const [confirm, setConfirm] = useState("");
   const [step, setStep] = useState("enter");
@@ -781,6 +783,7 @@ function PinScreen({ onUnlock, isSetup, onCancel, subtitle }) {
           <button key={i} onClick={()=>handleKey(k)} style={{background:"#161e19",border:"1px solid #26332c",borderRadius:14,padding:"19px 0",fontSize:k==="del"?18:24,fontWeight:700,color:k==="del"?"#5a5a7a":"#e8e4dc",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>{k==="del"?"⌫":k}</button>
         )}
       </div>
+      {onFingerprint&&!isSetup&&<BiometricUnlock onUnlocked={onFingerprint}/>}
       {onCancel&&<button onClick={onCancel} style={{marginTop:18,background:"none",border:"1px solid #2a2a3a",borderRadius:12,padding:"10px 22px",cursor:"pointer",fontSize:13,fontWeight:700,color:"#5a5a7a",fontFamily:"Inter,sans-serif"}}>Cancel</button>}
     </div>
   );
@@ -910,7 +913,7 @@ function ArthInner() {
           <div style={{ color:"rgba(255,255,255,0.5)",fontSize:13 }}>Try again in {pinLockMinsLeft} minute{pinLockMinsLeft!==1?"s":""}</div>
         </div>
       ) : (
-        <PinScreen isSetup={false} onUnlock={async pin=>{
+        <PinScreen isSetup={false} onFingerprint={()=>{ setUnlocked(true); setPinAttempts(0); }} onUnlock={async pin=>{
           if(appPin.length<=6){
             if(String(pin)===String(appPin)){
               const hash = await hashPin(pin);
@@ -2722,6 +2725,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(!ok){ setToast({ message:"Notifications are blocked for Arth. Allow them in your phone's settings, then try again.", icon:"⚠️" }); return; }
     setDueNotifOn(true); setToast({ message:"On: a reminder 3 days before a bill is due and on the day, at 9 am", icon:"🔔" });
   };
+  const bio = useBiometric(setToast);   // fingerprint unlock (Android app): src/native/biometric.js
   const smsInbox = useSmsInbox({ accounts, txns, people, billerAccounts });   // bank messages caught as they arrive (Android app only); proposals, never entries
   const activePrepaidAlerts = useMemo(()=>getPrepaidAlerts({ billerAccounts, bills, relationships:membershipRelationships, today:new Date(), dismissed:dismissedAlerts }),[billerAccounts,bills,membershipRelationships,dismissedAlerts]);
   const directOwedToMe = useMemo(()=>Object.values(settlements).reduce((s,p)=>s+(p.owesMe||0),0),[settlements]);
@@ -16149,6 +16153,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Repeating payments: Insights now has a card that finds payments that repeat in your own entries (the same name, the same amount, weekly, monthly, every 3 months or yearly) and shows what they cost a month and a year. \"Make a bill\" opens Add Bill filled in as a recurring bill; \"✕\" says it is not a subscription. It is a best guess and uses only what you have entered.",
             "New bills from your messages (Android app): when a provider sends a bill message (for example \"your electricity bill of Rs.3,045 is due on 28-Jul-26\"), Arth shows a NEW BILL card on Home and in the bell with the amount, due date and the connection it matched (by consumer number or provider name). \"Add this bill\" opens the Add Bill form filled in; nothing is saved until you save it. Credit card bills are not offered, because Arth makes those itself. You may need to allow Arth to read messages (Notifications > allow).",
             "One-tap WhatsApp: on a bill's split there is now a WhatsApp button next to Share for each person who owes. It opens that person's chat from your own WhatsApp with their share and the due date already typed (add their phone number on their profile; without one WhatsApp lets you pick the contact), and you press Send. Home, Needs you, Remind does the same. Arth cannot send WhatsApp messages by itself from a personal number.",
+            "Fingerprint unlock (Android app, Settings): touch the sensor instead of typing the PIN. Off by default; turning it on asks for your fingerprint once. The PIN stays as the fallback, and the lock-out after 5 wrong PINs is unchanged. Arth never stores the fingerprint; the phone keeps it.",
             "Bill reminders (Android app, Settings): a phone notification 3 days before a bill is due and on the day, at 9 am, for bills still owed. Tap it to open the bill. Off by default.",
             "Fixed: the Paste button under Bank SMS import did nothing on some phones and said nothing. It now uses the phone's own clipboard in the Android app, and if pasting is blocked it tells you to long-press the box and choose Paste.",
             "Transactions, new look: the list starts with what you spent and what came in, then four quick filters (Everything, With people, Work, Loans). A split row says who owes you in words (\"Raj owes you ₹900\"), and a transfer is named \"Transfer\" and shows from and to accounts.",
@@ -16601,6 +16606,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Manage</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
           <Row icon="🏦" title="Accounts" subtitle={`${accounts.length} account${accounts.length===1?"":"s"}`} onClick={()=>setSettingsSection("accounts")}/>
+          {bio.available&&<Row icon="🫆" title="Unlock with fingerprint" subtitle={bio.on?"On · the PIN is still the fallback":"Off · touch the sensor instead of typing the PIN"} onClick={bio.toggle}/>}
           {dueNotifAvailable()&&<Row icon="🧾" title="Bill reminders" subtitle={dueNotifOn?"On · 3 days before and on the day, 9 am":"Off"} onClick={toggleDueNotif}/>}
           {weeklyNotifAvailable()&&<Row icon="🔔" title="Weekly summary notification" subtitle={weeklyNotifOn?"On · Sundays at 7 pm":"Off"} onClick={toggleWeeklyNotif}/>}
           <Row icon="🗂️" title="Categories" subtitle={`${cats.length} categories`} onClick={()=>setSettingsSection("categories")}/>
