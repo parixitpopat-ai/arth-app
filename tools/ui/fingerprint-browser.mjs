@@ -26,13 +26,17 @@ rec("F4 lock screen: fingerprint unlocks with no PIN typed", /Good (Morning|Afte
 // a miss leaves the PIN keypad and a button to try again
 await p.evaluate(() => { sessionStorage.setItem("__bio", JSON.stringify({ available: true, result: false })); });
 await p.reload(); await p.waitForTimeout(1800);
-rec("F5 a miss keeps the keypad and shows Use fingerprint", (await p.getByTestId("unlock-fingerprint").count()) === 1 && /Enter your PIN/.test(await text()), {});
-await p.evaluate(() => { window.__ARTH_BIO_TEST__ = { available: true, result: true }; });
-await p.getByTestId("unlock-fingerprint").click(); await p.waitForTimeout(900);
+rec("F5 a failing fingerprint is asked 4 times, then only the PIN: message shown, keypad there", (await p.evaluate(() => window.__ARTH_BIO_TEST__.asks)) === 4 && /did not match/.test(await text()) && /Enter your PIN/.test(await text()), await p.evaluate(() => window.__ARTH_BIO_TEST__.asks));
+rec("F5b the button offers another go", (await p.getByTestId("unlock-fingerprint").count()) === 1, {});
+await p.evaluate(() => { sessionStorage.setItem("__bio", JSON.stringify({ available: true, result: false, code: "userCancel" })); }); await p.reload(); await p.waitForTimeout(1800);
+rec("F5c choosing the PIN (cancel) asks once and goes straight to the PIN, no scolding", (await p.evaluate(() => window.__ARTH_BIO_TEST__.asks)) === 1 && !/did not match|not available/.test(await text()), await p.evaluate(() => window.__ARTH_BIO_TEST__.asks));
+await p.evaluate(() => { sessionStorage.setItem("__bio", JSON.stringify({ available: true, result: false, code: "biometryLockout" })); }); await p.reload(); await p.waitForTimeout(1800);
+rec("F5d a phone lock-out of the sensor asks once and says it is not available", (await p.evaluate(() => window.__ARTH_BIO_TEST__.asks)) === 1 && /not available right now/.test(await text()), {});
+await p.evaluate(() => { window.__ARTH_BIO_TEST__.result = true; }); await p.getByTestId("unlock-fingerprint").click(); await p.waitForTimeout(900);
 rec("F6 tapping the button and confirming unlocks", /Good (Morning|Afternoon|Evening)|Left in budget/i.test(await text()), {});
 await p.reload(); await p.waitForTimeout(1800);
 await pin();
-rec("F7 the PIN still unlocks when the fingerprint is off the table", /Good (Morning|Afternoon|Evening)|Left in budget/i.test(await text()), {});
+rec("F7 the PIN still unlocks after the fingerprint gave up", /Good (Morning|Afternoon|Evening)|Left in budget/i.test(await text()), {});
 rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 await b.close(); try { process.kill(-server.pid); } catch {}
 const bad = results.filter(r => !r.pass).length; console.log(`\n${results.length - bad}/${results.length} passed`); process.exit(bad ? 1 : 0);

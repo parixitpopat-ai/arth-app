@@ -224,6 +224,7 @@ import { useBiometric } from "./native/useBiometric";
 import { segmentsFor, sectionOfTab, activeSegmentId, bottomTabs, isSectionTabActive, moneyViewParts } from "./domain/navigation/sections";
 import BiometricUnlock from "./components/BiometricUnlock";
 import { summariseLoans } from "./domain/loans/loanList";
+import { findPossibleDuplicates } from "./domain/futureMoney/duplicateFlags";
 import { whatsappLink } from "./domain/share/whatsapp";
 import { readClipboardText, PASTE_BLOCKED_MESSAGE, PASTE_EMPTY_MESSAGE } from "./native/clipboard";
 import { QUICK_FILTERS, matchesQuickFilter } from "./domain/transactions/quickFilters";
@@ -2730,6 +2731,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // The four-section layout (Today / Money / People / Plan), chosen in Settings; off by default. domain/navigation/sections.js
   const [navV2, setNavV2] = useState(()=>{ try { return localStorage.getItem("arth_nav_v2")==="1"; } catch { return false; } });
   useEffect(()=>{ try { localStorage.setItem("arth_nav_v2", navV2?"1":"0"); } catch { /* the choice is simply not kept */ } },[navV2]);
+  // Outlook: pairs the person said are not duplicates (domain/futureMoney/duplicateFlags.js). This phone only.
+  const [dupDismissed, setDupDismissed] = useState(()=>{ try { return JSON.parse(localStorage.getItem("arth_outlook_dups_dismissed")||"[]"); } catch { return []; } });
+  useEffect(()=>{ try { localStorage.setItem("arth_outlook_dups_dismissed", JSON.stringify(dupDismissed)); } catch { /* the choice is simply not kept */ } },[dupDismissed]);
   const [moneyView, setMoneyView] = useState("accounts");   // which part of the money hub shows (new navigation only): accounts | cards | loans | invest
   const bio = useBiometric(setToast);   // fingerprint unlock (Android app): src/native/biometric.js
   const smsInbox = useSmsInbox({ accounts, txns, people, billerAccounts });   // bank messages caught as they arrive (Android app only); proposals, never entries
@@ -14240,6 +14244,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     // Forecast period = overdue + due in the next 30 days: the same figure and period as Home's Money Required.
     const OUTLOOK_PERIOD_DAYS = 30;
     const moneyRequired = getMoneyRequiredForPeriod({ futureMoney:futureMoneyPlanned, today:todayStr(), horizonDays:OUTLOOK_PERIOD_DAYS });
+    const dupResult = findPossibleDuplicates([...(moneyRequired.spending||[]),...(moneyRequired.saving||[]),...(moneyRequired.debtService||[])], dupDismissed);
     const debtServiceTotal = moneyRequired.debtServiceTotal;
     const cashRequired = moneyRequired.total;
     const cashAvailable = openingBalance;
@@ -14395,6 +14400,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <span style={{ color:T.sub,flexShrink:0 }}>{rowIcon(e.sourceType)}</span>
           <div style={{ flex:1,minWidth:0 }}>
             <div style={{ color:T.text,fontSize:12.5,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{e.name}</div>
+            {dupResult.flagged.has(`${e.sourceType}:${e.sourceId}`)&&<div data-testid="dup-badge" style={{ display:"inline-block",background:T.warn+"22",color:T.warn,borderRadius:10,padding:"1px 8px",fontSize:10,fontWeight:800,marginTop:2 }}>Possible duplicate</div>}
             <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>{getSourceTypeLabel(e.sourceType)}{e.recurs?(section!=="next30"?" · last amount":(Number(e.cycleMonths)>1?` · every ${e.cycleMonths} months`:" · every month")):""}</div>
           </div>
           <div style={{ textAlign:"right",flexShrink:0 }}>
@@ -14517,6 +14523,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       {/* One dated list of every open commitment: overdue first, then by date, with the cash left after each.
           Replaces "Next 30 days" + "Forecast timeline" (same items twice, and the timeline left out EMIs and
           overdue items). Rows still open their real source. domain/futureMoney/commitmentTimeline.js. */}
+      {dupResult.pairs.length>0&&(
+        <div data-testid="dup-card" style={{ ...card,marginBottom:12,border:`1px solid ${T.warn}55` }}>
+          <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>Possible duplicates · {dupResult.pairs.length}</div>
+          <div style={{ color:T.sub,fontSize:11,marginTop:2,marginBottom:6 }}>These look like the same payment entered twice, and both are counted in what you need. Open one to fix it, or say they are different.</div>
+          {dupResult.pairs.map(pr=>(
+            <div key={pr.key} data-testid="dup-pair" style={{ borderTop:`1px solid ${T.border}`,padding:"8px 0" }}>
+              {[pr.a,pr.b].map(ev=>(
+                <div key={`${ev.sourceType}:${ev.sourceId}`} onClick={()=>openCommitmentRow(ev)} style={{ display:"flex",justifyContent:"space-between",gap:8,padding:"4px 0",cursor:"pointer" }}>
+                  <span style={{ color:T.text,fontSize:12.5,fontWeight:700,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{ev.name} <span style={{ color:T.sub,fontWeight:500 }}>· {getSourceTypeLabel(ev.sourceType)}{ev.date?` · ${formatShortDate(ev.date)||ev.date}`:""}</span></span>
+                  <span style={{ color:T.text,fontSize:12.5,fontWeight:800,fontFamily:FONT.mono,flexShrink:0 }}>{sym}{fmt(ev.amount)}</span>
+                </div>
+              ))}
+              <button data-testid="dup-not" onClick={()=>setDupDismissed(prev=>prev.includes(pr.key)?prev:[...prev,pr.key])} style={{ marginTop:4,background:"none",border:`1px solid ${T.border}`,borderRadius:14,minHeight:36,padding:"0 14px",color:T.sub,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>These are different</button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6 }}>
         <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>OVERDUE + NEXT {OUTLOOK_PERIOD_DAYS} DAYS · CASH LEFT AFTER EACH</span>
         <span style={{ color:T.sub,fontSize:11,fontWeight:700 }}>{commitmentTimeline.rows.length} item{commitmentTimeline.rows.length===1?"":"s"}</span>
@@ -16191,7 +16215,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "One-tap WhatsApp: on a bill's split there is now a WhatsApp button next to Share for each person who owes. It opens that person's chat from your own WhatsApp with their share and the due date already typed (add their phone number on their profile; without one WhatsApp lets you pick the contact), and you press Send. Home, Needs you, Remind does the same. Arth cannot send WhatsApp messages by itself from a personal number.",
             "Match your bank (Money → an account): each bank and cash account's own page now has \"Does this match your bank?\" with a Set actual balance button, and shows the gap or Matched. It is the same check that was in Settings, which still has it.",
             "New navigation (Settings, off by default): the bottom bar becomes Today, Money, People and Plan. Money opens on your activity, with Accounts, Cards, Loans and Invest one tap away (those four ask for the PIN; Loans is a new list of what you owe and what you gave); Plan holds Bills, Budget, Goals, Events and Outlook. Every screen is the same one as before, only grouped; switch it off any time.",
-            "Fingerprint unlock (Android app, Settings): touch the sensor instead of typing the PIN. Off by default; turning it on asks for your fingerprint once. The PIN stays as the fallback, and the lock-out after 5 wrong PINs is unchanged. Arth never stores the fingerprint; the phone keeps it.",
+            "Outlook flags possible duplicates: two open entries with the same amount, within a week of each other and with the same words in the name (a bill and a repeating schedule for the same rent, say) get a Possible duplicate tag and are listed in a card at the top. Both are counted in what you need, so check them; \"These are different\" clears a pair. Nothing is deleted for you.",
+            "Fingerprint unlock (Android app, Settings): touch the sensor instead of typing the PIN. Off by default; turning it on asks for your fingerprint once. The phone is asked up to 4 times, then only the PIN is left (at once if you choose the PIN). The lock-out after 5 wrong PINs is unchanged. Arth never stores the fingerprint; the phone keeps it.",
             "Bill reminders (Android app, Settings): a phone notification 3 days before a bill is due and on the day, at 9 am, for bills still owed. Tap it to open the bill. Off by default.",
             "Fixed: the Paste button under Bank SMS import did nothing on some phones and said nothing. It now uses the phone's own clipboard in the Android app, and if pasting is blocked it tells you to long-press the box and choose Paste.",
             "Transactions, new look: the list starts with what you spent and what came in, then four quick filters (Everything, With people, Work, Loans). A split row says who owes you in words (\"Raj owes you ₹900\"), and a transfer is named \"Transfer\" and shows from and to accounts.",

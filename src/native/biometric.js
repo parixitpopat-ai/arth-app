@@ -24,6 +24,17 @@ export async function biometricAvailable() {
   try { const r = await BiometricAuth.checkBiometry(); return Boolean(r && r.isAvailable); } catch { return false; }
 }
 
+/** Like confirmBiometric, but says why it ended. @returns {Promise<{ok:boolean, code:string}>} code is the plugin's BiometryError code ("" when it matched) */
+export async function askBiometric(reason = "Unlock Arth") {
+  const f = fake(); if (f) f.asks = (f.asks || 0) + 1;
+  if (f) return f.result === true ? { ok: true, code: "" } : { ok: false, code: typeof f.code === "string" ? f.code : "authenticationFailed" };
+  if (!isAndroidApp()) return { ok: false, code: "biometryNotAvailable" };
+  try {
+    await BiometricAuth.authenticate({ reason, cancelTitle: "Use PIN", androidTitle: "Unlock Arth", androidSubtitle: "Touch the fingerprint sensor", allowDeviceCredential: false, androidConfirmationRequired: false });
+    return { ok: true, code: "" };
+  } catch (e) { return { ok: false, code: String((e && e.code) || "authenticationFailed") }; }
+}
+
 /** Ask the phone for the fingerprint. Resolves true only when the phone confirms it; a cancel, a miss or any error is false. Never throws. */
 export async function confirmBiometric(reason = "Unlock Arth") {
   const f = fake(); if (f) return f.result === true;
