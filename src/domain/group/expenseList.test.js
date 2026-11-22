@@ -22,7 +22,7 @@ const bills = [
 ];
 test("every expense tagged to the group in the period is listed, with or without a member split; others are not", () => {
   const r = buildGroupExpenseList({ ...base, txns, bills });
-  assert.deepEqual(r.items.map(i => i.title), ["Electricity", "Party snacks", "Water bill", "Internet"]);
+  assert.deepEqual(r.items.map(i => i.title), ["Electricity", "Party snacks", "November Water bill", "November Internet Bill"]);
   assert.equal(r.totals.count, 4); assert.equal(r.totals.total, 3000 + 1200 + 600 + 900);
 });
 test("shares: who owes what, what is still open, and the person's own part", () => {
@@ -37,22 +37,28 @@ test("an expense tagged to the group as a whole has no member shares but keeps i
 test("a paid bill is its payment entry (not listed twice); an unpaid bill is listed from its split; cancelled and other groups are not", () => {
   const r = buildGroupExpenseList({ ...base, txns, bills });
   assert.equal(r.items.filter(i => /Water/.test(i.title)).length, 1);
-  const net = r.items.find(i => i.title === "Internet"); assert.deepEqual([net.kind, net.payer, net.due, net.shares.length], ["bill", "not paid yet", 600, 2]);
+  const net = r.items.find(i => /Internet/.test(i.title)); assert.deepEqual([net.kind, net.payer, net.due, net.shares.length], ["bill", "not paid yet", 600, 2]);
   assert.equal(r.items.some(i => /Elsewhere|Cancelled|Other group|Refund|Salary|Old/.test(i.title)), false);
 });
 test("a bill paid outside the period is not re-listed as unpaid, and an empty or strange input gives an empty list", () => {
   const r = buildGroupExpenseList({ ...base, from: "2026-11-18", to: "2026-11-30", txns, bills });
-  assert.deepEqual(r.items.map(i => i.title), ["Internet"]);
+  assert.deepEqual(r.items.map(i => i.title), ["November Internet Bill"]);
   assert.deepEqual(buildGroupExpenseList({ ...base, txns: undefined, bills: undefined }).totals, { count: 0, total: 0, memberTotal: 0, due: 0 });
   assert.doesNotThrow(() => buildGroupExpenseList({ ...base, txns: [null, {}], bills: [undefined] }));
 });
-test("the message lists the ticked items with each member's share, then the totals and the UPI line", () => {
-  const items = buildGroupExpenseList({ ...base, txns, bills }).items.map(i => ({ ...i, on: i.title !== "Internet" }));
-  const m = buildGroupExpenseMessage(items, { groupName: "Flat", from: base.from, to: base.to, upiHandle: "me@upi" });
-  assert.match(m, /^Flat · expenses/); assert.match(m, /Electricity - 3000 \(Raj 1000, Mangal 1000, you 1000\)/); assert.match(m, /Party snacks - 1200/);
-  assert.match(m, /Total expenses = 4800/); assert.match(m, /Still to be paid by members = 1200/); assert.match(m, /Pay to: me@upi/);
-  assert.doesNotMatch(m, /Internet/);
+test("the message reads month by month: Item - amount, a Sum for each month, then the PTD total; no member brackets", () => {
+  const t2 = [
+    { id: "j1", type: "expense", desc: "July Common Meter Electricity Bill", date: "2026-07-10", amount: 4560, groupId: "g1" },
+    { id: "j2", type: "expense", desc: "Coffee", date: "2026-07-12", amount: 678, groupId: "g1" },
+    { id: "j3", type: "expense", desc: "K Auto", date: "2026-07-20", amount: 7899, groupId: "g1", people: { r: { amount: 7899, mode: "owes" } } },
+    { id: "a1", type: "expense", desc: "August Water Bill", date: "2026-08-05", amount: 788, groupId: "g1", people: { r: { amount: 400, mode: "owes" }, m: { amount: 388, mode: "owes" } } },
+  ];
+  const items = buildGroupExpenseList({ ...base, from: "2026-07-01", to: "2026-08-31", txns: t2, bills: [] }).items.map(i => ({ ...i, on: true }));
+  const m = buildGroupExpenseMessage(items, { groupName: "Flat", from: "2026-07-01", to: "2026-08-31", upiHandle: "me@upi" });
+  assert.equal(m, ["Flat · 1 Jul 2026 – 31 Aug 2026", "", "July", "July Common Meter Electricity Bill - 4560", "Coffee - 678", "Raj - K Auto - 7899", "Sum - 13137", "", "August", "August Water Bill - 788", "Sum - 788", "", "PTD total - 13925", "", "Pay to: me@upi"].join("\n"));
+  assert.doesNotMatch(m, /\(Raj|Still to be paid/);               // a split between two members is just the bill; the one-member expense carries the name
   assert.equal(buildGroupExpenseMessage(items.map(i => ({ ...i, on: false })), {}), "");
+  assert.doesNotMatch(buildGroupExpenseMessage(items.filter(i => i.date < "2026-08"), { from: "2026-07-01", to: "2026-07-31" }), /PTD total/);   // one month: Sum only
 });
 
 import { categorySplit } from "./expenseList.js";
@@ -87,5 +93,5 @@ test("the break-up adds the ticked items by category, biggest first, no-category
 test("the message adds a By category section with the shares", () => {
   const items = buildGroupExpenseList({ ...base, txns: [{ id: "q", type: "expense", desc: "Lunch", date: "2026-11-05", amount: 400, groupId: "g1", catId: "food" }], bills: [] }).items.map(i => ({ ...i, on: true }));
   const m = buildGroupExpenseMessage(items, { groupName: "Flat", from: base.from, to: base.to, breakup: buildCategoryBreakup(items, [{ id: "food", name: "Food" }]) });
-  assert.match(m, /By category:\nFood - 400 \(100%\)/);
+  assert.match(m, /Sum - 400\n\nBy category:\nFood - 400 \(100%\)/);
 });

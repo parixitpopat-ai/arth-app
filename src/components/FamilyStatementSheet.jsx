@@ -36,7 +36,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const lines = useMemo(() => (fam ? familyLines(fam, nameOf) : []), [fam]);   // eslint-disable-line react-hooks/exhaustive-deps
   const isOn = l => (l.key in overrides ? overrides[l.key] : l.ticked);
   const simpleMessage = buildSimpleMessage(lines.map(l => ({ ...l, on: isOn(l) })), { upiHandle, withNames: true });
-  const ex = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, memberIds, txns, bills, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, from, to, people]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const ex = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, memberIds, txns, bills, billerAccounts, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, billerAccounts, from, to, people]);   // eslint-disable-line react-hooks/exhaustive-deps
   const exItems = ex ? ex.items.map(i => ({ ...i, on: !exOff[i.key] })) : [];
   const breakup = useMemo(() => buildCategoryBreakup(exItems.filter(i => i.on), cats), [ex, exOff, cats]);   // eslint-disable-line react-hooks/exhaustive-deps
   const exMessage = ex ? buildGroupExpenseMessage(exItems, { groupName: group.name, from, to, upiHandle, breakup: withBreakup ? breakup : null }) : "";

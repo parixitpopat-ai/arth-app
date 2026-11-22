@@ -37,11 +37,11 @@ await T("fam-cat-row").first().locator("summary").click(); await p.waitForTimeou
 rec("C2 opening a category shows the entries behind it", /Electricity/.test(await T("fam-cat-row").first().innerText()), {});
 const msg = await T("fam-message").innerText();
 rec("C3 the message carries a By category section", /By category:\nUtilities - 3000 \(58\.8%\)/.test(msg) && /Food & Dining - 1200/.test(msg), msg.split("By category:")[1]?.slice(0, 120));
-rec("G6 the message is one line per item with shares, then the totals and the UPI line", /^Flat · expenses/.test(msg) && /Electricity - 3000 \(Raj 1000, Mangal 1000, you 1000\)/.test(msg) && /Party snacks - 1200/.test(msg) && /Total expenses = 5100/.test(msg) && /Still to be paid by members = 1600/.test(msg) && /Pay to: sample@upi/.test(msg), msg);
+rec("G6 the message is month by month: Item - amount, a Sum, the UPI line", /Electricity - 3000/.test(msg) && /Party snacks - 1200/.test(msg) && /Internet.* - 900/.test(msg) && /Sum - 5100/.test(msg) && /Pay to: sample@upi/.test(msg) && !/\(Raj/.test(msg), msg);
 await T("fam-exp-check").nth(1).uncheck(); await p.waitForTimeout(300);
 const msg2 = await T("fam-message").innerText();
 rec("G6b the button shares the expenses (it does not ask for the members' balance)", /Share these expenses/.test(await T("fam-share").innerText()), await T("fam-share").innerText());
-rec("G7 un-ticking Party snacks takes it out of the message and the total (3,900)", !/Party snacks/.test(msg2) && /Total expenses = 3900/.test(msg2), msg2.split("\n").slice(-4).join(" | "));
+rec("G7 un-ticking Party snacks takes it out of the message and the total (3,900)", !/Party snacks/.test(msg2) && /Sum - 3900/.test(msg2), msg2.split("\n").slice(-4).join(" | "));
 rec("C4 un-ticking Party snacks takes Food out of the break-up", (await T("fam-cat-row").count()) === 2, await T("fam-cat-row").count());
 await T("fam-breakup-in-message").uncheck(); await p.waitForTimeout(200);
 rec("C5 the break-up can be left out of the message", !/By category/.test(await T("fam-message").innerText()), {});

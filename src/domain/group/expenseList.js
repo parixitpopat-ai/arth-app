@@ -10,6 +10,7 @@
 
 import { remainingShare } from "../shared/remainingShare.js";
 import { getBillSplitSource } from "../bills/splitSource.js";
+import { billMonthTitle, meterNicknamer } from "../bills/billMonthTitle.js";
 
 const P = n => Math.round((Number(n) || 0) * 100);
 const R = p => Math.round(p) / 100;
@@ -40,13 +41,19 @@ const dateOfBill = b => String(b.billDate || b.createdDate || b.dueDate || "").s
  * @returns {{items:Array<{key:string,kind:"expense"|"bill",id:any,date:string,title:string,total:number,payer:string,note:string,shares:Array<{personId:string,name:string,amount:number,remaining:number}>,memberTotal:number,due:number,groupAmount:number,yourShare:number|null}>,
  *           totals:{count:number,total:number,memberTotal:number,due:number}}}
  */
-export function buildGroupExpenseList({ groupId, memberIds = [], txns = [], bills = [], from, to, nameOf = id => String(id) }) {
+export function buildGroupExpenseList({ groupId, memberIds = [], txns = [], bills = [], billerAccounts = [], from, to, nameOf = id => String(id) }) {
   const gid = String(groupId);
   const inRange = d => d && d >= from && d <= to;
   const members = new Set((memberIds || []).map(String));
   const sharesOf = map => Object.entries(map || {})
     .filter(([pid, info]) => members.has(String(pid)) && info && info.mode === "owes" && Number(info.amount) > 0 && !info.transferredTo)
     .map(([pid, info]) => ({ personId: pid, name: nameOf(pid), amount: R(P(info.amount)), remaining: R(P(remainingShare(info))) }));
+  const nick = meterNicknamer(billerAccounts);
+  const billTitle = b => billMonthTitle(b, { nickname: nick(b) });          // "July Water Bill (Office)", the same naming the statements use
+  const forMember = (shares, total, forPerson) => {                         // the one member an expense belongs to, when it does
+    if (shares.length === 1 && P(shares[0].amount) >= P(total) - 1) return shares[0].personId;
+    return forPerson && members.has(String(forPerson)) ? String(forPerson) : null;
+  };
   const items = [];
   const paidBillIds = new Set();
   for (const t of txns || []) {
@@ -57,7 +64,9 @@ export function buildGroupExpenseList({ groupId, memberIds = [], txns = [], bill
     const shares = sharesOf({ ...(t.splitPeople || {}), ...(t.people || {}) });
     const memberTotal = R(shares.reduce((s, x) => s + P(x.amount), 0));
     const total = R(P(t.amount));
-    items.push({ key: `txn:${t.id}`, kind: "expense", id: t.id, date, title: t.paidBillName || t.desc || t.merchant || "Expense", total,
+    const paidBill = t.paidBillId != null ? (bills || []).find(b => b && String(b.id) === String(t.paidBillId)) : null;
+    const fm = forMember(shares, total, t.forPerson);
+    items.push({ key: `txn:${t.id}`, kind: "expense", id: t.id, date, title: paidBill ? billTitle(paidBill) : (t.paidBillName || t.desc || t.merchant || "Expense"), forPersonId: fm, forName: fm ? nameOf(fm) : "", total,
       payer: t.paidByPersonId ? nameOf(t.paidByPersonId) : "you", note: String(t.note || ""), shares, memberTotal, due: R(shares.reduce((s, x) => s + P(x.remaining), 0)),
       groupAmount: R(P(t.groupCollectiveAmount)), yourShare: shares.length && !(Number(t.groupCollectiveAmount) > 0) ? Math.max(0, R(P(total) - P(memberTotal))) : null, categories: categorySplit(t, P(total)) });
   }
@@ -71,7 +80,8 @@ export function buildGroupExpenseList({ groupId, memberIds = [], txns = [], bill
     const shares = sharesOf(src.people);
     const memberTotal = R(shares.reduce((s, x) => s + P(x.amount), 0));
     const total = R(P(b.amount));
-    items.push({ key: `bill:${b.id}`, kind: "bill", id: b.id, date, title: b.name || b.merchant || "Bill", total, payer: "not paid yet", note: "", shares, memberTotal,
+    const fmb = forMember(shares, total, null);
+    items.push({ key: `bill:${b.id}`, kind: "bill", id: b.id, date, title: billTitle(b), forPersonId: fmb, forName: fmb ? nameOf(fmb) : "", total, payer: "not paid yet", note: "", shares, memberTotal,
       due: R(shares.reduce((s, x) => s + P(x.remaining), 0)), groupAmount: R(P(b.groupCollectiveAmount)), yourShare: shares.length && !(Number(b.groupCollectiveAmount) > 0) ? Math.max(0, R(P(total) - P(memberTotal))) : null, categories: categorySplit({ catId: b.catId, catIds: b.catIds }, P(total)) });
   }
   items.sort((a, b) => a.date.localeCompare(b.date) || String(a.key).localeCompare(String(b.key)));
