@@ -4,7 +4,7 @@ import { buildGroupExpenseList } from "./expenseList.js";
 import { buildGroupExpenseMessage } from "./expenseMessage.js";
 
 const nameOf = id => ({ r: "Raj", m: "Mangal", me: "Me" }[id] || id);
-const base = { groupId: "g1", memberIds: ["r", "m"], from: "2026-11-01", to: "2026-11-30", nameOf };
+const base = { groupId: "g1", memberIds: ["r", "m"], meId: "me", from: "2026-11-01", to: "2026-11-30", nameOf };
 const txns = [
   { id: "t1", type: "expense", desc: "Electricity", date: "2026-11-05", amount: 3000, groupId: "g1", people: { r: { amount: 1000, mode: "owes" }, m: { amount: 1000, mode: "owes", settled: true } } },
   { id: "t2", type: "expense", desc: "Party snacks", date: "2026-11-10", amount: 1200, groupId: "g1", groupCollectiveAmount: 1200 },            // tagged to the group, no member split
@@ -134,4 +134,18 @@ test("a bill payment that carries a member's share is counted once, from the pay
   const t = [{ id: "pay", type: "expense", desc: "Gas", date: "2026-11-12", amount: 800, paidBillId: "bb", people: { m: { amount: 400, mode: "owes" } } }];
   const b = [{ id: "bb", name: "Gas", billDate: "2026-11-12", amount: 800, status: "paid", paidByTxnId: "pay", splitPeople: { m: { amount: 400, mode: "owes" } } }];
   assert.equal(buildGroupExpenseList({ ...base, includePeople: true, txns: t, bills: b }).items.length, 1);
+});
+
+test("a group the person is NOT part of (meId null): items count at the family's part, no part for the person, categories follow, the whole cost is kept", () => {
+  const t = [
+    { id: "e", type: "expense", desc: "Electricity", date: "2026-11-05", amount: 12000, groupId: "g1", catId: "util", people: { r: { amount: 3000, mode: "owes" }, m: { amount: 3000, mode: "owes" } } },
+    { id: "c", type: "expense", desc: "Coffee", date: "2026-11-06", amount: 678, groupId: "g1", catId: "food" },                                // tagged to the group as a whole: all of it is for them
+  ];
+  const r = buildGroupExpenseList({ ...base, meId: null, txns: t, bills: [] });
+  const e = r.items[0]; assert.deepEqual([e.total, e.wholeTotal], [6000, 12000]); assert.deepEqual(e.parts.map(p => p.name), ["Raj", "Mangal"]);
+  assert.deepEqual(e.categories.map(c => [c.catId, c.amount]), [["util", 6000]]);
+  const c = r.items[1]; assert.deepEqual([c.total, c.parts.length, c.parts[0].personId], [678, 1, null]);
+  assert.equal(r.totals.total, 6678);
+  const m = buildGroupExpenseMessage(r.items.map(i => ({ ...i, on: true })), { groupName: "Neighbours", from: "2026-11-01", to: "2026-11-30" });
+  assert.doesNotMatch(m, /You|Me /); assert.match(m, /Neighbours - expenses\nCoffee - 678/);
 });

@@ -121,6 +121,17 @@ export function buildGroupExpenseList({ groupId, memberIds = [], meId = null, in
         due: R(shares.reduce((sum, x) => sum + P(x.remaining), 0)), groupAmount: 0, yourShare: null, parts: shares.map(x => ({ personId: x.personId, name: x.name, amount: x.amount })), categories: categorySplit({ catId: b.catId, catIds: b.catIds }, P(mine)) });
     }
   }
+  // A group the person using Arth is NOT part of (a neighbour's family): the statement is the family's, so an item counts at what the family bears (its parts), and the
+  // rest of a shared bill, which is the person's own, is not in it. `wholeTotal` keeps what the expense cost.
+  if (meId == null) {
+    for (const i of items) {
+      i.wholeTotal = i.total; i.total = R(i.parts.reduce((sum, x) => sum + P(x.amount), 0));
+      if (i.wholeTotal > 0 && i.total !== i.wholeTotal) {                                   // the categories follow the family's part of the expense
+        const r = i.total / i.wholeTotal; let left = P(i.total);
+        i.categories = i.categories.map((c, k, arr) => { const paise = k === arr.length - 1 ? left : Math.round(P(c.amount) * r); left -= paise; return { ...c, amount: R(paise) }; }).filter(c => c.amount > 0);
+      }
+    }
+  }
   items.sort((a, b) => a.date.localeCompare(b.date) || String(a.key).localeCompare(String(b.key)));
   const sum = k => R(items.reduce((s, i) => s + P(i[k]), 0));
   return { items, totals: { count: items.length, total: sum("total"), memberTotal: sum("memberTotal"), due: sum("due") } };

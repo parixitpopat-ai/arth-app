@@ -12,12 +12,14 @@ await ctx.addInitScript(([d3, d2, d1]) => { if (localStorage.getItem("__init")) 
   set("arth_accounts", [{ id: "b1", name: "Test Savings", type: "bank", openingBalance: 100000, openingBalanceDate: "2026-01-01" }, { id: "u1", name: "Sample UPI", type: "upi", handle: "sample@upi", linkedAccount: "b1" }]);
   set("arth_people", [{ id: "me", name: "Me", isMe: true }, { id: "r", name: "Raj" }, { id: "m", name: "Mangal" }]);
   const owes = (amount, settled = false) => ({ amount, mode: "owes", settled, remainingAmt: settled ? 0 : amount });
-  set("arth_groups", [{ id: "flat", name: "Flat", icon: "🏠", color: "#16a34a", typeId: "other", type: "Other", members: ["r", "m"], includeMe: true, manualLimit: 0, defaultIntent: "split", modules: [] }]);
+  set("arth_groups", [{ id: "nb", name: "Neighbours", icon: "🏘️", color: "#0ea5e9", typeId: "other", type: "Other", members: ["r", "m"], includeMe: false, manualLimit: 0, defaultIntent: "split", modules: [] }, { id: "flat", name: "Flat", icon: "🏠", color: "#16a34a", typeId: "other", type: "Other", members: ["r", "m"], includeMe: true, manualLimit: 0, defaultIntent: "split", modules: [] }]);
   set("arth_bills", [{ id: "bw", name: "Internet", billDate: d1, dueDate: d1, status: "unpaid", amount: 900, groupId: "flat", splitPeople: { r: owes(300), m: owes(300) } }]);
   set("arth_txns", [
     { id: "t1", type: "expense", desc: "Electricity", date: d3, amount: 3000, accId: "b1", groupId: "flat", catId: "utilities", catIds: ["utilities"], people: { r: owes(1000), m: owes(1000, true) } },
     { id: "t2", type: "expense", desc: "Party snacks", date: d2, amount: 1200, accId: "b1", groupId: "flat", catId: "food", catIds: ["food"], groupCollectiveAmount: 1200 },
     { id: "t3", type: "expense", desc: "Not the flat", date: d2, amount: 777, accId: "b1" },
+    { id: "n1", type: "expense", desc: "Neighbour electricity", date: d3, amount: 9000, accId: "b1", groupId: "nb", people: { r: owes(3000), m: owes(3000) } },
+    { id: "n2", type: "expense", desc: "Coffee for them", date: d2, amount: 678, accId: "b1", groupId: "nb" },
     { id: "t4", type: "expense", desc: "K Auto", date: d2, amount: 500, accId: "b1", people: { r: owes(500) } }]);
   localStorage.setItem("arth_master_user_setup_complete", "true"); }, [day(3), day(2), day(1)]);
 const p = await ctx.newPage(); const errors = []; p.on("pageerror", e => errors.push(String(e)));
@@ -61,6 +63,15 @@ await T("fam-preset-last").click(); await p.waitForTimeout(400);
 rec("G9 a period with nothing tagged says so", (await T("fam-exp-empty").count()) === 1 || (await T("fam-exp-line").count()) >= 0, await T("fam-exp-line").count());
 await T("fam-mode-simple").click(); await p.waitForTimeout(400);
 rec("G10 the members views are still there (Members, simple / Full statement)", (await T("fam-mode-full").count()) === 1 && (await T("fam-expenses").count()) === 0, {});
+await p.reload(); await p.waitForTimeout(1200);
+for (let i = 0; i < 2; i++) if (await p.getByRole("button", { name: "1", exact: true }).count()) { for (let k = 0; k < 4; k++) { await p.getByRole("button", { name: "1", exact: true }).click(); await p.waitForTimeout(100); } await p.waitForTimeout(500); }
+await p.getByText(/^people$/i).last().dispatchEvent("click"); await p.waitForTimeout(800);
+await p.getByText(/Groups/).first().dispatchEvent("click"); await p.waitForTimeout(600);
+await p.getByText("Neighbours", { exact: true }).first().dispatchEvent("click"); await p.waitForTimeout(700);
+await T("group-statement").scrollIntoViewIfNeeded().catch(() => {}); await T("group-statement").dispatchEvent("click"); await p.waitForTimeout(700);
+const nmsg = await T("fam-message").innerText();
+rec("N1 a family I am not part of: no 'Only my part' choice, no block for me, the whole bill kept on screen", (await T("fam-who-me").count()) === 0 && !/Me - expenses/.test(nmsg) && /whole bill ₹9,000/.test(await body()), nmsg.slice(0, 120));
+rec("N2 the electricity counts at the family's 3,000 each (not the 9,000 bill), Raj's own K Auto joins, and the coffee tagged to the group is a line under 'Neighbours - expenses'; the month total is 7,178", /Raj - expenses\nNeighbour electricity - 3000/.test(nmsg) && /Mangal - expenses\nNeighbour electricity - 3000/.test(nmsg) && /Neighbours - expenses\nCoffee for them - 678/.test(nmsg) && /November total - 7178/.test(nmsg), nmsg);
 rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 await b.close(); try { process.kill(-server.pid); } catch {}
 const bad = results.filter(r => !r.pass).length; console.log(`\n${results.length - bad}/${results.length} passed`); process.exit(bad ? 1 : 0);
