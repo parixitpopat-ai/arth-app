@@ -6,6 +6,8 @@ import StatementPreview from "./StatementPreview";
 import { buildFamilyStatement } from "../domain/person/personStatement";
 import StatementSelection from "./StatementSelection";
 import { buildFamilyMessage, shortDate, familyLines, buildSimpleMessage } from "../domain/person/statementMessage";
+import { buildGroupExpenseList } from "../domain/group/expenseList";
+import { buildGroupExpenseMessage } from "../domain/group/expenseMessage";
 
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 function presets(todayIso) {
@@ -21,7 +23,8 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const [preset, setPreset] = useState("fy");
   const [from, setFrom] = useState(P.fy.from), [to, setTo] = useState(P.fy.to);
   const [status, setStatus] = useState("");
-  const [mode, setMode] = useState("simple");            // "simple": Member: Item - amount lines you tick, then a total | "full": the family statement
+  const [mode, setMode] = useState(() => (buildGroupExpenseList({ groupId: group.id, memberIds: [], txns, bills, from: presets(iso(new Date())).fy.from, to: iso(new Date()) }).totals.count > 0 ? "expenses" : "simple"));   // a group with expenses tagged to it opens on them
+  const [exOff, setExOff] = useState({});                // itemised expenses the person un-ticked            // "simple": Member: Item - amount lines you tick, then a total | "full": the family statement
   const [overrides, setOverrides] = useState({});
   const nameOf = id => (people.find(p => String(p.id) === String(id)) || {}).name || "someone";
   const labelOf = c => { const ba = billerAccounts.find(b => String(b.id) === String(c.billerAccountId)); return (ba && ba.type) || (c.billId ? "Bills" : "Own expenses"); };
@@ -31,9 +34,12 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const lines = useMemo(() => (fam ? familyLines(fam, nameOf) : []), [fam]);   // eslint-disable-line react-hooks/exhaustive-deps
   const isOn = l => (l.key in overrides ? overrides[l.key] : l.ticked);
   const simpleMessage = buildSimpleMessage(lines.map(l => ({ ...l, on: isOn(l) })), { upiHandle, withNames: true });
-  const message = !fam ? "" : mode === "simple" ? simpleMessage : buildFamilyMessage(fam, { groupName: group.name, nameOf, sym, fmt, upiHandle });
+  const ex = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, memberIds, txns, bills, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, from, to, people]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const exItems = ex ? ex.items.map(i => ({ ...i, on: !exOff[i.key] })) : [];
+  const exMessage = ex ? buildGroupExpenseMessage(exItems, { groupName: group.name, from, to, upiHandle }) : "";
+  const message = mode === "expenses" ? exMessage : !fam ? "" : mode === "simple" ? simpleMessage : buildFamilyMessage(fam, { groupName: group.name, nameOf, sym, fmt, upiHandle });
   const owed = fam ? fam.closing : 0;
-  const choose = id => { setPreset(id); setFrom(P[id].from); setTo(P[id].to); setStatus(""); setOverrides({}); };
+  const choose = id => { setPreset(id); setFrom(P[id].from); setTo(P[id].to); setStatus(""); setOverrides({}); setExOff({}); };
   const share = async () => {
     try {
       if (navigator.share) { await navigator.share({ title: `Statement for the ${group.name} family`, text: message }); setStatus(""); }
@@ -46,11 +52,23 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const inp = { background: T.input, border: `1px solid ${T.border}`, borderRadius: 10, color: T.text, padding: "9px 10px", fontSize: 13, fontFamily: "Inter,sans-serif", width: "100%" };
   const active = fam ? fam.members.filter(m => m.sections.length || m.payments.length || Math.abs(m.opening) > 0.004) : [];
 
+  const shareBlock = (<>
+        <div style={{ ...sub, marginTop: 12 }}>Message that will be shared</div>
+          {!message && <div data-testid="fam-none-ticked" style={{ color: T.warn, fontSize: 13, margin: "4px 0 10px" }}>Tick at least one item to send.</div>}
+          {message && <pre data-testid="fam-message" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 10, padding: 10, color: T.text, fontSize: 12, whiteSpace: "pre-wrap", margin: "4px 0 10px", fontFamily: "inherit" }}>{message}</pre>}
+          {!upiHandle && <div style={{ ...sub, marginBottom: 8 }}>No UPI handle is saved, so the message has no "Pay to" line.</div>}
+          {message && <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" data-testid="fam-share" onClick={share} style={{ flex: 1, background: T.accent, color: "#fff", border: "none", borderRadius: 12, padding: "12px", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Inter,sans-serif" }}>{mode === "expenses" ? "Share these expenses" : owed > 0.004 ? `Request ${money(owed)} from the family` : "Share"}</button>
+            <button type="button" data-testid="fam-copy" onClick={copy} style={{ background: "none", color: T.text, border: `1px solid ${T.border}`, borderRadius: 12, padding: "12px 16px", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Inter,sans-serif" }}>Copy</button>
+          </div>}
+          {status && <div data-testid="fam-status" style={{ ...sub, marginTop: 8 }}>{status}</div>}
+  </>);
+
   return (
     <BottomSheet onClose={onClose} T={T} maxHeight="92vh">
       <div data-testid="family-statement-sheet">
         <div style={{ color: T.text, fontSize: 18, fontWeight: 900 }}>Statement · {group.name}</div>
-        <div style={{ ...sub, marginBottom: 10 }}>The whole family in one: each member's shares and the repayments you recorded. Nothing is changed.</div>
+        <div style={{ ...sub, marginBottom: 10 }}>{mode === "expenses" ? "Every expense and bill tagged to this group, with who paid and each member's share. Nothing is changed." : "The whole family in one: each member's shares and the repayments you recorded. Nothing is changed."}</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
           {Object.entries(P).map(([id, p]) => <button key={id} type="button" data-testid={`fam-preset-${id}`} style={chip(preset === id)} onClick={() => choose(id)}>{p.label}</button>)}
         </div>
@@ -58,13 +76,40 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
           <label style={{ flex: 1 }}><span style={sub}>From</span><input data-testid="fam-from" type="date" style={inp} value={from} max={to || undefined} onChange={e => { setFrom(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
           <label style={{ flex: 1 }}><span style={sub}>Until</span><input data-testid="fam-to" type="date" style={inp} value={to} min={from || undefined} onChange={e => { setTo(e.target.value); setPreset("custom"); setStatus(""); setOverrides({}); }} /></label>
         </div>
-        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-          <button type="button" data-testid="fam-mode-simple" style={chip(mode === "simple")} onClick={() => { setMode("simple"); setStatus(""); }}>Simple list</button>
+        <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+          <button type="button" data-testid="fam-mode-expenses" style={chip(mode === "expenses")} onClick={() => { setMode("expenses"); setStatus(""); }}>Group expenses</button>
+          <button type="button" data-testid="fam-mode-simple" style={chip(mode === "simple")} onClick={() => { setMode("simple"); setStatus(""); }}>Members, simple</button>
           <button type="button" data-testid="fam-mode-full" style={chip(mode === "full")} onClick={() => { setMode("full"); setStatus(""); }}>Full statement</button>
         </div>
         {fam && mode === "simple" && <StatementSelection T={T} sym={sym} fmt={fmt} lines={lines} isOn={isOn} withNames testPrefix="famsel" onToggle={(l, on) => setOverrides(o => ({ ...o, [l.key]: on }))}
           onAll={() => setOverrides(Object.fromEntries(lines.map(l => [l.key, true])))} onNone={() => setOverrides(Object.fromEntries(lines.map(l => [l.key, false])))} />}
-        {!memberIds.length ? <div data-testid="fam-no-members" style={{ color: T.warn, fontSize: 13 }}>This group has no members besides you, so there is no one to ask.</div>
+        {mode === "expenses" && <div data-testid="fam-expenses">
+          {!ex ? <div data-testid="fam-bad-range" style={{ color: T.warn, fontSize: 13 }}>Choose a start date that is not after the end date.</div>
+            : !ex.items.length ? <div data-testid="fam-exp-empty" style={{ ...sub, padding: "8px 0" }}>No expense is tagged to {group.name} in this period.</div> : <>
+            <div data-testid="fam-exp-summary" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
+              <div style={line}><span style={{ color: T.text, fontSize: 13 }}>{ex.totals.count} expense{ex.totals.count === 1 ? "" : "s"} tagged to {group.name}</span><span data-testid="fam-exp-total" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.total)}</span></div>
+              {ex.totals.due > 0.004 && <div style={line}><span style={{ color: T.text, fontSize: 13 }}>Still to be paid by members</span><span data-testid="fam-exp-due" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.due)}</span></div>}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <span style={sub}>Tick what to send</span>
+              <span style={{ display: "flex", gap: 12 }}><button type="button" data-testid="fam-exp-all" style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }} onClick={() => setExOff({})}>All</button><button type="button" data-testid="fam-exp-none" style={{ background: "none", border: "none", color: T.accent, fontSize: 12, fontWeight: 700, cursor: "pointer", padding: 0 }} onClick={() => setExOff(Object.fromEntries(ex.items.map(i => [i.key, true])))}>None</button></span>
+            </div>
+            {ex.items.map(i => (
+              <label key={i.key} data-testid="fam-exp-line" style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 0", borderBottom: `1px solid ${T.border}` }}>
+                <input data-testid="fam-exp-check" type="checkbox" checked={!exOff[i.key]} onChange={e => setExOff(o => ({ ...o, [i.key]: !e.target.checked }))} style={{ marginTop: 3 }} />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ color: T.text, fontSize: 13, fontWeight: 700, display: "block", wordBreak: "break-word" }}>{i.title}</span>
+                  <span style={sub}>{shortDate(i.date, true)} · {i.kind === "bill" ? "bill, not paid yet" : `paid by ${i.payer}`}{i.groupAmount > 0 && !i.shares.length ? ` · for the group: ${money(i.groupAmount)}` : ""}</span>
+                  {i.shares.length > 0 && <span style={{ ...sub, display: "block" }}>{i.shares.map(x => `${x.name} ${money(x.amount)}${x.remaining < 0.005 ? " ✓" : ""}`).join(" · ")}{i.yourShare ? ` · you ${money(i.yourShare)}` : ""}</span>}
+                </span>
+                <span style={{ color: T.text, fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>{money(i.total)}</span>
+              </label>
+            ))}
+            <div style={{ ...sub, marginTop: 8 }}>"✓" means that member has paid their share.</div>
+            {shareBlock}
+          </>}
+        </div>}
+        {mode !== "expenses" && (!memberIds.length ? <div data-testid="fam-no-members" style={{ color: T.warn, fontSize: 13 }}>This group has no members besides you, so there is no one to ask.</div>
           : !fam ? <div data-testid="fam-bad-range" style={{ color: T.warn, fontSize: 13 }}>Choose a start date that is not after the end date.</div> : <>
           {mode === "full" && <div data-testid="fam-summary" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12 }}>
             <div style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>{group.name} family</div>
@@ -92,16 +137,8 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
               <div style={{ marginTop: 6 }}><StatementPreview T={T} sym={sym} fmt={fmt} st={m} name={nameOf(m.personId)} nameOf={nameOf} /></div>
             </details>
           ))}
-          <div style={{ ...sub, marginTop: 12 }}>Message that will be shared</div>
-          {!message && <div data-testid="fam-none-ticked" style={{ color: T.warn, fontSize: 13, margin: "4px 0 10px" }}>Tick at least one item to send.</div>}
-          {message && <pre data-testid="fam-message" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 10, padding: 10, color: T.text, fontSize: 12, whiteSpace: "pre-wrap", margin: "4px 0 10px", fontFamily: "inherit" }}>{message}</pre>}
-          {!upiHandle && <div style={{ ...sub, marginBottom: 8 }}>No UPI handle is saved, so the message has no "Pay to" line.</div>}
-          {message && <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" data-testid="fam-share" onClick={share} style={{ flex: 1, background: T.accent, color: "#fff", border: "none", borderRadius: 12, padding: "12px", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Inter,sans-serif" }}>{owed > 0.004 ? `Request ${money(owed)} from the family` : "Share"}</button>
-            <button type="button" data-testid="fam-copy" onClick={copy} style={{ background: "none", color: T.text, border: `1px solid ${T.border}`, borderRadius: 12, padding: "12px 16px", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Inter,sans-serif" }}>Copy</button>
-          </div>}
-          {status && <div data-testid="fam-status" style={{ ...sub, marginTop: 8 }}>{status}</div>}
-        </>}
+          {shareBlock}
+        </>)}
       </div>
     </BottomSheet>
   );
