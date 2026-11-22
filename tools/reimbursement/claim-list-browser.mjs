@@ -24,9 +24,9 @@ async function newPage(withWork) {
   const text = () => page.evaluate(() => document.body.innerText.replace(/\s+/g, " "));
   const openReimb = async amount => { await page.goto(APP); await page.waitForTimeout(1000); await unlock(); await page.waitForTimeout(500);
     await page.getByRole("button", { name: "+", exact: true }).first().click(); await page.waitForTimeout(700); await page.getByText("More options →").click(); await page.waitForTimeout(700);
-    await page.getByTestId("type-more").dispatchEvent("click"); await page.waitForTimeout(500);
+    await page.getByTestId("type-income").dispatchEvent("click"); await page.waitForTimeout(500);
     await page.getByPlaceholder(/e\.g\. ₹5,500/).fill(String(amount)); await page.waitForTimeout(300);
-    await page.locator("button:visible", { hasText: /Reimbursement/ }).first().dispatchEvent("click"); await page.waitForTimeout(500); };
+    await page.getByTestId("what-reimbursement").dispatchEvent("click"); await page.waitForTimeout(500); };
   return { page, T, ls, text, openReimb, unlock };
 }
 const save = async page => { await page.locator("button:visible", { hasText: /Add ✓|Save|Record/ }).last().click(); await page.waitForTimeout(900); };
@@ -87,8 +87,8 @@ try {
     const spent = (await text()).match(/Spent\s*₹([\d,]+)/)?.[1];
     rec("C4 it is not my spending: Home 'Spent' is not ₹180", spent !== "180", spent);
     await page.getByRole("button", { name: "+", exact: true }).first().click(); await page.waitForTimeout(700); await page.getByText("More options →").click(); await page.waitForTimeout(700);
-    await page.getByTestId("type-more").dispatchEvent("click"); await page.waitForTimeout(500);
-    await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("180"); await page.locator("button:visible", { hasText: /Reimbursement/ }).first().dispatchEvent("click"); await page.waitForTimeout(500);
+    await page.getByTestId("type-income").dispatchEvent("click"); await page.waitForTimeout(500);
+    await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("180"); await page.getByTestId("what-reimbursement").dispatchEvent("click"); await page.waitForTimeout(500);
     rec("C5 the claim shows in the reimbursement list and is ticked for ₹180", (await page.locator("[data-testid^='reimb-row-']").count()) === 1 && /1 ticked/.test(await T("reimb-summary").innerText()), (await T("reimb-summary").count()) ? await T("reimb-summary").innerText() : "");
     await page.locator("button:visible", { hasText: /Add ✓|Save|Record/ }).last().click(); await page.waitForTimeout(900);
     const all = await ls("arth_txns"); const inc = all.find(t => t.type === "settlement_in");

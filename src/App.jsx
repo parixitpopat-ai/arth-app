@@ -6379,21 +6379,21 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     handler is unchanged. */}
                 {(()=>{
                   const chooseType = v => { if(v==="petty_cash"){ setPettyCashDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } if(v==="loan_given"){ setLoanGivenDraft({ amount:amount, date:date, personId:transferTagPersonId || "" }); closeModal(); return; } setTxnType(v); setUserSetTxnType(true); if(v==="transfer") setWho(""); if(v!=="transfer"){ setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId(""); }};
-                  const moreTypes = ["settlement_in","investment","petty_cash"];
+                  const moreTypes = ["investment","petty_cash"];
                   const inMore = moreTypes.includes(txnType);
                   const seg = [["expense","Spent",T.danger],["income","Received",T.success],["transfer","Moved",T.info],["__more","More",T.info]];
                   return (
                     <div style={{ marginBottom:12 }}>
                       <div role="group" aria-label="Type" style={{ display:"flex",background:T.input,borderRadius:14,padding:3,gap:2 }}>
                         {seg.map(([v,lb,col])=>{
-                          const active = v==="__more" ? inMore : txnType===v;
-                          return <button key={v} data-testid={`type-${v==="__more"?"more":v}`} aria-pressed={active} onClick={()=>v==="__more"?chooseType("settlement_in"):chooseType(v)}
+                          const active = v==="__more" ? inMore : v==="income" ? (txnType==="income"||txnType==="settlement_in") : txnType===v;
+                          return <button key={v} data-testid={`type-${v==="__more"?"more":v}`} aria-pressed={active} onClick={()=>v==="__more"?chooseType("investment"):(v==="income"&&txnType==="settlement_in")?null:chooseType(v)}
                             style={{ flex:1,minHeight:44,borderRadius:11,border:"none",background:active?T.card:"transparent",boxShadow:active?`0 0 0 1px ${col}`:"none",color:active?col:T.sub,fontWeight:active?800:600,fontSize:13,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>{lb}</button>;
                         })}
                       </div>
                       {inMore&&(
                         <div style={{ display:"flex",gap:8,marginTop:8,flexWrap:"wrap" }}>
-                          {[["settlement_in","💼 Settlement"],["investment","💹 Invest"]].map(([v,lb])=>(
+                          {[["investment","💹 Invest"],["petty_cash","💵 Give petty cash"]].map(([v,lb])=>(
                             <button key={v} data-testid={`type-${v}`} onClick={()=>chooseType(v)} style={{ minHeight:40,padding:"0 14px",borderRadius:20,border:`1px solid ${txnType===v?T.info:T.border}`,background:txnType===v?T.info+"22":"none",color:txnType===v?T.info:T.sub,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>{lb}</button>
                           ))}
                         </div>
@@ -6401,6 +6401,27 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     </div>
                   );
                 })()}
+                {/* New look: under Received, say what the money is (the Design canvas "Received"). Salary or income is the income form; the other three
+                    are the old Settlement form with its "Tag this inflow as" already chosen. Same state, same save. */}
+                {(txnType==="income"||txnType==="settlement_in")&&!isEditing&&(
+                  <div data-testid="what-is-it" style={{ marginBottom:12 }}>
+                    <div style={{ ...lbl,marginBottom:6 }}>What is it?</div>
+                    <div style={{ display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:8 }}>
+                      {[["income",null,"Salary or income","Money earned"],["settlement_in","repayment","Someone paid me back","A repayment"],["settlement_in","refund","A refund","From a shop"],["settlement_in","reimbursement","Work reimbursement","From your employer"]].map(([tt,kind,title,sub])=>{
+                        const on = tt==="income" ? txnType==="income" : (txnType==="settlement_in" && settlementKind===kind);
+                        return (
+                          <button key={title} data-testid={`what-${kind||"income"}`} aria-pressed={on} onClick={()=>{
+                            if(tt==="income"){ setTxnType("income"); setUserSetTxnType(true); setTransferTagCatId(""); setTransferTagPersonId(""); setTransferTagGroupId(""); return; }
+                            setTxnType("settlement_in"); setUserSetTxnType(true); setSettlementKind(kind);
+                            if(kind==="reimbursement"){ setTagPerson(""); setSettlementTagGroup(""); }
+                          }} style={{ minHeight:64,textAlign:"left",padding:"10px 14px",borderRadius:16,border:`${on?2:1}px solid ${on?T.accent:T.border}`,background:on?T.accent+"22":T.input,color:T.text,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>
+                            <b style={{ display:"block",fontSize:13,color:on?T.accent:T.text }}>{title}</b><span style={{ fontSize:12,color:T.sub }}>{sub}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
           }
 
@@ -7111,14 +7132,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                     </div>
                   );
                 })()}
-                <div>
+                {isEditing&&<div>
                   <span style={lbl}>Tag this inflow as</span>
                   <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:10 }}>
                     {[{id:"refund",label:"↩ Refund",color:T.text},{id:"repayment",label:"💰 Repayment",color:T.info},{id:"reimbursement",label:"💼 Reimbursement",color:T.success}].map(opt=>(
                       <button key={opt.id} onClick={()=>{ setSettlementKind(opt.id); if(opt.id==="reimbursement"){ setTagPerson(""); setSettlementTagGroup(""); } }} style={{ background:settlementKind===opt.id?opt.color+"22":"none",border:`1px solid ${settlementKind===opt.id?opt.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:settlementKind===opt.id?opt.color:T.sub,fontFamily:"Inter,sans-serif" }}>{opt.label}</button>
                     ))}
                   </div>
-                </div>
+                </div>}
                 {reimbListShown&&(
                   <div data-testid="reimb-list" style={{ background:T.input,border:`1px solid ${T.success}33`,borderRadius:12,padding:"12px 14px" }}>
                     <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>Work expenses waiting for reimbursement</div>
@@ -15922,6 +15943,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "New look, Add screen, step 2: your three most-used categories are one-tap chips above the category picker, and each person row says what it does (\"It was for them. Just tagging it\", \"I owe them\", \"They owe me\") with a line underneath such as \"Raj will owe you ₹900\". Nothing underneath changed.",
             "Add screen, step 3: right above Add, one line says what saving does to what is owed (for example \"Raj Test will owe you ₹900\" or \"You will owe Raj Test ₹300\"). It shows only when someone owes someone.",
             "Add screen, step 4: the amount now has the full width, and the account and date read as one line under it (\"from Test Savings on 22-Nov-2026\") with \"Details\" on the right opening the same card as before.",
+            "Add screen, step 5: under Received, \"What is it?\" gives four big choices: Salary or income, Someone paid me back, A refund, Work reimbursement (the last three are the old Settlement form, already set). Settlement is no longer under More; More now holds Invest and Give petty cash.",
             "Today, step 2: a calmer \"Left in budget\" card (left-aligned, larger figure), a new \"Needs you\" list (the soonest bill, repayments not applied, who owes you most) and a \"Between people\" card (coming to you, including loans, against what you owe). Both cards hide themselves when there is nothing to show, and you can still move or hide them with Arrange",
             "Reimbursement received: when you tag an inflow as Reimbursement, the work expenses still waiting now show as a list, ticked from the oldest while the money lasts. Untick any, and only the ticked ones are marked reimbursed. It replaces the old \"Mark all reimbursed\" pop-up for this case",
             "Claim for a trip in your own vehicle (a drop or pick-up): add a Work expense, type the amount, and choose \"No account · claim only\" under Paid via. Nothing is spent and no balance moves; it waits in the reimbursement list, and when the money arrives it adds to the account you receive it into. Your fuel spending is unchanged",

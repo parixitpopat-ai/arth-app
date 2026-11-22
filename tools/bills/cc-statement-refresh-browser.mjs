@@ -38,7 +38,7 @@ try {
   rec("U6 the sheet has '↩ Add a refund or credit for this period'", (await T("cc-add-refund").count()) === 1, {});
   await T("cc-add-refund").click(); await page.waitForTimeout(900);
   const t = await text();
-  rec("U7 it opens the Add form as money in (\"Tag this inflow as\" with Refund chosen) on that card", /Tag this inflow as/i.test(t) && /Refund/.test(t), (t.match(/Tag this inflow as.{0,80}/i) || [""])[0]);
+  rec("U7 it opens the Add form as money in (\"What is it?\" with A refund chosen) on that card", /What is it\?/i.test(t) && (await page.getByTestId("what-refund").getAttribute("aria-pressed")) === "true", (t.match(/What is it\?.{0,80}/i) || [""])[0]);
 } catch (e) { rec("RUN", false, String(e).slice(0, 600)); }
 rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 await browser.close(); try { process.kill(-server.pid); } catch {}
