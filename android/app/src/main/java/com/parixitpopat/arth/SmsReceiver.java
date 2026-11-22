@@ -48,6 +48,19 @@ public class SmsReceiver extends BroadcastReceiver {
         Pattern.compile("(?i)\\bbill\\b[^.]{0,30}\\b(?:generated|due)\\b"),
     };
 
+    // A provider's bill notice ("your electricity bill of Rs.3045 is due on 28-Jul-26") is kept too, as a proposal for a new Bill. A credit-card bill is not: Arth
+    // makes each card's statement bill itself. The same rules exist in src/domain/sms/billSms.js, which makes the final decision.
+    private static final Pattern BILL_WORD = Pattern.compile("(?i)\\b(bill|invoice)\\b");
+    private static final Pattern DUE_WORD = Pattern.compile("(?i)\\b(due|pay(?:ment)?\\s+by|payable|last\\s+date|outstanding|pay\\s+before)\\b");
+    private static final Pattern MOVED = Pattern.compile("(?i)\\b(debited|credited|has been received|payment received|received your payment|thank you for (?:your )?payment|paid successfully|successfully paid)\\b");
+    private static final Pattern CARD_BILL = Pattern.compile("(?i)\\b(credit\\s*card|card\\s*(?:no\\.?|number|ending)|minimum\\s+(?:amount\\s+)?due)\\b");
+
+    static boolean looksLikeBill(String body) {
+        if (body == null || !AMOUNT.matcher(body).find()) return false;
+        if (!BILL_WORD.matcher(body).find() || !DUE_WORD.matcher(body).find()) return false;
+        return !(OTP.matcher(body).find() || PROMO.matcher(body).find() || MOVED.matcher(body).find() || CARD_BILL.matcher(body).find());
+    }
+
     static boolean looksLikeMoney(String body) {
         if (body == null || !AMOUNT.matcher(body).find() || !MOVE.matcher(body).find() || OTP.matcher(body).find()) return false;
         for (Pattern p : NOTICE) if (p.matcher(body).find()) return false;
@@ -72,10 +85,12 @@ public class SmsReceiver extends BroadcastReceiver {
         }
         for (Map.Entry<String, StringBuilder> e : bodies.entrySet()) {
             String body = e.getValue().toString();
-            if (!looksLikeMoney(body)) continue;
+            boolean money = looksLikeMoney(body);
+            boolean bill = !money && looksLikeBill(body);
+            if (!money && !bill) continue;
             long when = times.get(e.getKey());
             String id = e.getKey() + "|" + when + "|" + body.hashCode();
-            if (enqueue(context, id, e.getKey(), body, when)) notifyUser(context, body, id);
+            if (enqueue(context, id, e.getKey(), body, when)) notifyUser(context, body, id, bill);
         }
     }
 
@@ -96,7 +111,7 @@ public class SmsReceiver extends BroadcastReceiver {
         }
     }
 
-    private static void notifyUser(Context context, String body, String id) {
+    private static void notifyUser(Context context, String body, String id, boolean isBill) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 NotificationChannel ch = new NotificationChannel(CHANNEL, "Bank messages", NotificationManager.IMPORTANCE_DEFAULT);
@@ -104,15 +119,15 @@ public class SmsReceiver extends BroadcastReceiver {
                 context.getSystemService(NotificationManager.class).createNotificationChannel(ch);
             }
             Matcher m = AMOUNT.matcher(body);
-            String amount = m.find() ? "Rs. " + m.group(2) : "A transaction";
+            String amount = m.find() ? "Rs. " + m.group(2) : (isBill ? "A bill" : "A transaction");
             Intent open = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
             if (open != null) open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             PendingIntent pi = open == null ? null : PendingIntent.getActivity(context, 0, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
             // lock screen: say only that there is something to review, not the amount
-            NotificationCompat.Builder pub = new NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_stat_arth).setContentTitle("Arth").setContentText("New bank message to review");
+            NotificationCompat.Builder pub = new NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_stat_arth).setContentTitle("Arth").setContentText(isBill ? "New bill message to review" : "New bank message to review");
             NotificationCompat.Builder b = new NotificationCompat.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat_arth)
-                .setContentTitle("New bank message")
+                .setContentTitle(isBill ? "New bill message" : "New bank message")
                 .setContentText(amount + " · tap to review in Arth")
                 .setAutoCancel(true)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)

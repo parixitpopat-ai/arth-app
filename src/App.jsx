@@ -1610,6 +1610,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const [addPrefill, setAddPrefill] = useState(null);
   const [showInvestments, setShowInvestments] = useState(false);
   const [showAddBill, setShowAddBill] = useState(false);
+  const [smsBillPrefill, setSmsBillPrefill] = useState(null);   // a bill notice the person accepted: { billerAccountId, amount, dueDate } (domain/sms/billSms.js)
+  useEffect(()=>{ if(!showAddBill) setSmsBillPrefill(null); },[showAddBill]);
   const [defaultBillerAccountId, setDefaultBillerAccountId] = useState("");
   const [editingAccount, setEditingAccount] = useState(null);
   const [editingMonthBudget, setEditingMonthBudget] = useState(null); // month key
@@ -2717,7 +2719,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(!ok){ setToast({ message:"Notifications are blocked for Arth. Allow them in your phone's settings, then try again.", icon:"⚠️" }); return; }
     setDueNotifOn(true); setToast({ message:"On: a reminder 3 days before a bill is due and on the day, at 9 am", icon:"🔔" });
   };
-  const smsInbox = useSmsInbox({ accounts, txns, people });   // bank messages caught as they arrive (Android app only); proposals, never entries
+  const smsInbox = useSmsInbox({ accounts, txns, people, billerAccounts });   // bank messages caught as they arrive (Android app only); proposals, never entries
   const activePrepaidAlerts = useMemo(()=>getPrepaidAlerts({ billerAccounts, bills, relationships:membershipRelationships, today:new Date(), dismissed:dismissedAlerts }),[billerAccounts,bills,membershipRelationships,dismissedAlerts]);
   const directOwedToMe = useMemo(()=>Object.values(settlements).reduce((s,p)=>s+(p.owesMe||0),0),[settlements]);
   const receivablePeopleList = useMemo(()=>Object.entries(settlements)
@@ -11008,12 +11010,24 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const repaymentProblems = people.filter(pp=>!pp.isMe && !isPersonArchived(pp)).map(pp=>{ const r = findRepaymentProblems({ personId:pp.id, txns, bills }); return { personId:pp.id, name:pp.name, count:(r.unreduced||[]).length+(r.unlinked||[]).length }; }).filter(x=>x.count>0);
         const items = buildNeedsYou({ commitments:futureMoneyPlanned?.committedSpending||[], today:todayStr(), owedPeople, repaymentProblems, archived:needsArchived });
         const hiddenCount = buildNeedsYou({ commitments:futureMoneyPlanned?.committedSpending||[], today:todayStr(), owedPeople, repaymentProblems, archived:[], max:50 }).filter(i=>needsArchived.includes(i.signature)).length;
-        if(items.length===0 && hiddenCount===0) return null;
+        const newBills = smsInbox.billItems||[];
+        if(items.length===0 && hiddenCount===0 && newBills.length===0) return null;
         const open = it => { if(it.kind==="bill"){ setTab("bills"); return; } const pp = getPerson(it.personId); if(pp){ setSelectedPerson(pp); setTab("people"); } };
         return (
           <div key="needsYou" data-testid="home-needs-you" style={{ display:"flex",flexDirection:"column",gap:8 }}>
-            <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase",padding:"0 4px" }}>Needs you · {items.length}</div>
-            {items.length===0&&<div style={{ ...card,padding:"12px 14px",color:T.sub,fontSize:13 }}>Nothing needs you right now.</div>}
+            <div style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:1,textTransform:"uppercase",padding:"0 4px" }}>Needs you · {items.length+newBills.length}</div>
+            {items.length===0&&newBills.length===0&&<div style={{ ...card,padding:"12px 14px",color:T.sub,fontSize:13 }}>Nothing needs you right now.</div>}
+            {newBills.map(b=>(
+              <div key={b.id} data-testid="needs-new-bill" style={{ ...card,display:"flex",flexDirection:"column",gap:8,padding:"12px 14px",border:`2px solid ${T.accent}` }}>
+                <div style={{ display:"flex",justifyContent:"space-between",gap:8 }}><span style={{ color:T.accent,fontSize:11,fontWeight:800,letterSpacing:0.6 }}>NEW BILL</span><span style={{ color:T.sub,fontSize:11 }}>from your messages</span></div>
+                <div style={{ color:T.text,fontSize:15,fontWeight:700 }}>{b.title} · {M(`${sym}${fmt(b.amount)}`)}</div>
+                <div style={{ color:T.sub,fontSize:12 }}>{b.dueDate?`Due ${formatShortDate(b.dueDate)||b.dueDate}`:"Due date not found in the message"}</div>
+                <div style={{ display:"flex",gap:8 }}>
+                  <button data-testid="needs-new-bill-add" onClick={()=>{ const pre = smsInbox.acceptBill(b); setSmsBillPrefill(pre); setDefaultBillerAccountId(pre.billerAccountId||""); setShowAddBill(true); }} style={{ flex:1,background:T.accent,border:"none",borderRadius:22,minHeight:44,color:T.accentInk||"#fff",fontWeight:800,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Add this bill</button>
+                  <button data-testid="needs-new-bill-discard" aria-label="Not a bill, dismiss" title="Dismiss" onClick={()=>smsInbox.discardBill(b.id)} style={{ minWidth:44,minHeight:44,borderRadius:22,border:`1px solid ${T.border}`,background:"none",color:T.sub,fontSize:16,cursor:"pointer" }}>✓</button>
+                </div>
+              </div>
+            ))}
             {items.map(it=>{
               const bill = it.kind==="bill"&&it.sourceType==="bill" ? bills.find(b=>String(b.id)===String(it.sourceId)) : null;
               const archive = ()=>setNeedsArchived(prev=>prev.includes(it.signature)?prev:[...prev,it.signature]);
@@ -16101,6 +16115,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Fixed: a card with an old statement bill that has no period saved could make the app crash on Home (\"Something went wrong\") once a statement cycle closed. Statements are also never added twice now.",
             "Cards: Money now shows one box for all your cards (total limit, used, available) with each card's use under it. Used counts what is billed, what is spent but not yet billed, and EMI purchases still to be billed, because the bank keeps those blocked on the limit (check against your own statement). Money Required also lists what you have spent on a card since its last statement, due when that statement is due.",
             "New look, dark theme: the dark theme now matches the light one, a deep green-tinted charcoal with a softer green, in place of the old blue-violet navy. The PIN screen and the screens shown while the app waits use the same colours.",
+            "New bills from your messages (Android app): when a provider sends a bill message (for example \"your electricity bill of Rs.3,045 is due on 28-Jul-26\"), Arth shows a NEW BILL card on Home and in the bell with the amount, due date and the connection it matched (by consumer number or provider name). \"Add this bill\" opens the Add Bill form filled in; nothing is saved until you save it. Credit card bills are not offered, because Arth makes those itself. You may need to allow Arth to read messages (Notifications > allow).",
             "One-tap WhatsApp: on a bill's split there is now a WhatsApp button next to Share for each person who owes. It opens that person's chat from your own WhatsApp with their share and the due date already typed (add their phone number on their profile; without one WhatsApp lets you pick the contact), and you press Send. Home, Needs you, Remind does the same. Arth cannot send WhatsApp messages by itself from a personal number.",
             "Bill reminders (Android app, Settings): a phone notification 3 days before a bill is due and on the day, at 9 am, for bills still owed. Tap it to open the bill. Off by default.",
             "Fixed: the Paste button under Bank SMS import did nothing on some phones and said nothing. It now uses the phone's own clipboard in the Android app, and if pasting is blocked it tells you to long-press the box and choose Paste.",
@@ -19338,7 +19353,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ padding:"10px 8px",display:"flex",flexDirection:"column",gap:2 }}>
             {[
               { icon:"👤", label:"User Profile", onClick:()=>{ setShowSettings(true); setSettingsSection("myprofile"); onClose(); } },
-              { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+smsInbox.items.length, onClick:()=>{ setShowNotifications(true); onClose(); } },
+              { icon:"🔔", label:"Notifications", badge:activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+(smsInbox.items.length+(smsInbox.billItems||[]).length), onClick:()=>{ setShowNotifications(true); onClose(); } },
               { icon:"🧾", label:"Payments", onClick:()=>goToTab("bills") },
               { icon:"👥", label:"People & Groups", onClick:()=>goToTab("people") },
               { icon:"🚗", label:"Vehicles", onClick:()=>{ setShowSettings(true); setSettingsSection("vehicles"); onClose(); } },
@@ -19368,7 +19383,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ color:T.text,fontSize:16,fontWeight:900 }}>🔔 Notifications</div>
             <button onClick={onClose} style={{ background:"none",border:"none",color:T.sub,fontSize:18,cursor:"pointer" }}>✕</button>
           </div>
-          {activeBudgetAlerts.length===0&&activeCardAlerts.length===0&&activePrepaidAlerts.length===0&&smsInbox.items.length===0&&(
+          {activeBudgetAlerts.length===0&&activeCardAlerts.length===0&&activePrepaidAlerts.length===0&&(smsInbox.items.length+(smsInbox.billItems||[]).length)===0&&(
             <div style={{ textAlign:"center",padding:"40px 20px",color:T.sub,fontSize:13 }}>You're all caught up.</div>
           )}
           {smsInbox.available&&!smsInbox.perm.receive&&(
@@ -19377,6 +19392,21 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <button data-testid="sms-enable-btn" onClick={()=>smsInbox.request()} style={{ background:T.accent,border:"none",borderRadius:20,padding:"7px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",flexShrink:0 }}>Turn on</button>
             </div>
           )}
+          {(smsInbox.billItems||[]).map(b=>(
+            <div key={b.id} data-testid="sms-bill-item" style={{ background:T.accent+"12",border:`1px solid ${T.accent}33`,borderRadius:14,padding:"12px 14px",marginBottom:8 }}>
+              <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}>
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ color:T.text,fontSize:13,fontWeight:800 }}>🧾 New bill · {b.title}</div>
+                  <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{b.dueDate?`Due ${formatShortDate(b.dueDate)||b.dueDate}`:"Due date not found"} · from your messages</div>
+                </div>
+                <div style={{ color:T.text,fontSize:14,fontWeight:900 }}>{sym}{fmt(b.amount)}</div>
+              </div>
+              <div style={{ display:"flex",gap:6,marginTop:8 }}>
+                <button data-testid="sms-bill-add" onClick={()=>{ const pre = smsInbox.acceptBill(b); setSmsBillPrefill(pre); setDefaultBillerAccountId(pre.billerAccountId||""); setShowAddBill(true); onClose(); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:T.accentInk||"#000",fontFamily:"Inter,sans-serif" }}>Add bill</button>
+                <button data-testid="sms-bill-discard" onClick={()=>smsInbox.discardBill(b.id)} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Discard</button>
+              </div>
+            </div>
+          ))}
           {smsInbox.items.map(it=>{
             if(it.unreadable) return (
               <div key={it.id} data-testid="sms-item-unreadable" style={{ background:T.warn+"16",border:`1px solid ${T.warn}33`,borderRadius:14,padding:"12px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10 }}>
@@ -20546,9 +20576,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     const selectedBA = billerAccountId ? billerAccounts.find(b=>b.id===billerAccountId) : null;
     const _preBA = defaultBillerAccountId ? billerAccounts.find(b=>b.id===defaultBillerAccountId) : null;
     const [name,setName]=useState(_preBA?.name||"");
-    const [amount,setAmount]=useState("");
+    const [amount,setAmount]=useState(smsBillPrefill?.amount ? String(smsBillPrefill.amount) : "");
     const [billDate,setBillDate]=useState(todayStr());
-    const [dueDate,setDueDate]=useState("");
+    const [dueDate,setDueDate]=useState(smsBillPrefill?.dueDate || "");
     // Locked product decision (this session): a Bill's category has no existing authoritative
     // Relationship field to copy from (confirmed by audit — billerAccounts/membershipRelationships
     // carry no category of their own), so this must stay empty rather than defaulting to
@@ -21348,7 +21378,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
                     <button onClick={()=>setShowNavDrawer(true)} style={{ background:"none",border:"none",cursor:"pointer",fontSize:20,color:T.text,padding:"4px 6px 4px 0" }} title="Menu">☰</button>
                     {/* The bell opens Notifications; its count is the real number of open alerts (budget, card limit, prepaid plan ending). */}
-                    <button data-testid="home-bell" onClick={()=>setShowNotifications(true)} style={{ position:"relative",background:"none",border:"none",cursor:"pointer",fontSize:18,color:T.text,padding:4 }} title="Notifications">🔔{(activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+smsInbox.items.length)>0&&<span data-testid="home-bell-badge" style={{ position:"absolute",top:-2,right:-4,minWidth:16,height:16,borderRadius:8,background:T.danger,color:"#fff",fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px" }}>{activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+smsInbox.items.length}</span>}</button>
+                    <button data-testid="home-bell" onClick={()=>setShowNotifications(true)} style={{ position:"relative",background:"none",border:"none",cursor:"pointer",fontSize:18,color:T.text,padding:4 }} title="Notifications">🔔{(activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+(smsInbox.items.length+(smsInbox.billItems||[]).length))>0&&<span data-testid="home-bell-badge" style={{ position:"absolute",top:-2,right:-4,minWidth:16,height:16,borderRadius:8,background:T.danger,color:"#fff",fontSize:10,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px" }}>{activeBudgetAlerts.length+activeCardAlerts.length+activePrepaidAlerts.length+(smsInbox.items.length+(smsInbox.billItems||[]).length)}</span>}</button>
                   </div>
                   <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8 }}>
                     <div>

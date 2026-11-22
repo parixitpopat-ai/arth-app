@@ -6,18 +6,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { smsAvailable, smsStatus, smsRequest, smsTakePending, smsAckPending } from "./smsBridge.js";
 import { toPendingItems, itemStatuses, draftFor } from "../domain/sms/smsPending.js";
 import { payeeNamesByUpiId } from "../domain/imports/upiId.js";
+import { parseBillSms } from "../domain/sms/billSms.js";
 
-const HELD = "arth_sms_pending", HANDLED = "arth_sms_handled";
+const HELD = "arth_sms_pending", HANDLED = "arth_sms_handled", BILLS = "arth_sms_bills";
 const load = k => { try { const v = JSON.parse(localStorage.getItem(k) || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage full or blocked: the list just is not kept */ } };
 
-export function useSmsInbox({ accounts, txns, people }) {
+export function useSmsInbox({ accounts, txns, people, billerAccounts = [] }) {
   const available = smsAvailable();
   const [held, setHeld] = useState(() => load(HELD));
   const [handled, setHandled] = useState(() => load(HANDLED));
+  const [billHeld, setBillHeld] = useState(() => load(BILLS));   // bill notices from providers, kept as proposals for a new Bill (domain/sms/billSms.js)
   const [perm, setPerm] = useState({ granted: false, receive: false, notify: false });
   const busy = useRef(false), live = useRef({});
-  live.current = { held, handled, accounts };
+  live.current = { held, handled, accounts, billHeld, billerAccounts };
 
   // Never change what is on screen while the person is typing: applying new messages re-draws the app and would lose what they typed.
   // The look simply waits; it runs again a moment after they leave the field (and every 20 s otherwise).
@@ -36,8 +38,13 @@ export function useSmsInbox({ accounts, txns, people }) {
       if (!st.receive) return;
       const q = await smsTakePending();
       if (!q.length) return;
-      const { held: h, handled: d, accounts: a } = live.current;
-      const r = toPendingItems(q, a, { haveIds: [...h.map(i => i.id), ...d] });
+      const { held: h, handled: d, accounts: a, billHeld: bh, billerAccounts: bas } = live.current;
+      // A provider's bill notice is a proposal for a new Bill, not a money movement: take those out first, the rest follows the bank path.
+      const known = new Set([...h.map(i => i.id), ...d, ...bh.map(i => i.id)].map(String));
+      const bills = [], rest = [];
+      for (const m of q) { const b = parseBillSms(m, bas); if (b) { if (!known.has(b.id)) bills.push(b); } else rest.push(m); }
+      if (bills.length) setBillHeld(prev => { const n = [...prev, ...bills]; save(BILLS, n); return n; });
+      const r = toPendingItems(rest, a, { haveIds: [...h.map(i => i.id), ...d] });
       const add = [...r.items, ...r.unread];
       if (add.length) setHeld(prev => { const n = [...prev, ...add]; save(HELD, n); return n; });
       await smsAckPending(q.map(m => m.id));          // taken: now held, handled, or not a money message
@@ -76,5 +83,12 @@ export function useSmsInbox({ accounts, txns, people }) {
   const request = useCallback(async () => { const st = await smsRequest(); setPerm(prev => (prev.granted === st.granted && prev.receive === st.receive && prev.notify === st.notify ? prev : st)); if (st.receive) drain(); return st; }, [drain]);
   const accept = useCallback(item => draftFor(item, accounts, payeeByUpiId), [accounts, payeeByUpiId]);
 
-  return { available, perm, items, request, accept, discard: finish, done: finish, drain };
+  const finishBill = useCallback(id => {
+    setHandled(prev => { const n = [...new Set([...prev, id])].slice(-500); save(HANDLED, n); return n; });
+    setBillHeld(prev => { const n = prev.filter(i => i.id !== id); save(BILLS, n); return n; });
+  }, []);
+  // Accept: what the Add Bill form needs to open filled in. The notice is finished (a bill is added by hand from there).
+  const acceptBill = useCallback(item => { finishBill(item.id); return { billerAccountId: item.billerAccountId, amount: item.amount, dueDate: item.dueDate }; }, [finishBill]);
+
+  return { available, perm, items, request, accept, discard: finish, done: finish, drain, billItems: billHeld, acceptBill, discardBill: finishBill };
 }
