@@ -221,6 +221,7 @@ import { detectSubscriptions, subscriptionTotals, merchantKey } from "../domain/
 import { buildDueReminders } from "./domain/notifications/dueReminders";
 import { dueNotifAvailable, dueNotifEnable, dueNotifCancelAll, dueNotifSchedule, dueNotifOnOpen } from "./native/dueNotifications";
 import { useBiometric } from "./native/useBiometric";
+import { segmentsFor, sectionOfTab, activeSegmentId, bottomTabs, isSectionTabActive } from "./domain/navigation/sections";
 import BiometricUnlock from "./components/BiometricUnlock";
 import { whatsappLink } from "./domain/share/whatsapp";
 import { readClipboardText, PASTE_BLOCKED_MESSAGE, PASTE_EMPTY_MESSAGE } from "./native/clipboard";
@@ -2725,6 +2726,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     if(!ok){ setToast({ message:"Notifications are blocked for Arth. Allow them in your phone's settings, then try again.", icon:"⚠️" }); return; }
     setDueNotifOn(true); setToast({ message:"On: a reminder 3 days before a bill is due and on the day, at 9 am", icon:"🔔" });
   };
+  // The four-section layout (Today / Money / People / Plan), chosen in Settings; off by default. domain/navigation/sections.js
+  const [navV2, setNavV2] = useState(()=>{ try { return localStorage.getItem("arth_nav_v2")==="1"; } catch { return false; } });
+  useEffect(()=>{ try { localStorage.setItem("arth_nav_v2", navV2?"1":"0"); } catch { /* the choice is simply not kept */ } },[navV2]);
   const bio = useBiometric(setToast);   // fingerprint unlock (Android app): src/native/biometric.js
   const smsInbox = useSmsInbox({ accounts, txns, people, billerAccounts });   // bank messages caught as they arrive (Android app only); proposals, never entries
   const activePrepaidAlerts = useMemo(()=>getPrepaidAlerts({ billerAccounts, bills, relationships:membershipRelationships, today:new Date(), dismissed:dismissedAlerts }),[billerAccounts,bills,membershipRelationships,dismissedAlerts]);
@@ -16153,6 +16157,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Repeating payments: Insights now has a card that finds payments that repeat in your own entries (the same name, the same amount, weekly, monthly, every 3 months or yearly) and shows what they cost a month and a year. \"Make a bill\" opens Add Bill filled in as a recurring bill; \"✕\" says it is not a subscription. It is a best guess and uses only what you have entered.",
             "New bills from your messages (Android app): when a provider sends a bill message (for example \"your electricity bill of Rs.3,045 is due on 28-Jul-26\"), Arth shows a NEW BILL card on Home and in the bell with the amount, due date and the connection it matched (by consumer number or provider name). \"Add this bill\" opens the Add Bill form filled in; nothing is saved until you save it. Credit card bills are not offered, because Arth makes those itself. You may need to allow Arth to read messages (Notifications > allow).",
             "One-tap WhatsApp: on a bill's split there is now a WhatsApp button next to Share for each person who owes. It opens that person's chat from your own WhatsApp with their share and the due date already typed (add their phone number on their profile; without one WhatsApp lets you pick the contact), and you press Send. Home, Needs you, Remind does the same. Arth cannot send WhatsApp messages by itself from a personal number.",
+            "New navigation (Settings, off by default): the bottom bar becomes Today, Money, People and Plan. Money opens on your activity (Accounts, with the PIN, is one tap away); Plan holds Bills, Budget, Goals, Events and Outlook. Every screen is the same one as before, only grouped; switch it off any time.",
             "Fingerprint unlock (Android app, Settings): touch the sensor instead of typing the PIN. Off by default; turning it on asks for your fingerprint once. The PIN stays as the fallback, and the lock-out after 5 wrong PINs is unchanged. Arth never stores the fingerprint; the phone keeps it.",
             "Bill reminders (Android app, Settings): a phone notification 3 days before a bill is due and on the day, at 9 am, for bills still owed. Tap it to open the bill. Off by default.",
             "Fixed: the Paste button under Bank SMS import did nothing on some phones and said nothing. It now uses the phone's own clipboard in the Android app, and if pasting is blocked it tells you to long-press the box and choose Paste.",
@@ -16606,6 +16611,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,padding:"0 16px 8px" }}>Manage</div>
         <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:16,margin:"0 16px 16px",overflow:"hidden" }}>
           <Row icon="🏦" title="Accounts" subtitle={`${accounts.length} account${accounts.length===1?"":"s"}`} onClick={()=>setSettingsSection("accounts")}/>
+          <Row icon="🧭" title="New navigation" subtitle={navV2?"On · Today, Money, People, Plan":"Off · the current tabs"} onClick={()=>{ setNavV2(v=>!v); setTab("home"); setToast({ message:navV2?"Back to the current tabs":"Today, Money, People and Plan are on", icon:"🧭" }); }}/>
           {bio.available&&<Row icon="🫆" title="Unlock with fingerprint" subtitle={bio.on?"On · the PIN is still the fallback":"Off · touch the sensor instead of typing the PIN"} onClick={bio.toggle}/>}
           {dueNotifAvailable()&&<Row icon="🧾" title="Bill reminders" subtitle={dueNotifOn?"On · 3 days before and on the day, 9 am":"Off"} onClick={toggleDueNotif}/>}
           {weeklyNotifAvailable()&&<Row icon="🔔" title="Weekly summary notification" subtitle={weeklyNotifOn?"On · Sundays at 7 pm":"Off"} onClick={toggleWeeklyNotif}/>}
@@ -21239,7 +21245,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   // aren't removed: they're still full screens (tab==="outlook"/"insights" below), reached from
   // Home's existing entry points (Safe to Spend → Outlook, "✨ Insights for you" → Insights, both
   // already in <Home/>), per IA §2's "Home ├── Today ├── Outlook └── Insights".
-  const TABS=[
+  const TABS=navV2 ? bottomTabs() : [
     {id:"home",icon:"🏠",label:"Home"},
     {id:"wealth",icon:"💰",label:"Money"},
     {id:"__fab__",icon:"➕",label:""},
@@ -21294,6 +21300,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   };
 
   const isTabActive=t=>t==="settings_tab"?showSettings:(tab===t&&!showSettings);
+  const isNavItemActive=item=>navV2 ? (isSectionTabActive(item,tab)&&!showSettings) : isTabActive(item.id);
 
   // ─── P1 — Master User / Signup: top-level auth/setup/conflict gate ────────
   // New control flow — confirmed via trace that no hooks are called anywhere
@@ -21456,6 +21463,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
         </div>}
 
+        {navV2&&!showSettings&&segmentsFor(sectionOfTab(tab)).length>0&&(
+          <div data-testid="section-switch" style={{ display:"flex",gap:6,overflowX:"auto",padding:"10px 16px 4px" }}>
+            {segmentsFor(sectionOfTab(tab)).map(sg=>{
+              const on=activeSegmentId(tab)===sg.id;
+              return <button key={sg.id} data-testid={`section-${sg.id}`} onClick={()=>{ if(sg.kind==="modal"){ if(sg.target==="goals") setShowGoalsList(true); else setShowEventsList(true); } else handleTab(sg.target); }} style={{ flexShrink:0,minHeight:40,padding:"0 16px",borderRadius:20,border:`1px solid ${on?T.accent:T.border}`,background:on?T.accentSoft:"none",color:on?T.accent:T.text,fontWeight:800,fontSize:13,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>{sg.label}{sg.private?" 🔒":""}</button>;
+            })}
+          </div>
+        )}
+
         {/* Pages */}
         {!showSettings&&tab==="home"&&<Home/>}
         {!showSettings&&tab==="transactions"&&<Transactions/>}
@@ -21601,9 +21617,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </button>
               );
             }
-            const active=isTabActive(t.id);
+            const active=isNavItemActive(t);
             return (
-              <button key={t.id} onClick={()=>handleTab(t.id)} style={{ background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"2px 6px" }}>
+              <button key={t.id} data-testid={`nav-${t.label.toLowerCase()}`} onClick={()=>handleTab(t.id)} style={{ background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"2px 6px" }}>
                 <span style={{ fontSize:18,opacity:active?1:0.3,transition:"all 0.2s" }}>{t.icon}</span>
                 <span style={{ fontSize:8,fontWeight:800,color:active?T.accent:T.sub,textTransform:"uppercase",letterSpacing:0.8,fontFamily:"Inter,sans-serif" }}>{t.label}</span>
                 {active&&<div style={{ width:14,height:3,borderRadius:2,background:T.accent }}/>}

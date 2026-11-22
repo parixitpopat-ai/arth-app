@@ -102,6 +102,7 @@ test("DATA_KEYS is exactly the persisted synced data: every other persisted key 
     arth_recovery_notice: "one-time note that a damaged list was restored from a backup on THIS phone; device-only", arth_damaged_: "PREFIX: a copy of damaged text kept aside (arth_damaged_<key>) on THIS phone; device-only",
     arth_weekly_notif: "whether THIS phone shows the weekly summary notification; device-only by design (it is this phone's notification permission and alarm)",
     arth_sms_pending: "bank messages caught on THIS phone, waiting for accept/discard; device-only by design (they are this phone's messages)", arth_sms_handled: "ids of bank messages already accepted/discarded on this phone; device-only",
+    arth_nav_v2: "which bottom bar the person chose, on THIS phone; a display preference",
     arth_biometric: "whether fingerprint unlock is on, on THIS phone; the fingerprint itself is kept by the phone, never by Arth",
     arth_subs_dismissed: "merchants the person said are not subscriptions, on THIS phone; a device-only convenience (the list is only a best guess)",
     arth_sms_bills: "bill notices from providers caught on THIS phone, waiting to be added or dismissed; device-only by design (they are this phone's messages)",
