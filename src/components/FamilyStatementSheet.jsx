@@ -6,7 +6,7 @@ import StatementPreview from "./StatementPreview";
 import { buildFamilyStatement } from "../domain/person/personStatement";
 import StatementSelection from "./StatementSelection";
 import { buildFamilyMessage, shortDate, familyLines, buildSimpleMessage } from "../domain/person/statementMessage";
-import { buildGroupExpenseList } from "../domain/group/expenseList";
+import { buildGroupExpenseList, unpaidOnly } from "../domain/group/expenseList";
 import { buildGroupExpenseMessage } from "../domain/group/expenseMessage";
 import { buildCategoryBreakup } from "../domain/group/categoryBreakup";
 
@@ -28,6 +28,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const [exOff, setExOff] = useState({});
   const [withPeople, setWithPeople] = useState(true);       // one statement: the group's expenses AND the expenses tagged to its people
   const [showNames, setShowNames] = useState(group.includeMe !== false && meId != null);   // names as headings: on for my own flat, off for a family I send it to
+  const [onlyUnpaid, setOnlyUnpaid] = useState(false);   // only what is still owed: settled items drop out, part-paid ones are cut to what is left
   const [onlyMine, setOnlyMine] = useState(false);          // the message carries only the person using Arth's own parts
   const [withBreakup, setWithBreakup] = useState(true);   // the category break-up goes in the message too                // itemised expenses the person un-ticked            // "simple": Member: Item - amount lines you tick, then a total | "full": the family statement
   const [overrides, setOverrides] = useState({});
@@ -40,7 +41,13 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
   const lines = useMemo(() => (fam ? familyLines(fam, nameOf) : []), [fam]);   // eslint-disable-line react-hooks/exhaustive-deps
   const isOn = l => (l.key in overrides ? overrides[l.key] : l.ticked);
   const simpleMessage = buildSimpleMessage(lines.map(l => ({ ...l, on: isOn(l) })), { upiHandle, withNames: true });
-  const ex = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, groupName: group.name, groupNameOf: gid => (groups.find(x => String(x.id) === String(gid)) || {}).name || "", memberIds, meId: inGroup ? meId : null, includePeople: withPeople, txns, bills, billerAccounts, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, billerAccounts, from, to, people, withPeople]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const exAll = useMemo(() => (from && to && from <= to ? buildGroupExpenseList({ groupId: group.id, groupName: group.name, groupNameOf: gid => (groups.find(x => String(x.id) === String(gid)) || {}).name || "", memberIds, meId: inGroup ? meId : null, includePeople: withPeople, txns, bills, billerAccounts, from, to, nameOf }) : null), [memberIds, group.id, txns, bills, billerAccounts, from, to, people, withPeople]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const ex = useMemo(() => {
+    if (!exAll || !onlyUnpaid) return exAll;
+    const items = unpaidOnly(exAll.items);
+    const R = n => Math.round(n * 100) / 100;
+    return { items, totals: { count: items.length, total: R(items.reduce((a, i) => a + i.total, 0)), memberTotal: R(items.reduce((a, i) => a + (i.memberTotal || 0), 0)), due: R(items.reduce((a, i) => a + i.total, 0)) } };
+  }, [exAll, onlyUnpaid]);
   const exItems = ex ? ex.items.map(i => ({ ...i, on: !exOff[i.key] })) : [];
   const breakup = useMemo(() => {   // only my part: each expense counts at my share of it, spread over its categories in the same proportion
     const on = exItems.filter(i => i.on);
@@ -96,7 +103,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
           onAll={() => setOverrides(Object.fromEntries(lines.map(l => [l.key, true])))} onNone={() => setOverrides(Object.fromEntries(lines.map(l => [l.key, false])))} />}
         {mode === "expenses" && <div data-testid="fam-expenses">
           {!ex ? <div data-testid="fam-bad-range" style={{ color: T.warn, fontSize: 13 }}>Choose a start date that is not after the end date.</div>
-            : !ex.items.length ? <div data-testid="fam-exp-empty" style={{ ...sub, padding: "8px 0" }}>No expense for {group.name}{withPeople ? " or its people" : ""} in this period.</div> : <>
+            : !ex.items.length ? <div data-testid="fam-exp-empty" style={{ ...sub, padding: "8px 0" }}>{onlyUnpaid ? "Nothing is unpaid for " + group.name + " in this period." : <>No expense for {group.name}{withPeople ? " or its people" : ""} in this period.</>}{onlyUnpaid && <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><input data-testid="fam-only-unpaid-off" type="checkbox" checked onChange={() => setOnlyUnpaid(false)} />Only what is still unpaid</label>}</div> : <>
             <div data-testid="fam-exp-summary" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
               <div style={line}><span style={{ color: T.text, fontSize: 13 }}>{ex.totals.count} expense{ex.totals.count === 1 ? "" : "s"}{withPeople ? ` for ${group.name} and its people` : ` tagged to ${group.name}`}</span><span data-testid="fam-exp-total" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.total)}</span></div>
               {ex.totals.due > 0.004 && <div style={line}><span style={{ color: T.text, fontSize: 13 }}>Still to be paid by members</span><span data-testid="fam-exp-due" style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>{money(ex.totals.due)}</span></div>}
@@ -115,6 +122,7 @@ export default function FamilyStatementSheet({ T, sym = "₹", fmt = n => Number
               ))}
               <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, ...sub }}><input data-testid="fam-breakup-in-message" type="checkbox" checked={withBreakup} onChange={e => setWithBreakup(e.target.checked)} />Put this break-up in the message</label>
             </div>}
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, ...sub }}><input data-testid="fam-only-unpaid" type="checkbox" checked={onlyUnpaid} onChange={e => { setOnlyUnpaid(e.target.checked); setExOff({}); }} />Only what is still unpaid (settled entries are left out)</label>
             <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, ...sub }}><input data-testid="fam-with-people" type="checkbox" checked={withPeople} onChange={e => { setWithPeople(e.target.checked); setExOff({}); }} />Also include what {group.name}'s people bear in expenses tagged to them or to another group (such as a common meter), at what they bear</label>
             <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, ...sub }}><input data-testid="fam-show-names" type="checkbox" checked={showNames} onChange={e => setShowNames(e.target.checked)} />Put each person's name as a heading in the message</label>
             {inGroup && showNames && <div style={{ display: "flex", gap: 6, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>

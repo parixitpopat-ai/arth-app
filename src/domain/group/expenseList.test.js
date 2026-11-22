@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildGroupExpenseList } from "./expenseList.js";
+import { buildGroupExpenseList, unpaidOnly } from "./expenseList.js";
 import { buildGroupExpenseMessage } from "./expenseMessage.js";
 
 const nameOf = id => ({ r: "Raj", m: "Mangal", me: "Me" }[id] || id);
@@ -59,7 +59,7 @@ test("a person's parts: members their shares, the person using Arth what is left
   assert.deepEqual(parts("Lift"), [["Raj", 1000], ["Mangal", 1000], ["Parixit", 1000]]);
   assert.deepEqual(parts("Building electricity"), [["Parixit", 1520]]);
   assert.deepEqual(parts("K Auto"), [["Raj", 7899]]);
-  assert.deepEqual(r.items.find(i => i.title === "Coffee").parts, [{ personId: null, name: "", amount: 678 }]);
+  assert.deepEqual(r.items.find(i => i.title === "Coffee").parts, [{ personId: null, name: "", amount: 678, remaining: 0 }]);
 });
 test("the message: month by month, one 'Name - expenses' block per person with only their part, Sum, the month total, the PTD total", () => {
   const nm = id => ({ me: "Parixit", r: "Raj" }[id] || id);
@@ -210,4 +210,40 @@ test("the layout asked for: month by month, 'Common Meter water Bill - 800', 'Pe
   const m = buildGroupExpenseMessage(items, { groupName: "Suryamandal", from: "2026-07-01", to: "2026-08-31", showNames: false });
   assert.equal(m, ["Suryamandal · 1 Jul 2026 – 31 Aug 2026", "", "July", "July Public Works Department (Goa) Bill (Common Meter) - 800", "Person B - Urban Co - Plumber - 800", "Amazon - Coffee - 331", "Sum - 1931", "", "August", "Water bill - 500", "Sum - 500", "", "PTD total - 2431"].join("\n"));
   assert.doesNotMatch(m, /Sachin/);   // a bill's share is not named after the person
+});
+
+test("part of a purchase attributed to the group (547 of 1,150): the group's part is what counts, the whole is kept, and what is still unpaid is tracked", () => {
+  const t = [
+    { id: "a1", type: "expense", desc: "Groceries", merchant: "BigBasket", date: "2026-11-05", amount: 1150, groupId: "g1", trackingMode: "allocate", groupCollectiveAmount: 547, groupCollectiveSettledAmt: 0 },
+    { id: "a2", type: "expense", desc: "Snacks", date: "2026-11-06", amount: 1150, groupAllocations: [{ groupId: "g1", mode: "owes", amount: 547 }, { groupId: "g2", mode: "owes", amount: 300 }], groupCollectiveAmount: 847, groupCollectiveSettledAmt: 0 },   // split across two groups, no groupId of ours
+    { id: "a3", type: "expense", desc: "Half paid", date: "2026-11-07", amount: 1150, groupId: "g1", groupCollectiveAmount: 547, groupCollectiveSettledAmt: 200 },
+    { id: "a4", type: "expense", desc: "Only tagged", date: "2026-11-08", amount: 300, groupId: "g1" },
+  ];
+  const r = buildGroupExpenseList({ ...base, meId: null, txns: t, bills: [] });
+  const by = k => r.items.find(i => i.title.includes(k));
+  assert.deepEqual([by("BigBasket").total, by("BigBasket").wholeTotal, by("BigBasket").due], [547, 1150, 547]);                      // 547 is theirs, not the 1,150
+  assert.deepEqual([by("Snacks").total, by("Snacks").wholeTotal, by("Snacks").due], [547, 1150, 547]);                             // this group's slice of a split purchase
+  assert.deepEqual([by("Half paid").total, by("Half paid").due], [547, 347]);                                                   // 200 already settled
+  assert.deepEqual([by("Only tagged").total, by("Only tagged").due], [300, 0]);                                                   // tagged only: counted, nothing owed
+  assert.equal(r.totals.total, 547 + 547 + 547 + 300);
+  assert.equal(r.items.filter(i => i.due > 0.004).length, 3);                                                                     // the "only unpaid" filter keeps these
+});
+
+test("only what is still unpaid: settled items drop out, part-paid ones are cut to what is left, group part counts at its unpaid remainder", () => {
+  const t = [
+    { id: "u1", type: "expense", desc: "Paid in full", date: "2026-07-05", amount: 500, groupId: "g1", people: { x: { amount: 500, mode: "owes", settled: true } } },
+    { id: "u2", type: "expense", desc: "Half paid", date: "2026-07-06", amount: 1000, groupId: "g1", people: { x: { amount: 600, mode: "owes", remainingAmt: 250 }, y: { amount: 400, mode: "owes" } } },
+    { id: "u3", type: "expense", desc: "BigBasket", date: "2026-07-07", amount: 1150, groupId: "g1", groupCollectiveAmount: 547, groupCollectiveSettledAmt: 0 },
+    { id: "u4", type: "expense", desc: "Group part paid", date: "2026-07-08", amount: 800, groupId: "g1", groupCollectiveAmount: 300, groupCollectiveSettledAmt: 300 },
+  ];
+  const items = buildGroupExpenseList({ ...base, memberIds: ["x", "y"], meId: null, from: "2026-07-01", to: "2026-07-31", txns: t, bills: [] }).items;
+  const u = unpaidOnly(items);
+  const by = k => u.find(i => i.title === k);
+  assert.equal(by("Paid in full"), undefined);
+  assert.equal(by("Group part paid"), undefined);
+  assert.equal(by("BigBasket").total, 547);
+  assert.equal(by("Half paid").total, 650);
+  assert.deepEqual(by("Half paid").parts.map(p => p.amount), [250, 400]);
+  assert.equal(items.length, 4);
+  assert.deepEqual(unpaidOnly(null), []);
 });

@@ -75,6 +75,13 @@ rec("N2 sent to a family I am not part of: no names, 'Vendor - Item - amount' li
 await T("fam-show-names").check(); await p.waitForTimeout(300);
 const named = await T("fam-message").innerText();
 rec("N3 ticking 'Put each person's name as a heading' brings the blocks back (Xena - expenses ... Neighbours - expenses)", /Xena - expenses\nNeighbour electricity - 3000/.test(named) && /Neighbours - expenses\nCoffee for them - 678/.test(named), named.slice(0, 200));
+const nBefore = await T("fam-exp-line").count(); const sumBefore = await T("fam-exp-total").innerText();
+await T("fam-only-unpaid").check(); await p.waitForTimeout(400);
+const nAfter = await T("fam-exp-line").count(); const sumAfter = await T("fam-exp-total").innerText();
+rec("U1 'Only what is still unpaid' never adds lines or money, and the message follows it", nAfter <= nBefore && Number(sumAfter.replace(/[^0-9.]/g, "")) <= Number(sumBefore.replace(/[^0-9.]/g, "")) && (nAfter === 0 || (await T("fam-message").count()) === 1), [nBefore, nAfter, sumBefore, sumAfter]);
+if (nAfter === 0) await T("fam-only-unpaid-off").uncheck(); else await T("fam-only-unpaid").uncheck();
+await p.waitForTimeout(400);
+rec("U2 un-ticking it brings every entry back", (await T("fam-exp-line").count()) === nBefore, await T("fam-exp-line").count());
 rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 await b.close(); try { process.kill(-server.pid); } catch {}
 const bad = results.filter(r => !r.pass).length; console.log(`\n${results.length - bad}/${results.length} passed`); process.exit(bad ? 1 : 0);
