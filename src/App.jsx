@@ -5364,7 +5364,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         const mercM = clean.match(/(?:at|to|for|towards)\s+([A-Za-z0-9][A-Za-z0-9 ]{2,25}?)(?:\s+on|\s+via|\s+ref|\.|,|$)/i);
         const m = mercM?.[1]?.trim();
         // "debited for INR 670.01" is an amount, not a merchant
-        if(m && !skip.some(w=>m.toLowerCase().includes(w)) && !/^(?:inr|rs\.?|\u20b9)\s*\d/i.test(m) && !/^[\d\s]+$/.test(m)) merchant = m;
+        if(m && !skip.some(w=>m.toLowerCase().includes(w)) && !/^(?:inr|rs\.?|\u20b9)\s*\d/i.test(m) && !/^[\d\s.]+$/.test(m) && (m.match(/\d/g)||[]).length<7) merchant = m;
       }
       if(merchant) setWho(merchant);
 

@@ -33,7 +33,7 @@ export function extractUpiMerchant(text) {
   if (cut >= 0) rest = rest.slice(0, cut);
   for (const seg of rest.split(/\s*[-/]+\s*/)) {
     const name = seg.trim().replace(/\s+/g, " ");
-    if (!name || name.includes("@") || /^\d[\d\s]*$/.test(name) || NOT_A_NAME.test(name) || !/[A-Za-z]{2}/.test(name)) continue;
+    if (!name || name.includes("@") || /^\d[\d\s]*$/.test(name) || /^\d[\dxX*]*\d$/.test(name) || NOT_A_NAME.test(name) || !/[A-Za-z]{2}/.test(name)) continue;
     if (name.length < 2 || name.length > 40 || !/^[A-Za-z0-9][A-Za-z0-9 &'.]*$/.test(name)) return null;
     return titleCase(name);
   }

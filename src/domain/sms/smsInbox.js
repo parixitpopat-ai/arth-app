@@ -68,13 +68,17 @@ const dateOf = (t, receivedMs) => {
   const d = new Date(Number(receivedMs) || 0);
   return receivedMs ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` : "";
 };
-const merchantOf = t => {
+// The fraud footer ("To dispute call 1800…/SMS BLOCK 8004 to 9215676766") is never a merchant, and neither is a phone number: a name needs letters
+const FOOTER = /\bto\s+dispute\b.*|\bnot\s+you\b.*|\bsms\s+block\b.*|\bcall\s+\d.*/i;
+const isPhoneLike = s => !/[A-Za-z]{2}/.test(s) || (s.match(/\d/g) || []).length >= 7;
+const merchantOf = t0 => {
+  const t = t0.replace(FOOTER, "").trim();
   const semi = /;\s*([A-Za-z0-9][A-Za-z0-9 &'._-]{1,38}?)\s+(?:credited|debited)\b/i.exec(t);
   if (semi) return semi[1].trim();
   const upi = extractUpiMerchant(t);
   if (upi) return upi;
   let m = /\b(?:at|to|towards|info:?)\s+([A-Za-z0-9][A-Za-z0-9 &'._-]{1,38}?)(?=\s+on\s+\d|\s+via\b|\s+ref\b|\s+avl\b|\s+bal\b|\.\s|,|$)/i.exec(t.replace(/\s+/g, " "));
-  if (m && !/^(a\/c|acct|account|vpa|card)\b/i.test(m[1]) && !m[1].includes("@")) return m[1].trim();
+  if (m && !/^(a\/c|acct|account|vpa|card)\b/i.test(m[1]) && !m[1].includes("@") && !isPhoneLike(m[1])) return m[1].trim();
   m = /\bto\s+(?:vpa\s+)?([a-z0-9._-]+@[a-z]{2,})/i.exec(t);
   return m ? m[1] : "";
 };

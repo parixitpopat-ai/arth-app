@@ -92,3 +92,15 @@ test("'a/c ending XXXXXXXX456 is debited by Rs. 10000.00 on 01-11-26; RAJ credit
 test("'is debited … credited to A/c XXXX' (a second leg naming an account) is still a transfer, not guessed", () => {
   assert.equal(parseMoneySms({ id: 22, body: "Your a/c ending XXXXXXXX456 is debited by Rs. 500.00 on 01-11-26 and credited to a/c XXXXXX1234", date: 1 }).ok, false);
 });
+
+test("the fraud footer's phone number is never the vendor (UPI debit with the number at the very end)", async () => {
+  const { parseMoneySms } = await import("./smsInbox.js");
+  for (const ref of ["421234567890", "5XXXXXXXXX94", ""]) {
+    const body = `[BP-ICICIT-S] ICICI Bank Credit Card XX8004 debited for INR 535.00 on 21-Nov-26 for UPI-${ref}-HAP DAIL. To dispute call 18001080/SMS BLOCK 8004 to 9215676766.`;
+    const r = parseMoneySms({ body, date: 1 });
+    assert.equal(r.ok, true); assert.match(r.row.desc, /Hap Dail/); assert.doesNotMatch(r.row.desc, /9215676766/);
+  }
+  // no readable merchant at all: still not the phone number
+  const r2 = parseMoneySms({ body: "ICICI Bank Credit Card XX8004 debited for INR 535.00 on 21-Nov-26. To dispute call 18001080/SMS BLOCK 8004 to 9215676766.", date: 1 });
+  assert.doesNotMatch(JSON.stringify(r2), /9215676766/);
+});
