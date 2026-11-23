@@ -2,6 +2,9 @@
 // Bills -> Pay already copies them; linking a payment to a bill from Transactions ("I already paid this", the Add form's Link to...) did not, so the group's claim
 // vanished the moment the bill was marked paid. Also: an entry that carries a collect amount but is marked only "tag" has that amount reset to 0 when entries load
 // (the loader keeps it only for split/allocate), so the payment is marked "split" whenever it carries one. Pure; nothing is written here.
+// Settled money is never brought back: a share or group amount that has been paid back stays settled (its settled state travels with it), and a claim with nothing
+// left to collect is not a claim at all.
+import { remainingShare } from "../shared/remainingShare.js";
 
 const P = n => Math.round(Number(n || 0) * 100);
 const R = p => Math.round(p) / 100;
@@ -9,13 +12,16 @@ const owesPeople = people => Object.entries(people || {}).filter(([pid, i]) => p
 const hasOwn = t => Boolean(String(t.groupId || "")) || (t.groupAllocations || []).length > 0 || Number(t.groupCollectiveAmount || 0) > 0 || Boolean(t.forPerson) || owesPeople(t.people).length > 0;
 const SPLIT_MODES = new Set(["split", "allocate"]);
 
-/** What a bill carries that a payment should too: { groupId, collective, people } or null when it carries nothing. */
+/** What a bill still has to collect that a payment should carry too: { groupId, collective (total), settled, left, people (all, settled ones included), peopleLeft } or null when nothing is left. */
 export function billClaim(bill) {
   if (!bill) return null;
   const collective = R(P(bill.groupCollectiveAmount));
-  const hasPeople = owesPeople(bill.splitPeople).length > 0;
-  if (!(collective > 0) && !hasPeople) return null;
-  return { groupId: bill.groupId || null, collective, people: hasPeople ? { ...bill.splitPeople } : null };
+  const settled = Math.min(collective, R(P(bill.groupCollectiveSettledAmt)));
+  const left = R(P(collective) - P(settled));
+  const owing = owesPeople(bill.splitPeople);
+  const peopleLeft = owing.filter(([, i]) => remainingShare(i) > 0.004);
+  if (!(left > 0) && !peopleLeft.length) return null;
+  return { groupId: bill.groupId || null, collective, settled, left, people: owing.length ? { ...bill.splitPeople } : null, peopleLeft };
 }
 
 /**
@@ -25,15 +31,15 @@ export function billClaim(bill) {
 export function copyFromBill(bill, txn, { isFirst = true } = {}) {
   const c = billClaim(bill);
   if (!c || !txn || !isFirst || hasOwn(txn)) return {};
-  return { ...(c.groupId ? { groupId: c.groupId } : {}), ...(c.collective > 0 ? { groupCollectiveAmount: c.collective } : {}), ...(c.people ? { people: c.people } : {}), trackingMode: "split", billGroupCopied: true };
+  return { ...(c.groupId ? { groupId: c.groupId } : {}), ...(c.collective > 0 ? { groupCollectiveAmount: c.collective, ...(c.settled > 0 ? { groupCollectiveSettledAmt: c.settled } : {}) } : {}), ...(c.people ? { people: c.people } : {}), trackingMode: "split", billGroupCopied: true };
 }
 
 /** A payment that is in the bill's group but lost the collect amount (marked only "tag"): put it back. Empty object when it does not apply. */
 export function restoreCollect(bill, txn) {
   const c = billClaim(bill);
-  if (!c || !txn || !(c.collective > 0) || !c.groupId || String(txn.groupId || "") !== String(c.groupId)) return {};
+  if (!c || !txn || !(c.left > 0) || !c.groupId || String(txn.groupId || "") !== String(c.groupId)) return {};
   if (Number(txn.groupCollectiveAmount || 0) > 0 || (txn.groupAllocations || []).length || SPLIT_MODES.has(txn.trackingMode)) return {};
-  return { groupCollectiveAmount: c.collective, trackingMode: "split", billGroupCopied: true, ...(owesPeople(txn.people).length === 0 && c.people ? { people: c.people } : {}) };
+  return { groupCollectiveAmount: c.collective, ...(c.settled > 0 ? { groupCollectiveSettledAmt: c.settled } : {}), trackingMode: "split", billGroupCopied: true, ...(owesPeople(txn.people).length === 0 && c.people ? { people: c.people } : {}) };
 }
 
 /**
@@ -54,7 +60,7 @@ export function findPaymentsMissingBillGroup(txns, bills) {
     if (!Object.keys(patch).length) continue;
     const c = billClaim(b);
     out.push({ txnId: first.id, billId: b.id, date: String(first.date || ""), title: first.paidBillName || first.desc || b.name || "Bill payment", amount: Number(first.amount || 0), kind, patch,
-      now: { groupId: first.groupId || null, collect: Number(first.groupCollectiveAmount || 0) }, after: { groupId: c.groupId, collect: c.collective, people: c.people ? Object.keys(c.people).length : 0 } });
+      now: { groupId: first.groupId || null, collect: Number(first.groupCollectiveAmount || 0) }, after: { groupId: c.groupId, collect: c.left, people: c.peopleLeft.length } });
   }
   return out.sort((a, b) => b.date.localeCompare(a.date));
 }
@@ -74,7 +80,7 @@ export function prefillRowsFromBill(bill) {
   const c = billClaim(bill);
   if (!c) return [];
   const rows = [];
-  if (c.groupId && c.collective > 0) rows.push({ targetType: "group", targetId: c.groupId, mode: "owes", amount: String(c.collective) });
-  if (c.people) for (const [pid, info] of owesPeople(c.people)) rows.push({ targetType: "person", targetId: pid, mode: "owes", amount: String(R(P(info.amount))) });
+  if (c.groupId && c.left > 0) rows.push({ targetType: "group", targetId: c.groupId, mode: "owes", amount: String(c.left) });   // only what is still to collect, never the part already settled
+  for (const [pid, info] of c.peopleLeft) rows.push({ targetType: "person", targetId: pid, mode: "owes", amount: String(R(P(remainingShare(info)))) });
   return rows;
 }

@@ -11,7 +11,7 @@ const today = (() => { const x = new Date(); return `${x.getFullYear()}-${String
 await ctx.addInitScript(d => { if (localStorage.getItem("__init")) return; localStorage.setItem("__init", "1"); const set = (k, v) => localStorage.setItem(k, JSON.stringify(v));
   set("arth_accounts", [{ id: "b1", name: "Test Savings", type: "bank", openingBalance: 100000, openingBalanceDate: "2026-01-01" }]); set("arth_people", [{ id: "me", name: "Me", isMe: true }, { id: "x", name: "Xena" }]);
   set("arth_groups", [{ id: "g1", name: "Neighbours", icon: "🏘️", color: "#0ea5e9", typeId: "other", type: "Other", members: ["x"], includeMe: false, manualLimit: 0, defaultIntent: "split", modules: [] }]);
-  set("arth_bills", [{ id: "bb", name: "Goa Electricity", billDate: d, dueDate: d, status: "unpaid", amount: 4000, catId: "food", groupId: "g1", groupCollectiveAmount: 3445, splitPeople: {} }]);
+  set("arth_bills", [{ id: "bb", name: "Goa Electricity", billDate: d, dueDate: d, status: "unpaid", amount: 4000, catId: "food", groupId: "g1", groupCollectiveAmount: 3445, groupCollectiveSettledAmt: 1000, splitPeople: {} }]);
   set("arth_txns", []); localStorage.setItem("arth_master_user_setup_complete", "true"); }, today);
 const p = await ctx.newPage(); const errors = []; p.on("pageerror", e => errors.push(String(e)));
 const T = id => p.getByTestId(id); const body = async () => (await p.locator("body").innerText()).replace(/\s+/g, " ");
@@ -29,10 +29,10 @@ const choose = p.locator("button:not([data-testid=needs-bill])", { hasText: /Goa
 rec("P1 the bill (the only match) is offered to link, and picked as the closest match", (await choose.count()) >= 1, (await choose.count()));
 await choose.dispatchEvent("click"); await p.waitForTimeout(700);
 t = await body();
-rec("P2 choosing the bill fills in the group: 'Neighbours will owe you ₹3,445'", /Neighbours will owe you ₹3,445/.test(t), t.match(/[A-Za-z ]+will owe you ₹[\d,]+/)?.[0]);
+rec("P2 choosing the bill fills in the group with only what is still owed: ₹2,445 (₹1,000 already settled is not asked for again)", /Neighbours will owe you ₹2,445/.test(t) && !/₹3,445/.test(t), t.match(/[A-Za-z ]+will owe you ₹[\d,]+/)?.[0]);
 await p.getByRole("button", { name: /Save|Add ✓/ }).last().dispatchEvent("click"); await p.waitForTimeout(1200);
 const saved = await p.evaluate(() => JSON.parse(localStorage.getItem("arth_txns") || "[]")[0]);
-rec("P3 saving without touching the group records it: the group owes 3,445 and the bill is the one paid", saved && saved.paidBillId === "bb" && ((saved.groupAllocations || [])[0] || {}).groupId === "g1" && Number(saved.groupCollectiveAmount) === 3445, saved && [saved.paidBillId, saved.groupId, saved.groupCollectiveAmount, saved.trackingMode]);
+rec("P3 saving without touching the group records it: the group owes the 2,445 still outstanding and the bill is the one paid", saved && saved.paidBillId === "bb" && ((saved.groupAllocations || [])[0] || {}).groupId === "g1" && Number(saved.groupCollectiveAmount) === 2445, saved && [saved.paidBillId, saved.groupId, saved.groupCollectiveAmount, saved.trackingMode]);
 rec("Z1 no page errors", errors.length === 0, errors.slice(0, 2));
 await b.close(); try { process.kill(-server.pid); } catch {}
 const bad = results.filter(r => !r.pass).length; console.log(`\n${results.length - bad}/${results.length} passed`); process.exit(bad ? 1 : 0);

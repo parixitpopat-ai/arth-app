@@ -8,7 +8,8 @@ const empty = { id: "p1", type: "expense", amount: 4000, date: "2026-07-12", pai
 test("a bill carries a claim only when it has a collect amount or people who owe; otherwise nothing", () => {
   assert.equal(billClaim({ id: "b", groupId: "g1" }), null);
   assert.equal(billClaim(null), null);
-  assert.deepEqual(billClaim(bill), { groupId: "g1", collective: 3445, people: bill.splitPeople });
+  const c = billClaim(bill);
+  assert.equal(c.groupId, "g1"); assert.equal(c.collective, 3445); assert.equal(c.left, 3445); assert.deepEqual(c.people, bill.splitPeople); assert.equal(c.peopleLeft.length, 2);
 });
 test("an empty payment takes the bill's group, collect amount and people, marked as a split", () => {
   const p = copyFromBill(bill, empty);
@@ -63,4 +64,24 @@ test("prefill rows: the group's amount to collect and each person who owes, in t
   ]);
   assert.deepEqual(prefillRowsFromBill({ id: "b", groupId: "g1" }), []);
   assert.deepEqual(prefillRowsFromBill(null), []);
+});
+
+test("settled money is never brought back: settled amounts travel with the copy, prefill and the review offer only what is still owed, a fully settled bill is no claim", async () => {
+  const { prefillRowsFromBill } = await import("./billGroupCopy.js");
+  const part = { ...bill, groupCollectiveSettledAmt: 1000, splitPeople: { x: { amount: 300, mode: "owes", settled: true }, y: { amount: 255, mode: "owes", remainingAmt: 100 } } };
+  const p = copyFromBill(part, empty);
+  assert.equal(p.groupCollectiveAmount, 3445); assert.equal(p.groupCollectiveSettledAmt, 1000);        // the 1,000 already paid back stays paid back
+  assert.equal(p.people.x.settled, true); assert.equal(p.people.y.remainingAmt, 100);                     // and so do the people's states
+  assert.deepEqual(prefillRowsFromBill(part), [
+    { targetType: "group", targetId: "g1", mode: "owes", amount: "2445" },
+    { targetType: "person", targetId: "y", mode: "owes", amount: "100" },                                  // x is settled: not asked for again
+  ]);
+  const f = findPaymentsMissingBillGroup([empty], [part]);
+  assert.equal(f.length, 1); assert.equal(f[0].after.collect, 2445); assert.equal(f[0].after.people, 1);
+  const done = { ...bill, groupCollectiveSettledAmt: 3445, splitPeople: { x: { amount: 300, mode: "owes", settled: true }, y: { amount: 255, mode: "owes", settled: true } } };
+  assert.equal(billClaim(done), null);
+  assert.deepEqual(copyFromBill(done, empty), {}); assert.deepEqual(prefillRowsFromBill(done), []); assert.deepEqual(findPaymentsMissingBillGroup([empty], [done]), []);
+  // a lost collect amount comes back with its settled part
+  const lost = { ...empty, groupId: "g1", trackingMode: "tag", groupCollectiveAmount: 0 };
+  assert.equal(restoreCollect(part, lost).groupCollectiveSettledAmt, 1000);
 });
