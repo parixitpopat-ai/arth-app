@@ -9,6 +9,7 @@
 // NO ROUNDING: if a payment falls ₹0.46 short of a bill, that bill stays open with ₹0.46 remaining.
 // Legacy: an expense that already points at a bill (`paidBillId`) but has no Contribution was a full payment before Contributions existed: never offered again.
 import { getBillBalance, planBillPayment } from "../obligations/billBalance.js";
+import { copyFromBill } from "./billGroupCopy.js";
 import { withBillContributionForTxn } from "../obligations/billContributionSync.js";
 
 const EPS = 0.005, DAY = 86400000;
@@ -96,7 +97,7 @@ export function planCover(txn, bill, allBills, contributions) {
 export function applyAllocations({ txn, allocations, bills, contributions, genId }) {
   let contribs = contributions || [];
   const touched = new Map();
-  let firstBill = null, appliedTotal = 0;
+  let firstBill = null, firstIsFirst = false, appliedTotal = 0;
   for (const a of allocations || []) {
     const bill = (bills || []).find(b => same(b.id, a.billId));
     if (!bill) continue;
@@ -111,9 +112,9 @@ export function applyAllocations({ txn, allocations, bills, contributions, genId
       lastPaidAmount: plan.applied, lastPaidDate: txn.date, lastPaidAt: txn.id,
     });
     appliedTotal = money(appliedTotal + plan.applied);
-    if (!firstBill) firstBill = bill;
+    if (!firstBill) { firstBill = bill; firstIsFirst = isFirst; }
   }
   const nextBills = (bills || []).map(b => (touched.has(String(b.id)) ? { ...b, ...touched.get(String(b.id)) } : b));
-  const txnPatch = firstBill ? { isBillPayment: true, paidBillId: txn.paidBillId != null ? txn.paidBillId : firstBill.id, paidBillName: txn.paidBillName || firstBill.name, billInvoiceNo: txn.billInvoiceNo || firstBill.invoiceNo || "" } : {};
+  const txnPatch = firstBill ? { isBillPayment: true, paidBillId: txn.paidBillId != null ? txn.paidBillId : firstBill.id, paidBillName: txn.paidBillName || firstBill.name, billInvoiceNo: txn.billInvoiceNo || firstBill.invoiceNo || "", ...copyFromBill(firstBill, txn, { isFirst: firstIsFirst }) } : {};
   return { contributions: contribs, bills: nextBills, txnPatch, applied: appliedTotal };
 }
