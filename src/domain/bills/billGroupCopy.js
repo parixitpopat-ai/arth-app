@@ -65,3 +65,16 @@ export function applyBillGroupFixes(txns, bills, ids) {
   const patches = new Map(findPaymentsMissingBillGroup(txns, bills).filter(f => want.has(String(f.txnId))).map(f => [String(f.txnId), f.patch]));
   return (txns || []).map(t => (t && patches.has(String(t.id)) ? { ...t, ...patches.get(String(t.id)) } : t));
 }
+
+/**
+ * The rows the Add form's "Who is this for?" box would hold for a bill chosen to be paid: the group (amount to collect) and each person who owes, so the form fills
+ * itself in and does not ask again. Same row shape the form uses ({ targetType, targetId, mode, amount as text }). Empty when the bill carries nothing.
+ */
+export function prefillRowsFromBill(bill) {
+  const c = billClaim(bill);
+  if (!c) return [];
+  const rows = [];
+  if (c.groupId && c.collective > 0) rows.push({ targetType: "group", targetId: c.groupId, mode: "owes", amount: String(c.collective) });
+  if (c.people) for (const [pid, info] of owesPeople(c.people)) rows.push({ targetType: "person", targetId: pid, mode: "owes", amount: String(R(P(info.amount))) });
+  return rows;
+}

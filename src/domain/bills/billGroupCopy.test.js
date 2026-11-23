@@ -53,3 +53,14 @@ test("'I already paid this' (applyAllocations) copies the bill's group onto an e
   const own = applyAllocations({ txn: { id: "t2", type: "expense", amount: 4000, date: "2026-07-12", groupId: "g9" }, allocations: [{ billId: "b7", applied: 4000 }], bills: [open], contributions: [], genId });
   assert.equal(own.txnPatch.groupId, undefined); assert.equal(own.txnPatch.paidBillId, "b7");
 });
+
+test("prefill rows: the group's amount to collect and each person who owes, in the form's own row shape; nothing for a bill that carries nothing", async () => {
+  const { prefillRowsFromBill } = await import("./billGroupCopy.js");
+  assert.deepEqual(prefillRowsFromBill(bill), [
+    { targetType: "group", targetId: "g1", mode: "owes", amount: "3445" },
+    { targetType: "person", targetId: "x", mode: "owes", amount: "300" },
+    { targetType: "person", targetId: "y", mode: "owes", amount: "255" },
+  ]);
+  assert.deepEqual(prefillRowsFromBill({ id: "b", groupId: "g1" }), []);
+  assert.deepEqual(prefillRowsFromBill(null), []);
+});
