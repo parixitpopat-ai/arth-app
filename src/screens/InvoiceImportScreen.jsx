@@ -32,7 +32,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
   const label = { color: T.sub, fontSize: 11, fontWeight: 700, textTransform: "uppercase", marginBottom: 4 };
   const btn = (primary, disabled) => ({ border: primary ? "0" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? T.accentInk : T.text, borderRadius: 12, padding: "11px 14px", fontWeight: 800, fontSize: 13, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.45 : 1 });
   const banner = (tone, children, tid) => (
-    <div data-testid={tid} style={{ background: tone === "amb" ? "rgba(240,165,0,0.16)" : tone === "info" ? "rgba(6,182,212,0.16)" : T.accentSoft, color: T.text, borderRadius: 12, padding: "10px 12px", fontSize: 12, marginBottom: 10 }}>{children}</div>
+    <div data-testid={tid} style={{ background: tone === "amb" ? T.attentionSoft : tone === "info" ? T.infoSoft : T.accentSoft, color: T.text, borderRadius: 12, padding: "10px 12px", fontSize: 12, marginBottom: 10 }}>{children}</div>
   );
 
   const compute = (analysis, dates, fileName) => {

@@ -16,7 +16,7 @@ const files = [];
 })(root);
 
 const BANNED = [
-  [/#f0a500/i, "the old amber: use T.warn (DARK.warn on a screen that is always dark)"],
+  [/#f0a500|rgba\(240, ?165, ?0,/i, "the old amber: use T.warn / T.attentionSoft (DARK.warn on a screen that is always dark)"],
   [/#16a34a|#22c55e/i, "the old greens: use T.success / T.accent (DARK.accent on a screen that is always dark)"],
   [/#f0fdf4|#1e1e28|#13131a|#5a5a7a|#2a2a3a|#888888/i, "an old interface colour: use the theme"],
   [/color: ?"#000"/, "black text on the accent: use T.accentInk"],
