@@ -958,8 +958,8 @@ function ArthInner() {
   return <>
     <ErrorBoundary><AppContent onLock={lock} appPin={appPin} setAppPin={setAppPin}/></ErrorBoundary>
     {showIdleWarning && (
-      <div onClick={()=>resetIdleRef.current?.()} style={{position:"fixed",bottom:0,left:0,right:0,zIndex:99999,background:"#1a1a1aee",backdropFilter:"blur(8px)",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:`2px solid ${DARK.warn}`,cursor:"pointer"}}>
-        <span style={{color:"#fff",fontSize:13,fontWeight:700}}>🔒 Locking in {idleCountdown}s due to inactivity</span>
+      <div onClick={()=>resetIdleRef.current?.()} style={{position:"fixed",bottom:0,left:0,right:0,zIndex:99999,background:DARK.card+"ee",backdropFilter:"blur(8px)",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:`2px solid ${DARK.warn}`,cursor:"pointer"}}>
+        <span style={{color:DARK.textStrong,fontSize:13,fontWeight:700}}>🔒 Locking in {idleCountdown}s due to inactivity</span>
         <button onClick={e=>{e.stopPropagation();resetIdleRef.current?.();}} style={{background:DARK.warn,color:DARK.accentInk,border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Inter,sans-serif"}}>Stay active</button>
       </div>
     )}
@@ -3441,7 +3441,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   const btnP = { ...BUTTON("primary", T), width:"100%" };
   const btnG = { ...BUTTON("secondary", T) };
   const ttStyle = { background:T.card, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px 12px", fontSize:12, color:T.text };
-  const lightSelect = { ...inp, background:"#fff", color:"#111" };
+  const lightSelect = { ...inp, background:T.input, color:T.text };
 
   const Chip = ({ color, children, onClick, active }) => (
     <button onClick={onClick} style={{ background:active?color+"22":"none", border:`1px solid ${active?color:T.border}`, borderRadius:20, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:700, color:active?color:T.sub, whiteSpace:"nowrap", fontFamily:"Inter,sans-serif" }}>{children}</button>
@@ -3499,9 +3499,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   );
   const InvestmentFrequencySelect = ({ value, onChange, emptyLabel="One-time / not fixed", styleOverride }) => (
     <select style={styleOverride || lightSelect} value={value} onChange={e=>onChange(e.target.value)}>
-      <option value="" style={{ background:"#fff",color:"#111" }}>{emptyLabel}</option>
+      <option value="" style={{ background:T.card,color:T.text }}>{emptyLabel}</option>
       {INVESTMENT_FREQUENCY_OPTIONS.map(option=>(
-        <option key={option.value} value={option.value} style={{ background:"#fff",color:"#111" }}>{option.label}</option>
+        <option key={option.value} value={option.value} style={{ background:T.card,color:T.text }}>{option.label}</option>
       ))}
     </select>
   );
@@ -7140,7 +7140,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                                 setSettleAmounts(prev=>prev[row.key]!==undefined?prev:{...prev,[row.key]:String(row.remaining)});
                               }} style={{ display:"flex",alignItems:"center",gap:10,cursor:"pointer" }}>
                                 <div style={{ width:20,height:20,borderRadius:5,background:isSelected?row.color:"none",border:`2px solid ${isSelected?row.color:T.border}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
-                                  {isSelected&&<span style={{ color:"#fff",fontSize:12,fontWeight:900 }}>✓</span>}
+                                  {isSelected&&<span style={{ color:T.accentInk,fontSize:12,fontWeight:900 }}>✓</span>}
                                 </div>
                                 <div style={{ flex:1,minWidth:0 }}>
                                   <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{row.label}</div>
@@ -7313,7 +7313,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       const on = reimbPickedIds.includes(c.id);
                       return (
                         <div key={c.id} data-testid={`reimb-row-${c.id}`} onClick={()=>{ const cur = Object.fromEntries(reimbClaims.map(x=>[x.id, reimbPickedIds.includes(x.id)])); cur[c.id] = !on; setReimbManual(cur); }} style={{ display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderTop:`1px solid ${T.border}`,cursor:"pointer",opacity:on?1:0.6 }}>
-                          <div style={{ width:18,height:18,borderRadius:9,border:`2px solid ${on?T.success:T.border}`,background:on?T.success:"none",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center" }}>{on&&<span style={{ color:"#fff",fontSize:10,fontWeight:900 }}>✓</span>}</div>
+                          <div style={{ width:18,height:18,borderRadius:9,border:`2px solid ${on?T.success:T.border}`,background:on?T.success:"none",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center" }}>{on&&<span style={{ color:T.accentInk,fontSize:10,fontWeight:900 }}>✓</span>}</div>
                           <div style={{ flex:1,minWidth:0 }}>
                             <div style={{ color:T.text,fontSize:12,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>💼 {c.title}</div>
                             <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{formatShortDate(c.date)||c.date}{c.spent>c.amount+0.005?` · ${sym}${fmt(c.spent)} spent, ${sym}${fmt(c.amount)} reimbursable`:""}</div>
@@ -7370,7 +7370,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                             setRepaymentPartialKey(null);
                           }} style={{ display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderTop:`1px solid ${T.border}`,cursor:"pointer",opacity:isSelected?1:0.6 }}>
                             <div style={{ width:18,height:18,borderRadius:9,border:`2px solid ${isSelected?T.info:T.border}`,background:isSelected?T.info:"none",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center" }}>
-                              {isSelected&&<span style={{ color:"#fff",fontSize:10,fontWeight:900 }}>✓</span>}
+                              {isSelected&&<span style={{ color:T.accentInk,fontSize:10,fontWeight:900 }}>✓</span>}
                             </div>
                             <div style={{ flex:1,minWidth:0 }}>
                               <div style={{ color:T.text,fontSize:12,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{icon} {item.title}</div>
@@ -11625,11 +11625,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     return (
       <div style={{ position:"relative",overflow:"hidden" }}>
         <div style={{ position:"absolute",left:0,top:0,bottom:0,display:"flex" }}>
-          {actionBtn(toggleFavorite, T.warn, "#fff", t.favorite?"⭐":"☆", "Fav")}
+          {actionBtn(toggleFavorite, T.warn, T.accentInk, t.favorite?"⭐":"☆", "Fav")}
           {actionBtn(repeatTxn, T.accent, "#000", "🔁", "Repeat")}
         </div>
         <div style={{ position:"absolute",right:0,top:0,bottom:0,display:"flex" }}>
-          {actionBtn(shareTxn, T.info, "#fff", "📤", "Share")}
+          {actionBtn(shareTxn, T.info, T.accentInk, "📤", "Share")}
           {actionBtn(e=>{ e?.stopPropagation?.(); setConfirmDeleteTxn(t); close(); }, T.danger, "#fff", "🗑️", "Delete")}
         </div>
         <div
@@ -18995,7 +18995,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {statsTab==="cashflow"&&(<>
           <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
             {["7D","30D","12W","Q","HY","Y"].map(p=>(
-              <button key={p} onClick={()=>setStatsPeriod(p)} style={{ flex:"1 1 30%",minWidth:60,background:statsPeriod===p?T.accent:T.input,border:"none",borderRadius:12,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:800,color:statsPeriod===p?"#fff":T.sub,fontFamily:"Inter,sans-serif" }}>{p}</button>
+              <button key={p} onClick={()=>setStatsPeriod(p)} style={{ flex:"1 1 30%",minWidth:60,background:statsPeriod===p?T.accent:T.input,border:"none",borderRadius:12,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:800,color:statsPeriod===p?T.accentInk:T.sub,fontFamily:"Inter,sans-serif" }}>{p}</button>
             ))}
           </div>
           <div style={{ background:T.card,borderRadius:16,padding:16,border:`1px solid ${T.border}` }}>
@@ -19297,10 +19297,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       <div onClick={e=>{ if(e.target===e.currentTarget) onClose(); }} style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:400,display:"flex" }}>
         <div style={{ background:T.card,width:"78%",maxWidth:320,height:"100%",overflowY:"auto",display:"flex",flexDirection:"column" }}>
           <div style={{ background:`linear-gradient(135deg, ${T.accent}, ${T.accent}cc)`,padding:"24px 20px",display:"flex",alignItems:"center",gap:12 }}>
-            <div style={{ width:52,height:52,borderRadius:"50%",background:"rgba(255,255,255,0.25)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24 }}>{me?.emoji||"🧑"}</div>
+            <div style={{ width:52,height:52,borderRadius:"50%",background:T.accentInk+"33",display:"flex",alignItems:"center",justifyContent:"center",fontSize:24 }}>{me?.emoji||"🧑"}</div>
             <div>
-              <div style={{ color:"#fff",fontSize:16,fontWeight:900 }}>{me?.name||"Me"}</div>
-              <div style={{ color:"#ffffffcc",fontSize:11,marginTop:2 }}>My Arth</div>
+              <div style={{ color:T.accentInk,fontSize:16,fontWeight:900 }}>{me?.name||"Me"}</div>
+              <div style={{ color:T.accentInk+"cc",fontSize:11,marginTop:2 }}>My Arth</div>
             </div>
           </div>
           <div style={{ padding:"10px 8px",display:"flex",flexDirection:"column",gap:2 }}>
@@ -19400,7 +19400,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {hit&&<div style={{ color:T.warn,fontSize:11,marginTop:6 }}>Looks like your entry “{hit.merchant||hit.desc||"entry"}” ({formatShortDate(hit.date)||hit.date}). Link it instead of adding a copy.</div>}
                 <div style={{ display:"flex",gap:6,marginTop:8,flexWrap:"wrap" }}>
                   {hit&&<button data-testid="sms-link" onClick={()=>{ setTxns(prev=>applyMerges(prev,[{ txnId:it.matchId,row:it.row }],{ batchId:genId() })); setToast({ message:"Linked to your entry" }); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:T.accentInk,fontFamily:"Inter,sans-serif" }}>Link to it</button>}
-                  <button data-testid="sms-accept" onClick={openForm} style={{ background:hit?T.input:T.accent,border:hit?`1px solid ${T.border}`:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:hit?T.text:"#fff",fontFamily:"Inter,sans-serif" }}>{hit?"Add anyway":"Accept"}</button>
+                  <button data-testid="sms-accept" onClick={openForm} style={{ background:hit?T.input:T.accent,border:hit?`1px solid ${T.border}`:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:hit?T.text:T.accentInk,fontFamily:"Inter,sans-serif" }}>{hit?"Add anyway":"Accept"}</button>
                   <button data-testid="sms-discard" onClick={()=>smsInbox.discard(it.id)} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Discard</button>
                 </div>
               </div>
@@ -19873,7 +19873,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               return (
                 <div key={t.id} onClick={()=>setSelectedIds(prev=>({...prev,[t.id]:!prev[t.id]}))} style={{ display:"flex",alignItems:"center",gap:10,background:isSelected?T.purple+"16":T.input,border:`1px solid ${isSelected?T.purple:T.border}`,borderRadius:12,padding:"10px 14px",cursor:"pointer" }}>
                   <div style={{ width:20,height:20,borderRadius:5,background:isSelected?T.purple:"none",border:`2px solid ${isSelected?T.purple:T.border}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
-                    {isSelected&&<span style={{ color:"#fff",fontSize:12,fontWeight:900 }}>✓</span>}
+                    {isSelected&&<span style={{ color:T.accentInk,fontSize:12,fontWeight:900 }}>✓</span>}
                   </div>
                   <div style={{ flex:1,minWidth:0 }}>
                     <div style={{ color:T.text,fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{t.merchant||t.who||t.desc||"Expense"}</div>
@@ -21333,7 +21333,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         )}
 
         {["conflict","paused-token","paused-reconcile","blocked-backup"].includes(syncStatus.kind) && (
-          <div data-testid="sync-attention-banner" onClick={()=>{ setShowSettings(true); setSettingsSection("cloudsync"); if(syncStatus.kind==="conflict") setSyncConflictOpen(true); }} style={{ background:T.attention,color:"#1a1a1a",fontSize:12,fontWeight:800,padding:"8px 14px",textAlign:"center",cursor:"pointer" }}>
+          <div data-testid="sync-attention-banner" onClick={()=>{ setShowSettings(true); setSettingsSection("cloudsync"); if(syncStatus.kind==="conflict") setSyncConflictOpen(true); }} style={{ background:T.attention,color:T.accentInk,fontSize:12,fontWeight:800,padding:"8px 14px",textAlign:"center",cursor:"pointer" }}>
             ⚠️ {syncStatus.text?.headline} — tap to review
           </div>
         )}
