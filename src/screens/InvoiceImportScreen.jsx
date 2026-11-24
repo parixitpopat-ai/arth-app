@@ -30,7 +30,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
 
   const card = { background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: 14, marginBottom: 12 };
   const label = { color: T.sub, fontSize: 11, fontWeight: 700, textTransform: "uppercase", marginBottom: 4 };
-  const btn = (primary, disabled) => ({ border: primary ? "0" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? "#fff" : T.text, borderRadius: 12, padding: "11px 14px", fontWeight: 800, fontSize: 13, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.45 : 1 });
+  const btn = (primary, disabled) => ({ border: primary ? "0" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? T.accentInk : T.text, borderRadius: 12, padding: "11px 14px", fontWeight: 800, fontSize: 13, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.45 : 1 });
   const banner = (tone, children, tid) => (
     <div data-testid={tid} style={{ background: tone === "amb" ? "rgba(240,165,0,0.16)" : tone === "info" ? "rgba(6,182,212,0.16)" : T.accentSoft, color: T.text, borderRadius: 12, padding: "10px 12px", fontSize: 12, marginBottom: 10 }}>{children}</div>
   );
@@ -86,7 +86,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
   };
 
   const outcomeCard = (o, key, extra) => o && (
-    <div key={key} data-testid="invoice-error" data-status={extra && extra.status} style={{ ...card, borderColor: o.tone === "amb" ? "#f0a500" : T.border }}>
+    <div key={key} data-testid="invoice-error" data-status={extra && extra.status} style={{ ...card, borderColor: o.tone === "amb" ? T.warn : T.border }}>
       <div style={{ color: T.text, fontSize: 14, fontWeight: 800, marginBottom: 4 }}>{o.title}</div>
       <div style={{ color: T.sub, fontSize: 12, marginBottom: 10 }}>{o.message}</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{o.actions.map(a => <button key={a.id} data-testid={`action-${a.id}`} onClick={() => act(a.id)} style={btn(a.id === "choose-another")}>{a.label}</button>)}</div>
@@ -96,7 +96,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
   const field = (id, name, value, opts = {}) => (
     <div data-testid={`field-${id}`} style={{ borderBottom: `1px solid ${T.border}`, padding: "8px 0" }}>
       <div style={label}>{name}</div>
-      <div style={{ color: value ? T.text : T.sub, fontSize: 14, fontFamily: opts.mono ? "'IBM Plex Mono', monospace" : "inherit", overflowWrap: "anywhere" }}>{value || "Not on the invoice"}</div>
+      <div style={{ color: value ? T.text : T.sub, fontSize: 14, fontFamily: opts.mono ? "Inter, sans-serif" : "inherit", overflowWrap: "anywhere" }}>{value || "Not on the invoice"}</div>
       {opts.note && <div style={{ color: T.sub, fontSize: 11, marginTop: 2 }}>{opts.note}</div>}
     </div>
   );
@@ -137,8 +137,8 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
           {field("payment", "Paid with", null, { note: v.paymentMethod.note })}
           <div style={{ paddingTop: 10 }}>
             <div style={label}>Payment date</div>
-            <input data-testid="payment-date" type="date" value={typed || ""} onChange={e => setPayDate(inv.page, e.target.value)} style={{ padding: 8, borderRadius: 10, border: `1px solid ${dateCheck.ok ? T.border : "#f0a500"}`, background: T.card, color: T.text, fontSize: 14 }} />
-            {!dateCheck.ok && <div data-testid="payment-date-error" style={{ color: "#f0a500", fontSize: 11, marginTop: 4 }}>{dateCheck.error}</div>}
+            <input data-testid="payment-date" type="date" value={typed || ""} onChange={e => setPayDate(inv.page, e.target.value)} style={{ padding: 8, borderRadius: 10, border: `1px solid ${dateCheck.ok ? T.border : T.warn}`, background: T.card, color: T.text, fontSize: 14 }} />
+            {!dateCheck.ok && <div data-testid="payment-date-error" style={{ color: T.warn, fontSize: 11, marginTop: 4 }}>{dateCheck.error}</div>}
             <div style={{ color: T.sub, fontSize: 11, marginTop: 4 }}>Starts as the invoice date. Change it to the day you paid. Used only to look for matching expenses; nothing is saved.</div>
           </div>
         </div>
@@ -148,12 +148,12 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
           <div key={i.srNo} data-testid="item-row" style={{ ...card, marginBottom: 8, padding: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
               <div data-testid={`item-label-${i.srNo}`} style={{ color: T.text, fontSize: 13, fontWeight: 700, overflowWrap: "anywhere" }}>{names[i.srNo].label}</div>
-              <div data-testid="item-total" style={{ color: T.text, fontSize: 13, fontWeight: 800, whiteSpace: "nowrap", fontFamily: "'IBM Plex Mono', monospace" }}>{money(i.lineTotal, sym)}</div>
+              <div data-testid="item-total" style={{ color: T.text, fontSize: 13, fontWeight: 800, whiteSpace: "nowrap", fontFamily: "Inter, sans-serif" }}>{money(i.lineTotal, sym)}</div>
             </div>
             <div style={{ color: T.sub, fontSize: 11, marginTop: 4 }}>{i.qty} × MRP {money(i.mrp, sym)}{i.discount > 0 ? ` · discount ${money(i.discount, sym)} is already inside the line total` : ""}</div>
             {i.qty > 1 && <div style={{ color: T.sub, fontSize: 11 }}>≈ {money(i.perUnitAfterDiscount, sym)} each after discount (calculated, not printed)</div>}
             <div style={{ color: T.sub, fontSize: 11 }}>Taxable {money(i.taxable, sym)} · CGST {i.cgstRate}% {money(i.cgst, sym)} · SGST {i.sgstRate}% {money(i.sgst, sym)}</div>
-            <div style={{ color: T.sub, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}>UPC {i.upc} · HSN {i.hsn}</div>
+            <div style={{ color: T.sub, fontSize: 10, fontFamily: "Inter, sans-serif" }}>UPC {i.upc} · HSN {i.hsn}</div>
             {mode === "create" && !oc.done && (
               <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                 <input data-testid={`item-name-${i.srNo}`} aria-label={`Name on the expense for ${i.name}`} value={names[i.srNo].label} onChange={e => setForm(key, { itemNames: { ...(f.itemNames || {}), [i.srNo]: e.target.value } })} style={{ ...selStyle, flex: 2, fontSize: 12, padding: 6 }} />
@@ -173,7 +173,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
         ))}
         {v.handling && (
           <div data-testid="handling-charge" data-verified={String(v.handling.verified)} style={{ ...card, padding: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}><div style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{v.handling.label}</div><div style={{ color: T.text, fontSize: 13, fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace" }}>{money(v.handling.total, sym)}</div></div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}><div style={{ color: T.text, fontSize: 13, fontWeight: 700 }}>{v.handling.label}</div><div style={{ color: T.text, fontSize: 13, fontWeight: 800, fontFamily: "Inter, sans-serif" }}>{money(v.handling.total, sym)}</div></div>
             {v.handling.consolidated && <div style={{ color: T.sub, fontSize: 11, marginTop: 4 }}>Taxable {money(v.handling.taxable, sym)} · CGST {money(v.handling.cgst, sym)} · SGST {money(v.handling.sgst, sym)}</div>}
             <div style={{ color: T.sub, fontSize: 11, marginTop: 4 }}>{v.handling.note}</div>
             <details style={{ marginTop: 6 }}><summary style={{ color: T.accent, fontSize: 11, cursor: "pointer" }}>Printed rows ({v.handling.sourceRows.length})</summary>
@@ -184,8 +184,8 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
         {v.totals && (
           <div style={card}>
             <div style={{ color: T.sub, fontSize: 12 }}>Taxable {money(v.totals.taxable, sym)} · CGST {money(v.totals.cgst, sym)} · SGST {money(v.totals.sgst, sym)}</div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}><div style={{ color: T.text, fontSize: 15, fontWeight: 800 }}>Invoice total</div><div data-testid="invoice-total" style={{ color: T.text, fontSize: 17, fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace" }}>{money(v.totals.invoiceTotal, sym)}</div></div>
-            <div data-testid="reconciliation" data-level={v.reconciliation.level} style={{ color: v.reconciliation.level === "does-not-add-up" ? "#f0a500" : T.sub, fontSize: 12, marginTop: 6 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}><div style={{ color: T.text, fontSize: 15, fontWeight: 800 }}>Invoice total</div><div data-testid="invoice-total" style={{ color: T.text, fontSize: 17, fontWeight: 800, fontFamily: "Inter, sans-serif" }}>{money(v.totals.invoiceTotal, sym)}</div></div>
+            <div data-testid="reconciliation" data-level={v.reconciliation.level} style={{ color: v.reconciliation.level === "does-not-add-up" ? T.warn : T.sub, fontSize: 12, marginTop: 6 }}>
               {v.reconciliation.level === "adds-up" ? "Items, charge and taxes add up to the invoice total." : v.reconciliation.level === "adds-up-with-printed-rounding" ? "Adds up to the invoice total. The invoice has ₹0.01 rounding differences of its own, kept as printed." : "Does not add up. Values are shown exactly as printed; nothing was corrected."}
             </div>
             {v.reconciliation.issues.length > 0 && <details style={{ marginTop: 4 }}><summary style={{ color: T.accent, fontSize: 11, cursor: "pointer" }}>What was flagged ({v.reconciliation.issues.length})</summary>{v.reconciliation.issues.map((x, n) => <div key={n} style={{ color: T.sub, fontSize: 11, marginTop: 3 }}>{x.level === "error" ? "Check: " : "Note: "}{x.message}</div>)}</details>}
@@ -195,7 +195,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
 
         <div style={label}>Might already be in Arth</div>
         <div style={{ color: T.sub, fontSize: 11, marginBottom: 6 }}>Suggestions only. Arth never links anything on its own, and a match does not need the exact amount.</div>
-        <div data-testid="match-rules-note" style={{ color: "#f0a500", fontSize: 11, marginBottom: 6 }}>Early matching rules, not yet verified on real data: an expense within 3 days; a similar amount means within ₹25 or 5%, and the expense must mention Blinkit.</div>
+        <div data-testid="match-rules-note" style={{ color: T.warn, fontSize: 11, marginBottom: 6 }}>Early matching rules, not yet verified on real data: an expense within 3 days; a similar amount means within ₹25 or 5%, and the expense must mention Blinkit.</div>
         {inv.matches.length === 0 && <div data-testid="no-matches" style={{ ...card, color: T.sub, fontSize: 12 }}>No expense within 3 days looks like this invoice.</div>}
         {inv.matches.map(m => (
           <button key={m.id} data-testid="match-row" data-id={m.id} data-strength={m.strength} data-selected={String(sel === m.id)} onClick={() => setPicked({ ...picked, [key]: sel === m.id ? null : m.id })} style={{ ...card, display: "block", width: "100%", textAlign: "left", cursor: "pointer", border: `2px solid ${sel === m.id ? T.accent : T.border}`, marginBottom: 8 }}>
@@ -208,16 +208,16 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
         {/* ---- Add to Arth: nothing below writes anything until Confirm ---- */}
         <div style={label}>Add to Arth</div>
         {oc.done ? (
-          <div data-testid="import-done" style={{ ...card, borderColor: "#22c55e" }}>
+          <div data-testid="import-done" style={{ ...card, borderColor: T.success }}>
             <div style={{ color: T.text, fontSize: 14, fontWeight: 800 }}>Added to Arth</div>
             <div data-testid="import-done-sentence" style={{ color: T.sub, fontSize: 12, margin: "4px 0 10px" }}>{oc.done.sentence}</div>
             <button data-testid="undo-import" onClick={undo} style={btn(false)}>Undo</button>
-            {oc.undoError && <div data-testid="undo-error" style={{ color: "#f0a500", fontSize: 11, marginTop: 6 }}>{oc.undoError}</div>}
+            {oc.undoError && <div data-testid="undo-error" style={{ color: T.warn, fontSize: 11, marginTop: 6 }}>{oc.undoError}</div>}
           </div>
         ) : (
           <div data-testid="add-to-arth" style={card}>
             {oc.undone && <div data-testid="undone-note" style={{ color: T.sub, fontSize: 12, marginBottom: 8 }}>Undone. Nothing from this invoice is in Arth.</div>}
-            {sameAmount && mode === "create" && <div data-testid="double-count-warning" style={{ color: "#f0a500", fontSize: 12, marginBottom: 8 }}>You already have a {money(sameAmount.amount, sym)} expense that looks like this invoice ({sameAmount.date}). Adding it as a new expense would count the spend twice. Select it above to add the items to it instead.</div>}
+            {sameAmount && mode === "create" && <div data-testid="double-count-warning" style={{ color: T.warn, fontSize: 12, marginBottom: 8 }}>You already have a {money(sameAmount.amount, sym)} expense that looks like this invoice ({sameAmount.date}). Adding it as a new expense would count the spend twice. Select it above to add the items to it instead.</div>}
             {chosen && chosen.strength === "same-amount" && (
               <label style={{ display: "flex", gap: 8, alignItems: "center", color: T.text, fontSize: 13, marginBottom: 8 }}>
                 <input data-testid="mode-link" type="checkbox" checked={mode === "link"} onChange={e => setForm(key, { mode: e.target.checked ? "link" : "create" })} />
@@ -242,11 +242,11 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
             {plan.errors.some(e => e.code === "orphan") && <label style={{ display: "flex", gap: 8, color: T.text, fontSize: 12, marginTop: 8 }}><input data-testid="import-again" type="checkbox" checked={!!f.importAgain} onChange={e => setForm(key, { importAgain: e.target.checked })} />Add it again (the earlier expense no longer exists)</label>}
             {mode === "create" && <label style={{ display: "flex", gap: 8, alignItems: "center", color: T.text, fontSize: 12, marginTop: 8 }}><input data-testid="remember-cats" type="checkbox" checked={f.remember !== false} onChange={e => setForm(key, { remember: e.target.checked })} />Remember these item categories for next time</label>}
             {mode === "create" && <label style={{ display: "flex", gap: 8, alignItems: "center", color: T.text, fontSize: 12, marginTop: 8 }}><input data-testid="strip-brands" type="checkbox" checked={f.stripBrands !== false} onChange={e => setForm(key, { stripBrands: e.target.checked })} />Show item names without the brand (the brand is still kept in the background)</label>}
-            {plan.ok && plan.uncategorised > 0 && <div data-testid="uncategorised-note" style={{ color: "#f0a500", fontSize: 11, marginTop: 8 }}>{plan.uncategorised} line{plan.uncategorised === 1 ? " has" : "s have"} no category. Arth's edit screen will ask for it the next time you edit this expense.</div>}
+            {plan.ok && plan.uncategorised > 0 && <div data-testid="uncategorised-note" style={{ color: T.warn, fontSize: 11, marginTop: 8 }}>{plan.uncategorised} line{plan.uncategorised === 1 ? " has" : "s have"} no category. Arth's edit screen will ask for it the next time you edit this expense.</div>}
             <div data-testid="review-sentence" style={{ background: T.accentSoft, borderRadius: 10, padding: "8px 10px", color: T.text, fontSize: 12, marginTop: 10 }}>
               {plan.ok ? <>Arth will: {plan.sentence}</> : <>Not ready: {plan.errors.map(e => e.message).join(" ")}</>}
             </div>
-            {oc.error && <div data-testid="import-error" style={{ color: "#f0a500", fontSize: 12, marginTop: 8 }}>{oc.error}</div>}
+            {oc.error && <div data-testid="import-error" style={{ color: T.warn, fontSize: 12, marginTop: 8 }}>{oc.error}</div>}
             <button data-testid="confirm-import" disabled={!plan.ok || oc.busy} onClick={confirm} style={{ ...btn(true, !plan.ok || oc.busy), marginTop: 10, width: "100%" }}>{oc.busy ? "Adding…" : mode === "link" ? "Confirm: add the items" : "Confirm: add this expense"}</button>
           </div>
         )}
@@ -292,7 +292,7 @@ export default function InvoiceImportScreen({ accounts = [], txns = [], cats = [
       {res && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <button data-testid="try-another" onClick={() => fileRef.current && fileRef.current.click()} style={btn(false)}>Try another file</button>
-          <span data-testid="diag-code" style={{ color: T.sub, fontSize: 10, fontFamily: "'IBM Plex Mono', monospace" }}>Code: {state.diag.status}{state.diag.codes.length ? ` · ${state.diag.codes.join(", ")}` : ""}</span>
+          <span data-testid="diag-code" style={{ color: T.sub, fontSize: 10, fontFamily: "Inter, sans-serif" }}>Code: {state.diag.status}{state.diag.codes.length ? ` · ${state.diag.codes.join(", ")}` : ""}</span>
         </div>
       )}
       <div data-testid="preview-footer" style={{ color: T.sub, fontSize: 11, textAlign: "center", marginTop: 16 }}>Nothing is added until you press Confirm</div>

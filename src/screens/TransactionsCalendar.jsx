@@ -29,7 +29,7 @@ export default function TransactionsCalendar({
     const isSel = selected && selected.date === d.date;
     const aria = `${d.day} ${MONTHS[m - 1]}${d.isToday ? ", today" : ""}${has ? `, spent ${money(sym, d.spent)}${d.income ? `, income ${money(sym, d.income)}` : ""}, ${d.count} entr${d.count === 1 ? "y" : "ies"}` : ", no entries"}`;
     const base = { minHeight: 56, borderRadius: 10, border: `1px solid ${isSel ? T.accent : "transparent"}`, background: isSel ? T.accentSoft : "none", padding: "4px 2px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start", gap: 2, fontFamily: "inherit", color: T.text };
-    const dayNum = <span style={{ fontSize: 13, fontWeight: d.isToday ? 800 : 600, color: d.isFuture ? T.mute || T.sub : T.text, ...(d.isToday ? { background: T.accent, color: "#000", borderRadius: 999, minWidth: 22, textAlign: "center", padding: "1px 4px" } : {}) }}>{d.day}</span>;
+    const dayNum = <span style={{ fontSize: 13, fontWeight: d.isToday ? 800 : 600, color: d.isFuture ? T.mute || T.sub : T.text, ...(d.isToday ? { background: T.accent, color: T.accentInk, borderRadius: 999, minWidth: 22, textAlign: "center", padding: "1px 4px" } : {}) }}>{d.day}</span>;
     if (d.isFuture) {
       cells.push(
         <button key={d.date} type="button" aria-label={`${d.day} ${MONTHS[m - 1]}, upcoming${d.dueCount ? `, ${d.dueCount} due` : ""}`} aria-pressed={!!isSel} onClick={() => onSelectDate(d.date)} style={{ ...base, opacity: isSel ? 1 : 0.6, cursor: "pointer" }}>
@@ -105,7 +105,7 @@ export default function TransactionsCalendar({
           ))}
         </div>
       )}
-      {!selected.isFuture && <button type="button" onClick={() => onAddForDate(selected.date)} style={{ minHeight: 48, border: "none", borderRadius: 12, background: T.accent, color: "#000", fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>+ Add entry for this date</button>}
+      {!selected.isFuture && <button type="button" onClick={() => onAddForDate(selected.date)} style={{ minHeight: 48, border: "none", borderRadius: 12, background: T.accent, color: T.accentInk, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>+ Add entry for this date</button>}
     </div>
   );
 

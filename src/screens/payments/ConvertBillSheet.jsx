@@ -20,7 +20,7 @@ export default function ConvertBillSheet({ T, sym, fmt, bill, check, accounts, d
           <div style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>{bill.name}</div>
           <div style={{ color: T.text, fontSize: 20, fontWeight: 800, marginTop: 2 }}>{sym}{fmt(bill.amount)}</div>
         </div>
-        {!check.ok && <div data-testid="convert-bill-refused" style={{ color: "#f0a500", fontSize: 12, marginTop: 12, lineHeight: 1.5 }}>⚠ {check.reason}</div>}
+        {!check.ok && <div data-testid="convert-bill-refused" style={{ color: T.warn, fontSize: 12, marginTop: 12, lineHeight: 1.5 }}>⚠ {check.reason}</div>}
         <span style={lbl}>Bought with (account or card) *</span>
         <select data-testid="convert-bill-account" style={input} value={accId} onChange={e => setAccId(e.target.value)} disabled={!check.ok}>
           <option value="">— Choose —</option>

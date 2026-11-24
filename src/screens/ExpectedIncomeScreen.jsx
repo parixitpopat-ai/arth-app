@@ -64,7 +64,7 @@ export const AddExpectedIncomeModal = ({ existing, onClose, T, inp, lbl, setExpe
           <span style={lbl}>Next Expected Date</span>
           <input style={inp} type="date" value={nextDate} onChange={e=>setNextDate(e.target.value)}/>
         </div>
-        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Expected Income"}</button>
+        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color: (canSave) ? T.accentInk : T.sub,fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Expected Income"}</button>
       </div>
     </BottomSheet>
   );
@@ -120,7 +120,7 @@ export const ExpectedIncomeListModal = ({ onClose, T, sym, fmt, formatShortDate,
         ))}
       </div>
 
-      <button onClick={()=>{ setEditingExpectedIncome(null); setShowAddExpectedIncome(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>+ Add Expected Income</button>
+      <button onClick={()=>{ setEditingExpectedIncome(null); setShowAddExpectedIncome(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color: T.accentInk,fontFamily:"Inter,sans-serif" }}>+ Add Expected Income</button>
     </BottomSheet>
   );
 };

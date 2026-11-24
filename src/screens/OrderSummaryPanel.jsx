@@ -15,9 +15,9 @@ export default function OrderSummaryPanel({ T, sym = "₹", card, label, orders,
   const r = evaluateManualEntry(vals);
   const numberBad = orderNo.trim() !== "" && !ORDER_NUMBER_FORMAT.test(orderNo.trim());
   const input = { width: "100%", boxSizing: "border-box", padding: 10, minHeight: 44, borderRadius: 10, border: `1px solid ${T.border}`, background: T.card, color: T.text, fontSize: 14 };
-  const btn = (primary, disabled) => ({ minHeight: 44, padding: "10px 14px", borderRadius: 12, border: primary ? "0" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? "#fff" : T.text, fontWeight: 800, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1 });
+  const btn = (primary, disabled) => ({ minHeight: 44, padding: "10px 14px", borderRadius: 12, border: primary ? "0" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? T.accentInk : T.text, fontWeight: 800, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1 });
   const eqRow = (id, text, e) => (
-    <div data-testid={id} data-status={e.status} style={{ fontSize: 12, color: e.status === "fails" ? "#f0a500" : T.text, padding: "3px 0" }}>
+    <div data-testid={id} data-status={e.status} style={{ fontSize: 12, color: e.status === "fails" ? T.warn : T.text, padding: "3px 0" }}>
       {e.status === "holds" ? "✔ " : e.status === "fails" ? "⚠ " : "… "}{text}{e.status === "fails" ? ` — it should be ${inr(e.expectedPaise, sym)}, you have ${inr(e.actualPaise, sym)}` : ""}
     </div>
   );
@@ -41,7 +41,7 @@ export default function OrderSummaryPanel({ T, sym = "₹", card, label, orders,
               <div key={k} style={{ marginBottom: 8 }}>
                 <div style={{ color: T.sub, fontSize: 11, fontWeight: 700 }}>{name}</div>
                 <input data-testid={`summary-${k}`} inputMode="decimal" autoComplete="off" value={vals[k]} onChange={e => setVals({ ...vals, [k]: e.target.value })} style={input} placeholder="0.00" />
-                {r.errors[k] && vals[k] !== "" && <div style={{ color: "#f0a500", fontSize: 11 }}>{r.errors[k]}</div>}
+                {r.errors[k] && vals[k] !== "" && <div style={{ color: T.warn, fontSize: 11 }}>{r.errors[k]}</div>}
               </div>
             ))}
             <div data-testid="summary-total" style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800, color: T.text, padding: "6px 0" }}><span>Total (calculated)</span><span>{r.figures.total == null ? "—" : inr(r.figures.total, sym)}</span></div>
@@ -51,7 +51,7 @@ export default function OrderSummaryPanel({ T, sym = "₹", card, label, orders,
             <div style={{ marginTop: 8 }}>
               <div style={{ color: T.sub, fontSize: 11, fontWeight: 700 }}>Order number (optional)</div>
               <input data-testid="summary-ordernumber" value={orderNo} onChange={e => setOrderNo(e.target.value)} style={input} placeholder="405-1234567-1234567" />
-              {numberBad && <div data-testid="summary-ordernumber-bad" style={{ color: "#f0a500", fontSize: 11 }}>That is not in the form 123-1234567-1234567; you can choose the order instead.</div>}
+              {numberBad && <div data-testid="summary-ordernumber-bad" style={{ color: T.warn, fontSize: 11 }}>That is not in the form 123-1234567-1234567; you can choose the order instead.</div>}
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
               <button data-testid="summary-ack" disabled={!r.ready} onClick={submit} style={btn(true, !r.ready)}>These figures are right</button>
@@ -72,9 +72,9 @@ export default function OrderSummaryPanel({ T, sym = "₹", card, label, orders,
               <div style={{ fontSize: 12, color: T.text }}>Belongs to: <b>{o ? optionLabel(o) : "an order"}</b> — {s.match.how === "exact" ? "matched exactly" : "chosen by you"}
                 {s.match.state === "chosen" && <button data-testid="summary-rechoose" onClick={() => onChoose(s.id, undefined)} style={{ ...btn(false), marginLeft: 8, minHeight: 36, padding: "4px 10px" }}>Change</button>}
               </div>); })()}
-            {s.match.state === "unattached" && s.match.reason === "no-orders-read" && <div data-testid="summary-blocked" style={{ fontSize: 12, color: "#f0a500" }}>No invoices have been read yet, so this summary is not attached to an order. Confirmation is blocked. Add the invoices from this order.</div>}
+            {s.match.state === "unattached" && s.match.reason === "no-orders-read" && <div data-testid="summary-blocked" style={{ fontSize: 12, color: T.warn }}>No invoices have been read yet, so this summary is not attached to an order. Confirmation is blocked. Add the invoices from this order.</div>}
             {s.match.state === "unattached" && s.match.reason === "not-sure" && (
-              <div data-testid="summary-blocked" style={{ fontSize: 12, color: "#f0a500" }}>Not attached to any order. Confirmation is blocked.
+              <div data-testid="summary-blocked" style={{ fontSize: 12, color: T.warn }}>Not attached to any order. Confirmation is blocked.
                 <button data-testid="summary-rechoose" onClick={() => onChoose(s.id, undefined)} style={{ ...btn(false), marginLeft: 8, minHeight: 36, padding: "4px 10px" }}>Choose an order</button></div>)}
             {s.match.state === "choose" && (
               <div data-testid="summary-picker">
@@ -87,7 +87,7 @@ export default function OrderSummaryPanel({ T, sym = "₹", card, label, orders,
                   </button>
                 ))}
                 <button data-testid="summary-not-sure" onClick={() => onChoose(s.id, null)} style={btn(false)}>I am not sure</button>
-                <div data-testid="summary-blocked" style={{ fontSize: 12, color: "#f0a500", marginTop: 6 }}>Not attached yet: confirmation is blocked until you choose.</div>
+                <div data-testid="summary-blocked" style={{ fontSize: 12, color: T.warn, marginTop: 6 }}>Not attached yet: confirmation is blocked until you choose.</div>
               </div>)}
           </div>
           <button data-testid="summary-remove" onClick={() => onRemove(s.id)} style={{ ...btn(false), marginTop: 8 }}>Remove this summary</button>

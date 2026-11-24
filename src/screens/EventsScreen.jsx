@@ -65,7 +65,7 @@ export const AddEventModal = ({ existing, onClose, T, inp, lbl, people, setEvent
             })}
           </div>
         </div>
-        <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Trip/Outing"}</button>
+        <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color: (canSave) ? T.accentInk : T.sub,fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Trip/Outing"}</button>
       </div>
     </BottomSheet>
   );
@@ -166,7 +166,7 @@ export const EventsListModal = ({ onClose, T, sym, fmt, events, txns, formatShor
           );
         })}
       </div>
-      <button onClick={()=>{ setEditingEvent(null); setShowAddEvent(true); onClose(); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>+ Add Trip / Outing</button>
+      <button onClick={()=>{ setEditingEvent(null); setShowAddEvent(true); onClose(); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color: T.accentInk,fontFamily:"Inter,sans-serif" }}>+ Add Trip / Outing</button>
     </BottomSheet>
   );
 };

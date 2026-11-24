@@ -101,7 +101,7 @@ export const SchoolFeeScheduleListModal = ({ onClose, T, sym, fmt, feeSchedules,
           />
         ))}
       </div>
-      <button onClick={()=>setShowAddSchedule(true)} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>+ Add School Year</button>
+      <button onClick={()=>setShowAddSchedule(true)} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color: T.accentInk,fontFamily:"Inter,sans-serif" }}>+ Add School Year</button>
     </BottomSheet>
   );
 };
@@ -357,7 +357,7 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
         {error && <div style={{ color:T.warn,fontSize:11,marginBottom:10 }}>{error}</div>}
         <div style={{ display:"flex",gap:8 }}>
           <button onClick={()=>setPendingImpact(null)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Cancel</button>
-          <button onClick={confirmImpactAndSave} style={{ flex:1,background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>Confirm changes</button>
+          <button onClick={confirmImpactAndSave} style={{ flex:1,background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:13,fontWeight:800,color: T.accentInk,fontFamily:"Inter,sans-serif" }}>Confirm changes</button>
         </div>
       </BottomSheet>
     );
@@ -443,7 +443,7 @@ export const AddSchoolYearModal = ({ onClose, T, inp, lbl, existing, feePeriods,
 
         {error && <div style={{ color:T.warn,fontSize:11 }}>{error}</div>}
         <div style={{ color:T.sub,fontSize:10 }}>{isEdit?"Changes to dates or rates apply to every unpaid, unprotected period — including past months — but never rewrite a period that's already been paid, discounted, or written off.":"Each row becomes one fee period exactly as entered. Every period can be individually corrected, discounted, or written off later — nothing here is final."}</div>
-        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Schedule"}</button>
+        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color: (canSave) ? T.accentInk : T.sub,fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Schedule"}</button>
       </div>
     </BottomSheet>
   );
@@ -546,7 +546,7 @@ export const SchoolFeeScheduleDetailModal = ({
             <span style={{ color:T.infoText,fontSize:15,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(availableCredit)}</span>
           </div>
           <div style={{ color:T.sub,fontSize:10.5,lineHeight:1.5,margin:"6px 0 10px" }}>Arth suggests applying this to the next outstanding period — it will not apply this on its own.</div>
-          <button onClick={applyCreditToOldest} style={{ background:T.accent,border:"none",borderRadius:10,padding:"8px 14px",cursor:"pointer",fontSize:11.5,fontWeight:700,color:"#fff",fontFamily:"Inter,sans-serif" }}>Apply to next outstanding period</button>
+          <button onClick={applyCreditToOldest} style={{ background:T.accent,border:"none",borderRadius:10,padding:"8px 14px",cursor:"pointer",fontSize:11.5,fontWeight:700,color: T.accentInk,fontFamily:"Inter,sans-serif" }}>Apply to next outstanding period</button>
         </div>
       )}
 
@@ -582,7 +582,7 @@ export const SchoolFeeScheduleDetailModal = ({
             return (
               <div key={p.id} style={{ display:"flex",gap:9,alignItems:"center",padding:"10px 14px",borderTop:group.lines[0]===p?"none":`1px solid ${T.border}` }}>
                 {selectable && (
-                  <button data-testid={`fee-line-select-${p.id}`} onClick={()=>toggleSelect(p.id)} style={{ width:24,height:24,flexShrink:0,display:"grid",placeItems:"center",background:selected?T.accent:T.input,border:`1.5px solid ${selected?T.accent:T.border}`,borderRadius:7,cursor:"pointer",color:"#fff",fontSize:12 }}>{selected?"✓":""}</button>
+                  <button data-testid={`fee-line-select-${p.id}`} onClick={()=>toggleSelect(p.id)} style={{ width:24,height:24,flexShrink:0,display:"grid",placeItems:"center",background:selected?T.accent:T.input,border:`1.5px solid ${selected?T.accent:T.border}`,borderRadius:7,cursor:"pointer",color: (selected) ? T.accentInk : T.sub,fontSize:12 }}>{selected?"✓":""}</button>
                 )}
                 {!selectable && <span style={{ width:24,flexShrink:0 }}/>}
                 <button onClick={()=>setViewingPeriod(p)} style={{ flex:1,minWidth:0,display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"Inter,sans-serif",padding:0 }}>
@@ -641,7 +641,7 @@ export const SchoolFeeScheduleDetailModal = ({
             <span style={{ color:T.text,fontSize:18,fontWeight:800,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums" }}>{sym}{fmt(selectedTotal)}</span>
           </div>
           <div style={{ display:"flex",gap:8 }}>
-            <button data-testid="schedule-pay-fees-btn" onClick={()=>setShowSettle(true)} style={{ flex:1,padding:13,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Pay fees</button>
+            <button data-testid="schedule-pay-fees-btn" onClick={()=>setShowSettle(true)} style={{ flex:1,padding:13,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color: T.accentInk,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Pay fees</button>
             <button onClick={()=>setSelectedPeriodIds([])} style={{ padding:"13px 16px",borderRadius:12,background:"none",border:`1px solid ${T.border}`,fontSize:13,fontWeight:600,color:T.sub,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Clear</button>
           </div>
         </div>
@@ -763,7 +763,7 @@ export const PayFeesModal = ({
         return (
           <div key={l.periodId} style={{ background:l.ticked?T.card:"transparent",border:`1px solid ${T.border}`,borderRadius:14,padding:"11px 13px",marginBottom:8,opacity:l.ticked?1:0.6 }}>
             <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-              <button data-testid={`payfees-toggle-${l.periodId}`} onClick={()=>toggleLine(l.periodId)} style={{ width:24,height:24,flexShrink:0,display:"grid",placeItems:"center",background:l.ticked?T.accent:T.input,border:`1.5px solid ${l.ticked?T.accent:T.border}`,borderRadius:7,cursor:"pointer",color:"#fff",fontSize:13 }}>{l.ticked?"✓":"+"}</button>
+              <button data-testid={`payfees-toggle-${l.periodId}`} onClick={()=>toggleLine(l.periodId)} style={{ width:24,height:24,flexShrink:0,display:"grid",placeItems:"center",background:l.ticked?T.accent:T.input,border:`1.5px solid ${l.ticked?T.accent:T.border}`,borderRadius:7,cursor:"pointer",color: (l.ticked) ? T.accentInk : T.sub,fontSize:13 }}>{l.ticked?"✓":"+"}</button>
               <div style={{ flex:1,minWidth:0 }}>
                 <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{feeLineDisplayName(l.period)}</div>
                 <div style={{ color:T.sub,fontSize:10.5,marginTop:1 }}>{l.ticked ? `Applies to ${l.period.label}` : "Not included · stays due"}</div>
@@ -787,7 +787,7 @@ export const PayFeesModal = ({
         const lSub = lCat?.subs?.find(s=>s.id===l.subId) || null;
         return (
         <div key={l.id} style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:"11px 13px",marginBottom:8,display:"flex",alignItems:"center",gap:10 }}>
-          <span style={{ width:24,height:24,flexShrink:0,display:"grid",placeItems:"center",background:T.accent,borderRadius:7,color:"#fff",fontSize:13 }}>✓</span>
+          <span style={{ width:24,height:24,flexShrink:0,display:"grid",placeItems:"center",background:T.accent,borderRadius:7,color: T.accentInk,fontSize:13 }}>✓</span>
           <div style={{ flex:1,minWidth:0 }}>
             <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{l.name}</div>
             {/* WP18c-fix: shows the real category the user picked — no longer a hardcoded
@@ -825,7 +825,7 @@ export const PayFeesModal = ({
           </div>
           <div style={{ display:"flex",gap:8 }}>
             <button onClick={()=>{ setAddingExtra(false); setExtraName(""); setExtraAmount(""); setExtraCatId(""); setExtraSubId(""); }} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Cancel</button>
-            <button onClick={addExtraLine} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:"#fff",fontFamily:"Inter,sans-serif" }}>Add</button>
+            <button onClick={addExtraLine} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color: T.accentInk,fontFamily:"Inter,sans-serif" }}>Add</button>
           </div>
         </div>
       ) : (
@@ -1001,7 +1001,7 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
               <div style={{ marginTop:8,display:"inline-block",background:(badge.kind==="overdue"?T.danger:T.warn)+"18",color:badge.kind==="overdue"?T.danger:T.warn,borderRadius:8,padding:"3px 9px",fontSize:10.5,fontWeight:800 }}>{badge.kind==="overdue"?"Overdue":badge.text}</div>
             )}
             {out>0 && onPayRemaining && (
-              <button onClick={()=>onPayRemaining(period)} style={{ width:"100%",marginTop:12,background:T.accent,border:"none",borderRadius:12,padding:"11px",cursor:"pointer",fontSize:13,fontWeight:700,color:"#fff",fontFamily:"Inter,sans-serif" }}>Pay {sym}{fmt(out)} remaining</button>
+              <button onClick={()=>onPayRemaining(period)} style={{ width:"100%",marginTop:12,background:T.accent,border:"none",borderRadius:12,padding:"11px",cursor:"pointer",fontSize:13,fontWeight:700,color: T.accentInk,fontFamily:"Inter,sans-serif" }}>Pay {sym}{fmt(out)} remaining</button>
             )}
           </div>
         );
@@ -1027,7 +1027,7 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
               <div style={{ color:T.sub,fontSize:11.5,lineHeight:1.5,marginBottom:12 }}>This period was marked paid when the schedule was set up, but Arth has no actual payment on record for it — this is a starting-balance claim, not a witnessed transaction. If that was entered incorrectly, you can correct it.</div>
               <span style={{ display:"block",color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",marginBottom:6 }}>Reason for correction *</span>
               <input value={correctionReason} onChange={e=>setCorrectionReason(e.target.value)} placeholder="e.g. Marked paid by mistake at setup" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"10px 12px",fontSize:13,fontWeight:600,color:T.text,fontFamily:"Inter,sans-serif",outline:"none",marginBottom:11 }}/>
-              <button onClick={correctPeriod} disabled={!correctionReason.trim()} style={{ width:"100%",padding:12,borderRadius:12,background:correctionReason.trim()?T.accent:T.border,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:correctionReason.trim()?"pointer":"not-allowed",fontFamily:"Inter,sans-serif" }}>Correct — mark as actually unpaid</button>
+              <button onClick={correctPeriod} disabled={!correctionReason.trim()} style={{ width:"100%",padding:12,borderRadius:12,background:correctionReason.trim()?T.accent:T.border,border:"none",fontSize:13,fontWeight:700,color: (correctionReason.trim()) ? T.accentInk : T.sub,cursor:correctionReason.trim()?"pointer":"not-allowed",fontFamily:"Inter,sans-serif" }}>Correct — mark as actually unpaid</button>
             </>
           ) : classification==="protected" ? (
             <>
@@ -1038,7 +1038,7 @@ export const PeriodDetailModal = ({ period, schedule, onClose, T, sym, fmt, setF
             <>
               <input type="number" value={feeDraft} onChange={e=>setFeeDraft(e.target.value)} style={{ width:"100%",border:`1.5px solid ${T.accent}55`,background:T.bg,borderRadius:12,padding:"11px 14px",fontSize:22,fontWeight:700,color:T.text,fontFamily:FONT.mono,fontVariantNumeric:"tabular-nums",outline:"none",marginBottom:9 }}/>
               <div style={{ color:T.sub,fontSize:11,lineHeight:1.5,marginBottom:11 }}>Changes only this period. It does not touch any other period, and does not alter any payment already recorded — this is a future obligation, not history.</div>
-              <button onClick={saveFee} style={{ width:"100%",padding:12,borderRadius:12,background:T.accent,border:"none",fontSize:13,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Save fee for {period.label}</button>
+              <button onClick={saveFee} style={{ width:"100%",padding:12,borderRadius:12,background:T.accent,border:"none",fontSize:13,fontWeight:700,color: T.accentInk,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Save fee for {period.label}</button>
             </>
           )}
         </div>
@@ -1161,7 +1161,7 @@ export const AdjustmentModal = ({ kind, feePeriods, setFeePeriods, targetPeriodI
       <span style={{ ...lbl,marginTop:10 }}>Reason</span>
       <input style={inp} placeholder="e.g. Sibling concession" value={reason} onChange={e=>setReason(e.target.value)}/>
       {error && <div style={{ color:T.warn,fontSize:11,marginTop:10 }}>{error}</div>}
-      <button onClick={confirm} style={{ width:"100%",padding:14,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Inter,sans-serif",marginTop:14 }}>{isDiscount?"Record discount":"Record write-off"}</button>
+      <button onClick={confirm} style={{ width:"100%",padding:14,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color: T.accentInk,cursor:"pointer",fontFamily:"Inter,sans-serif",marginTop:14 }}>{isDiscount?"Record discount":"Record write-off"}</button>
     </BottomSheet>
   );
 };
@@ -1198,7 +1198,7 @@ export const CreditNoteModal = ({ schedule, feePeriods, setFeePeriods, schoolCre
       <span style={{ ...lbl,marginTop:10 }}>Reason</span>
       <input style={inp} placeholder="e.g. School issued a refund credit" value={reason} onChange={e=>setReason(e.target.value)}/>
       {error && <div style={{ color:T.warn,fontSize:11,marginTop:10 }}>{error}</div>}
-      <button onClick={create} style={{ width:"100%",padding:14,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"Inter,sans-serif",marginTop:14 }}>Create Credit Note</button>
+      <button onClick={create} style={{ width:"100%",padding:14,borderRadius:12,background:T.accent,border:"none",fontSize:13.5,fontWeight:700,color: T.accentInk,cursor:"pointer",fontFamily:"Inter,sans-serif",marginTop:14 }}>Create Credit Note</button>
     </BottomSheet>
   );
 };

@@ -100,7 +100,7 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
             {error && <div style={{ color: T.danger, fontSize: 12, fontWeight: 700, marginTop: 10, textAlign: "center" }}>{error}</div>}
             <button
               onClick={handleSendCode} disabled={busy}
-              style={{ width: "100%", boxSizing: "border-box", minHeight: 52, marginTop: 16, padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Inter,sans-serif" }}
+              style={{ width: "100%", boxSizing: "border-box", minHeight: 52, marginTop: 16, padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: T.accentInk, fontSize: 15, fontWeight: 800, fontFamily: "Inter,sans-serif" }}
             >
               {busy ? "Sending..." : copy.button}
             </button>
@@ -119,7 +119,7 @@ export default function AuthGateScreen({ mode = "signin", onBack, T }) {
             {error && <div style={{ color: T.danger, fontSize: 12, fontWeight: 700, marginTop: 10, textAlign: "center" }}>{error}</div>}
             <button
               onClick={handleVerifyCode} disabled={busy}
-              style={{ width: "100%", boxSizing: "border-box", minHeight: 52, marginTop: 16, padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Inter,sans-serif" }}
+              style={{ width: "100%", boxSizing: "border-box", minHeight: 52, marginTop: 16, padding: 14, borderRadius: 14, border: "none", cursor: busy ? "wait" : "pointer", background: T.accent, color: T.accentInk, fontSize: 15, fontWeight: 800, fontFamily: "Inter,sans-serif" }}
             >
               {busy ? "Verifying..." : "Verify & continue"}
             </button>

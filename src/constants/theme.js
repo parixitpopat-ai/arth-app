@@ -10,7 +10,7 @@
 
 export const FONT = {
   sans: "Inter, system-ui, sans-serif",
-  mono: "'IBM Plex Mono', ui-monospace, monospace",
+  mono: "Inter, system-ui, sans-serif",   // one typeface throughout (Inter; Manrope only on big money numbers): there is no separate monospace any more
 };
 
 export const DARK = {

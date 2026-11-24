@@ -82,7 +82,7 @@ export default function PersonStatementSheet({ T, sym = "₹", fmt = n => Number
           {message && <pre data-testid="stmt-message" style={{ background: T.input, border: `1px solid ${T.border}`, borderRadius: 10, padding: 10, color: T.text, fontSize: 12, whiteSpace: "pre-wrap", margin: "4px 0 10px", fontFamily: "inherit" }}>{message}</pre>}
           {!upiHandle && <div style={{ ...sub, marginBottom: 8 }}>No UPI handle is saved, so the message has no "Pay to" line.</div>}
           {message && <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" data-testid="stmt-share" onClick={share} style={{ flex: 1, background: T.accent, color: "#fff", border: "none", borderRadius: 12, padding: "12px", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Inter,sans-serif" }}>Share</button>
+            <button type="button" data-testid="stmt-share" onClick={share} style={{ flex: 1, background: T.accent, color: T.accentInk, border: "none", borderRadius: 12, padding: "12px", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Inter,sans-serif" }}>Share</button>
             <button type="button" data-testid="stmt-copy" onClick={copy} style={{ background: "none", color: T.text, border: `1px solid ${T.border}`, borderRadius: 12, padding: "12px 16px", fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Inter,sans-serif" }}>Copy</button>
           </div>}
           {status && <div data-testid="stmt-status" style={{ ...sub, marginTop: 8 }}>{status}</div>}

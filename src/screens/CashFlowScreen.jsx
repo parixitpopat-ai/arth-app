@@ -320,7 +320,7 @@ export default function CashFlowScreen({
           <div style={{ color: T.sub, fontSize: 13, margin: "10px 2px 0" }}>{state === "future" ? "Nothing has happened yet" : state === "empty" ? "No transactions this month" : sentenceFor(sym, fmt, cf.leftOver)}</div>
           <div style={{ marginTop: 14 }}>{Chart}</div>
           {MonthList}
-          {state !== "future" && <button type="button" data-testid="cf-see-month" onClick={() => setView("month")} style={{ width: "100%", minHeight: 48, marginTop: 14, borderRadius: 12, border: "none", background: T.accent, color: "#fff", fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>See {monthName(monthKey)}</button>}
+          {state !== "future" && <button type="button" data-testid="cf-see-month" onClick={() => setView("month")} style={{ width: "100%", minHeight: 48, marginTop: 14, borderRadius: 12, border: "none", background: T.accent, color: T.accentInk, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>See {monthName(monthKey)}</button>}
           {state === "future" && <Empty title={`Nothing has happened in ${monthName(monthKey)} yet`} body="Only recorded transactions count here. Upcoming bills and renewals are in Payments." />}
         </>}
       </>

@@ -17,7 +17,7 @@ export default function ReceiptPhotoReview({ T, sym = "₹", card, label, onUse 
   const [printed, setPrinted] = useState(null);
   const [unreadable, setUnreadable] = useState([]);                      // amounts of item-area lines that could not be read (never their text)
   const input = { width: "100%", boxSizing: "border-box", padding: 8, minHeight: 40, borderRadius: 10, border: `1px solid ${T.border}`, background: T.card, color: T.text, fontSize: 13 };
-  const btn = (primary, disabled) => ({ minHeight: 44, padding: "10px 14px", borderRadius: 12, border: primary ? "0" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? "#fff" : T.text, fontWeight: 800, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1 });
+  const btn = (primary, disabled) => ({ minHeight: 44, padding: "10px 14px", borderRadius: 12, border: primary ? "0" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? T.accentInk : T.text, fontWeight: 800, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1 });
 
   const numeric = rows.map(r => ({ label: r.label, qty: Number(r.qty) > 0 ? Number(r.qty) : 0, ratePaise: toPaise(r.rate), valuePaise: toPaise(r.value) }));
   const paidPaise = paid.trim() === "" ? null : toPaise(paid);
@@ -48,7 +48,7 @@ export default function ReceiptPhotoReview({ T, sym = "₹", card, label, onUse 
     close();
   };
   const eqRow = (id, text, e, detail) => (
-    <div data-testid={id} data-status={e.status} style={{ fontSize: 12, color: e.status === "fails" ? "#f0a500" : T.text, padding: "3px 0" }}>
+    <div data-testid={id} data-status={e.status} style={{ fontSize: 12, color: e.status === "fails" ? T.warn : T.text, padding: "3px 0" }}>
       {e.status === "holds" ? "✔ " : e.status === "fails" ? "⚠ " : "… "}{text}{e.status === "fails" && detail ? ` — ${detail}` : ""}
     </div>
   );
@@ -71,7 +71,7 @@ export default function ReceiptPhotoReview({ T, sym = "₹", card, label, onUse 
       )}
       {on && phase.name === "reading" && <div data-testid="receipt-reading" style={{ color: T.sub, fontSize: 13, marginTop: 10 }}>Reading the photo on this phone…</div>}
       {on && phase.name === "declined" && (
-        <div data-testid="receipt-declined" style={{ marginTop: 10, fontSize: 12, color: "#f0a500" }}>{phase.message}
+        <div data-testid="receipt-declined" style={{ marginTop: 10, fontSize: 12, color: T.warn }}>{phase.message}
           <div style={{ marginTop: 8 }}><button data-testid="receipt-try-again" onClick={close} style={btn(false)}>Try another photo</button></div>
         </div>
       )}
@@ -82,7 +82,7 @@ export default function ReceiptPhotoReview({ T, sym = "₹", card, label, onUse 
           <input data-testid="receipt-shop" value={shop} onChange={e => setShop(e.target.value)} style={{ ...input, marginBottom: 6 }} />
           <div style={{ color: T.sub, fontSize: 11, fontWeight: 700 }}>Bill date</div>
           <input data-testid="receipt-date" type="date" value={date} onChange={e => setDate(e.target.value)} style={{ ...input, marginBottom: 6 }} />
-          {!validDate(date) && <div style={{ color: "#f0a500", fontSize: 11, marginBottom: 6 }}>The date was not read. Choose the bill date.</div>}
+          {!validDate(date) && <div style={{ color: T.warn, fontSize: 11, marginBottom: 6 }}>The date was not read. Choose the bill date.</div>}
           <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Items (name · qty · rate · value)</div>
           {rows.map((r, i) => (
             <div key={r.id} data-testid="receipt-row" data-ok={String(c.rows[i] ? c.rows[i].ok : false)} style={{ borderTop: `1px solid ${T.border}`, padding: "6px 0" }}>
@@ -93,18 +93,18 @@ export default function ReceiptPhotoReview({ T, sym = "₹", card, label, onUse 
                 <input data-testid={`receipt-value-${i}`} inputMode="decimal" value={r.value} onChange={e => setRow(r.id, "value", e.target.value)} style={input} aria-label="Value" />
                 <button data-testid={`receipt-remove-${i}`} aria-label="Remove this row" onClick={() => setRows(prev => prev.filter(x => x.id !== r.id))} style={{ ...btn(false), minHeight: 40, padding: "4px 10px" }}>✕</button>
               </div>
-              {c.rows[i] && !c.rows[i].ok && <div data-testid={`receipt-rowwarn-${i}`} style={{ color: "#f0a500", fontSize: 11, marginTop: 2 }}>⚠ {c.rows[i].expectedPaise != null ? `qty × rate is ${inr(c.rows[i].expectedPaise, sym)}, the value is ${inr(numeric[i].valuePaise || 0, sym)}` : "Check this row's quantity, rate and value"}</div>}
+              {c.rows[i] && !c.rows[i].ok && <div data-testid={`receipt-rowwarn-${i}`} style={{ color: T.warn, fontSize: 11, marginTop: 2 }}>⚠ {c.rows[i].expectedPaise != null ? `qty × rate is ${inr(c.rows[i].expectedPaise, sym)}, the value is ${inr(numeric[i].valuePaise || 0, sym)}` : "Check this row's quantity, rate and value"}</div>}
             </div>
           ))}
           <button data-testid="receipt-add-row" onClick={addRow} style={{ ...btn(false), marginTop: 8, width: "100%" }}>+ Add a row</button>
-          {unreadable.length > 0 && <div data-testid="receipt-unreadable" style={{ color: "#f0a500", fontSize: 12, marginTop: 8 }}>⚠ {unreadable.length === 1 ? "One line looks like an item but could not be read" : `${unreadable.length} lines look like items but could not be read`} (amounts seen: {unreadable.map(v => inr(v, sym)).join(", ")}). Add {unreadable.length === 1 ? "it" : "them"} with “Add a row”.</div>}
+          {unreadable.length > 0 && <div data-testid="receipt-unreadable" style={{ color: T.warn, fontSize: 12, marginTop: 8 }}>⚠ {unreadable.length === 1 ? "One line looks like an item but could not be read" : `${unreadable.length} lines look like items but could not be read`} (amounts seen: {unreadable.map(v => inr(v, sym)).join(", ")}). Add {unreadable.length === 1 ? "it" : "them"} with “Add a row”.</div>}
           <div style={{ color: T.sub, fontSize: 11, fontWeight: 700, marginTop: 8 }}>Amount paid</div>
           <input data-testid="receipt-paid" inputMode="decimal" value={paid} onChange={e => setPaid(e.target.value)} style={input} placeholder="0.00" />
-          {phase.conflict && <div data-testid="receipt-conflict" style={{ color: "#f0a500", fontSize: 11 }}>The receipt shows more than one payment amount. Type the amount you paid.</div>}
+          {phase.conflict && <div data-testid="receipt-conflict" style={{ color: T.warn, fontSize: 11 }}>The receipt shows more than one payment amount. Type the amount you paid.</div>}
           {eqRow("receipt-e2", `Items add up to ${inr(c.sumPaise, sym)} = amount paid`, c.e2, c.e2.expectedPaise != null ? `you paid ${inr(c.e2.expectedPaise, sym)}, the items come to ${inr(c.e2.actualPaise, sym)}` : "enter the amount paid")}
           {printed && printed.totalPaise != null && eqRow("receipt-e1", `Items add up to the printed total ${inr(printed.totalPaise, sym)}`, c.e1, `printed ${inr(c.e1.expectedPaise, sym)}, the items come to ${inr(c.e1.actualPaise, sym)}`)}
           {printed && printed.qty != null && eqRow("receipt-qty", `Quantities add up to the printed ${printed.qty}`, c.qty, `printed ${c.qty.expected}, the rows come to ${c.qty.actual}`)}
-          {c.paidVsPrinted.status === "differs" && <div data-testid="receipt-paid-differs" style={{ color: "#f0a500", fontSize: 12 }}>⚠ The amount paid ({inr(c.paidVsPrinted.paidPaise, sym)}) is not the printed total ({inr(c.paidVsPrinted.printedPaise, sym)}). Check it against the receipt.</div>}
+          {c.paidVsPrinted.status === "differs" && <div data-testid="receipt-paid-differs" style={{ color: T.warn, fontSize: 12 }}>⚠ The amount paid ({inr(c.paidVsPrinted.paidPaise, sym)}) is not the printed total ({inr(c.paidVsPrinted.printedPaise, sym)}). Check it against the receipt.</div>}
           {suggestion && (
             <div data-testid="receipt-suggestion" style={{ fontSize: 12, color: T.sub, padding: "4px 0" }}>
               Did you mean row {suggestion.index + 1} to be {inr(suggestion.valuePaise, sym)}? The items would then add up.

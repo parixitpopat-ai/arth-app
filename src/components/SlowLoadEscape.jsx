@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 export default function SlowLoadEscape({ T, label, onOpenLocal, afterMs = 12000 }) {
   const [slow, setSlow] = useState(false);
   useEffect(() => { const t = setTimeout(() => setSlow(true), afterMs); return () => clearTimeout(t); }, [afterMs]);
-  const btn = primary => ({ width: "100%", minHeight: 48, borderRadius: 12, border: primary ? "none" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? "#fff" : T.text, fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Inter,sans-serif", marginTop: 10 });
+  const btn = primary => ({ width: "100%", minHeight: 48, borderRadius: 12, border: primary ? "none" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? T.accentInk : T.text, fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "Inter,sans-serif", marginTop: 10 });
   return (
     <div data-testid="slow-load" style={{ background: T.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: T.sub, fontSize: 13, fontFamily: "Inter,sans-serif", padding: 24 }}>
       <div style={{ maxWidth: 340, width: "100%", textAlign: "center" }}>

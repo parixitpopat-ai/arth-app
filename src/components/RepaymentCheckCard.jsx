@@ -11,7 +11,7 @@ export default function RepaymentCheckCard({ T, sym = "₹", fmt = n => Number(n
   const [pick, setPick] = useState({});              // unlinked repayment key -> chosen item key
   const money = n => `${sym}${fmt(Math.abs(n))}`;
   const sub = { color: T.sub, fontSize: 11, lineHeight: 1.4 };
-  const btn = (primary) => ({ border: primary ? "none" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? "#fff" : T.text, borderRadius: 10, padding: "8px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "Inter,sans-serif" });
+  const btn = (primary) => ({ border: primary ? "none" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? T.accentInk : T.text, borderRadius: 10, padding: "8px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "Inter,sans-serif" });
   const mine = lastFix && String(lastFix.personId) === String(person.id) ? lastFix : null;
   const total = found.unreduced.length + found.unlinked.length;
   if (!total && !mine) return null;

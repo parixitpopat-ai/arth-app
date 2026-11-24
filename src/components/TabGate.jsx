@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import TabPausedScreen from "./TabPausedScreen";
 import { createTabOwnership, watchForeignWrites } from "../sync/tabOwnership";
+import { DARK } from "../constants/theme";
 
 // SYNC-SAFETY-004: only ONE tab of this browser profile runs Arth at a time (two tabs share storage but not memory; a stale tab would
 // save over the other's data and then sync it). Other tabs mount nothing, so they cannot save or sync; the person can take over explicitly.
@@ -22,6 +23,6 @@ export default function TabGate({ children }) {
     return watchForeignWrites(window, window.localStorage, ()=>setStale(true));   // another tab changed the synced data under this one
   }, [own]);
   if(own==="owner" && !stale) return children;
-  if(own==="waiting" && !showWaiting) return <div style={{ minHeight:"100vh",background:"#0e1411" }}/>;
+  if(own==="waiting" && !showWaiting) return <div style={{ minHeight:"100vh",background:DARK.bg }}/>;
   return <TabPausedScreen reason={stale?"stale":"other"} onTakeOver={()=>{ setStale(false); ctlRef.current?.takeOver(); }} onReload={()=>window.location.reload()}/>;
 }

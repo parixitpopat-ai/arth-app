@@ -68,7 +68,7 @@ export const AddGoalModal = ({ existing, onClose, T, inp, lbl, accounts, setGoal
               <input style={inp} type="number" placeholder="0" value={currentAmount} onChange={e=>setCurrentAmount(e.target.value)}/>
             </div>
           )}
-          <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Goal"}</button>
+          <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color: (canSave) ? T.accentInk : T.sub,fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Create Goal"}</button>
         </div>
       </div>
     </div>
@@ -140,7 +140,7 @@ export const GoalsListModal = ({ onClose, T, sym, fmt, formatShortDate, goals, s
             ))}
           </div>
         )}
-        <button onClick={()=>{ setEditingGoal(null); setShowAddGoal(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>+ New Goal</button>
+        <button onClick={()=>{ setEditingGoal(null); setShowAddGoal(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color: T.accentInk,fontFamily:"Inter,sans-serif" }}>+ New Goal</button>
       </div>
     </div>
   );

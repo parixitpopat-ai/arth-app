@@ -143,7 +143,7 @@ export function MonthRangeSheet({ T, initialStart, initialEnd, isPaid, summarize
       <button
         type="button" disabled={!hasRange} data-testid="month-sheet-apply"
         onClick={() => { onApply(start, end); onClose(); }}
-        style={{ width: "100%", minHeight: 48, borderRadius: 14, border: "none", cursor: hasRange ? "pointer" : "not-allowed", background: hasRange ? T.accent : T.border, color: "#fff", fontSize: 14, fontWeight: 800 }}
+        style={{ width: "100%", minHeight: 48, borderRadius: 14, border: "none", cursor: hasRange ? "pointer" : "not-allowed", background: hasRange ? T.accent : T.border, color: hasRange ? T.accentInk : T.sub, fontSize: 14, fontWeight: 800 }}
       >{hasRange ? `Use ${MONTHS[Number(start.slice(5)) - 1]} – ${MONTHS[Number(end.slice(5)) - 1]}` : "Select a range"}</button>
     </BottomSheet>
   );

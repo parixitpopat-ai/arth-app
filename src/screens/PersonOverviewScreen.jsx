@@ -45,7 +45,7 @@
 // onViewAllTransactions, onViewBudget, onEditPerson, onOpenConnection:
 //   navigation callbacks into EXISTING screens/modals
 
-const card = { background: "var(--card-bg, #12151c)", borderRadius: 14, padding: 14, marginBottom: 12 };
+const card = { borderRadius: 14, padding: 14, marginBottom: 12 };   // the background comes from the theme where it is used (it used to be a fixed dark navy)
 
 export function PersonOverviewScreen({
   person,
@@ -81,7 +81,7 @@ export function PersonOverviewScreen({
 
       {/* Contact info — rendered only where present, never as empty fields (RPP-002 §1) */}
       {(person.mobile || person.email || person.dob || person.anniversary) && (
-        <div style={{ ...card }}>
+        <div style={{ ...card, background: T.card }}>
           {person.mobile && <div style={{ color: T.sub, fontSize: 12, marginBottom: 4 }}>📱 {person.mobile}</div>}
           {person.email && <div style={{ color: T.sub, fontSize: 12, marginBottom: 4 }}>✉️ {person.email}</div>}
           {person.dob && <div style={{ color: T.sub, fontSize: 12, marginBottom: 4 }}>🎂 {person.dob}</div>}
@@ -91,7 +91,7 @@ export function PersonOverviewScreen({
 
       {/* Financial position — reuses the existing settlements[pid] shape verbatim */}
       {!person.isMe && (balance?.owesMe > 0 || balance?.iOwe > 0) && (
-        <div style={{ ...card }}>
+        <div style={{ ...card, background: T.card }}>
           <div style={{ color: T.text, fontSize: 13, fontWeight: 800, marginBottom: 8 }}>FINANCIAL POSITION</div>
           {balance.owesMe > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
@@ -117,7 +117,7 @@ export function PersonOverviewScreen({
           here because nothing upstream of this component ever builds one
           from a transaction. */}
       {activeConnections.length > 0 && (
-        <div style={{ ...card }}>
+        <div style={{ ...card, background: T.card }}>
           <div style={{ color: T.text, fontSize: 13, fontWeight: 800, marginBottom: 8 }}>ACTIVE</div>
           {activeConnections.map(conn => (
             <div
@@ -136,7 +136,7 @@ export function PersonOverviewScreen({
 
       {/* Spending this month — summary only, full detail via View Budget */}
       {spendingSummary.total > 0 && (
-        <div style={{ ...card }}>
+        <div style={{ ...card, background: T.card }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <div style={{ color: T.text, fontSize: 13, fontWeight: 800 }}>SPENDING THIS MONTH</div>
             <div style={{ color: T.text, fontSize: 15, fontWeight: 900 }}>{sym}{fmt(spendingSummary.total)}</div>
@@ -161,7 +161,7 @@ export function PersonOverviewScreen({
       {/* Recent activity — summary only; the caller already computed this
           via the EXISTING person-filtered transaction mechanism */}
       {recentActivity.length > 0 && (
-        <div style={{ ...card }}>
+        <div style={{ ...card, background: T.card }}>
           <div style={{ color: T.text, fontSize: 13, fontWeight: 800, marginBottom: 8 }}>RECENT ACTIVITY</div>
           {recentActivity.slice(0, 5).map(t => (
             <div key={t.id} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0" }}>

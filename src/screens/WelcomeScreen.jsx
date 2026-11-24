@@ -18,14 +18,14 @@ export default function WelcomeScreen({ onChoose, T }) {
         <button
           data-testid="welcome-signin"
           onClick={() => onChoose("signin")}
-          style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", cursor: "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Inter,sans-serif", marginBottom: 12 }}
+          style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", cursor: "pointer", background: T.accent, color: T.accentInk, fontSize: 15, fontWeight: 800, fontFamily: "Inter,sans-serif", marginBottom: 12 }}
         >
           Sign In
         </button>
         <button
           data-testid="welcome-signup"
           onClick={() => onChoose("signup")}
-          style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", cursor: "pointer", background: T.accent, color: "#fff", fontSize: 15, fontWeight: 800, fontFamily: "Inter,sans-serif" }}
+          style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", cursor: "pointer", background: T.accent, color: T.accentInk, fontSize: 15, fontWeight: 800, fontFamily: "Inter,sans-serif" }}
         >
           Sign Up
         </button>

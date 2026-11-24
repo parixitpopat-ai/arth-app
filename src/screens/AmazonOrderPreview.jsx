@@ -8,7 +8,7 @@ const inr = (paise, sym) => `${sym}${(paise / 100).toLocaleString("en-IN", { min
 
 export default function AmazonOrderPreview({ orders, counts, outcomes, panel = null, T, sym = "₹", card, label, onAddAnother, onClear }) {
   const sum = { cursor: "pointer", minHeight: 44, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, listStyle: "none", color: T.text, fontSize: 13, fontWeight: 700 };
-  const stat = (id, text, n, warn) => <div key={id} data-testid={`count-${id}`} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 12, color: warn && n > 0 ? "#f0a500" : T.text }}><span>{text}</span><b>{n}</b></div>;
+  const stat = (id, text, n, warn) => <div key={id} data-testid={`count-${id}`} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 12, color: warn && n > 0 ? T.warn : T.text }}><span>{text}</span><b>{n}</b></div>;
   const flat = outcomes.flatMap(o => (o.pages ? o.pages.map(p => ({ ...p, index: o.index })) : [o]));
   return (
     <div data-testid="amazon-preview">
@@ -56,25 +56,25 @@ export default function AmazonOrderPreview({ orders, counts, outcomes, panel = n
           <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0 2px", fontSize: 12, color: T.sub, borderTop: `1px solid ${T.border}` }}><span>Items</span><span>{inr(o.itemsPaise, sym)}</span></div>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: T.sub }}><span>Fees on invoices</span><span>{inr(o.chargesPaise, sym)}</span></div>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 14, color: T.text, fontWeight: 800 }} data-testid="amazon-invoiced-total"><span>Invoiced total</span><span>{inr(o.invoicedPaise, sym)}</span></div>
-          {o.flaggedInvoiceNumbers.length > 0 && <div data-testid="amazon-probable" style={{ color: "#f0a500", fontSize: 12, marginBottom: 6 }}>Probable duplicate: invoices {o.flaggedInvoiceNumbers.join(" and ")} look alike (same seller, date, amount and item). Both are kept and counted until you decide.</div>}
+          {o.flaggedInvoiceNumbers.length > 0 && <div data-testid="amazon-probable" style={{ color: T.warn, fontSize: 12, marginBottom: 6 }}>Probable duplicate: invoices {o.flaggedInvoiceNumbers.join(" and ")} look alike (same seller, date, amount and item). Both are kept and counted until you decide.</div>}
           {o.summaryView && o.summaryView.gate.reconciliation && (
             <div data-testid="summary-reconciliation" data-mismatch={String(o.summaryView.gate.reconciliation.hasInvoiceMismatch)} style={{ borderTop: `1px solid ${T.border}`, padding: "8px 0", fontSize: 12, color: T.text }}>
               <b>Summary against the invoices</b>
               {o.summaryView.gate.reconciliation.components.map(c => (
-                <div key={c.name} data-testid="summary-component" data-state={c.state} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "3px 0", color: c.state === "matches" || c.state === "summary-only" ? T.text : "#f0a500" }}>
+                <div key={c.name} data-testid="summary-component" data-state={c.state} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "3px 0", color: c.state === "matches" || c.state === "summary-only" ? T.text : T.warn }}>
                   <span>{c.name}</span>
                   <span>{c.state === "matches" ? `matches · ${inr(c.summaryPaise, sym)}` : c.state === "summary-only" ? `${inr(c.summaryPaise, sym)} (only on the summary)` : c.state === "missing-coverage" ? `invoices fall short by ${inr(-c.differencePaise, sym)}` : `invoices exceed the summary by ${inr(c.differencePaise, sym)}`}</span>
                 </div>))}
               <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, paddingTop: 4 }} data-testid="summary-order-total"><span>Order total (Grand Total)</span><span>{inr(o.summaryView.gate.reconciliation.orderTotalPaise, sym)}</span></div>
             </div>)}
           {o.summaryView && (
-            <div data-testid="order-gate" style={{ color: "#f0a500", fontSize: 12, marginBottom: 6 }}>
+            <div data-testid="order-gate" style={{ color: T.warn, fontSize: 12, marginBottom: 6 }}>
               Confirmation is blocked: {o.summaryView.gate.reasons.filter(r => r !== "amazon-confirm-not-available").map(r => GATE_MESSAGE[r]).join(" ") || GATE_MESSAGE["amazon-confirm-not-available"]}
             </div>)}
           <div style={{ background: T.accentSoft, borderRadius: 10, padding: "8px 10px", color: T.text, fontSize: 12 }} data-testid="amazon-missing">
             <b>This is not necessarily what you paid.</b> It does not include: {o.notOnTheseInvoices.join("; ")}. Add the other invoices from this order; the amount you actually paid comes from your own entry.
           </div>
-          {o.status !== "supported" && <div style={{ color: "#f0a500", fontSize: 12, marginTop: 8 }} data-testid="amazon-review">Check this before relying on it: {o.invoices.flatMap(i => i.findings).map(f => f.message).join(" ")}</div>}
+          {o.status !== "supported" && <div style={{ color: T.warn, fontSize: 12, marginTop: 8 }} data-testid="amazon-review">Check this before relying on it: {o.invoices.flatMap(i => i.findings).map(f => f.message).join(" ")}</div>}
         </div>
       ))}
       <div style={{ ...card, color: T.sub, fontSize: 12 }} data-testid="amazon-confirm-note">Adding an Amazon order as an expense is not available yet. It waits for the purchase-entry change (amount paid first, items underneath), so a discount, shipping or EMI is never guessed. Until then this is a preview only; nothing is saved.</div>

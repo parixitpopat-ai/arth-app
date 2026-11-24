@@ -15,7 +15,7 @@ export default function OcrSummaryReview({ T, sym = "₹", card, label, orders, 
   const [orderNo, setOrderNo] = useState("");
   const [extra, setExtra] = useState({ unrecognised: [], conflicts: [] });
   const input = { width: "100%", boxSizing: "border-box", padding: 10, minHeight: 44, borderRadius: 10, border: `1px solid ${T.border}`, background: T.card, color: T.text, fontSize: 14 };
-  const btn = (primary, disabled) => ({ minHeight: 44, padding: "10px 14px", borderRadius: 12, border: primary ? "0" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? "#fff" : T.text, fontWeight: 800, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1 });
+  const btn = (primary, disabled) => ({ minHeight: 44, padding: "10px 14px", borderRadius: 12, border: primary ? "0" : `1px solid ${T.border}`, background: primary ? T.accent : "none", color: primary ? T.accentInk : T.text, fontWeight: 800, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1 });
 
   const figures = Object.fromEntries(FIGURE_KEYS.map(k => [k, String(vals[k] ?? "").trim() === "" ? null : toPaise(vals[k])]));
   const bad = k => String(vals[k] ?? "").trim() !== "" && figures[k] == null;
@@ -45,7 +45,7 @@ export default function OcrSummaryReview({ T, sym = "₹", card, label, orders, 
     onAdd(a.summary); close();
   };
   const eqRow = (id, text, e) => (
-    <div data-testid={id} data-status={e.status} style={{ fontSize: 12, color: e.status === "fails" ? "#f0a500" : T.text, padding: "3px 0" }}>
+    <div data-testid={id} data-status={e.status} style={{ fontSize: 12, color: e.status === "fails" ? T.warn : T.text, padding: "3px 0" }}>
       {e.status === "holds" ? "✔ " : e.status === "fails" ? "⚠ " : "… "}{text}{e.status === "fails" ? ` — it should be ${inr(e.expectedPaise, sym)}, you have ${inr(e.actualPaise, sym)}` : ""}
     </div>
   );
@@ -70,7 +70,7 @@ export default function OcrSummaryReview({ T, sym = "₹", card, label, orders, 
       )}
       {on && phase.name === "reading" && <div data-testid="ocr-reading" style={{ color: T.sub, fontSize: 13, marginTop: 10 }}>Reading the picture on this phone…</div>}
       {on && phase.name === "declined" && (
-        <div data-testid="ocr-declined" style={{ marginTop: 10, fontSize: 12, color: "#f0a500" }}>{phase.message}
+        <div data-testid="ocr-declined" style={{ marginTop: 10, fontSize: 12, color: T.warn }}>{phase.message}
           <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button data-testid="ocr-try-again" onClick={close} style={btn(false)}>Try another picture</button>
             <button data-testid="ocr-manual" onClick={() => { close(); onManual && onManual(); }} style={btn(false)}>Enter the figures myself</button>
@@ -84,7 +84,7 @@ export default function OcrSummaryReview({ T, sym = "₹", card, label, orders, 
             <div key={k} style={{ marginBottom: 8 }}>
               <div style={{ color: T.sub, fontSize: 11, fontWeight: 700 }}>{FIGURE_LABEL[k]}{k === "discount" ? " (subtracted)" : ""} <span data-testid={`ocr-tick-${k}`}>{tick(k)}</span></div>
               <input data-testid={`ocr-${k}`} inputMode="decimal" autoComplete="off" value={vals[k] ?? ""} onChange={e => setVals({ ...vals, [k]: e.target.value })} style={input} placeholder="not read" />
-              {bad(k) && <div style={{ color: "#f0a500", fontSize: 11 }}>Enter a plain amount like 329.00</div>}
+              {bad(k) && <div style={{ color: T.warn, fontSize: 11 }}>Enter a plain amount like 329.00</div>}
             </div>
           ))}
           {eqRow("ocr-e1", "Subtotal + shipping + fee = Total", eqs.e1)}
@@ -95,8 +95,8 @@ export default function OcrSummaryReview({ T, sym = "₹", card, label, orders, 
               <button data-testid="ocr-apply-suggestion" onClick={() => setVals({ ...vals, [suggestion.figure]: asText(suggestion.valuePaise) })} style={{ ...btn(false), marginLeft: 8, minHeight: 36, padding: "4px 10px" }}>Use it</button>
             </div>
           )}
-          {extra.unrecognised.length > 0 && <div data-testid="ocr-unrecognised" style={{ fontSize: 12, color: "#f0a500", padding: "4px 0" }}>The picture has a row Arth does not recognise ({extra.unrecognised.map(u => inr(u.amountPaise, sym)).join(", ")}). Arth cannot accept this reading. Enter the figures yourself instead.</div>}
-          {extra.conflicts.length > 0 && <div data-testid="ocr-conflicts" style={{ fontSize: 12, color: "#f0a500", padding: "4px 0" }}>The picture shows two different amounts for the same row. Arth cannot accept this reading. Enter the figures yourself instead.</div>}
+          {extra.unrecognised.length > 0 && <div data-testid="ocr-unrecognised" style={{ fontSize: 12, color: T.warn, padding: "4px 0" }}>The picture has a row Arth does not recognise ({extra.unrecognised.map(u => inr(u.amountPaise, sym)).join(", ")}). Arth cannot accept this reading. Enter the figures yourself instead.</div>}
+          {extra.conflicts.length > 0 && <div data-testid="ocr-conflicts" style={{ fontSize: 12, color: T.warn, padding: "4px 0" }}>The picture shows two different amounts for the same row. Arth cannot accept this reading. Enter the figures yourself instead.</div>}
           <div style={{ marginTop: 8 }}>
             <div style={{ color: T.sub, fontSize: 11, fontWeight: 700 }}>Order number (read from the picture; check it)</div>
             <input data-testid="ocr-ordernumber" value={orderNo} onChange={e => setOrderNo(e.target.value)} style={input} placeholder="405-1234567-1234567" />

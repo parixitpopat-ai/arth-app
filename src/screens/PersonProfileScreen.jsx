@@ -409,7 +409,7 @@ export function PersonProfileScreen({
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ fontSize: 40 }}>{person.emoji || "👤"}</div>
           <div>
-            <div style={{ color: T.text, fontSize: 20, fontWeight: 900 }}>{person.name} {person.favorite && <span style={{ color: "#f0a500" }}>★</span>}</div>
+            <div style={{ color: T.text, fontSize: 20, fontWeight: 900 }}>{person.name} {person.favorite && <span style={{ color: T.warn }}>★</span>}</div>
             <div style={{ color: T.sub, fontSize: 12 }}>{[uiTypeLabel || person.personType, person.relation].filter(Boolean).join(" · ")}</div>
           </div>
         </div>

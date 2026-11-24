@@ -283,7 +283,7 @@ export default function VehicleProfileScreen({
                   <div style={{ height: 80, display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8, alignItems: "end" }}>
                     {fs.byMonth.map((m, i) => {
                       const max = Math.max(...fs.byMonth.map(x => x.amt), 1);
-                      return <span key={m.key} style={{ height: `${Math.max(4, (m.amt / max) * 100)}%`, background: i === fs.byMonth.length - 1 ? "#f97316" : T.borderStrong, borderRadius: "3px 3px 0 0" }} />;
+                      return <span key={m.key} style={{ height: `${Math.max(4, (m.amt / max) * 100)}%`, background: i === fs.byMonth.length - 1 ? T.warn : T.borderStrong, borderRadius: "3px 3px 0 0" }} />;
                     })}
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8, color: T.sub, fontSize: 11, textAlign: "center" }}>

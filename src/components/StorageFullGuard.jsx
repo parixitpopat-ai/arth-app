@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { hasRoom, storageReport, buildAllBackupsExport, freeBackupSpace, SAFETY_KEY, AUTO_KEY } from "../sync/storageSpace";
+import { DARK, LIGHT } from "../constants/theme";
 
 // Shown over everything (login, loading, the app) when this browser's storage for Arth is full. Without it a full storage looks like
 // "can't reach your account", and new entries can silently fail to save. It frees BACKUP COPIES only, after they are saved to a file.
@@ -56,7 +57,7 @@ export default function StorageFullGuard({ storage = typeof window !== "undefine
   if (!full && low && !lowHidden) {
     let darkLow = false; try { darkLow = JSON.parse(storage.getItem("arth_dark") || "false") === true; } catch { /* light */ }
     return (
-      <div data-testid="storage-low-strip" role="status" style={{ position: "fixed", left: 12, right: 12, bottom: 84, zIndex: 99000, background: darkLow ? "#2a2410" : "#fff6dd", color: darkLow ? "#f5e6b3" : "#4a3b00", border: `1px solid ${darkLow ? "#5c4d1c" : "#e6cf86"}`, borderRadius: 12, padding: "10px 12px", fontSize: 12, fontWeight: 700, display: "flex", gap: 10, alignItems: "center", fontFamily: "Inter, system-ui, sans-serif" }}>
+      <div data-testid="storage-low-strip" role="status" style={{ position: "fixed", left: 12, right: 12, bottom: 84, zIndex: 99000, background: darkLow ? DARK.card : LIGHT.card, color: darkLow ? DARK.text : LIGHT.text, border: `1px solid ${darkLow ? DARK.warn : LIGHT.warn}`, borderRadius: 12, padding: "10px 12px", fontSize: 12, fontWeight: 700, display: "flex", gap: 10, alignItems: "center", fontFamily: "Inter, system-ui, sans-serif" }}>
         <span style={{ flex: 1 }}>Storage for Arth on this phone is nearly full. Open Settings → Backup & Restore to shrink photos before saves start failing.</span>
         <button data-testid="storage-low-dismiss" onClick={() => setLowHidden(true)} style={{ background: "none", border: `1px solid currentColor`, color: "inherit", borderRadius: 8, padding: "4px 10px", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>OK</button>
       </div>
@@ -64,8 +65,8 @@ export default function StorageFullGuard({ storage = typeof window !== "undefine
   }
   if (!full || hidden) return null;
   let dark = false; try { dark = JSON.parse(storage.getItem("arth_dark") || "false") === true; } catch { /* default light */ }
-  const c = dark ? { bg: "#0b0d12", card: "#161a22", text: "#f2f4f8", sub: "#a8b0bf", line: "#2a3040", accent: "#22c55e", ink: "#04210f", danger: "#f87171" }
-    : { bg: "#f4f2ee", card: "#ffffff", text: "#1a1a2e", sub: "#5b5b73", line: "#dcd8d0", accent: "#16813f", ink: "#ffffff", danger: "#c62828" };
+  const c = dark ? { bg: DARK.bg, card: DARK.card, text: DARK.text, sub: DARK.sub, line: DARK.border, accent: DARK.accent, ink: DARK.accentInk, danger: DARK.danger }
+    : { bg: LIGHT.bg, card: LIGHT.card, text: LIGHT.text, sub: LIGHT.sub, line: LIGHT.border, accent: LIGHT.accent, ink: LIGHT.accentInk, danger: LIGHT.dangerText };
   const btn = (primary, disabled) => ({ width: "100%", minHeight: 48, borderRadius: 14, border: primary ? "none" : `1px solid ${c.line}`, background: primary ? c.accent : c.card, color: primary ? c.ink : c.text, fontWeight: 800, fontSize: 14, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 });
 
   const saveFiles = () => {

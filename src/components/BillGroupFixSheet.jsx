@@ -28,7 +28,7 @@ export default function BillGroupFixSheet({ T, sym = "₹", fmt = n => Number(n)
         </label>;
       })}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button type="button" data-testid="billfix-apply" disabled={!on.size} onClick={() => onApply([...on])} style={{ flex: 1, background: T.accent, color: "#000", border: "none", borderRadius: 12, padding: "11px 12px", fontWeight: 800, fontSize: 13, cursor: on.size ? "pointer" : "default", opacity: on.size ? 1 : 0.5 }}>Fix {on.size} selected</button>
+        <button type="button" data-testid="billfix-apply" disabled={!on.size} onClick={() => onApply([...on])} style={{ flex: 1, background: T.accent, color: T.accentInk, border: "none", borderRadius: 12, padding: "11px 12px", fontWeight: 800, fontSize: 13, cursor: on.size ? "pointer" : "default", opacity: on.size ? 1 : 0.5 }}>Fix {on.size} selected</button>
         <button type="button" data-testid="billfix-close" onClick={onClose} style={{ background: T.input, color: T.text, border: `1px solid ${T.border}`, borderRadius: 12, padding: "11px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Not now</button>
       </div>
     </div>

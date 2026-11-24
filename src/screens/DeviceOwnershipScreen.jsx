@@ -28,7 +28,7 @@ export default function DeviceOwnershipScreen({ T, ownership, accountEmail, loca
   const who = accountEmail || "this account";
   const counts = Object.entries(localSummary || {}).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k === "txns" ? (n === 1 ? "transaction" : "transactions") : k}`).join(", ") || plural(ownership.txnCount || 0, "transaction");
   const card = { background: T.card || T.input, border: `1px solid ${T.border}`, borderRadius: 16, padding: 16, marginBottom: 12 };
-  const btn = (primary, danger) => ({ width: "100%", padding: 14, borderRadius: 14, border: primary ? "none" : `1px solid ${danger ? T.danger : T.border}`, cursor: busy ? "wait" : "pointer", background: primary ? T.accent : "none", color: primary ? "#fff" : (danger ? T.danger : T.text), fontSize: 14, fontWeight: 800, fontFamily: "Inter,sans-serif", marginBottom: 6 });
+  const btn = (primary, danger) => ({ width: "100%", padding: 14, borderRadius: 14, border: primary ? "none" : `1px solid ${danger ? T.danger : T.border}`, cursor: busy ? "wait" : "pointer", background: primary ? T.accent : "none", color: primary ? T.accentInk : (danger ? T.danger : T.text), fontSize: 14, fontWeight: 800, fontFamily: "Inter,sans-serif", marginBottom: 6 });
   const freshSteps = [
     `First, a backup of this phone's data (${counts}) is saved and checked. If it can't be checked, nothing is changed.`,
     `Then this phone shows only ${who}'s own data, or an empty account if there is none.`,

@@ -46,7 +46,7 @@ export default function BillPhotoReview({ T, sym = "₹", billerAccounts = [], b
     close();
   };
   const row = (id, ok, text, detail) => (
-    <div data-testid={id} data-status={ok === null ? "unknown" : ok ? "holds" : "fails"} style={{ fontSize: 12, color: ok === false ? "#f0a500" : T.text, padding: "3px 0" }}>
+    <div data-testid={id} data-status={ok === null ? "unknown" : ok ? "holds" : "fails"} style={{ fontSize: 12, color: ok === false ? T.warn : T.text, padding: "3px 0" }}>
       {ok === null ? "… " : ok ? "✔ " : "⚠ "}{text}{ok === false && detail ? ` — ${detail}` : ""}
     </div>
   );
@@ -60,7 +60,7 @@ export default function BillPhotoReview({ T, sym = "₹", billerAccounts = [], b
           <input data-testid="billphoto-file" type="file" accept="image/*" onChange={chooseFile} style={{ display: "block", marginTop: 8, maxWidth: "100%", fontSize: 12 }} />
         </label>
         <div style={{ color: T.sub, fontSize: 11, marginTop: 6 }}>Read on this phone only. The photo is not kept, and the name and address on the bill are not read out.</div>
-        {phase.name === "declined" && <div data-testid="billphoto-declined" style={{ color: "#f0a500", fontSize: 12, marginTop: 8 }}>{phase.message}{phase.reason ? <span style={{ display: "block", color: T.sub, fontSize: 10, marginTop: 4 }}>Reason: {phase.reason}{phase.detail ? ` (${phase.detail})` : ""}</span> : null}</div>}
+        {phase.name === "declined" && <div data-testid="billphoto-declined" style={{ color: T.warn, fontSize: 12, marginTop: 8 }}>{phase.message}{phase.reason ? <span style={{ display: "block", color: T.sub, fontSize: 10, marginTop: 4 }}>Reason: {phase.reason}{phase.detail ? ` (${phase.detail})` : ""}</span> : null}</div>}
       </div>
     );
   }
@@ -87,7 +87,7 @@ export default function BillPhotoReview({ T, sym = "₹", billerAccounts = [], b
         {row("billphoto-check-words", words == null ? null : !wordsDiffer, words == null ? "The amount in words could not be read, so it is not cross-checked" : `Amount matches the amount in words (${sym}${money(words)})`, `the bill's words say ${sym}${money(words)}, the amount above says ${sym}${money(amount)}`)}
         {row("billphoto-check-due", dueOk, "Due date is on or after the bill date", "check the two dates")}
         {row("billphoto-check-readings", readingsOk, "Current − previous reading equals the units used", "the three numbers do not agree; check them")}
-        {duplicate && <div data-testid="billphoto-duplicate" style={{ color: "#f0a500", fontSize: 12, padding: "3px 0" }}>⚠ Already added: {duplicate.name || "a bill"} dated {duplicate.billDate}. Change the bill date only if this is a different bill.</div>}
+        {duplicate && <div data-testid="billphoto-duplicate" style={{ color: T.warn, fontSize: 12, padding: "3px 0" }}>⚠ Already added: {duplicate.name || "a bill"} dated {duplicate.billDate}. Change the bill date only if this is a different bill.</div>}
       </div>
       {wordsDiffer && (
         <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>

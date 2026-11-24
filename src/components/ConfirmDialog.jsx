@@ -26,7 +26,7 @@ export default function ConfirmDialog({ message, onConfirm, onClose, variant = "
               background: hasCancel ? (isDestructive ? T.danger : T.accent) : T.accent,
               border: "none", borderRadius: 12, padding: "10px", cursor: "pointer",
               fontSize: 13, fontWeight: 800,
-              color: hasCancel && isDestructive ? "#fff" : (hasCancel ? "#000" : "#000"),
+              color: hasCancel && isDestructive ? "#fff" : T.accentInk,
               fontFamily: "Inter,sans-serif",
             }}
           >

@@ -400,7 +400,7 @@ const normalizeLiabilityTypes = stored => {
       id,
       name,
       icon: typeof entry === "object" && entry?.icon ? entry.icon : "🧾",
-      color: typeof entry === "object" && entry?.color ? entry.color : "#ef4444",
+      color: typeof entry === "object" && entry?.color ? entry.color : DARK.danger,
       custom:true,
     });
   });
@@ -783,23 +783,23 @@ function PinScreen({ onUnlock, isSetup, onCancel, subtitle, onFingerprint }) {
   const hiddenInputRef = React.useRef(null);
   React.useEffect(() => { hiddenInputRef.current?.focus(); }, [cur.length]);
   return (
-    <div style={{minHeight:"100vh",background:"#0e1411",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Inter,sans-serif"}}>
+    <div style={{minHeight:"100vh",background:DARK.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Inter,sans-serif"}}>
       {/* B15: Hidden input keeps mobile keyboard context */}
       <input ref={hiddenInputRef} type="tel" inputMode="numeric" pattern="[0-9]*" style={{position:"absolute",opacity:0,width:1,height:1,pointerEvents:"none"}} onChange={e=>{ const v=e.target.value.replace(/\D/g,""); if(v) { handleKey(v[v.length-1]); e.target.value=""; } }} onKeyDown={e=>{ if(e.key==="Backspace") handleKey("del"); }}/>
-      <div style={{fontSize:52,marginBottom:12,color:"#22c55e",fontWeight:900,fontFamily:"Inter,sans-serif"}}>₹</div>
-      <div style={{color:"#22c55e",fontSize:30,fontWeight:900,marginBottom:6}}>Arth</div>
-      <div style={{color:"#5a5a7a",fontSize:13,marginBottom:40,textAlign:"center"}}>{subtitle || (isSetup?step==="enter"?"Set your 4-digit PIN":"Confirm your PIN":"Enter your PIN")}</div>
+      <div style={{fontSize:52,marginBottom:12,color:DARK.accent,fontWeight:900,fontFamily:"Inter,sans-serif"}}>₹</div>
+      <div style={{color:DARK.accent,fontSize:30,fontWeight:900,marginBottom:6}}>Arth</div>
+      <div style={{color:DARK.sub,fontSize:13,marginBottom:40,textAlign:"center"}}>{subtitle || (isSetup?step==="enter"?"Set your 4-digit PIN":"Confirm your PIN":"Enter your PIN")}</div>
       <div style={{display:"flex",gap:18,marginBottom:14}}>
-        {[0,1,2,3].map(i=><div key={i} style={{width:18,height:18,borderRadius:"50%",background:cur.length>i?"#22c55e":"transparent",border:"2px solid",borderColor:cur.length>i?"#22c55e":"#2a2a3a",transition:"all 0.15s"}}/>)}
+        {[0,1,2,3].map(i=><div key={i} style={{width:18,height:18,borderRadius:"50%",background:cur.length>i?DARK.accent:"transparent",border:"2px solid",borderColor:cur.length>i?DARK.accent:DARK.border,transition:"all 0.15s"}}/>)}
       </div>
-      {error&&<div style={{color:"#ef4444",fontSize:12,marginBottom:14,textAlign:"center"}}>{error}</div>}
+      {error&&<div style={{color:DARK.danger,fontSize:12,marginBottom:14,textAlign:"center"}}>{error}</div>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,width:252,marginTop:12}}>
         {["1","2","3","4","5","6","7","8","9","","0","del"].map((k,i)=>k===""?<div key={i}/>:
-          <button key={i} onClick={()=>handleKey(k)} style={{background:"#161e19",border:"1px solid #26332c",borderRadius:14,padding:"19px 0",fontSize:k==="del"?18:24,fontWeight:700,color:k==="del"?"#5a5a7a":"#e8e4dc",cursor:"pointer",fontFamily:"Inter,sans-serif"}}>{k==="del"?"⌫":k}</button>
+          <button key={i} onClick={()=>handleKey(k)} style={{background:DARK.card,border:`1px solid ${DARK.border}`,borderRadius:14,padding:"19px 0",fontSize:k==="del"?18:24,fontWeight:700,color:k==="del"?DARK.sub:DARK.text,cursor:"pointer",fontFamily:"Inter,sans-serif"}}>{k==="del"?"⌫":k}</button>
         )}
       </div>
       {onFingerprint&&!isSetup&&<BiometricUnlock onUnlocked={onFingerprint}/>}
-      {onCancel&&<button onClick={onCancel} style={{marginTop:18,background:"none",border:"1px solid #2a2a3a",borderRadius:12,padding:"10px 22px",cursor:"pointer",fontSize:13,fontWeight:700,color:"#5a5a7a",fontFamily:"Inter,sans-serif"}}>Cancel</button>}
+      {onCancel&&<button onClick={onCancel} style={{marginTop:18,background:"none",border:`1px solid ${DARK.border}`,borderRadius:12,padding:"10px 22px",cursor:"pointer",fontSize:13,fontWeight:700,color:DARK.sub,fontFamily:"Inter,sans-serif"}}>Cancel</button>}
     </div>
   );
 }
@@ -811,11 +811,11 @@ class ErrorBoundary extends React.Component {
   componentDidCatch(e,info){ console.error("Arth error:",e,info); }
   render(){
     if(this.state.hasError) return (
-      <div style={{minHeight:"100vh",background:"#0e1411",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Inter,sans-serif"}}>
+      <div style={{minHeight:"100vh",background:DARK.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,fontFamily:"Inter,sans-serif"}}>
         <div style={{fontSize:48,marginBottom:16}}>⚠️</div>
-        <div style={{color:"#22c55e",fontSize:20,fontWeight:900,marginBottom:8}}>Something went wrong</div>
-        <div style={{color:"#5a5a7a",fontSize:12,marginBottom:24,textAlign:"center",maxWidth:300}}>{this.state.error}</div>
-        <button onClick={()=>this.setState({hasError:false,error:""})} style={{background:"#22c55e",color:"#000",border:"none",borderRadius:12,padding:"12px 24px",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"Inter,sans-serif"}}>Try Again</button>
+        <div style={{color:DARK.accent,fontSize:20,fontWeight:900,marginBottom:8}}>Something went wrong</div>
+        <div style={{color:DARK.sub,fontSize:12,marginBottom:24,textAlign:"center",maxWidth:300}}>{this.state.error}</div>
+        <button onClick={()=>this.setState({hasError:false,error:""})} style={{background:DARK.accent,color:DARK.accentInk,border:"none",borderRadius:12,padding:"12px 24px",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"Inter,sans-serif"}}>Try Again</button>
       </div>
     );
     return this.props.children;
@@ -920,11 +920,11 @@ function ArthInner() {
   }}/>;
 
   if(!unlocked) return (
-    <div style={{ minHeight:"100vh",background:"#0e1411",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
+    <div style={{ minHeight:"100vh",background:DARK.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
       {pinIsLocked ? (
         <div style={{ textAlign:"center" }}>
           <div style={{ fontSize:48,marginBottom:12 }}>🔒</div>
-          <div style={{ color:"#f0a500",fontSize:18,fontWeight:900,marginBottom:8 }}>Too many attempts</div>
+          <div style={{ color:DARK.warn,fontSize:18,fontWeight:900,marginBottom:8 }}>Too many attempts</div>
           <div style={{ color:"rgba(255,255,255,0.5)",fontSize:13 }}>Try again in {pinLockMinsLeft} minute{pinLockMinsLeft!==1?"s":""}</div>
         </div>
       ) : (
@@ -958,9 +958,9 @@ function ArthInner() {
   return <>
     <ErrorBoundary><AppContent onLock={lock} appPin={appPin} setAppPin={setAppPin}/></ErrorBoundary>
     {showIdleWarning && (
-      <div onClick={()=>resetIdleRef.current?.()} style={{position:"fixed",bottom:0,left:0,right:0,zIndex:99999,background:"#1a1a1aee",backdropFilter:"blur(8px)",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:"2px solid #f0a500",cursor:"pointer"}}>
+      <div onClick={()=>resetIdleRef.current?.()} style={{position:"fixed",bottom:0,left:0,right:0,zIndex:99999,background:"#1a1a1aee",backdropFilter:"blur(8px)",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderTop:`2px solid ${DARK.warn}`,cursor:"pointer"}}>
         <span style={{color:"#fff",fontSize:13,fontWeight:700}}>🔒 Locking in {idleCountdown}s due to inactivity</span>
-        <button onClick={e=>{e.stopPropagation();resetIdleRef.current?.();}} style={{background:"#f0a500",color:"#000",border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Inter,sans-serif"}}>Stay active</button>
+        <button onClick={e=>{e.stopPropagation();resetIdleRef.current?.();}} style={{background:DARK.warn,color:DARK.accentInk,border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Inter,sans-serif"}}>Stay active</button>
       </div>
     )}
   </>;
@@ -3596,11 +3596,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               {t.type==="expense"&&linkedRepayments.length>0&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💰 Repaid</span>}
               {t.billerLinkId&&(()=>{ const ba=billerAccounts.find(b=>b.id===t.billerLinkId); if(!ba) return null; return <span style={{ background:T.accent+"18",color:T.accent,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{getBillerIcon(ba.type)} {ba.name}</span>; })()}
               {t.guestPerson&&<span style={{ background:T.warn+"18",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>👤 {t.guestPerson} owes {sym}{fmt(t.guestPersonAmount||0)}</span>}
-              {t.type==="expense"&&t.reimbursable&&!t.reimbursedByTxnId&&<span style={{ background:"#f0a50018",color:"#f0a500",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimb.{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
+              {t.type==="expense"&&t.reimbursable&&!t.reimbursedByTxnId&&<span style={{ background:T.warn+"18",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimb.{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
               {t.type==="expense"&&t.reimbursedByTxnId&&<span style={{ background:T.success+"18",color:T.success,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💼 Reimbursed{t.reimbursableAmount&&t.reimbursableAmount!==t.amount?` ${sym}${fmt(t.reimbursableAmount)}`:""}</span>}
               {t.isAutoEmiInstallment&&<span style={{ background:T.warn+"18",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💳 EMI {t.emiInstallmentNum}/{t.emiTotalInstallments}</span>}
               {t.type==="cc_emi"&&t.ccEmiPlanId&&<span style={{ background:T.purple+"18",color:T.purple,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>💳 EMI {t.installmentNo}/{t.ccEmiTenure||"?"}</span>}
-              {t.vehicleId&&(()=>{ const v=vehicles.find(x=>x.id===t.vehicleId); if(!v) return null; const vIcon=v.type==="bike"?"🏍️":v.type==="truck"?"🚛":v.type==="auto"?"🛺":"🚗"; const last4=(v.number||"").replace(/\s/g,"").slice(-4)||v.number||""; return <span style={{ background:"#3b82f618",color:"#3b82f6",borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{vIcon} {last4}</span>; })()}
+              {t.vehicleId&&(()=>{ const v=vehicles.find(x=>x.id===t.vehicleId); if(!v) return null; const vIcon=v.type==="bike"?"🏍️":v.type==="truck"?"🚛":v.type==="auto"?"🛺":"🚗"; const last4=(v.number||"").replace(/\s/g,"").slice(-4)||v.number||""; return <span style={{ background:T.info+"18",color:T.info,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:700 }}>{vIcon} {last4}</span>; })()}
               {t.imageBase64&&<span style={{ fontSize:10 }}>📷</span>}
               {t.type==="expense"&&(()=>{ const g=expenseGaps(t,cats,{ mePersonId:people.find(p=>p.isMe)?.id||"" }); if(!g.length) return null; return <span data-testid="row-needs-details" title={g.map(x=>GAP_LABELS[x]).join(", ")} style={{ background:T.warn+"22",color:T.warn,borderRadius:20,padding:"1px 8px",fontSize:10,fontWeight:800 }}>❓ {g.includes("category")?"Uncategorised":g.includes("subcategory")?"No sub-category":"No person/group"}</span>; })()}
             </div>
@@ -3663,7 +3663,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 })}
               </div>
             )}
-            {t.forPerson&&<div style={{ fontSize:11,color:"#ec4899",marginBottom:8 }}>👤 for {getPerson(t.forPerson).name}{t.tagPersonAmount&&t.tagPersonAmount!==t.amount?` · ${sym}${fmt(t.tagPersonAmount)} personal`:""}{ t.tagGroupAmount&&t.groupId?` · ${sym}${fmt(t.tagGroupAmount)} → ${getGroup(t.groupId)?.name||"group"}`:""}</div>}
+            {t.forPerson&&<div style={{ fontSize:11,color:T.purple,marginBottom:8 }}>👤 for {getPerson(t.forPerson).name}{t.tagPersonAmount&&t.tagPersonAmount!==t.amount?` · ${sym}${fmt(t.tagPersonAmount)} personal`:""}{ t.tagGroupAmount&&t.groupId?` · ${sym}${fmt(t.tagGroupAmount)} → ${getGroup(t.groupId)?.name||"group"}`:""}</div>}
             {t.tagItems?.length>0&&<div style={{ fontSize:11,marginBottom:8,display:"flex",flexWrap:"wrap",gap:4 }}>{t.tagItems.map(item=>{const isP=item.targetType==="person";const obj=isP?getPerson(item.targetId):getGroup(item.targetId);return <span key={item.id} style={{ background:T.pill,color:obj?.color||T.sub,borderRadius:20,padding:"2px 8px" }}>{isP?"👤":"👥"} {obj?.name||"?"} {sym}{fmt(item.amount)}</span>})}</div>}
             {t.type==="expense"&&groupCollectiveDue>0&&<div style={{ fontSize:11,color:T.info,marginBottom:8,fontWeight:700 }}>👥 {getGroup(t.groupId)?.name||"Group"} collectively owes {sym}{fmt(groupCollectiveDue)}</div>}
             {t.transactionRef&&<div style={{ fontSize:11,color:T.sub,marginBottom:8 }}>🔖 Transaction ID: {t.transactionRef}</div>}
@@ -7330,7 +7330,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {settlementKind!=="reimbursement"&&<div>
                   <span style={lbl}>Person (optional)</span>
                   <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                    <button onClick={()=>{ setTagPerson(""); setSettlementTagGroup(""); setSettlementKind("refund"); }} style={{ background:(!tagPerson&&!settlementTagGroup)?"#88888822":"none",border:`1px solid ${(!tagPerson&&!settlementTagGroup)?"#888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>No contact</button>
+                    <button onClick={()=>{ setTagPerson(""); setSettlementTagGroup(""); setSettlementKind("refund"); }} style={{ background:(!tagPerson&&!settlementTagGroup)?T.mutedSoft:"none",border:`1px solid ${(!tagPerson&&!settlementTagGroup)?T.borderStrong:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>No contact</button>
                     {people.filter(p=>!p.isMe && !isPersonArchived(p)).map(p=><button key={p.id} onClick={()=>{ setTagPerson(tagPerson===p.id?"":p.id); setSettlementKind("repayment"); setRepaymentTouched(false); if(!who.trim()) setWho(p.name); }} style={{ background:tagPerson===p.id?p.color+"22":"none",border:`1px solid ${tagPerson===p.id?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:tagPerson===p.id?p.color:T.sub,fontFamily:"Inter,sans-serif" }}>{p.emoji} {p.name}</button>)}
                   </div>
                 </div>}
@@ -7493,7 +7493,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       <div>
                         <span style={lbl}>Category (optional)</span>
                         <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                          <button onClick={()=>{ setCatIds([]); setSubIds([]); }} style={{ background:!catIds.length?"#88888822":"none",border:`1px solid ${!catIds.length?"#888":T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>❓ None</button>
+                          <button onClick={()=>{ setCatIds([]); setSubIds([]); }} style={{ background:!catIds.length?T.mutedSoft:"none",border:`1px solid ${!catIds.length?T.borderStrong:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>❓ None</button>
                           {cats.map(c=>(
                             <button key={c.id} onClick={()=>{ const newIds=catIds.includes(c.id)?catIds.filter(x=>x!==c.id):[c.id]; setCatIds(newIds); setSubIds([]); }} style={{ background:catIds.includes(c.id)?c.color+"22":"none",border:`1px solid ${catIds.includes(c.id)?c.color:T.border}`,borderRadius:10,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:catIds.includes(c.id)?c.color:T.sub,fontFamily:"Inter,sans-serif" }}>{c.icon} {c.name.split(" ")[0]}</button>
                           ))}
@@ -7652,7 +7652,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           <button key={sb.id} type="button" data-testid={`edu-pick-${sb.id}`} aria-pressed={on} disabled={needsSchool}
                             onClick={()=>{ setCategoryTouched(true); setEduSelected(prev=>prev.includes(sb.id)?prev.filter(x=>x!==sb.id):[...prev,sb.id]); }}
                             style={{ display:"flex",alignItems:"center",gap:10,width:"100%",minWidth:0,minHeight:52,padding:"6px 0",background:"none",border:"none",borderTop:`1px solid ${T.border}`,cursor:needsSchool?"not-allowed":"pointer",opacity:needsSchool?0.55:1,textAlign:"left",fontFamily:"inherit" }}>
-                            <span style={{ width:22,height:22,flexShrink:0,borderRadius:6,display:"grid",placeItems:"center",background:on?T.accent:"transparent",border:`1.5px solid ${on?T.accent:T.border}`,color:"#fff",fontSize:13,fontWeight:900 }}>{on?"✓":""}</span>
+                            <span style={{ width:22,height:22,flexShrink:0,borderRadius:6,display:"grid",placeItems:"center",background:on?T.accent:"transparent",border:`1.5px solid ${on?T.accent:T.border}`,color:T.accentInk,fontSize:13,fontWeight:900 }}>{on?"✓":""}</span>
                             <span style={{ flex:1,minWidth:0 }}>
                               <span style={{ display:"block",color:T.text,fontSize:15,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{sb.name}</span>
                               <span style={{ display:"block",color:T.sub,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{needsSchool?`Needs a school for ${personName}`:role===EDU_SUB.SCHOOL_FEES?"Covers a month or date range":(tg==="One-time"?"Paid once":"Ordinary Education line")}</span>
@@ -7832,12 +7832,12 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div style={{ marginTop:10,background:T.input,borderRadius:10,padding:"10px 12px" }}>
                     <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:8 }}>Vehicle</div>
                     <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                      <button onClick={()=>setVehicleId("")} style={{ background:!vehicleId?"#88888822":"none",border:`1px solid ${!vehicleId?"#888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>None</button>
+                      <button onClick={()=>setVehicleId("")} style={{ background:!vehicleId?T.mutedSoft:"none",border:`1px solid ${!vehicleId?T.borderStrong:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>None</button>
                       {vehicles.filter(v=>!v.archived).map(v=>{
                         const vIcon=v.type==="bike"?"🏍️":v.type==="truck"?"🚛":v.type==="auto"?"🛺":"🚗";
                         const last4=(v.number||"").replace(/\s/g,"").slice(-4)||v.number||"";
                         return (
-                          <button key={v.id} onClick={()=>setVehicleId(vehicleId===v.id?"":v.id)} style={{ background:vehicleId===v.id?"#3b82f622":"none",border:`1px solid ${vehicleId===v.id?"#3b82f6":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:vehicleId===v.id?"#3b82f6":T.sub,fontFamily:"Inter,sans-serif" }}>
+                          <button key={v.id} onClick={()=>setVehicleId(vehicleId===v.id?"":v.id)} style={{ background:vehicleId===v.id?T.info+"22":"none",border:`1px solid ${vehicleId===v.id?T.info:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:vehicleId===v.id?T.info:T.sub,fontFamily:"Inter,sans-serif" }}>
                             {vIcon} {last4}{v.name?` · ${v.name}`:""}
                           </button>
                         );
@@ -8268,7 +8268,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             {txnType==="expense"&&(
               <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
                 <div style={{ display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:isBillPayment?10:0 }}>
-                  <button onClick={()=>{ setReimbursable(r=>!r); if(reimbursable) setReimbursableAmount(""); }} title={reimbursable?"Reimbursable — tap to remove":"Mark as reimbursable work expense"} style={{ background:reimbursable?"#f0a50018":"none",border:`1px solid ${reimbursable?"#f0a500":T.border}`,borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:reimbursable?"#f0a500":T.sub,fontFamily:"Inter,sans-serif",display:"inline-flex",alignItems:"center",gap:4 }}>
+                  <button onClick={()=>{ setReimbursable(r=>!r); if(reimbursable) setReimbursableAmount(""); }} title={reimbursable?"Reimbursable — tap to remove":"Mark as reimbursable work expense"} style={{ background:reimbursable?T.warn+"18":"none",border:`1px solid ${reimbursable?T.warn:T.border}`,borderRadius:20,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:reimbursable?T.warn:T.sub,fontFamily:"Inter,sans-serif",display:"inline-flex",alignItems:"center",gap:4 }}>
                     <span>💼</span>
                     <span>{reimbursable?"Reimbursable ✓":"Work expense"}</span>
                   </button>
@@ -8442,7 +8442,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <div style={{ color:T.warn,fontSize:11,marginBottom:10 }}>People set per item will be cleared. Who is this for goes back to Just you.</div>
             )}
             <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-              <button onClick={()=>setShowStandardSwitchConfirm(false)} style={{ background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>Keep Itemised</button>
+              <button onClick={()=>setShowStandardSwitchConfirm(false)} style={{ background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.accentInk,fontFamily:"Inter,sans-serif" }}>Keep Itemised</button>
               <button onClick={()=>{
                 const rollupCatIds = itemCategoryRollup?.catIds||[];
                 const rollupSubIds = itemCategoryRollup?.subIds||[];
@@ -8669,7 +8669,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
             <div data-testid="item-calc" style={{ color:T.sub,fontSize:12 }}>{describeLine({ basis:iBasis, qty:iQty, unit:iUnit, price:iPrice, rateUnit:iRateUnit }, sym, fmt)}</div>
             <div style={{ display:"flex",gap:8,alignItems:"flex-end" }}>
-              <button onClick={handleSave} disabled={!iName.trim()} style={{ flex:1,background:iName.trim()?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:iName.trim()?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",height:48 }}>{editingItemId?"Save Changes ✓":"Add Item ✓"}</button>
+              <button onClick={handleSave} disabled={!iName.trim()} style={{ flex:1,background:iName.trim()?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:iName.trim()?"pointer":"not-allowed",fontSize:14,fontWeight:800,color: (iName.trim()) ? T.accentInk : T.sub,fontFamily:"Inter,sans-serif",height:48 }}>{editingItemId?"Save Changes ✓":"Add Item ✓"}</button>
             </div>
           </div>
         </div>
@@ -9926,7 +9926,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                         const record = { id:existing?.id||genId(), groupKey, investType:group.type, name:displayTitle, day, amount, accId, active:true, createdAt:existing?.createdAt||Date.now(), ...(existing?.skippedMonths?{skippedMonths:existing.skippedMonths}:{}) };
                         setRecurringSchedules(prev=>existing?prev.map(r=>r.groupKey===groupKey?record:r):[...prev,record]);
                         setEditingRecurring(null);
-                      }} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:800,color:"#000",fontFamily:"Inter,sans-serif" }}>Save Schedule</button>
+                      }} style={{ flex:1,background:T.accent,border:"none",borderRadius:10,padding:"10px",cursor:"pointer",fontSize:13,fontWeight:800,color:T.accentInk,fontFamily:"Inter,sans-serif" }}>Save Schedule</button>
                       {existing&&<button onClick={()=>{ setRecurringSchedules(prev=>prev.filter(r=>r.groupKey!==groupKey)); setEditingRecurring(null); }} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"10px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.danger,fontFamily:"Inter,sans-serif" }}>Remove</button>}
                     </div>
                   </div>
@@ -11460,7 +11460,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>💳 {c.cardName} statement closed on {formatShortDate(c.to)||c.to}</div>
                 <div style={{ color:T.sub,fontSize:11,marginBottom:10 }}>Arth has no transactions on this card between {formatShortDate(c.from)||c.from} and {formatShortDate(c.to)||c.to}. Please check your statement. Did you use it?</div>
                 <div style={{ display:"flex",gap:8 }}>
-                  <button data-testid="statement-none" onClick={()=>mark("none")} style={{ flex:1,background:T.success,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>No transactions</button>
+                  <button data-testid="statement-none" onClick={()=>mark("none")} style={{ flex:1,background:T.success,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:800,color:T.accentInk,fontFamily:"Inter,sans-serif" }}>No transactions</button>
                   <button onClick={()=>{ setAddPrefill({ accId:c.cardId }); setDefaultAddType("expense"); setShowAdd(true); }} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.text,fontFamily:"Inter,sans-serif" }}>Yes, add them</button>
                   <button onClick={()=>mark(`snooze:${tomorrow}`)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Tomorrow</button>
                 </div>
@@ -11487,7 +11487,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 {many&&<div style={{ color:T.sub,fontSize:11,fontWeight:700,marginBottom:4 }}>{pending.days.length} days at {pending.billerName} to check in</div>}
                 <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:10 }}>🏋️ Did you go to {pending.billerName} {dayLabel}?</div>
                 <div style={{ display:"flex",gap:8 }}>
-                  <button onClick={()=>answer(true)} style={{ flex:1,background:T.success,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>✅ Went</button>
+                  <button onClick={()=>answer(true)} style={{ flex:1,background:T.success,border:"none",borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:800,color:T.accentInk,fontFamily:"Inter,sans-serif" }}>✅ Went</button>
                   <button onClick={()=>answer(false)} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:12,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>❌ Didn't go</button>
                   <button onClick={()=>setArthHolidays(prev=>prev.includes(day)?prev:[...prev,day])} style={{ flex:1,background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"9px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>🏖 Holiday</button>
                 </div>
@@ -11616,7 +11616,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       return (
         <div onClick={()=>onToggleSelect(t.id)} style={{ display:"flex",alignItems:"center",gap:10,cursor:"pointer",background:selected?T.accentSoft:"transparent",borderRadius:10 }}>
           <div style={{ paddingLeft:10 }}>
-            <div style={{ width:20,height:20,borderRadius:6,border:`2px solid ${selected?T.accent:T.border}`,background:selected?T.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"#fff" }}>{selected?"✓":""}</div>
+            <div style={{ width:20,height:20,borderRadius:6,border:`2px solid ${selected?T.accent:T.border}`,background:selected?T.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:T.accentInk }}>{selected?"✓":""}</div>
           </div>
           <div style={{ flex:1,pointerEvents:"none" }}><TxnRow t={t} last={last} onEditTxn={onEditTxn}/></div>
         </div>
@@ -11740,15 +11740,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {txnSearch&&<button onClick={()=>setTxnSearch("")} style={{ background:"none",border:"none",color:T.sub,cursor:"pointer",fontSize:14,fontFamily:"Inter,sans-serif" }}>✕</button>}
         </div>
         {txnReimbursableOnly&&(
-          <div data-testid="txn-work-summary" style={{ background:"#f0a50012",border:"1px solid #f0a50044",borderRadius:10,padding:"8px 12px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-            <span style={{ color:"#f0a500",fontSize:12,fontWeight:700 }}>{(()=>{
+          <div data-testid="txn-work-summary" style={{ background:T.warn+"12",border:`1px solid ${T.warn}44`,borderRadius:10,padding:"8px 12px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <span style={{ color:T.warn,fontSize:12,fontWeight:700 }}>{(()=>{
               const mode = txnReimbursableOnly===true ? "waiting" : txnReimbursableOnly;
               const list = filteredTxns.filter(t=>t.type==="expense"&&t.reimbursable);
               const amt = t=>Number(t.reimbursableAmount||t.amount||0);
               const total = list.reduce((s,t)=>s+amt(t),0), done = list.filter(t=>t.reimbursedByTxnId).reduce((s,t)=>s+amt(t),0);
               return `💼 ${mode==="waiting"?"Waiting for reimbursement":mode==="reimbursed"?"Reimbursed":"Work expenses"} · ${list.length} · ${sym}${fmt(total)}${mode==="all"?` · reimbursed ${sym}${fmt(done)} · waiting ${sym}${fmt(total-done)}`:""}`;
             })()}</span>
-            <button onClick={()=>setTxnReimbursableOnly(false)} style={{ background:"none",border:"none",color:"#f0a500",cursor:"pointer",fontSize:14,fontFamily:"Inter,sans-serif" }}>✕</button>
+            <button onClick={()=>setTxnReimbursableOnly(false)} style={{ background:"none",border:"none",color:T.warn,cursor:"pointer",fontSize:14,fontFamily:"Inter,sans-serif" }}>✕</button>
           </div>
         )}
         <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:14 }}>
@@ -11802,7 +11802,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M3 5H21L14 13V19L10 17V13L3 5Z" fill="currentColor" />
               </svg>
-              {hasActiveFilters&&<span style={{ position:"absolute",top:-5,right:-5,minWidth:18,height:18,borderRadius:999,background:T.accent,color:"#000",fontSize:10,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px" }}>{activeFilterCount}</span>}
+              {hasActiveFilters&&<span style={{ position:"absolute",top:-5,right:-5,minWidth:18,height:18,borderRadius:999,background:T.accent,color:T.accentInk,fontSize:10,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 4px" }}>{activeFilterCount}</span>}
             </button>
             <button onClick={()=>{ if(bulkMode) exitBulk(); else setBulkMode(true); }} style={{ height:38,borderRadius:12,border:`1px solid ${bulkMode?T.accent:T.border}`,background:bulkMode?T.accentSoft:T.card,color:bulkMode?T.accent:T.sub,cursor:"pointer",padding:"0 12px",fontSize:11,fontWeight:800,fontFamily:"Inter,sans-serif" }}>{bulkMode?"Cancel":"Select"}</button>
           </div>
@@ -11828,9 +11828,9 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           onSort={()=>{ setBulkMode(true); setBulkSelected(uncatIds); }} onSelectUncategorised={()=>setBulkSelected(uncatIds)} onSelectAllShown={()=>setBulkSelected(filteredTxns.map(t=>t.id))}/>; })()}
         {bulkMode&&bulkSelected.length>0&&(
           <div style={{ position:"sticky",top:0,zIndex:20,background:T.accent,borderRadius:14,padding:"10px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-            <span style={{ color:"#000",fontSize:12,fontWeight:800 }}>{bulkSelected.length} selected</span>
+            <span style={{ color:T.accentInk,fontSize:12,fontWeight:800 }}>{bulkSelected.length} selected</span>
             <div style={{ display:"flex",gap:8 }}>
-              <button onClick={()=>setShowBulkCategory(true)} style={{ background:"#00000022",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Inter,sans-serif" }}>🏷️ Category</button>
+              <button onClick={()=>setShowBulkCategory(true)} style={{ background:"#00000022",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:T.accentInk,fontFamily:"Inter,sans-serif" }}>🏷️ Category</button>
               <button onClick={()=>{
                 // Column definition and the transaction→row mapping stay here — that's business
                 // logic (it knows what a transaction looks like), not something csv.js should know.
@@ -11841,7 +11841,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   rows.push([t.date||"",t.merchant||t.desc||"",getCat(t.catId)?.name||"",t.amount,t.type]);
                 });
                 downloadCsvFile(`arth-transactions-${todayStr()}.csv`, rowsToCsvString(rows));
-              }} style={{ background:"#00000022",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Inter,sans-serif" }}>⬇️ Export</button>
+              }} style={{ background:"#00000022",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:T.accentInk,fontFamily:"Inter,sans-serif" }}>⬇️ Export</button>
               <button onClick={()=>{
                 askConfirm(`Delete ${bulkSelected.length} transaction${bulkSelected.length>1?"s":""}? This can't be undone.`, ()=>{
                   // QW-2: same bill/Contribution cleanup a single delete does, for every deleted transaction.
@@ -11851,7 +11851,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   setTxns(prev=>prev.filter(x=>!bulkSelected.includes(x.id)));
                   exitBulk();
                 });
-              }} style={{ background:"#00000022",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#000",fontFamily:"Inter,sans-serif" }}>🗑️ Delete</button>
+              }} style={{ background:"#00000022",border:"none",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:11,fontWeight:800,color:T.accentInk,fontFamily:"Inter,sans-serif" }}>🗑️ Delete</button>
             </div>
           </div>
         )}
@@ -12765,10 +12765,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   if(p.isMe){ setTab("budget"); setShowSettings(false); }
                   else { setBudgetFocusPersonId(p.id); setTab("budget"); setShowSettings(false); }
                 }}
-                style={{ width:"100%",background:"#f0fdf4",border:"1px solid #16a34a44",borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}
+                style={{ width:"100%",background:T.accentSoft,border:`1px solid ${T.success}44`,borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}
               >
-                <span style={{ color:"#16a34a",fontSize:13,fontWeight:800 }}>📊 View Budget & Spend</span>
-                <span style={{ color:"#16a34a",fontSize:16 }}>→</span>
+                <span style={{ color:T.success,fontSize:13,fontWeight:800 }}>📊 View Budget & Spend</span>
+                <span style={{ color:T.success,fontSize:16 }}>→</span>
               </button>
             )}
 
@@ -13184,7 +13184,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                       {PALETTE.map(c=><div key={c} onClick={()=>setEditingGroupColor(c)} style={{ width:24,height:24,borderRadius:6,background:c,cursor:"pointer",border:editingGroupColor===c?"3px solid #fff":"3px solid transparent" }}/>)}
                     </div>
                     <div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>
-                      <button onClick={saveGroupEdits} style={{ background:T.accent,border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:"#000",fontFamily:"Inter,sans-serif" }}>Save</button>
+                      <button onClick={saveGroupEdits} style={{ background:T.accent,border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.accentInk,fontFamily:"Inter,sans-serif" }}>Save</button>
                       <button onClick={cancelEditingGroup} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Cancel</button>
                     </div>
                   </div>
@@ -13609,7 +13609,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ width:42,height:42,borderRadius:"50%",background:p.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0,position:"relative" }}>
                   {p.emoji}
                   {p.personType==="dependant"&&<div style={{ position:"absolute",bottom:-2,right:-2,fontSize:9,background:T.info,borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center" }}>♥</div>}
-                  {p.favorite&&<div style={{ position:"absolute",top:-2,right:-2,fontSize:9,background:T.accent,color:"#000",borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900 }}>★</div>}
+                  {p.favorite&&<div style={{ position:"absolute",top:-2,right:-2,fontSize:9,background:T.accent,color:T.accentInk,borderRadius:"50%",width:14,height:14,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900 }}>★</div>}
                 </div>
                 <div style={{ flex:1 }}>
                   <div style={{ color:T.text,fontSize:14,fontWeight:800 }}>{p.name}{p.isMe?<span style={{ color:T.accent,fontSize:10,marginLeft:6 }}>you</span>:""}</div>
@@ -13722,7 +13722,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ color:T.text,fontSize:20,fontWeight:900 }}>💹 Investments</div>
           <div style={{ display:"flex",alignItems:"center",gap:8 }}>
             {Object.values(holdingValues).some(v=>v&&v.schemeCode)&&<button data-testid="invest-refresh-navs" onClick={()=>refreshNavs()} style={{ background:"none",border:`1px solid ${T.border}`,color:T.text,borderRadius:10,padding:"7px 12px",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"Inter,sans-serif" }}>↻ NAV</button>}
-            <button onClick={openInvestmentComposer} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Inter,sans-serif" }}>+ Add</button>
+            <button onClick={openInvestmentComposer} style={{ background:T.accent,border:"none",color:T.accentInk,borderRadius:10,padding:"7px 16px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Inter,sans-serif" }}>+ Add</button>
             {onClose && <button onClick={onClose} style={{ background:T.pill,border:"none",color:T.sub,borderRadius:8,padding:"5px 11px",cursor:"pointer",fontSize:16,fontFamily:"Inter,sans-serif" }}>✕</button>}
           </div>
         </div>
@@ -15414,263 +15414,6 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
     );
   };
 
-  const WealthPage = () => {
-    const getLoanStatusMeta = loan => {
-      if(loan.status==="written_off") return { label:"Written off", color:T.sub };
-      if(loan.status==="converted_to_expense") return { label:"Converted to expense", color:T.warn };
-      if(loan.status==="closed" || Number(loan.outstanding||0)<=0) return { label:"Closed", color:T.success };
-      return { label:loan.direction==="taken"?"To repay":"To receive", color:loan.direction==="taken"?T.danger:T.accent };
-    };
-
-    const visibleLoans = loans.filter(loan=>!isCreditCardBackedLoan(loan));
-    const activeGivenLoans = visibleLoans.filter(loan=>loan.direction!=="taken" && loan.status==="active" && Number(loan.outstanding||0)>0);
-    const activeTakenLoans = visibleLoans.filter(loan=>loan.direction==="taken" && loan.status==="active" && Number(loan.outstanding||0)>0);
-
-    const inlineSections = {
-      banks: accounts.filter(a=>a.type==="bank" && !isInvestmentAccount(a)).map(a=>({
-        id:a.id,
-        title:a.name,
-        meta:`Live ${sym}${fmt(effectiveAccountBalance(a.id))}${balanceCheckpoints[a.id]?.date?` · Gap ${accountReconciliationGap(a.id)>=0?"+":"−"}${sym}${fmt(Math.abs(accountReconciliationGap(a.id)))}`:""}`,
-        value:`${sym}${fmt(effectiveAccountBalance(a.id))}`,
-        color:effectiveAccountBalance(a.id)>=0?T.success:T.danger,
-        onClick:()=>setShowAccDetail(a),
-      })),
-      cash: accounts.filter(a=>a.type==="cash" && !isInvestmentAccount(a)).map(a=>({
-        id:a.id,
-        title:a.name,
-        meta:`Cash in hand ${sym}${fmt(accountBalance(a.id))}`,
-        value:`${sym}${fmt(accountBalance(a.id))}`,
-        color:accountBalance(a.id)>=0?T.success:T.danger,
-        onClick:()=>setShowAccDetail(a),
-      })),
-      upi: accounts.filter(a=>a.type==="upi" && !isInvestmentAccount(a) && !isLinkedPaymentMethod(a,accounts)).map(a=>({
-        id:a.id,
-        title:a.name,
-        meta:`${a.handle||"UPI"} · ${sym}${fmt(accountBalance(a.id))}`,
-        value:`${sym}${fmt(accountBalance(a.id))}`,
-        color:accountBalance(a.id)>=0?T.success:T.danger,
-        onClick:()=>setShowAccDetail(a),
-      })),
-      investments: investmentTypeSummaries.map(type=>({
-        id:type.id,
-        title:type.name.split("/")[0].trim(),
-        meta:`${type.groupCount} ${type.groupCount===1?"holding":"holdings"}`,
-        value:`${sym}${fmt(type.total)}`,
-        color:type.color || T.info,
-        onClick:()=>{ setSelectedInvestmentTypeView(type.id); setShowInvestments(true); },
-      })),
-      owed: Object.entries(settlements).filter(([,val])=>Number(val?.owesMe||0)>0).map(([pid,val])=>({
-        id:`person_${pid}`,
-        title:getPerson(pid).name,
-        meta:"Amount to receive",
-        value:`${sym}${fmt(val.owesMe||0)}`,
-        color:T.accent,
-      })),
-      loanGiven: activeGivenLoans.map(loan=>({
-        id:loan.id,
-        title:loan.name,
-        meta:`${getLoanStatusMeta(loan).label}${loan.dueDate?` · due ${loan.dueDate}`:""}${loan.hasInterest&&Number(loan.interestRate||0)>0?` · ${loan.interestRate}% p.a.`:" · no interest"}`,
-        value:`${sym}${fmt(loan.outstanding||0)}`,
-        color:T.accent,
-        onClick:()=>setRepaymentLoan(loan),
-      })),
-      trackedAssets: trackedAssets.map(asset=>({
-        id:asset.id,
-        title:asset.name,
-        meta:(ASSET_TYPES.find(x=>x.id===asset.type)?.name)||"Asset",
-        value:`${sym}${fmt(asset.currentValue||0)}`,
-        color:T.purple,
-      })),
-      cc: accounts.filter(a=>a.type==="cc").map(a=>{
-        const summary = getCardSummary(a, accounts, expandPaymentLines(txns), toDateOnly);
-        return {
-          id:a.id,
-          title:a.name,
-          meta:`Due now ${sym}${fmt(summary.currentDue)} · Unbilled ${sym}${fmt(summary.currentCycleSpend)} · Outstanding ${sym}${fmt(summary.totalOutstanding||0)}`,
-          value:`${sym}${fmt(summary.totalOutstanding||0)}`,
-          color:T.danger,
-          onClick:()=>setShowAccDetail(a),
-        };
-      }),
-      loanTaken: activeTakenLoans.map(loan=>({
-        id:loan.id,
-        title:loan.name,
-        meta:`${getLoanStatusMeta(loan).label}${loan.dueDate?` · due ${loan.dueDate}`:""}${loan.hasInterest&&Number(loan.interestRate||0)>0?` · ${loan.interestRate}% p.a.`:" · no interest"}`,
-        value:`${sym}${fmt(loan.outstanding||0)}`,
-        color:T.danger,
-        onClick:()=>setEditingLoan(loan),
-      }))
-    };
-
-    const renderInlineBreakdown = mode => {
-      const items = inlineSections[mode] || [];
-      return (
-        <div style={{ padding:"0 0 8px 10px" }}>
-          {items.length===0 ? (
-            <div style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:10,padding:"10px 12px",color:T.sub,fontSize:11 }}>Nothing to show here yet.</div>
-          ) : items.map(item=>(
-            <div key={item.id} onClick={item.onClick} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:T.input,border:`1px solid ${T.border}`,borderRadius:10,padding:"9px 10px",marginBottom:6,cursor:item.onClick?"pointer":"default" }}>
-              <div style={{ minWidth:0,flex:1 }}>
-                <div style={{ color:T.text,fontSize:12,fontWeight:700 }}>{item.title}</div>
-                <div style={{ color:T.sub,fontSize:10,marginTop:2,whiteSpace:"normal" }}>{item.meta}</div>
-              </div>
-              <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                <div style={{ color:item.color,fontSize:12,fontWeight:800 }}>{item.value}</div>
-                {item.onClick&&<div style={{ color:T.sub,fontSize:12 }}>›</div>}
-              </div>
-            </div>
-          ))}
-        </div>
-      );
-    };
-
-    const assetBreakdownItems = [
-      { label:"Cash in bank", value:cashBankTotal, color:T.success, icon:"🏦", mode:"banks" },
-      { label:"Cash at hand", value:cashWalletTotal, color:T.success, icon:"🪙", mode:"cash" },
-      { label:"UPI balance", value:upiTotal, color:T.success, icon:"📱", mode:"upi" },
-      { label:"Investments", value:investmentAssetsTotal, color:T.info, icon:"📈", mode:"investments" },
-      { label:"People owe you (dues)", value:directOwedToMe, color:T.accent, icon:"🤝", mode:"owed" },
-      { label:"Loans given (tracked)", value:loanGivenTotal, color:T.accent, icon:"🫴", mode:"loanGiven" },
-      { label:"Tracked assets", value:trackedAssetsTotal, color:T.purple, icon:"🏠", mode:"trackedAssets" },
-    ];
-
-    return (
-      <div style={{ padding:"14px 16px 0" }}>
-        <div style={{ ...card,background:`linear-gradient(135deg,${T.success}10,${T.card})` }}>
-          <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:6 }}>Net Worth</div>
-          <div style={{ color:netWorthValue>=0?T.success:T.danger,fontSize:30,fontWeight:900,marginBottom:14 }}>{sym}{fmt(netWorthValue)}</div>
-          {reconciledBankCount>0&&(
-            <div style={{ background:Math.abs(reconciliationGapTotal)<0.01?T.success+"14":T.warn+"14",border:`1px solid ${Math.abs(reconciliationGapTotal)<0.01?T.success:T.warn}33`,borderRadius:10,padding:"8px 10px",marginBottom:12 }}>
-              <div style={{ color:T.text,fontSize:11,fontWeight:800 }}>Bank reconciliation gap</div>
-              <div style={{ color:Math.abs(reconciliationGapTotal)<0.01?T.success:T.warn,fontSize:11,marginTop:2 }}>
-                {Math.abs(reconciliationGapTotal)<0.01
-                  ? `All ${reconciledBankCount} reconciled bank account${reconciledBankCount===1?"":"s"} are matched.`
-                  : `Live bank balances are ${reconciliationGapTotal>=0?"ahead of":"behind"} entered transactions by ${sym}${fmt(Math.abs(reconciliationGapTotal))}. Add missing txns to close this gap.`}
-              </div>
-            </div>
-          )}
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-            <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
-              <div style={{ color:T.success,fontSize:18,fontWeight:800 }}>{sym}{fmt(totalAssetsValue)}</div>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Assets</div>
-            </div>
-            <div style={{ background:T.input,borderRadius:12,padding:"12px 14px" }}>
-              <div style={{ color:T.danger,fontSize:18,fontWeight:800 }}>{sym}{fmt(totalLiabilitiesValue)}</div>
-              <div style={{ color:T.sub,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.8 }}>Liabilities</div>
-            </div>
-          </div>
-        </div>
-
-        <div style={card}>
-          <div style={{ color:T.text,fontSize:15,fontWeight:800,marginBottom:10 }}>Assets Breakdown</div>
-          {assetBreakdownItems.map((item,idx)=>{
-            const isOpen = showWealthBreakdown===item.mode;
-            return (
-              <div key={item.label} style={{ borderBottom:idx===assetBreakdownItems.length-1?"none":`1px solid ${T.border}` }}>
-                <div onClick={()=>setShowWealthBreakdown(isOpen?null:item.mode)} style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",cursor:"pointer" }}>
-                  <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{item.icon} {item.label}</div>
-                  <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                    <div style={{ color:item.value>=0?item.color:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(item.value)}</div>
-                    <div style={{ color:T.sub,fontSize:12 }}>{isOpen?"▲":"▼"}</div>
-                  </div>
-                </div>
-                {isOpen && renderInlineBreakdown(item.mode)}
-              </div>
-            );
-          })}
-        </div>
-
-        <div style={card}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-            <div style={{ color:T.text,fontSize:15,fontWeight:800 }}>Tracked Assets</div>
-            <button onClick={()=>setShowAddAsset(true)} style={{ background:T.info+"22",border:`1px solid ${T.info}33`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.info,fontFamily:"Inter,sans-serif" }}>+ Add</button>
-          </div>
-          {trackedAssets.length===0?<div style={{ color:T.sub,fontSize:12 }}>Add real estate, vehicles, gold, valuables, or other assets you want included in net worth.</div>
-            :trackedAssets.map((asset,idx)=>{
-              const type=ASSET_TYPES.find(x=>x.id===asset.type)||ASSET_TYPES[ASSET_TYPES.length-1];
-              return <div key={asset.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"9px 0",borderBottom:idx===trackedAssets.length-1?"none":`1px solid ${T.border}` }}>
-                <div style={{ width:36,height:36,borderRadius:10,background:type.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{type.icon}</div>
-                <div style={{ flex:1 }}>
-                  <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{asset.name}</div>
-                  <div style={{ color:T.sub,fontSize:10 }}>{type.name}{asset.note?` · ${asset.note}`:""}</div>
-                </div>
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ color:type.color,fontSize:13,fontWeight:800 }}>{sym}{fmt(asset.currentValue)}</div>
-                  <div style={{ display:"flex",gap:4,justifyContent:"flex-end",marginTop:2 }}>
-                    <button onClick={()=>setEditingAsset(asset)} style={{ background:"none",border:"none",color:T.info,cursor:"pointer",fontSize:11,fontFamily:"Inter,sans-serif" }}>Edit</button>
-                    <button onClick={()=>setTrackedAssets(prev=>prev.filter(x=>x.id!==asset.id))} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:11,fontFamily:"Inter,sans-serif" }}>Delete</button>
-                  </div>
-                </div>
-              </div>;
-            })}
-        </div>
-
-        <div style={card}>
-          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-            <div style={{ color:T.text,fontSize:15,fontWeight:800 }}>Manage Liabilities</div>
-            <button onClick={()=>setShowAddLiability(true)} style={{ background:T.danger+"22",border:`1px solid ${T.danger}33`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.danger,fontFamily:"Inter,sans-serif" }}>+ Add</button>
-          </div>
-          <div style={{ borderBottom:`1px solid ${T.border}` }}>
-            <div onClick={()=>setShowWealthBreakdown(showWealthBreakdown==="cc"?null:"cc")} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",cursor:"pointer" }}>
-              <div>
-                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>💳 Credit Card Debt</div>
-                <div style={{ color:T.sub,fontSize:10 }}>{accounts.filter(a=>a.type==="cc").length} card(s)</div>
-              </div>
-              <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                <div style={{ color:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(creditCardLiabilityTotal)}</div>
-                <div style={{ color:T.sub,fontSize:12 }}>{showWealthBreakdown==="cc"?"▲":"▼"}</div>
-              </div>
-            </div>
-            {showWealthBreakdown==="cc" && renderInlineBreakdown("cc")}
-          </div>
-          <div style={{ borderBottom:liabilities.length===0?"none":`1px solid ${T.border}` }}>
-            <div onClick={()=>setShowWealthBreakdown(showWealthBreakdown==="loanTaken"?null:"loanTaken")} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",cursor:"pointer" }}>
-              <div>
-                <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>🤲 Loans Taken</div>
-                <div style={{ color:T.sub,fontSize:10 }}>{activeTakenLoans.length} active loan(s)</div>
-                <button data-testid="wealth-add-loan" onClick={e=>{ e.stopPropagation(); setShowAddLoan(true); }} style={{ marginTop:6,minHeight:36,padding:"0 12px",background:"none",border:`1px solid ${T.border}`,borderRadius:16,color:T.accent,fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>+ Add a loan</button>
-              </div>
-              <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                <div style={{ color:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(loanTakenTotal)}</div>
-                <div style={{ color:T.sub,fontSize:12 }}>{showWealthBreakdown==="loanTaken"?"▲":"▼"}</div>
-              </div>
-            </div>
-            {showWealthBreakdown==="loanTaken" && renderInlineBreakdown("loanTaken")}
-          </div>
-          {liabilities.length===0?<div style={{ color:T.sub,fontSize:12,paddingTop:10 }}>Add mortgages, student loans, car loans, tax dues, or any other debt here.</div>
-            :liabilities.map((liability,idx)=>{
-              const type=liabilityTypeOptions.find(x=>x.id===liability.type)||liabilityTypeOptions[liabilityTypeOptions.length-1]||LIABILITY_TYPES[LIABILITY_TYPES.length-1];
-              const paymentAccount = liability.paymentAccId ? getAcc(liability.paymentAccId) : null;
-              const liabilityMeta = [
-                type.name,
-                Number(liability.principal||0)>0 ? `principal ${sym}${fmt(liability.principal||0)}` : "",
-                Number(liability.emiAmount||0)>0 ? `EMI ${sym}${fmt(liability.emiAmount||0)}` : "",
-                Number(liability.interestRate||0)>0 ? `${fmt(liability.interestRate)}%` : "",
-                liability.tenureMonths ? `${liability.tenureMonths} mo` : "",
-                liability.nextDue ? `due ${liability.nextDue}` : "",
-                paymentAccount?.name ? `from ${paymentAccount.name}` : "",
-                liability.note || "",
-              ].filter(Boolean).join(" · ");
-              return <div key={liability.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"9px 0",borderBottom:idx===liabilities.length-1?"none":`1px solid ${T.border}` }}>
-                <div style={{ width:36,height:36,borderRadius:10,background:type.color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18 }}>{type.icon}</div>
-                <div style={{ flex:1 }}>
-                  <div style={{ color:T.text,fontSize:13,fontWeight:700 }}>{liability.name}</div>
-                  <div style={{ color:T.sub,fontSize:10 }}>{liabilityMeta}</div>
-                </div>
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ color:T.danger,fontSize:13,fontWeight:800 }}>{sym}{fmt(liability.outstanding)}</div>
-                  <div style={{ display:"flex",gap:4,justifyContent:"flex-end",marginTop:2 }}>
-                    <button onClick={()=>setEditingLiability(liability)} style={{ background:"none",border:"none",color:T.info,cursor:"pointer",fontSize:11,fontFamily:"Inter,sans-serif" }}>Edit</button>
-                    <button onClick={()=>setLiabilities(prev=>prev.filter(x=>x.id!==liability.id))} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:11,fontFamily:"Inter,sans-serif" }}>Delete</button>
-                  </div>
-                </div>
-              </div>;
-            })}
-        </div>
-      </div>
-    );
-  };
-
   const WealthBreakdownModal = () => {
     if(!showWealthBreakdown) return null;
 
@@ -15988,7 +15731,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ display:"flex",gap:6,marginBottom:10,alignItems:"center" }}>
               <input style={{ ...inp,flex:0.5,marginBottom:0,padding:"5px 8px",fontSize:12 }} placeholder="emoji" maxLength={2} value={newBehaviorIcon} onChange={e=>setNewBehaviorIcon(e.target.value)}/>
               <input style={{ ...inp,flex:1,marginBottom:0,padding:"5px 8px",fontSize:12 }} placeholder="New behavior name e.g. Crypto, BNPL" value={newBehaviorLabel} onChange={e=>setNewBehaviorLabel(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter"&&newBehaviorLabel.trim()){ e.preventDefault(); const id=normalizeIncomeTypeValue(newBehaviorLabel); setCustomBaseBehaviors(prev=>[...prev,{id,label:newBehaviorLabel.trim(),icon:newBehaviorIcon.trim()||"💰",isCustom:true}]); setNewBehaviorLabel(""); setNewBehaviorIcon(""); } }}/>
-              <button onClick={()=>{ if(!newBehaviorLabel.trim()) return; const id=normalizeIncomeTypeValue(newBehaviorLabel); setCustomBaseBehaviors(prev=>[...prev,{id,label:newBehaviorLabel.trim(),icon:newBehaviorIcon.trim()||"💰",isCustom:true}]); setNewBehaviorLabel(""); setNewBehaviorIcon(""); }} style={{ background:T.accent,border:"none",color:"#000",borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"Inter,sans-serif",whiteSpace:"nowrap" }}>+ Behavior</button>
+              <button onClick={()=>{ if(!newBehaviorLabel.trim()) return; const id=normalizeIncomeTypeValue(newBehaviorLabel); setCustomBaseBehaviors(prev=>[...prev,{id,label:newBehaviorLabel.trim(),icon:newBehaviorIcon.trim()||"💰",isCustom:true}]); setNewBehaviorLabel(""); setNewBehaviorIcon(""); }} style={{ background:T.accent,border:"none",color:T.accentInk,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"Inter,sans-serif",whiteSpace:"nowrap" }}>+ Behavior</button>
             </div>
             {newAccountBaseType!=="cc"&&<>
               <div style={{ color:T.text,fontSize:12,fontWeight:800,marginBottom:8 }}>Show this under</div>
@@ -16053,7 +15796,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ display:"flex",alignItems:"center",gap:12,padding:"0 16px 16px" }}>
           <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
           <div style={{ color:T.text,fontSize:18,fontWeight:900 }}>Investments</div>
-          <button onClick={openInvestmentComposer} style={{ background:T.accent,border:"none",color:"#000",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Inter,sans-serif" }}>+ Add</button>
+          <button onClick={openInvestmentComposer} style={{ background:T.accent,border:"none",color:T.accentInk,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Inter,sans-serif" }}>+ Add</button>
         </div>
         <div style={{ padding:"0 16px" }}>
           {trackedInvestments.length===0 ? <div style={{ color:T.sub,fontSize:12,paddingTop:10 }}>No investments yet.</div> : trackedInvestments.map((inv)=>{
@@ -16122,11 +15865,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ display:"flex",alignItems:"center",gap:12,marginBottom:16 }}>
             <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
             <div style={{ color:T.text,fontSize:18,fontWeight:900,flex:1 }}>Vehicles</div>
-            <button onClick={()=>setShowAddVehicle(true)} style={{ background:T.accent,border:"none",color:"#000",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Inter,sans-serif" }}>+ Add</button>
+            <button onClick={()=>setShowAddVehicle(true)} style={{ background:T.accent,border:"none",color:T.accentInk,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Inter,sans-serif" }}>+ Add</button>
           </div>
           {activeVehicles.length===0&&(
             <EmptyState icon="🚗" title="No vehicles yet" subtitle="Add a car or bike to see what it costs you. Fuel, service and insurance payments you link to it add up here." T={T}
-              action={<button onClick={()=>setShowAddVehicle(true)} style={{ background:T.accent,border:"none",color:"#000",borderRadius:12,padding:"12px 24px",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"Inter,sans-serif" }}>Add vehicle</button>}
+              action={<button onClick={()=>setShowAddVehicle(true)} style={{ background:T.accent,border:"none",color:T.accentInk,borderRadius:12,padding:"12px 24px",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"Inter,sans-serif" }}>Add vehicle</button>}
             />
           )}
           {activeVehicles.map(v=>{
@@ -16142,7 +15885,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   subtitle={`${vt.label} · ${v.number}${linkedTxns.length?` · Last 12 months · ${linkedTxns.length} transaction${linkedTxns.length===1?"":"s"}`:" · No spending linked yet"}`}
                   T={T}
                   onClick={()=>{ setVehicleTab("overview"); setSelectedVehicle(v); }}
-                  trailing={linkedTxns.length>0?<span style={{ color:T.text,fontSize:14,fontWeight:800,fontFamily:"IBM Plex Mono,monospace" }}>{sym}{fmt(running)}</span>:null}
+                  trailing={linkedTxns.length>0?<span style={{ color:T.text,fontSize:14,fontWeight:800,fontFamily:"Inter,sans-serif" }}>{sym}{fmt(running)}</span>:null}
                 />
               </div>
             );
@@ -16157,7 +15900,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         <div style={{ display:"flex",alignItems:"center",gap:12,padding:"0 16px 16px" }}>
           <button onClick={()=>setSettingsSection(null)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:22,padding:0 }}>←</button>
           <div style={{ color:T.text,fontSize:18,fontWeight:900,flex:1 }}>Accounts</div>
-          <button onClick={()=>setShowAddAccount(true)} style={{ background:T.accent,border:"none",color:"#000",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Inter,sans-serif" }}>+ Add</button>
+          <button onClick={()=>setShowAddAccount(true)} style={{ background:T.accent,border:"none",color:T.accentInk,borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"Inter,sans-serif" }}>+ Add</button>
         </div>
         <div style={{ padding:"0 16px" }}>
           {/* Debit cards and UPI handles are a way of paying from a bank or card, not a source of money: they are listed
@@ -16298,7 +16041,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             "Match your bank (Money → an account): each bank and cash account's own page now has \"Does this match your bank?\" with a Set actual balance button, and shows the gap or Matched. It is the same check that was in Settings, which still has it.",
             "New navigation (Settings, off by default): the bottom bar becomes Today, Money, People and Plan. Money opens on your activity, with Accounts, Cards, Loans and Invest one tap away (those four ask for the PIN; Loans is a new list of what you owe and what you gave); Plan holds Bills, Budget, Goals, Events and Outlook. Every screen is the same one as before, only grouped; switch it off any time.",
             "Settings, tidied: five groups (You and your data, Money setup, Look and behaviour, Privacy and notifications, Help). On/off items are real switches and the whole row is the tap target. Notifications is one screen: Bill reminders, Weekly summary and the new Daily summary (what you spent today, at 9 pm, Android app, off by default). PIN, fingerprint and lock are one screen. If the phone will not allow notifications, Arth now says why and offers Open settings instead of doing nothing. The version shows once.",
-            "Group statement, itemised: Statement for a group now opens on Group expenses, every expense and bill tagged to the group in the dates you choose, plus (a tick box) what the group's people bear in expenses tagged to them or to another group such as a common meter, in ONE statement with a tick-list. Each line is \"Vendor - Item - amount\" (bills are named by month, with the meter in brackets; for a family you are not part of, a bill that is entirely theirs shows the group name in brackets instead). For a family you are not part of the message has no names (except an expense that is one person's own, which reads \"Person - Vendor - Item - amount\"): a plain list per month, a Sum, the PTD total, then an optional By category section and your UPI line, with only the family's part of a shared bill counted. For your own flat, tick \"Put each person's name as a heading\" to get a \"Name - expenses\" block per person (and Only my part). Members, simple and Full statement are still there. A purchase split across groups now shows only the group's part (547 of a 1,150 bill, not 1,150), and a new tick box, Only what is still unpaid, leaves out settled entries and cuts part-paid ones to what is left. On the group page, Everything owed to me opens the statement for all time, unpaid only, group and members together, and shows the total of the entries listed next to the balance on the cards so any gap is visible. A new All button next to Group expenses lists everything owed by the group and each member in one statement, and adds whatever your cards say is owed but no entry explains as Other balance lines so the list reaches the card total. A bill whose payment is not tagged to the group is still listed while it is open, amounts tagged to a member item by item are listed, and tapping a search result now opens that entry (or bill) instead of the whole list. Transactions now shows a banner when expenses have no category (Sort them opens Select with those ticked), and Select mode has Select all shown and Select no-category buttons. A payment linked to a bill now carries the bill's group, split and amount to collect (Bills → Pay already did, but its collect amount could be reset when the app loaded), and Notifications lists past linked payments that are missing it, to review and fix. Choosing the bill to pay in the Add form now fills in who it is for (the group and the amount to collect, each person who owes) from the bill, so the form does not ask again; what you typed is never replaced.",
+            "Group statement, itemised: Statement for a group now opens on Group expenses, every expense and bill tagged to the group in the dates you choose, plus (a tick box) what the group's people bear in expenses tagged to them or to another group such as a common meter, in ONE statement with a tick-list. Each line is \"Vendor - Item - amount\" (bills are named by month, with the meter in brackets; for a family you are not part of, a bill that is entirely theirs shows the group name in brackets instead). For a family you are not part of the message has no names (except an expense that is one person's own, which reads \"Person - Vendor - Item - amount\"): a plain list per month, a Sum, the PTD total, then an optional By category section and your UPI line, with only the family's part of a shared bill counted. For your own flat, tick \"Put each person's name as a heading\" to get a \"Name - expenses\" block per person (and Only my part). Members, simple and Full statement are still there. A purchase split across groups now shows only the group's part (547 of a 1,150 bill, not 1,150), and a new tick box, Only what is still unpaid, leaves out settled entries and cuts part-paid ones to what is left. On the group page, Everything owed to me opens the statement for all time, unpaid only, group and members together, and shows the total of the entries listed next to the balance on the cards so any gap is visible. A new All button next to Group expenses lists everything owed by the group and each member in one statement, and adds whatever your cards say is owed but no entry explains as Other balance lines so the list reaches the card total. A bill whose payment is not tagged to the group is still listed while it is open, amounts tagged to a member item by item are listed, and tapping a search result now opens that entry (or bill) instead of the whole list. Transactions now shows a banner when expenses have no category (Sort them opens Select with those ticked), and Select mode has Select all shown and Select no-category buttons. A payment linked to a bill now carries the bill's group, split and amount to collect (Bills → Pay already did, but its collect amount could be reset when the app loaded), and Notifications lists past linked payments that are missing it, to review and fix. Choosing the bill to pay in the Add form now fills in who it is for (the group and the amount to collect, each person who owes) from the bill, so the form does not ask again; what you typed is never replaced. One look everywhere: the old amber and green colours and black text on the green accent are gone, the search screen, dropdowns and tick boxes follow the theme, the page font is Inter, Inter and Manrope now ship inside the app (they work offline, and the rupee sign no longer falls back to another font), and about 250 lines of unused code were removed.",
             "Investments worth what they are worth now: open a mutual fund, stock, gold or crypto holding and add today's price (a fund can look its NAV up by name or scheme code). Net worth then counts units x price instead of the money put in, and shows the gain. Units are worked out from your entries (amount / NAV bought at; stocks and gold use the units on each entry) or you type your real units. A failed lookup keeps the old value and says why. Funds with a scheme code refresh once a day when Arth opens, or tap \"↻ NAV\" on Investments. Stock, gold and crypto prices are typed, with their date. Saved on this phone.",
             "Outlook, tidied: the repeated Budget and Payments links, the second Available cash and the third Buffer are gone; What changed since yesterday moved to Money, under net worth. Possible duplicate payments (same amount, dates within a week, same words in the name) are now reported in Notifications: tap it and Outlook shows only those pairs to check, with These are different. Nothing is deleted for you.",
             "Fingerprint unlock (Android app, Settings): touch the sensor instead of typing the PIN. Off by default; turning it on asks for your fingerprint once. The phone is asked up to 4 times, then only the PIN is left (at once if you choose the PIN). The lock-out after 5 wrong PINs is unchanged. Arth never stores the fingerprint; the phone keeps it.",
@@ -16428,7 +16171,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
             <input style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",color:T.text,fontSize:14,fontFamily:"Inter,sans-serif",outline:"none" }} type="email" placeholder="Email address" autoComplete="email" autoCapitalize="none" value={syncEmail} onChange={e=>setSyncEmail(e.target.value)}/>
             <input style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:12,padding:"12px 14px",color:T.text,fontSize:14,fontFamily:"Inter,sans-serif",outline:"none" }} type="password" placeholder="Password" autoComplete="new-password" value={syncPassword} onChange={e=>setSyncPassword(e.target.value)}/>
-            <button onClick={()=>handleCloudAuth("signin")} disabled={cloudBusy||!syncEmail||!syncPassword} style={{ background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#000",fontFamily:"Inter,sans-serif" }}>{cloudBusy?"Please wait...":"Sign In"}</button>
+            <button onClick={()=>handleCloudAuth("signin")} disabled={cloudBusy||!syncEmail||!syncPassword} style={{ background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.accentInk,fontFamily:"Inter,sans-serif" }}>{cloudBusy?"Please wait...":"Sign In"}</button>
             <button onClick={()=>handleCloudAuth("signup")} disabled={cloudBusy||!syncEmail||!syncPassword} style={{ background:"none",border:`1px solid ${T.accent}44`,borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:T.accent,fontFamily:"Inter,sans-serif" }}>{cloudBusy?"Please wait...":"Create Account"}</button>
             {cloudStatus&&<div style={{ color:cloudStatus.includes("failed")||cloudStatus.includes("error")?T.danger:T.sub,fontSize:11,textAlign:"center" }}>{cloudStatus}</div>}
           </div>
@@ -17146,7 +16889,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <div style={{ display:"inline-block", background:T.mutedSoft, border:`1px solid ${T.border}`, borderRadius:20, padding:"3px 10px", marginBottom:10 }}><span style={{ color:T.sub, fontSize:10, fontWeight:800 }}>NO BUDGET SET</span></div>
                   <div style={{ color:T.text, fontSize:16, fontWeight:800, marginBottom:6 }}>Set up your household budget</div>
                   <div style={{ color:T.sub, fontSize:12, marginBottom:16, lineHeight:1.5 }}>Once you set a monthly amount, Home will show your Safe-to-Spend, Budget Health, and Forecast automatically.</div>
-                  <button onClick={()=>setBudgetView("year")} style={{ background:T.accent, border:"none", borderRadius:12, padding:"12px 20px", color:"#fff", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"Inter,sans-serif" }}>Set Household Budget</button>
+                  <button onClick={()=>setBudgetView("year")} style={{ background:T.accent, border:"none", borderRadius:12, padding:"12px 20px", color:T.accentInk, fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"Inter,sans-serif" }}>Set Household Budget</button>
                 </div>
               </>
             );
@@ -17215,7 +16958,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ ...card,background:T.accentSoft,border:`1px solid ${T.accent}44`,marginBottom:12 }}>
                   <div style={{ color:T.text,fontSize:13,fontWeight:800,marginBottom:4 }}>Confirm this month's commitments?</div>
                   <div style={{ color:T.sub,fontSize:12,marginBottom:10 }}>{sym}{fmt(getMandatoryCommitmentsTotal(liveActiveMandatory))} reserved, {sym}{fmt(liveDiscretionaryPool)} available</div>
-                  <button onClick={confirmMandatory} style={{ background:T.accent,border:"none",borderRadius:12,padding:"9px 16px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Confirm</button>
+                  <button onClick={confirmMandatory} style={{ background:T.accent,border:"none",borderRadius:12,padding:"9px 16px",color:T.accentInk,fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"Inter,sans-serif" }}>Confirm</button>
                 </div>
               )}
 
@@ -17711,7 +17454,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </button>
               </div>
             )}
-            <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Commitment"}</button>
+            <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color: (canSave) ? T.accentInk : T.sub,fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Commitment"}</button>
             {isEdit&&<button onClick={()=>onDelete(existing.id)} style={{ background:"none",border:`1px solid ${T.danger}44`,borderRadius:14,padding:"11px",cursor:"pointer",fontSize:13,fontWeight:700,color:T.danger,fontFamily:"Inter,sans-serif" }}>🗑 Delete Commitment</button>}
           </div>
         </div>
@@ -17731,7 +17474,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
       <div style={{ marginTop:10,borderTop:`1px solid ${T.border}`,paddingTop:10 }}>
         <div style={{ display:"flex",background:T.input,borderRadius:10,padding:2,marginBottom:10 }}>
           {[["month","This Month"],["year",fyLabel]].map(([id,label])=>(
-            <button key={id} onClick={()=>setBudgetPersonViewMode(id)} style={{ flex:1,textAlign:"center",padding:"6px 4px",fontSize:11,fontWeight:800,borderRadius:8,border:"none",cursor:"pointer",background:budgetPersonViewMode===id?"#16a34a22":"none",color:budgetPersonViewMode===id?"#16a34a":T.sub,fontFamily:"Inter,sans-serif" }}>{label}</button>
+            <button key={id} onClick={()=>setBudgetPersonViewMode(id)} style={{ flex:1,textAlign:"center",padding:"6px 4px",fontSize:11,fontWeight:800,borderRadius:8,border:"none",cursor:"pointer",background:budgetPersonViewMode===id?T.success+"22":"none",color:budgetPersonViewMode===id?T.success:T.sub,fontFamily:"Inter,sans-serif" }}>{label}</button>
           ))}
         </div>
 
@@ -17812,11 +17555,11 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12 }}>
                 <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Annual Budget</div><div style={{ color:T.text,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(personAnnualBudget)}</div></div>
                 <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Spent (YTD)</div><div style={{ color:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{sym}{fmt(ytdSpend)}</div></div>
-                <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>{ytdRemaining>=0?"Remaining":"Over Budget"}</div><div style={{ color:ytdRemaining>=0?"#16a34a":T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{ytdRemaining<0?"-":""}{sym}{fmt(Math.abs(ytdRemaining))}</div></div>
-                <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Used</div><div style={{ color:ytdPct>100?T.danger:"#16a34a",fontSize:15,fontWeight:900,marginTop:2 }}>{ytdPct}%</div></div>
+                <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>{ytdRemaining>=0?"Remaining":"Over Budget"}</div><div style={{ color:ytdRemaining>=0?T.success:T.danger,fontSize:15,fontWeight:900,marginTop:2 }}>{ytdRemaining<0?"-":""}{sym}{fmt(Math.abs(ytdRemaining))}</div></div>
+                <div><div style={{ color:T.sub,fontSize:9,fontWeight:700,textTransform:"uppercase" }}>Used</div><div style={{ color:ytdPct>100?T.danger:T.success,fontSize:15,fontWeight:900,marginTop:2 }}>{ytdPct}%</div></div>
               </div>
               <div style={{ height:6,background:T.border,borderRadius:3,marginBottom:14 }}>
-                <div style={{ height:"100%",width:`${Math.min(100,ytdPct)}%`,background:ytdPct>100?T.danger:"#16a34a",borderRadius:3 }}/>
+                <div style={{ height:"100%",width:`${Math.min(100,ytdPct)}%`,background:ytdPct>100?T.danger:T.success,borderRadius:3 }}/>
               </div>
 
               {catRows.length>0&&(
@@ -18054,7 +17797,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div style={{ background:T.input,borderRadius:12,padding:"10px 12px" }}>
               <span style={{ color:T.sub,fontSize:11,fontWeight:700,letterSpacing:0.5 }}>FOR (WHO THIS BILL BELONGS TO)</span>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginTop:8 }}>
-                <button onClick={()=>{setEditForType("unassigned");setEditForId("");}} style={{ background:editForType==="unassigned"?"#88888822":"none",border:`1px solid ${editForType==="unassigned"?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Unassigned</button>
+                <button onClick={()=>{setEditForType("unassigned");setEditForId("");}} style={{ background:editForType==="unassigned"?T.mutedSoft:"none",border:`1px solid ${editForType==="unassigned"?T.borderStrong:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Unassigned</button>
                 <button onClick={()=>{setEditForType("house");setEditForId("");}} style={{ background:editForType==="house"?T.accent+"22":"none",border:`1px solid ${editForType==="house"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editForType==="house"?T.accent:T.sub,fontFamily:"Inter,sans-serif" }}>🏠 Common Areas</button>
                 {people.filter(p=>!isPersonArchived(p)).map(p=>(
                   <button key={p.id} onClick={()=>{setEditForType("person");setEditForId(p.id);}} style={{ background:editForType==="person"&&String(editForId)===String(p.id)?p.color+"22":"none",border:`1px solid ${editForType==="person"&&String(editForId)===String(p.id)?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editForType==="person"&&String(editForId)===String(p.id)?p.color:T.sub,fontFamily:"Inter,sans-serif" }}>{p.emoji} {p.isMe?"Me":p.name}</button>
@@ -18124,7 +17867,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             <div>
               <span style={lbl}>Split with (optional)</span>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
-                <button onClick={()=>{setEditSplitPeople({});setEditGroup("");}} style={{ background:editSelectedPids.length===0&&!editGroup?"#88888822":"none",border:`1px solid ${editSelectedPids.length===0&&!editGroup?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>None</button>
+                <button onClick={()=>{setEditSplitPeople({});setEditGroup("");}} style={{ background:editSelectedPids.length===0&&!editGroup?T.mutedSoft:"none",border:`1px solid ${editSelectedPids.length===0&&!editGroup?T.borderStrong:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>None</button>
                 {getActiveGroups(groups).map(g=><button key={g.id} onClick={()=>{setEditGroup(editGroup===g.id?"":g.id); setEditSplitPeople({});}} style={{ background:editGroup===g.id?g.color+"22":"none",border:`1px solid ${editGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:editGroup===g.id?g.color:T.sub,fontFamily:"Inter,sans-serif" }}>{g.icon} {g.name}</button>)}
               </div>
               <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:editSelectedPids.length>0?10:0 }}>
@@ -18581,7 +18324,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           <div style={{ fontSize: 40,marginBottom: 12 }}>💳</div>
           <div style={{ color: T.text,fontSize: 15,fontWeight: 800,marginBottom: 6 }}>Nothing connected yet</div>
           <div style={{ color: T.sub,fontSize: 12.5,lineHeight: 1.5,marginBottom: 18 }}>Add the bills and services you pay for. They show here grouped by type, with anything due at the top.</div>
-          <button onClick={() => setShowAddActivateSheet(true)} style={{ background: T.accent,border: "none",borderRadius: 14,padding: "12px 20px",cursor: "pointer",fontSize: 13,fontWeight: 800,color: "#fff",fontFamily: "Inter,sans-serif" }}>+ Add / Activate</button>
+          <button onClick={() => setShowAddActivateSheet(true)} style={{ background: T.accent,border: "none",borderRadius: 14,padding: "12px 20px",cursor: "pointer",fontSize: 13,fontWeight: 800,color:T.accentInk,fontFamily: "Inter,sans-serif" }}>+ Add / Activate</button>
           {/* A3's own secondary CTA (WP18b left this unwired — no connectionless add-bill flow was
               found anywhere else in the app under investigation, so this opens the one that
               already exists: AddBillModal with no defaultBillerAccountId, which already shows a
@@ -18909,7 +18652,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ color: T.text,fontSize: 20,fontWeight: 900 }}>{sym}{fmt(openBadge.balance.amount)}</div>
                 {openBadge.balance.paid > 0 && <div style={{ color: T.sub,fontSize: 11,marginTop: 2 }}>{sym}{fmt(openBadge.balance.paid)} of {sym}{fmt(openBadge.balance.amount)}</div>}
                 <div style={{ color: openBadge.kind === "overdue" ? T.danger : T.warn,fontSize: 11,fontWeight: 800,marginTop: 4 }}>{openBadge.kind === "overdue" ? "Overdue" : openBadge.balance.status === "partial" ? "Partially paid" : "Due"}</div>
-                <button data-testid="conn-record-payment" onClick={() => { setMarkingBillPaid(openBill); }} style={{ width: "100%",marginTop: 10,background: T.accent,border: "none",borderRadius: 12,padding: "11px",cursor: "pointer",fontSize: 13,fontWeight: 800,color: "#fff",fontFamily: "Inter,sans-serif" }}>Record payment {sym}{fmt(openBadge.balance.remaining)}</button>
+                <button data-testid="conn-record-payment" onClick={() => { setMarkingBillPaid(openBill); }} style={{ width: "100%",marginTop: 10,background: T.accent,border: "none",borderRadius: 12,padding: "11px",cursor: "pointer",fontSize: 13,fontWeight: 800,color:T.accentInk,fontFamily: "Inter,sans-serif" }}>Record payment {sym}{fmt(openBadge.balance.remaining)}</button>
               </div>
             )}
 
@@ -19617,7 +19360,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           {smsInbox.available&&!smsInbox.perm.receive&&(
             <div data-testid="sms-enable" style={{ background:T.accent+"14",border:`1px solid ${T.accent}33`,borderRadius:14,padding:"12px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10 }}>
               <div style={{ flex:1,color:T.text,fontSize:12,lineHeight:1.45 }}><b>Bank-message alerts are off.</b> Turn them on and Arth will notice each bank or card message as it arrives, so you can accept or discard it here. Messages stay on this phone.</div>
-              <button data-testid="sms-enable-btn" onClick={()=>smsInbox.request()} style={{ background:T.accent,border:"none",borderRadius:20,padding:"7px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",flexShrink:0 }}>Turn on</button>
+              <button data-testid="sms-enable-btn" onClick={()=>smsInbox.request()} style={{ background:T.accent,border:"none",borderRadius:20,padding:"7px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:T.accentInk,fontFamily:"Inter,sans-serif",flexShrink:0 }}>Turn on</button>
             </div>
           )}
           {(smsInbox.billItems||[]).map(b=>(
@@ -19656,7 +19399,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
                 {hit&&<div style={{ color:T.warn,fontSize:11,marginTop:6 }}>Looks like your entry “{hit.merchant||hit.desc||"entry"}” ({formatShortDate(hit.date)||hit.date}). Link it instead of adding a copy.</div>}
                 <div style={{ display:"flex",gap:6,marginTop:8,flexWrap:"wrap" }}>
-                  {hit&&<button data-testid="sms-link" onClick={()=>{ setTxns(prev=>applyMerges(prev,[{ txnId:it.matchId,row:it.row }],{ batchId:genId() })); setToast({ message:"Linked to your entry" }); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>Link to it</button>}
+                  {hit&&<button data-testid="sms-link" onClick={()=>{ setTxns(prev=>applyMerges(prev,[{ txnId:it.matchId,row:it.row }],{ batchId:genId() })); setToast({ message:"Linked to your entry" }); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:T.accentInk,fontFamily:"Inter,sans-serif" }}>Link to it</button>}
                   <button data-testid="sms-accept" onClick={openForm} style={{ background:hit?T.input:T.accent,border:hit?`1px solid ${T.border}`:"none",borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:800,color:hit?T.text:"#fff",fontFamily:"Inter,sans-serif" }}>{hit?"Add anyway":"Accept"}</button>
                   <button data-testid="sms-discard" onClick={()=>smsInbox.discard(it.id)} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:20,padding:"6px 14px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Discard</button>
                 </div>
@@ -19670,7 +19413,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <div style={{ color:T.sub,fontSize:10,marginTop:2 }}>{a.stage==="post"?"Coverage ended":"Coverage ends"} {formatShortDate(a.validUntil)||a.validUntil}</div>
               </div>
               <div style={{ display:"flex",gap:6,flexShrink:0 }}>
-                <button data-testid="prepaid-alert-recharge" onClick={()=>{ setDefaultBillerAccountId(a.billerAccountId); setShowAddBill(true); onClose(); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>Recharge</button>
+                <button data-testid="prepaid-alert-recharge" onClick={()=>{ setDefaultBillerAccountId(a.billerAccountId); setShowAddBill(true); onClose(); }} style={{ background:T.accent,border:"none",borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:800,color:T.accentInk,fontFamily:"Inter,sans-serif" }}>Recharge</button>
                 <button data-testid="prepaid-alert-dismiss" onClick={()=>archive(a.id)} style={{ background:T.input,border:`1px solid ${T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:10,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Dismiss</button>
               </div>
             </div>
@@ -19914,7 +19657,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
                 <div style={{ color:T.sub,fontSize:11 }}>{formatShortDate(linkedTxn.date)||linkedTxn.date}{acc?` · ${acc.name}`:""}</div>
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8 }}>
-                  <span style={{ color:T.sub,fontSize:10.5,fontFamily:"monospace" }}>TXN-{String(linkedTxn.id).slice(-8).toUpperCase()}</span>
+                  <span style={{ color:T.sub,fontSize:10.5,fontFamily:"Inter,sans-serif" }}>TXN-{String(linkedTxn.id).slice(-8).toUpperCase()}</span>
                   {onViewTransaction&&<button onClick={()=>onViewTransaction(linkedTxn.id)} style={{ background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"Inter,sans-serif" }}>View transaction →</button>}
                 </div>
               </div>
@@ -20199,7 +19942,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
               )}
             </div>
-            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{existing?"Save Changes":"Add Provider"}</button>
+            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color: (canSave) ? T.accentInk : T.sub,fontFamily:"Inter,sans-serif",marginTop:4 }}>{existing?"Save Changes":"Add Provider"}</button>
           </div>
         </div>
       </div>
@@ -20388,7 +20131,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                           const on = picked.includes(String(p.id)), locked = alreadyOnPlanIds.includes(String(p.id));
                           return (
                             <button key={p.id} type="button" data-testid={`ba-person-${p.id}`} aria-pressed={on} onClick={()=>toggle(p.id)} style={{ width:"100%",display:"flex",alignItems:"center",gap:10,minHeight:44,background:"none",border:"none",padding:"6px 14px",cursor:locked?"default":"pointer",textAlign:"left",fontFamily:"inherit",color:T.text,fontSize:14 }}>
-                              <span style={{ width:20,height:20,borderRadius:5,border:`2px solid ${on?T.accent:T.border}`,background:on?T.accent:"none",color:"#fff",fontSize:13,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{on?"✓":""}</span>
+                              <span style={{ width:20,height:20,borderRadius:5,border:`2px solid ${on?T.accent:T.border}`,background:on?T.accent:"none",color:T.accentInk,fontSize:13,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{on?"✓":""}</span>
                               <span style={{ flex:1 }}>{p.emoji} {p.name}</span>
                               {locked&&<span style={{ color:T.sub,fontSize:11 }}>on this plan</span>}
                               {!locked&&on&&String(baAttributedTo)===String(p.id)&&picked.length>1&&<span style={{ color:T.sub,fontSize:11 }}>main</span>}
@@ -20439,7 +20182,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <input style={inp} placeholder="Any notes about this provider" value={baNote} onChange={e=>setBaNote(e.target.value)}/>
             </div>
             {duplicateError&&<div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",color:T.danger,fontSize:11,fontWeight:700 }}>{duplicateError}</div>}
-            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Provider Account"}</button>
+            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color: (canSave) ? T.accentInk : T.sub,fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Provider Account"}</button>
           </div>
         </div>
       </div>
@@ -20714,7 +20457,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             </div>
 
             {schoolGuardError&&<div style={{ background:T.danger+"18",border:`1px solid ${T.danger}44`,borderRadius:10,padding:"8px 12px",color:T.danger,fontSize:11,fontWeight:700 }}>{schoolGuardError}</div>}
-            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Membership"}</button>
+            <button onClick={handleSave} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color: (canSave) ? T.accentInk : T.sub,fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Membership"}</button>
           </div>
         </div>
       </div>
@@ -20784,7 +20527,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <span style={lbl}>Note (optional)</span>
               <input style={inp} placeholder="e.g. Cash in envelope" value={note} onChange={e=>setNote(e.target.value)}/>
             </div>
-            <button onClick={handleSave} disabled={!amount||!fromWhom} style={{ background:amount&&fromWhom?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:amount&&fromWhom?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>Save Gift</button>
+            <button onClick={handleSave} disabled={!amount||!fromWhom} style={{ background:amount&&fromWhom?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:amount&&fromWhom?"pointer":"not-allowed",fontSize:14,fontWeight:800,color: (amount&&fromWhom) ? T.accentInk : T.sub,fontFamily:"Inter,sans-serif",marginTop:4 }}>Save Gift</button>
           </div>
         </div>
       </div>
@@ -20986,7 +20729,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               if(ba) applyAccount(ba);
               setPhotoMsg({ warn:false, text:ba?`Filled in from the photo and matched to ${ba.name}. Check the split, then save.`:"Filled in from the photo. Pick the provider and split, then save." });
             }}/>}
-            {photoMsg&&<div data-testid="billphoto-message" style={{ color:photoMsg.warn?"#f0a500":T.accent,fontSize:12,fontWeight:700 }}>{photoMsg.warn?"⚠ ":"✔ "}{photoMsg.text}</div>}
+            {photoMsg&&<div data-testid="billphoto-message" style={{ color:photoMsg.warn?T.warn:T.accent,fontSize:12,fontWeight:700 }}>{photoMsg.warn?"⚠ ":"✔ "}{photoMsg.text}</div>}
 
             {/* Pick an existing biller account — the generic, connectionless path (no
                 defaultBillerAccountId): no provider prefill, this picker and the real category
@@ -21111,7 +20854,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <input value={forSearch} onChange={e=>setForSearch(e.target.value)} placeholder="Search people, groups, homes, vehicles" style={{ width:"100%",border:`1px solid ${T.border}`,background:T.bg,borderRadius:10,padding:"8px 11px",fontSize:12.5,color:T.text,fontFamily:"Inter,sans-serif",outline:"none",marginBottom:8 }}/>
                 )}
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                  <button onClick={()=>{setBillForType("unassigned");setBillForId("");}} style={{ background:billForType==="unassigned"?"#88888822":"none",border:`1px solid ${billForType==="unassigned"?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>No one · Unassigned</button>
+                  <button onClick={()=>{setBillForType("unassigned");setBillForId("");}} style={{ background:billForType==="unassigned"?T.mutedSoft:"none",border:`1px solid ${billForType==="unassigned"?T.borderStrong:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>No one · Unassigned</button>
                   <button onClick={()=>{setBillForType("house");setBillForId("");}} style={{ background:billForType==="house"?T.accent+"22":"none",border:`1px solid ${billForType==="house"?T.accent:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="house"?T.accent:T.sub,fontFamily:"Inter,sans-serif" }}>🏠 Common Areas</button>
                   {getActivePeople(people).filter(p=>!forSearch.trim()||p.name.toLowerCase().includes(forSearch.trim().toLowerCase())).map(p=>(
                     <button key={p.id} onClick={()=>{setBillForType("person");setBillForId(p.id);}} style={{ background:billForType==="person"&&String(billForId)===String(p.id)?p.color+"22":"none",border:`1px solid ${billForType==="person"&&String(billForId)===String(p.id)?p.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billForType==="person"&&String(billForId)===String(p.id)?p.color:T.sub,fontFamily:"Inter,sans-serif" }}>{p.emoji} {p.isMe?"Me":p.name}</button>
@@ -21165,7 +20908,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   <button onClick={()=>setShowSplitSheet(false)} style={{ background:"none",border:"none",color:T.accent,fontSize:11,fontWeight:700,cursor:"pointer" }}>Done</button>
                 </div>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:8 }}>
-                  <button onClick={()=>{setBillSplitPeople({});setBillGroup("");}} style={{ background:selectedPids.length===0&&!billGroup?"#88888822":"none",border:`1px solid ${selectedPids.length===0&&!billGroup?"#888888":T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Just me</button>
+                  <button onClick={()=>{setBillSplitPeople({});setBillGroup("");}} style={{ background:selectedPids.length===0&&!billGroup?T.mutedSoft:"none",border:`1px solid ${selectedPids.length===0&&!billGroup?T.borderStrong:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:T.sub,fontFamily:"Inter,sans-serif" }}>Just me</button>
                   {getActiveGroups(groups).map(g=><button key={g.id} onClick={()=>handleGroupSelect(billGroup===g.id?"":g.id)} style={{ background:billGroup===g.id?g.color+"22":"none",border:`1px solid ${billGroup===g.id?g.color:T.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer",fontSize:11,fontWeight:700,color:billGroup===g.id?g.color:T.sub,fontFamily:"Inter,sans-serif" }}>{g.icon} {g.name}</button>)}
                 </div>
                 <div style={{ display:"flex",gap:6,flexWrap:"wrap",marginBottom:selectedPids.length>0?10:0 }}>
@@ -21386,8 +21129,8 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
               <span style={lbl}>Capabilities</span>
               <div style={{ display:"flex",flexDirection:"column",gap:6,marginTop:6 }}>
                 {PERSON_MODULES.map(mod=>(
-                  <label key={mod.id} style={{ display:"flex",alignItems:"center",gap:10,background:modules.includes(mod.id)?"#16a34a14":T.input,border:`1px solid ${modules.includes(mod.id)?"#16a34a":T.border}`,borderRadius:10,padding:"8px 12px",cursor:"pointer" }}>
-                    <input type="checkbox" checked={modules.includes(mod.id)} onChange={()=>toggleModule(mod.id)} style={{ width:16,height:16,accentColor:"#16a34a",cursor:"pointer" }}/>
+                  <label key={mod.id} style={{ display:"flex",alignItems:"center",gap:10,background:modules.includes(mod.id)?T.success+"14":T.input,border:`1px solid ${modules.includes(mod.id)?T.success:T.border}`,borderRadius:10,padding:"8px 12px",cursor:"pointer" }}>
+                    <input type="checkbox" checked={modules.includes(mod.id)} onChange={()=>toggleModule(mod.id)} style={{ width:16,height:16,accentColor:T.success,cursor:"pointer" }}/>
                     <span style={{ fontSize:14 }}>{mod.icon}</span>
                     <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{mod.label}</span>
                   </label>
@@ -21401,15 +21144,15 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 <span style={lbl}>Default Settlement Method</span>
                 <div style={{ display:"flex",gap:6 }}>
                   {["UPI","Cash","Bank"].map(m=>(
-                    <button key={m} onClick={()=>setDefaultSettlement(m)} style={{ flex:1,background:defaultSettlement===m?"#16a34a18":"none",border:`1px solid ${defaultSettlement===m?"#16a34a":T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:700,color:defaultSettlement===m?"#16a34a":T.text,fontFamily:"Inter,sans-serif" }}>{m}</button>
+                    <button key={m} onClick={()=>setDefaultSettlement(m)} style={{ flex:1,background:defaultSettlement===m?T.success+"18":"none",border:`1px solid ${defaultSettlement===m?T.success:T.border}`,borderRadius:10,padding:"8px",cursor:"pointer",fontSize:12,fontWeight:700,color:defaultSettlement===m?T.success:T.text,fontFamily:"Inter,sans-serif" }}>{m}</button>
                   ))}
                 </div>
               </div>
             </div>}
             {modules.includes("budget")&&(
-              <button onClick={()=>{ onClose(); if(!p.isMe) setBudgetFocusPersonId(p.id); setTab("budget"); setShowSettings(false); }} style={{ width:"100%",background:"#f0fdf4",border:"1px solid #16a34a44",borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}>
-                <span style={{ color:"#16a34a",fontSize:12,fontWeight:800 }}>📊 Set monthly budget in Budget tab</span>
-                <span style={{ color:"#16a34a",fontSize:15 }}>→</span>
+              <button onClick={()=>{ onClose(); if(!p.isMe) setBudgetFocusPersonId(p.id); setTab("budget"); setShowSettings(false); }} style={{ width:"100%",background:T.accentSoft,border:`1px solid ${T.success}44`,borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer" }}>
+                <span style={{ color:T.success,fontSize:12,fontWeight:800 }}>📊 Set monthly budget in Budget tab</span>
+                <span style={{ color:T.success,fontSize:15 }}>→</span>
               </button>
             )}
             <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
@@ -21565,13 +21308,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
   return (
     <div style={{ background:T.bg,minHeight:"100vh",transition:"background 0.3s" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Manrope:wght@600;700;800&display=swap');
         *{box-sizing:border-box;margin:0;padding:0;}
         ::-webkit-scrollbar{display:none;}
         input,textarea,select{font-size:16px!important;-webkit-text-size-adjust:100%;}
         input[type=date]::-webkit-calendar-picker-indicator{filter:${dark?"invert(1)":"none"};}
-        select option{background:#13131a;}
+        select option{background:${T.card};color:${T.text};}
+        html,body{font-family:Inter,system-ui,sans-serif;}   /* anything without its own font (the page itself, plain text) is Inter too, never the browser default serif */
         textarea{font-family:Inter,sans-serif;}
+        input[type=checkbox],input[type=radio]{accent-color:${T.accent};}
         @keyframes arth-spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
       `}</style>
       <div style={{ maxWidth:430,margin:"0 auto",minHeight:"100vh",position:"relative",paddingBottom:80,fontFamily:"Inter,sans-serif" }}>
@@ -21632,14 +21376,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 </div>
               </div>
             )}
-            {tab==="bills"&&<button onClick={()=>setShowAddBill(true)} style={{ background:T.accent,border:"none",color:"#000",borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Inter,sans-serif" }}>+ Add Bill</button>}
+            {tab==="bills"&&<button onClick={()=>setShowAddBill(true)} style={{ background:T.accent,border:"none",color:T.accentInk,borderRadius:10,padding:"6px 16px",cursor:"pointer",fontSize:13,fontWeight:900,fontFamily:"Inter,sans-serif" }}>+ Add Bill</button>}
           </div>
           <div style={{ display:"flex",gap:8,alignItems:"center",marginTop:8,justifyContent:"space-between" }}>
             {/* Home's hamburger already renders in the greeting header above — this used to
                 render a second one here, duplicating it on Home specifically (every other tab
                 only ever had the one at line ~15168). Removed, not replaced. */}
             <div style={{ display:"flex",gap:8,alignItems:"center",justifyContent:"flex-end",flex:1 }}>
-            <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?"#f0a50022":"none",border:`1px solid ${workTripMode?"#f0a500":T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?"#f0a500":T.sub,fontFamily:"Inter,sans-serif" }}>💼{workTripMode?" ON":""}</button>
+            <button onClick={()=>setWorkTripMode(m=>!m)} title={workTripMode?"Work Trip Mode ON — tap to turn off":"Work Trip Mode OFF — tap to auto-mark expenses as reimbursable"} style={{ background:workTripMode?T.warn+"22":"none",border:`1px solid ${workTripMode?T.warn:T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:12,fontWeight:700,color:workTripMode?T.warn:T.sub,fontFamily:"Inter,sans-serif" }}>💼{workTripMode?" ON":""}</button>
             <button onClick={()=>{ setShowSearch(true); setSearchQuery(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:14,color:T.sub }} title="Search">🔍</button>
             <button onClick={toggleMask} style={{ background:maskMode?T.warn+"22":"none",border:`1px solid ${maskMode?T.warn:T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:14,color:maskMode?T.warn:T.sub }} title={maskMode?"Tap to reveal (PIN) or disable":"Tap to hide amounts"}>{maskMode?"🙈":"👁️"}</button>
             <button onClick={onLock} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"5px 9px",cursor:"pointer",fontSize:14,color:T.sub }} title="Lock app">🔒</button>
@@ -21743,14 +21487,14 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
 
       {/* Universal Search Overlay */}
       {showSearch&&(
-        <div style={{ position:"fixed",inset:0,zIndex:9000,background:"rgba(0,0,0,0.97)",display:"flex",flexDirection:"column",padding:"16px 16px 0" }}>
+        <div style={{ position:"fixed",inset:0,zIndex:9000,background:T.bg,display:"flex",flexDirection:"column",padding:"16px 16px 0" }}>
           <div style={{ display:"flex",gap:10,alignItems:"center",marginBottom:14 }}>
             <input
               autoFocus
               placeholder="Search transactions, bills, people, groups…"
               value={searchQuery}
               onChange={e=>setSearchQuery(e.target.value)}
-              style={{ flex:1,background:"#1e1e28",border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 14px",color:"#fff",fontSize:15,fontFamily:"Inter,sans-serif",outline:"none" }}
+              style={{ flex:1,background:T.input,border:`1px solid ${T.border}`,borderRadius:12,padding:"10px 14px",color:T.text,fontSize:15,fontFamily:"Inter,sans-serif",outline:"none" }}
             />
             <button onClick={()=>{ setShowSearch(false); setSearchQuery(""); }} style={{ background:"none",border:`1px solid ${T.border}`,borderRadius:10,padding:"8px 12px",cursor:"pointer",fontSize:14,color:T.sub,fontFamily:"Inter,sans-serif",flexShrink:0 }}>✕</button>
           </div>
@@ -21762,7 +21506,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           )}
           <div style={{ overflowY:"auto",flex:1,paddingBottom:80 }}>
             {searchResults.map(r=>{
-              const kindColor = r.kind==="txn"?T.accent:r.kind==="bill"?T.warn:r.kind==="person"?"#a855f7":r.kind==="group"?"#22c55e":T.sub;
+              const kindColor = r.kind==="txn"?T.accent:r.kind==="bill"?T.warn:r.kind==="person"?T.purple:r.kind==="group"?T.success:T.sub;
               const kindLabel = {txn:"TXN",bill:"BILL",person:"PERSON",group:"GROUP",cat:"CAT"}[r.kind]||r.kind.toUpperCase();
               const handleResultTap = ()=>{
                 setShowSearch(false); setSearchQuery("");
@@ -21772,10 +21516,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 else if(r.kind==="bill"){ setTab("bills"); setShowSettings(false); setViewingBillId(r.id); }
               };
               return (
-                <div key={r.key} onClick={handleResultTap} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderRadius:12,marginBottom:8,background:"#1e1e28",cursor:"pointer",border:`1px solid ${T.border}` }}>
+                <div key={r.key} onClick={handleResultTap} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderRadius:12,marginBottom:8,background:T.card,cursor:"pointer",border:`1px solid ${T.border}` }}>
                   <div style={{ width:34,height:34,borderRadius:9,background:kindColor+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:kindColor,flexShrink:0,letterSpacing:0.3 }}>{kindLabel}</div>
                   <div style={{ flex:1,minWidth:0 }}>
-                    <div style={{ color:"#fff",fontSize:13,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{r.title}</div>
+                    <div style={{ color:T.text,fontSize:13,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis" }}>{r.title}</div>
                     <div style={{ color:T.sub,fontSize:11,marginTop:2 }}>{r.sub}</div>
                   </div>
                   <span style={{ color:T.sub,fontSize:16 }}>›</span>
@@ -21798,7 +21542,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
             if(t.id==="__fab__"){
               return (
                 <button key={t.id} onClick={handleFabClick} onPointerDown={handleFabPointerDown} onPointerUp={handleFabPointerUp} onPointerLeave={handleFabPointerUp} style={{ background:T.accent,border:`4px solid ${T.nav}`,borderRadius:"50%",width:52,height:52,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",marginTop:-22,boxShadow:"0 4px 12px rgba(0,0,0,0.25)",flexShrink:0,transform:fabPressed?"scale(0.88)":"scale(1)",transition:"transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1)" }}>
-                  <span style={{ fontSize:22,color:"#000",lineHeight:1 }}>+</span>
+                  <span style={{ fontSize:22,color:T.accentInk,lineHeight:1 }}>+</span>
                 </button>
               );
             }
@@ -22437,7 +22181,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                   const doRecharge = ()=>{ setDefaultBillerAccountId(ba.id); setShowAddBill(true); setActiveBillerForAction(null); };
                   const kicker = { color:T.sub,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1 };
                   const rechargeBtn = (
-                    <button data-testid="prepaid-recharge-btn" onClick={doRecharge} style={{ width:"100%",minHeight:48,marginTop:12,background:T.accent,border:"none",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"inherit" }}>{rw.action}</button>
+                    <button data-testid="prepaid-recharge-btn" onClick={doRecharge} style={{ width:"100%",minHeight:48,marginTop:12,background:T.accent,border:"none",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:T.accentInk,fontFamily:"inherit" }}>{rw.action}</button>
                   );
                   // W1/W2 — same card frame in both states; zero recharges is a valid state, never "0 days left".
                   const accName = b=>{ const tx = txns.find(t=>String(t.id)===String(b.paidByTxnId)); return tx ? (accounts.find(a=>String(a.id)===String(tx.accId))?.name||"") : ""; };
@@ -23097,7 +22841,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
           </div>
         )}
         {reimbursementMatchSuggestion&&(
-          <div style={{ position:"fixed",bottom:90,left:"50%",transform:"translateX(-50%)",width:"calc(100% - 32px)",maxWidth:398,background:T.card,border:"1px solid #f0a50066",borderRadius:16,padding:"14px 16px",zIndex:300,boxShadow:`0 4px 24px ${T.sh}` }}>
+          <div style={{ position:"fixed",bottom:90,left:"50%",transform:"translateX(-50%)",width:"calc(100% - 32px)",maxWidth:398,background:T.card,border:`1px solid ${T.warn}66`,borderRadius:16,padding:"14px 16px",zIndex:300,boxShadow:`0 4px 24px ${T.sh}` }}>
             <div style={{ color:T.text,fontSize:14,fontWeight:800,marginBottom:6 }}>💼 Work expenses pending reimbursement</div>
             <div style={{ color:T.sub,fontSize:12,marginBottom:12 }}>
               {reimbursementMatchSuggestion.pending.length} expense{reimbursementMatchSuggestion.pending.length>1?"s":""} totalling {sym}{fmt(reimbursementMatchSuggestion.pending.reduce((s,t)=>s+Number(t.reimbursableAmount||t.amount||0),0))}. Mark all as reimbursed by this income?
@@ -23108,7 +22852,7 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
                 const id=reimbursementMatchSuggestion.incomeTxnId;
                 setTxns(p=>p.map(x=>reimbursementMatchSuggestion.pending.some(pt=>String(pt.id)===String(x.id))?{...x,reimbursedByTxnId:id}:x));
                 setReimbursementMatchSuggestion(null);
-              }} style={{ ...btnP,flex:2,padding:"8px",background:"#f0a500",color:"#000" }}>✓ Mark all reimbursed</button>
+              }} style={{ ...btnP,flex:2,padding:"8px",background:T.warn,color:T.accentInk }}>✓ Mark all reimbursed</button>
             </div>
           </div>
         )}
@@ -23497,10 +23241,10 @@ function AppContent({ onLock, suppressMainApp, onCloudSetupComplete, appPin, set
         {/* Mask PIN reveal overlay */}
         {showMaskPin&&(
           <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",zIndex:500,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24 }}>
-            <div style={{ color:"#f0a500",fontSize:20,fontWeight:900,marginBottom:6 }}>👁️ Reveal Amounts</div>
+            <div style={{ color:DARK.warn,fontSize:20,fontWeight:900,marginBottom:6 }}>👁️ Reveal Amounts</div>
             <div style={{ color:"rgba(255,255,255,0.5)",fontSize:12,marginBottom:28 }}>Enter PIN to view for 60 seconds</div>
             <div style={{ display:"flex",gap:12,marginBottom:24 }}>
-              {[0,1,2,3].map(i=>(<div key={i} style={{ width:14,height:14,borderRadius:"50%",background:maskPinInput.length>i?"#f0a500":"transparent",border:"2px solid #f0a500" }}/>))}
+              {[0,1,2,3].map(i=>(<div key={i} style={{ width:14,height:14,borderRadius:"50%",background:maskPinInput.length>i?DARK.warn:"transparent",border:`2px solid ${DARK.warn}` }}/>))}
             </div>
             {maskPinError&&<div style={{ color:"#ef4444",fontSize:12,marginBottom:12,fontWeight:700 }}>Wrong PIN</div>}
             <div style={{ display:"grid",gridTemplateColumns:"repeat(3,68px)",gap:10,marginBottom:20 }}>

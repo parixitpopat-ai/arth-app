@@ -1,6 +1,6 @@
 // "N expenses have no category · Sort them" on Transactions, and, once Select is on, one-tap ways to tick many entries at once. Presentational only.
 export default function UncategorisedBanner({ T, count, shown, selected, bulkMode, onSort, onSelectUncategorised, onSelectAllShown }) {
-  const btn = { background: T.accent, color: "#000", border: "none", borderRadius: 10, padding: "8px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "Inter,sans-serif" };
+  const btn = { background: T.accent, color: T.accentInk, border: "none", borderRadius: 10, padding: "8px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "Inter,sans-serif" };
   const soft = { background: T.input, color: T.text, border: `1px solid ${T.border}`, borderRadius: 10, padding: "8px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "Inter,sans-serif" };
   if (!bulkMode) {
     if (!(count > 0)) return null;

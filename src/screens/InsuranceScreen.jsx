@@ -158,7 +158,7 @@ export const AddInsurancePolicyModal = ({ existing, prefill, onClose, T, inp, lb
           {scheduleDoc&&<button onClick={()=>setScheduleDoc(null)} style={{ background:"none",border:"none",color:T.danger,cursor:"pointer",fontSize:16 }}>✕</button>}
         </div>
         {!isEdit&&<div style={{ color:T.sub,fontSize:10 }}>The premium will appear in Payments → Insurance as an Expected renewal — no Bill is created until a renewal notice is added.</div>}
-        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Policy"}</button>
+        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color: (canSave) ? T.accentInk : T.sub,fontFamily:"Inter,sans-serif",marginTop:4 }}>{isEdit?"Save Changes":"Add Policy"}</button>
       </div>
     </BottomSheet>
   );
@@ -182,7 +182,7 @@ export const InsurancePolicyListModal = ({ onClose, T, sym, fmt, insurancePolici
         />
       ))}
     </div>
-    <button onClick={()=>{ setEditingPolicy(null); setShowAddPolicy(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>+ Add Insurance Policy</button>
+    <button onClick={()=>{ setEditingPolicy(null); setShowAddPolicy(true); }} style={{ width:"100%",background:T.accent,border:"none",borderRadius:14,padding:"13px",cursor:"pointer",fontSize:14,fontWeight:800,color: T.accentInk,fontFamily:"Inter,sans-serif" }}>+ Add Insurance Policy</button>
   </BottomSheet>
 );
 
@@ -274,7 +274,7 @@ export const AddInsuranceRenewalNoticeModal = ({ policy, expected, onClose, T, i
           <span style={{ color:T.sub,fontSize:12 }}>Sum insured</span>
           <span style={{ color:T.text,fontSize:12,fontWeight:700 }}>{sym}{fmt(policy.sumInsured)}</span>
         </div>
-        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif",marginTop:4 }}>Save · create bill</button>
+        <button onClick={save} disabled={!canSave} style={{ background:canSave?T.accent:T.border,border:"none",borderRadius:14,padding:"13px",cursor:canSave?"pointer":"not-allowed",fontSize:14,fontWeight:800,color: (canSave) ? T.accentInk : T.sub,fontFamily:"Inter,sans-serif",marginTop:4 }}>Save · create bill</button>
       </div>
     </BottomSheet>
   );
@@ -381,7 +381,7 @@ export const InsurancePolicyDetailModal = ({ policy, onClose, T, sym, fmt, forma
               ))}
             </div>
             {badge && badge.kind!=="paid" && (
-              <button onClick={()=>onRecordPayment&&onRecordPayment(linkedBill)} style={{ width:"100%",minHeight:48,background:T.accent,border:"none",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color:"#fff",fontFamily:"Inter,sans-serif" }}>Record payment</button>
+              <button onClick={()=>onRecordPayment&&onRecordPayment(linkedBill)} style={{ width:"100%",minHeight:48,background:T.accent,border:"none",borderRadius:12,cursor:"pointer",fontSize:14,fontWeight:800,color: T.accentInk,fontFamily:"Inter,sans-serif" }}>Record payment</button>
             )}
           </div>
           <div style={{ color:T.sub,fontSize:12,marginTop:8 }}>Also listed in Payments › Bills.</div>
