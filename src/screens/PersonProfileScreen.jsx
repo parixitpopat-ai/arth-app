@@ -433,7 +433,7 @@ export function PersonProfileScreen({
       {!person.isMe && (
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           {onSettle && positionLabel.owesMe > 0 && <button onClick={() => onSettle(person)} style={{ flex: 1, background: T.accentSoft, border: `1px solid ${T.accent}33`, color: T.accent, borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Settle</button>}
-          {onPayBack && positionLabel.iOwe > 0 && <button data-testid="person-payback" onClick={() => onPayBack(person)} style={{ flex: 1, background: T.danger + "18", border: `1px solid ${T.danger}44`, color: T.danger, borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Pay back</button>}
+          {onPayBack && positionLabel.iOwe > 0 && <button data-testid="person-payback" onClick={() => onPayBack(person)} style={{ flex: 1, background: T.danger + "18", border: `1px solid ${T.danger}44`, color: T.danger, borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Settle</button>}
           {onRequest && positionLabel.owesMe > 0 && <button onClick={() => onRequest(person)} style={{ flex: 1, background: "none", border: `1px solid ${T.border}`, color: T.text, borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Request</button>}
           {onArchivePerson && <button onClick={() => onArchivePerson(person)} style={{ flex: 1, background: "transparent", border: `1px solid ${T.danger}`, color: T.danger, borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>🗄️ Archive</button>}
         </div>

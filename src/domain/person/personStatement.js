@@ -75,7 +75,7 @@ export function buildPersonStatement({ personId, txns = [], bills = [], billerAc
     }
     if (t.fromPersonId === personId) {
       const extra = P(t.extraAmount);
-      if (extra > 0) parts.push({ txnId: t.id, date, amount: extra, linkKey: null, title: "Extra kept as advance", advance: true });
+      if (extra > 0) parts.push({ txnId: t.id, date, amount: extra, linkKey: null, title: "Excess, held until settled", advance: true });
       const left = P(t.amount) - linked - extra;
       if (!(t.settlementLinks || []).length && P(t.appliedAmount || t.amount) > 0 && left > 0) unappliedPerson.push({ txnId: t.id, date, amount: P(t.appliedAmount != null ? t.appliedAmount : t.amount) - extra });
     }

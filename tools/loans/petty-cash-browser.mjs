@@ -100,7 +100,7 @@ try {
     await page.evaluate(() => { const t = JSON.parse(localStorage.getItem("arth_txns") || "[]"); t.unshift({ id: "pc1", type: "transfer", isPettyCash: true, pettyCashPersonId: "p_sp", desc: "Petty cash - Priya Test", amount: 5000, fromAccId: "bank1", toAccId: null, accId: null, date: "2026-11-01", catIds: [], people: {}, createdAt: 1 }); localStorage.setItem("arth_txns", JSON.stringify(t)); });
     await home(); await openAdd();
     await page.getByPlaceholder(/e\.g\. ₹5,500/).fill("900"); await addPriya();
-    rec("P1y even when she holds petty cash there is no separate 'Paid by' row or petty-cash button: 'They paid' covers it", (await T("paid-by").count()) === 0 && (await T("alloc-petty").count()) === 0, {});
+    rec("P1y when she holds petty cash the 'Paid by' row shows her name beside Me, and her row has the petty-cash button ('They paid' is the other way, for their own pocket)", (await T("paid-by").count()) === 1 && /Me/.test(await T("paid-by").innerText()) && (await T("alloc-petty").count()) === 1, [await T("paid-by").count(), await T("alloc-petty").count()]);
     await page.locator("button[title='Own']").first().dispatchEvent("click"); await page.waitForTimeout(300);
     const sm = (await T("row-summary").innerText()).replace(/\s+/g, " ");
     rec("P2 'They paid' with no amount means all of it: she paid 900, you owe her until you pay back, your account is debited 0", /Priya Test paid ₹900/.test(sm) && /debited ₹0/.test(sm), sm);
